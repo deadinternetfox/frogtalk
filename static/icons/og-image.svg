@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0a"/>
+      <stop offset="50%" style="stop-color:#0d1f0a"/>
+      <stop offset="100%" style="stop-color:#0a0a0a"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  
+  <!-- Grid pattern (subtle) -->
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1a2e1a" stroke-width="0.5"/>
+  </pattern>
+  <rect width="1200" height="630" fill="url(#grid)" opacity="0.3"/>
+  
+  <!-- Frog icon (left side) -->
+  <g transform="translate(100, 165)">
+    <!-- Main head -->
+    <circle cx="150" cy="165" r="120" fill="#4caf50"/>
+    <!-- Eye bumps -->
+    <circle cx="105" cy="85" r="40" fill="#4caf50"/>
+    <circle cx="195" cy="85" r="40" fill="#4caf50"/>
+    <!-- Eye whites -->
+    <circle cx="105" cy="82" r="28" fill="#e8f5e9"/>
+    <circle cx="195" cy="82" r="28" fill="#e8f5e9"/>
+    <!-- Pupils -->
+    <circle cx="108" cy="85" r="16" fill="#1b5e20"/>
+    <circle cx="198" cy="85" r="16" fill="#1b5e20"/>
+    <!-- Eye shine -->
+    <circle cx="113" cy="79" r="5" fill="white"/>
+    <circle cx="203" cy="79" r="5" fill="white"/>
+    <!-- Smile -->
+    <path d="M100 195 Q150 235 200 195" stroke="#1b5e20" stroke-width="8" fill="none" stroke-linecap="round"/>
+    <!-- Belly -->
+    <ellipse cx="150" cy="210" rx="75" ry="55" fill="#a5d6a7" opacity="0.5"/>
+  </g>
+  
+  <!-- Text content -->
+  <g filter="url(#glow)">
+    <text x="420" y="260" font-family="system-ui, -apple-system, sans-serif" font-size="80" font-weight="800" fill="#4caf50">FrogTalk</text>
+  </g>
+  <text x="420" y="330" font-family="system-ui, -apple-system, sans-serif" font-size="32" fill="#e0e0e0">Secure Encrypted Chat</text>
+  
+  <!-- Feature badges -->
+  <g transform="translate(420, 380)">
+    <rect x="0" y="0" width="140" height="40" rx="20" fill="#1a2e1a" stroke="#4caf50" stroke-width="2"/>
+    <text x="70" y="27" font-family="system-ui" font-size="16" fill="#4caf50" text-anchor="middle">🔒 E2E Encrypted</text>
+    
+    <rect x="160" y="0" width="130" height="40" rx="20" fill="#1a2e1a" stroke="#4caf50" stroke-width="2"/>
+    <text x="225" y="27" font-family="system-ui" font-size="16" fill="#4caf50" text-anchor="middle">📞 Voice Calls</text>
+    
+    <rect x="310" y="0" width="130" height="40" rx="20" fill="#1a2e1a" stroke="#4caf50" stroke-width="2"/>
+    <text x="375" y="27" font-family="system-ui" font-size="16" fill="#4caf50" text-anchor="middle">📹 Video Calls</text>
+    
+    <rect x="460" y="0" width="110" height="40" rx="20" fill="#1a2e1a" stroke="#4caf50" stroke-width="2"/>
+    <text x="515" y="27" font-family="system-ui" font-size="16" fill="#4caf50" text-anchor="middle">💬 Private</text>
+  </g>
+  
+  <!-- URL -->
+  <text x="420" y="500" font-family="system-ui" font-size="28" fill="#666">frogtalk.xyz</text>
+  
+  <!-- Corner accent -->
+  <path d="M1200 0 L1200 80 L1120 0 Z" fill="#4caf50" opacity="0.3"/>
+  <path d="M0 630 L0 550 L80 630 Z" fill="#4caf50" opacity="0.3"/>
+</svg>

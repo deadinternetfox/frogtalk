@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0D0D0D">
+
+    <!-- WebView container - WebView added programmatically -->
+    <FrameLayout
+        android:id="@+id/webview_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Loading screen - shown while WebView initialises -->
+    <LinearLayout
+        android:id="@+id/loading_screen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#0D0D0D"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🐸"
+            android:textSize="64sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="FrogTalk"
+            android:textColor="#4CAF50"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginTop="24dp"
+            android:indeterminateTint="#4CAF50" />
+    </LinearLayout>
+
+    <!-- Error screen - shown if WebView fails to load -->
+    <LinearLayout
+        android:id="@+id/error_screen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#0D0D0D"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🐸"
+            android:textSize="64sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Something went wrong"
+            android:textColor="#4CAF50"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/error_detail"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:text="Could not start the app.\nPlease update Android System WebView\nfrom the Play Store and try again."
+            android:textColor="#888888"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btn_retry"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="24dp"
+            android:backgroundTint="#4CAF50"
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp"
+            android:text="Retry"
+            android:textColor="#000000"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btn_open_browser"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#333333"
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp"
+            android:text="Open in Browser"
+            android:textColor="#CCCCCC" />
+    </LinearLayout>
+
+</FrameLayout>

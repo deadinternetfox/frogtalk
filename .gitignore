@@ -1,0 +1,51 @@
+# ── Secrets & runtime data ─────────────────────────────────────
+.env
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Python ─────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
+*.egg-info/
+*.egg
+
+# ── Node / JS ──────────────────────────────────────────────────
+node_modules/
+desktop/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Build outputs ──────────────────────────────────────────────
+dist/
+build/
+*.log
+
+# ── Release binaries (served at runtime, not stored in git) ────
+static/*.AppImage
+static/*.deb
+static/*.apk
+static/frogtalk-v*.apk
+static/frogtalk_*.deb
+static/FrogTalk-*.AppImage
+
+# ── IDE & OS ───────────────────────────────────────────────────
+.DS_Store
+.vscode/
+*.swp
+*~
+
+# ── Android ────────────────────────────────────────────────────
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/google-services.json
+*.apk
+*.aab

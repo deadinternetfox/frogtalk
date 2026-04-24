@@ -1,0 +1,216 @@
+"""Bot & API key management routes."""
+import secrets
+import hashlib
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import List, Optional
+
+import database as db
+from deps import get_current_user
+
+router = APIRouter(prefix="/developer", tags=["developer"])
+
+
+def hash_key(key: str) -> str:
+    """Hash an API key for storage."""
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# API Keys
+# ---------------------------------------------------------------------------
+
+class CreateApiKeyRequest(BaseModel):
+    name: str
+    permissions: List[str] = ["read", "write"]
+
+
+@router.post("/keys")
+async def create_api_key(body: CreateApiKeyRequest, current_user: dict = Depends(get_current_user)):
+    """Create a new API key."""
+    if len(body.name) < 1 or len(body.name) > 64:
+        return JSONResponse(status_code=400, content={"error": "Key name must be 1-64 characters"})
+    
+    # Generate secure key
+    raw_key = f"frog_{secrets.token_urlsafe(32)}"
+    key_hash = hash_key(raw_key)
+    
+    key_id = db.create_api_key(
+        current_user["id"],
+        body.name,
+        key_hash,
+        body.permissions
+    )
+    
+    # Return raw key only once!
+    return {
+        "id": key_id,
+        "key": raw_key,
+        "name": body.name,
+        "permissions": body.permissions,
+        "message": "Save this key! It won't be shown again."
+    }
+
+
+@router.get("/keys")
+async def list_api_keys(current_user: dict = Depends(get_current_user)):
+    """List all API keys for the current user."""
+    keys = db.get_user_api_keys(current_user["id"])
+    return {"keys": keys}
+
+
+@router.delete("/keys/{key_id}")
+async def delete_api_key(key_id: int, current_user: dict = Depends(get_current_user)):
+    """Revoke an API key."""
+    if db.delete_api_key(key_id, current_user["id"]):
+        return {"ok": True}
+    return JSONResponse(status_code=404, content={"error": "Key not found"})
+
+
+# ---------------------------------------------------------------------------
+# Bots
+# ---------------------------------------------------------------------------
+
+class CreateBotRequest(BaseModel):
+    name: str
+    description: str = ""
+    avatar: Optional[str] = None
+    is_public: bool = False
+
+
+class UpdateBotRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    avatar: Optional[str] = None
+    is_public: Optional[bool] = None
+
+
+@router.post("/bots")
+async def create_bot(body: CreateBotRequest, current_user: dict = Depends(get_current_user)):
+    """Create a new bot."""
+    if len(body.name) < 2 or len(body.name) > 32:
+        return JSONResponse(status_code=400, content={"error": "Bot name must be 2-32 characters"})
+    
+    # Create a dedicated API key for the bot
+    raw_key = f"bot_{secrets.token_urlsafe(32)}"
+    key_hash = hash_key(raw_key)
+    key_id = db.create_api_key(
+        current_user["id"],
+        f"Bot: {body.name}",
+        key_hash,
+        ["bot"]
+    )
+    
+    bot_id = db.create_bot(
+        owner_id=current_user["id"],
+        name=body.name,
+        api_key_id=key_id,
+        avatar=body.avatar,
+        description=body.description,
+        is_public=1 if body.is_public else 0
+    )
+    
+    if bot_id is None:
+        # Clean up the API key
+        db.delete_api_key(key_id, current_user["id"])
+        return JSONResponse(status_code=409, content={"error": "Bot name already taken"})
+    
+    return {
+        "id": bot_id,
+        "name": body.name,
+        "api_key": raw_key,
+        "message": "Save the bot API key! It won't be shown again."
+    }
+
+
+@router.get("/bots")
+async def list_bots(current_user: dict = Depends(get_current_user)):
+    """List all bots owned by the current user."""
+    bots = db.get_user_bots(current_user["id"])
+    return {"bots": bots}
+
+
+@router.put("/bots/{bot_id}")
+async def update_bot(bot_id: int, body: UpdateBotRequest, current_user: dict = Depends(get_current_user)):
+    """Update a bot."""
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "is_public" in updates:
+        updates["is_public"] = 1 if updates["is_public"] else 0
+    
+    if db.update_bot(bot_id, current_user["id"], **updates):
+        return {"ok": True}
+    return JSONResponse(status_code=404, content={"error": "Bot not found or not owned by you"})
+
+
+@router.delete("/bots/{bot_id}")
+async def delete_bot(bot_id: int, current_user: dict = Depends(get_current_user)):
+    """Delete a bot."""
+    if db.delete_bot(bot_id, current_user["id"]):
+        return {"ok": True}
+    return JSONResponse(status_code=404, content={"error": "Bot not found"})
+
+
+# ---------------------------------------------------------------------------
+# Bot Channel Management
+# ---------------------------------------------------------------------------
+
+@router.post("/channels/{room_name}/bots/{bot_id}")
+async def add_bot_to_channel(room_name: str, bot_id: int, current_user: dict = Depends(get_current_user)):
+    """Add a bot to a channel (must be channel owner/mod)."""
+    room = db.get_room(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Channel not found"})
+    
+    # Check if user is owner or mod
+    is_owner = room["owner_id"] == current_user["id"]
+    is_mod = db.is_room_mod(room["id"], current_user["id"])
+    if not is_owner and not is_mod and not current_user.get("is_admin"):
+        return JSONResponse(status_code=403, content={"error": "Not authorized"})
+    
+    bot = db.get_bot_by_id(bot_id)
+    if not bot:
+        return JSONResponse(status_code=404, content={"error": "Bot not found"})
+    
+    if db.add_bot_to_channel(bot_id, room["id"], current_user["id"]):
+        return {"ok": True, "bot": bot["name"]}
+    return JSONResponse(status_code=409, content={"error": "Bot already in channel"})
+
+
+@router.delete("/channels/{room_name}/bots/{bot_id}")
+async def remove_bot_from_channel(room_name: str, bot_id: int, current_user: dict = Depends(get_current_user)):
+    """Remove a bot from a channel."""
+    room = db.get_room(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Channel not found"})
+    
+    is_owner = room["owner_id"] == current_user["id"]
+    is_mod = db.is_room_mod(room["id"], current_user["id"])
+    if not is_owner and not is_mod and not current_user.get("is_admin"):
+        return JSONResponse(status_code=403, content={"error": "Not authorized"})
+    
+    if db.remove_bot_from_channel(bot_id, room["id"]):
+        return {"ok": True}
+    return JSONResponse(status_code=404, content={"error": "Bot not in channel"})
+
+
+@router.get("/channels/{room_name}/bots")
+async def get_channel_bots(room_name: str, current_user: dict = Depends(get_current_user)):
+    """Get all bots in a channel."""
+    room = db.get_room(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Channel not found"})
+    
+    bots = db.get_channel_bots(room["id"])
+    return {"bots": bots}
+
+
+# ---------------------------------------------------------------------------
+# Public Bot Directory
+# ---------------------------------------------------------------------------
+
+@router.get("/bots/public")
+async def list_public_bots():
+    """List all public bots."""
+    bots = db.get_public_bots()
+    return {"bots": bots}

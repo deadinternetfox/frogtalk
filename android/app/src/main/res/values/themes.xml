@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FrogTalk" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:statusBarColor">@color/frog_dark</item>
+        <item name="android:navigationBarColor">@color/frog_dark</item>
+        <item name="android:windowBackground">@color/frog_dark</item>
+        <item name="colorPrimary">@color/frog_green</item>
+        <item name="colorPrimaryDark">@color/frog_dark_green</item>
+        <item name="colorAccent">@color/frog_green</item>
+    </style>
+</resources>

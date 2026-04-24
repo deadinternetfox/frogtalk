@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run Your FrogTalk Node</title>
+<meta name="description" content="Production guide to run your own FrogTalk federation node with update channel and trust verification.">
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --panel: #111723;
+    --line: #30363d;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --green: #4ade80;
+    --blue: #58a6ff;
+    --amber: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(900px 560px at 50% -10%, rgba(74,222,128,.10), transparent 70%),
+      radial-gradient(560px 420px at 14% 75%, rgba(88,166,255,.07), transparent 65%),
+      radial-gradient(520px 360px at 86% 18%, rgba(74,222,128,.06), transparent 65%),
+      var(--bg);
+    line-height: 1.55;
+  }
+  .top {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    backdrop-filter: blur(10px);
+    background: rgba(13,17,23,.9);
+    border-bottom: 1px solid var(--line);
+  }
+  .top-inner {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: .82rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .8rem;
+  }
+  .brand { color: var(--green); text-decoration: none; font-weight: 800; }
+  .links { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .links a {
+    text-decoration: none;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: .32rem .7rem;
+    font-size: .78rem;
+  }
+  .links a:hover { color: var(--text); border-color: #3f566f; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 1.2rem 1rem 3rem; }
+  .hero {
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 1.2rem;
+    background: linear-gradient(150deg, rgba(22,27,34,.94), rgba(17,23,31,.94));
+    margin-bottom: 1rem;
+    box-shadow: 0 8px 28px rgba(0,0,0,.25);
+  }
+  h1 { margin: 0 0 .35rem; font-size: clamp(1.4rem, 3.5vw, 2rem); }
+  .sub { margin: 0; color: var(--muted); }
+  .step {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 1rem;
+    background: linear-gradient(180deg, rgba(22,27,34,.9), rgba(17,23,31,.92));
+    margin-bottom: .9rem;
+    box-shadow: 0 4px 14px rgba(0,0,0,.16);
+  }
+  .step h2 { margin: 0 0 .45rem; font-size: 1.08rem; }
+  pre {
+    margin: .6rem 0 0;
+    background: #0a121b;
+    border: 1px solid #28313b;
+    border-radius: 10px;
+    padding: .72rem;
+    overflow: auto;
+    font-size: .82rem;
+    line-height: 1.44;
+  }
+  code { font-family: "Consolas", "SFMono-Regular", monospace; }
+  .hint { color: var(--muted); }
+  .ok { color: #86efac; }
+  .warn { color: #fde68a; }
+  .callout {
+    border: 1px solid #2d5a3a;
+    border-radius: 12px;
+    background: rgba(74,222,128,.08);
+    padding: .72rem;
+    color: #d9f99d;
+  }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="top-inner">
+      <a href="/" class="brand">Run FrogTalk Node</a>
+      <div class="links">
+        <a href="/">Home</a>
+        <a href="/docs/api">API Docs</a>
+        <a href="/app">Open App</a>
+      </div>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1>Self-Host A Federation Node</h1>
+      <p class="sub">Production setup with update feed, legitimacy checks, and federation-safe update flow.</p>
+    </section>
+
+    <section class="step">
+      <h2>1) Deploy FrogTalk Service</h2>
+      <p class="hint">Clone project, create virtualenv, install requirements, run as systemd service.</p>
+      <pre><code>git clone https://github.com/your-org/frogtalk-standalone.git /opt/frogtalk
+cd /opt/frogtalk
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env</code></pre>
+    </section>
+
+    <section class="step">
+      <h2>2) Configure Federation + Update Channel</h2>
+      <pre><code># /opt/frogtalk/.env
+FROGTALK_FEDERATION_ENABLED=1
+FROGTALK_FEDERATION_TOKEN=CHANGE_THIS_SHARED_SECRET
+FROGTALK_OFFICIAL_DIRECTORY_URL=https://frogtalk.xyz/api/network/servers
+
+# Centralized release feed from main site
+FROGTALK_UPDATE_FEED_URL=https://frogtalk.xyz/api/network/updates/latest
+FROGTALK_UPDATE_CHECK_INTERVAL_SEC=300
+FROGTALK_AUTO_UPDATE_ENABLED=1
+
+# Optional service install dir / service name overrides
+FROGTALK_INSTALL_DIR=/opt/frogtalk
+FROGTALK_SERVICE_NAME=frogtalk</code></pre>
+      <p class="hint">Use same federation token only for trusted nodes under your control.</p>
+    </section>
+
+    <section class="step">
+      <h2>3) Start Service</h2>
+      <pre><code>sudo systemctl daemon-reload
+sudo systemctl enable frogtalk
+sudo systemctl restart frogtalk
+sudo systemctl status frogtalk --no-pager</code></pre>
+    </section>
+
+    <section class="step">
+      <h2>4) Verify Node Health + Hash</h2>
+      <pre><code>curl -s https://your-node.example/api/network/status
+curl -s https://your-node.example/api/network/build/local
+curl -s https://your-node.example/api/network/update/status</code></pre>
+      <p class="hint">`build_hash` should match the approved release from main-site feed for federation stability.</p>
+    </section>
+
+    <section class="step">
+      <h2>5) Publish Releases From Main Site</h2>
+      <p class="hint">On frogtalk.xyz, publish metadata once per release so nodes can pull updates safely.</p>
+      <pre><code>curl -X POST https://frogtalk.xyz/api/network/updates/publish \
+  -H "X-Session-Token: ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "version": "1.4.0",
+    "package_url": "https://frogtalk.xyz/releases/frogtalk-1.4.0.tar.gz",
+    "package_sha256": "PUT_REAL_SHA256",
+    "build_hash": "PUT_REAL_WEB_BUILD_HASH",
+    "notes": "Federation-safe rollout"
+  }'</code></pre>
+    </section>
+
+    <section class="step">
+      <h2>6) Use Network Settings In App</h2>
+      <p class="hint">Open app Settings -> Network to:</p>
+      <ul>
+        <li>Probe nodes and view latency</li>
+        <li>Verify legitimacy badges (`SAME HASH`, `LEGIT COPY`, mismatch alerts)</li>
+        <li>Check/apply updates from the official feed</li>
+      </ul>
+    </section>
+
+  </main>
+</body>
+</html>

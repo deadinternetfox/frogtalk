@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FrogTalk Full API Reference</title>
+<meta name="description" content="Complete FrogTalk API reference including auth, chat, social, federation, developer token API, and server-admin endpoints.">
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg-soft: #111723;
+    --text: #e6edf3;
+    --muted: #7d8590;
+    --line: #30363d;
+    --green: #4ade80;
+    --blue: #58a6ff;
+    --amber: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(900px 560px at 50% -10%, rgba(74,222,128,.10), transparent 70%),
+      radial-gradient(560px 420px at 14% 75%, rgba(88,166,255,.07), transparent 65%),
+      radial-gradient(520px 360px at 86% 18%, rgba(74,222,128,.06), transparent 65%),
+      var(--bg);
+    line-height: 1.55;
+  }
+  .top {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    backdrop-filter: blur(10px);
+    background: rgba(13,17,23,.9);
+    border-bottom: 1px solid var(--line);
+  }
+  .top-inner {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: .8rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .8rem;
+  }
+  .brand { color: var(--green); font-weight: 800; text-decoration: none; }
+  .links { display: flex; gap: .6rem; flex-wrap: wrap; }
+  .links a {
+    text-decoration: none;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: .32rem .7rem;
+    font-size: .78rem;
+  }
+  .links a:hover { color: var(--text); border-color: #3f566f; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 1.3rem 1rem 3rem; }
+  .hero {
+    border: 1px solid var(--border, var(--line));
+    border-radius: 16px;
+    background: linear-gradient(150deg, rgba(22,27,34,.94), rgba(17,23,31,.94));
+    padding: 1.2rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 8px 28px rgba(0,0,0,.25);
+  }
+  h1 { margin: 0 0 .35rem; font-size: clamp(1.4rem, 3.4vw, 2rem); }
+  .sub { color: var(--muted); margin: 0; }
+  .meta { margin-top: .65rem; color: var(--muted); font-size: .86rem; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 1rem;
+  }
+  .toc {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(22,27,34,.9), rgba(17,23,31,.92));
+    padding: .8rem;
+    position: sticky;
+    top: 72px;
+    height: fit-content;
+  }
+  .toc h3 { margin: .1rem 0 .55rem; font-size: .95rem; color: var(--blue); }
+  .toc a { display: block; color: var(--muted); text-decoration: none; padding: .18rem 0; font-size: .87rem; }
+  .toc a:hover { color: var(--text); }
+
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(22,27,34,.9), rgba(17,23,31,.92));
+    padding: 1rem;
+    margin-bottom: .9rem;
+    box-shadow: 0 4px 14px rgba(0,0,0,.16);
+  }
+  .panel h2 { margin: 0 0 .4rem; font-size: 1.08rem; }
+  .muted { color: var(--muted); }
+  .tag {
+    display: inline-block;
+    border: 1px solid #2d435b;
+    border-radius: 999px;
+    padding: .16rem .52rem;
+    font-size: .72rem;
+    color: #bfd6ec;
+    background: rgba(125,211,252,.09);
+    margin-right: .35rem;
+  }
+  pre {
+    margin: .6rem 0 0;
+    background: #0a121b;
+    border: 1px solid #28313b;
+    border-radius: 10px;
+    padding: .7rem;
+    overflow: auto;
+    font-size: .82rem;
+    line-height: 1.4;
+  }
+  code { font-family: "Consolas", "SFMono-Regular", monospace; }
+  .ok { color: #86efac; }
+  .warn { color: #fde68a; }
+
+  @media (max-width: 980px) {
+    .layout { grid-template-columns: 1fr; }
+    .toc { position: static; }
+  }
+</style>
+</head>
+<body>
+  <div class="top">
+    <div class="top-inner">
+      <a href="/" class="brand">FrogTalk API Reference</a>
+      <div class="links">
+        <a href="/">Home</a>
+        <a href="/docs/node">Run Node</a>
+        <a href="/app">Open App</a>
+      </div>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1>Complete API Reference</h1>
+      <p class="sub">All user-callable API endpoints currently in this codebase, including developer token API and federation update commands.</p>
+      <div class="meta">Base URL: <code>https://your-host/api</code> · Session header: <code>X-Session-Token</code> · Developer header: <code>X-API-Key</code> or <code>Authorization: Bearer KEY</code></div>
+    </section>
+
+    <div class="layout">
+      <aside class="toc">
+        <h3>Sections</h3>
+        <a href="#auth">Auth</a>
+        <a href="#users">Users / Friends</a>
+        <a href="#rooms">Rooms / Messages / DMs</a>
+        <a href="#media">Media / Emojis / Preview / Push / Calls / Location</a>
+        <a href="#social">Social / Wall / Directory / Invites</a>
+        <a href="#bots">Developer + Bots</a>
+        <a href="#external">External Token API</a>
+        <a href="#bridge">Bridge API</a>
+        <a href="#federation">Federation / Network / Updates</a>
+        <a href="#admin">Admin / Server Admin</a>
+        <a href="#misc">Misc / WebSocket</a>
+      </aside>
+
+      <section>
+        <article class="panel" id="auth">
+          <h2>Auth Endpoints</h2>
+          <div class="muted"><span class="tag">PREFIX</span> /api/auth</div>
+<pre><code>POST   /api/auth/register
+POST   /api/auth/login
+POST   /api/auth/logout
+PATCH  /api/auth/nickname
+GET    /api/auth/me
+PATCH  /api/auth/profile
+DELETE /api/auth/account
+GET    /api/auth/captcha
+POST   /api/auth/register-secure
+POST   /api/auth/recovery-key
+POST   /api/auth/recover
+POST   /api/auth/verify-recovery-key</code></pre>
+        </article>
+
+        <article class="panel" id="users">
+          <h2>Users + Friends</h2>
+          <div class="muted"><span class="tag">PREFIX</span> /api/users and /api/friends</div>
+<pre><code>GET    /api/users
+GET    /api/users/{user_id}
+POST   /api/users/{user_id}/block
+DELETE /api/users/{user_id}/block
+GET    /api/users/me/blocked
+GET    /api/users/me/bans
+GET    /api/users/{user_id}/aliases
+
+GET    /api/users/search
+GET    /api/users/profile/{nickname}
+GET    /api/users/{user_id}/pubkey
+POST   /api/users/pubkey
+GET    /api/users/me/tags
+POST   /api/users/me/tags
+DELETE /api/users/me/tags/{tag}
+POST   /api/users/me/presence
+
+POST   /api/friends/request/{nickname}
+POST   /api/friends/accept/{nickname}
+POST   /api/friends/decline/{nickname}
+DELETE /api/friends/{nickname}
+POST   /api/friends/block/{nickname}
+GET    /api/friends</code></pre>
+        </article>
+
+        <article class="panel" id="rooms">
+          <h2>Rooms, Messages, DMs</h2>
+          <div class="muted"><span class="tag">PREFIX</span> /api/rooms, /api/messages, /api/dms</div>
+<pre><code>GET    /api/rooms
+POST   /api/rooms
+DELETE /api/rooms/{room_name}
+GET    /api/rooms/{room_name}
+PATCH  /api/rooms/{room_name}
+POST   /api/rooms/{room_name}/moderators
+DELETE /api/rooms/{room_name}/moderators/{user_id}
+POST   /api/rooms/{room_name}/bans
+DELETE /api/rooms/{room_name}/bans/{user_id}
+GET    /api/rooms/{room_name}/bans
+GET    /api/rooms/{room_name}/pins
+POST   /api/rooms/{room_name}/pins/{msg_id}
+DELETE /api/rooms/{room_name}/pins/{msg_id}
+POST   /api/rooms/{room_name}/join
+GET    /api/rooms/{room_name}/members
+GET    /api/rooms/{room_name}/voice-participants
+POST   /api/rooms/{room_name}/leave
+GET    /api/rooms/{room_name}/queue
+POST   /api/rooms/{room_name}/queue
+DELETE /api/rooms/{room_name}/queue/{track_id}
+POST   /api/rooms/{room_name}/queue/skip
+POST   /api/rooms/{room_name}/queue/clear
+POST   /api/rooms/{room_name}/dj-only
+POST   /api/rooms/{room_name}/djs
+DELETE /api/rooms/{room_name}/djs/{user_id}
+
+POST   /api/messages/{room_name}/send
+GET    /api/messages/media/{msg_id}
+GET    /api/messages/{room_name}
+PATCH  /api/messages/{msg_id}
+DELETE /api/messages/{msg_id}
+POST   /api/messages/{msg_id}/react
+POST   /api/messages/{msg_id}/view
+GET    /api/messages/search/global
+GET    /api/messages/{room_name}/search
+GET    /api/messages/users/mentionable
+
+POST   /api/dms/open/{nickname}
+GET    /api/dms
+POST   /api/dms/{channel_id}/read
+GET    /api/dms/{channel_id}/messages
+GET    /api/dms/{channel_id}/messages/{msg_id}/media
+POST   /api/dms/{channel_id}/messages
+POST   /api/dms/{channel_id}/messages/{msg_id}/view
+PUT    /api/dms/{channel_id}/messages/{msg_id}
+DELETE /api/dms/{channel_id}/messages/{msg_id}
+POST   /api/dms/{channel_id}/messages/{msg_id}/react
+GET    /api/dms/{channel_id}/disappear
+POST   /api/dms/{channel_id}/disappear
+POST   /api/dms/{channel_id}/hide
+POST   /api/dms/{channel_id}/unhide
+DELETE /api/dms/{channel_id}/messages</code></pre>
+        </article>
+
+        <article class="panel" id="media">
+          <h2>Media, Emojis, Preview, Push, Calls, Location</h2>
+<pre><code>GET    /api/emojis
+POST   /api/emojis
+DELETE /api/emojis/{emoji_id}
+
+GET    /api/preview
+
+GET    /api/push/vapid-key
+POST   /api/push/subscribe
+DELETE /api/push/unsubscribe
+POST   /api/push/fcm-subscribe
+DELETE /api/push/fcm-unsubscribe
+
+GET    /api/calls/{call_id}/pending
+GET    /api/calls/pending-latest
+POST   /api/calls/{call_id}/decline
+POST   /api/calls/decline
+
+POST   /api/location/share
+GET    /api/location/dm/{channel_id}
+DELETE /api/location/dm/{channel_id}
+PATCH  /api/location/settings
+
+GET    /api/media/gifs/search
+GET    /api/media/gifs/trending
+GET    /api/media/gifs/categories
+GET    /api/media/stickers/packs
+POST   /api/media/stickers/packs
+POST   /api/media/stickers
+GET    /api/media/stickers/packs/{pack_id}
+POST   /api/media/stickers/packs/{pack_id}/install
+DELETE /api/media/stickers/packs/{pack_id}/uninstall
+DELETE /api/media/stickers/{sticker_id}
+GET    /api/media/stickers/public</code></pre>
+        </article>
+
+        <article class="panel" id="social">
+          <h2>Social, Wall, Directory, Invites</h2>
+<pre><code>POST   /api/social/follow/{nickname}
+DELETE /api/social/follow/{nickname}
+GET    /api/social/profile/{nickname}
+GET    /api/social/profile/{nickname}/posts
+GET    /api/social/profile/{nickname}/followers
+GET    /api/social/profile/{nickname}/channels
+GET    /api/social/profile/{nickname}/following
+GET    /api/social/feed
+GET    /api/social/explore
+GET    /api/social/suggested
+GET    /api/social/profile/{nickname}/media
+POST   /api/social/profile/media/{msg_id}/to-wall
+GET    /api/social/stories
+POST   /api/social/stories
+POST   /api/social/stories/upload
+POST   /api/social/stories/{story_id}/view
+DELETE /api/social/stories/{story_id}
+GET    /api/social/stories/{story_id}/viewers
+
+GET    /api/wall/users/{username}
+POST   /api/wall/posts
+GET    /api/wall/posts/{post_id}
+PUT    /api/wall/posts/{post_id}
+DELETE /api/wall/posts/{post_id}
+POST   /api/wall/posts/{post_id}/reactions
+GET    /api/wall/posts/{post_id}/reactions
+GET    /api/wall/posts/{post_id}/comments
+POST   /api/wall/posts/{post_id}/comments
+DELETE /api/wall/comments/{comment_id}
+PATCH  /api/wall/settings
+GET    /api/wall/settings
+
+GET    /api/directory/channels
+GET    /api/directory/channels/search
+GET    /api/directory/categories
+PATCH  /api/directory/channels/{room_name}/visibility
+GET    /api/directory/featured
+GET    /api/directory/suggested
+GET    /api/directory/users/search
+GET    /api/directory/channels/{room_name}/profile
+POST   /api/directory/channels/{room_name}/like
+DELETE /api/directory/channels/{room_name}/like
+GET    /api/directory/channels/{room_name}/comments
+POST   /api/directory/channels/{room_name}/comments
+DELETE /api/directory/channels/{room_name}/comments/{comment_id}
+PUT    /api/directory/channels/{room_name}/listing
+GET    /api/directory/suggest
+GET    /api/directory/new
+
+POST   /api/invites/channels/{room_name}
+GET    /api/invites/channels/{room_name}
+DELETE /api/invites/channels/{room_name}/{code}
+GET    /api/invites/{code}
+POST   /api/invites/{code}/join
+GET    /api/invites/{code}/landing</code></pre>
+        </article>
+
+        <article class="panel" id="bots">
+          <h2>Developer + Bot Management</h2>
+          <div class="muted"><span class="tag">PREFIX</span> /api/developer</div>
+<pre><code>POST   /api/developer/keys
+GET    /api/developer/keys
+DELETE /api/developer/keys/{key_id}
+POST   /api/developer/bots
+GET    /api/developer/bots
+PUT    /api/developer/bots/{bot_id}
+DELETE /api/developer/bots/{bot_id}
+POST   /api/developer/channels/{room_name}/bots/{bot_id}
+DELETE /api/developer/channels/{room_name}/bots/{bot_id}
+GET    /api/developer/channels/{room_name}/bots
+GET    /api/developer/bots/public</code></pre>
+          <p class="muted">Use these endpoints to mint API keys and manage bot accounts/channels from your own backend tools.</p>
+        </article>
+
+        <article class="panel" id="external">
+          <h2>External Token API (for Devs and Bots)</h2>
+          <div class="muted"><span class="tag">PREFIX</span> /api/external</div>
+          <p class="muted">Auth: <code>X-API-Key: frog_xxx</code> or <code>Authorization: Bearer frog_xxx</code>. Key comes from <code>/api/developer/keys</code>.</p>
+<pre><code>GET    /api/external/docs
+GET    /api/external/health
+GET    /api/external/me
+GET    /api/external/channels
+GET    /api/external/channels/{name}/messages
+POST   /api/external/channels/{name}/messages
+GET    /api/external/users/{user_id}
+POST   /api/external/dms/{user_id}
+POST   /api/external/webhooks</code></pre>
+          <pre><code>curl -X GET https://frogtalk.xyz/api/external/me \
+  -H "X-API-Key: frog_your_key_here"</code></pre>
+        </article>
+
+        <article class="panel" id="bridge">
+          <h2>Bridge API (Discord / Telegram)</h2>
+          <div class="muted"><span class="tag">PREFIX</span> /api</div>
+<pre><code>GET    /api/bridges
+GET    /api/rooms/{room_name}/bridge-outbound
+POST   /api/bridges/create
+POST   /api/bridges/prepare-code
+GET    /api/bridges/check-code/{code}
+POST   /api/bridges/claim-code
+DELETE /api/bridges/{bridge_id}
+POST   /api/bridges/{bridge_id}/toggle
+POST   /api/bridges/{bridge_id}/direction
+GET    /api/discord-bridges
+GET    /api/discord-bridges/invite-meta
+POST   /api/discord-bridges/validate-channel
+POST   /api/discord-bridges/create
+DELETE /api/discord-bridges/{bridge_id}
+POST   /api/bridge/message</code></pre>
+        </article>
+
+        <article class="panel" id="federation">
+          <h2>Federation, Network, Trust, Updates</h2>
+          <div class="muted"><span class="tag">PREFIX</span> /api</div>
+<pre><code>GET    /api/network/status
+GET    /api/network/servers
+GET    /api/network/probe
+GET    /api/network/auto-select
+GET    /api/network/build/local
+POST   /api/network/build/verify-peers
+GET    /api/network/updates/latest
+POST   /api/network/updates/publish
+GET    /api/network/update/status
+POST   /api/network/update/check
+POST   /api/network/update/apply
+POST   /api/network/servers/register
+POST   /api/network/servers/sync-official
+GET    /api/network/status/tor
+POST   /api/network/servers/register-transport
+
+GET    /api/identity/me
+PUT    /api/identity/me/pubkey
+GET    /api/identity/me/claim
+GET    /api/identity/users/{user_id}/claim
+
+POST   /api/federation/events/inbox
+POST   /api/federation/manifests/register
+GET    /api/federation/manifests/verify
+GET    /api/federation/manifests/list
+POST   /api/federation/events/emit
+GET    /api/federation/events/outbox
+GET    /api/federation/failover/status</code></pre>
+        </article>
+
+        <article class="panel" id="admin">
+          <h2>Admin + Server Admin</h2>
+          <div class="muted"><span class="warn">Server-sensitive</span> endpoints.</div>
+<pre><code>POST   /api/admin/ban/{nickname}
+POST   /api/admin/unban/{nickname}
+POST   /api/admin/kick/{nickname}
+POST   /api/admin/mute/{nickname}
+POST   /api/admin/unmute/{nickname}
+
+GET    /server
+GET    /api/server-admin/config
+POST   /api/server-admin/login
+POST   /api/server-admin/logout
+GET    /api/server-admin/me
+GET    /api/server-admin/stats
+GET    /api/server-admin/online-users
+POST   /api/server-admin/control/sync-official-directory
+POST   /api/server-admin/control/kick
+POST   /api/server-admin/control/ban
+POST   /api/server-admin/control/unban
+POST   /api/server-admin/control/mute
+POST   /api/server-admin/control/unmute</code></pre>
+        </article>
+
+        <article class="panel" id="misc">
+          <h2>Misc + Real-time</h2>
+<pre><code>GET    /api/ping
+GET    /invite/{code}          (landing)
+WebSocket: /ws/{room_name}?token=SESSION_TOKEN</code></pre>
+          <p class="muted ok">This page now mirrors the current routed API surface in this repository.</p>
+        </article>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

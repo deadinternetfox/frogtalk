@@ -1,0 +1,141 @@
+/**
+ * state.js — Shared application state
+ */
+
+const State = {
+  token: null,
+  user: null,          // { id, nickname, avatar, bio, is_admin }
+  currentRoom: null,    // room name string
+  currentRoomType: 'public', // 'public' | 'private' | 'dm'
+  currentRoomOwner: null, // nickname of room owner (for permission checks)
+  currentRoomMods: [],  // list of moderator nicknames for the current room
+  rooms: [],            // list of room objects from server
+  _showAllChannels: false, // toggle to show unjoined channels
+  messages: {},         // roomName -> [msg, ...]
+  onlineUsers: [],      // current room online users
+  dmPeer: null,         // nickname of DM peer if in DM
+  roomKeys: {},         // roomName -> CryptoKey
+  bridgeOut: {},        // roomName -> bool (has active outbound bridge)
+  pendingAttachment: null, // { dataUrl, type }
+  isLoadingHistory: false,
+  oldestMsgId: null,
+  typingTimeout: null,
+  blockedNicks: new Set(), // lowercased nicknames the viewer has blocked
+
+  save() {
+    if (this.token) localStorage.setItem('fc_token', this.token);
+    if (this.user) localStorage.setItem('fc_user', JSON.stringify(this.user));
+  },
+
+  load() {
+    this.token = localStorage.getItem('fc_token');
+    try { this.user = JSON.parse(localStorage.getItem('fc_user')); } catch { this.user = null; }
+  },
+
+  clear() {
+    localStorage.removeItem('fc_token');
+    localStorage.removeItem('fc_user');
+    localStorage.removeItem('fc_last_room');
+    this.token = null;
+    this.user = null;
+  }
+};
+
+/* ── Compatibility shims for new modules (friends.js, dms.js, calls.js, media.js) ── */
+
+// STATE alias → State (new modules use STATE, old use State)
+// We use a Proxy so both names share the same object
+const STATE = State;
+
+// wsSend → WS.send (WS is defined after state.js loads)
+function wsSend (obj) {
+  if (typeof WS !== 'undefined') WS.send(obj);
+}
+
+// toast() → UI.showToast() with optional stack-based toasts div
+function toast (text, type = 'info', ms = 3000) {
+  // Try new stacked toasts first, fall back to legacy single toast
+  const stack = document.getElementById('toasts');
+  if (stack) {
+    const el = document.createElement('div');
+    const colors = { error: '#f85149', success: '#4caf50', info: '#4ade80' };
+    el.style.cssText = `background:#141414;border:1px solid #2a2a2a;border-radius:10px;
+      padding:10px 18px;font-size:13px;color:${colors[type]||'#888'};
+      box-shadow:0 4px 20px rgba(0,0,0,.5);pointer-events:auto;
+      max-width:320px;cursor:pointer;animation:fadeInRight .2s ease`;
+    el.textContent = text;
+    el.onclick = () => el.remove();
+    stack.appendChild(el);
+    setTimeout(() => el.remove(), ms);
+  } else if (typeof UI !== 'undefined') {
+    UI.showToast(text, type);
+  }
+}
+
+// esc() → UI.escHtml() — HTML-escape helper
+function esc (s) {
+  if (typeof UI !== 'undefined') return UI.escHtml(String(s ?? ''));
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// apiFetch() — authenticated fetch using current State.token.
+// Signals ConnErr on network-level failures (TypeError) so the retry overlay
+// appears after repeated offline failures.
+async function apiFetch (url, method = 'GET', body = null) {
+  const headers = { 'X-Session-Token': State.token || '' };
+  const opts = { method, headers };
+  if (body && method !== 'GET') {
+    headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  try {
+    const res = await fetch(url, opts);
+    if (typeof ConnErr !== 'undefined') ConnErr.onNetOk();
+    return res;
+  } catch (err) {
+    // TypeError: Failed to fetch → network / server unreachable
+    if (typeof ConnErr !== 'undefined') ConnErr.onNetFail();
+    throw err;
+  }
+}
+
+// scrollChatBottom helper
+function scrollChatBottom () {
+  const area = document.getElementById('messages-area');
+  if (area) area.scrollTop = area.scrollHeight;
+}
+
+// deriveSharedSecret — stub (calls crypto.js ECDH if available)
+async function deriveSharedSecret (peerPubKey) {
+  try {
+    if (typeof Crypto !== 'undefined' && Crypto.deriveShared) {
+      State.sharedSecret = await Crypto.deriveShared(peerPubKey);
+    }
+  } catch {}
+}
+
+// encryptMsg / decryptMsg for DMs (uses shared ECDH secret if available)
+async function encryptMsg (plain) {
+  if (typeof Crypto !== 'undefined' && State.sharedSecret) {
+    return Crypto.encrypt(plain, State.sharedSecret);
+  }
+  return plain;
+}
+
+async function decryptMsg (cipher) {
+  if (typeof Crypto !== 'undefined' && State.sharedSecret) {
+    const out = await Crypto.decrypt(cipher, State.sharedSecret);
+    return out !== null ? out : cipher;
+  }
+  return cipher;
+}
+
+// Inject toast fade-in keyframe
+const _toastStyle = document.createElement('style');
+_toastStyle.textContent = `@keyframes fadeInRight{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}`;
+document.head?.appendChild(_toastStyle);

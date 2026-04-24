@@ -1,0 +1,803 @@
+"""Bridge management endpoints (Telegram + Discord)."""
+
+import os
+import base64
+import secrets
+import string
+import time
+import re
+from datetime import datetime
+from fastapi import APIRouter, HTTPException, Depends, Request
+from pydantic import BaseModel
+from typing import Optional
+from urllib.parse import quote_plus
+import httpx
+
+import database as db
+from deps import get_current_user
+
+router = APIRouter(tags=["bridge"])
+
+# In-memory pending invite codes for the easy bridge-setup flow.
+# Maps CODE -> {"room_name", "owner_id", "bot_token", "bot_name", "expires_at"}
+_pending_codes: dict = {}
+_CODE_TTL = 15 * 60  # 15 minutes
+
+
+def _discord_client_id_from_token(token: str) -> Optional[str]:
+    """Best-effort extract Discord bot user/client id from token prefix.
+
+    Discord bot tokens commonly encode the bot user id in the first segment
+    (base64url). If extraction fails, return None.
+    """
+    try:
+        if not token or "." not in token:
+            return None
+        first = token.split(".", 1)[0].strip()
+        if not first:
+            return None
+        padded = first + "=" * ((4 - len(first) % 4) % 4)
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        cid = raw.decode("ascii", errors="ignore").strip()
+        return cid if cid.isdigit() else None
+    except Exception:
+        return None
+
+
+async def _validate_discord_channel_access(channel_id: int) -> tuple[int, int]:
+    """Ensure the configured hosted Discord bot can see the target channel.
+
+    Returns `(channel_id, guild_id)` on success. Raises `HTTPException` with a
+    user-facing explanation when the id is invalid or the bot cannot access it.
+    """
+    try:
+        import bridge_discord as bdc
+        snap = bdc.get_channel_access_snapshot(channel_id)
+        if snap:
+            if not snap.get("can_view"):
+                raise HTTPException(403, "FrogTalk Discord bot cannot view that channel")
+            if not snap.get("can_send"):
+                raise HTTPException(403, "FrogTalk Discord bot can see that channel but cannot send messages there")
+            return int(snap["channel_id"]), int(snap.get("guild_id") or 0)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    token = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
+    if not token:
+        raise HTTPException(503, "Discord bridge bot is not configured on this server")
+
+    url = f"https://discord.com/api/v10/channels/{int(channel_id)}"
+    headers = {"Authorization": f"Bot {token}"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(url, headers=headers)
+    except Exception:
+        raise HTTPException(502, "Could not verify Discord channel right now")
+
+    if response.status_code == 200:
+        data = response.json()
+        guild_id = int(data.get("guild_id") or 0)
+        return int(data.get("id") or channel_id), guild_id
+
+    detail = {}
+    try:
+        detail = response.json() or {}
+    except Exception:
+        detail = {}
+    code = int(detail.get("code") or 0)
+    if response.status_code == 404 and code == 10003:
+        raise HTTPException(
+            400,
+            "Discord channel not found for this bot. Check that you copied the channel ID from the target text channel and that the FrogTalk bot was invited to that server with View Channels access.",
+        )
+    if response.status_code == 403:
+        raise HTTPException(
+            403,
+            "FrogTalk Discord bot does not have permission to access that channel",
+        )
+    raise HTTPException(400, detail.get("message") or "Failed to verify Discord channel")
+
+
+async def _fetch_discord_channel_details(channel_id: int) -> dict:
+    token = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
+    if not token:
+        raise HTTPException(503, "Discord bridge bot is not configured on this server")
+
+    headers = {"Authorization": f"Bot {token}"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        channel_resp = await client.get(
+            f"https://discord.com/api/v10/channels/{int(channel_id)}",
+            headers=headers,
+        )
+        if channel_resp.status_code != 200:
+            raise HTTPException(400, "Could not read Discord channel details")
+        channel = channel_resp.json() or {}
+
+        guild_id = str(channel.get("guild_id") or "").strip()
+        guild_name = "Discord Server"
+        if guild_id:
+            guild_resp = await client.get(
+                f"https://discord.com/api/v10/guilds/{guild_id}",
+                headers=headers,
+            )
+            if guild_resp.status_code == 200:
+                guild_name = (guild_resp.json() or {}).get("name") or guild_name
+
+    return {
+        "channel_id": int(channel.get("id") or channel_id),
+        "channel_name": channel.get("name") or "channel",
+        "guild_id": int(guild_id or 0),
+        "guild_name": guild_name,
+    }
+
+def _gen_code() -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    # Avoid confusing chars
+    alphabet = alphabet.replace("O", "").replace("0", "").replace("I", "").replace("1", "")
+    return "".join(secrets.choice(alphabet) for _ in range(6))
+
+def _sweep_codes():
+    now = time.time()
+    expired = [c for c, v in _pending_codes.items() if v.get("expires_at", 0) < now]
+    for c in expired:
+        _pending_codes.pop(c, None)
+
+
+class CreateBridgeRequest(BaseModel):
+    room_name: str
+    telegram_chat_id: int
+    bot_token: str
+    bot_name: str = ""
+
+
+class CreateDiscordBridgeRequest(BaseModel):
+    room_name: str
+    discord_channel_id: int
+    discord_guild_id: int = 0
+    bot_name: str = ""
+
+
+class ValidateDiscordChannelRequest(BaseModel):
+    discord_channel_id: int
+
+
+class ToggleBridgeRequest(BaseModel):
+    enabled: bool
+
+
+class BridgeMessageRequest(BaseModel):
+    """Incoming message from bridge bot."""
+    room_name: str
+    sender_name: str
+    content: str = ""
+    media_url: Optional[str] = None
+    sender_avatar: Optional[str] = None
+    bridge_token: str
+    platform: str = "telegram"
+    # Remote-platform message ids, used to render replies natively.
+    # `remote_msg_id` is the id of THIS message on the remote platform.
+    # `reply_to_remote_id` is the id of the message being replied to on the
+    # remote platform (server resolves it to the FrogTalk msg_id via the
+    # bridge_msg_map table).
+    remote_chat_id: Optional[str] = None
+    remote_msg_id: Optional[str] = None
+    reply_to_remote_id: Optional[str] = None
+
+
+class DirectionRequest(BaseModel):
+    direction: str  # 'both' | 'in' | 'out'
+
+
+@router.get("/bridges")
+async def list_bridges(current_user: dict = Depends(get_current_user)):
+    bridges = db.get_telegram_bridges(owner_id=current_user["id"])
+    return {"bridges": bridges}
+
+
+@router.get("/rooms/{room_name}/bridge-outbound")
+async def room_bridge_outbound(room_name: str, _: dict = Depends(get_current_user)):
+    """Return whether the given room has any enabled bridge that mirrors
+    FrogTalk → remote (direction in {'both','out'}).
+
+    Used by the client so it can attach a plaintext `bridge_plain` field on
+    encrypted messages — the server never stores it, only forwards it to the
+    remote platform. For rooms with NO outbound bridge, no plaintext leaves
+    the browser and E2EE is preserved.
+    """
+    outbound = False
+    try:
+        for b in db.get_telegram_bridges_for_room(room_name):
+            if (b.get("direction") or "both").lower() in ("both", "out"):
+                outbound = True
+                break
+        if not outbound:
+            for b in db.get_discord_bridges_for_room(room_name):
+                if (b.get("direction") or "both").lower() in ("both", "out"):
+                    outbound = True
+                    break
+    except Exception:
+        pass
+    return {"outbound": outbound}
+
+
+@router.post("/bridges/create")
+async def create_bridge_endpoint(body: CreateBridgeRequest, current_user: dict = Depends(get_current_user)):
+    # Verify user owns the room
+    room = db.get_room_by_name(body.room_name)
+    if not room:
+        raise HTTPException(404, "Room not found")
+    if room["owner_id"] != current_user["id"]:
+        raise HTTPException(403, "Only room owner can create bridges")
+    if len(body.bot_token) < 20 or ":" not in body.bot_token:
+        raise HTTPException(400, "Invalid bot token format")
+
+    bridge_id = db.create_telegram_bridge(
+        room_name=body.room_name,
+        telegram_chat_id=body.telegram_chat_id,
+        bot_token=body.bot_token,
+        bot_name=body.bot_name,
+        owner_id=current_user["id"]
+    )
+    if not bridge_id:
+        raise HTTPException(409, "Bridge already exists for this room/chat combination")
+    return {"id": bridge_id, "ok": True}
+
+
+# ─── Easy bridge setup: invite-code flow ─────────────────────────────────
+# Flow:
+#   1. Frontend calls /bridges/prepare-code with room + bot_token → gets CODE + bot username
+#   2. User adds @FrogTalkBridgeBot to their Telegram group
+#   3. User types "/claim CODE" in the Telegram group
+#   4. bridge_telegram.py sees the /claim command, calls /bridges/claim-code
+#      (server-side) with {code, telegram_chat_id}; bridge is finalized
+#   5. Frontend polls /bridges/check-code until status=claimed (or uses WS later)
+
+class PrepareCodeRequest(BaseModel):
+    room_name: str
+    bot_token: str  # FrogTalk bot API key, used as bridge_token on /api/bridge/message
+    bot_name: str = "Telegram Bridge"
+
+
+class ClaimCodeRequest(BaseModel):
+    code: str
+    telegram_chat_id: int
+    telegram_chat_title: str = ""
+
+
+class PrepareDiscordCodeRequest(BaseModel):
+    room_name: str
+    bot_name: str = "Discord Bridge"
+
+
+class ClaimDiscordCodeRequest(BaseModel):
+    code: str
+    discord_channel_id: int
+    discord_guild_id: int = 0
+    discord_channel_name: str = ""
+    discord_guild_name: str = ""
+
+
+@router.post("/bridges/prepare-code")
+async def bridge_prepare_code(body: PrepareCodeRequest, current_user: dict = Depends(get_current_user)):
+    """Issue a short-lived invite code that the user sends to the Telegram bot
+    via `/claim CODE`. The bot then finalizes the bridge server-side so the
+    user never has to find the numeric chat_id themselves."""
+    _sweep_codes()
+    room = db.get_room_by_name(body.room_name)
+    if not room:
+        raise HTTPException(404, "Room not found")
+    if room["owner_id"] != current_user["id"]:
+        raise HTTPException(403, "Only room owner can create bridges")
+    if len(body.bot_token) < 20 or ":" not in body.bot_token:
+        # FrogTalk bot tokens are `bot_xxxxx`; accept those too.
+        if not body.bot_token.startswith("bot_"):
+            raise HTTPException(400, "Invalid bot token format")
+
+    # Generate a unique code
+    for _ in range(10):
+        code = _gen_code()
+        if code not in _pending_codes:
+            break
+    else:
+        raise HTTPException(500, "Could not allocate code, try again")
+
+    _pending_codes[code] = {
+        "room_name": body.room_name,
+        "owner_id": current_user["id"],
+        "bot_token": body.bot_token,
+        "bot_name": body.bot_name or "Telegram Bridge",
+        "expires_at": time.time() + _CODE_TTL,
+        "status": "pending",
+        "bridge_id": None,
+    }
+
+    # Report which bot the user should add (from env)
+    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "")
+    return {
+        "ok": True,
+        "code": code,
+        "bot_username": bot_username,
+        "expires_in": _CODE_TTL,
+        "instructions": (
+            f"1. Add @{bot_username or 'FrogTalkBridgeBot'} to your Telegram group\n"
+            f"2. In the group, send: /claim {code}\n"
+            f"3. This window will update when linked"
+        ),
+    }
+
+
+@router.get("/bridges/check-code/{code}")
+async def bridge_check_code(code: str, current_user: dict = Depends(get_current_user)):
+    """Frontend polls this to learn if the code has been claimed."""
+    _sweep_codes()
+    entry = _pending_codes.get(code.upper())
+    if not entry:
+        return {"status": "expired"}
+    if entry["owner_id"] != current_user["id"]:
+        raise HTTPException(403, "Not your code")
+    return {"status": entry.get("status", "pending"), "bridge_id": entry.get("bridge_id")}
+
+
+def _build_bridge_claim_command(platform: str, code: str) -> str:
+    p = (platform or "").lower()
+    if p == "discord":
+        return f"bridge {code}"
+    return f"/claim {code}"
+
+
+@router.post("/bridges/claim-code")
+async def bridge_claim_code(body: ClaimCodeRequest, request: Request):
+    """Called server-side by bridge_telegram.py when it sees `/claim CODE`.
+    Only accepts loopback / local calls — not meant to be invoked by browsers."""
+    # Security: restrict to loopback to prevent random internet calls from
+    # hijacking codes. The Telegram bridge runs in-process with us, so
+    # 127.0.0.1 is sufficient.
+    client_ip = (request.client.host if request.client else "")
+    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Only callable locally")
+
+    _sweep_codes()
+    code = body.code.upper().strip()
+    entry = _pending_codes.get(code)
+    if not entry:
+        raise HTTPException(404, "Code not found or expired")
+    if entry.get("status") == "claimed":
+        return {"ok": True, "already": True, "room_name": entry["room_name"]}
+
+    bridge_id = db.create_telegram_bridge(
+        room_name=entry["room_name"],
+        telegram_chat_id=body.telegram_chat_id,
+        bot_token=entry["bot_token"],
+        bot_name=entry["bot_name"],
+        owner_id=entry["owner_id"],
+    )
+    if not bridge_id:
+        # Bridge may already exist for this chat+room — treat as success
+        return {"ok": True, "already": True, "room_name": entry["room_name"]}
+
+    entry["status"] = "claimed"
+    entry["bridge_id"] = bridge_id
+
+    # Register with the live in-memory bridge map so messages flow immediately.
+    try:
+        import bridge_telegram as btg
+        btg._bridges[body.telegram_chat_id] = {
+            "room": entry["room_name"],
+            "token": entry["bot_token"],
+            "bot_name": entry["bot_name"],
+            "enabled": True,
+            "direction": "both",
+        }
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "bridge_id": bridge_id,
+        "room_name": entry["room_name"],
+        "chat_title": body.telegram_chat_title,
+    }
+
+
+@router.delete("/bridges/{bridge_id}")
+async def delete_bridge(bridge_id: int, current_user: dict = Depends(get_current_user)):
+    # Look up the chat_id BEFORE deleting so we can drop it from the live
+    # in-memory bridge map — otherwise the poll loop keeps mirroring until
+    # the service restarts.
+    chat_id = None
+    try:
+        for b in db.get_telegram_bridges(owner_id=current_user["id"]):
+            if b.get("id") == bridge_id:
+                chat_id = b.get("telegram_chat_id")
+                break
+    except Exception:
+        pass
+    if not db.delete_telegram_bridge(bridge_id, current_user["id"]):
+        raise HTTPException(404, "Bridge not found or not owned by you")
+    if chat_id is not None:
+        try:
+            import bridge_telegram as btg
+            btg._bridges.pop(chat_id, None)
+        except Exception:
+            pass
+    return {"ok": True}
+
+
+@router.post("/bridges/{bridge_id}/toggle")
+async def toggle_bridge(bridge_id: int, body: ToggleBridgeRequest, current_user: dict = Depends(get_current_user)):
+    # Try Telegram first, then Discord
+    if not db.toggle_telegram_bridge(bridge_id, current_user["id"], body.enabled):
+        if not db.toggle_discord_bridge(bridge_id, current_user["id"], body.enabled):
+            raise HTTPException(404, "Bridge not found or not owned by you")
+    return {"ok": True}
+
+
+@router.post("/bridges/{bridge_id}/direction")
+async def set_bridge_direction(bridge_id: int, body: DirectionRequest,
+                               current_user: dict = Depends(get_current_user)):
+    """Set mirroring direction for a Telegram OR Discord bridge.
+
+    both = two-way, in = remote→FrogTalk only, out = FrogTalk→remote only.
+    """
+    direction = (body.direction or "both").lower()
+    if direction not in ("both", "in", "out"):
+        raise HTTPException(400, "direction must be 'both', 'in', or 'out'")
+    with db._conn() as con:
+        # Only update rows owned by the caller. Try both tables — the id
+        # space is separate, but only one will match.
+        cur = con.execute(
+            "UPDATE telegram_bridges SET direction=? WHERE id=? AND owner_id=?",
+            (direction, bridge_id, current_user["id"]),
+        )
+        touched_tg = cur.rowcount
+        cur = con.execute(
+            "UPDATE discord_bridges SET direction=? WHERE id=? AND owner_id=?",
+            (direction, bridge_id, current_user["id"]),
+        )
+        touched_dc = cur.rowcount
+        con.commit()
+    if not (touched_tg or touched_dc):
+        raise HTTPException(404, "Bridge not found or not owned by you")
+    # Refresh in-memory bridge map so direction changes take effect live.
+    try:
+        import bridge_telegram as btg
+        btg.load_bridges()
+    except Exception:
+        pass
+    try:
+        import bridge_discord as bdc
+        bdc.load_bridges()
+    except Exception:
+        pass
+    return {"ok": True, "direction": direction}
+
+
+# ─── Discord bridge endpoints ─────────────────────────────────────────────
+
+@router.get("/discord-bridges")
+async def list_discord_bridges(current_user: dict = Depends(get_current_user)):
+    bridges = db.get_discord_bridges(owner_id=current_user["id"])
+    return {"bridges": bridges}
+
+
+@router.get("/discord-bridges/invite-meta")
+async def discord_bridge_invite_meta(_: dict = Depends(get_current_user)):
+    """Return one-click invite metadata for the hosted Discord bridge bot.
+
+    Resolution order:
+    1) DISCORD_BOT_INVITE_URL (explicit override)
+    2) Build OAuth URL from DISCORD_BOT_CLIENT_ID
+    3) Build OAuth URL by decoding DISCORD_BOT_TOKEN prefix
+    """
+    invite_url = (os.environ.get("DISCORD_BOT_INVITE_URL") or "").strip()
+    client_id = (os.environ.get("DISCORD_BOT_CLIENT_ID") or "").strip()
+    token = (os.environ.get("DISCORD_BOT_TOKEN") or "").strip()
+
+    # Required for bridge read/write basics.
+    permissions_int = 117760
+    scopes = "bot applications.commands"
+
+    if not invite_url:
+        if not client_id:
+            client_id = _discord_client_id_from_token(token) or ""
+        if client_id:
+            invite_url = (
+                "https://discord.com/oauth2/authorize"
+                f"?client_id={quote_plus(client_id)}"
+                f"&permissions={permissions_int}"
+                f"&scope={quote_plus(scopes)}"
+            )
+
+    return {
+        "ok": bool(invite_url),
+        "invite_url": invite_url,
+        "client_id": client_id,
+        "permissions": {
+            "int": permissions_int,
+            "recommended": [
+                "View Channels",
+                "Read Message History",
+                "Send Messages",
+                "Embed Links",
+                "Attach Files",
+            ],
+        },
+    }
+
+
+@router.post("/discord-bridges/prepare-code")
+async def discord_bridge_prepare_code(body: PrepareDiscordCodeRequest,
+                                      current_user: dict = Depends(get_current_user)):
+    """Issue a short-lived claim code for Discord.
+
+    The bridge is only created after the hosted Discord bot sees `bridge CODE`
+    in the target channel, which proves the caller can actually post there.
+    """
+    _sweep_codes()
+    room = db.get_room_by_name(body.room_name)
+    if not room:
+        raise HTTPException(404, "Room not found")
+    if room["owner_id"] != current_user["id"]:
+        raise HTTPException(403, "Only room owner can create bridges")
+
+    for _ in range(10):
+        code = _gen_code()
+        if code not in _pending_codes:
+            break
+    else:
+        raise HTTPException(500, "Could not allocate code, try again")
+
+    _pending_codes[code] = {
+        "platform": "discord",
+        "room_name": body.room_name,
+        "owner_id": current_user["id"],
+        "bot_token": "discord",
+        "bot_name": body.bot_name or "Discord Bridge",
+        "expires_at": time.time() + _CODE_TTL,
+        "status": "pending",
+        "bridge_id": None,
+    }
+
+    command_text = _build_bridge_claim_command("discord", code)
+    return {
+        "ok": True,
+        "platform": "discord",
+        "code": code,
+        "command": command_text,
+        "expires_in": _CODE_TTL,
+        "instructions": (
+            "1. Open the Discord channel you want to bridge\n"
+            f"2. Send exactly: {command_text}\n"
+            "3. This window will update automatically when the bridge is linked"
+        ),
+        "message_content_required": True,
+    }
+
+
+@router.post("/discord-bridges/claim-code")
+async def discord_bridge_claim_code(body: ClaimDiscordCodeRequest, request: Request):
+    """Called locally by the Discord bridge bot after it sees `bridge CODE`."""
+    client_ip = (request.client.host if request.client else "")
+    if client_ip not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Only callable locally")
+
+    _sweep_codes()
+    code = re.sub(r"[^A-Z0-9]", "", (body.code or "").upper())
+    entry = _pending_codes.get(code)
+    if not entry or (entry.get("platform") or "telegram") != "discord":
+        raise HTTPException(404, "Code not found or expired")
+    if entry.get("status") == "claimed":
+        return {"ok": True, "already": True, "room_name": entry["room_name"]}
+
+    bridge_id = db.create_discord_bridge(
+        room_name=entry["room_name"],
+        discord_channel_id=body.discord_channel_id,
+        bot_token="discord",
+        bot_name=entry.get("bot_name") or "Discord Bridge",
+        owner_id=entry["owner_id"],
+        discord_guild_id=body.discord_guild_id or 0,
+    )
+    if not bridge_id:
+        existing = None
+        try:
+            for bridge in db.get_discord_bridges(owner_id=entry["owner_id"]):
+                if bridge.get("room_name") == entry["room_name"] and int(bridge.get("discord_channel_id") or 0) == int(body.discord_channel_id):
+                    existing = bridge
+                    break
+        except Exception:
+            existing = None
+        if existing:
+            entry["status"] = "claimed"
+            entry["bridge_id"] = existing.get("id")
+            try:
+                import bridge_discord as bdc
+                bdc.load_bridges()
+            except Exception:
+                pass
+            return {"ok": True, "already": True, "bridge_id": existing.get("id"), "room_name": entry["room_name"]}
+        raise HTTPException(409, "Bridge already exists for this room/channel combination")
+
+    entry["status"] = "claimed"
+    entry["bridge_id"] = bridge_id
+
+    try:
+        import bridge_discord as bdc
+        bdc.load_bridges()
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "bridge_id": bridge_id,
+        "room_name": entry["room_name"],
+        "channel_name": body.discord_channel_name,
+        "guild_name": body.discord_guild_name,
+    }
+
+
+@router.post("/discord-bridges/validate-channel")
+async def validate_discord_channel_endpoint(body: ValidateDiscordChannelRequest,
+                                            _: dict = Depends(get_current_user)):
+    channel_id, guild_id = await _validate_discord_channel_access(body.discord_channel_id)
+    details = await _fetch_discord_channel_details(channel_id)
+    return {
+        "ok": True,
+        "channel_id": int(channel_id),
+        "guild_id": int(guild_id or details.get("guild_id") or 0),
+        "channel_name": details.get("channel_name") or "channel",
+        "guild_name": details.get("guild_name") or "Discord Server",
+    }
+
+
+@router.post("/discord-bridges/create")
+async def create_discord_bridge_endpoint(body: CreateDiscordBridgeRequest, current_user: dict = Depends(get_current_user)):
+    room = db.get_room_by_name(body.room_name)
+    if not room:
+        raise HTTPException(404, "Room not found")
+    if room["owner_id"] != current_user["id"]:
+        raise HTTPException(403, "Only room owner can create bridges")
+    channel_id, guild_id = await _validate_discord_channel_access(body.discord_channel_id)
+    bridge_id = db.create_discord_bridge(
+        room_name=body.room_name,
+        discord_channel_id=channel_id,
+        bot_token="discord",
+        bot_name=body.bot_name or "Discord Bridge",
+        owner_id=current_user["id"],
+        discord_guild_id=body.discord_guild_id or guild_id,
+    )
+    if not bridge_id:
+        raise HTTPException(409, "Bridge already exists for this room/channel combination")
+    try:
+        import bridge_discord as bdc
+        bdc.load_bridges()
+    except Exception:
+        pass
+    return {"id": bridge_id, "ok": True}
+
+
+@router.delete("/discord-bridges/{bridge_id}")
+async def delete_discord_bridge(bridge_id: int, current_user: dict = Depends(get_current_user)):
+    if not db.delete_discord_bridge(bridge_id, current_user["id"]):
+        raise HTTPException(404, "Bridge not found or not owned by you")
+    try:
+        import bridge_discord as bdc
+        bdc.load_bridges()
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@router.post("/bridge/message")
+async def receive_bridge_message(body: BridgeMessageRequest):
+    """Receive a message forwarded from a bridge bot (Telegram or Discord)."""
+    # Verify bridge token matches a known bridge
+    platform = body.platform or "telegram"
+
+    all_bridges = db.get_telegram_bridges() + db.get_discord_bridges()
+    matched_bridge = None
+    for b in all_bridges:
+        if (
+            b.get("bot_token") == body.bridge_token
+            and b.get("room_name") == body.room_name
+            and bool(b.get("enabled", 1))
+        ):
+            matched_bridge = b
+            break
+
+    if not matched_bridge:
+        raise HTTPException(403, "Invalid bridge token")
+
+    # Honor direction setting: 'out' means FrogTalk→remote only, so we
+    # deliberately drop inbound messages. 'both' / 'in' accept them.
+    direction = (matched_bridge.get("direction") or "both").lower()
+    if direction == "out":
+        return {"ok": True, "dropped": "direction=out"}
+
+    media_type = None
+    if body.media_url:
+        media_type = "image/jpeg"
+        lower = body.media_url.lower()
+        if lower.endswith(".gif"):
+            media_type = "image/gif"
+        elif lower.endswith(".webp"):
+            media_type = "image/webp"
+        elif lower.endswith(".png"):
+            media_type = "image/png"
+        elif lower.endswith(".mp4") or lower.endswith(".webm"):
+            media_type = "video/mp4"
+
+    # Save to DB as a bridge message. user_id must reference a real user row
+    # (FK constraint) — attribute to the bridge owner so history is preserved.
+    bridge_owner_id = matched_bridge.get("owner_id") or 1
+
+    # Resolve an inbound reply: if the remote message is a reply to another
+    # remote message that we've previously mirrored, attach it as a native
+    # FrogTalk reply. Otherwise the reply just renders as a plain message.
+    reply_to_ft_id = None
+    reply_nickname = None
+    reply_content = None
+    if body.reply_to_remote_id and body.remote_chat_id:
+        reply_to_ft_id = db.lookup_bridge_msg_map(
+            platform, body.remote_chat_id, body.reply_to_remote_id
+        )
+        if reply_to_ft_id:
+            try:
+                with db._conn() as _con:
+                    row = _con.execute(
+                        "SELECT nickname, substr(content,1,120) AS content "
+                        "FROM messages WHERE id=?", (reply_to_ft_id,)
+                    ).fetchone()
+                if row:
+                    reply_nickname = row["nickname"]
+                    reply_content = row["content"]
+            except Exception:
+                pass
+
+    msg_id = db.save_message(
+        room_name=body.room_name,
+        user_id=bridge_owner_id,
+        nickname=body.sender_name,
+        content=body.content or "",
+        media_data=body.media_url,
+        media_type=media_type,
+        bridge_platform=platform,
+        bridge_avatar=body.sender_avatar or None,
+        reply_to=reply_to_ft_id,
+    )
+
+    # Persist the remote → FrogTalk mapping so future replies on either
+    # platform can resolve back to this message.
+    if body.remote_msg_id and body.remote_chat_id:
+        db.save_bridge_msg_map(
+            platform, body.remote_chat_id, body.remote_msg_id, msg_id
+        )
+
+    # Broadcast to WebSocket clients in the room
+    from ws_manager import manager
+    msg_data = {
+        "type": "message",
+        "id": msg_id,
+        "room": body.room_name,
+        "nickname": body.sender_name,
+        "user_id": 0,
+        "content": body.content or "",
+        "media_data": body.media_url,
+        "media_type": media_type,
+        "edited": False,
+        "reactions": {},
+        "created_at": datetime.utcnow().isoformat(),
+        "bridge": True,
+        "platform": platform,
+        "bridge_platform": platform,
+        "avatar": body.sender_avatar or None,
+        "reply_to": reply_to_ft_id,
+        "reply_nickname": reply_nickname,
+        "reply_content": reply_content,
+    }
+    # Backward-compatible alias for older consumers
+    msg_data["sender"] = msg_data["nickname"]
+    await manager.broadcast_room(body.room_name, msg_data)
+
+    return {"ok": True, "id": msg_id}

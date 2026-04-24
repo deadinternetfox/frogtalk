@@ -1,0 +1,171 @@
+"""Friends, tags, user search routes."""
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import Optional
+
+import database as db
+from deps import get_current_user
+
+router = APIRouter(prefix="/friends", tags=["friends"])
+users_router = APIRouter(prefix="/users", tags=["users_ext"])
+
+
+def _friend_push(user_id: int, title: str, body: str):
+    """Send push notification for friend events (silent fail)."""
+    try:
+        from routers.push import send_push
+        send_push(user_id, title, body, "/app")
+    except Exception:
+        pass
+
+
+# ── Friends ──────────────────────────────────────────────────────────────────
+
+@users_router.get("/search")
+async def search_users(q: str = "", current_user: dict = Depends(get_current_user)):
+    if not q or len(q) < 1:
+        return {"users": []}
+    results = db.search_users(q, limit=20, requester_id=current_user["id"])
+    return {"users": [
+        {"id": u["id"], "nickname": u["nickname"], "avatar": u["avatar"],
+         "presence": u.get("presence", "online"),
+         "allow_friend_requests": bool(u.get("allow_friend_requests", 1))}
+        for u in results if u["id"] != current_user["id"]
+    ]}
+
+
+@users_router.get("/profile/{nickname}")
+async def get_profile(nickname: str, _: dict = Depends(get_current_user)):
+    profile = db.get_user_profile(nickname)
+    if not profile:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    return {k: v for k, v in profile.items() if k != "ecdh_pub_key"}
+
+
+@users_router.get("/{user_id}/pubkey")
+async def get_pubkey(user_id: int, _: dict = Depends(get_current_user)):
+    key = db.get_pubkey(user_id)
+    if key is None:
+        return JSONResponse(status_code=404, content={"error": "No public key set"})
+    return {"pub_key": key, "ecdh_pub_key": key}
+
+
+@users_router.post("/pubkey")
+async def set_pubkey(body: dict, current_user: dict = Depends(get_current_user)):
+    key = str(body.get("pub_key") or body.get("ecdh_pub_key") or "")
+    if not key:
+        return JSONResponse(status_code=400, content={"error": "pub_key required"})
+    db.set_ecdh_pub_key(current_user["id"], key)
+    return {"ok": True}
+
+
+# ── Tags ─────────────────────────────────────────────────────────────────────
+
+class TagBody(BaseModel):
+    tag: str
+
+
+@users_router.get("/me/tags")
+async def my_tags(current_user: dict = Depends(get_current_user)):
+    return {"tags": db.get_tags(current_user["id"])}
+
+
+@users_router.post("/me/tags")
+async def add_tag(body: TagBody, current_user: dict = Depends(get_current_user)):
+    tag = body.tag.strip().lower()[:32]
+    if not tag:
+        return JSONResponse(status_code=400, content={"error": "Empty tag"})
+    tags = db.get_tags(current_user["id"])
+    if len(tags) >= 10:
+        return JSONResponse(status_code=400, content={"error": "Max 10 tags"})
+    ok = db.add_tag(current_user["id"], tag)
+    return {"ok": ok, "tags": db.get_tags(current_user["id"])}
+
+
+@users_router.delete("/me/tags/{tag}")
+async def remove_tag(tag: str, current_user: dict = Depends(get_current_user)):
+    db.remove_tag(current_user["id"], tag)
+    return {"tags": db.get_tags(current_user["id"])}
+
+
+# ── Presence ─────────────────────────────────────────────────────────────────
+
+class PresenceBody(BaseModel):
+    presence: str  # online | away | dnd | invisible
+
+
+@users_router.post("/me/presence")
+async def set_presence(body: PresenceBody, current_user: dict = Depends(get_current_user)):
+    db.update_presence(current_user["id"], body.presence)
+    return {"ok": True}
+
+
+# ── Friend requests ───────────────────────────────────────────────────────────
+
+@router.post("/request/{nickname}")
+async def send_request(nickname: str, current_user: dict = Depends(get_current_user)):
+    profile = db.get_user_profile(nickname)
+    if not profile:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    result = db.send_friend_request(current_user["id"], profile["id"])
+    if result == "self":
+        return JSONResponse(status_code=400, content={"error": "Cannot add yourself"})
+    if result == "blocked":
+        return JSONResponse(status_code=403, content={"error": "Cannot send request"})
+    if result == "already":
+        return JSONResponse(status_code=409, content={"error": "Already sent or friends"})
+    # Push notification to recipient as backup
+    _friend_push(profile["id"], "\ud83d\udc65 Friend Request",
+                 f"{current_user['nickname']} wants to be friends")
+    return {"ok": True}
+
+
+@router.post("/accept/{nickname}")
+async def accept_request(nickname: str, current_user: dict = Depends(get_current_user)):
+    profile = db.get_user_profile(nickname)
+    if not profile:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    ok = db.accept_friend_request(profile["id"], current_user["id"])
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "No pending request from that user"})
+    # Push notification to requester as backup
+    _friend_push(profile["id"], "\ud83d\udc65 Friend Accepted",
+                 f"{current_user['nickname']} accepted your friend request")
+    return {"ok": True}
+
+
+@router.post("/decline/{nickname}")
+async def decline_request(nickname: str, current_user: dict = Depends(get_current_user)):
+    profile = db.get_user_profile(nickname)
+    if not profile:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    db.decline_friend_request(profile["id"], current_user["id"])
+    return {"ok": True}
+
+
+@router.delete("/{nickname}")
+async def remove_friend(nickname: str, current_user: dict = Depends(get_current_user)):
+    profile = db.get_user_profile(nickname)
+    if not profile:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    db.remove_friend(current_user["id"], profile["id"])
+    return {"ok": True}
+
+
+@router.post("/block/{nickname}")
+async def block_user(nickname: str, current_user: dict = Depends(get_current_user)):
+    profile = db.get_user_profile(nickname)
+    if not profile:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    db.block_user(current_user["id"], profile["id"])
+    return {"ok": True}
+
+
+@router.get("")
+async def list_friends(current_user: dict = Depends(get_current_user)):
+    return {
+        "friends": db.get_friends(current_user["id"]),
+        "requests_in": db.get_friend_requests_in(current_user["id"]),
+        "requests_out": db.get_friend_requests_out(current_user["id"]),
+    }

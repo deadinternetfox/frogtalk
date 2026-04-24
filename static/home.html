@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="FrogTalk — Encrypted chat, voice & video calls, a full social feed with posts &amp; stories, shared music listening, and live Discord/Telegram bridges. Privacy-first, zero ads.">
+<meta name="theme-color" content="#4caf50">
+<meta name="author" content="FrogTalk">
+<meta name="keywords" content="encrypted chat, secure messaging, voice calls, video calls, social feed, stories, music sharing, discord bridge, telegram bridge, privacy, E2E encryption">
+
+<!-- Open Graph (Facebook, Discord, Telegram, etc.) -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://frogtalk.xyz/">
+<meta property="og:title" content="🐸 FrogTalk — Chat • Social • Music">
+<meta property="og:description" content="E2E encrypted DMs, voice &amp; video calls, a social feed with posts &amp; stories, shared music, and live Discord/Telegram bridges. One app, no tracking.">
+<meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:site_name" content="FrogTalk">
+<meta property="og:locale" content="en_US">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="🐸 FrogTalk — Chat • Social • Music">
+<meta name="twitter:description" content="Encrypted DMs, calls, social feed, stories, shared music, and live Discord/Telegram bridges. Private by default.">
+<meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+
+<link rel="icon" href="/static/favicon.ico" sizes="any">
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/icons/icon-96.png" type="image/png" sizes="96x96">
+<link rel="icon" href="/static/icons/icon-192.png" type="image/png" sizes="192x192">
+<link rel="icon" href="/static/icons/icon-512.png" type="image/png" sizes="512x512">
+<link rel="apple-touch-icon" sizes="192x192" href="/static/icons/icon-192.png">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-title" content="FrogTalk">
+<meta name="application-name" content="FrogTalk">
+<link rel="canonical" href="https://frogtalk.xyz/">
+<title>FrogTalk — Secure Encrypted Chat</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #21262d;
+    --border: #30363d;
+    --green: #4ade80;
+    --green-dim: #22c55e;
+    --green-dark: #16a34a;
+    --text: #e6edf3;
+    --text-muted: #7d8590;
+    --accent: #4ade80;
+    --danger: #f85149;
+    --blue: #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ── NAV ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem;
+    height: 60px;
+    background: rgba(13,17,23,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo {
+    display: flex; align-items: center; gap: .6rem;
+    font-size: 1.25rem; font-weight: 700; color: var(--green);
+    text-decoration: none;
+  }
+  .nav-logo .frog { font-size: 1.5rem; }
+  .nav-links { display: flex; align-items: center; gap: 1.2rem; }
+  .nav-links a {
+    color: var(--text); text-decoration: none; font-size: .9rem;
+    font-weight: 500; transition: color .2s;
+  }
+  .nav-links a:hover { color: var(--green); }
+  .btn {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .55rem 1.25rem;
+    border-radius: 8px; font-size: .9rem; font-weight: 600;
+    cursor: pointer; text-decoration: none; border: none;
+    transition: all .2s;
+  }
+  .btn-ghost {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { border-color: var(--green); color: var(--green); }
+  .btn-primary {
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+    color: #fff;
+    font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0,0,0,.2);
+    box-shadow: 0 4px 14px rgba(34,197,94,.35);
+  }
+  .btn-primary:hover { 
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%); 
+    transform: translateY(-2px); 
+    box-shadow: 0 6px 20px rgba(34,197,94,.45);
+  }
+  .btn-lg { padding: .75rem 2rem; font-size: 1rem; border-radius: 10px; }
+
+  /* ── HERO ── */
+  .hero {
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    text-align: center;
+    padding: 6rem 1.5rem 4rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 900px 600px at 50% 30%, rgba(74,222,128,.12) 0%, transparent 70%),
+      radial-gradient(ellipse 500px 400px at 15% 75%, rgba(88,166,255,.07) 0%, transparent 60%),
+      radial-gradient(ellipse 450px 350px at 85% 20%, rgba(74,222,128,.06) 0%, transparent 60%);
+    pointer-events: none;
+    animation: heroGlow 18s ease-in-out infinite alternate;
+  }
+  .hero::after {
+    content: '';
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(circle at 20% 25%, rgba(74,222,128,.5) 0, rgba(74,222,128,.5) 1px, transparent 2px),
+      radial-gradient(circle at 70% 60%, rgba(74,222,128,.4) 0, rgba(74,222,128,.4) 1px, transparent 2px),
+      radial-gradient(circle at 45% 80%, rgba(88,166,255,.4) 0, rgba(88,166,255,.4) 1px, transparent 2px),
+      radial-gradient(circle at 85% 35%, rgba(74,222,128,.3) 0, rgba(74,222,128,.3) 1px, transparent 2px),
+      radial-gradient(circle at 30% 60%, rgba(74,222,128,.3) 0, rgba(74,222,128,.3) 1px, transparent 2px);
+    background-size: 100% 100%;
+    opacity: .6;
+    animation: starsDrift 40s linear infinite;
+  }
+  @keyframes heroGlow {
+    0%   { transform: scale(1)    translate(0,0);      opacity: .85; }
+    50%  { transform: scale(1.05) translate(-10px,5px); opacity: 1;   }
+    100% { transform: scale(1.02) translate(8px,-6px);  opacity: .9;  }
+  }
+  @keyframes starsDrift {
+    0%   { transform: translateY(0);     }
+    100% { transform: translateY(-40px); }
+  }
+  /* Floating ambient orbs behind the hero */
+  .hero-orbs {
+    position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0;
+  }
+  .hero-orb {
+    position: absolute; border-radius: 50%; filter: blur(60px); opacity: .35;
+  }
+  .hero-orb.o1 { width: 320px; height: 320px; background: #4ade80; top: 10%; left: -80px;  animation: orb1 22s ease-in-out infinite alternate; }
+  .hero-orb.o2 { width: 280px; height: 280px; background: #58a6ff; bottom: 5%; right: -60px; animation: orb2 26s ease-in-out infinite alternate; opacity: .22; }
+  .hero-orb.o3 { width: 200px; height: 200px; background: #22c55e; top: 55%;  left: 55%;     animation: orb3 30s ease-in-out infinite alternate; opacity: .18; }
+  @keyframes orb1 { to { transform: translate(120px, 60px)  scale(1.15); } }
+  @keyframes orb2 { to { transform: translate(-80px, -40px) scale(1.1);  } }
+  @keyframes orb3 { to { transform: translate(-120px, 80px) scale(1.2);  } }
+  @media (prefers-reduced-motion: reduce) {
+    .hero::before, .hero::after, .hero-orb { animation: none !important; }
+  }
+  .hero > * { position: relative; z-index: 1; }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: .5rem;
+    background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.3);
+    color: var(--green); padding: .3rem .9rem; border-radius: 999px;
+    font-size: .8rem; font-weight: 600; letter-spacing: .05em;
+    margin-bottom: 1.5rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.5rem, 7vw, 5rem);
+    font-weight: 800; line-height: 1.1;
+    margin-bottom: 1.5rem;
+    background: linear-gradient(135deg, #e6edf3 30%, var(--green) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero p {
+    font-size: clamp(1rem, 2.5vw, 1.25rem);
+    color: var(--text-muted); max-width: 600px; margin: 0 auto 2.5rem;
+  }
+  .hero-cta { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
+
+  /* ── STATS ── */
+  .stats {
+    display: flex; gap: 3rem; justify-content: center; flex-wrap: wrap;
+    padding: 2rem 1.5rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+  .stat { text-align: center; }
+  .stat-num { font-size: 1.75rem; font-weight: 700; color: var(--green); }
+  .stat-label { font-size: .8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; }
+
+  /* ── FEATURES ── */
+  .section { padding: 5rem 1.5rem; }
+  .section-title {
+    text-align: center;
+    font-size: clamp(1.75rem, 4vw, 2.5rem);
+    font-weight: 700; margin-bottom: .75rem;
+  }
+  .section-sub {
+    text-align: center; color: var(--text-muted);
+    font-size: 1rem; max-width: 500px; margin: 0 auto 3.5rem;
+  }
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    max-width: 1100px; margin: 0 auto;
+  }
+  .feature-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.75rem;
+    transition: border-color .2s, transform .2s;
+  }
+  .feature-card:hover {
+    border-color: rgba(74,222,128,.4);
+    transform: translateY(-3px);
+  }
+  .feature-icon {
+    font-size: 2rem; margin-bottom: 1rem;
+  }
+  .feature-card h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
+  .feature-card p { color: var(--text-muted); font-size: .9rem; line-height: 1.6; }
+
+  .federation-spotlight {
+    max-width: 1100px;
+    margin: 0 auto;
+    background:
+      radial-gradient(900px 380px at 10% 0%, rgba(74,222,128,.12), transparent 60%),
+      linear-gradient(160deg, #121923 0%, #0f141b 100%);
+    border: 1px solid #2b3947;
+    border-radius: 16px;
+    padding: 1.25rem;
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: 1rem;
+    box-shadow: 0 12px 34px rgba(0,0,0,.28);
+  }
+  .fed-title { font-size: 1.2rem; font-weight: 700; margin-bottom: .45rem; }
+  .fed-sub { color: var(--text-muted); font-size: .95rem; margin-bottom: .9rem; }
+  .fed-badges { display: flex; gap: .45rem; flex-wrap: wrap; margin-bottom: .8rem; }
+  .fed-badge {
+    font-size: .72rem; font-weight: 700; letter-spacing: .03em;
+    padding: .28rem .62rem; border-radius: 999px;
+    border: 1px solid rgba(148,163,184,.35);
+    color: #cbd5e1; background: rgba(15,23,42,.5);
+  }
+  .fed-badge.ok { border-color: rgba(74,222,128,.45); color: #86efac; background: rgba(22,163,74,.13); }
+  .fed-badge.warn { border-color: rgba(251,191,36,.45); color: #fde68a; background: rgba(245,158,11,.14); }
+  .fed-actions { display: flex; gap: .55rem; flex-wrap: wrap; }
+  .fed-mini-grid { display: grid; grid-template-columns: 1fr; gap: .6rem; }
+  .fed-mini {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: .75rem .8rem;
+    background: rgba(2,6,23,.45);
+  }
+  .fed-mini h4 { font-size: .92rem; margin-bottom: .2rem; }
+  .fed-mini p { color: var(--text-muted); font-size: .82rem; }
+
+  /* ── PRIVACY SECTION ── */
+  .privacy-section {
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .privacy-inner {
+    max-width: 1000px; margin: 0 auto;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4rem;
+    align-items: center;
+  }
+  .privacy-inner h2 { font-size: clamp(1.5rem, 3vw, 2.25rem); font-weight: 700; margin-bottom: 1rem; }
+  .privacy-inner p { color: var(--text-muted); margin-bottom: 1.5rem; }
+  .privacy-checks { list-style: none; display: flex; flex-direction: column; gap: .75rem; }
+  .privacy-checks li {
+    display: flex; align-items: flex-start; gap: .75rem;
+    color: var(--text-muted); font-size: .95rem;
+  }
+  .privacy-checks li span.check { color: var(--green); font-size: 1.1rem; flex-shrink: 0; }
+  .code-block {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 10px; padding: 1.5rem;
+    font-family: 'Courier New', monospace;
+    font-size: .8rem; line-height: 1.8;
+    color: var(--text-muted);
+    overflow: auto;
+  }
+  .code-block .kw { color: var(--green); }
+  .code-block .str { color: #79c0ff; }
+  .code-block .cm { color: #484f58; }
+
+  /* ── HOW IT WORKS ── */
+  .steps {
+    max-width: 800px; margin: 0 auto;
+    display: flex; flex-direction: column; gap: 1.5rem;
+  }
+  .step {
+    display: flex; gap: 1.5rem; align-items: flex-start;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.5rem;
+    transition: border-color .2s;
+  }
+  .step:hover { border-color: rgba(74,222,128,.4); }
+  .step-num {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(74,222,128,.15); border: 1px solid rgba(74,222,128,.4);
+    color: var(--green); font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 1rem;
+  }
+  .step-content h3 { font-weight: 600; margin-bottom: .3rem; }
+  .step-content p { color: var(--text-muted); font-size: .9rem; }
+
+  /* ── CTA BANNER ── */
+  .cta-banner {
+    text-align: center;
+    padding: 5rem 1.5rem;
+    background: linear-gradient(135deg, rgba(74,222,128,.06) 0%, transparent 50%);
+    border-top: 1px solid var(--border);
+  }
+  .cta-banner h2 { font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 700; margin-bottom: 1rem; }
+  .cta-banner p { color: var(--text-muted); margin-bottom: 2rem; }
+
+  /* ── FOOTER ── */
+  footer {
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    padding: 2rem 2rem;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 1rem;
+    font-size: .85rem; color: var(--text-muted);
+  }
+  footer a { color: var(--text-muted); text-decoration: none; }
+  footer a:hover { color: var(--green); }
+  .footer-links { display: flex; gap: 1.5rem; }
+
+  /* ── DEMO PREVIEW ── */
+  .demo-preview {
+    max-width: 960px; margin: 0 auto 0;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .demo-topbar {
+    background: var(--bg3);
+    padding: .75rem 1rem;
+    display: flex; align-items: center; gap: .5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .demo-dot { width: 12px; height: 12px; border-radius: 50%; }
+  .demo-dot.r { background: #f85149; }
+  .demo-dot.y { background: #d29922; }
+  .demo-dot.g { background: #4ade80; }
+  .demo-title { margin-left: .5rem; font-size: .8rem; color: var(--text-muted); }
+  .demo-body { display: flex; height: 360px; }
+  /* Server strip (mirrors real app) */
+  .demo-strip {
+    width: 60px; flex-shrink: 0;
+    background: #0d0d0d;
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    padding: .75rem 0; gap: .4rem;
+  }
+  .demo-strip .ds-icon {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #1e3a1e;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; cursor: pointer; transition: all .2s;
+    position: relative;
+  }
+  .demo-strip .ds-icon.active { border-radius: 14px; background: #4caf50; }
+  .demo-strip .ds-icon.social { background: linear-gradient(135deg,#0d1f0d,#1e3a1e); color: #4ade80; }
+  .demo-strip .ds-divider { width: 30px; height: 2px; background: #2a2a2a; border-radius: 2px; margin: .2rem 0; }
+  .demo-sidebar {
+    width: 190px; flex-shrink: 0;
+    background: rgba(0,0,0,.2);
+    border-right: 1px solid var(--border);
+    padding: .75rem .5rem;
+    display: flex; flex-direction: column; gap: .15rem;
+  }
+  .demo-sidebar .sec-label {
+    font-size: .65rem; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .1em;
+    padding: .5rem .5rem .25rem;
+  }
+  .demo-ch {
+    padding: .3rem .55rem;
+    border-radius: 6px;
+    font-size: .78rem; color: var(--text-muted);
+    display: flex; align-items: center; gap: .4rem;
+    cursor: pointer;
+  }
+  .demo-ch.active { background: rgba(74,222,128,.12); color: var(--green); }
+  .demo-ch:not(.active):hover { background: var(--bg3); }
+  .demo-messages {
+    flex: 1; padding: 1rem; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: flex-end; gap: .75rem;
+  }
+  .demo-msg { display: flex; gap: .75rem; align-items: flex-start; }
+  .demo-av {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--bg3); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: .9rem; flex-shrink: 0;
+  }
+  .demo-msg-body {}
+  .demo-msg-name { font-size: .75rem; color: var(--green); font-weight: 600; margin-bottom: .15rem; }
+  .demo-msg-text {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 0 8px 8px 8px; padding: .5rem .75rem;
+    font-size: .8rem; color: var(--text); max-width: 380px;
+  }
+  .demo-msg-text.enc { color: var(--text-muted); font-style: italic; font-size: .75rem; }
+  .demo-reactions { display: flex; gap: .3rem; margin-top: .3rem; }
+  .demo-reaction {
+    background: var(--bg3); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1px 6px;
+    font-size: .7rem; color: var(--text-muted);
+  }
+  .demo-reaction.mine { border-color: rgba(74,222,128,.4); background: rgba(74,222,128,.08); color: var(--green); }
+  .demo-music-pill {
+    display: inline-flex; align-items: center; gap: .4rem;
+    background: linear-gradient(135deg,rgba(74,222,128,.14),rgba(88,166,255,.1));
+    border: 1px solid rgba(74,222,128,.3);
+    border-radius: 10px; padding: .35rem .6rem;
+    font-size: .72rem; color: var(--text); max-width: 300px;
+  }
+  .demo-input-row {
+    padding: .75rem 1rem;
+    border-top: 1px solid var(--border);
+    background: var(--bg3);
+    display: flex; gap: .5rem; align-items: center;
+  }
+  .demo-input {
+    flex: 1; background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; padding: .5rem .75rem; color: var(--text-muted);
+    font-size: .8rem; outline: none;
+  }
+  .demo-send-btn {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: rgba(74,222,128,.2); border: 1px solid rgba(74,222,128,.4);
+    color: var(--green); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Mobile-first app preview (shown only on small screens) */
+  .demo-mobile {
+    display: none;
+    height: 100%;
+    background: #111;
+    color: #e0e0e0;
+    flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    overflow: hidden;
+  }
+  .dmob-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px;
+    background: #111;
+    border-bottom: 1px solid #1e1e1e;
+    flex-shrink: 0;
+  }
+  .dmob-header-left { display: flex; align-items: center; gap: 8px; }
+  .dmob-ch-av {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #1e3a1e; display: flex; align-items: center;
+    justify-content: center; font-size: 14px; flex-shrink: 0;
+  }
+  .dmob-ch-name { font-size: 13px; font-weight: 700; color: #e0e0e0; line-height: 1.2; }
+  .dmob-ch-topic { font-size: 11px; color: #666; line-height: 1.2; }
+  .dmob-header-icons { display: flex; align-items: center; gap: 12px; color: #888; font-size: 16px; }
+  .dmob-msgs {
+    flex: 1; overflow: hidden; display: flex; flex-direction: column;
+    justify-content: flex-end; padding: 6px 0;
+  }
+  .dmob-msg { display: flex; align-items: flex-start; gap: 8px; padding: 3px 10px; margin: 0; text-align: left; }
+  .dmob-av {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: #1e3a1e; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; margin-top: 2px;
+  }
+  .dmob-msg-body { flex: 1; min-width: 0; }
+  .dmob-msg-meta {
+    display: flex; align-items: center; gap: 5px;
+    flex-wrap: wrap; margin-bottom: 2px;
+  }
+  .dmob-nick { font-size: 13px; font-weight: 600; color: #4caf50; }
+  .dmob-time { font-size: 11px; color: #555; }
+  .dmob-tick { font-size: 10px; color: #555; }
+  .dmob-bridge-pill {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9px; font-weight: 700; letter-spacing: .4px;
+    text-transform: uppercase; padding: 1px 6px 1px 4px;
+    border-radius: 999px; line-height: 1.5;
+  }
+  .dmob-bridge-pill.tg { color: #4fc3e8; background: rgba(79,195,232,.12); border: 1px solid rgba(79,195,232,.38); }
+  .dmob-bridge-pill.dc { color: #8aa5f5; background: rgba(138,165,245,.12); border: 1px solid rgba(138,165,245,.38); }
+  .dmob-msg-text { font-size: 13px; color: #d0d0d0; line-height: 1.45; margin-bottom: 1px; }
+  .dmob-reply-quote {
+    border-left: 3px solid #4caf50;
+    background: rgba(74,222,128,.06);
+    padding: 3px 8px; border-radius: 0 4px 4px 0;
+    font-size: 11px; color: #888; margin-bottom: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .dmob-reactions { display: flex; gap: 5px; margin-top: 3px; }
+  .dmob-reaction {
+    font-size: 11px; background: #1e1e1e;
+    border: 1px solid #333; border-radius: 8px;
+    padding: 1px 7px; color: #aaa;
+  }
+  .dmob-reaction.mine { border-color: rgba(74,222,128,.4); background: rgba(74,222,128,.08); color: #4caf50; }
+  .dmob-input-bar {
+    background: #0d0d0d;
+    border-top: 1px solid #1e1e1e;
+    flex-shrink: 0; padding: 6px 10px 8px;
+  }
+  .dmob-toolbar {
+    display: flex; align-items: center; gap: 14px;
+    padding-bottom: 6px; color: #666; font-size: 18px;
+  }
+  .dmob-gif-btn {
+    background: #222; border: 1px solid #333; border-radius: 4px;
+    padding: 1px 5px; font-size: 11px; font-weight: 700; color: #ccc; line-height: 1.4;
+  }
+  .dmob-input-row { display: flex; align-items: center; gap: 8px; }
+  .dmob-input-field {
+    flex: 1; background: #1a1a1a; border: 1px solid #2a2a2a;
+    border-radius: 8px; padding: 8px 12px;
+    font-size: 13px; color: #555;
+  }
+  .dmob-send-btn {
+    width: 36px; height: 36px; border-radius: 10px;
+    background: #16a34a; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 16px;
+  }
+
+  @media (max-width: 900px) {
+    .demo-preview {
+      border-radius: 18px;
+      max-width: 360px;
+      margin: 0 auto;
+      box-shadow: 0 16px 40px rgba(0,0,0,.45);
+    }
+    .demo-topbar { display: none; }
+    .demo-body {
+      height: 560px;
+      display: block;
+    }
+    .demo-sidebar, .demo-strip { display: none; }
+    .demo-body > div:last-child { display: none !important; }
+    .demo-mobile { display: flex; }
+  }
+
+  @media (max-width: 640px) {
+    .privacy-inner { grid-template-columns: 1fr; gap: 2rem; }
+    footer { flex-direction: column; text-align: center; gap: 1rem; }
+    .footer-links { flex-wrap: wrap; justify-content: center; gap: 1rem; }
+    .federation-spotlight { grid-template-columns: 1fr; padding: 1rem; }
+  }
+
+  /* ── MOBILE NAV ── */
+  @media (max-width: 768px) {
+    nav { padding: 0 1rem; }
+    .nav-logo { font-size: 1.1rem; }
+    .nav-logo .frog { font-size: 1.3rem; }
+    .nav-links a:not(.btn):not(.nav-mobile-keep) { display: none; }
+    .nav-links { gap: .5rem; }
+    .nav-mobile-keep {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid #2f3b48;
+      border-radius: 999px;
+      padding: .3rem .55rem;
+      font-size: .7rem !important;
+      color: #b6c3cf !important;
+      background: rgba(15,23,42,.35);
+    }
+    .nav-mobile-keep:hover { border-color: rgba(74,222,128,.6); color: #86efac !important; }
+    .nav-links .btn {
+      padding: .45rem .8rem;
+      font-size: .8rem;
+    }
+    .nav-links .btn-primary { color: #fff !important; }
+    .nav-links .btn-ghost { display: none; }
+    .hero { padding-top: 5rem; }
+    .hero-cta { flex-direction: column; align-items: center; gap: .75rem; }
+    .hero-cta .btn { width: 100%; max-width: 280px; justify-content: center; }
+    .section { padding: 3rem 1rem; }
+    .stats { gap: 1.5rem; padding: 1.5rem 1rem; }
+  }
+  
+  @media (max-width: 400px) {
+    nav { padding: 0 .75rem; height: 54px; }
+    .nav-logo { font-size: 1rem; gap: .4rem; }
+    .nav-logo .frog { font-size: 1.2rem; }
+    .nav-links .btn-primary {
+      padding: .4rem .7rem;
+      font-size: .75rem;
+      color: #fff !important;
+    }
+    .hero-badge { font-size: .7rem; padding: .25rem .7rem; }
+    .hero h1 { font-size: 2rem; }
+    .hero p { font-size: .9rem; }
+    .section-title { font-size: 1.5rem; }
+  }
+  
+  @media (max-width: 320px) {
+    nav { padding: 0 .5rem; height: 50px; }
+    .nav-logo { font-size: .9rem; }
+    .nav-logo .frog { font-size: 1.1rem; }
+    .nav-links .btn-primary { padding: .35rem .6rem; font-size: .7rem; color: #fff !important; }
+    .hero { padding: 4rem .75rem 2rem; }
+    .hero-cta .btn { max-width: 240px; padding: .6rem 1rem; }
+    .section { padding: 2rem .75rem; }
+  }
+
+  /* Mobile APK Banner */
+  .mobile-banner {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+    padding: 1rem 1.5rem;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    z-index: 1000;
+    box-shadow: 0 -4px 20px rgba(0,0,0,.3);
+  }
+  .mobile-banner.show { display: flex; }
+  .mobile-banner-content {
+    display: flex; align-items: center; gap: .75rem;
+  }
+  .mobile-banner-icon { font-size: 2rem; }
+  .mobile-banner-text h4 { color: #fff; font-size: .95rem; margin: 0; }
+  .mobile-banner-text p { color: rgba(255,255,255,.8); font-size: .75rem; margin: 0; }
+  .mobile-banner-btn {
+    background: #fff; color: #16a34a;
+    padding: .6rem 1.2rem; border-radius: 8px;
+    font-weight: 700; font-size: .85rem;
+    text-decoration: none;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0,0,0,.2);
+  }
+  .mobile-banner-btn:hover { background: #f0fdf4; }
+  .mobile-banner-close {
+    background: transparent; border: none;
+    color: rgba(255,255,255,.7); font-size: 1.5rem;
+    cursor: pointer; padding: 0 .5rem;
+  }
+  .mobile-banner-close:hover { color: #fff; }
+
+  @media (min-width: 769px) {
+    .mobile-banner { display: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="/" class="nav-logo">
+    <span class="frog">🐸</span>
+    FrogTalk
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#how">How it works</a>
+    <a href="#privacy">Privacy</a>
+    <a href="/docs/api" class="nav-mobile-keep">API</a>
+    <a href="/docs/node" class="nav-mobile-keep">Run Node</a>
+    <a href="/app" class="btn btn-ghost">Log In</a>
+    <a href="/app" class="btn btn-primary">Sign Up Free</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-orbs" aria-hidden="true">
+    <div class="hero-orb o1"></div>
+    <div class="hero-orb o2"></div>
+    <div class="hero-orb o3"></div>
+  </div>
+  <div class="hero-badge">🔒 E2E Encrypted · 🌐 Social · 🎵 Music · 🌉 Bridges</div>
+  <h1>Chat, Post,<br>Vibe Together</h1>
+  <p>FrogTalk is one app for everything — encrypted DMs, voice &amp; video calls, a full social feed with stories, shared music, and live Discord/Telegram bridges. No tracking, ever.</p>
+  <div class="hero-cta">
+    <a href="/app" class="btn btn-primary btn-lg">🐸 Join the Pond</a>
+    <a href="#features" class="btn btn-ghost btn-lg">See Features ↓</a>
+  </div>
+  <div style="margin-top:1.2rem;display:flex;gap:1.2rem;justify-content:center;flex-wrap:wrap;">
+    <a href="/download/android" download style="color:var(--muted);font-size:.9rem;text-decoration:none;">📱 Android APK</a>
+    <a href="/download/linux" download style="color:var(--muted);font-size:.9rem;text-decoration:none;">🐧 Linux AppImage</a>
+    <a href="/download/deb" download style="color:var(--muted);font-size:.9rem;text-decoration:none;">📦 Debian / Ubuntu .deb</a>
+  </div>
+
+  <!-- DEMO PREVIEW -->
+  <div style="width:100%;max-width:960px;margin-top:4rem;">
+    <div class="demo-preview">
+      <div class="demo-topbar">
+        <div class="demo-dot r"></div>
+        <div class="demo-dot y"></div>
+        <div class="demo-dot g"></div>
+        <span class="demo-title">🐸 FrogTalk — #general · 12 online · 🎵 Now playing</span>
+      </div>
+      <div class="demo-body">
+        <div class="demo-mobile" aria-hidden="true">
+          <!-- header: frog logo · hamburger · channel avatar + name · icons -->
+          <div class="dmob-header">
+            <div class="dmob-header-left">
+              <span style="font-size:18px">🐸</span>
+              <span style="color:#888;font-size:18px">☰</span>
+              <div class="dmob-ch-av">🌿</div>
+              <div>
+                <div class="dmob-ch-name">#the-swamp</div>
+                <div class="dmob-ch-topic">chill &amp; bridges 🌉</div>
+              </div>
+            </div>
+            <div class="dmob-header-icons">
+              <span>🔔</span>
+              <span>👥</span>
+              <span style="font-size:14px;letter-spacing:2px">···</span>
+            </div>
+          </div>
+          <!-- messages -->
+          <div class="dmob-msgs">
+            <!-- yesterday separator -->
+            <div style="text-align:center;font-size:11px;color:#555;padding:6px 0 4px;flex-shrink:0">Yesterday</div>
+            <div class="dmob-msg">
+              <div class="dmob-av" style="background:#1a2e3a;font-size:16px">🌊</div>
+              <div class="dmob-msg-body">
+                <div class="dmob-msg-meta">
+                  <span class="dmob-nick" style="color:#38bdf8">TideFrog</span>
+                  <span class="dmob-time">21:14</span>
+                </div>
+                <div class="dmob-msg-text">this app is actually good ngl</div>
+              </div>
+            </div>
+            <div class="dmob-msg">
+              <div class="dmob-av">🐸</div>
+              <div class="dmob-msg-body">
+                <div class="dmob-msg-meta">
+                  <span class="dmob-nick">ZippyFrog</span>
+                  <span class="dmob-time">21:45</span>
+                  <span class="dmob-tick">✓</span>
+                </div>
+                <div class="dmob-msg-text">e2e DMs + voice calls too 🔒</div>
+              </div>
+            </div>
+            <!-- today separator -->
+            <div style="text-align:center;font-size:11px;color:#555;padding:6px 0 4px;flex-shrink:0">Today</div>
+            <!-- normal message -->
+            <div class="dmob-msg">
+              <div class="dmob-av" style="background:#2a1a2e;font-size:12px;font-weight:700;color:#c084fc">V</div>
+              <div class="dmob-msg-body">
+                <div class="dmob-msg-meta">
+                  <span class="dmob-nick" style="color:#c084fc">VaultFrog</span>
+                  <span class="dmob-time">03:10</span>
+                </div>
+                <div class="dmob-msg-text">anyone tried the discord bridge yet?</div>
+              </div>
+            </div>
+            <div class="dmob-msg">
+              <div class="dmob-av">🐸</div>
+              <div class="dmob-msg-body">
+                <div class="dmob-msg-meta">
+                  <span class="dmob-nick">ZippyFrog</span>
+                  <span class="dmob-time">03:22</span>
+                  <span class="dmob-tick">✓</span>
+                </div>
+                <div class="dmob-msg-text">Just bridged this to Telegram 🎉</div>
+              </div>
+            </div>
+            <!-- Telegram bridged message with real badge -->
+            <div class="dmob-msg">
+              <div class="dmob-av" style="background:#1a253a;font-size:12px;font-weight:700;color:#4fc3e8">TG</div>
+              <div class="dmob-msg-body">
+                <div class="dmob-msg-meta">
+                  <span class="dmob-nick">CrispyPond</span>
+                  <span class="dmob-bridge-pill tg"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9" style="flex-shrink:0"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg> Telegram</span>
+                  <span class="dmob-time">03:33</span>
+                </div>
+                <div class="dmob-msg-text">just joined from telegram 👋</div>
+                <div class="dmob-msg-text">bridges work super smooth</div>
+              </div>
+            </div>
+            <!-- reply-quote message -->
+            <div class="dmob-msg">
+              <div class="dmob-av" style="background:#1e1a2e;font-size:12px;font-weight:700;color:#a78bfa">N</div>
+              <div class="dmob-msg-body">
+                <div class="dmob-msg-meta">
+                  <span class="dmob-nick" style="color:#a78bfa">ReedWhistle</span>
+                  <span class="dmob-time">03:50</span>
+                </div>
+                <div class="dmob-reply-quote"><span style="color:#4fc3e8">CrispyPond</span> · bridges work super smooth</div>
+                <div class="dmob-msg-text">yes amazing! 🙏</div>
+              </div>
+            </div>
+            <!-- message with reactions -->
+            <div class="dmob-msg">
+              <div class="dmob-av" style="background:#1a2e1a">🌿</div>
+              <div class="dmob-msg-body">
+                <div class="dmob-msg-meta">
+                  <span class="dmob-nick">MossyLog</span>
+                  <span class="dmob-time">04:36</span>
+                </div>
+                <div class="dmob-msg-text">Start using frogtalk frogsocial 🐸</div>
+                <div class="dmob-reactions">
+                  <span class="dmob-reaction mine">🐸 3</span>
+                  <span class="dmob-reaction">❤️ 2</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- bottom input bar — matches real app layout exactly -->
+          <div class="dmob-input-bar">
+            <div class="dmob-toolbar">
+              <span>📎</span>
+              <span>📷</span>
+              <span>🎤</span>
+              <span>🎬</span>
+              <span class="dmob-gif-btn">GIF</span>
+              <span>😊</span>
+            </div>
+            <div class="dmob-input-row">
+              <div class="dmob-input-field">Message #the-swamp…</div>
+              <div class="dmob-send-btn">&#9658;</div>
+            </div>
+          </div>
+        </div>
+        <div class="demo-strip" aria-hidden="true">
+          <div class="ds-icon active" title="Home">🐸</div>
+          <div class="ds-divider"></div>
+          <div class="ds-icon" title="DMs">💬</div>
+          <div class="ds-icon" title="Friends">👥</div>
+          <div class="ds-icon social" title="Frog Social">🌐</div>
+          <div class="ds-icon" title="Channel Directory">🧭</div>
+        </div>
+        <div class="demo-sidebar">
+          <div class="sec-label">Channels</div>
+          <div class="demo-ch active"># general</div>
+          <div class="demo-ch"># random <span style="margin-left:auto;background:#4ade80;color:#000;font-size:.6rem;padding:1px 5px;border-radius:8px">3</span></div>
+          <div class="demo-ch">🔊 voice-lounge</div>
+          <div class="demo-ch">🎵 music-together</div>
+          <div class="demo-ch">📣 announcements</div>
+          <div class="sec-label">Direct Messages</div>
+          <div class="demo-ch">🔒 ZippyFrog</div>
+          <div class="demo-ch">🔒 MossyLog</div>
+          <div class="sec-label" style="margin-top:auto;border-top:1px solid var(--border);padding-top:.5rem">🟢 voice-lounge · 4 talking</div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+          <div class="demo-messages">
+            <div class="demo-msg">
+              <div class="demo-av">🐸</div>
+              <div class="demo-msg-body">
+                <div class="demo-msg-name">ZippyFrog <span style="color:#888;font-weight:400;font-size:.65rem">· 👑 owner</span></div>
+                <div class="demo-msg-text">Check out the new <b style="color:#4ade80">Frog Social</b> feed — post updates, stories, and see what friends are up to 🌐</div>
+                <div class="demo-reactions">
+                  <span class="demo-reaction mine">🐸 4</span>
+                  <span class="demo-reaction">🔥 2</span>
+                  <span class="demo-reaction">❤️ 7</span>
+                </div>
+              </div>
+            </div>
+            <div class="demo-msg">
+              <div class="demo-av">🌿</div>
+              <div class="demo-msg-body">
+                <div class="demo-msg-name">MossyLog</div>
+                <div class="demo-music-pill">🎵 <span style="font-weight:600;color:#4ade80">Now playing</span> · Tame Impala — <i>Let It Happen</i> <span style="color:#888">(synced)</span></div>
+              </div>
+            </div>
+            <div class="demo-msg">
+              <div class="demo-av" style="background:rgba(88,101,242,.2);border-color:rgba(88,101,242,.5);color:#a5b4fc;font-size:.85rem">DC</div>
+              <div class="demo-msg-body">
+                <div class="demo-msg-name">blaze <span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px 1px 4px;border-radius:999px;color:#8aa5f5;background:rgba(138,165,245,.12);border:1px solid rgba(138,165,245,.38);vertical-align:1px"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z"/></svg> Discord</span></div>
+                <div class="demo-msg-text">reactions &amp; media sync both ways 🔁</div>
+              </div>
+            </div>
+            <div class="demo-msg">
+              <div class="demo-av" style="background:rgba(38,166,239,.2);border-color:rgba(38,166,239,.5);color:#7dd3fc;font-size:.85rem">TG</div>
+              <div class="demo-msg-body">
+                <div class="demo-msg-name">mira <span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px 1px 4px;border-radius:999px;color:#4fc3e8;background:rgba(79,195,232,.12);border:1px solid rgba(79,195,232,.38);vertical-align:1px"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg> Telegram</span></div>
+                <div class="demo-msg-text">voice notes and stickers too 🎙️</div>
+              </div>
+            </div>
+            <div class="demo-msg">
+              <div class="demo-av">⚡</div>
+              <div class="demo-msg-body">
+                <div class="demo-msg-name">VaultFrog</div>
+                <div class="demo-msg-text enc">🔒 end-to-end encrypted · ECDH + AES-256-GCM</div>
+              </div>
+            </div>
+          </div>
+          <div class="demo-input-row">
+            <div style="color:var(--text-muted);font-size:1rem">📷</div>
+            <div style="color:var(--text-muted);font-size:1rem">📎</div>
+            <div style="color:var(--text-muted);font-size:1rem">🎙️</div>
+            <input class="demo-input" placeholder="Message #general…" readonly>
+            <div style="color:var(--text-muted);font-size:1rem">😀</div>
+            <div style="color:var(--text-muted);font-size:1rem">GIF</div>
+            <div class="demo-send-btn">↑</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<div class="stats">
+  <div class="stat"><div class="stat-num">E2E</div><div class="stat-label">Encrypted DMs</div></div>
+  <div class="stat"><div class="stat-num">🌐</div><div class="stat-label">Social Feed</div></div>
+  <div class="stat"><div class="stat-num">🎵</div><div class="stat-label">Music Together</div></div>
+  <div class="stat"><div class="stat-num">🔁</div><div class="stat-label">Discord &amp; TG Bridges</div></div>
+  <div class="stat"><div class="stat-num">0</div><div class="stat-label">Ads / Tracking</div></div>
+</div>
+
+<!-- FEATURES -->
+<section class="section" id="features">
+  <div class="section-title">Everything You Need</div>
+  <div class="section-sub">A full chat + social + music platform, built for privacy.</div>
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-icon">🔒</div>
+      <h3>End-to-End Encrypted DMs</h3>
+      <p>Every DM is encrypted client-side with ECDH + AES-256-GCM. The server only ever sees ciphertext.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🌐</div>
+      <h3>Frog Social</h3>
+      <p>A full social feed inside the app — post updates with images, tag friends, follow &amp; block, explore trending posts and channels.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📸</div>
+      <h3>Stories</h3>
+      <p>Share 24-hour stories with your friends or a public audience. Filters, privacy controls, and a built-in camera.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎵</div>
+      <h3>Music Together</h3>
+      <p>Dedicated music channel with a persistent "Now Playing" bar. Share YouTube, Spotify &amp; SoundCloud, react, and vibe together.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔁</div>
+      <h3>Discord &amp; Telegram Bridges</h3>
+      <p>Link a FrogTalk channel to Discord or Telegram. Messages, photos, videos, voice notes and stickers sync both ways in real time.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📞</div>
+      <h3>Voice &amp; Video Calls</h3>
+      <p>1:1 and group calls over WebRTC P2P. Switch camera, share your screen, or go audio-only mid-call.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎙️</div>
+      <h3>Voice Messages</h3>
+      <p>Hold to record, release to send. Waveform playback, Telegram-style voice notes that stick around.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🏠</div>
+      <h3>Channels &amp; Directory</h3>
+      <p>Public &amp; private text/voice channels, channel images, pinned messages, roles, and a browsable directory.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">👥</div>
+      <h3>Friends &amp; Presence</h3>
+      <p>Add friends, see who's online, set a custom status. Real-time presence and typing indicators across the app.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">📎</div>
+      <h3>Rich Media</h3>
+      <p>Images, videos, audio, files, GIFs, link previews, and an image lightbox — all inline, all fast.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">😄</div>
+      <h3>Reactions, Replies &amp; Polls</h3>
+      <p>React with any emoji, quote-reply to any message, and spin up quick polls for group decisions.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">💨</div>
+      <h3>Disappearing Messages</h3>
+      <p>Auto-delete DMs after 1 hour, 24 hours, 7 days or 30 days. Messages vanish on their own.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🎨</div>
+      <h3>Custom Themes</h3>
+      <p>Pick from Cyberpunk, Ocean, Sakura, Retrowave and more — live preview before you switch.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔔</div>
+      <h3>Real-time Notifications</h3>
+      <p>Instant WebSocket delivery. Browser &amp; mobile push for DMs, mentions, friend requests and posts you're tagged in.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🖥️</div>
+      <h3>Web, Android &amp; Desktop</h3>
+      <p>PWA-enabled web app, native Android APK and Linux AppImage / .deb. Your account works everywhere.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="federation">
+  <div class="section-title">Federation Reliability</div>
+  <div class="section-sub">Keep every FrogTalk node in sync with official release metadata, build hashes, and trust checks.</div>
+  <div class="federation-spotlight">
+    <div>
+      <div class="fed-title">Ship Once From frogtalk.xyz, Propagate Everywhere</div>
+      <div class="fed-sub">Main site publishes a release feed with package SHA-256 and build hash. Nodes poll the feed, verify legitimacy, and apply updates safely.</div>
+      <div class="fed-badges">
+        <span class="fed-badge ok">SAME HASH</span>
+        <span class="fed-badge ok">LEGIT COPY</span>
+        <span class="fed-badge warn">HASH MISMATCH ALERT</span>
+      </div>
+      <div class="fed-actions">
+        <a href="/docs/api" class="btn btn-primary">View API Docs</a>
+        <a href="/docs/node" class="btn btn-ghost">Node Setup Guide</a>
+      </div>
+    </div>
+    <div class="fed-mini-grid">
+      <div class="fed-mini">
+        <h4>Central Release Feed</h4>
+        <p>Publish latest version, package URL, SHA-256, and expected build hash from your main domain.</p>
+      </div>
+      <div class="fed-mini">
+        <h4>Trust Badges In Network UI</h4>
+        <p>Operators instantly see connected state, official directory status, hash match, and legitimacy badges.</p>
+      </div>
+      <div class="fed-mini">
+        <h4>Safe Apply Flow</h4>
+        <p>Node downloads update package, verifies checksum, syncs files, and restarts service without drift.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRIVACY -->
+<section class="section privacy-section" id="privacy">
+  <div class="privacy-inner">
+    <div>
+      <h2>Built for Privacy,<br>Not Profit</h2>
+      <p>Most chat apps monetize your conversations. FrogTalk is different — your messages are encrypted before they ever leave your device.</p>
+      <ul class="privacy-checks">
+        <li><span class="check">✓</span> ECDH key exchange — shared secret only on your devices</li>
+        <li><span class="check">✓</span> AES-256-GCM encryption on every DM</li>
+        <li><span class="check">✓</span> WebRTC P2P calls — media never touches our server</li>
+        <li><span class="check">✓</span> No analytics, no third-party SDKs</li>
+        <li><span class="check">✓</span> Self-hosted — run your own instance</li>
+        <li><span class="check">✓</span> SQLite — single file backup, you own your data</li>
+      </ul>
+    </div>
+    <div class="code-block">
+<span class="cm">// Your DM encryption (client-side)</span>
+<span class="kw">const</span> shared = <span class="kw">await</span> crypto.subtle.deriveBits({
+  name: <span class="str">'ECDH'</span>,
+  public: theirPublicKey
+}, myPrivateKey, <span class="str">256</span>);
+
+<span class="kw">const</span> aesKey = <span class="kw">await</span> crypto.subtle.deriveKey({
+  name: <span class="str">'HKDF'</span>, hash: <span class="str">'SHA-256'</span>, ...
+}, shared, { name: <span class="str">'AES-GCM'</span>, length: <span class="str">256</span> });
+
+<span class="cm">// Server receives only ciphertext 🔒</span>
+<span class="kw">const</span> encrypted = <span class="kw">await</span> crypto.subtle.encrypt(
+  { name: <span class="str">'AES-GCM'</span>, iv },
+  aesKey, plaintext
+);
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section" id="how">
+  <div class="section-title">Get Started in Seconds</div>
+  <div class="section-sub">No email, no phone number, no personal data required.</div>
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <h3>Create Your Account</h3>
+        <p>Pick a nickname and password. That's it. No email, no phone, no tracking. Your account is yours.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <h3>Add Friends, Join Channels, Explore Social</h3>
+        <p>Find friends by username, jump into public channels, or open <b style="color:var(--green)">Frog Social</b> to post updates, share stories, and see what's trending.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <h3>Chat, Call, Vibe</h3>
+        <p>Send encrypted DMs and voice notes, hop in voice or video calls, play music together, or bridge a channel to Discord / Telegram — all in one app.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-banner">
+  <div style="font-size:3rem;margin-bottom:1rem;">🐸</div>
+  <h2>Ready to Hop In?</h2>
+  <p>Join FrogTalk today. Free forever, private always.</p>
+  <a href="/app" class="btn btn-primary btn-lg">Create Your Account →</a>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div style="display:flex;align-items:center;gap:.5rem;">
+    <span style="font-size:1.2rem;">🐸</span>
+    <span style="font-weight:600;color:var(--text);">FrogTalk</span>
+    <span>— Secure Chat</span>
+  </div>
+  <div class="footer-links">
+    <a href="/app">App</a>
+    <a href="#features">Features</a>
+    <a href="#federation">Federation</a>
+    <a href="#privacy">Privacy</a>
+    <a href="/docs/api">API Docs</a>
+    <a href="/docs/node">Run Your Node</a>
+    <a href="/download/android" download>📱 Android App</a>
+    <a href="/download/linux" download>🐧 Linux AppImage</a>
+    <a href="/download/deb" download>📦 .deb</a>
+  </div>
+  <div>© 2026 FrogTalk. Your chat, your privacy.</div>
+</footer>
+
+<!-- MOBILE APK BANNER -->
+<div class="mobile-banner" id="mobile-banner">
+  <div class="mobile-banner-content">
+    <div class="mobile-banner-icon">🐸</div>
+    <div class="mobile-banner-text">
+      <h4>Get FrogTalk for Android</h4>
+      <p>Secure messaging in your pocket</p>
+    </div>
+  </div>
+  <a href="/download/android" download class="mobile-banner-btn">Download APK</a>
+  <button class="mobile-banner-close" onclick="document.getElementById('mobile-banner').classList.remove('show');localStorage.setItem('hideMobileBanner','1');">×</button>
+</div>
+
+<script>
+// Show mobile banner on Android/mobile devices
+(function() {
+  const ua = navigator.userAgent.toLowerCase();
+  const isMobile = /android|iphone|ipad|ipod|mobile/i.test(ua);
+  const isAndroid = /android/i.test(ua);
+  const hidden = localStorage.getItem('hideMobileBanner');
+  if ((isMobile || isAndroid) && !hidden) {
+    document.getElementById('mobile-banner').classList.add('show');
+  }
+})();
+</script>
+
+</body>
+</html>

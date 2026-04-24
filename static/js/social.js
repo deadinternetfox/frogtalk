@@ -1,0 +1,3092 @@
+/**
+ * social.js — Instagram-style social profile page, feed, & explore
+ */
+
+const Social = (() => {
+  let _currentTab = 'feed';     // feed | explore | profile
+  let _profileUser = null;       // currently viewed profile nickname
+  let _profileData = null;
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  const esc = s => UI.escHtml(s);
+  // Returns a JS string literal safe to embed in an HTML `onclick="..."`
+  // attribute. Raw JSON.stringify emits "foo" — the double quotes terminate
+  // the attribute early and the browser throws "Unexpected end of input".
+  // Encoding them as &quot; leaves valid HTML that decodes back to "foo"
+  // before the JS engine parses the handler.
+  const jsStr = s => JSON.stringify(String(s || '')).replace(/"/g, '&quot;');
+  const api = async (path, method, body) => {
+    const res = await apiFetch(path, method, body);
+    if (!res.ok) {
+      // Try to parse JSON error, otherwise create a synthetic JSON response
+      const clone = res.clone();
+      try { await clone.json(); } catch {
+        // Response isn't JSON — wrap the text in a JSON-compatible Response
+        const text = await res.text();
+        return new Response(JSON.stringify({ error: text || 'Server error' }), {
+          status: res.status, headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+    return res;
+  };
+
+  function timeAgo(iso) {
+    if (!iso) return '';
+    const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+    const s = Math.floor((Date.now() - d) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h';
+    if (s < 604800) return Math.floor(s / 86400) + 'd';
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+
+  // ── open / close ──────────────────────────────────────────────────────
+  function open(tab) {
+    _currentTab = tab || 'feed';
+    const overlay = document.getElementById('social-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('hidden');
+    renderNav();
+    // Paint the persistent "Now playing" strip immediately — it lives in
+    // #social-overlay and must reflect current music state on open.
+    try { _applyMusicState(); } catch {}
+    if (_currentTab === 'profile') {
+        loadProfile(_profileUser || State.user?.nickname);
+    } else if (_currentTab === 'feed') {
+        loadFeed();
+    } else if (_currentTab === 'explore') {
+        loadExplore();
+    }
+  }
+
+  function close() {
+    const overlay = document.getElementById('social-overlay');
+    if (overlay) overlay.classList.add('hidden');
+  }
+
+  function openProfile(nickname) {
+    _profileUser = nickname;
+    _currentTab = 'profile';
+    open('profile');
+  }
+
+  // ── navigation ──────────────────────────────────────────────────────────
+  function renderNav() {
+    document.querySelectorAll('.social-nav-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === _currentTab);
+    });
+  }
+
+  function switchTab(tab) {
+    _currentTab = tab;
+    // "My Profile" in the top nav should always jump to the logged-in
+    // user's own profile — even if we were just viewing someone else.
+    if (tab === 'profile') _profileUser = State.user?.nickname || null;
+    renderNav();
+    if (tab === 'feed') loadFeed();
+    else if (tab === 'explore') loadExplore();
+    else if (tab === 'music') loadMusicTab();
+    else if (tab === 'profile') loadProfile(_profileUser || State.user?.nickname);
+    // Persistent "Now playing" strip lives outside the tab content —
+    // make sure it's painted/hidden correctly after switching tabs.
+    try { _applyMusicState(); } catch {}
+  }
+
+  // ── STORIES ──────────────────────────────────────────────────────────────
+  let _storyData = [];   // [{user_id, nickname, avatar, stories:[], has_unviewed}]
+  let _storyViewIdx = 0; // index in current user's stories array
+  let _storyUserIdx = 0; // index in _storyData
+  const _storyViewerCache = new Map();
+
+  async function loadStoriesBar() {
+    try {
+      const res = await api('/api/social/stories');
+      const data = await res.json();
+      _storyData = data.users || [];
+    } catch { _storyData = []; }
+    return renderStoriesBar();
+  }
+
+  function renderStoriesBar() {
+    if (_storyData.length === 0 && !State.user) return '';
+    const myStory = _storyData.find(u => u.user_id === State.user?.id);
+    let html = '<div class="stories-bar"><div class="stories-scroll">';
+    // "Add story" circle
+    html += `<div class="story-circle add-story" onclick="Social.openAddStory()">
+      <div class="story-avatar-ring">
+        <div class="story-avatar">${UI.avatarEl(State.user?.avatar, State.user?.nickname, 56)}</div>
+        <div class="story-add-badge">+</div>
+      </div>
+      <span class="story-nick">Your story</span>
+    </div>`;
+    for (let i = 0; i < _storyData.length; i++) {
+      const u = _storyData[i];
+      if (u.user_id === State.user?.id && u.stories.length > 0) {
+        // show own story ring (viewed style)
+        continue; // already shown as "Your story"
+      }
+      html += `<div class="story-circle" onclick="Social.viewStories(${i})">
+        <div class="story-avatar-ring ${u.has_unviewed ? 'unviewed' : 'viewed'}">
+          <div class="story-avatar">${UI.avatarEl(u.avatar, u.nickname, 56)}</div>
+        </div>
+        <span class="story-nick">${esc(u.nickname)}</span>
+      </div>`;
+    }
+    html += '</div></div>';
+    return html;
+  }
+
+  function viewStories(userIdx) {
+    _storyUserIdx = userIdx;
+    _storyViewIdx = 0;
+    // Find first unviewed
+    const stories = _storyData[userIdx]?.stories || [];
+    for (let i = 0; i < stories.length; i++) {
+      if (!stories[i].viewed) { _storyViewIdx = i; break; }
+    }
+    showStoryViewer();
+  }
+
+  function _recomputeUserStorySeenState(user) {
+    if (!user || !Array.isArray(user.stories)) return;
+    user.has_unviewed = user.stories.some(s => !s.viewed);
+  }
+
+  function _rerenderStoriesBarInDom() {
+    try {
+      const host = document.getElementById('social-content');
+      if (!host) return;
+      const oldBar = host.querySelector('.stories-bar');
+      if (!oldBar) return;
+      const wrap = document.createElement('div');
+      wrap.innerHTML = renderStoriesBar();
+      const newBar = wrap.firstElementChild;
+      if (!newBar) return;
+      oldBar.replaceWith(newBar);
+    } catch {}
+  }
+
+  function _setProfileRingViewedStateForUser(nickname, hasUnviewed) {
+    try {
+      if (!nickname || _currentTab !== 'profile' || _profileUser !== nickname) return;
+      const avatar = document.querySelector('.social-profile .sp-avatar');
+      if (!avatar) return;
+      if (!avatar.classList.contains('has-story')) return;
+      avatar.classList.toggle('unviewed', !!hasUnviewed);
+      avatar.classList.toggle('viewed', !hasUnviewed);
+    } catch {}
+  }
+
+  function _renderStoryViewerMeta(story, user) {
+    const isMine = Number(user?.user_id) === Number(State.user?.id);
+    if (!isMine) return '';
+    const cached = _storyViewerCache.get(story.id);
+    if (!cached) {
+      return `<div class="story-viewers-meta" id="story-viewers-meta">Loading views…</div>`;
+    }
+    const viewers = cached.viewers || [];
+    if (viewers.length === 0) {
+      return `<div class="story-viewers-meta" id="story-viewers-meta">No views yet</div>`;
+    }
+    const top = viewers.slice(0, 6);
+    const chips = top.map(v =>
+      `<div class="story-view-chip" title="${esc(v.nickname || '')}">${UI.avatarEl(v.avatar, v.nickname, 24)}</div>`
+    ).join('');
+    const more = viewers.length > 6 ? `<span class="story-view-more">+${viewers.length - 6}</span>` : '';
+    return `<div class="story-viewers-meta" id="story-viewers-meta">
+      <div class="story-view-chips">${chips}${more}</div>
+      <span class="story-view-count">${viewers.length} viewed</span>
+    </div>`;
+  }
+
+  async function _hydrateStoryViewers(story, user) {
+    const isMine = Number(user?.user_id) === Number(State.user?.id);
+    if (!isMine || !story?.id || _storyViewerCache.has(story.id)) return;
+    try {
+      const res = await api(`/api/social/stories/${story.id}/viewers`);
+      const data = await res.json();
+      _storyViewerCache.set(story.id, { viewers: data.viewers || [] });
+      const meta = document.getElementById('story-viewers-meta');
+      if (meta && document.getElementById('story-viewer')) {
+        meta.outerHTML = _renderStoryViewerMeta(story, user);
+      }
+    } catch {
+      const meta = document.getElementById('story-viewers-meta');
+      if (meta) meta.textContent = 'Could not load views';
+    }
+  }
+
+  function showStoryViewer() {
+    const user = _storyData[_storyUserIdx];
+    if (!user) return closeStoryViewer();
+    const story = user.stories[_storyViewIdx];
+    if (!story) return closeStoryViewer();
+
+    // Mark viewed
+    if (!story.viewed) {
+      api(`/api/social/stories/${story.id}/view`, 'POST');
+      story.viewed = true;
+      _recomputeUserStorySeenState(user);
+      _setProfileRingViewedStateForUser(user.nickname, !!user.has_unviewed);
+      _rerenderStoriesBarInDom();
+    }
+
+    let viewer = document.getElementById('story-viewer');
+    if (!viewer) {
+      viewer = document.createElement('div');
+      viewer.id = 'story-viewer';
+      document.body.appendChild(viewer);
+    }
+
+    const progress = user.stories.map((s, i) =>
+      `<div class="story-prog-seg ${i < _storyViewIdx ? 'done' : i === _storyViewIdx ? 'active' : ''}"></div>`
+    ).join('');
+
+    viewer.innerHTML = `
+      <div class="story-viewer-inner" onclick="Social.nextStory()">
+        <div class="story-progress">${progress}</div>
+        <div class="story-header">
+          <div class="story-header-avatar">${UI.avatarEl(user.avatar, user.nickname, 32)}</div>
+          <span class="story-header-nick">${esc(user.nickname)}</span>
+          <span class="story-header-time">${timeAgo(story.created_at)}</span>
+          <button class="story-close" onclick="event.stopPropagation();Social.closeStoryViewer()">✕</button>
+        </div>
+        <div class="story-media">
+          ${story.media_type.startsWith('video')
+            ? `<video src="${esc(story.media_data)}" autoplay playsinline></video>`
+            : `<img src="${esc(story.media_data)}" alt="">`}
+        </div>
+        ${story.caption ? `<div class="story-caption">${esc(story.caption)}</div>` : ''}
+        ${_renderStoryViewerMeta(story, user)}
+        <div class="story-nav-zones">
+          <div class="story-nav-left" onclick="event.stopPropagation();Social.prevStory()"></div>
+          <div class="story-nav-right" onclick="event.stopPropagation();Social.nextStory()"></div>
+        </div>
+      </div>`;
+    viewer.style.display = 'flex';
+
+    // Auto-advance after 5s
+    clearTimeout(viewer._timer);
+    viewer._timer = setTimeout(() => nextStory(), 5000);
+    _hydrateStoryViewers(story, user);
+  }
+
+  function nextStory() {
+    const user = _storyData[_storyUserIdx];
+    if (!user) return closeStoryViewer();
+    if (_storyViewIdx < user.stories.length - 1) {
+      _storyViewIdx++;
+      showStoryViewer();
+    } else if (_storyUserIdx < _storyData.length - 1) {
+      _storyUserIdx++;
+      _storyViewIdx = 0;
+      showStoryViewer();
+    } else {
+      closeStoryViewer();
+    }
+  }
+
+  function prevStory() {
+    if (_storyViewIdx > 0) { _storyViewIdx--; showStoryViewer(); }
+    else if (_storyUserIdx > 0) {
+      _storyUserIdx--;
+      _storyViewIdx = _storyData[_storyUserIdx].stories.length - 1;
+      showStoryViewer();
+    }
+  }
+
+  function closeStoryViewer() {
+    const v = document.getElementById('story-viewer');
+    if (v) { clearTimeout(v._timer); v.style.display = 'none'; }
+    _rerenderStoriesBarInDom();
+  }
+
+  let _addStoryMedia = null, _addStoryFile = null, _addStoryType = null, _addStoryPrivacy = 'public';
+  let _addStoryPreviewUrl = null;
+  let _storySubmitInFlight = false;
+  let _storyModalOpen = false;
+  let _lastStoryShareTapAt = 0;
+  let _storyTapLocked = false;
+  let _storyUploadXhr = null;  // For cancellation support
+  let _storyUploadSession = null;  // Current upload session
+  let _storyUploadMinimized = false;  // Track if bar is minimized
+
+  function _ensureStoryUploadOverlay() {
+    let ov = document.getElementById('story-upload-overlay');
+    if (ov) return ov;
+    ov = document.createElement('div');
+    ov.id = 'story-upload-overlay';
+    ov.innerHTML = `
+      <div class="story-upload-bar" id="story-upload-bar-main">
+        <div class="story-upload-bar-inner">
+          <div class="story-upload-bar-content">
+            <div class="story-upload-bar-left" id="story-upload-bar-left">
+              <div class="story-upload-bar-icon" id="story-upload-icon">📤</div>
+              <div class="story-upload-bar-text">
+                <div class="story-upload-bar-title" id="story-upload-title">Uploading story</div>
+                <div class="story-upload-bar-sub" id="story-upload-sub">0%</div>
+              </div>
+            </div>
+            <div class="story-upload-bar-progress" id="story-upload-progress-container">
+              <div class="story-upload-progress" style="flex:1">
+                <div class="story-upload-progress-fill" id="story-upload-progress-fill"></div>
+              </div>
+              <div class="story-upload-bar-pct" id="story-upload-pct">0%</div>
+            </div>
+            <button class="story-upload-bar-minimize" id="story-upload-minimize" type="button" title="Minimize">−</button>
+            <button class="story-upload-bar-cancel" id="story-upload-cancel" type="button" title="Cancel upload">✕</button>
+          </div>
+          <div class="story-upload-bar-retry-hint" id="story-upload-retry-hint" style="display:none;margin-top:8px;font-size:11px;color:#ff9500;text-align:center">
+            Retrying... <span id="story-upload-retry-count">1/3</span>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    
+    const minimizeBtn = ov.querySelector('#story-upload-minimize');
+    const cancelBtn = ov.querySelector('#story-upload-cancel');
+    
+    if (minimizeBtn) {
+      minimizeBtn.addEventListener('click', () => {
+        _storyUploadMinimized = !_storyUploadMinimized;
+        const main = ov.querySelector('#story-upload-bar-main');
+        const left = ov.querySelector('#story-upload-bar-left');
+        const container = ov.querySelector('#story-upload-progress-container');
+        if (_storyUploadMinimized) {
+          left.style.display = 'none';
+          container.style.display = 'none';
+          minimizeBtn.textContent = '+';
+          minimizeBtn.title = 'Expand';
+          main.classList.add('minimized');
+        } else {
+          left.style.display = 'flex';
+          container.style.display = 'flex';
+          minimizeBtn.textContent = '−';
+          minimizeBtn.title = 'Minimize';
+          main.classList.remove('minimized');
+        }
+      });
+    }
+    
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        if (_storyUploadXhr) {
+          _storyUploadXhr.abort();
+          _storyUploadXhr = null;
+        }
+        _storyUploadSession = null;
+        try { localStorage.removeItem('_storyUploadState'); } catch {}
+        _hideStoryUploadOverlay(0);
+        _storyNotify('Upload cancelled', 'info');
+      });
+    }
+    return ov;
+  }
+
+  function _updateStoryUploadOverlay(percent, text) {
+    const ov = _ensureStoryUploadOverlay();
+    if (!ov) return;
+    const fill = ov.querySelector('#story-upload-progress-fill');
+    const pct = ov.querySelector('#story-upload-pct');
+    const sub = ov.querySelector('#story-upload-sub');
+    const title = ov.querySelector('#story-upload-title');
+    const icon = ov.querySelector('#story-upload-icon');
+    const p = Math.max(0, Math.min(100, Number(percent || 0)));
+    
+    ov.style.display = 'flex';
+    if (fill) {
+      fill.style.width = `${p}%`;
+    }
+    if (pct) pct.textContent = `${Math.round(p)}%`;
+    if (sub) {
+      if (p <= 5) sub.textContent = 'Connecting...';
+      else if (text) sub.textContent = text;
+      else if (p < 100) sub.textContent = `${Math.round(p)}% uploading…`;
+      else sub.textContent = 'Finalizing…';
+    }
+    if (title && p === 100) title.textContent = 'Story posted!';
+    if (icon) {
+      if (p === 100) icon.textContent = '✓';
+      else if (p > 30) icon.textContent = '📤';
+    }
+  }
+
+  function _showStoryUploadRetry(retryNum, maxRetries) {
+    const ov = _ensureStoryUploadOverlay();
+    if (!ov) return;
+    const hint = ov.querySelector('#story-upload-retry-hint');
+    const count = ov.querySelector('#story-upload-retry-count');
+    if (hint && count) {
+      count.textContent = `${retryNum}/${maxRetries}`;
+      hint.style.display = 'block';
+    }
+  }
+
+  function _hideStoryUploadRetryHint() {
+    const ov = document.getElementById('story-upload-overlay');
+    if (!ov) return;
+    const hint = ov.querySelector('#story-upload-retry-hint');
+    if (hint) hint.style.display = 'none';
+  }
+
+  function _hideStoryUploadOverlay(delay = 500) {
+    const ov = document.getElementById('story-upload-overlay');
+    if (!ov) return;
+    setTimeout(() => { ov.style.display = 'none'; }, Math.max(0, delay));
+  }
+
+  let _lastAndroidStoryNotif = -1;
+  let _lastAndroidStoryNotifAt = 0;
+  function _notifyAndroidStoryUpload(percent, stage = 'uploading') {
+    try {
+      if (!window.Android) return;
+      const p = Math.max(0, Math.min(100, Math.round(Number(percent || 0))));
+      if (stage === 'done') {
+        if (typeof window.Android.finishStoryUploadNotification === 'function') {
+          window.Android.finishStoryUploadNotification(true, 'Your story is now live');
+        } else if (typeof window.Android.showNotification === 'function') {
+          window.Android.showNotification('Story posted', 'Your story is now live');
+        }
+        _lastAndroidStoryNotif = 100;
+        _lastAndroidStoryNotifAt = Date.now();
+        return;
+      }
+      if (stage === 'failed') {
+        if (typeof window.Android.finishStoryUploadNotification === 'function') {
+          window.Android.finishStoryUploadNotification(false, 'Tap back into FrogTalk to retry');
+        } else if (typeof window.Android.showNotification === 'function') {
+          window.Android.showNotification('Story upload failed', 'Tap back into FrogTalk to retry');
+        }
+        _lastAndroidStoryNotifAt = Date.now();
+        return;
+      }
+
+      if (typeof window.Android.updateStoryUploadNotification === 'function') {
+        // New Android bridge: in-place update, no sound spam.
+        window.Android.updateStoryUploadNotification(p, p < 100 ? `Uploading ${p}%` : 'Finalizing…');
+        _lastAndroidStoryNotif = p;
+        _lastAndroidStoryNotifAt = Date.now();
+        return;
+      }
+
+      // Backward compatibility for older APKs: severely throttle to avoid sound spam.
+      if (typeof window.Android.showNotification === 'function') {
+        const now = Date.now();
+        if (_lastAndroidStoryNotif >= 0 && p < 100) {
+          const delta = p - _lastAndroidStoryNotif;
+          const elapsed = now - _lastAndroidStoryNotifAt;
+          if (delta < 25 && elapsed < 12000) return;
+        }
+        window.Android.showNotification('Uploading story', `${p}%`);
+        _lastAndroidStoryNotif = p;
+        _lastAndroidStoryNotifAt = now;
+      }
+    } catch {}
+  }
+
+  function _uploadStoryWithProgress(payload, onProgress) {
+    return new Promise((resolve, reject) => {
+      try {
+        const xhr = new XMLHttpRequest();
+        let lastReportedProgress = 0;
+        
+        xhr.open('POST', '/api/social/stories', true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        if (State.token) xhr.setRequestHeader('X-Session-Token', State.token);
+        xhr.upload.onloadstart = () => onProgress(0);
+        
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const progress = Math.round((e.loaded / e.total) * 100);
+          if (progress > lastReportedProgress) {
+            lastReportedProgress = progress;
+            onProgress(progress);
+          }
+        };
+        
+        xhr.onerror = () => reject(new Error('Network error'));
+        
+        xhr.onload = () => {
+          onProgress(100);
+          const txt = xhr.responseText || '';
+          let data = null;
+          try { data = txt ? JSON.parse(txt) : null; } catch {}
+          resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data, text: txt });
+        };
+
+        xhr.send(JSON.stringify(payload));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  function _uploadStoryFileWithProgress({ file, caption, privacy }, onProgress) {
+    return new Promise((resolve, reject) => {
+      try {
+        const xhr = new XMLHttpRequest();
+        _storyUploadXhr = xhr;
+        let lastReportedProgress = 0;
+        
+        const uploadTimeout = setTimeout(() => {
+          xhr.abort();
+          reject(new Error('Upload timeout'));
+        }, 120000);  // 120 second timeout
+        
+        xhr.open('POST', '/api/social/stories/upload', true);
+        if (State.token) xhr.setRequestHeader('X-Session-Token', State.token);
+        xhr.upload.onloadstart = () => onProgress(0);
+        
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const progress = Math.round((e.loaded / e.total) * 100);
+          if (progress > lastReportedProgress) {
+            lastReportedProgress = progress;
+            onProgress(progress);
+          }
+        };
+        
+        xhr.onerror = () => {
+          _storyUploadXhr = null;
+          clearTimeout(uploadTimeout);
+          reject(new Error('Network error'));
+        };
+        
+        xhr.onabort = () => {
+          _storyUploadXhr = null;
+          clearTimeout(uploadTimeout);
+          reject(new Error('Upload cancelled'));
+        };
+        
+        xhr.onload = () => {
+          _storyUploadXhr = null;
+          clearTimeout(uploadTimeout);
+          onProgress(100);
+          const txt = xhr.responseText || '';
+          let data = null;
+          try { data = txt ? JSON.parse(txt) : null; } catch {}
+          resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data, text: txt });
+        };
+        
+        // Start the upload
+        const form = new FormData();
+        form.append('media', file, file.name || 'story-upload');
+        form.append('caption', caption || '');
+        form.append('privacy', privacy || 'public');
+
+        xhr.send(form);
+      } catch (e) {
+        _storyUploadXhr = null;
+        reject(e);
+      }
+    });
+  }
+
+  function _ensureSelfProfileStoryRing() {
+    try {
+      const nick = State.user?.nickname;
+      if (!nick || _currentTab !== 'profile' || _profileUser !== nick) return;
+      const avatar = document.querySelector('.sp-avatar');
+      if (!avatar) return;
+      avatar.classList.add('has-story', 'unviewed');
+      avatar.classList.remove('viewed');
+      avatar.style.cursor = 'pointer';
+      avatar.title = 'View stories';
+      avatar.setAttribute('onclick', `Social.viewProfileStories(${jsStr(nick)},${Number(State.user?.id || 0)})`);
+    } catch {}
+  }
+
+  function _bindAddStoryActions(modal) {
+    if (!modal) return;
+    const oldShareBtn = modal.querySelector('#add-story-share-btn');
+    if (oldShareBtn && oldShareBtn.dataset.bound !== '2') {
+      // Replace node to drop any stale listeners from prior script versions.
+      const shareBtn = oldShareBtn.cloneNode(true);
+      oldShareBtn.replaceWith(shareBtn);
+      const onSharePress = (ev) => handleStoryShareTap(ev);
+      shareBtn.addEventListener('click', onSharePress, { passive: false });
+      shareBtn.addEventListener('touchstart', onSharePress, { passive: false });
+      shareBtn.addEventListener('pointerdown', onSharePress, { passive: false });
+      shareBtn.dataset.bound = '2';
+    }
+  }
+
+  function _ensureGlobalStoryShareDelegation() {
+    // Keep as no-op: explicit button handlers are more reliable than
+    // global capture listeners and avoid delayed submits after cancel.
+  }
+
+  function openAddStory() {
+    _ensureGlobalStoryShareDelegation();
+    _storyModalOpen = true;
+    _storyTapLocked = false;
+    _addStoryMedia = null; _addStoryFile = null; _addStoryType = null;
+    if (_addStoryPreviewUrl) {
+      try { URL.revokeObjectURL(_addStoryPreviewUrl); } catch {}
+      _addStoryPreviewUrl = null;
+    }
+    _addStoryPrivacy = (localStorage.getItem('ft_default_story_privacy') || 'public');
+    let modal = document.getElementById('add-story-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'add-story-modal';
+      modal.innerHTML = `
+        <div class="add-story-box" style="position:relative">
+          <button type="button" class="add-story-close" onclick="Social.closeAddStory()" aria-label="Close story dialog">✕</button>
+          <h3 style="margin:0 0 12px;color:#e0e0e0;font-size:16px">Add to Your Story</h3>
+          <div id="add-story-preview" style="display:none;margin-bottom:12px;text-align:center">
+            <img id="add-story-img" style="display:none;max-width:100%;max-height:300px;border-radius:8px">
+            <video id="add-story-vid" style="display:none;max-width:100%;max-height:300px;border-radius:8px;background:#000" controls playsinline></video>
+          </div>
+          <button type="button" onclick="Social.openStoryCamera()" style="display:block;width:100%;padding:16px;text-align:center;border:none;background:linear-gradient(135deg,#4caf50,#2e7d32);border-radius:12px;cursor:pointer;color:#000;font-weight:700;margin-bottom:10px;font-size:15px">
+            📷 Open Camera · Tap for photo · Hold for video
+          </button>
+          <label style="display:block;padding:16px;text-align:center;border:1px dashed #333;border-radius:10px;cursor:pointer;color:#888;margin-bottom:10px;font-size:13px">
+            📂 Or pick from gallery
+            <input type="file" accept="image/*,video/*" style="display:none" onchange="Social.handleStoryMedia(this)">
+          </label>
+          <input id="add-story-caption" placeholder="Add a caption…" style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#e0e0e0;margin-bottom:10px;box-sizing:border-box">
+          <div id="add-story-status" style="display:none;margin:-2px 0 10px 0;font-size:12px;color:#9ca3af"></div>
+          <div style="display:flex;gap:10px;justify-content:flex-end;align-items:center">
+            <button type="button" id="story-priv-chip" class="ft-inline-chip" onclick="Social.cycleStoryPrivacy()" title="Change audience" style="margin-right:auto">🌍 Everyone</button>
+            <button type="button" id="add-story-cancel-btn" onclick="Social.closeAddStory()" style="background:#1a1a1a;border:none;color:#888;padding:8px 16px;border-radius:8px;cursor:pointer">Cancel</button>
+            <button type="button" id="add-story-share-btn" onclick="Social.handleStoryShareTap(event);return false" ontouchstart="Social.handleStoryShareTap(event);return false" onpointerdown="Social.handleStoryShareTap(event);return false" style="background:#4caf50;border:none;color:#000;font-weight:600;padding:8px 20px;border-radius:8px;cursor:pointer;touch-action:manipulation">Share</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+    }
+    _bindAddStoryActions(modal);
+    modal.style.display = 'flex';
+    modal.onclick = (ev) => {
+      if (ev.target === modal) closeAddStory();
+    };
+    document.getElementById('add-story-preview').style.display = 'none';
+    _setAddStoryStatus('', 'info');
+    const cap = document.getElementById('add-story-caption');
+    if (cap) cap.value = '';
+    setStoryPrivacy(_addStoryPrivacy);
+  }
+
+  function setStoryPrivacy(p) {
+    _addStoryPrivacy = (p === 'followers') ? 'followers' : 'public';
+    localStorage.setItem('ft_default_story_privacy', _addStoryPrivacy);
+    // Inline chip
+    const chip = document.getElementById('story-priv-chip');
+    if (chip) {
+      chip.textContent = _addStoryPrivacy === 'followers' ? '👥 Followers' : '🌍 Everyone';
+      chip.classList.toggle('on', _addStoryPrivacy === 'followers');
+    }
+    // Legacy buttons (if present)
+    ['public','followers'].forEach(k => {
+      const btn = document.getElementById('story-priv-' + k);
+      if (!btn) return;
+      if (k === _addStoryPrivacy) {
+        btn.style.background = 'linear-gradient(135deg,#4caf50,#2e7d32)';
+        btn.style.color = '#000';
+        btn.style.borderColor = '#4caf50';
+      } else {
+        btn.style.background = '#1a1a1a';
+        btn.style.color = '#ddd';
+        btn.style.borderColor = '#2a2a2a';
+      }
+    });
+  }
+
+  function cycleStoryPrivacy() {
+    setStoryPrivacy(_addStoryPrivacy === 'public' ? 'followers' : 'public');
+  }
+
+  function closeAddStory() {
+    _storyModalOpen = false;
+    const m = document.getElementById('add-story-modal');
+    if (m) m.style.display = 'none';
+  }
+
+  function _storyNotify(msg, type = 'info') {
+    try {
+      if (typeof UI !== 'undefined' && typeof UI.showToast === 'function') {
+        UI.showToast(msg, type);
+        return;
+      }
+      if (typeof toast === 'function') {
+        toast(msg, type);
+        return;
+      }
+      if (typeof alert === 'function' && (type === 'error' || type === 'success')) {
+        alert(msg);
+        return;
+      }
+    } catch {}
+    console.log('[Story]', type, msg);
+  }
+
+  function _setAddStoryStatus(msg, type = 'info') {
+    const el = document.getElementById('add-story-status');
+    if (!el) return;
+    if (!msg) {
+      el.style.display = 'none';
+      el.textContent = '';
+      return;
+    }
+    el.style.display = 'block';
+    el.textContent = msg;
+    if (type === 'error') el.style.color = '#f87171';
+    else if (type === 'success') el.style.color = '#4caf50';
+    else el.style.color = '#9ca3af';
+  }
+
+  function _renderStoryPreview(dataUrl, type) {
+    const preview = document.getElementById('add-story-preview');
+    const img = document.getElementById('add-story-img');
+    const vid = document.getElementById('add-story-vid');
+    if (!preview) return;
+    preview.style.display = 'block';
+    if (type && type.startsWith('video')) {
+      if (img) img.style.display = 'none';
+      if (vid) { vid.src = dataUrl; vid.style.display = 'block'; vid.load(); }
+    } else {
+      if (vid) { vid.style.display = 'none'; vid.removeAttribute('src'); vid.load(); }
+      if (img) { img.src = dataUrl; img.style.display = 'block'; }
+    }
+  }
+
+  function handleStoryMedia(input) {
+    const file = input.files[0];
+    if (!file) {
+      _setAddStoryStatus('No file selected', 'error');
+      return;
+    }
+    const isVideo = String(file.type || '').startsWith('video');
+    const maxBytes = isVideo ? 100 * 1024 * 1024 : 100 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      _setAddStoryStatus(`File too large (max 100MB)`, 'error');
+      _storyNotify(`File too large (max 100MB)`, 'error');
+      return;
+    }
+    _setAddStoryStatus('Preparing preview…', 'info');
+    if (_addStoryPreviewUrl) {
+      try { URL.revokeObjectURL(_addStoryPreviewUrl); } catch {}
+      _addStoryPreviewUrl = null;
+    }
+    try {
+      _addStoryPreviewUrl = URL.createObjectURL(file);
+      _addStoryFile = file;
+      _addStoryMedia = null;
+      _addStoryType = file.type;
+      _renderStoryPreview(_addStoryPreviewUrl, file.type);
+      _setAddStoryStatus(`${isVideo ? 'Video' : 'Image'} ready to share`, 'success');
+    } catch {
+      _setAddStoryStatus('', 'info');
+      _storyNotify('Could not prepare selected file', 'error');
+    }
+  }
+
+  function openStoryCamera() {
+    if (typeof openStoryCapture === 'function') {
+      openStoryCapture((dataUrl, mime) => {
+        _addStoryMedia = dataUrl;
+        _addStoryFile = null;
+        _addStoryType = mime || 'image/jpeg';
+        _renderStoryPreview(dataUrl, _addStoryType);
+      });
+      return;
+    }
+    if (typeof openCameraCapture === 'function') {
+      openCameraCapture((dataUrl) => {
+        _addStoryMedia = dataUrl;
+        _addStoryFile = null;
+        _addStoryType = 'image/jpeg';
+        _renderStoryPreview(dataUrl, 'image/jpeg');
+      });
+      return;
+    }
+    UI.showToast('Camera unavailable', 'error');
+  }
+
+  async function submitStory() {
+    if (_storySubmitInFlight) return;
+    _storySubmitInFlight = true;
+    if (!_addStoryMedia && !_addStoryFile) {
+      _setAddStoryStatus('Choose a photo or video first', 'error');
+      _storyNotify('Choose a photo or video', 'error');
+      _storySubmitInFlight = false;
+      _storyTapLocked = false;
+      return;
+    }
+    const caption = document.getElementById('add-story-caption')?.value?.trim() || '';
+    const shareBtn = document.getElementById('add-story-share-btn');
+    const cancelBtn = document.getElementById('add-story-cancel-btn');
+    const oldShareText = shareBtn ? shareBtn.textContent : 'Share';
+    if (shareBtn) { shareBtn.disabled = true; shareBtn.style.opacity = '0.7'; shareBtn.textContent = 'Uploading…'; }
+    if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.style.opacity = '0.7'; }
+    // Close modal immediately so upload happens in background
+    closeAddStory();
+    _setAddStoryStatus('Starting upload…', 'info');
+    _updateStoryUploadOverlay(2, 'Starting upload…');
+    _notifyAndroidStoryUpload(2);
+    
+    // Create upload session for tracking and recovery
+    _storyUploadSession = {
+      fileSize: _addStoryFile?.size || 0,
+      startTime: Date.now(),
+      retryCount: 0,
+      maxRetries: 3,
+      caption,
+      privacy: _addStoryPrivacy || 'public'
+    };
+    _saveStoryUploadState();
+    
+    await _performStoryUploadWithRetry();
+    
+    if (shareBtn) { shareBtn.disabled = false; shareBtn.style.opacity = '1'; shareBtn.textContent = oldShareText; }
+    if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.style.opacity = '1'; }
+    _storySubmitInFlight = false;
+    _storyTapLocked = false;
+  }
+
+  function _saveStoryUploadState() {
+    if (!_storyUploadSession) return;
+    try {
+      localStorage.setItem('_storyUploadState', JSON.stringify({
+        startTime: _storyUploadSession.startTime,
+        retryCount: _storyUploadSession.retryCount,
+        caption: _storyUploadSession.caption,
+        privacy: _storyUploadSession.privacy,
+        fileSize: _storyUploadSession.fileSize
+      }));
+    } catch {}
+  }
+
+  function _clearStoryUploadState() {
+    _storyUploadSession = null;
+    try { localStorage.removeItem('_storyUploadState'); } catch {}
+  }
+
+  async function _performStoryUploadWithRetry() {
+    const maxRetries = _storyUploadSession?.maxRetries || 3;
+    let lastError = null;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const res = _addStoryFile
+          ? await _uploadStoryFileWithProgress({ file: _addStoryFile, caption: _storyUploadSession?.caption || '', privacy: _storyUploadSession?.privacy || 'public' }, (p) => {
+              _updateStoryUploadOverlay(p, p < 100 ? 'Uploading story…' : 'Finalizing…');
+              _notifyAndroidStoryUpload(p);
+            })
+          : await _uploadStoryWithProgress({
+              media_data: _addStoryMedia, media_type: _addStoryType, caption: _storyUploadSession?.caption || '',
+              privacy: _storyUploadSession?.privacy || 'public'
+            }, (p) => {
+              _updateStoryUploadOverlay(p, p < 100 ? 'Uploading story…' : 'Finalizing…');
+              _notifyAndroidStoryUpload(p);
+            });
+        
+        if (res.ok) {
+          _handleStoryUploadSuccess();
+          return;
+        } else if (res.status >= 400 && res.status < 500) {
+          // Client error (4xx) - don't retry
+          throw new Error((res.data && (res.data.error || res.data.detail)) || 'Could not add story');
+        } else {
+          // Server error (5xx) or other - retry
+          throw new Error('Server error, retrying...');
+        }
+      } catch (err) {
+        lastError = err;
+        if (attempt < maxRetries) {
+          // Exponential backoff: 1s, 2s, 4s
+          const delayMs = Math.pow(2, attempt) * 1000;
+          _updateStoryUploadSession(attempt + 1);
+          _showStoryUploadRetry(attempt + 1, maxRetries);
+          _updateStoryUploadOverlay(Math.max(10, Math.min(90, attempt * 20)), `Retrying (${attempt + 1}/${maxRetries})…`);
+          await new Promise(r => setTimeout(r, delayMs));
+        }
+      }
+    }
+    
+    // All retries failed
+    _handleStoryUploadFailure(lastError?.message || 'Upload failed after retries');
+  }
+
+  function _updateStoryUploadSession(retryCount) {
+    if (_storyUploadSession) {
+      _storyUploadSession.retryCount = retryCount;
+      _saveStoryUploadState();
+    }
+  }
+
+  function _handleStoryUploadSuccess() {
+    try {
+      if (_profileData && _profileData.is_self) {
+        const cur = _profileData.story_status || { count: 0, has_unviewed: 0 };
+        _profileData.story_status = {
+          count: Math.max(1, Number(cur.count || 0) + 1),
+          has_unviewed: 1,
+        };
+      }
+      _ensureSelfProfileStoryRing();
+    } catch {}
+    _updateStoryUploadOverlay(100, 'Story posted');
+    _hideStoryUploadRetryHint();
+    _notifyAndroidStoryUpload(100, 'done');
+    _setAddStoryStatus('Story uploaded', 'success');
+    _storyNotify('Story added!', 'success');
+    if (_currentTab === 'feed') loadFeed();
+    else if (_currentTab === 'profile' && _profileUser === State.user?.nickname) {
+      loadProfile(State.user?.nickname);
+    }
+    _hideStoryUploadOverlay(700);
+    if (_addStoryPreviewUrl) {
+      try { URL.revokeObjectURL(_addStoryPreviewUrl); } catch {}
+      _addStoryPreviewUrl = null;
+    }
+    _addStoryFile = null;
+    _clearStoryUploadState();
+  }
+
+  function _handleStoryUploadFailure(errorMsg) {
+    _notifyAndroidStoryUpload(0, 'failed');
+    _updateStoryUploadOverlay(0, errorMsg || 'Upload failed');
+    _hideStoryUploadRetryHint();
+    _hideStoryUploadOverlay(2000);
+    _setAddStoryStatus(errorMsg || 'Upload failed', 'error');
+    _storyNotify(errorMsg || 'Upload failed', 'error');
+    _clearStoryUploadState();
+  }
+
+  function submitStoryFromTap() {
+    submitStory();
+  }
+
+  function handleStoryShareTap(ev) {
+    try {
+      if (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+    } catch {}
+    if (!_storyModalOpen) return;
+    if (_storyTapLocked || _storySubmitInFlight) return;
+    const now = Date.now();
+    if (now - _lastStoryShareTapAt < 500) return;
+    _lastStoryShareTapAt = now;
+    _storyTapLocked = true;
+    try {
+      _setAddStoryStatus('Share tapped…', 'info');
+      closeAddStory();
+      _updateStoryUploadOverlay(1, 'Starting upload…');
+    } catch {}
+    submitStoryFromTap();
+  }
+
+  // ── FEED ────────────────────────────────────────────────────────────────
+  async function loadFeed() {
+    const content = document.getElementById('social-content');
+    content.innerHTML = '<div class="social-loading">Loading feed…</div>';
+    try {
+      const [feedRes, sugRes, storiesHtml] = await Promise.all([
+        api('/api/social/feed'), api('/api/social/suggested'), loadStoriesBar()
+      ]);
+      const feedData = await feedRes.json();
+      const sugData = await sugRes.json();
+      const posts = feedData.posts || [];
+      // Dedupe suggested users by nickname (case-insensitive) — server can return dupes
+      const _seenSug = new Set();
+      const suggested = (sugData.users || []).filter(u => {
+        const k = (u.nickname || '').toLowerCase();
+        if (!k || _seenSug.has(k)) return false;
+        _seenSug.add(k);
+        return true;
+      });
+
+      let html = storiesHtml;
+
+      // suggested users bar
+      if (suggested.length > 0) {
+        html += `<div class="social-suggest-bar">
+          <div class="social-suggest-title">Suggested for you</div>
+          <div class="social-suggest-scroll">
+            ${suggested.map(u => {
+              const mc = Number(u.mutual_count || 0);
+              const mutualsList = (u.mutual_sample || '').split(',').map(s => s.trim()).filter(Boolean);
+              const metaHtml = mc > 0
+                ? `<div class="social-suggest-meta mut" title="Followed by ${mutualsList.map(esc).join(', ')}">
+                    <span class="mut-dot">●</span> ${mutualsList.length ? 'Followed by @' + esc(mutualsList[0]) : ''}${mc > 1 ? ` <span class="mut-more">+${mc - 1}</span>` : ''}
+                   </div>`
+                : `<div class="social-suggest-meta">${u.follower_count || 0} followers</div>`;
+              const reasonTag = mc > 0
+                ? `<span class="social-suggest-tag mut">${mc} mutual${mc === 1 ? '' : 's'}</span>`
+                : (Number(u.follower_count || 0) > 5 ? `<span class="social-suggest-tag pop">🔥 Popular</span>` : `<span class="social-suggest-tag new">✨ New</span>`);
+              return `<div class="social-suggest-card" onclick="Social.openProfile('${esc(u.nickname)}')">
+                ${reasonTag}
+                <div class="social-suggest-avatar">${UI.avatarEl(u.avatar, u.nickname, 56)}</div>
+                <div class="social-suggest-nick">${esc(u.nickname)}</div>
+                ${metaHtml}
+                <button class="social-follow-sm" onclick="event.stopPropagation();Social.toggleFollow('${esc(u.nickname)}',this)">Follow</button>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }
+
+      if (posts.length === 0) {
+        html += `<div class="social-empty">
+          <div style="font-size:48px;margin-bottom:12px">🐸</div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:6px">Your feed is empty</div>
+          <div style="color:#888;font-size:14px">Follow people to see their posts here, or check out <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
+        </div>`;
+      } else {
+        html += `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
+      }
+
+      content.innerHTML = html;
+    } catch {
+      content.innerHTML = '<div class="social-empty">Could not load feed</div>';
+    }
+  }
+
+  // ── EXPLORE ─────────────────────────────────────────────────────────────
+  let _exploreSort = 'trending';
+
+  async function loadExplore(sort) {
+    if (sort) _exploreSort = sort;
+    const content = document.getElementById('social-content');
+    content.innerHTML = '<div class="social-loading">Discovering…</div>';
+    try {
+      const [postsRes, channelsRes] = await Promise.all([
+        api(`/api/social/explore?sort=${_exploreSort}`),
+        api('/api/directory/new')
+      ]);
+      const postsData = await postsRes.json();
+      const channelsData = await channelsRes.json().catch(() => ({ channels: [] }));
+      const posts = postsData.posts || [];
+      const newChannels = channelsData.channels || [];
+
+      // Sort tabs + refresh
+      let html = `<div class="explore-toolbar">
+        <div class="explore-tabs">
+          <button class="explore-tab ${_exploreSort==='trending'?'active':''}" onclick="Social.loadExplore('trending')">🔥 Trending</button>
+          <button class="explore-tab ${_exploreSort==='new'?'active':''}" onclick="Social.loadExplore('new')">🆕 New</button>
+          <button class="explore-tab ${_exploreSort==='top'?'active':''}" onclick="Social.loadExplore('top')">⭐ Top</button>
+        </div>
+        <button class="explore-refresh" onclick="Social.loadExplore()" title="Refresh">🔄</button>
+      </div>`;
+
+      // New channels section
+      if (newChannels.length > 0) {
+        const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
+        html += `<div class="explore-channels-section">
+          <div class="explore-section-head">
+            <span class="explore-section-title">📺 New Channels</span>
+            <button class="explore-section-link" onclick="showChannelDirectory()">View all →</button>
+          </div>
+          <div class="explore-channels-scroll">${newChannels.slice(0, 8).map(ch => {
+            const iconHtml = ch.icon && ch.icon.startsWith('data:image')
+              ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+              : esc(ch.icon || '💬');
+            return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
+              <div class="explore-channel-icon">${iconHtml}</div>
+              <div class="explore-channel-name">${esc(ch.name)}</div>
+              <div class="explore-channel-meta">${catIcons[ch.category]||''} ${ch.member_count || 0} members</div>
+            </div>`;
+          }).join('')}</div>
+        </div>`;
+      }
+
+      if (posts.length === 0 && newChannels.length === 0) {
+        html += `<div class="social-empty">
+          <div style="font-size:48px;margin-bottom:12px">🌍</div>
+          <div style="font-size:16px;font-weight:600">Nothing to explore yet</div>
+          <div style="color:#888;font-size:14px;margin-top:6px">Be the first to post something!</div>
+        </div>`;
+        content.innerHTML = html;
+        return;
+      }
+
+      // grid of media posts + list of text posts.
+      // Only real images belong in the visual grid — video/music/link posts
+      // would render as broken 🖼 placeholders. They still appear in the
+      // text-post list below so nothing is hidden from Explore.
+      const isImage = (p) => {
+        const mt = String(p.media_type || '').toLowerCase();
+        if (mt.startsWith('image/')) return true;
+        // Legacy posts without media_type: sniff by extension.
+        if (!mt && /\.(jpe?g|png|gif|webp|avif|bmp)(\?|#|$)/i.test(String(p.media_data || ''))) return true;
+        return false;
+      };
+      const mediaPosts = posts.filter(isImage);
+      const textPosts = posts.filter(p => !isImage(p));
+
+      if (mediaPosts.length > 0) {
+        html += `<div class="social-grid">${mediaPosts.map(p => `
+          <div class="social-grid-item" onclick="Social.viewPostDetail(${p.id})">
+            <img src="${esc(p.media_data)}" alt="" loading="lazy"
+                 onerror="this.closest('.social-grid-item')?.remove()">
+            <div class="social-grid-overlay">
+              <span>❤️ ${p.reaction_count || 0}</span>
+              <span>💬 ${p.comment_count || 0}</span>
+            </div>
+          </div>
+        `).join('')}</div>`;
+      }
+      if (textPosts.length > 0) {
+        html += `<div class="social-feed">${textPosts.map(p => renderFeedPost(p)).join('')}</div>`;
+      }
+
+      content.innerHTML = html;
+    } catch {
+      content.innerHTML = '<div class="social-empty">Could not load explore</div>';
+    }
+  }
+
+  // ── PROFILE ─────────────────────────────────────────────────────────────
+  async function loadProfile(nickname) {
+    if (!nickname) nickname = State.user?.nickname;
+    _profileUser = nickname;
+    const content = document.getElementById('social-content');
+    content.innerHTML = `
+      <div class="social-profile fade-in">
+        <div class="sp-banner skel-block" style="height:140px;border-radius:0"></div>
+        <div class="sp-header" style="padding:12px 16px">
+          <div class="skel-circle" style="width:86px;height:86px;margin-top:-40px"></div>
+          <div style="flex:1;margin-left:14px">
+            <div class="skel-line" style="width:40%;height:16px;margin-bottom:8px"></div>
+            <div class="skel-line" style="width:55%;height:10px;margin-bottom:6px"></div>
+            <div class="skel-line" style="width:70%;height:10px"></div>
+          </div>
+        </div>
+        <div style="padding:16px">${skelList(3, 36)}</div>
+      </div>`;
+    try {
+      const res = await api('/api/social/profile/' + encodeURIComponent(nickname));
+      if (!res.ok) { content.innerHTML = '<div class="social-empty">User not found</div>'; return; }
+      const u = await res.json();
+      _profileData = u;
+
+      // Fallback: if self profile says no story but stories feed includes
+      // own active stories, patch story_status so ring remains visible.
+      if (u.is_self && (!u.story_status || !u.story_status.count)) {
+        try {
+          const sr = await api('/api/social/stories');
+          if (sr.ok) {
+            const sd = await sr.json();
+            const me = (sd.users || []).find(x => Number(x.user_id) === Number(u.id));
+            if (me && Array.isArray(me.stories) && me.stories.length > 0) {
+              u.story_status = {
+                count: me.stories.length,
+                has_unviewed: me.has_unviewed ? 1 : 0,
+              };
+            }
+          }
+        } catch {}
+      }
+
+      const isSelf = u.is_self;
+
+      // Private profile fallback — server returned a minimal payload.
+      if (u.private) {
+        const canRequest = u.friend_status === 'none' || !u.friend_status;
+        content.innerHTML = `
+        <div class="social-profile fade-in sp-private">
+          <div class="sp-banner" style="background:linear-gradient(135deg,#1a1320 0%,#0d0d12 60%)"></div>
+          <div class="sp-header">
+            <div class="sp-avatar">${UI.avatarEl(u.avatar, u.nickname, 86)}</div>
+            <div class="sp-info">
+              <div class="sp-name-row">
+                <span class="sp-nick">${esc(u.nickname)}</span>
+              </div>
+              <div class="sp-private-note">
+                <span class="sp-lock">🔒</span> This profile is private.
+                Only @${esc(u.nickname)}'s friends can see posts, media, and channels.
+              </div>
+              <div class="sp-private-actions">
+                ${canRequest
+                  ? `<button class="sp-action-btn primary" onclick="Social.addFriendFromProfile('${esc(u.nickname)}',this)">+ Add Friend</button>`
+                  : u.friend_status === 'sent'
+                    ? `<button class="sp-action-btn secondary" disabled>Friend Request Sent</button>`
+                    : u.friend_status === 'received'
+                      ? `<button class="sp-action-btn primary" onclick="Social.acceptFriendFromProfile('${esc(u.nickname)}',this)">Accept Friend</button>`
+                      : ''}
+                <button class="sp-action-btn secondary" onclick="Social.dmUser('${esc(u.nickname)}')">💬 Message</button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+        return;
+      }
+
+      content.innerHTML = `
+      <div class="social-profile fade-in">
+        <!-- Banner -->
+        <div class="sp-banner" style="background:${u.banner ? `url('${esc(u.banner)}') center/cover` : 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)'}">
+          ${isSelf ? `<button class="sp-edit-btn" onclick="showProfile()" title="Edit Profile">✏️</button>` : ''}
+        </div>
+
+        <!-- Header -->
+        <div class="sp-header">
+          <div class="sp-avatar ${u.story_status?.count ? (u.story_status.has_unviewed ? 'has-story unviewed' : 'has-story viewed') : ''}"
+               ${u.story_status?.count ? `onclick="Social.viewProfileStories('${esc(u.nickname)}',${u.id})" style="cursor:pointer" title="View stories"` : ''}>
+            ${UI.avatarEl(u.avatar, u.nickname, 86)}
+          </div>
+          <div class="sp-info">
+            <div class="sp-name-row">
+              <span class="sp-nick">${u.is_admin ? '<span style="color:#ffd700">👑</span> ' : ''}${esc(u.nickname)}${isSelf && u.profile_public === false ? ' <span class="sp-privacy-badge" title="Your profile is private — only friends can view it">🔒 Private</span>' : ''}</span>
+              ${isSelf
+                ? `<button class="sp-action-btn secondary" onclick="Social.openNewPost()">+ New Post</button>
+                   <button class="sp-share-btn" onclick="Social.shareProfile('${esc(u.nickname)}',this)" title="Copy share link">🔗 Share</button>`
+                : `<button class="sp-action-btn ${u.is_following ? 'secondary' : 'primary'}" id="sp-follow-btn" onclick="Social.toggleFollow('${esc(u.nickname)}',this)">${u.is_following ? 'Following' : 'Follow'}</button>
+                   ${u.friend_status === 'friends'
+                     ? `<button class="sp-action-btn secondary" disabled>Friends ✓</button>`
+                     : u.friend_status === 'sent'
+                     ? `<button class="sp-action-btn secondary" disabled>Requested</button>`
+                     : u.friend_status === 'received'
+                     ? `<button class="sp-action-btn primary" onclick="Social.acceptFriendFromProfile('${esc(u.nickname)}',this)">Accept Friend</button>`
+                     : `<button class="sp-action-btn secondary" onclick="Social.addFriendFromProfile('${esc(u.nickname)}',this)">+ Add Friend</button>`
+                   }
+                   <button class="sp-action-btn primary" onclick="Social.dmUser('${esc(u.nickname)}')" style="background:#4caf50;color:#000;font-weight:600">💬 Message</button>
+                   <button class="sp-share-btn" onclick="Social.shareProfile('${esc(u.nickname)}',this)" title="Copy share link">🔗 Share</button>`
+              }
+            </div>
+            <div class="sp-stats">
+              <span class="sp-stat"><strong>${u.post_count}</strong> posts</span>
+              <span class="sp-stat sp-stat-link" onclick="Social.showFollowers('${esc(u.nickname)}')"><strong>${u.follower_count}</strong> followers</span>
+              <span class="sp-stat sp-stat-link" onclick="Social.showFollowing('${esc(u.nickname)}')"><strong>${u.following_count}</strong> following</span>
+            </div>
+            ${u.bio ? `<div class="sp-bio">${esc(u.bio)}</div>` : ''}
+            ${u.status_msg || u.mood ? `<div class="sp-mood">${esc([u.status_msg, u.mood].filter(Boolean).join(' · '))}</div>` : ''}
+            ${u.tags?.length ? `<div class="sp-tags">${u.tags.map(t => `<span class="sp-tag">${esc(t)}</span>`).join('')}</div>` : ''}
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="sp-tabs">
+          <button class="sp-tab active" data-pt="wall" onclick="Social.switchProfileTab('wall',this)">📝 Wall</button>
+          <button class="sp-tab" data-pt="public-media" onclick="Social.switchProfileTab('public-media',this)">🌍 Public Media</button>
+          <button class="sp-tab" data-pt="music" onclick="Social.switchProfileTab('music',this)">🎵 Music</button>
+          ${isSelf ? `<button class="sp-tab" data-pt="private-media" onclick="Social.switchProfileTab('private-media',this)">🔒 Private Media</button>` : ''}
+          <button class="sp-tab" data-pt="channels" onclick="Social.switchProfileTab('channels',this)">📺 Channels</button>
+        </div>
+
+        <!-- Posts area -->
+        <div id="sp-posts" class="sp-posts">
+          <div class="social-loading">Loading posts…</div>
+        </div>
+      </div>`;
+
+      loadProfilePosts(nickname, 'wall');
+    } catch {
+      content.innerHTML = '<div class="social-empty">Could not load profile</div>';
+    }
+  }
+
+  async function loadProfilePosts(nickname, view) {
+    const container = document.getElementById('sp-posts');
+    if (!container) return;
+    try {
+      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts');
+      const data = await res.json();
+      if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load posts');
+      const posts = data.posts || [];
+
+      if (view === 'public-media') {
+        // Public media = image/video posts only. Music shares have their
+        // own tab — exclude them from this grid (their media_data is a URL,
+        // not an image blob, so they'd render as broken thumbs here).
+        const mediaPosts = posts.filter(p =>
+          p.media_data && p.privacy !== 'private' &&
+          p.media_type && (p.media_type.startsWith('image/') || p.media_type.startsWith('video/'))
+        );
+        if (mediaPosts.length === 0) {
+          container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+            <div style="font-size:36px;margin-bottom:8px">🌍</div>
+            <div style="font-size:15px;color:#888">No public media yet</div>
+          </div>`;
+          return;
+        }
+        container.innerHTML = `<div class="social-grid">${mediaPosts.map(p => {
+          const isVideo = p.media_type && p.media_type.startsWith('video/');
+          const thumb = isVideo
+            ? `<video src="${esc(p.media_data)}" muted preload="metadata"></video>`
+            : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
+          return `
+          <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
+            ${thumb}
+            ${isVideo ? `<span class="social-grid-video-ico">▶</span>` : ''}
+            <div class="social-grid-overlay">
+              <span>❤️ ${p.reaction_count || 0}</span>
+              <span>💬 ${p.comment_count || 0}</span>
+            </div>
+          </div>`;
+        }).join('')}</div>`;
+        return;
+      }
+
+      if (view === 'music') {
+        // Music-only view on profiles — station/playlist style.
+        const isMusic = (p) => {
+          const mt = (p.media_type || '').toLowerCase();
+          if (mt.startsWith('music/')) return true;
+          const md = String(p.media_data || '');
+          if (!md) return false;
+          return /youtube\.com|youtu\.be|open\.spotify\.com|soundcloud\.com/i.test(md);
+        };
+        const musicPosts = posts.filter(isMusic);
+        if (musicPosts.length === 0) {
+          container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+            <div style="font-size:36px;margin-bottom:8px;opacity:.7">♫</div>
+            <div style="font-size:15px;color:#888">No music shared yet</div>
+          </div>`;
+          return;
+        }
+        container.innerHTML = `<div class="social-feed sp-music-feed">${musicPosts.map(p => renderFeedPost(p)).join('')}</div>`;
+        return;
+      }
+
+      // Default "wall" view: all posts (text + media) the viewer may see
+      if (posts.length === 0) {
+        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+          <div style="font-size:36px;margin-bottom:8px">📝</div>
+          <div style="font-size:15px;color:#888">Nothing on the wall yet</div>
+        </div>`;
+        return;
+      }
+      container.innerHTML = `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
+    } catch {
+      container.innerHTML = '<div class="social-empty">Could not load posts</div>';
+    }
+  }
+
+  function switchProfileTab(tab, btn) {
+    document.querySelectorAll('.sp-tab').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    if (tab === 'private-media') loadProfileMedia(_profileUser);
+    else if (tab === 'channels') loadProfileChannels(_profileUser);
+    else loadProfilePosts(_profileUser, tab);
+  }
+
+  // ── MEDIA tab — channel media sent by this user ──────────────────────
+  async function loadProfileMedia(nickname) {
+    const container = document.getElementById('sp-posts');
+    if (!container) return;
+    container.innerHTML = '<div class="social-loading">Loading media…</div>';
+    try {
+      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/media');
+      const data = await res.json();
+      const items = data.media || [];
+      const isSelf = data.is_self;
+
+      if (items.length === 0) {
+        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+          <div style="font-size:36px;margin-bottom:8px">🖼️</div>
+          <div style="font-size:15px;color:#888">No private media yet</div>
+          <div style="color:#666;font-size:12px;margin-top:6px">Media you send in channels shows here — only you can see it until you hit <em>Make Public</em>.</div>
+        </div>`;
+        return;
+      }
+
+      container.innerHTML = `<div class="social-media-grid">${items.map(item => {
+        const isImg = item.media_type && (item.media_type.startsWith('image') || item.media_type.startsWith('video'));
+        const isAudio = item.media_type && item.media_type.startsWith('audio');
+        return `
+          <div class="social-media-item" data-msg-id="${item.id}">
+            <div class="social-media-thumb" onclick="Social.previewMedia(${item.id})">
+              ${isAudio
+                ? `<div class="social-media-audio-icon">🎵</div>`
+                : `<img src="/api/messages/media/${item.id}?thumb=1" alt="" loading="lazy" onerror="this.closest('.social-media-item')?.remove()">`
+              }
+              <div class="social-media-info">
+                <span>#${esc(item.room_name)}</span>
+                <span>${timeAgo(item.created_at)}</span>
+              </div>
+            </div>
+            ${isSelf ? `<button class="social-media-wall-btn" onclick="Social.moveToWall(${item.id},this)" title="Post to Public Media">🌍 Make Public</button>` : ''}
+          </div>`;
+      }).join('')}</div>`;
+    } catch {
+      container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+        <div style="font-size:36px;margin-bottom:8px">🖼️</div>
+        <div style="font-size:15px;color:#888">No media yet</div>
+      </div>`;
+    }
+  }
+
+  async function moveToWall(msgId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Posting…'; }
+    try {
+      const res = await api(`/api/social/profile/media/${msgId}/to-wall`, 'POST');
+      if (res.ok) {
+        UI.showToast('Posted to your wall!', 'success');
+        // Animate the tile out of the Private Media grid — the server has
+        // flipped `posted_to_wall`, so the next load won't return it either.
+        const tile = btn?.closest('.social-media-item');
+        if (tile) {
+          tile.style.transition = 'opacity .28s ease, transform .28s ease';
+          tile.style.opacity = '0';
+          tile.style.transform = 'scale(.9)';
+          setTimeout(() => {
+            tile.remove();
+            // If the grid is now empty, reload the tab so the empty-state
+            // hero appears instead of an empty blank area.
+            const grid = document.querySelector('.social-media-grid');
+            if (grid && !grid.children.length) loadProfileMedia(_profileUser);
+          }, 300);
+        }
+      } else {
+        const data = await res.json();
+        UI.showToast(data.error || 'Failed', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '🌍 Make Public'; }
+      }
+    } catch {
+      UI.showToast('Network error', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '🌍 Make Public'; }
+    }
+  }
+
+  // ── CHANNELS tab — channels created by this user ──────────────────────
+  async function loadProfileChannels(nickname) {
+    const container = document.getElementById('sp-posts');
+    if (!container) return;
+    container.innerHTML = '<div class="social-loading">Loading channels…</div>';
+    try {
+      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/channels');
+      const data = await res.json();
+      const channels = data.channels || [];
+
+      if (channels.length === 0) {
+        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+          <div style="font-size:36px;margin-bottom:8px">📺</div>
+          <div style="font-size:15px;color:#888">No channels created yet</div>
+        </div>`;
+        return;
+      }
+
+      const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
+      container.innerHTML = `<div class="sp-channels-list">${channels.map(ch => {
+        const iconHtml = ch.icon && ch.icon.startsWith('data:image')
+          ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+          : esc(ch.icon || '💬');
+        let tags = [];
+        try { tags = typeof ch.tags === 'string' ? JSON.parse(ch.tags) : (ch.tags || []); } catch {}
+        const desc = ch.directory_description || ch.description || '';
+        return `<div class="sp-channel-card" onclick="Social.viewChannelProfile(${jsStr(ch.name)})">
+          <div class="sp-channel-icon">${iconHtml}</div>
+          <div class="sp-channel-info">
+            <div class="sp-channel-name">${esc(ch.name)}</div>
+            <div class="sp-channel-meta">
+              ${ch.category ? `<span class="sp-channel-cat">${catIcons[ch.category]||''} ${esc(ch.category)}</span>` : ''}
+              <span>👥 ${ch.member_count || 0} members</span>
+              ${ch.is_public ? '<span style="color:#4caf50">🌐 Public</span>' : '<span style="color:#888">🔒 Private</span>'}
+            </div>
+            ${desc ? `<div class="sp-channel-desc">${esc(desc.substring(0, 120))}${desc.length > 120 ? '…' : ''}</div>` : ''}
+            ${tags.length ? `<div class="sp-channel-tags">${tags.slice(0, 4).map(t => `<span class="dir-tag">${esc(t)}</span>`).join('')}</div>` : ''}
+          </div>
+        </div>`;
+      }).join('')}</div>`;
+    } catch {
+      container.innerHTML = '<div class="social-empty">Could not load channels</div>';
+    }
+  }
+
+  async function previewMedia(msgId) {
+    try {
+      const res = await apiFetch(`/api/messages/media/${msgId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.media_type?.startsWith('image')) {
+        if (typeof openLightbox === 'function') openLightbox(data.media_data);
+      } else if (data.media_type?.startsWith('video')) {
+        if (typeof openLightbox === 'function') openLightbox(data.media_data);
+      }
+    } catch {}
+  }
+
+  // ── render a single feed post ──────────────────────────────────────────
+  function _formatPostContent(text) {
+    let html = esc(text);
+    // URLs — themed link (green accent, no default blue)
+    html = html.replace(/https?:\/\/[^\s<>"]+/g, url =>
+      `<a href="${url}" target="_blank" rel="noopener noreferrer" class="sf-link">${url}</a>`);
+    // @mentions
+    html = html.replace(/@(\w+)/g, (match, nick) =>
+      `<span class="sf-mention" onclick="Social.openProfile('${esc(nick)}')">@${esc(nick)}</span>`);
+    // #channel refs → clickable pill that jumps to the channel (same flow
+    // as in-channel #mentions: closes Social, auto-joins if public, shows
+    // a "deleted" toast if the channel is gone).
+    html = html.replace(/(^|[\s(\[>])#([a-zA-Z0-9][a-zA-Z0-9_-]{1,31})\b/g,
+      (m, pre, name) => `${pre}<span class="room-mention sf-room-mention" data-room="${esc(name)}" onclick="event.stopPropagation();if(window.Rooms&&Rooms.openChannelLink){Rooms.openChannelLink('${esc(name).replace(/'/g,"\\'")}')}">#${esc(name)}</span>`);
+    return html;
+  }
+
+  // ── Music share card ──────────────────────────────────────────────────
+  // Extracts the provider name from media_type ("music/youtube" → "youtube")
+  // and builds a clickable embed that opens the track in a new tab.
+  function _parseMusicTrack(url, provider) {
+    const u = String(url || '');
+    try {
+      // YouTube — normal + shortened
+      const ytFull = u.match(/[?&]v=([A-Za-z0-9_-]{6,})/);
+      const ytShort = u.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
+      const ytId = (ytFull && ytFull[1]) || (ytShort && ytShort[1]);
+      if (ytId && (!provider || provider === 'youtube')) {
+        return { provider: 'youtube', id: ytId,
+                 thumb: `https://img.youtube.com/vi/${ytId}/hqdefault.jpg`,
+                 embed: `https://www.youtube.com/embed/${ytId}` };
+      }
+      // Spotify — track/playlist/album (embed URL uses same path)
+      const sp = u.match(/open\.spotify\.com\/(track|playlist|album|episode)\/([A-Za-z0-9]+)/);
+      if (sp) {
+        return { provider: 'spotify', id: `${sp[1]}/${sp[2]}`, thumb: '',
+                 embed: `https://open.spotify.com/embed/${sp[1]}/${sp[2]}` };
+      }
+      // SoundCloud — URL is the ID, embed requires passing the URL.
+      if (u.includes('soundcloud.com')) {
+        return { provider: 'soundcloud', id: u, thumb: '',
+                 embed: `https://w.soundcloud.com/player/?url=${encodeURIComponent(u)}&color=%234caf50` };
+      }
+    } catch {}
+    return { provider: provider || 'link', id: u, thumb: '', embed: '' };
+  }
+
+  function _renderMusicCard(p) {
+    const prov = (p.media_type || '').split('/')[1] || 'link';
+    // media_data is the raw track URL. Early-2026 shares briefly encoded a
+    // JSON blob here ({url, title, room}) — unwrap those for compat before
+    // the DB-backed track_title/track_room fields took over.
+    let rawMediaData = p.media_data || '';
+    let metaTitle = p.track_title || '';
+    let metaRoom  = p.track_room  || '';
+    let trackUrl  = rawMediaData;
+    try {
+      if (rawMediaData.trim().startsWith('{')) {
+        const meta = JSON.parse(rawMediaData);
+        trackUrl  = meta.url  || rawMediaData;
+        if (!metaTitle) metaTitle = meta.title || '';
+        if (!metaRoom)  metaRoom  = meta.room  || '';
+      }
+    } catch {}
+    const t = _parseMusicTrack(trackUrl, prov);
+    // Try to pluck a title from the post content (we store the track title
+    // on its own line after "🎵 Now playing …: ").
+    let title = metaTitle;
+    let roomHint = metaRoom;
+    try {
+      // Legacy posts stored the track title as "🎵 Now playing in #room: <title>".
+      if (!title) {
+        const m = /🎵\s*(?:Now playing|Sharing)(?:\s+in\s+#(\S+))?:\s*(.+)/i.exec(p.content || '');
+        if (m) { roomHint = roomHint || m[1] || ''; title = (m[2] || '').trim(); }
+      }
+    } catch {}
+    // If we still don't have a title, derive a pretty fallback from the URL
+    // (e.g. "open.spotify.com/track/..." → "Spotify track") instead of
+    // showing the raw link.
+    if (!title) {
+      if (t.provider === 'youtube') title = 'YouTube track';
+      else if (t.provider === 'spotify') title = 'Spotify track';
+      else if (t.provider === 'soundcloud') title = 'SoundCloud track';
+      else title = 'Track';
+    }
+    const label = t.provider === 'youtube' ? 'YouTube'
+              : t.provider === 'spotify' ? 'Spotify'
+              : t.provider === 'soundcloud' ? 'SoundCloud' : 'Music';
+    const chipIcon = t.provider === 'youtube' ? '▶' : t.provider === 'spotify' ? '♫' : t.provider === 'soundcloud' ? '☁️' : '🎵';
+    const artBg = t.thumb ? `style="background-image:url('${esc(t.thumb)}')"` : '';
+    const sharer = p.nickname || p.author_nick || p.author || '';
+    const fullUrl = trackUrl;
+    // Tapping the cover always routes through the unified Music mini-player,
+    // regardless of which tab the card is shown in. If the track is already
+    // live, it toggles pause; otherwise it starts solo playback.
+    const toggleArgs = `${jsStr(fullUrl)},${jsStr(t.provider)},${jsStr(title)},${jsStr(sharer)}`;
+    const coverAction = `Social.toggleMusicCard(${toggleArgs})`;
+    // Ask Music whether this exact url is already the active track so we
+    // can render the right icon on first paint (before any state event).
+    let initialState = 'idle';
+    try {
+      const cur = (window.Music && typeof Music.getCurrent === 'function') ? Music.getCurrent() : null;
+      if (cur && cur.active && cur.url === fullUrl) {
+        initialState = cur.paused ? 'paused' : 'playing';
+      }
+    } catch {}
+    const stateCls = initialState === 'playing' ? 'is-playing'
+                   : initialState === 'paused'  ? 'is-playing is-paused' : '';
+    const playIcon = initialState === 'playing' ? '⏸'
+                   : initialState === 'paused'  ? '▶' : '▶';
+    const playTitle = initialState === 'playing' ? 'Pause'
+                    : initialState === 'paused'  ? 'Resume' : 'Play';
+    return `
+      <div class="sf-music-card ${stateCls}" data-provider="${esc(t.provider)}" data-track-url="${esc(fullUrl)}">
+        <div class="sfmc-cover ${t.thumb ? '' : 'no-art'}" ${artBg}
+             onclick="${coverAction}">
+          <span class="sfmc-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <button type="button" class="sfmc-play" title="${playTitle}" aria-label="${playTitle}"
+                  onclick="event.stopPropagation();${coverAction}">${playIcon}</button>
+          <span class="sfmc-provider-chip" data-provider="${esc(t.provider)}">${chipIcon} ${esc(label)}</span>
+        </div>
+        <div class="sfmc-body">
+          <div class="sfmc-title" title="${esc(title)}">${esc(title)}</div>
+          <div class="sfmc-sub">
+            ${roomHint ? `<span class="room-mention sfmc-room" data-room="${esc(roomHint)}" onclick="event.stopPropagation();if(window.Rooms&&Rooms.openChannelLink){Rooms.openChannelLink('${esc(roomHint).replace(/'/g,"\\'")}')}">#${esc(roomHint)}</span> · ` : ''}
+            <a href="${esc(fullUrl)}" target="_blank" rel="noopener noreferrer" class="sfmc-link">Open on ${esc(label)} ↗</a>
+          </div>
+          ${(() => {
+            const mood = (p.track_mood || '').toLowerCase().trim();
+            if (!mood) return '';
+            const moodMeta = {
+              chill:       { icon: '🎧', label: 'Chill',       color: '#6cc4ff' },
+              hype:        { icon: '🔥', label: 'Hype',        color: '#ff7a4d' },
+              focus:       { icon: '💼', label: 'Focus',       color: '#b289ff' },
+              party:       { icon: '🎉', label: 'Party',       color: '#ff5ea8' },
+              'late-night':{ icon: '🌙', label: 'Late-night',  color: '#8ca0ff' },
+              morning:     { icon: '🌅', label: 'Morning',     color: '#ffc55a' },
+              sad:         { icon: '🌧️', label: 'Sad',         color: '#88aac2' },
+              romance:     { icon: '💘', label: 'Romance',     color: '#ff8fb5' },
+            };
+            const mm = moodMeta[mood] || { icon: '🎵', label: mood, color: '#888' };
+            return `<span class="sfmc-mood" style="--mood:${mm.color}"
+                           onclick="event.stopPropagation();Social.filterMusicByMood('${esc(mood)}')"
+                           title="Filter ${mm.label} tracks">${mm.icon} ${esc(mm.label)}</span>`;
+          })()}
+          <div class="sfmc-status" aria-live="polite"></div>
+        </div>
+      </div>`;
+  }
+
+  // Opens an in-place embedded player for the given track.
+  function openMusicEmbed(embedUrl, provider, title) {
+    if (!embedUrl) return;
+    // Reuse the profile/media modal if present, otherwise build a simple one.
+    let modal = document.getElementById('social-music-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'social-music-modal';
+      modal.className = 'modal-overlay';
+      modal.innerHTML = `
+        <div class="modal-box" style="max-width:min(560px,96vw);padding:14px;background:#0f0f0f;border:1px solid #2a2a2a">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:10px">
+            <div id="smm-title" style="color:#e0e0e0;font-weight:600;font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+            <button class="modal-btn secondary" onclick="document.getElementById('social-music-modal').classList.add('hidden')" title="Close">✕</button>
+          </div>
+          <div id="smm-frame-wrap" style="aspect-ratio:16/9;width:100%;background:#000;border-radius:10px;overflow:hidden"></div>
+        </div>`;
+      document.body.appendChild(modal);
+    }
+    modal.querySelector('#smm-title').textContent = title || 'Music';
+    modal.querySelector('#smm-frame-wrap').innerHTML =
+      `<iframe src="${esc(embedUrl)}" allow="autoplay; encrypted-media; clipboard-write" allowfullscreen
+               style="width:100%;height:100%;border:0"></iframe>`;
+    modal.classList.remove('hidden');
+  }
+
+  // Music tab — filters the user's feed to music-share posts across
+  // followed users + self. Falls back to "no shares yet" with a prompt.
+  // Cache of last-rendered music posts so playMusicInTab can look up
+  // track metadata without re-parsing.
+  let _musicTabPosts = [];
+  // Currently selected mood filter on the Music tab ('' = all moods).
+  let _musicTabMood = '';
+  // Scope of the music feed: 'following' = own + followed, 'explore' = all public.
+  let _musicTabScope = 'following';
+  // Sort for Explore scope only: 'new' | 'trending' | 'top'.
+  let _musicTabSort = 'new';
+
+  function filterMusicByMood(mood) {
+    _musicTabMood = mood || '';
+    // Reload so backend applies mood filtering.
+    loadMusicTab();
+  }
+
+  function filterMusicByMoodSelect(selectEl) {
+    if (!selectEl) return;
+    const mood = selectEl.value || '';
+    const selected = selectEl.options && selectEl.selectedIndex >= 0
+      ? selectEl.options[selectEl.selectedIndex]
+      : null;
+    const color = (selected && selected.dataset && selected.dataset.color) || '#7e57c2';
+    const wrap = selectEl.closest('.msb-mood-select-wrap');
+    if (wrap) {
+      wrap.style.setProperty('--mood-dot', color);
+      wrap.classList.remove('dot-pulse');
+      // Reflow so the pulse reliably re-triggers on repeated changes.
+      void wrap.offsetWidth;
+      wrap.classList.add('dot-pulse');
+    }
+    filterMusicByMood(mood);
+  }
+
+  function switchMusicScope(scope) {
+    if (scope !== 'following' && scope !== 'explore') return;
+    if (_musicTabScope === scope) return;
+    _musicTabScope = scope;
+    _musicTabMood = '';
+    loadMusicTab();
+  }
+
+  function switchMusicSort(sort) {
+    if (!['new','trending','top'].includes(sort)) return;
+    if (_musicTabSort === sort) return;
+    _musicTabSort = sort;
+    loadMusicTab();
+  }
+
+  async function loadMusicTab() {
+    const content = document.getElementById('social-content');
+    if (!content) return;
+    content.innerHTML = '<div class="social-loading">Loading music shares…</div>';
+    try {
+      // Scope-driven fetch:
+      //   following → own + followed posts (via /feed)
+      //   explore   → all public posts (via /explore, sortable)
+      const moodQuery = _musicTabMood ? `&mood=${encodeURIComponent(_musicTabMood)}` : '';
+      let fetchRes;
+      if (_musicTabScope === 'explore') {
+        fetchRes = await api(`/api/social/explore?limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`).catch(() => null);
+      } else {
+        fetchRes = await api(`/api/social/feed?limit=100${moodQuery}`).catch(() => null);
+      }
+      const feedData = fetchRes && fetchRes.ok ? await fetchRes.json() : { posts: [] };
+      const seen = new Set();
+      const all = [];
+      for (const p of (feedData.posts || [])) {
+        if (!p || seen.has(p.id)) continue;
+        seen.add(p.id);
+        all.push(p);
+      }
+      const isMusic = (p) => {
+        const mt = (p.media_type || '').toLowerCase();
+        if (mt.startsWith('music/')) return true;
+        let md = String(p.media_data || '');
+        if (!md) return false;
+        // Unwrap JSON-encoded media_data ({url, title, room}) before URL test.
+        try {
+          if (md.trim().startsWith('{')) md = JSON.parse(md).url || md;
+        } catch {}
+        return /youtube\.com|youtu\.be|open\.spotify\.com|soundcloud\.com/i.test(md);
+      };
+      const musicPostsRaw = all.filter(isMusic);
+      // For 'new' and 'following' we sort by recency. For 'trending'/'top'
+      // we keep the server-provided order (ranking already applied).
+      const musicPosts = (_musicTabScope === 'explore' && _musicTabSort !== 'new')
+        ? musicPostsRaw
+        : musicPostsRaw.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+      _musicTabPosts = musicPosts;
+
+      const moodOrder = ['chill','hype','focus','party','late-night','morning','sad','romance'];
+      const moodMeta = {
+        chill:       { icon: '🎧', label: 'Chill',       color: '#6cc4ff' },
+        hype:        { icon: '🔥', label: 'Hype',        color: '#ff7a4d' },
+        focus:       { icon: '💼', label: 'Focus',       color: '#b289ff' },
+        party:       { icon: '🎉', label: 'Party',       color: '#ff5ea8' },
+        'late-night':{ icon: '🌙', label: 'Late-night',  color: '#8ca0ff' },
+        morning:     { icon: '🌅', label: 'Morning',     color: '#ffc55a' },
+        sad:         { icon: '🌧️', label: 'Sad',         color: '#88aac2' },
+        romance:     { icon: '💘', label: 'Romance',     color: '#ff8fb5' },
+      };
+      const activeMood = _musicTabMood || '';
+      const activeMoodColor = (activeMood && moodMeta[activeMood]) ? moodMeta[activeMood].color : '#7e57c2';
+      const scope = _musicTabScope;
+      const sort  = _musicTabSort;
+
+      const scopeBar = `
+        <div class="music-scope-bar">
+          <div class="msb-toggle" role="tablist" aria-label="Music feed scope">
+            <button class="msb-seg ${scope==='following'?'active':''}" role="tab"
+                    aria-selected="${scope==='following'}"
+                    onclick="Social.switchMusicScope('following')">
+              <span class="msb-seg-ico">👥</span><span>Following</span>
+            </button>
+            <button class="msb-seg ${scope==='explore'?'active':''}" role="tab"
+                    aria-selected="${scope==='explore'}"
+                    onclick="Social.switchMusicScope('explore')">
+              <span class="msb-seg-ico">🌐</span><span>Explore</span>
+            </button>
+          </div>
+          ${scope==='explore' ? `
+            <div class="msb-sort">
+              <button class="msb-sort-chip ${sort==='new'?'active':''}"       onclick="Social.switchMusicSort('new')">🆕 New</button>
+              <button class="msb-sort-chip ${sort==='trending'?'active':''}"  onclick="Social.switchMusicSort('trending')">🔥 Trending</button>
+              <button class="msb-sort-chip ${sort==='top'?'active':''}"       onclick="Social.switchMusicSort('top')">⭐ Top</button>
+              <label class="msb-mood-select-wrap" style="--mood-dot:${activeMoodColor}" title="Filter by mood">
+                <span class="msb-mood-dot"></span>
+                <select class="msb-mood-select" onchange="Social.filterMusicByMoodSelect(this)">
+                  <option value="">All moods</option>
+                  ${moodOrder.map(m => {
+                    const mm = moodMeta[m];
+                    return `<option value="${m}" data-color="${mm.color}" ${activeMood===m?'selected':''}>${mm.icon} ${mm.label}</option>`;
+                  }).join('')}
+                </select>
+              </label>
+            </div>` : ''}
+        </div>`;
+
+      const hero = `
+        <div class="music-tab-hero-v2">
+          <div class="mth2-head">
+            <div>
+              <div class="mth2-title">🎵 Share what you're vibing to</div>
+              <div class="mth2-sub">Drop a YouTube, Spotify or SoundCloud link — give it a mood and let the feed feel it.</div>
+            </div>
+            <button class="mth2-share-btn" onclick="Social.promptMusicShare()">
+              <span class="mth2-share-icon">＋</span>
+              <span>Share a track</span>
+            </button>
+          </div>
+          <div class="mth2-quick">
+            ${moodOrder.map(m => {
+              const mm = moodMeta[m];
+              return `<button class="mth2-mood" data-mood="${m}" style="--mood:${mm.color}"
+                             onclick="Social.promptMusicShare('${m}')"
+                             title="Share a ${mm.label.toLowerCase()} track">${mm.icon} ${mm.label}</button>`;
+            }).join('')}
+          </div>
+        </div>
+        ${scopeBar}`;
+
+      const filteredPosts = musicPosts;
+
+      let feed;
+      if (musicPosts.length === 0) {
+        if (activeMood) {
+          const moodLabel = (moodMeta[activeMood] && moodMeta[activeMood].label) || 'this mood';
+          feed = `<div class="social-empty">
+            <div style="font-size:36px;margin-bottom:8px;opacity:.7">🕳️</div>
+            <div style="font-size:15px;font-weight:600;margin-bottom:4px">No tracks in ${moodLabel}</div>
+            <div style="color:#888;font-size:13px">Try another mood or switch sort.</div>
+          </div>`;
+          content.innerHTML = hero + feed;
+          _applyMusicState();
+          return;
+        }
+        const emptyCopy = _musicTabScope === 'explore'
+          ? { t: 'No public music shares yet', s: 'When people start sharing tracks publicly, they\'ll show up here.' }
+          : { t: 'No music shares yet',        s: 'Tap <b>Share a track</b> above — or switch to <b>Explore</b> to hear what everyone\'s playing.' };
+        feed = `<div class="social-empty">
+          <div style="font-size:48px;margin-bottom:12px;opacity:.7">♫</div>
+          <div style="font-size:16px;font-weight:600;margin-bottom:6px">${emptyCopy.t}</div>
+          <div style="color:#888;font-size:14px;max-width:420px;margin:0 auto">${emptyCopy.s}</div>
+        </div>`;
+      } else if (filteredPosts.length === 0) {
+        feed = `<div class="social-empty">
+          <div style="font-size:36px;margin-bottom:8px;opacity:.7">🕳️</div>
+          <div style="font-size:15px;font-weight:600;margin-bottom:4px">No tracks in this mood yet</div>
+          <div style="color:#888;font-size:13px">${_musicTabScope === 'explore' ? 'Try another mood or switch sort.' : 'Be the first to share one.'}</div>
+        </div>`;
+      } else {
+        feed = `<div class="social-feed">${filteredPosts.map(p => renderFeedPost(p)).join('')}</div>`;
+      }
+      content.innerHTML = hero + feed;
+
+      // Paint current play state onto any card that matches, and refresh
+      // the "Now playing" strip at the top of the tab.
+      _applyMusicState();
+    } catch {
+      content.innerHTML = '<div class="social-empty">Could not load music shares</div>';
+    }
+  }
+
+  // Kick off playback of a social music card via the main FrogTalk Music
+  // module — same mini-player / mini-dock that music channels use.
+  // If the clicked track is ALREADY the live mini-player track, toggle
+  // pause/resume instead of restarting it.
+  function toggleMusicCard(url, provider, title, sharer) {
+    const theUrl = url || '';
+    if (!theUrl) return;
+    const M = window.Music;
+    if (!M || typeof M.playSolo !== 'function') {
+      window.open(theUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    try {
+      const cur = typeof M.getCurrent === 'function' ? M.getCurrent() : null;
+      if (cur && cur.active && cur.url === theUrl) {
+        // Same track — pause/resume only if provider supports it.
+        if (typeof M.togglePauseGlobal === 'function' && M.togglePauseGlobal()) return;
+        try { UI.showToast('This provider doesn\'t support pause — use the embed controls', 'info'); } catch {}
+        return;
+      }
+    } catch {}
+    const ok = M.playSolo({
+      url: theUrl,
+      title: title || 'Music',
+      provider: provider || '',
+      sharer: sharer || '',
+    });
+    if (!ok) return;
+    _applyMusicState();
+  }
+
+  // Back-compat: older markup calls Social.playMusicInTab(embed, provider, title, url, sharer, ...)
+  function playMusicInTab(embed, provider, title, url, sharer /*, roomHint */) {
+    void embed;
+    toggleMusicCard(url || '', provider || '', title || '', sharer || '');
+  }
+
+  // Paints is-playing / is-paused classes + status text on every visible
+  // music card, and refreshes the "Now playing" strip. Driven by the
+  // music:statechange event (see _wireMusicEvents) and called directly
+  // after a tab load.
+  function _applyMusicState() {
+    let cur = { active: false };
+    try {
+      if (window.Music && typeof Music.getCurrent === 'function') cur = Music.getCurrent();
+    } catch {}
+    // Cards
+    document.querySelectorAll('.sf-music-card').forEach(card => {
+      const url = card.getAttribute('data-track-url') || '';
+      const match = cur.active && url && url === cur.url;
+      card.classList.toggle('is-playing', !!match);
+      card.classList.toggle('is-paused', !!(match && cur.paused));
+      const btn = card.querySelector('.sfmc-play');
+      const status = card.querySelector('.sfmc-status');
+      if (btn) {
+        if (match && !cur.paused) { btn.textContent = '⏸'; btn.title = 'Pause'; btn.setAttribute('aria-label', 'Pause'); }
+        else if (match && cur.paused) { btn.textContent = '▶'; btn.title = 'Resume'; btn.setAttribute('aria-label', 'Resume'); }
+        else { btn.textContent = '▶'; btn.title = 'Play'; btn.setAttribute('aria-label', 'Play'); }
+      }
+      if (status) {
+        if (match && !cur.paused) status.textContent = '● Now playing in mini-player';
+        else if (match && cur.paused) status.textContent = '‖ Paused';
+        else status.textContent = '';
+      }
+    });
+    // Top "Now playing" strips — paint BOTH the persistent overlay strip
+    // (#social-nowplaying, visible on every tab) and the legacy in-tab one
+    // (#mt-nowplaying, if any cached HTML still has it).
+    const strips = [
+      document.getElementById('social-nowplaying'),
+      document.getElementById('mt-nowplaying'),
+    ].filter(Boolean);
+    for (const strip of strips) {
+      if (!cur.active) {
+        strip.hidden = true;
+        strip.innerHTML = '';
+        continue;
+      }
+        const labelMap = { youtube: 'YouTube', spotify: 'Spotify', soundcloud: 'SoundCloud' };
+        const providerLabel = labelMap[cur.provider] || 'Music';
+        const dotCls = cur.paused ? 'mtnp-dot paused' : 'mtnp-dot';
+        const stateTxt = cur.paused ? 'Paused' : 'Playing now';
+        const sharerTxt = cur.sharer ? `shared by @${esc(cur.sharer)}` : '';
+        const canPause = cur.provider === 'youtube' || cur.provider === 'soundcloud';
+        const pauseBtn = canPause
+          ? `<button class="mtnp-btn mtnp-pp" onclick="Social._toggleNowPlaying()"
+                    title="${cur.paused ? 'Resume' : 'Pause'}">${cur.paused ? '▶' : '⏸'}</button>`
+          : '';
+        // Middle action: share this track to the viewer's FrogSocial wall.
+        const shareBtn = `<button class="mtnp-btn mtnp-share" onclick="Music.shareToWall()"
+                                  title="Share this track to your wall" aria-label="Share to wall">↗</button>`;
+        strip.hidden = false;
+        strip.innerHTML = `
+          <span class="${dotCls}"></span>
+          <div class="mtnp-info">
+            <div class="mtnp-state">${stateTxt}<span class="mtnp-prov" data-provider="${esc(cur.provider)}">${esc(providerLabel)}</span>${sharerTxt ? `<span class="mtnp-sharer">${sharerTxt}</span>` : ''}</div>
+            <div class="mtnp-title" title="${esc(cur.title || '')}">${esc(cur.title || 'Music')}</div>
+          </div>
+          <div class="mtnp-ctrls">
+            ${pauseBtn}
+            ${shareBtn}
+            <button class="mtnp-btn mtnp-stop" onclick="Music.close()" title="Stop">✕</button>
+          </div>`;
+    }
+  }
+
+  function _toggleNowPlaying() {
+    if (window.Music && typeof Music.togglePauseGlobal === 'function') Music.togglePauseGlobal();
+  }
+
+
+  // One-time hookup of the music:statechange event so card UI stays in sync.
+  let _musicEventsWired = false;
+  function _wireMusicEvents() {
+    if (_musicEventsWired) return;
+    _musicEventsWired = true;
+    document.addEventListener('music:statechange', () => _applyMusicState());
+  }
+  _wireMusicEvents();
+
+  // Legacy alias (kept so older generated markup still functions).
+  function _syncMusicTabActiveCard() { _applyMusicState(); }
+
+  // Backwards-compat stubs — nothing pins a player anymore, but older
+  // callers (stashed shortcuts, cached HTML) may still reference these.
+  function stopMusicInTab() {
+    if (window.Music && typeof window.Music.close === 'function') window.Music.close();
+    document.querySelectorAll('.sf-music-card.is-playing').forEach(el => el.classList.remove('is-playing'));
+  }
+  function _openNowPlaying() { /* no-op: handled by mini-dock */ }
+
+  // ── Polished music-share modal ────────────────────────────────────────
+  // Shared by Social.promptMusicShare (URL entry) and Music.shareToWall
+  // (current-track share). Replaces every window.prompt/confirm flow.
+  //
+  //   Social.openMusicShareModal({
+  //     url, title, provider, caption, room,
+  //     lockUrl,              // true = show URL as read-only (current track)
+  //     onShare({caption, url, provider, privacy}) -> Promise
+  //   })
+  function openMusicShareModal(opts) {
+    opts = opts || {};
+    let modal = document.getElementById('music-share-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'music-share-modal';
+      modal.className = 'modal-overlay hidden';
+      modal.innerHTML = `
+        <div class="modal-box music-share-box" onclick="event.stopPropagation()">
+          <div class="msb-header">
+            <div class="msb-title">🎵 Share to your wall</div>
+            <button class="msb-close" onclick="Social._closeMusicShareModal()" title="Close">✕</button>
+          </div>
+          <div class="msb-preview" id="msb-preview">
+            <div class="msb-art" id="msb-art">🎵</div>
+            <div class="msb-meta">
+              <div class="msb-track-title" id="msb-track-title">—</div>
+              <div class="msb-track-sub" id="msb-track-sub"></div>
+            </div>
+          </div>
+          <div class="msb-field">
+            <label class="msb-label" for="msb-url">Track link</label>
+            <input type="url" id="msb-url" class="msb-input"
+                   placeholder="https://youtu.be/…  ·  open.spotify.com/track/…  ·  soundcloud.com/…"
+                   autocomplete="off" spellcheck="false" />
+            <div class="msb-hint" id="msb-hint">YouTube, Spotify, or SoundCloud links only.</div>
+          </div>
+          <div class="msb-field">
+            <label class="msb-label" for="msb-caption">Caption <span class="msb-optional">(optional)</span></label>
+            <textarea id="msb-caption" class="msb-textarea" rows="3" maxlength="500"
+                      placeholder="Say something about this track…"></textarea>
+            <div class="msb-counter"><span id="msb-counter-num">0</span>/500</div>
+          </div>
+          <div class="msb-field">
+            <label class="msb-label">Mood <span class="msb-optional">(what's the vibe?)</span></label>
+            <div class="msb-moods" id="msb-moods">
+              <button type="button" class="msb-mood" data-mood=""           style="--mood:#888">None</button>
+              <button type="button" class="msb-mood" data-mood="chill"      style="--mood:#6cc4ff">🎧 Chill</button>
+              <button type="button" class="msb-mood" data-mood="hype"       style="--mood:#ff7a4d">🔥 Hype</button>
+              <button type="button" class="msb-mood" data-mood="focus"      style="--mood:#b289ff">💼 Focus</button>
+              <button type="button" class="msb-mood" data-mood="party"      style="--mood:#ff5ea8">🎉 Party</button>
+              <button type="button" class="msb-mood" data-mood="late-night" style="--mood:#8ca0ff">🌙 Late-night</button>
+              <button type="button" class="msb-mood" data-mood="morning"    style="--mood:#ffc55a">🌅 Morning</button>
+              <button type="button" class="msb-mood" data-mood="sad"        style="--mood:#88aac2">🌧️ Sad</button>
+              <button type="button" class="msb-mood" data-mood="romance"    style="--mood:#ff8fb5">💘 Romance</button>
+            </div>
+          </div>
+          <div class="msb-field">
+            <label class="msb-label">Visibility</label>
+            <div class="msb-privacy" id="msb-privacy">
+              <button type="button" class="msb-priv active" data-v="public">🌍 Public</button>
+              <button type="button" class="msb-priv"        data-v="followers">👥 Followers</button>
+              <button type="button" class="msb-priv"        data-v="friends">🐸 Friends</button>
+            </div>
+          </div>
+          <div class="msb-footer">
+            <button class="modal-btn secondary" onclick="Social._closeMusicShareModal()">Cancel</button>
+            <button class="modal-btn primary" id="msb-submit" onclick="Social._submitMusicShare()">
+              <span class="msb-submit-icon">🐸</span> Share
+            </button>
+          </div>
+        </div>`;
+      // Click-outside closes (but only on the overlay, not the box)
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeMusicShareModal();
+      });
+      document.body.appendChild(modal);
+
+      // Wire live URL → preview + counter
+      const urlEl = modal.querySelector('#msb-url');
+      const capEl = modal.querySelector('#msb-caption');
+      urlEl.addEventListener('input', () => _refreshMusicSharePreview());
+      capEl.addEventListener('input', () => {
+        const n = modal.querySelector('#msb-counter-num');
+        if (n) n.textContent = String(capEl.value.length);
+      });
+      modal.querySelectorAll('.msb-priv').forEach(b => {
+        b.addEventListener('click', () => {
+          modal.querySelectorAll('.msb-priv').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+        });
+      });
+      modal.querySelectorAll('.msb-mood').forEach(b => {
+        b.addEventListener('click', () => {
+          modal.querySelectorAll('.msb-mood').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+        });
+      });
+      // Esc closes
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeMusicShareModal();
+      });
+    }
+
+    // Populate + store callback for submission
+    _musicShareOpts = opts;
+    const urlEl = modal.querySelector('#msb-url');
+    const capEl = modal.querySelector('#msb-caption');
+    const titleEl = modal.querySelector('.msb-title');
+    const submitBtn = modal.querySelector('#msb-submit');
+    urlEl.value = opts.url || '';
+    urlEl.readOnly = !!opts.lockUrl;
+    urlEl.classList.toggle('is-locked', !!opts.lockUrl);
+    capEl.value = opts.caption || '';
+    modal.querySelector('#msb-counter-num').textContent = String(capEl.value.length);
+    titleEl.textContent = opts.lockUrl ? '🎵 Share this track' : '🎵 Share a track';
+    submitBtn.innerHTML = opts.lockUrl
+      ? `<span class="msb-submit-icon">🐸</span> Share to wall`
+      : `<span class="msb-submit-icon">🐸</span> Share`;
+
+    // Reset privacy to public (or first available)
+    modal.querySelectorAll('.msb-priv').forEach((b, i) => b.classList.toggle('active', i === 0));
+    // Preselect mood — either the one the user clicked in the hero, or
+    // none.
+    const wantMood = String(opts.mood || '').toLowerCase();
+    modal.querySelectorAll('.msb-mood').forEach(b => {
+      b.classList.toggle('active', (b.dataset.mood || '') === wantMood);
+    });
+    // Ensure SOMETHING is active (default to "None" if we didn't match).
+    if (!modal.querySelector('.msb-mood.active')) {
+      modal.querySelector('.msb-mood[data-mood=""]')?.classList.add('active');
+    }
+
+    _refreshMusicSharePreview();
+    // Defensively re-attach to <body> every open. Something in the social
+    // overlay stacking context was clipping the modal under #social-overlay
+    // (z-index 600). A direct body child with our explicit z-index wins.
+    if (modal.parentNode !== document.body) {
+      document.body.appendChild(modal);
+    }
+    modal.style.zIndex = '10050';
+    modal.classList.remove('hidden');
+    // Focus the first editable field
+    setTimeout(() => {
+      if (opts.lockUrl) capEl.focus();
+      else urlEl.focus();
+    }, 50);
+  }
+
+  let _musicShareOpts = null;
+
+  function _refreshMusicSharePreview() {
+    const modal = document.getElementById('music-share-modal');
+    if (!modal) return;
+    const url = (modal.querySelector('#msb-url').value || '').trim();
+    const artEl = modal.querySelector('#msb-art');
+    const titleEl = modal.querySelector('#msb-track-title');
+    const subEl = modal.querySelector('#msb-track-sub');
+    const hint = modal.querySelector('#msb-hint');
+    const submit = modal.querySelector('#msb-submit');
+    const preview = modal.querySelector('#msb-preview');
+
+    if (!url) {
+      preview.classList.add('is-empty');
+      artEl.style.backgroundImage = '';
+      artEl.textContent = '🎵';
+      titleEl.textContent = 'Paste a link to preview';
+      subEl.textContent = '';
+      hint.className = 'msb-hint';
+      hint.textContent = 'YouTube, Spotify, or SoundCloud links only.';
+      if (submit) submit.disabled = !_musicShareOpts?.lockUrl;
+      return;
+    }
+    const t = _parseMusicTrack(url, (_musicShareOpts && _musicShareOpts.provider) || '');
+    preview.classList.remove('is-empty');
+    preview.setAttribute('data-provider', t.provider);
+    if (t.provider === 'link') {
+      artEl.style.backgroundImage = '';
+      artEl.textContent = '⚠';
+      titleEl.textContent = 'Unsupported link';
+      subEl.textContent = 'Only YouTube, Spotify, and SoundCloud are supported.';
+      hint.className = 'msb-hint is-error';
+      hint.textContent = 'This link is not a supported music provider.';
+      if (submit) submit.disabled = true;
+      return;
+    }
+    const label = t.provider === 'youtube' ? 'YouTube'
+                : t.provider === 'spotify' ? 'Spotify'
+                : t.provider === 'soundcloud' ? 'SoundCloud' : 'Music';
+    if (t.thumb) {
+      artEl.style.backgroundImage = `url('${t.thumb}')`;
+      artEl.textContent = '';
+    } else {
+      artEl.style.backgroundImage = '';
+      artEl.textContent = t.provider === 'spotify' ? '♫'
+                        : t.provider === 'soundcloud' ? '☁️' : '🎵';
+    }
+    const incomingTitle = (_musicShareOpts && _musicShareOpts.title) || '';
+    titleEl.textContent = incomingTitle || url;
+    const bits = [label];
+    if (_musicShareOpts && _musicShareOpts.room) bits.push(`from #${_musicShareOpts.room}`);
+    subEl.textContent = bits.join(' · ');
+    hint.className = 'msb-hint is-ok';
+    hint.textContent = `✓ Detected ${label}`;
+    if (submit) submit.disabled = false;
+  }
+
+  function closeMusicShareModal() {
+    const modal = document.getElementById('music-share-modal');
+    if (modal) modal.classList.add('hidden');
+    _musicShareOpts = null;
+  }
+  // Alias used by inline onclick handlers.
+  const _closeMusicShareModal = closeMusicShareModal;
+
+  async function _submitMusicShare() {
+    const modal = document.getElementById('music-share-modal');
+    if (!modal || !_musicShareOpts) return;
+    const url = (modal.querySelector('#msb-url').value || '').trim();
+    const caption = (modal.querySelector('#msb-caption').value || '').trim();
+    const privacyBtn = modal.querySelector('.msb-priv.active');
+    const privacy = (privacyBtn && privacyBtn.dataset.v) || 'public';
+    const moodBtn = modal.querySelector('.msb-mood.active');
+    const mood = (moodBtn && moodBtn.dataset.mood) || '';
+    const submit = modal.querySelector('#msb-submit');
+    if (!url) { UI.showToast('Please paste a link', 'error'); return; }
+    const t = _parseMusicTrack(url, (_musicShareOpts.provider) || '');
+    if (t.provider === 'link') {
+      UI.showToast('Only YouTube, Spotify, or SoundCloud links are supported', 'error');
+      return;
+    }
+    if (submit) { submit.disabled = true; submit.classList.add('is-loading'); }
+    try {
+      const opts = _musicShareOpts;
+      if (typeof opts.onShare === 'function') {
+        await opts.onShare({ caption, url, provider: t.provider, privacy, mood });
+      } else {
+        // Default: post directly via wall API. Track title + source room
+        // ride along as first-class fields so the rendered music card can
+        // show the real title.
+        const res = await api('/api/wall/posts', 'POST', {
+          content: caption,
+          media_data: url,
+          media_type: `music/${t.provider}`,
+          privacy,
+          allow_comments: true,
+          track_title: (_musicShareOpts && _musicShareOpts.title) || null,
+          track_room:  (_musicShareOpts && _musicShareOpts.room)  || null,
+          track_mood:  mood || null,
+        });
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody.error || `Server error ${res.status}`);
+        }
+      }
+      UI.showToast('🐸 Shared to your wall', 'success');
+      closeMusicShareModal();
+      if (_currentTab === 'music') loadMusicTab();
+      else if (_currentTab === 'feed') loadFeed();
+    } catch (e) {
+      UI.showToast(e.message || 'Could not share', 'error');
+      if (submit) { submit.disabled = false; submit.classList.remove('is-loading'); }
+    }
+  }
+
+  // Public entry point — opens the polished modal for a free-form URL share.
+  // An optional `mood` preselects one of the mood chips in the modal.
+  function promptMusicShare(mood) {
+    openMusicShareModal({ lockUrl: false, mood: mood || '' });
+  }
+
+  function renderFeedPost(p) {
+    const reactions = p.reactions || [];
+    const heartReaction = reactions.find(r => r.emoji === '❤️');
+    const heartCount = heartReaction ? heartReaction.count : 0;
+    const iLiked = heartReaction && heartReaction.users && heartReaction.users.includes(State.user?.nickname);
+
+    let mediaHtml = '';
+    let isMusicPost = false;
+    if (p.media_data && p.media_type) {
+      if (p.media_type.startsWith('image/')) {
+        mediaHtml = `<div class="sf-media"><img src="${esc(p.media_data)}" alt="" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" onerror="this.closest('.sf-media')?.remove()"></div>`;
+      } else if (p.media_type.startsWith('video/')) {
+        mediaHtml = `<div class="sf-media"><video src="${esc(p.media_data)}" controls onerror="this.closest('.sf-media')?.remove()"></video></div>`;
+      } else if (p.media_type.startsWith('music/')) {
+        mediaHtml = _renderMusicCard(p);
+        isMusicPost = true;
+      }
+    }
+
+    // For music posts, strip legacy auto-generated lines (emoji prefix +
+    // standalone URL) — the card already shows that info. Leaves only
+    // the user's real caption text.
+    let postText = p.content || '';
+    if (isMusicPost && postText) {
+      postText = postText
+        .split(/\r?\n/)
+        .filter(line => {
+          const t = line.trim();
+          if (!t) return false;
+          if (/^🎵\s*(Now playing|Sharing)/i.test(t)) return false;
+          // Drop lines that are just the shared URL (or any bare URL).
+          if (/^https?:\/\/\S+$/i.test(t)) return false;
+          return true;
+        })
+        .join('\n')
+        .trim();
+    }
+
+    const otherReactions = reactions.filter(r => r.emoji !== '❤️');
+    const rxHtml = otherReactions.map(r =>
+      `<button class="sf-reaction" onclick="Social.reactPost(${p.id},'${esc(r.emoji)}')">${r.emoji} ${r.count}</button>`
+    ).join('');
+
+    return `
+    <div class="sf-post" data-post-id="${p.id}">
+      <div class="sf-post-header">
+        <div class="sf-post-avatar" onclick="Social.openProfile('${esc(p.nickname)}')">${UI.avatarEl(p.avatar, p.nickname, 36)}</div>
+        <div class="sf-post-info" onclick="Social.openProfile('${esc(p.nickname)}')">
+          <span class="sf-post-nick">${esc(p.nickname)}</span>
+          <span class="sf-post-time">${timeAgo(p.created_at)}</span>
+        </div>
+        <button class="sf-post-menu" title="More options" aria-label="Post options"
+          data-nick="${esc(p.nickname)}" data-uid="${p.user_id}" data-pid="${p.id}"
+          onclick="event.stopPropagation();Social.openPostMenu(this)">⋯</button>
+      </div>
+      ${postText ? `<div class="sf-post-text ${isMusicPost ? 'is-music-caption' : ''}">${_formatPostContent(postText)}</div>` : ''}
+      ${mediaHtml}
+      <div class="sf-post-actions">
+        <button type="button" class="sf-like ${iLiked ? 'liked' : ''}" onclick="Social.reactPost(event, ${p.id},'❤️')">
+          ${iLiked ? '❤️' : '🤍'} <span>${heartCount}</span>
+        </button>
+        <button type="button" class="sf-comment-btn" onclick="Social.toggleComments(event, ${p.id})">💬 ${p.comment_count || 0}</button>
+        <button type="button" class="sf-react-btn" onclick="Social.showReactPicker(event, ${p.id})">😊</button>
+        ${rxHtml}
+      </div>
+      <div class="sf-comments" id="sf-comments-${p.id}" style="display:none"></div>
+    </div>`;
+  }
+
+  // ── interactions ────────────────────────────────────────────────────────
+  async function toggleFollow(nickname, btn) {
+    const isFollowing = btn?.textContent?.trim() === 'Following' || btn?.textContent?.trim() === 'Unfollow';
+    const method = isFollowing ? 'DELETE' : 'POST';
+    try {
+      const res = await api('/api/social/follow/' + encodeURIComponent(nickname), method);
+      const data = await res.json();
+      if (btn) {
+        if (data.following) {
+          btn.textContent = 'Following';
+          btn.classList.remove('primary');
+          btn.classList.add('secondary');
+        } else {
+          btn.textContent = 'Follow';
+          btn.classList.remove('secondary');
+          btn.classList.add('primary');
+        }
+      }
+      // Update follower count on profile if visible
+      const fcEl = document.querySelector('.sp-stats strong');
+      if (_currentTab === 'profile' && _profileUser === nickname) {
+        loadProfile(nickname); // reload profile stats
+      }
+    } catch {}
+  }
+
+  async function reactPost(ev, postId, emoji) {
+    try {
+      ev?.preventDefault?.();
+      ev?.stopPropagation?.();
+    } catch {}
+    const postEl = document.querySelector(`.sf-post[data-post-id="${postId}"]`);
+    const likeBtn = emoji === '❤️' ? postEl?.querySelector('.sf-like') : null;
+    const likeCountEl = likeBtn?.querySelector('span');
+    const wasLiked = likeBtn?.classList.contains('liked');
+    const prevCount = likeCountEl ? Number(likeCountEl.textContent || '0') : 0;
+    // Optimistic UI feedback so likes feel instant — no full reload needed.
+    if (likeBtn && likeCountEl) {
+      likeBtn.classList.toggle('liked', !wasLiked);
+      likeBtn.firstChild.textContent = !wasLiked ? '❤️ ' : '🤍 ';
+      likeCountEl.textContent = String(Math.max(0, prevCount + (!wasLiked ? 1 : -1)));
+    }
+    try {
+      if (likeBtn) likeBtn.classList.add('is-pending');
+      const res = await api(`/api/wall/posts/${postId}/reactions`, 'POST', { emoji });
+      if (!res.ok) throw new Error('Failed to react');
+      const data = await res.json();
+      // Update just this post's reactions inline, don't reload entire tab
+      if (likeBtn && likeCountEl && data.count !== undefined) {
+        likeCountEl.textContent = String(data.count);
+      }
+    } catch {
+      // Revert optimistic state on failure — keep old UI until user tries again
+      if (likeBtn && likeCountEl) {
+        likeBtn.classList.toggle('liked', !!wasLiked);
+        likeBtn.firstChild.textContent = wasLiked ? '❤️ ' : '🤍 ';
+        likeCountEl.textContent = String(prevCount);
+      }
+    } finally {
+      if (likeBtn) likeBtn.classList.remove('is-pending');
+    }
+  }
+
+  function showReactPicker(ev, postId) {
+    try {
+      ev?.preventDefault?.();
+      ev?.stopPropagation?.();
+    } catch {}
+    const postEl = document.querySelector(`[data-post-id="${postId}"]`);
+    if (!postEl) return;
+    const old = postEl.querySelector('.sf-react-picker');
+    if (old) { old.remove(); return; }
+    const emojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏','💯','✨'];
+    const picker = document.createElement('div');
+    picker.className = 'sf-react-picker';
+    picker.innerHTML = emojis.map(e =>
+      `<button type="button" onclick="Social.reactPost(event, ${postId},'${e}');this.parentElement.remove()">${e}</button>`
+    ).join('');
+    postEl.querySelector('.sf-post-actions').after(picker);
+  }
+
+  async function toggleComments(ev, postId) {
+    try {
+      ev?.preventDefault?.();
+      ev?.stopPropagation?.();
+    } catch {}
+    const el = document.getElementById(`sf-comments-${postId}`);
+    if (!el) return;
+    if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.innerHTML = '<div style="color:#666;font-size:12px;padding:8px 0">Loading…</div>';
+    try {
+      const res = await api(`/api/wall/posts/${postId}/comments`);
+      const data = await res.json();
+      const comments = data.comments || [];
+      let html = '';
+      if (comments.length === 0) {
+        html += '<div style="color:#666;font-size:12px;padding:8px 0;text-align:center">No comments yet</div>';
+      } else {
+        html += comments.map(c => `
+          <div class="sf-comment">
+            <div class="sf-comment-avatar" onclick="Social.openProfile('${esc(c.nickname)}')">${UI.avatarEl(c.avatar, c.nickname, 24)}</div>
+            <div class="sf-comment-body">
+              <span class="sf-comment-nick" onclick="Social.openProfile('${esc(c.nickname)}')">${esc(c.nickname)}</span>
+              <span class="sf-comment-text">${esc(c.content)}</span>
+              <span class="sf-comment-time">${timeAgo(c.created_at)}</span>
+            </div>
+            ${c.user_id === State.user?.id ? `<button class="sf-comment-del" onclick="Social.deleteComment(${c.id},${postId})">✕</button>` : ''}
+          </div>
+        `).join('');
+      }
+      html += `
+        <div class="sf-comment-input">
+          <input id="sf-ci-${postId}" placeholder="Add a comment…" onkeydown="if(event.key==='Enter'){Social.submitComment(${postId})}">
+          <button onclick="Social.submitComment(${postId})">Post</button>
+        </div>`;
+      el.innerHTML = html;
+    } catch {
+      el.innerHTML = '<div style="color:#666;font-size:12px;padding:8px">Could not load comments</div>';
+    }
+  }
+
+  async function submitComment(postId) {
+    const input = document.getElementById(`sf-ci-${postId}`);
+    if (!input || !input.value.trim()) return;
+    try {
+      const res = await api(`/api/wall/posts/${postId}/comments`, 'POST', { content: input.value.trim() });
+      if (res.ok) {
+        input.value = '';
+        toggleComments(postId); // close
+        toggleComments(postId); // reopen & reload
+      }
+    } catch {}
+  }
+
+  async function deleteComment(commentId, postId) {
+    try {
+      await api(`/api/wall/comments/${commentId}`, 'DELETE');
+      toggleComments(postId);
+      toggleComments(postId);
+    } catch {}
+  }
+
+  async function deletePost(postId) {
+    if (!confirm('Delete this post?')) return;
+    try {
+      await api(`/api/wall/posts/${postId}`, 'DELETE');
+      if (_currentTab === 'feed') loadFeed();
+      else if (_currentTab === 'explore') loadExplore();
+      else if (_currentTab === 'profile') loadProfile(_profileUser);
+    } catch {}
+  }
+
+  // Post "⋯" menu — shared for own posts (Delete) and others (Block / Report / Profile / DM)
+  function openPostMenu(btn) {
+    const nick = btn.dataset.nick;
+    const uid  = +btn.dataset.uid;
+    const pid  = +btn.dataset.pid;
+    const isOwn = uid === State.user?.id;
+
+    const items = [];
+    items.push({ icon: '👤', label: `View @${nick}`, onclick: () => openProfile(nick) });
+    if (!isOwn) {
+      items.push({ icon: '✉️', label: 'Send message', onclick: () => dmUser(nick) });
+      items.push({ icon: '🚫', label: `Block @${nick}`, danger: true, onclick: () => blockUserFromSocial(nick) });
+    }
+    if (isOwn) {
+      items.push({ icon: '🗑️', label: 'Delete post', danger: true, onclick: () => deletePost(pid) });
+    }
+    if (typeof showActionSheet === 'function') {
+      showActionSheet(`Post by @${nick}`, items);
+    } else {
+      // Fallback: simple confirm-based menu
+      if (isOwn && confirm('Delete this post?')) deletePost(pid);
+      else if (!isOwn && confirm(`Block @${nick}?`)) blockUserFromSocial(nick);
+    }
+  }
+
+  async function blockUserFromSocial(nickname) {
+    if (!nickname) return;
+    if (!confirm(`Block @${nickname}?\n\nThey won't be able to message or interact with you — across chat AND Frog Social.`)) return;
+    try {
+      const r = await apiFetch(`/api/friends/block/${encodeURIComponent(nickname)}`, 'POST');
+      if (r.ok) {
+        UI.showToast(`@${nickname} blocked`);
+        if (typeof refreshBlockedCache === 'function') refreshBlockedCache();
+        if (_currentTab === 'feed') loadFeed();
+        else if (_currentTab === 'explore') loadExplore();
+        else if (_currentTab === 'profile' && _profileUser === nickname) close();
+      } else {
+        const d = await r.json().catch(() => ({}));
+        UI.showToast(d.error || 'Failed to block user', 'error');
+      }
+    } catch {
+      UI.showToast('Failed to block user', 'error');
+    }
+  }
+
+  function dmUser(nickname) {
+    close();
+    if (typeof openDMWithNick === 'function') openDMWithNick(nickname);
+    else if (typeof Rooms !== 'undefined') Rooms.openDM(nickname);
+  }
+
+  // Build a shareable URL that opens the app directly to this profile.
+  // Uses `?profile=<nick>` which app.js already handles post-login.
+  function profileShareUrl(nickname) {
+    try {
+      const u = new URL(window.location.origin);
+      u.searchParams.set('profile', nickname);
+      return u.toString();
+    } catch {
+      return `${window.location.origin}/?profile=${encodeURIComponent(nickname)}`;
+    }
+  }
+
+  // Share/copy a profile link. Uses the native share sheet when available
+  // (mobile / PWAs), otherwise falls back to clipboard copy + toast.
+  async function shareProfile(nickname, btn) {
+    const url = profileShareUrl(nickname);
+    // If the current user is looking at their own private profile, warn
+    // them that friends-only viewers won't actually be able to see it.
+    const isSelfPrivate = _profileData
+      && _profileData.nickname === nickname
+      && _profileData.is_self
+      && _profileData.profile_public === false;
+    if (isSelfPrivate) {
+      try { UI.showToast('Your profile is private \u2014 only friends will see it via this link', 'info'); } catch {}
+    }
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `@${nickname} on FrogTalk`,
+          text: `Check out @${nickname} on FrogTalk`,
+          url,
+        });
+        return;
+      }
+    } catch (e) {
+      // User cancelled — fall through to clipboard.
+      if (e && e.name === 'AbortError') return;
+    }
+    const ok = await UI.copy(url);
+    if (ok) {
+      if (btn) {
+        const orig = btn.innerHTML;
+        btn.classList.add('is-copied');
+        btn.innerHTML = '\u2713 Copied';
+        setTimeout(() => { btn.classList.remove('is-copied'); btn.innerHTML = orig; }, 1600);
+      }
+      try { UI.showToast('Profile link copied to clipboard', 'success'); } catch {}
+    } else {
+      // Clipboard API + execCommand both failed — last-resort prompt.
+      window.prompt('Copy this profile link:', url);
+    }
+  }
+
+  async function addFriendFromProfile(nickname, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    const r = await apiFetch('/api/friends/request/' + encodeURIComponent(nickname), 'POST');
+    if (r.ok) {
+      if (btn) { btn.textContent = 'Requested'; }
+      UI.showToast('Friend request sent to ' + nickname, 'success');
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = '+ Add Friend'; }
+      const d = await r.json().catch(() => ({}));
+      UI.showToast(d.detail || 'Could not send request', 'error');
+    }
+  }
+
+  async function acceptFriendFromProfile(nickname, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    const r = await apiFetch('/api/friends/accept/' + encodeURIComponent(nickname), 'POST');
+    if (r.ok) {
+      if (btn) { btn.textContent = 'Friends ✓'; }
+      UI.showToast(nickname + ' is now your friend! 🐸', 'success');
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Accept Friend'; }
+      UI.showToast('Could not accept request', 'error');
+    }
+  }
+
+  // ── new post modal ──────────────────────────────────────────────────────
+  let _newPostMedia = null;
+  let _newPostMediaType = null;
+  let _newPostOrigMedia = null; // original unfiltered image
+  let _newPostPrivacy = 'public';
+  let _newPostAllowComments = true;
+  let _filterState = { brightness: 100, contrast: 100, saturate: 100 };
+
+  const _filterPresets = {
+    none:     { brightness: 100, contrast: 100, saturate: 100 },
+    warm:     { brightness: 105, contrast: 105, saturate: 130 },
+    cool:     { brightness: 100, contrast: 110, saturate: 80 },
+    vintage:  { brightness: 110, contrast: 90, saturate: 70 },
+    dramatic: { brightness: 90, contrast: 140, saturate: 110 },
+    fade:     { brightness: 115, contrast: 85, saturate: 80 },
+    bw:       { brightness: 105, contrast: 120, saturate: 0 },
+  };
+
+  function openNewPost() {
+    _newPostMedia = null;
+    _newPostMediaType = null;
+    _newPostOrigMedia = null;
+    _newPostPrivacy = (localStorage.getItem('ft_default_post_privacy') || 'private');
+    _newPostAllowComments = (localStorage.getItem('ft_default_allow_comments') !== '0');
+    _filterState = { brightness: 100, contrast: 100, saturate: 100 };
+    document.getElementById('social-new-post').classList.remove('hidden');
+    document.getElementById('snp-text').value = '';
+    document.getElementById('snp-media-preview').style.display = 'none';
+    resetFilterUI();
+    setPostPrivacy(_newPostPrivacy);
+    const cmt = document.getElementById('snp-allow-comments');
+    if (cmt) cmt.checked = _newPostAllowComments;
+    // Sync comments chip label to saved default (without flipping value)
+    const cchip = document.getElementById('snp-comments-chip');
+    if (cchip) {
+      cchip.textContent = _newPostAllowComments ? '💬 On' : '💬 Off';
+      cchip.classList.toggle('on', _newPostAllowComments);
+      cchip.classList.toggle('off', !_newPostAllowComments);
+    }
+    setTimeout(() => document.getElementById('snp-text').focus(), 100);
+  }
+
+  function closeNewPost() {
+    document.getElementById('social-new-post').classList.add('hidden');
+  }
+
+  function handleNewPostMedia(input) {
+    const file = input.files[0];
+    if (!file) return;
+    if (file.size > 100 * 1024 * 1024) { UI.showToast('File too large (max 100MB)', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = e => {
+      _newPostMedia = e.target.result;
+      _newPostOrigMedia = e.target.result;
+      _newPostMediaType = file.type;
+      _filterState = { brightness: 100, contrast: 100, saturate: 100 };
+      resetFilterUI();
+      const img = document.getElementById('snp-media-img');
+      if (img) { img.src = e.target.result; document.getElementById('snp-media-preview').style.display = 'block'; }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function openNewPostCamera() {
+    if (typeof openCameraCapture !== 'function') { UI.showToast('Camera unavailable', 'error'); return; }
+    openCameraCapture((dataUrl) => {
+      _newPostMedia = dataUrl;
+      _newPostOrigMedia = dataUrl;
+      _newPostMediaType = 'image/jpeg';
+      _filterState = { brightness: 100, contrast: 100, saturate: 100 };
+      resetFilterUI();
+      const img = document.getElementById('snp-media-img');
+      if (img) { img.src = dataUrl; document.getElementById('snp-media-preview').style.display = 'block'; }
+    });
+  }
+
+  function clearNewPostMedia() {
+    _newPostMedia = null;
+    _newPostMediaType = null;
+    _newPostOrigMedia = null;
+    _filterState = { brightness: 100, contrast: 100, saturate: 100 };
+    resetFilterUI();
+    document.getElementById('snp-media-preview').style.display = 'none';
+    const fi = document.getElementById('snp-media-input');
+    if (fi) fi.value = '';
+  }
+
+  function resetFilterUI() {
+    document.querySelectorAll('#snp-filters .filter-btn').forEach(b => b.classList.remove('active'));
+    const none = document.querySelector('#snp-filters .filter-btn');
+    if (none) none.classList.add('active');
+    document.querySelectorAll('#snp-filters input[type=range]').forEach(s => { s.value = 100; });
+  }
+
+  function applyFilter(preset) {
+    if (!_newPostOrigMedia || !_newPostMediaType?.startsWith('image/')) return;
+    const p = _filterPresets[preset] || _filterPresets.none;
+    _filterState = { ...p };
+    // Update sliders
+    document.querySelectorAll('#snp-filters input[data-filter]').forEach(s => {
+      if (_filterState[s.dataset.filter] !== undefined) s.value = _filterState[s.dataset.filter];
+    });
+    // Update active button
+    document.querySelectorAll('#snp-filters .filter-btn').forEach(b => b.classList.remove('active'));
+    const clicked = [...document.querySelectorAll('#snp-filters .filter-btn')].find(b => b.textContent.trim().toLowerCase().replace('&', '').replace('b&w','bw') === preset || b.onclick?.toString().includes(`'${preset}'`));
+    if (clicked) clicked.classList.add('active');
+    applyFilterToPreview();
+  }
+
+  function updateFilter(prop, val) {
+    if (!_newPostOrigMedia || !_newPostMediaType?.startsWith('image/')) return;
+    _filterState[prop] = parseInt(val);
+    // Clear active preset button
+    document.querySelectorAll('#snp-filters .filter-btn').forEach(b => b.classList.remove('active'));
+    applyFilterToPreview();
+  }
+
+  function applyFilterToPreview() {
+    const img = document.getElementById('snp-media-img');
+    if (!img) return;
+    const filterStr = `brightness(${_filterState.brightness}%) contrast(${_filterState.contrast}%) saturate(${_filterState.saturate}%)`;
+    img.style.filter = filterStr;
+  }
+
+  function setPostPrivacy(p) {
+    if (!['public', 'followers', 'friends', 'private'].includes(p)) p = 'private';
+    _newPostPrivacy = p;
+    localStorage.setItem('ft_default_post_privacy', p);
+    // Update inline chip label + icon
+    const chip = document.getElementById('snp-priv-chip');
+    if (chip) {
+      const map = { public: '🌍 Public', followers: '👥 Followers', friends: '🤝 Friends', private: '🔒 Only me' };
+      chip.textContent = map[p];
+      chip.classList.toggle('on', p !== 'public');
+    }
+    // Legacy pill buttons (if any remain) — keep compatible
+    ['public', 'followers', 'friends', 'private'].forEach(k => {
+      const btn = document.getElementById('snp-priv-' + k);
+      if (!btn) return;
+      if (k === p) {
+        btn.style.background = 'linear-gradient(135deg,#4caf50,#2e7d32)';
+        btn.style.color = '#000';
+        btn.style.borderColor = '#4caf50';
+      } else {
+        btn.style.background = '#1a1a1a';
+        btn.style.color = '#ddd';
+        btn.style.borderColor = '#2a2a2a';
+      }
+    });
+  }
+
+  function cyclePostPrivacy() {
+    const order = ['private', 'friends', 'followers', 'public'];
+    const next = order[(order.indexOf(_newPostPrivacy) + 1) % order.length];
+    setPostPrivacy(next);
+  }
+
+  function toggleAllowComments() {
+    _newPostAllowComments = !_newPostAllowComments;
+    localStorage.setItem('ft_default_allow_comments', _newPostAllowComments ? '1' : '0');
+    const cb = document.getElementById('snp-allow-comments');
+    if (cb) cb.checked = _newPostAllowComments;
+    const chip = document.getElementById('snp-comments-chip');
+    if (chip) {
+      chip.textContent = _newPostAllowComments ? '💬 On' : '💬 Off';
+      chip.classList.toggle('on', _newPostAllowComments);
+      chip.classList.toggle('off', !_newPostAllowComments);
+    }
+  }
+
+  function applyFilterToImage(dataUrl) {
+    // Apply CSS filters to canvas and return filtered data URL
+    return new Promise(resolve => {
+      const { brightness, contrast, saturate } = _filterState;
+      if (brightness === 100 && contrast === 100 && saturate === 100) {
+        resolve(dataUrl);
+        return;
+      }
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        const ctx = c.getContext('2d');
+        ctx.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturate}%)`;
+        ctx.drawImage(img, 0, 0);
+        resolve(c.toDataURL('image/jpeg', 0.92));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
+  async function submitNewPost() {
+    const text = document.getElementById('snp-text').value.trim();
+    if (!text && !_newPostMedia) return;
+    const cmtEl = document.getElementById('snp-allow-comments');
+    const allowCmt = cmtEl ? !!cmtEl.checked : _newPostAllowComments;
+    localStorage.setItem('ft_default_allow_comments', allowCmt ? '1' : '0');
+    try {
+      const body = {
+        content: text || '',
+        privacy: _newPostPrivacy || 'public',
+        allow_comments: allowCmt,
+      };
+      if (_newPostMedia && _newPostMediaType?.startsWith('image/') && _newPostOrigMedia) {
+        body.media_data = await applyFilterToImage(_newPostOrigMedia);
+        body.media_type = 'image/jpeg';
+      } else if (_newPostMedia) {
+        body.media_data = _newPostMedia;
+        body.media_type = _newPostMediaType;
+      }
+      const res = await api('/api/wall/posts', 'POST', body);
+      if (res.ok) {
+        closeNewPost();
+        UI.showToast('Posted!', 'success');
+        if (_currentTab === 'profile') loadProfile(State.user?.nickname);
+        else if (_currentTab === 'feed') loadFeed();
+      } else {
+        const data = await res.json();
+        UI.showToast(data.error || 'Could not post', 'error');
+      }
+    } catch { UI.showToast('Network error', 'error'); }
+  }
+
+  // ── followers/following list popup ──────────────────────────────────────
+  async function showFollowers(nickname) {
+    showUserList('Followers', `/api/social/profile/${encodeURIComponent(nickname)}/followers`);
+  }
+
+  async function showFollowing(nickname) {
+    showUserList('Following', `/api/social/profile/${encodeURIComponent(nickname)}/following`);
+  }
+
+  async function showUserList(title, url) {
+    const overlay = document.getElementById('social-userlist');
+    const titleEl = document.getElementById('sul-title');
+    const listEl = document.getElementById('sul-list');
+    titleEl.textContent = title;
+    listEl.innerHTML = '<div class="social-loading">Loading…</div>';
+    overlay.classList.remove('hidden');
+    try {
+      const res = await api(url);
+      const data = await res.json();
+      const users = data.users || [];
+      if (users.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center;color:#666;padding:30px">Nobody here yet</div>';
+        return;
+      }
+      listEl.innerHTML = users.map(u => `
+        <div class="sul-user">
+          <div class="sul-avatar" onclick="Social.openProfile('${esc(u.nickname)}')">${UI.avatarEl(u.avatar, u.nickname, 40)}</div>
+          <div class="sul-info" onclick="Social.openProfile('${esc(u.nickname)}')">
+            <div class="sul-nick">${esc(u.nickname)}</div>
+            ${u.bio ? `<div class="sul-bio">${esc(u.bio.substring(0, 60))}</div>` : ''}
+          </div>
+          ${u.nickname !== State.user?.nickname
+            ? `<button class="sp-action-btn ${u.is_following ? 'secondary' : 'primary'} small" onclick="Social.toggleFollow('${esc(u.nickname)}',this)">${u.is_following ? 'Following' : 'Follow'}</button>`
+            : ''}
+        </div>
+      `).join('');
+    } catch {
+      listEl.innerHTML = '<div style="text-align:center;color:#666;padding:30px">Could not load</div>';
+    }
+  }
+
+  function closeUserList() {
+    document.getElementById('social-userlist').classList.add('hidden');
+  }
+
+  function expandPost(postId) {
+    // Scroll to and highlight the post in feed view, opening its comments
+    switchTab('feed');
+    setTimeout(() => {
+      const el = document.querySelector(`[data-post-id="${postId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.outline = '2px solid #4caf50';
+        setTimeout(() => { el.style.outline = ''; }, 2000);
+        toggleComments(postId);
+      }
+    }, 500);
+  }
+
+  async function viewPostDetail(postId) {
+    // Show a single post in a modal-like overlay
+    try {
+      const res = await api(`/api/wall/posts/${postId}`);
+      if (!res.ok) return;
+      const p = await res.json();
+      p.reactions = p.reactions || [];
+      let overlay = document.getElementById('social-post-detail');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'social-post-detail';
+        overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
+        document.body.appendChild(overlay);
+      }
+      overlay.innerHTML = `<div class="spd-inner"><button class="social-close-btn" onclick="Social.closePostDetail()" style="position:absolute;top:8px;right:8px;z-index:1">✕</button>${renderFeedPost(p)}</div>`;
+      overlay.style.display = 'flex';
+    } catch {}
+  }
+
+  function closePostDetail() {
+    const o = document.getElementById('social-post-detail');
+    if (o) o.style.display = 'none';
+  }
+
+  // Open story viewer by nickname — used by the avatar ring on the profile page.
+  // Loads a fresh stories feed if we don't already have this user's stories
+  // cached, then hands off to viewStories.
+  async function viewProfileStories(nickname, userId) {
+    try {
+      // Populate _storyData if empty (profile is often opened without stories bar loaded)
+      if (!_storyData.length) {
+        try {
+          const res = await api('/api/social/stories');
+          const data = await res.json();
+          _storyData = data.users || [];
+        } catch {}
+      }
+      const idx = _storyData.findIndex(u =>
+        (userId && u.user_id === userId) ||
+        (nickname && u.nickname === nickname));
+      if (idx < 0) return;
+      viewStories(idx);
+    } catch {}
+  }
+
+  // ─── Side-menu navigation (hamburger in topbar) ─────────────────
+  function openSideMenu(){
+    const menu = document.getElementById('social-side-menu');
+    const bd   = document.getElementById('social-side-backdrop');
+    if (menu) menu.classList.add('open');
+    if (bd)   bd.classList.add('open');
+    // ESC to close
+    if (!openSideMenu._esc){
+      openSideMenu._esc = (e)=>{ if(e.key==='Escape') closeSideMenu(); };
+      document.addEventListener('keydown', openSideMenu._esc);
+    }
+  }
+  function closeSideMenu(){
+    const menu = document.getElementById('social-side-menu');
+    const bd   = document.getElementById('social-side-backdrop');
+    if (menu) menu.classList.remove('open');
+    if (bd)   bd.classList.remove('open');
+    if (openSideMenu._esc){
+      document.removeEventListener('keydown', openSideMenu._esc);
+      openSideMenu._esc = null;
+    }
+  }
+  function navTo(target){
+    closeSideMenu();
+    // Close Frog Social, then run the action after a tiny delay so the
+    // overlay transition completes before the target panel/modal opens.
+    close();
+    setTimeout(()=>{
+      try {
+        switch(target){
+          case 'home':
+            if (typeof goHomeChannel === 'function') goHomeChannel();
+            break;
+          case 'dms':
+            if (typeof openDMsPanel === 'function') openDMsPanel();
+            break;
+          case 'friends':
+            if (typeof openFriends === 'function') openFriends();
+            break;
+          case 'directory':
+            if (typeof showChannelDirectory === 'function') showChannelDirectory();
+            break;
+          case 'profile':
+            if (typeof showProfile === 'function') showProfile();
+            break;
+          case 'logout':
+            if (typeof doLogout === 'function') doLogout();
+            break;
+        }
+      } catch(e){ console.warn('[social] navTo failed', target, e); }
+    }, 50);
+  }
+
+  function _initUploadRecovery() {
+    try {
+      const saved = localStorage.getItem('_storyUploadState');
+      if (!saved) return;
+      const state = JSON.parse(saved);
+      if (!state || Date.now() - state.startTime > 86400000) {  // Discard if older than 24h
+        localStorage.removeItem('_storyUploadState');
+        return;
+      }
+      // Upload is pending, notify user
+      _storyNotify(`Resume upload? (${state.retryCount} retries)`, 'info');
+    } catch {}
+  }
+
+  return {
+    open, close, openProfile, switchTab, switchProfileTab,
+    openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
+    toggleFollow, reactPost, showReactPicker, toggleComments,
+    submitComment, deleteComment, deletePost, dmUser,
+    shareProfile, profileShareUrl,
+    openPostMenu, blockUserFromSocial,
+    addFriendFromProfile, acceptFriendFromProfile,
+    openNewPost, closeNewPost, handleNewPostMedia, openNewPostCamera, clearNewPostMedia, submitNewPost,    applyFilter, updateFilter,
+    setPostPrivacy, cyclePostPrivacy, toggleAllowComments,
+    showFollowers, showFollowing, closeUserList, expandPost,
+    loadFeed, loadExplore, loadProfile, moveToWall, previewMedia,
+    viewPostDetail, closePostDetail,
+    viewStories, nextStory, prevStory, closeStoryViewer,
+    viewProfileStories,
+    openAddStory, closeAddStory, handleStoryMedia, openStoryCamera, submitStory, submitStoryFromTap, handleStoryShareTap, setStoryPrivacy, cycleStoryPrivacy,
+    loadMusicTab, openMusicEmbed, promptMusicShare,
+    playMusicInTab, toggleMusicCard, stopMusicInTab, _openNowPlaying,
+    _toggleNowPlaying, filterMusicByMood, filterMusicByMoodSelect,
+    switchMusicScope, switchMusicSort,
+    openMusicShareModal, closeMusicShareModal,
+    _closeMusicShareModal, _submitMusicShare,
+    // Refresh inline avatars/nicknames in the Suggested-for-you bar and
+    // any other rendered profile references when a user updates their
+    // profile picture or nickname.
+    refreshUserProfile(userId, nickname, avatar) {
+      try {
+        const nick = String(nickname || '');
+        if (!nick) return;
+        // Suggested cards
+        document.querySelectorAll('.social-suggest-card').forEach(card => {
+          const nameEl = card.querySelector('.social-suggest-nick');
+          if (!nameEl) return;
+          if (nameEl.textContent.trim() === nick) {
+            const avWrap = card.querySelector('.social-suggest-avatar');
+            if (avWrap && typeof UI !== 'undefined' && UI.avatarEl) {
+              avWrap.innerHTML = UI.avatarEl(avatar, nick, 56);
+            }
+          }
+        });
+        // Feed / post author avatars rendered with [data-nick]
+        document.querySelectorAll(`[data-social-nick="${CSS.escape(nick)}"]`).forEach(el => {
+          if (typeof UI !== 'undefined' && UI.avatarEl) {
+            const size = parseInt(el.getAttribute('data-size') || '40', 10) || 40;
+            el.innerHTML = UI.avatarEl(avatar, nick, size);
+          }
+        });
+      } catch {}
+    },
+    viewChannelProfile(name) { if (typeof viewChannelProfile === 'function') viewChannelProfile(name); },
+  };
+})();
+
+// Expose globally so other modules (music.js) can feature-detect via
+// `window.Social`. Top-level `const` does NOT attach to window in non-module
+// scripts, so without this line `window.Social` would be undefined even
+// though `Social` resolves fine in inline onclick= handlers.
+window.Social = Social;

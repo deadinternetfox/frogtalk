@@ -1,0 +1,768 @@
+/* ─── friends.js ──────────────────────────────────────────────────────────── */
+'use strict';
+
+let _currentFriendTab = 'friends';
+let _pendingFriends    = [];
+let _allFriends        = [];
+
+/* ── Open / close ──────────────────────────────────────────────────────────── */
+function openFriends () {
+  document.getElementById('friends-panel').classList.remove('hidden');
+  loadFriends();
+}
+function closeFriends () {
+  document.getElementById('friends-panel').classList.add('hidden');
+}
+
+/* ── Tab switching ─────────────────────────────────────────────────────────── */
+function switchFriendTab (tab) {
+  _currentFriendTab = tab;
+  ['friends','all','pending','add'].forEach(t => {
+    document.getElementById('ftab-' + t).classList.toggle('active', t === tab);
+  });
+  renderFriendTab();
+}
+
+/* ── Data loading ──────────────────────────────────────────────────────────── */
+async function loadFriends () {
+  const content = document.getElementById('friends-content');
+  if (content && !content.innerHTML.trim()) content.innerHTML = skelList(4, 40);
+  try {
+    const r = await apiFetch('/api/friends');
+    if (!r.ok) return;
+    const d = await r.json();
+    _allFriends   = d.friends        || [];
+    _pendingFriends = d.requests_in  || [];
+    const badge = document.getElementById('pending-badge');
+    if (_pendingFriends.length) {
+      badge.textContent = ' (' + _pendingFriends.length + ')';
+    } else {
+      badge.textContent = '';
+    }
+    renderFriendTab();
+  } catch (e) { console.error('loadFriends', e); }
+}
+
+/* ── Render current tab ────────────────────────────────────────────────────── */
+function renderFriendTab () {
+  const el = document.getElementById('friends-content');
+  if (_currentFriendTab === 'add') { renderAddFriend(el); return; }
+  if (_currentFriendTab === 'pending') { renderPending(el); return; }
+
+  const list = _currentFriendTab === 'friends'
+    ? _allFriends.filter(f => f.online || f.presence === 'online' || f.presence === 'away' || f.presence === 'dnd')
+    : _allFriends;
+
+  if (!list.length) {
+    el.innerHTML = `<div style="color:#888;text-align:center;padding:32px 0">
+      ${_currentFriendTab === 'friends' ? 'No friends online' : 'No friends yet'}<br>
+      <small style="font-size:12px;color:#555">Use the Add tab to find people</small>
+    </div>`;
+    return;
+  }
+
+  el.innerHTML = list.map(f => `
+    <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1a1a">
+      <div style="position:relative;flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center">
+        ${fmtAv(f.avatar, f.nickname, 40)}
+        <span style="position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;
+          background:${presenceColor(f.presence)};border:2px solid #141414"></span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:14px">${esc(f.nickname)}</div>
+        <div style="font-size:12px;color:#888">${esc(f.status_msg||presenceLabel(f.presence))}</div>
+      </div>
+      <div style="display:flex;gap:4px">
+        <button class="icon-btn" onclick="closeFriends();openDMWithNick('${esc(f.nickname)}')" title="Message">💬</button>
+        <button class="icon-btn" onclick="closeFriends();callNick('${esc(f.nickname)}','voice')" title="Call">📞</button>
+        <button class="icon-btn" onclick="openFriendSoundEditor('${esc(f.nickname)}')" title="Custom sounds">🔔</button>
+        <button class="icon-btn" onclick="removeFriend('${esc(f.nickname)}', this)" title="Remove" style="color:#888">✕</button>
+      </div>
+    </div>`).join('');
+}
+
+function renderPending (el) {
+  const incoming = _pendingFriends;
+  const outgoing = _allFriends.filter ? [] : []; // we re-fetch outgoing below if needed
+
+  if (!incoming.length) {
+    el.innerHTML = `<div style="color:#888;text-align:center;padding:32px 0">No pending requests</div>`;
+    return;
+  }
+
+  el.innerHTML = `<div style="font-size:12px;color:#888;font-weight:600;margin-bottom:8px">INCOMING</div>` +
+    incoming.map(f => `
+      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1a1a">
+        <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${fmtAv(f.avatar, f.nickname, 40)}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">${esc(f.nickname)}</div>
+          <div style="font-size:12px;color:#888">${esc(f.bio||'')}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="modal-btn primary" style="padding:4px 10px;font-size:12px" onclick="acceptFriend('${esc(f.nickname)}', this)">✓ Accept</button>
+          <button class="modal-btn secondary" style="padding:4px 10px;font-size:12px" onclick="declineFriend('${esc(f.nickname)}', this)">✕</button>
+        </div>
+      </div>`).join('');
+}
+
+function renderAddFriend (el) {
+  el.innerHTML = `
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <input id="friend-search-inp" class="modal-input" style="margin:0;flex:1" placeholder="Search by nickname…"
+             oninput="searchFriends()" maxlength="64">
+    </div>
+    <div id="friend-search-results"></div>`;
+}
+
+/* ── Search ────────────────────────────────────────────────────────────────── */
+let _fSearchTimer = null;
+async function searchFriends () {
+  clearTimeout(_fSearchTimer);
+  _fSearchTimer = setTimeout(async () => {
+    const q = (document.getElementById('friend-search-inp')?.value||'').trim();
+    if (q.length < 2) { document.getElementById('friend-search-results').innerHTML=''; return; }
+    const r = await apiFetch('/api/users/search?q=' + encodeURIComponent(q));
+    if (!r.ok) return;
+    const data = await r.json();
+    const users = Array.isArray(data) ? data : (data.users || []);
+    const el = document.getElementById('friend-search-results');
+    if (!el) return;
+    if (!users.length) { el.innerHTML='<div style="color:#888;text-align:center;padding:16px">No users found</div>'; return; }
+    const myNick = STATE.user?.nickname;
+    el.innerHTML = users.filter(u => u.nickname !== myNick).map(u => {
+      const isFriend = _allFriends.some(f => f.nickname === u.nickname);
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1a1a">
+        <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${fmtAv(u.avatar, u.nickname, 40)}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">${esc(u.nickname)}</div>
+          <div style="font-size:12px;color:#888">${esc(u.bio||'')}</div>
+        </div>
+        ${isFriend
+          ? `<span style="font-size:12px;color:#4caf50">Friends</span>`
+          : `<button class="modal-btn primary" style="padding:4px 12px;font-size:12px"
+               onclick="sendFriendReq('${esc(u.nickname)}',this)">+ Add</button>`}
+      </div>`;
+    }).join('');
+  }, 300);
+}
+
+/* ── Actions ───────────────────────────────────────────────────────────────── */
+async function sendFriendReq (nick, btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-ring" style="width:12px;height:12px;border-width:2px"></span>'; }
+  const r = await apiFetch('/api/friends/request/' + encodeURIComponent(nick), 'POST');
+  if (r.ok) {
+    toast('Friend request sent to ' + nick);
+    if (btn) { btn.textContent = 'Sent ✓'; btn.style.background = '#1a3a1a'; btn.style.color = '#4caf50'; }
+    // Notify recipient in real-time via WebSocket
+    wsSend({ type: 'friend_notify', action: 'request', to_nick: nick });
+  } else {
+    if (btn) { btn.disabled = false; btn.textContent = '+ Add'; }
+    const d = await r.json().catch(()=>({}));
+    toast(d.detail || d.error || 'Could not send request', 'error');
+  }
+}
+
+function _animateRemoveRow (btn) {
+  const row = btn && btn.closest('div[style*="border-bottom"], .ffp-friend');
+  if (!row) return;
+  row.classList.add('row-leaving');
+  return new Promise(res => setTimeout(res, 260));
+}
+
+async function acceptFriend (nick, btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-ring" style="width:12px;height:12px;border-width:2px"></span>'; }
+  const r = await apiFetch('/api/friends/accept/' + encodeURIComponent(nick), 'POST');
+  if (r.ok) {
+    toast(nick + ' is now your friend! 🐸', 'success');
+    if (btn) await _animateRemoveRow(btn);
+    loadFriends();
+    wsSend({ type: 'friend_notify', action: 'accept', to_nick: nick });
+  } else {
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Accept'; }
+    toast('Could not accept request', 'error');
+  }
+}
+
+async function declineFriend (nick, btn) {
+  if (btn) btn.disabled = true;
+  const r = await apiFetch('/api/friends/decline/' + encodeURIComponent(nick), 'POST');
+  if (r.ok) {
+    if (btn) await _animateRemoveRow(btn);
+    loadFriends();
+  } else if (btn) { btn.disabled = false; }
+}
+
+async function removeFriend (nick, btn) {
+  if (!confirm('Remove ' + nick + ' from friends?')) return;
+  if (btn) btn.disabled = true;
+  const r = await apiFetch('/api/friends/' + encodeURIComponent(nick), 'DELETE');
+  if (r.ok) {
+    toast('Removed ' + nick);
+    if (btn) await _animateRemoveRow(btn);
+    loadFriends();
+  } else if (btn) { btn.disabled = false; }
+}
+
+/* ── Called from user-info modal ────────────────────────────────────────────── */
+function friendActionUserInfo () {
+  const nick = document.getElementById('userinfo-name').dataset.nick;
+  const btn  = document.getElementById('userinfo-friend-btn');
+  if (!nick) return;
+  if (btn.dataset.action === 'accept') {
+    acceptFriend(nick).then(() => closeModal('modal-user-info'));
+  } else {
+    sendFriendReq(nick, btn);
+  }
+}
+
+/* ── Helpers ───────────────────────────────────────────────────────────────── */
+function presenceColor (p) {
+  const m = {online:'#4caf50',away:'#ffc107',dnd:'#f44336',offline:'#888'};
+  return m[p] || '#888';
+}
+function presenceLabel (p) {
+  const m = {online:'Online',away:'Away',dnd:'Do Not Disturb',offline:'Offline'};
+  return m[p] || 'Offline';
+}
+
+/* ── Receive WS push notification for friend request ───────────────────────── */
+function handleFriendNotify (data) {
+  if (data.type === 'friend_notify') {
+    const msg = data.action === 'request'
+      ? `${data.from} sent you a friend request`
+      : `${data.from} accepted your friend request`;
+    toast('👥 ' + msg, 'info', 5000);
+    loadFriends(); // refresh badge
+    updateFrogBadge();
+    // Show system notification (browser / Electron / Android)
+    _showFriendNotification(data.from, data.action, data.from_avatar);
+  }
+}
+
+function _showFriendNotification (fromNick, action, avatar) {
+  const title = action === 'request' ? '👥 Friend Request' : '👥 Friend Accepted';
+  const body  = action === 'request'
+    ? `${fromNick} wants to be friends`
+    : `${fromNick} accepted your friend request`;
+  // Android native bridge
+  if (window.Android?.showNotification) {
+    try { window.Android.showNotification(title, body); } catch (_) {}
+    return;
+  }
+  // Electron native bridge
+  if (window.desktopApp?.showNotification) {
+    try { window.desktopApp.showNotification(title, body); } catch (_) {}
+    return;
+  }
+  // Browser Notification API
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      new Notification(title, {
+        body, icon: '/static/icons/icon-192.png', tag: 'friend-' + fromNick,
+        badge: '/static/icons/icon-192.png',
+      });
+    } catch (_) {}
+  }
+}
+
+/* ── Frog icon friends panel ───────────────────────────────────────────────── */
+let _friendsPanelOpen = false;
+
+function openFriendsPanel() {
+  // Toggle the friends panel overlay
+  let panel = document.getElementById('frog-friends-panel');
+  if (!panel) {
+    // Create the panel
+    panel = document.createElement('div');
+    panel.id = 'frog-friends-panel';
+    panel.className = 'frog-friends-panel';
+    panel.innerHTML = `
+      <div class="ffp-header">
+        <span>🐸 Friends & Activity</span>
+        <button onclick="closeFriendsPanel()" style="background:none;border:none;color:#888;font-size:18px;cursor:pointer">✕</button>
+      </div>
+      <div class="ffp-tabs">
+        <button class="ffp-tab active" data-tab="online" onclick="switchFfpTab('online')">Online</button>
+        <button class="ffp-tab" data-tab="all" onclick="switchFfpTab('all')">All Friends</button>
+        <button class="ffp-tab" data-tab="pending" onclick="switchFfpTab('pending')">Pending <span id="ffp-pending-count"></span></button>
+      </div>
+      <div class="ffp-content" id="ffp-content"></div>
+    `;
+    document.body.appendChild(panel);
+    
+    // Add styles
+    const style = document.createElement('style');
+    style.textContent = `
+      .frog-friends-panel {
+        position: fixed;
+        left: 70px;
+        top: 0;
+        width: 300px;
+        height: 100vh;
+        background: #141414;
+        border-right: 1px solid #2a2a2a;
+        z-index: 500;
+        display: none;
+        flex-direction: column;
+        animation: slideInLeft .2s ease;
+      }
+      .frog-friends-panel.open { display: flex; }
+      @keyframes slideInLeft {
+        from { transform: translateX(-100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      .ffp-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px;
+        font-weight: 600;
+        color: #e0e0e0;
+        border-bottom: 1px solid #2a2a2a;
+      }
+      .ffp-tabs {
+        display: flex;
+        padding: 8px;
+        gap: 4px;
+        border-bottom: 1px solid #2a2a2a;
+      }
+      .ffp-tab {
+        flex: 1;
+        background: transparent;
+        border: none;
+        color: #888;
+        padding: 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 12px;
+      }
+      .ffp-tab:hover { background: #1e1e1e; color: #e0e0e0; }
+      .ffp-tab.active { background: #1a3a1a; color: #4caf50; }
+      .ffp-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+      }
+      .ffp-friend {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background .15s;
+      }
+      .ffp-friend:hover { background: #1e1e1e; }
+      .ffp-avatar {
+        font-size: 1.8rem;
+        position: relative;
+        flex-shrink: 0;
+      }
+      .ffp-presence {
+        position: absolute;
+        bottom: 0;
+        right: 0;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        border: 2px solid #141414;
+      }
+      .ffp-info { flex: 1; min-width: 0; }
+      .ffp-name { font-weight: 600; font-size: 14px; color: #e0e0e0; }
+      .ffp-status { font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ffp-actions { display: flex; gap: 4px; }
+      .ffp-empty {
+        text-align: center;
+        padding: 40px 16px;
+        color: #666;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  _friendsPanelOpen = !_friendsPanelOpen;
+  panel.classList.toggle('open', _friendsPanelOpen);
+  
+  if (_friendsPanelOpen) {
+    loadFriends();
+    renderFfpContent('online');
+  }
+}
+
+function closeFriendsPanel() {
+  _friendsPanelOpen = false;
+  const panel = document.getElementById('frog-friends-panel');
+  if (panel) panel.classList.remove('open');
+}
+
+function switchFfpTab(tab) {
+  document.querySelectorAll('.ffp-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+  renderFfpContent(tab);
+}
+
+function renderFfpContent(tab) {
+  const el = document.getElementById('ffp-content');
+  if (!el) return;
+  
+  // Update pending count
+  const countEl = document.getElementById('ffp-pending-count');
+  if (countEl) countEl.textContent = _pendingFriends.length ? `(${_pendingFriends.length})` : '';
+  
+  if (tab === 'pending') {
+    if (!_pendingFriends.length) {
+      el.innerHTML = '<div class="ffp-empty">No pending friend requests</div>';
+      return;
+    }
+    el.innerHTML = _pendingFriends.map(f => `
+      <div class="ffp-friend">
+        <div class="ffp-avatar">${fmtAv(f.avatar, f.nickname, 40)}</div>
+        <div class="ffp-info">
+          <div class="ffp-name">${esc(f.nickname)}</div>
+          <div class="ffp-status">Wants to be friends</div>
+        </div>
+        <div class="ffp-actions">
+          <button class="icon-btn" onclick="acceptFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Accept" style="color:#4caf50">✓</button>
+          <button class="icon-btn" onclick="declineFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Decline" style="color:#f44336">✕</button>
+        </div>
+      </div>
+    `).join('');
+    return;
+  }
+  
+  let list;
+  if (tab === 'online') {
+    list = _allFriends.filter(f => f.presence === 'online' || f.presence === 'away' || f.presence === 'dnd');
+  } else {
+    list = _allFriends;
+  }
+  
+  if (!list.length) {
+    el.innerHTML = `<div class="ffp-empty">${tab === 'online' ? 'No friends online' : 'No friends yet'}</div>`;
+    return;
+  }
+  
+  el.innerHTML = list.map(f => `
+    <div class="ffp-friend" onclick="closeFriendsPanel();openDMWithNick('${esc(f.nickname)}')">
+      <div class="ffp-avatar" style="position:relative">
+        ${fmtAv(f.avatar, f.nickname, 40)}
+        <span class="ffp-presence" style="background:${presenceColor(f.presence)}"></span>
+      </div>
+      <div class="ffp-info">
+        <div class="ffp-name">${esc(f.nickname)}</div>
+        <div class="ffp-status">${esc(f.status_msg || presenceLabel(f.presence))}</div>
+      </div>
+      <div class="ffp-actions" onclick="event.stopPropagation()">
+        <button class="icon-btn" onclick="closeFriendsPanel();openDMWithNick('${esc(f.nickname)}')" title="Message">💬</button>
+        <button class="icon-btn" onclick="closeFriendsPanel();callNick('${esc(f.nickname)}','voice')" title="Call">📞</button>
+        <button class="icon-btn" onclick="openFriendSoundEditor('${esc(f.nickname)}')" title="Custom sounds">🔔</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateFrogBadge() {
+  const count = _pendingFriends.length;
+  const setBadge = (id, n) => {
+    const badge = document.getElementById(id);
+    if (!badge) return;
+    if (n > 0) {
+      badge.textContent = n > 99 ? '99+' : n;
+      badge.style.display = '';
+    } else {
+      badge.style.display = 'none';
+    }
+  };
+  // Friend-request pending count goes on the Friends (👥) sidebar icon
+  setBadge('friends-sidebar-badge', count);
+  // Keep the legacy frog badge as an aggregate unread indicator
+  let unreadDMs = 0;
+  try {
+    if (typeof _dmChannels !== 'undefined' && Array.isArray(_dmChannels)) {
+      unreadDMs = _dmChannels.reduce((n, c) => n + (c.unread || 0), 0);
+    }
+  } catch {}
+  setBadge('dm-sidebar-badge', unreadDMs);
+  setBadge('frog-badge', count + unreadDMs);
+}
+
+// Hook into loadFriends to update badge
+const _originalLoadFriends = loadFriends;
+loadFriends = async function() {
+  await _originalLoadFriends();
+  updateFrogBadge();
+};
+
+// ── Per-friend custom sounds editor ──────────────────────────────────────
+// Opens a modal that lets the user pick a message alert tone and an incoming
+// call ringtone for a specific friend. Selections are stored in localStorage
+// via Notifications.setFriendSound and take effect immediately.
+function openFriendSoundEditor(nick) {
+  if (!nick) return;
+  let modal = document.getElementById('friend-sound-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'friend-sound-modal';
+    modal.className = 'hidden';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:950;display:none;align-items:center;justify-content:center;padding:14px';
+    modal.innerHTML = `
+      <div id="fsm-box" style="background:#141414;border:1px solid #2a4a2a;border-radius:16px;width:100%;max-width:440px;max-height:92vh;overflow:auto;display:flex;flex-direction:column">
+        <div style="padding:16px 18px;border-bottom:1px solid #222;display:flex;align-items:center;gap:10px">
+          <span style="font-size:22px">🔔</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;color:#e0e0e0;font-size:15px">Custom sounds</div>
+            <div id="fsm-peer" style="font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+          </div>
+          <button onclick="closeFriendSoundEditor()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px">✕</button>
+        </div>
+        <div style="padding:14px 18px;display:flex;flex-direction:column;gap:14px">
+          <div class="fsm-section">
+            <div class="fsm-section-head">
+              <div class="fsm-section-title"><span>💬</span> Message alert</div>
+              <button class="fsm-upload-btn" type="button" onclick="_uploadFriendSound('msg')" title="Upload your own mp3/wav/ogg"><span>📁</span> Upload</button>
+            </div>
+            <div id="fsm-msg-custom"></div>
+            <div id="fsm-msg-list" style="display:flex;flex-direction:column;gap:4px"></div>
+          </div>
+          <div class="fsm-section">
+            <div class="fsm-section-head">
+              <div class="fsm-section-title"><span>📞</span> Incoming call ringtone</div>
+              <button class="fsm-upload-btn" type="button" onclick="_uploadFriendSound('ring')" title="Upload your own mp3/wav/ogg"><span>📁</span> Upload</button>
+            </div>
+            <div id="fsm-ring-custom"></div>
+            <div id="fsm-ring-list" style="display:flex;flex-direction:column;gap:4px"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:2px">
+            <button onclick="resetFriendSounds()" style="flex:1;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;transition:all .15s" onmouseover="this.style.borderColor='#3a2a2a';this.style.color='#ff9090'" onmouseout="this.style.borderColor='#2a2a2a';this.style.color='#aaa'">↺ Reset to default</button>
+            <button onclick="closeFriendSoundEditor()" style="flex:1;background:linear-gradient(135deg,#4caf50,#3d9b42);border:none;color:#000;font-weight:700;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;box-shadow:0 4px 14px rgba(76,175,80,.25)">✓ Done</button>
+          </div>
+        </div>
+      </div>`;
+    // Click outside the box to close
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeFriendSoundEditor();
+    });
+    document.body.appendChild(modal);
+    // One-time styles for sound rows
+    const style = document.createElement('style');
+    style.textContent = `
+      .fsm-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:#0f0f0f;border:1px solid #222;border-radius:10px;cursor:pointer;transition:all .15s}
+      .fsm-row:hover{border-color:#3a5a3a;background:#141a14}
+      .fsm-row.selected{border-color:#4caf50;background:#162116}
+      .fsm-row .fsm-dot{width:14px;height:14px;border-radius:50%;border:2px solid #444;flex-shrink:0}
+      .fsm-row.selected .fsm-dot{border-color:#4caf50;background:#4caf50;box-shadow:inset 0 0 0 2px #141414}
+      .fsm-row .fsm-label{flex:1;color:#ddd;font-size:13px;font-weight:500}
+      .fsm-row.selected .fsm-label{color:#4caf50}
+      .fsm-row .fsm-play{background:#1a1a1a;border:1px solid #2a2a2a;color:#9c9;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+      .fsm-row .fsm-play:hover{border-color:#4caf50;color:#4caf50;transform:scale(1.08)}
+    `;
+    document.head.appendChild(style);
+  }
+  modal._targetNick = nick;
+  const peerEl = modal.querySelector('#fsm-peer');
+  if (peerEl) peerEl.textContent = 'for @' + nick;
+  _renderFriendSoundList('msg');
+  _renderFriendSoundList('ring');
+  modal.style.display = 'flex';
+  modal.classList.remove('hidden');
+}
+
+function closeFriendSoundEditor() {
+  const m = document.getElementById('friend-sound-modal');
+  if (m) { m.style.display = 'none'; m.classList.add('hidden'); }
+}
+
+function resetFriendSounds() {
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  if (!nick || !window.Notifications) return;
+  Notifications.setFriendSound(nick, 'msg', null);
+  Notifications.setFriendSound(nick, 'ring', null);
+  // Also purge any uploaded custom files so Default really means default.
+  try {
+    Notifications.setCustomSound?.(nick, 'msg', null);
+    Notifications.setCustomSound?.(nick, 'ring', null);
+    _setCustomSoundMeta(nick, 'msg', null);
+    _setCustomSoundMeta(nick, 'ring', null);
+  } catch {}
+  _renderFriendSoundList('msg');
+  _renderFriendSoundList('ring');
+  if (typeof toast === 'function') toast('Reset to default sounds', 'success');
+}
+
+function _friendSoundLabel(kind, key) {
+  const labels = {
+    msg: {
+      pop: 'Pop', chime: 'Chime', ding: 'Ding', click: 'Click',
+      bell: 'Bell', soft: 'Soft', bubble: 'Bubble', zap: 'Zap',
+      coin: 'Coin', knock: 'Knock', silent: 'Silent',
+      custom: '🎵 Custom upload',
+    },
+    ring: {
+      default: 'Classic two-tone', classic: 'Classic phone', digital: 'Digital',
+      melody: 'Melody', marimba: 'Marimba', sonar: 'Sonar', silent: 'Silent',
+      custom: '🎵 Custom upload',
+    },
+  };
+  return labels[kind]?.[key] || key;
+}
+
+function _renderFriendSoundList(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  if (!m || !window.Notifications) return;
+  const nick = m._targetNick;
+  const listId = kind === 'msg' ? 'fsm-msg-list' : 'fsm-ring-list';
+  const el = m.querySelector('#' + listId);
+  if (!el) return;
+  // Defensive: fall back to known catalogue if the exported lists are ever
+  // missing (e.g. older cached notifications.js).
+  const MSG_FALLBACK  = ['pop','chime','ding','click','bell','soft','bubble','zap','coin','knock','silent'];
+  const RING_FALLBACK = ['default','classic','digital','melody','marimba','sonar','silent'];
+  let options = kind === 'msg' ? Notifications.MSG_TONES_LIST : Notifications.RING_TONES_LIST;
+  if (!Array.isArray(options) || !options.length) {
+    options = kind === 'msg' ? MSG_FALLBACK : RING_FALLBACK;
+  }
+  // Prepend an explicit "Default" entry. Uploaded custom file gets its own
+  // highlighted chip above the preset list (see fsm-{kind}-custom container).
+  const items = [
+    { key: null, isDefault: true },
+    ...options.map(k => ({ key: k })),
+  ];
+  const current = Notifications.getFriendSound ? Notifications.getFriendSound(nick, kind) : null;
+  const customData = (Notifications.getCustomSound && Notifications.getCustomSound(nick, kind)) || null;
+  const customMeta = _getCustomSoundMeta(nick, kind);
+
+  // Render the "uploaded file" chip if present
+  const customContainerId = kind === 'msg' ? 'fsm-msg-custom' : 'fsm-ring-custom';
+  const customEl = m.querySelector('#' + customContainerId);
+  if (customEl) {
+    if (customData) {
+      const isSelected = current === 'custom';
+      const name = customMeta?.name || 'Custom file';
+      const sizeKb = customMeta?.size ? Math.round(customMeta.size / 1024) + ' KB' : '';
+      customEl.innerHTML = `
+        <div class="fsm-custom-chip" style="${isSelected ? 'box-shadow:0 0 0 2px rgba(76,175,80,.35)' : ''}">
+          <button class="fcc-btn" title="Preview" onclick="_previewFriendSound('${kind}','custom')">▶</button>
+          <div style="flex:1;min-width:0">
+            <div class="fcc-name">${esc(name)}</div>
+            <div class="fcc-meta">${sizeKb} · ${isSelected ? '✓ Active' : 'tap to use'}</div>
+          </div>
+          ${isSelected
+            ? '<span style="color:#4caf50;font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>'
+            : `<button class="fcc-btn" title="Use this" onclick="_selectCustomSound('${kind}')">✓</button>`}
+          <button class="fcc-btn danger" title="Delete" onclick="_deleteCustomSound('${kind}')">✕</button>
+        </div>`;
+      customEl.style.marginBottom = '8px';
+    } else {
+      customEl.innerHTML = `<div class="fsm-empty-hint">No custom file uploaded — tap 📁 Upload above.</div>`;
+      customEl.style.marginBottom = '8px';
+    }
+  }
+
+  el.innerHTML = items.map(it => {
+    const selected = (it.isDefault && !current) || (!it.isDefault && it.key === current);
+    const label = it.isDefault ? 'Default (app setting)' : _friendSoundLabel(kind, it.key);
+    const key = it.isDefault ? '' : esc(it.key);
+    const rightBtn = it.isDefault ? ''
+      : `<button class="fsm-play" title="Preview" onclick="event.stopPropagation();_previewFriendSound('${kind}','${key}')">▶</button>`;
+    return `
+      <div class="fsm-row ${selected ? 'selected' : ''}" data-kind="${kind}" data-key="${key}" data-default="${it.isDefault ? '1' : ''}" onclick="_selectFriendSound(this)">
+        <span class="fsm-dot"></span>
+        <span class="fsm-label">${esc(label)}</span>
+        ${rightBtn}
+      </div>`;
+  }).join('');
+}
+
+function _selectFriendSound(row) {
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  if (!nick || !window.Notifications) return;
+  const kind = row.dataset.kind;
+  const isDefault = row.dataset.default === '1';
+  const key = isDefault ? null : row.dataset.key;
+  Notifications.setFriendSound(nick, kind, key);
+  _renderFriendSoundList(kind);
+  if (!isDefault) _previewFriendSound(kind, key);
+}
+
+// Custom-sound metadata: { [friend:<nick>:<kind>]: { name, size } }
+function _getCustomSoundMetaMap() {
+  try { return JSON.parse(localStorage.getItem('ft_custom_sound_meta') || '{}') || {}; }
+  catch { return {}; }
+}
+function _saveCustomSoundMetaMap(m) {
+  try { localStorage.setItem('ft_custom_sound_meta', JSON.stringify(m || {})); } catch {}
+}
+function _customMetaKey(nick, kind) { return 'friend:' + nick + ':' + kind; }
+function _getCustomSoundMeta(nick, kind) {
+  return _getCustomSoundMetaMap()[_customMetaKey(nick, kind)] || null;
+}
+function _setCustomSoundMeta(nick, kind, meta) {
+  const m = _getCustomSoundMetaMap();
+  const key = _customMetaKey(nick, kind);
+  if (meta) m[key] = meta; else delete m[key];
+  _saveCustomSoundMetaMap(m);
+}
+
+function _selectCustomSound(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  if (!nick || !window.Notifications) return;
+  Notifications.setFriendSound(nick, kind, 'custom');
+  _renderFriendSoundList(kind);
+  _previewFriendSound(kind, 'custom');
+  if (typeof toast === 'function') toast('Using your custom sound', 'success');
+}
+
+function _deleteCustomSound(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  if (!nick || !window.Notifications) return;
+  Notifications.setCustomSound(nick, kind, null);
+  _setCustomSoundMeta(nick, kind, null);
+  // If this custom was the active selection, fall back to default
+  if (Notifications.getFriendSound(nick, kind) === 'custom') {
+    Notifications.setFriendSound(nick, kind, null);
+  }
+  _renderFriendSoundList(kind);
+  if (typeof toast === 'function') toast('Custom sound removed', 'info');
+}
+
+function _uploadFriendSound(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  if (!nick || !window.Notifications) return;
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'audio/*,.mp3,.wav,.ogg,.m4a,.aac';
+  input.onchange = async () => {
+    const f = input.files && input.files[0];
+    if (!f) return;
+    const res = await Notifications.uploadCustomSound(nick, kind, f);
+    if (!res.ok) {
+      if (typeof toast === 'function') toast(res.error || 'Upload failed', 'error');
+      return;
+    }
+    _setCustomSoundMeta(nick, kind, { name: f.name || 'Custom file', size: f.size || 0 });
+    Notifications.setFriendSound(nick, kind, 'custom');
+    _renderFriendSoundList(kind);
+    if (typeof toast === 'function') toast('Custom sound saved & active', 'success');
+    Notifications.playCustomSound(res.dataUrl);
+  };
+  input.click();
+}
+
+function _previewFriendSound(kind, key) {
+  if (!window.Notifications || !key) return;
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  if (key === 'custom' && nick) {
+    const data = Notifications.getCustomSound(nick, kind);
+    if (data) return Notifications.playCustomSound(data);
+    return _uploadFriendSound(kind);
+  }
+  if (kind === 'msg') Notifications.previewTone(key);
+  else Notifications.previewRingtone(key);
+}
