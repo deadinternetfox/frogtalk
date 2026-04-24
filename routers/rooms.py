@@ -70,9 +70,16 @@ def _normalize_room_icon(icon: Optional[str]) -> Optional[str]:
 async def list_rooms(current_user: dict = Depends(get_current_user)):
     rooms = db.list_rooms()
     joined_ids = db.get_user_joined_room_ids(current_user["id"])
+    is_admin = bool(current_user.get("is_admin"))
+    visible = []
     for r in rooms:
         r["joined"] = r["id"] in joined_ids
-    return {"rooms": rooms}
+        # Private rooms are invite-only: hide them from listing unless the
+        # requesting user is already a member or is a server admin.
+        if r.get("type") == "private" and not r["joined"] and not is_admin:
+            continue
+        visible.append(r)
+    return {"rooms": visible}
 
 
 @router.post("")
