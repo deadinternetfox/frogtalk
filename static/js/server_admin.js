@@ -450,7 +450,7 @@
       const caps = Array.isArray(n.capabilities) ? n.capabilities.length : 0;
       return `
         <tr>
-          <td>
+          <td data-label="Node">
             <div class="node-name-row">
               <span class="node-name">${escHtml(n.display_name || n.server_id || 'Unknown node')}</span>
               ${n.official ? '<span class="mini-badge success">official</span>' : ''}
@@ -459,9 +459,9 @@
             <div class="node-endpoint">${escHtml(n.display_endpoint || 'hidden endpoint')}</div>
             <div class="node-meta">${escHtml(n.transport_label || 'Route unknown')} · ${escHtml(n.privacy_label || 'Privacy unknown')} · ${escHtml(n.region || 'Unknown region')} · ${caps} cap${caps === 1 ? '' : 's'} · ${escHtml(lastSeen)}</div>
           </td>
-          <td><span class="mini-badge ${blocked ? 'danger' : 'success'}">${escHtml(status)}</span></td>
-          <td><span class="mini-badge ${trust === 'official' ? 'success' : ''}">${escHtml(trust)}</span></td>
-          <td style="display:flex; gap:6px; flex-wrap:wrap;">${nodeActionButton(n)}<button class="btn" data-node-probe="${n.server_id || ''}">Probe</button></td>
+          <td data-label="Status"><span class="mini-badge ${blocked ? 'danger' : 'success'}">${escHtml(status)}</span></td>
+          <td data-label="Trust"><span class="mini-badge ${trust === 'official' ? 'success' : ''}">${escHtml(trust)}</span></td>
+          <td data-label="Action" class="node-actions-cell" style="display:flex; gap:6px; flex-wrap:wrap;">${nodeActionButton(n)}<button class="btn" data-node-probe="${n.server_id || ''}">Probe</button></td>
         </tr>
       `;
     }).join('');
