@@ -1144,17 +1144,19 @@ function _renderNetworkServersList() {
   const list = document.getElementById('network-servers-list');
   if (!list) return;
   if (!_networkProbeResults.length) {
-    list.innerHTML = '<div style="color:#666;font-size:12px;text-align:center;padding:8px">Click "Probe Servers" or "Auto Select Best" to discover available FrogTalk instances</div>';
+    list.innerHTML = '<div style="color:#666;font-size:12px;text-align:center;padding:16px 8px">Click "Probe Servers" or "Auto Select Best" to discover available FrogTalk instances</div>';
     return;
   }
   const connectedBase = _getConnectedServerBaseUrl();
   list.innerHTML = _networkProbeResults.map((s) => {
     const publicAddr = _preferredNetworkUrl(s);
     const torPreferred = _isTorPreferred();
+    const isOnion = _isOnionNetworkUrl(publicAddr) || !!s.onion_url;
     const healthy = !!s.healthy;
     const latency = s.latency_ms == null ? 'n/a' : `${s.latency_ms} ms`;
     const region = _networkRegionLabel(s, s.base_url || publicAddr);
     const statusColor = healthy ? '#4caf50' : '#f44336';
+    const statusDot = healthy ? '#3ecf65' : '#f44336';
     const selected = _networkSelectedServer && _networkSelectedServer.server_id === s.server_id;
     const isConnected = connectedBase && publicAddr === connectedBase;
     const trust = _networkBuildTrustByBase[publicAddr] || null;
@@ -1163,34 +1165,67 @@ function _renderNetworkServersList() {
     const isOfficialCopy = !!(trust && trust.remote_official);
     const trustError = trust && trust.error;
 
+    // Card accent: green for connected, purple-green tint for onion, default for others
+    const cardBorder = isConnected
+      ? '1px solid rgba(62,207,101,.35)'
+      : isOnion
+        ? '1px solid rgba(133,215,160,.18)'
+        : '1px solid rgba(255,255,255,.055)';
+    const cardBg = isConnected
+      ? 'linear-gradient(135deg,rgba(23,52,39,.7) 0%,rgba(15,27,20,.85) 100%)'
+      : isOnion
+        ? 'linear-gradient(135deg,rgba(20,38,29,.65) 0%,rgba(13,19,16,.85) 100%)'
+        : 'rgba(18,20,19,.5)';
+    const cardShadow = isConnected
+      ? '0 2px 16px rgba(62,207,101,.08)'
+      : isOnion
+        ? '0 2px 12px rgba(133,215,160,.05)'
+        : 'none';
+
     const chips = [];
-    if (isConnected) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#173427;color:#88e7a4;font-size:10px;font-weight:700">CONNECTED</span>');
-    if ((s.official || 0) || s.trust_tier === 'official') chips.push('<span style="padding:2px 7px;border-radius:999px;background:#1a2d3f;color:#8fc7ff;font-size:10px;font-weight:700">OFFICIAL DIR</span>');
-    if (s.onion_url) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#17261d;color:#85d7a0;font-size:10px;font-weight:700">ONION</span>');
-    if (torPreferred && s.onion_url) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#24301a;color:#d7f08a;font-size:10px;font-weight:700">TOR MODE</span>');
-    if (trustChecked && isSameHash) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#1e3a24;color:#8fffaa;font-size:10px;font-weight:700">SAME HASH</span>');
-    if (trustChecked && isOfficialCopy) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#2f2a16;color:#ffd66d;font-size:10px;font-weight:700">LEGIT COPY</span>');
-    if (trustChecked && !isSameHash && !trustError) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#3a1d1d;color:#ff9f9f;font-size:10px;font-weight:700">HASH MISMATCH</span>');
-    if (trustError) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#35261a;color:#ffbf8f;font-size:10px;font-weight:700">VERIFY ERROR</span>');
+    if (isConnected) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(62,207,101,.15);border:1px solid rgba(62,207,101,.3);color:#88e7a4;font-size:10px;font-weight:700;letter-spacing:.03em">CONNECTED</span>');
+    if ((s.official || 0) || s.trust_tier === 'official') chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(52,130,255,.12);border:1px solid rgba(52,130,255,.25);color:#8fc7ff;font-size:10px;font-weight:700;letter-spacing:.03em">OFFICIAL DIR</span>');
+    if (s.onion_url) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(62,170,101,.13);border:1px solid rgba(133,215,160,.28);color:#85d7a0;font-size:10px;font-weight:700;letter-spacing:.03em">🧅 ONION</span>');
+    if (torPreferred && s.onion_url) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(120,180,40,.13);border:1px solid rgba(180,230,80,.22);color:#d7f08a;font-size:10px;font-weight:700;letter-spacing:.03em">TOR MODE</span>');
+    if (trustChecked && isSameHash) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(30,58,36,.8);border:1px solid rgba(80,220,120,.22);color:#8fffaa;font-size:10px;font-weight:700;letter-spacing:.03em">✓ SAME HASH</span>');
+    if (trustChecked && isOfficialCopy) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(47,42,22,.8);border:1px solid rgba(255,200,60,.2);color:#ffd66d;font-size:10px;font-weight:700;letter-spacing:.03em">LEGIT COPY</span>');
+    if (trustChecked && !isSameHash && !trustError) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(58,29,29,.8);border:1px solid rgba(255,80,80,.2);color:#ff9f9f;font-size:10px;font-weight:700;letter-spacing:.03em">⚠ HASH MISMATCH</span>');
+    if (trustError) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(53,38,26,.8);border:1px solid rgba(255,150,80,.2);color:#ffbf8f;font-size:10px;font-weight:700;letter-spacing:.03em">VERIFY ERROR</span>');
 
     const locationIcon = region === 'Tor Hidden Service' ? '🧅' : '📍';
-    const locationRow = (!torPreferred && region) ? `<div style="font-size:11px;color:#8fa3b6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${locationIcon} ${UI.escHtml(region)}</div>` : '';
+    const locationRow = (!torPreferred && region)
+      ? `<div style="font-size:11px;color:#7a94a6;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${locationIcon} ${UI.escHtml(region)}</div>`
+      : '';
     const addressRow = _isOnionNetworkUrl(publicAddr)
       ? _networkAddressRow(publicAddr, 'tor')
-      : `<div style="font-size:11px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(publicAddr || '')}</div>`;
+      : `<div style="font-size:11px;color:#566870;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(publicAddr || '')}</div>`;
+
+    const latencyColor = s.latency_ms == null ? '#555' : s.latency_ms < 200 ? '#4caf50' : s.latency_ms < 600 ? '#f0c040' : '#f07060';
 
     return `
-      <label class="network-server-row ${selected ? 'is-selected' : ''}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border-bottom:1px solid #1a1a1a;cursor:pointer;">
-        <div style="display:flex;align-items:center;gap:8px;min-width:0">
-          <input type="radio" name="network-server-choice" ${selected ? 'checked' : ''} onchange="selectNetworkServer('${String(s.server_id).replace(/'/g, "\\'")}')">
+      <label class="network-server-row ${selected ? 'is-selected' : ''}"
+        style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;
+               border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;transition:background .15s;
+               background:${cardBg};border:${cardBorder};border-radius:12px;margin:4px 0;
+               box-shadow:${cardShadow};">
+        <div style="display:flex;align-items:center;gap:10px;min-width:0">
+          <input type="radio" name="network-server-choice" ${selected ? 'checked' : ''}
+            style="accent-color:#3ecf65;width:15px;height:15px;flex-shrink:0"
+            onchange="selectNetworkServer('${String(s.server_id).replace(/'/g, "\\'")}')">
           <div style="min-width:0">
-            <div style="font-size:12px;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(s.display_name || s.server_id || 'Unknown')}</div>
+            <div style="font-size:13px;font-weight:600;color:#dde8e2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.01em">${UI.escHtml(s.display_name || s.server_id || 'Unknown')}</div>
             ${locationRow}
             ${addressRow}
-            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">${chips.join('')}</div>
+            ${chips.length ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${chips.join('')}</div>` : ''}
           </div>
         </div>
-        <div style="font-size:11px;color:${statusColor};white-space:nowrap;text-align:right;line-height:1.35">Status: ${healthy ? 'healthy' : 'down'}<br>Ping: ${latency}</div>
+        <div style="flex-shrink:0;text-align:right;min-width:80px">
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;margin-bottom:3px">
+            <span style="width:7px;height:7px;border-radius:50%;background:${statusDot};display:inline-block;box-shadow:0 0 6px ${statusDot}55"></span>
+            <span style="font-size:11px;color:${statusColor};font-weight:600">${healthy ? 'healthy' : 'down'}</span>
+          </div>
+          <div style="font-size:11px;color:${latencyColor};font-weight:500">${latency === 'n/a' ? '— ms' : latency}</div>
+        </div>
       </label>
     `;
   }).join('');
