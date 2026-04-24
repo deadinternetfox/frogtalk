@@ -288,30 +288,33 @@ input, select {
   font-size: 11px;
   color: var(--muted);
 }
-.log-line {
-  display: grid;
-  grid-template-columns: 88px 1fr;
+.node-status-line {
+  display: flex;
+  align-items: center;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: 1px solid #1f392a;
   border-radius: 10px;
   background: rgba(9, 19, 12, 0.88);
-  margin-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.35;
 }
-.log-line.ok {
+.node-status-line.ok {
   border-color: rgba(86, 209, 109, 0.22);
 }
-.log-line.error {
+.node-status-line.error {
   border-color: rgba(255, 106, 106, 0.28);
 }
-.log-time {
+.node-status-time {
+  flex: 0 0 auto;
   color: #8db39b;
   font-family: "IBM Plex Mono", monospace;
   font-size: 11px;
 }
-.log-text {
+.node-status-text {
+  min-width: 0;
   color: #e8f2eb;
-  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .easter-grid {
   display: block;
@@ -452,7 +455,7 @@ input, select {
   .grid-mini { grid-template-columns: 1fr; }
   .form-row { grid-template-columns: 1fr; }
   #node-msg {
-    min-height: 140px !important;
+    min-height: 84px !important;
   }
   .users-table {
     min-width: 0;
@@ -632,7 +635,7 @@ input, select {
         </div>
         <div class="panel">
           <div class="section-title">Node Action Output</div>
-          <div id="node-msg" class="msg" style="min-height:220px; white-space:pre-wrap;"></div>
+          <div id="node-msg" class="msg" style="min-height:84px;"></div>
         </div>
       </div>
 

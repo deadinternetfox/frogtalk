@@ -23,7 +23,6 @@
   const easterSaveBtn = document.getElementById('easter-save-btn');
   const easterUploadBtn = document.getElementById('easter-upload-btn');
   const easterUploadInput = document.getElementById('easter-upload-input');
-  let nodeLog = [];
   let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
   let easterEggLoaded = false;
   let easterEggDirty = false;
@@ -52,17 +51,13 @@
   function setNodeMessage(msg, isError = false) {
     const line = String(msg || '').trim();
     if (!line) return;
-    nodeLog = [{
-      stamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-      text: line,
-      isError: !!isError,
-    }, ...nodeLog].slice(0, 14);
-    nodeMsg.innerHTML = nodeLog.map((entry) => `
-      <div class="log-line ${entry.isError ? 'error' : 'ok'}">
-        <span class="log-time">${escHtml(entry.stamp)}</span>
-        <span class="log-text">${escHtml(entry.text)}</span>
+    const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    nodeMsg.innerHTML = `
+      <div class="node-status-line ${isError ? 'error' : 'ok'}">
+        <span class="node-status-time">${escHtml(stamp)}</span>
+        <span class="node-status-text">${escHtml(line)}</span>
       </div>
-    `).join('');
+    `;
   }
 
   function setEasterMessage(msg, isError = false) {
