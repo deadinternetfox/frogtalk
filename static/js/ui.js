@@ -1120,6 +1120,13 @@ function _prettyNetworkRegion(region) {
   return map[k] || raw;
 }
 
+function _networkRegionLabel(server, fallbackBase) {
+  const region = _prettyNetworkRegion(server?.region || _guessNetworkRegionFromBaseUrl(fallbackBase));
+  if (region && region !== 'Unknown') return region;
+  if (server?.onion_url || _isOnionNetworkUrl(fallbackBase || '')) return 'Tor Hidden Service';
+  return 'Unknown';
+}
+
 function _renderNetworkSelection() {
   const infoEl = document.getElementById('network-current-selection');
   if (!infoEl) return;
@@ -1146,7 +1153,7 @@ function _renderNetworkServersList() {
     const torPreferred = _isTorPreferred();
     const healthy = !!s.healthy;
     const latency = s.latency_ms == null ? 'n/a' : `${s.latency_ms} ms`;
-    const region = _prettyNetworkRegion(s.region || _guessNetworkRegionFromBaseUrl(s.base_url));
+    const region = _networkRegionLabel(s, s.base_url || publicAddr);
     const statusColor = healthy ? '#4caf50' : '#f44336';
     const selected = _networkSelectedServer && _networkSelectedServer.server_id === s.server_id;
     const isConnected = connectedBase && publicAddr === connectedBase;
@@ -1166,7 +1173,8 @@ function _renderNetworkServersList() {
     if (trustChecked && !isSameHash && !trustError) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#3a1d1d;color:#ff9f9f;font-size:10px;font-weight:700">HASH MISMATCH</span>');
     if (trustError) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#35261a;color:#ffbf8f;font-size:10px;font-weight:700">VERIFY ERROR</span>');
 
-    const locationRow = (!torPreferred && region) ? `<div style="font-size:11px;color:#8fa3b6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📍 ${UI.escHtml(region)}</div>` : '';
+    const locationIcon = region === 'Tor Hidden Service' ? '🧅' : '📍';
+    const locationRow = (!torPreferred && region) ? `<div style="font-size:11px;color:#8fa3b6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${locationIcon} ${UI.escHtml(region)}</div>` : '';
     const addressRow = _isOnionNetworkUrl(publicAddr)
       ? _networkAddressRow(publicAddr, 'tor')
       : `<div style="font-size:11px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(publicAddr || '')}</div>`;
@@ -1197,10 +1205,10 @@ function selectNetworkServer(serverId) {
 
 async function refreshNetworkServers() {
   const mode = document.getElementById('network-mode')?.value || 'auto';
-  const preferOnion = document.getElementById('network-prefer-onion')?.checked ? 1 : 0;
   const officialOnly = mode === 'official' ? 1 : 0;
   try {
-    const res = await apiFetch(`/api/network/probe?official_only=${officialOnly}&include_onion=${preferOnion}`);
+    // Always request onion metadata so capability badges remain accurate even when clearnet is preferred.
+    const res = await apiFetch(`/api/network/probe?official_only=${officialOnly}&include_onion=1`);
     const data = await res.json();
     if (!res.ok) {
       UI.showToast(data.error || 'Failed to probe network', 'error');
