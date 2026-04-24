@@ -8,6 +8,8 @@ let _dmPage      = 0;
 const DM_PER_PAGE = 50;
 let _dmTypingTimer = null;
 let _dmReplyTo   = null;  // {id, content, nickname}
+const _dmPeerPubKeyCache = new Map();
+const _dmSharedKeyCache = new Map();
 
 function _voSeenKey(msgId, channelId) {
   const uid = STATE.user?.id || '0';
@@ -34,6 +36,58 @@ function _dmPreviewText(content, hasMedia, mediaType) {
   return (hasMedia || mediaType) ? 'Media' : '';
 }
 
+async function _getDMSharedKey(peerId) {
+  const id = Number(peerId || 0);
+  if (!id) return null;
+  if (_dmSharedKeyCache.has(id)) return _dmSharedKeyCache.get(id);
+  let peerPub = _dmPeerPubKeyCache.get(id) || null;
+  if (!peerPub) {
+    try {
+      const r = await apiFetch(`/api/users/${id}/pubkey`);
+      if (!r.ok) return null;
+      const d = await r.json();
+      peerPub = d.ecdh_pub_key || d.pub_key || null;
+      if (peerPub) _dmPeerPubKeyCache.set(id, peerPub);
+    } catch {
+      return null;
+    }
+  }
+  if (!peerPub || typeof Crypto === 'undefined' || !Crypto.deriveShared) return null;
+  try {
+    const key = await Crypto.deriveShared(peerPub);
+    if (key) _dmSharedKeyCache.set(id, key);
+    return key || null;
+  } catch {
+    return null;
+  }
+}
+
+async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
+  const raw = String(cipher || '');
+  if (!raw) return '';
+  if (_parseDMCallLog(raw)) return raw;
+
+  // Primary path: ECDH shared key for this peer.
+  try {
+    const key = await _getDMSharedKey(peerId);
+    if (key && typeof Crypto !== 'undefined' && Crypto.decrypt) {
+      const out = await Crypto.decrypt(raw, key);
+      if (out !== null) return out;
+    }
+  } catch {}
+
+  // Legacy fallback: deterministic DM key derivation.
+  try {
+    if (typeof Crypto !== 'undefined' && Crypto.getDMKey && Crypto.decrypt && STATE?.user?.nickname && peerNick) {
+      const legacyKey = await Crypto.getDMKey(STATE.user.nickname, peerNick);
+      const out = await Crypto.decrypt(raw, legacyKey);
+      if (out !== null) return out;
+    }
+  } catch {}
+
+  return raw;
+}
+
 /* ── Sidebar DM list ────────────────────────────────────────────────────────── */
 async function loadDMChannels () {
   const sidebarEl = document.getElementById('dm-channels');
@@ -44,16 +98,19 @@ async function loadDMChannels () {
     const r = await apiFetch('/api/dms');
     if (!r.ok) return;
     const data = await r.json();
-    _dmChannels = (data.channels || data || []).map(ch => {
-      const _logMeta = _parseDMCallLog(ch.last_msg);
+    _dmChannels = await Promise.all((data.channels || data || []).map(async (ch) => {
+      const peerNick = ch.other_nick || ch.nickname || '';
+      const peerId = ch.other_id || ch.with_user_id || 0;
+      const previewContent = await _decryptDMPreviewContent(ch.last_msg, peerId, peerNick);
+      const _logMeta = _parseDMCallLog(previewContent);
       return {
         id: ch.id,
-        nickname: ch.other_nick || ch.nickname,
+        nickname: peerNick,
         avatar: ch.other_avatar || ch.avatar || '🐸',
         unread: ch.unread || 0,
-        last_msg_raw: ch.last_msg,
+        last_msg_raw: previewContent,
         last_msg_meta: _logMeta,
-        last_msg: _dmPreviewText(ch.last_msg, false, null),
+        last_msg: _dmPreviewText(previewContent, false, null),
         last_msg_at: ch.last_msg_at,
         last_msg_id: ch.last_msg_id || 0,
         last_sender_id: ch.last_sender_id != null ? +ch.last_sender_id : null,
@@ -61,9 +118,9 @@ async function loadDMChannels () {
         peer_last_read: ch.peer_last_read || 0,
         other_last_seen: ch.other_last_seen || null,
         other_show_read_receipts: ch.other_show_read_receipts !== 0,
-        with_user_id: ch.other_id || ch.with_user_id,
+        with_user_id: peerId,
       };
-    });
+    }));
     renderDMChannels();
   } catch (e) { console.error('loadDMChannels', e); }
 }
@@ -1083,27 +1140,34 @@ function handleWSDMMessage (data) {
 
   // Cheap in-place sidebar update (avoid round-tripping /api/dms on every message
   // which was adding 200-500 ms of perceived send lag).
-  try {
-    const ch = _dmChannels.find(c => c.id === data.channel_id);
-    if (ch) {
-      ch.last_msg_raw = data.content || '';
-      ch.last_msg_meta = _parseDMCallLog(data.content);
-      ch.last_msg    = _dmPreviewText(data.content, data.has_media, data.media_type);
-      ch.last_msg_at = data.created_at || new Date().toISOString();
-      ch.last_msg_id = data.id || ch.last_msg_id || 0;
-      ch.last_sender_id = data.sender_id != null ? +data.sender_id : ch.last_sender_id;
-      if (!_isMine && !(data._isActive && !document.hidden)) {
-        ch.unread = (ch.unread || 0) + 1;
+  (async () => {
+    try {
+      const ch = _dmChannels.find(c => c.id === data.channel_id);
+      if (ch) {
+        const previewContent = await _decryptDMPreviewContent(
+          data.content || '',
+          data.sender_id || ch.with_user_id,
+          data.sender_nick || ch.nickname,
+        );
+        ch.last_msg_raw = previewContent;
+        ch.last_msg_meta = _parseDMCallLog(previewContent);
+        ch.last_msg = _dmPreviewText(previewContent, data.has_media, data.media_type);
+        ch.last_msg_at = data.created_at || new Date().toISOString();
+        ch.last_msg_id = data.id || ch.last_msg_id || 0;
+        ch.last_sender_id = data.sender_id != null ? +data.sender_id : ch.last_sender_id;
+        if (!_isMine && !(data._isActive && !document.hidden)) {
+          ch.unread = (ch.unread || 0) + 1;
+        }
+        // Bubble to top of list
+        const idx = _dmChannels.indexOf(ch);
+        if (idx > 0) { _dmChannels.splice(idx, 1); _dmChannels.unshift(ch); }
+        renderDMChannels();
+      } else {
+        // Unknown channel — fall back to refresh (rare path).
+        loadDMChannels();
       }
-      // Bubble to top of list
-      const idx = _dmChannels.indexOf(ch);
-      if (idx > 0) { _dmChannels.splice(idx, 1); _dmChannels.unshift(ch); }
-      renderDMChannels();
-    } else {
-      // Unknown channel — fall back to refresh (rare path).
-      loadDMChannels();
-    }
-  } catch {}
+    } catch {}
+  })();
 
   if (!_activeDM || data.channel_id !== _activeDM.id) {
     if (!_isMine) {

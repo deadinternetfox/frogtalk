@@ -1542,6 +1542,7 @@ async function createChannelBridge() {
 
 /* ─── Easy Telegram bridge setup (invite-code flow) ─────────────────────── */
 let _bridgeCodePollTimer = null;
+let _discordBridgeCodePollTimer = null;
 let _discordInviteMetaLoaded = false;
 
 async function generateDiscordBridgeCode() {
@@ -1565,11 +1566,10 @@ async function generateDiscordBridgeCode() {
     if (codeEl) codeEl.textContent = data.code;
     const st = document.getElementById('ch-bridge-discord-code-status');
     if (st) {
-      st.textContent = 'After posting in Discord, click "I Posted The Code, Link Now".';
+      st.textContent = '⏳ Waiting for your bridge command in Discord...';
       st.style.color = '#888';
     }
-    const checkBtn = document.getElementById('ch-bridge-discord-check-btn');
-    if (checkBtn) checkBtn.disabled = false;
+    _startDiscordBridgeCodePoll(data.code, roomName);
     try { box?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch {}
     UI.showToast('Discord claim code ready', 'success');
   } catch {
@@ -1675,6 +1675,40 @@ async function _checkDiscordBridgeCodeNow() {
   }
 }
 window._checkDiscordBridgeCodeNow = _checkDiscordBridgeCodeNow;
+
+function _startDiscordBridgeCodePoll(code, roomName) {
+  if (_discordBridgeCodePollTimer) clearInterval(_discordBridgeCodePollTimer);
+  let tries = 0;
+  _discordBridgeCodePollTimer = setInterval(async () => {
+    tries++;
+    if (tries > 60) {
+      clearInterval(_discordBridgeCodePollTimer);
+      const el = document.getElementById('ch-bridge-discord-code-status');
+      if (el) { el.textContent = '⌛ Code expired or timed out. Generate a new one.'; el.style.color = '#f55'; }
+      return;
+    }
+    try {
+      const r = await fetch(`/api/bridges/check-code/${encodeURIComponent(code)}`, {
+        headers: { 'X-Session-Token': State.token }
+      });
+      if (!r.ok) return;
+      const d = await r.json();
+      const el = document.getElementById('ch-bridge-discord-code-status');
+      if (d.status === 'claimed') {
+        clearInterval(_discordBridgeCodePollTimer);
+        if (el) {
+          el.textContent = '✅ Discord bridge linked automatically. Messages and media will now mirror.';
+          el.style.color = '#4caf50';
+        }
+        UI.showToast('Discord bridge connected!', 'success');
+        loadChannelBridgesPanel(roomName);
+      } else if (d.status === 'expired') {
+        clearInterval(_discordBridgeCodePollTimer);
+        if (el) { el.textContent = '⌛ Code expired. Generate a new one.'; el.style.color = '#f55'; }
+      }
+    } catch {}
+  }, 5000);
+}
 
 async function _loadDiscordBridgeInviteMeta() {
   if (_discordInviteMetaLoaded) return;

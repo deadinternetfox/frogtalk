@@ -4193,7 +4193,7 @@ window.ConnErr = (function(){
               <span class="bridge-step-num">4</span>
               <div class="bridge-step-body">
                 <div class="bridge-step-title">Send the code inside the target Discord channel</div>
-                <div class="bridge-step-hint">In the Discord channel you want to bridge, send the exact command below. Keep Message Content Intent enabled so the bot can read your one-time claim code.</div>
+                <div class="bridge-step-hint">In the Discord channel you want to bridge, send the exact command below. FrogTalk auto-detects it and links the bridge automatically. Keep Message Content Intent enabled so the bot can read your one-time claim code.</div>
                 <div id="ch-bridge-discord-code-box" style="display:none;margin-top:10px">
                   <div class="bridge-claim-card">
                     <div class="bridge-claim-label">Send this in the target Discord channel (valid 15 min):</div>
@@ -4202,8 +4202,7 @@ window.ConnErr = (function(){
                       <span class="bridge-claim-code" id="ch-bridge-discord-code">------</span>
                       <span class="bridge-claim-copy">📋 copy</span>
                     </div>
-                    <button id="ch-bridge-discord-check-btn" class="modal-btn secondary" type="button" onclick="_checkDiscordBridgeCodeNow()" style="width:100%;margin-top:10px">✅ I Posted The Code, Link Now</button>
-                    <div id="ch-bridge-discord-code-status" class="bridge-claim-status">After posting in Discord, click the button above to check and link.</div>
+                    <div id="ch-bridge-discord-code-status" class="bridge-claim-status">Auto-detect is running. As soon as the bot confirms the code, this bridge will link automatically.</div>
                   </div>
                 </div>
               </div>
@@ -5120,12 +5119,12 @@ if ('caches' in window) {
 <script src="/static/js/ws.js?v=195"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=203"></script>
-<script src="/static/js/rooms.js?v=199"></script>
+  <script src="/static/js/rooms.js?v=201"></script>
 <script src="/static/js/messages.js?v=193"></script>
 <script src="/static/js/users.js?v=191"></script>
 <script src="/static/js/emoji.js?v=191"></script>
 <script src="/static/js/friends.js?v=191"></script>
-<script src="/static/js/dms.js?v=202"></script>
+<script src="/static/js/dms.js?v=203"></script>
 <script src="/static/js/calls.js?v=200"></script>
 <script src="/static/js/media.js?v=193"></script>
 <script src="/static/js/gifs.js?v=191"></script>

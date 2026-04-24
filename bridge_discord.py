@@ -114,9 +114,10 @@ async def send_to_frogtalk(room: str, token: str, content: str,
         if sender_avatar:
             payload["sender_avatar"] = sender_avatar
         if remote_chat_id is not None:
-            payload["remote_chat_id"] = remote_chat_id
+            # API model expects string IDs; Discord gives us integers.
+            payload["remote_chat_id"] = str(remote_chat_id)
         if remote_msg_id is not None:
-            payload["remote_msg_id"] = remote_msg_id
+            payload["remote_msg_id"] = str(remote_msg_id)
         if reply_to_remote_id:
             payload["reply_to_remote_id"] = reply_to_remote_id
         r = await client.post(
@@ -577,6 +578,7 @@ def stop_discord_bridge():
 
 async def forward_to_discord(room: str, nickname: str, content: str,
                              media_data: str = None,
+                             sender_avatar: str | None = None,
                              *, ft_msg_id: int | None = None,
                              reply_to_ft_id: int | None = None,
                              media_blur: bool = False):
@@ -588,16 +590,19 @@ async def forward_to_discord(room: str, nickname: str, content: str,
         return
 
     # Cheap users-table lookup for the sender's avatar.
-    sender_avatar = None
-    try:
-        import database as db
-        u = db.get_user_by_nick(nickname)
-        if u:
-            av = (u.get("avatar") or "").strip()
-            if av.startswith("http://") or av.startswith("https://"):
-                sender_avatar = av
-    except Exception:
-        pass
+    resolved_avatar = (sender_avatar or "").strip()
+    if not (resolved_avatar.startswith("http://") or resolved_avatar.startswith("https://")):
+        resolved_avatar = None
+    if not resolved_avatar:
+        try:
+            import database as db
+            u = db.get_user_by_nick(nickname)
+            if u:
+                av = (u.get("avatar") or "").strip()
+                if av.startswith("http://") or av.startswith("https://"):
+                    resolved_avatar = av
+        except Exception:
+            pass
 
     body = content or "[media]"
     for channel_id, bridge in _bridges.items():
@@ -618,7 +623,7 @@ async def forward_to_discord(room: str, nickname: str, content: str,
         try:
             dc_msg_id = await send_to_discord(
                 channel_id, body, media_data,
-                nickname=nickname, avatar=sender_avatar, room=room,
+                nickname=nickname, avatar=resolved_avatar, room=room,
                 has_spoiler=bool(media_blur),
                 reply_to_message_id=reply_dc_id,
             )

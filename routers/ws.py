@@ -305,6 +305,7 @@ async def websocket_endpoint(
                     outbound_text = plain or content
                     bridge_outbound.forward_user_message(
                         room_name, user["nickname"], outbound_text, media_data,
+                        sender_avatar=user.get("avatar"),
                         ft_msg_id=msg_id,
                         reply_to_ft_id=reply_to or None,
                         media_blur=bool(media_blur),
