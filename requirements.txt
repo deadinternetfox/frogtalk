@@ -5,6 +5,7 @@ slowapi>=0.1.9
 python-multipart>=0.0.9
 websockets>=12.0
 httpx>=0.27.0
+socksio>=1.0.0
 pywebpush>=2.0.0
 firebase-admin>=6.5.0
 cryptography>=42.0.0

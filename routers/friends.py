@@ -1,4 +1,6 @@
 """Friends, tags, user search routes."""
+import time
+import uuid
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -16,6 +18,38 @@ def _friend_push(user_id: int, title: str, body: str):
     try:
         from routers.push import send_push
         send_push(user_id, title, body, "/app")
+    except Exception:
+        pass
+
+
+def _emit_friend_event(event_type: str, payload: dict) -> None:
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": event_type,
+            "payload": payload,
+        })
+    except Exception:
+        pass
+
+
+def _emit_profile_update(user_id: int) -> None:
+    try:
+        ident = db.get_user_by_id(user_id) or {}
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "user.profile.updated",
+            "payload": {
+                "global_user_id": ident.get("global_user_id") or "",
+                "nickname": ident.get("nickname") or "",
+                "avatar": ident.get("avatar") or "",
+                "bio": ident.get("bio") or "",
+                "status_msg": ident.get("status_msg") or "",
+                "presence": ident.get("presence") or "online",
+                "mood": ident.get("mood") or "",
+                "identity_pubkey": ident.get("identity_pubkey") or "",
+            },
+        })
     except Exception:
         pass
 
@@ -98,6 +132,7 @@ class PresenceBody(BaseModel):
 @users_router.post("/me/presence")
 async def set_presence(body: PresenceBody, current_user: dict = Depends(get_current_user)):
     db.update_presence(current_user["id"], body.presence)
+    _emit_profile_update(current_user["id"])
     return {"ok": True}
 
 
@@ -118,6 +153,10 @@ async def send_request(nickname: str, current_user: dict = Depends(get_current_u
     # Push notification to recipient as backup
     _friend_push(profile["id"], "\ud83d\udc65 Friend Request",
                  f"{current_user['nickname']} wants to be friends")
+    _emit_friend_event("friend.requested", {
+        "from_nickname": current_user["nickname"],
+        "to_nickname": profile["nickname"],
+    })
     return {"ok": True}
 
 
@@ -132,6 +171,10 @@ async def accept_request(nickname: str, current_user: dict = Depends(get_current
     # Push notification to requester as backup
     _friend_push(profile["id"], "\ud83d\udc65 Friend Accepted",
                  f"{current_user['nickname']} accepted your friend request")
+    _emit_friend_event("friend.accepted", {
+        "from_nickname": profile["nickname"],
+        "to_nickname": current_user["nickname"],
+    })
     return {"ok": True}
 
 

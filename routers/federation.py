@@ -8,6 +8,7 @@ import secrets
 import urllib.request
 import urllib.error
 import urllib.parse
+import httpx
 from pathlib import Path
 import tempfile
 import shutil
@@ -76,19 +77,98 @@ def _normalize_base_url(url: str) -> str:
     return (url or "").strip().rstrip("/")
 
 
+def _tor_proxy_url() -> str:
+    return (os.getenv("FROGTALK_TOR_SOCKS_PROXY") or "socks5://127.0.0.1:9050").strip()
+
+
+def _url_uses_tor(url: str) -> bool:
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").strip().lower()
+    except Exception:
+        host = ""
+    return host.endswith(".onion")
+
+
+def _fetch_url_bytes(
+    url: str,
+    *,
+    timeout_s: float = 4.5,
+    method: str = "GET",
+    headers: dict | None = None,
+    data: bytes | None = None,
+) -> bytes:
+    if _url_uses_tor(url):
+        with httpx.Client(proxy=_tor_proxy_url(), timeout=timeout_s, follow_redirects=True) as client:
+            resp = client.request(method, url, headers=headers, content=data)
+            resp.raise_for_status()
+            return resp.content
+
+    req = urllib.request.Request(url, headers=headers or {}, data=data, method=method)
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        return resp.read()
+
+
+def _select_peer_target(server: dict) -> str:
+    transport = str(db.get_federation_server_transport(str(server.get("server_id") or "")) or "auto").strip().lower()
+    base_url = _normalize_base_url(str(server.get("base_url") or ""))
+    onion_url = _normalize_base_url(str(server.get("onion_url") or ""))
+    tor_enabled = _tor_mode_enabled()
+
+    if transport == "onion" and onion_url:
+        return onion_url
+    if transport == "clearnet" and base_url:
+        return base_url
+    if transport == "auto" and tor_enabled and onion_url:
+        return onion_url
+    return base_url or onion_url
+
+
+def _tor_mode_enabled() -> bool:
+    return (os.getenv("FROGTALK_TOR_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _server_advertises_onion_only(server: dict) -> bool:
+    onion_url = _normalize_base_url(str(server.get("onion_url") or ""))
+    if not onion_url:
+        return False
+    if not _normalize_base_url(str(server.get("base_url") or "")):
+        return True
+    transport = str(server.get("transport_preference") or "").strip().lower()
+    return transport == "onion"
+
+
+def _public_server_target(server: dict) -> str:
+    onion_url = _normalize_base_url(str(server.get("onion_url") or ""))
+    base_url = _normalize_base_url(str(server.get("base_url") or ""))
+    if _server_advertises_onion_only(server):
+        return onion_url or base_url
+    return base_url or onion_url
+
+
+def _public_server_view(server: dict, *, onion_only: bool | None = None) -> dict:
+    public = dict(server)
+    onion_url = _normalize_base_url(str(public.get("onion_url") or ""))
+    base_url = _normalize_base_url(str(public.get("base_url") or ""))
+    if onion_only is None:
+        onion_only = _server_advertises_onion_only(public)
+    public["onion_url"] = onion_url
+    public["base_url"] = "" if (onion_only and onion_url) else base_url
+    return public
+
+
 def _probe_url(base_url: str, timeout_s: float = 1.2) -> dict:
     start = time.perf_counter()
     target = _normalize_base_url(base_url)
     if not target:
         return {"ok": False, "latency_ms": None, "error": "missing_base_url"}
     try:
-        req = urllib.request.Request(
+        _fetch_url_bytes(
             f"{target}/api/network/status",
+            timeout_s=timeout_s,
             headers={"User-Agent": "FrogTalk-Probe/1.0"},
             method="GET",
         )
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            ok = 200 <= int(resp.status) < 300
+        ok = True
         latency_ms = int((time.perf_counter() - start) * 1000)
         return {"ok": ok, "latency_ms": latency_ms, "error": None if ok else "status_not_ok"}
     except urllib.error.URLError as e:
@@ -133,13 +213,12 @@ def _get_update_feed_url() -> str:
 
 
 def _fetch_update_manifest(feed_url: str, timeout_s: float = 4.0) -> dict:
-    req = urllib.request.Request(
+    raw = _fetch_url_bytes(
         feed_url,
+        timeout_s=timeout_s,
         headers={"User-Agent": "FrogTalk-Updater/1.0", "Accept": "application/json"},
         method="GET",
-    )
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
+    ).decode("utf-8", errors="replace")
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("invalid update manifest")
@@ -158,13 +237,9 @@ def _sha256_of_file(path: str) -> str:
 
 
 def _download_update_package(url: str, target_path: str, timeout_s: float = 15.0) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "FrogTalk-Updater/1.0"}, method="GET")
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp, open(target_path, "wb") as out:
-        while True:
-            chunk = resp.read(65536)
-            if not chunk:
-                break
-            out.write(chunk)
+    raw = _fetch_url_bytes(url, timeout_s=timeout_s, headers={"User-Agent": "FrogTalk-Updater/1.0"}, method="GET")
+    with open(target_path, "wb") as out:
+        out.write(raw)
 
 
 def _apply_package_archive(archive_path: str) -> dict:
@@ -277,13 +352,12 @@ def _current_user_from_header(x_session_token: str | None) -> dict | None:
 
 
 def _load_directory_entries(directory_url: str, timeout_s: float = 4.0) -> list[dict]:
-    req = urllib.request.Request(
+    raw = _fetch_url_bytes(
         directory_url,
+        timeout_s=timeout_s,
         headers={"User-Agent": "FrogTalk-DirectorySync/1.0", "Accept": "application/json"},
         method="GET",
-    )
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        raw = resp.read().decode("utf-8", errors="replace")
+    ).decode("utf-8", errors="replace")
     payload = json.loads(raw)
     if isinstance(payload, list):
         return [p for p in payload if isinstance(p, dict)]
@@ -297,10 +371,10 @@ def _load_directory_entries(directory_url: str, timeout_s: float = 4.0) -> list[
 def _coerce_server_row(item: dict) -> dict | None:
     server_id = str(item.get("server_id") or item.get("id") or "").strip()
     base_url = _normalize_base_url(str(item.get("base_url") or item.get("url") or "").strip())
-    if not server_id or not base_url:
+    onion_url = str(item.get("onion_url") or item.get("onion") or "").strip()
+    if not server_id or not (base_url or onion_url):
         return None
     display_name = str(item.get("display_name") or item.get("name") or server_id).strip()
-    onion_url = str(item.get("onion_url") or item.get("onion") or "").strip()
     region = str(item.get("region") or "").strip()
     server_pubkey = str(item.get("server_pubkey") or item.get("pubkey") or "").strip()
     caps = item.get("capabilities")
@@ -360,12 +434,13 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
 @router.get("/network/status")
 async def network_status():
     local = db.get_or_create_local_server_identity()
+    public = _public_server_view(local, onion_only=_tor_mode_enabled())
     return {
         "server": {
-            "server_id": local["server_id"],
-            "display_name": local["display_name"],
-            "base_url": local["base_url"],
-            "onion_url": local["onion_url"],
+            "server_id": public["server_id"],
+            "display_name": public["display_name"],
+            "base_url": public["base_url"],
+            "onion_url": public["onion_url"],
             "federation_enabled": os.getenv("FROGTALK_FEDERATION_ENABLED", "0") in ("1", "true", "yes"),
             "tor_enabled": os.getenv("FROGTALK_TOR_ENABLED", "0") in ("1", "true", "yes"),
         }
@@ -374,23 +449,25 @@ async def network_status():
 
 @router.get("/network/servers")
 async def list_network_servers(request: Request, official_only: int = 0):
-    rows = db.list_federation_servers(official_only=bool(official_only))
+    rows = [_public_server_view(row) for row in db.list_federation_servers(official_only=bool(official_only))]
     local = db.get_or_create_local_server_identity()
     request_base = _normalize_base_url(str(request.base_url))
     local_base = _normalize_base_url(local.get("base_url") or request_base)
-    if local_base and not any((s.get("server_id") == local["server_id"] or _normalize_base_url(s.get("base_url") or "") == local_base) for s in rows):
-        rows.insert(0, {
-            "server_id": local["server_id"],
-            "display_name": local["display_name"],
-            "base_url": local_base,
-            "onion_url": local.get("onion_url") or "",
-            "region": "",
-            "official": 1,
-            "trust_tier": "official",
-            "capabilities": ["federation-v1"],
-            "enabled": 1,
-            "last_seen": None,
-        })
+    local_public = _public_server_view({
+        "server_id": local["server_id"],
+        "display_name": local["display_name"],
+        "base_url": local_base,
+        "onion_url": local.get("onion_url") or "",
+        "region": "",
+        "official": 1,
+        "trust_tier": "official",
+        "capabilities": ["federation-v1"],
+        "enabled": 1,
+        "last_seen": None,
+    }, onion_only=_tor_mode_enabled())
+    local_target = _public_server_target(local_public)
+    if local_target and not any((s.get("server_id") == local["server_id"] or _public_server_target(s) == local_target) for s in rows):
+        rows.insert(0, local_public)
     return {"servers": rows}
 
 
@@ -405,9 +482,7 @@ async def probe_network_servers(
     servers = (await list_network_servers(request=request, official_only=official_only)).get("servers", [])
 
     async def probe_one(server: dict):
-        target = server.get("base_url") or ""
-        if include_onion and server.get("onion_url"):
-            target = server.get("onion_url")
+        target = server.get("onion_url") if (include_onion and server.get("onion_url")) else _public_server_target(server)
         result = await asyncio.to_thread(_probe_url, target, timeout_ms / 1000.0)
         return {
             **server,
@@ -484,16 +559,13 @@ async def network_verify_peer_builds(
 
     # Detect the server's own public base URL to short-circuit loopback requests.
     # Prefer explicit env vars, then fall back to persisted federation identity.
-    own_public = (
-        os.getenv("FROGTALK_PUBLIC_URL")
-        or os.getenv("PUBLIC_URL")
-        or os.getenv("FROGTALK_BASE_URL")
-        or ""
-    ).rstrip("/").lower()
+    own_public = ""
     if not own_public:
         try:
             local_ident = db.get_or_create_local_server_identity() or {}
-            own_public = str(local_ident.get("base_url") or "").rstrip("/").lower()
+            own_public = _public_server_target(
+                _public_server_view(local_ident, onion_only=_tor_mode_enabled())
+            ).rstrip("/").lower()
         except Exception:
             own_public = ""
 
@@ -529,13 +601,12 @@ async def network_verify_peer_builds(
             results.append(entry)
             continue
         try:
-            req = urllib.request.Request(
+            raw = _fetch_url_bytes(
                 f"{base}/api/network/build/local",
+                timeout_s=5.0,
                 headers={"User-Agent": "FrogTalk-BuildVerify/1.0", "Accept": "application/json"},
                 method="GET",
-            )
-            with urllib.request.urlopen(req, timeout=5.0) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
+            ).decode("utf-8", errors="replace")
             payload = json.loads(raw)
             remote_hash = str(payload.get("build_hash") or "")
             entry["reachable"] = True
@@ -890,6 +961,8 @@ async def federation_inbox_processor():
                     await _handle_user_event(event)
                 elif event_type.startswith("social."):
                     await _handle_social_event(event)
+                elif event_type.startswith("friend."):
+                    await _handle_friend_event(event)
 
                 db.mark_federation_inbox_event(event_id, "applied")
             except Exception as e:
@@ -918,12 +991,12 @@ async def federation_outbox_processor():
             continue
         if str(srv.get("server_id") or "") == local_server_id:
             continue
-        base = _normalize_base_url(str(srv.get("base_url") or ""))
-        if not base:
+        target = _select_peer_target(srv)
+        if not target:
             continue
-        if local_base and base.lower() == local_base:
+        if local_base and target.lower() == local_base:
             continue
-        targets.append(base)
+        targets.append(target)
 
     if not targets:
         return
@@ -953,8 +1026,10 @@ async def federation_outbox_processor():
         delivered = False
         for base in targets:
             try:
-                req = urllib.request.Request(
+                raw = _fetch_url_bytes(
                     f"{base}/api/federation/events/inbox",
+                    timeout_s=4.5,
+                    method="POST",
                     data=json.dumps({"events": [envelope]}).encode("utf-8"),
                     headers={
                         "Content-Type": "application/json",
@@ -962,11 +1037,8 @@ async def federation_outbox_processor():
                         "User-Agent": "FrogTalk-FederationPush/1.0",
                         "x-federation-token": fed_token,
                     },
-                    method="POST",
                 )
-                with urllib.request.urlopen(req, timeout=4.5) as resp:
-                    raw = resp.read().decode("utf-8", errors="replace")
-                reply = json.loads(raw or "{}")
+                reply = json.loads(raw.decode("utf-8", errors="replace") or "{}")
                 if int(reply.get("accepted") or 0) > 0:
                     delivered = True
             except Exception:
@@ -1030,6 +1102,39 @@ async def _handle_user_event(event: dict) -> None:
         origin_server_id=str(event.get("origin_server_id") or ""),
     )
 
+    nick = str(payload.get("nickname") or "").strip()
+    if not nick:
+        return
+    user = _ensure_local_user_by_nickname(nick)
+    if not user:
+        return
+
+    allowed_presence = {"online", "away", "dnd", "invisible"}
+    presence = str(payload.get("presence") or "").strip().lower()
+    if presence not in allowed_presence:
+        presence = None
+
+    with db._conn() as con:
+        con.execute(
+            """
+            UPDATE users
+            SET avatar=?, bio=?, status_msg=?, mood=?,
+                presence=COALESCE(?, presence),
+                identity_pubkey=COALESCE(NULLIF(?, ''), identity_pubkey)
+            WHERE id=?
+            """,
+            (
+                str(payload.get("avatar") or ""),
+                str(payload.get("bio") or ""),
+                str(payload.get("status_msg") or "")[:128],
+                str(payload.get("mood") or "")[:100],
+                presence,
+                str(payload.get("identity_pubkey") or ""),
+                user["id"],
+            ),
+        )
+        con.commit()
+
 
 def _ensure_local_user_by_nickname(nickname: str) -> dict | None:
     nick = (nickname or "").strip()
@@ -1059,7 +1164,7 @@ async def _handle_dm_event(event: dict) -> None:
         return
 
     channel_id = db.get_or_create_dm(sender["id"], peer["id"])
-    db.send_dm_message(
+    msg_id = db.send_dm_message(
         channel_id,
         sender["id"],
         str(payload.get("content") or ""),
@@ -1070,6 +1175,88 @@ async def _handle_dm_event(event: dict) -> None:
         media_blur=int(payload.get("media_blur") or 0),
         view_once=int(payload.get("view_once") or 0),
     )
+
+    dm_broadcast = {
+        "type": "dm_message",
+        "id": msg_id,
+        "channel_id": channel_id,
+        "sender_id": sender["id"],
+        "sender_nick": sender["nickname"],
+        "sender_avatar": sender.get("avatar"),
+        "content": str(payload.get("content") or ""),
+        "media_type": payload.get("media_type"),
+        "media_name": payload.get("media_name"),
+        "has_media": bool(payload.get("media_data")),
+        "media_blur": int(payload.get("media_blur") or 0),
+        "view_once": int(payload.get("view_once") or 0),
+        "reply_to": payload.get("reply_to"),
+        "edited": False,
+        "deleted": False,
+        "reactions": {},
+        "created_at": str(payload.get("created_at") or datetime.utcnow().isoformat()),
+    }
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(peer["id"], dm_broadcast)
+    except Exception:
+        pass
+    try:
+        from routers.push import send_push
+        preview = (str(payload.get("content") or "") or "📎 Media")[:80]
+        send_push(peer["id"], f"💬 {sender['nickname']}", preview, "/app")
+    except Exception:
+        pass
+
+
+async def _handle_friend_event(event: dict) -> None:
+    payload = event.get("payload") or {}
+    event_type = str(event.get("event_type") or "")
+    from_nick = str(payload.get("from_nickname") or "").strip()
+    to_nick = str(payload.get("to_nickname") or "").strip()
+    if not from_nick or not to_nick:
+        return
+
+    from_user = _ensure_local_user_by_nickname(from_nick)
+    to_user = _ensure_local_user_by_nickname(to_nick)
+    if not from_user or not to_user:
+        return
+
+    if event_type == "friend.requested":
+        db.send_friend_request(from_user["id"], to_user["id"])
+        try:
+            from ws_manager import manager
+            await manager.send_to_user(to_user["id"], {
+                "type": "friend_notify",
+                "action": "request",
+                "from": from_nick,
+                "from_avatar": from_user.get("avatar"),
+            })
+        except Exception:
+            pass
+        try:
+            from routers.push import send_push
+            send_push(to_user["id"], "👥 Friend Request", f"{from_nick} wants to be friends", "/app")
+        except Exception:
+            pass
+        return
+
+    if event_type == "friend.accepted":
+        db.accept_friend_request(from_user["id"], to_user["id"])
+        try:
+            from ws_manager import manager
+            await manager.send_to_user(from_user["id"], {
+                "type": "friend_notify",
+                "action": "accept",
+                "from": to_nick,
+                "from_avatar": to_user.get("avatar"),
+            })
+        except Exception:
+            pass
+        try:
+            from routers.push import send_push
+            send_push(from_user["id"], "👥 Friend Accepted", f"{to_nick} accepted your friend request", "/app")
+        except Exception:
+            pass
 
 
 async def _handle_social_event(event: dict) -> None:
@@ -1096,6 +1283,41 @@ async def _handle_social_event(event: dict) -> None:
         )
         return
 
+    if event_type == "social.story.created":
+        author_nick = str(payload.get("nickname") or "").strip()
+        author = _ensure_local_user_by_nickname(author_nick)
+        if not author:
+            return
+        media_data = payload.get("media_data")
+        if not media_data:
+            return
+        privacy = str(payload.get("privacy") or "public")
+        if privacy not in ("public", "followers"):
+            privacy = "public"
+        db.create_story(
+            author["id"],
+            str(media_data),
+            str(payload.get("media_type") or "application/octet-stream"),
+            str(payload.get("caption") or ""),
+            privacy,
+        )
+        return
+
+    if event_type == "social.story.deleted":
+        author_nick = str(payload.get("nickname") or "").strip()
+        author = _ensure_local_user_by_nickname(author_nick)
+        if not author:
+            return
+        story_id = payload.get("story_id")
+        try:
+            sid = int(story_id)
+        except Exception:
+            return
+        with db._conn() as con:
+            con.execute("DELETE FROM stories WHERE id=? AND user_id=?", (sid, author["id"]))
+            con.commit()
+        return
+
     if event_type == "social.follow.changed":
         follower_nick = str(payload.get("follower_nickname") or "").strip()
         following_nick = str(payload.get("following_nickname") or "").strip()
@@ -1118,14 +1340,14 @@ async def _handle_social_event(event: dict) -> None:
 async def network_status_tor():
     """TOR-specific server identity endpoint."""
     local = db.get_or_create_local_server_identity()
-    onion_url = os.getenv("FROGTALK_ONION_URL", "").strip()
+    public = _public_server_view(local, onion_only=True)
     return {
         "server": {
-            "server_id": local["server_id"],
-            "display_name": local["display_name"],
-            "base_url": local.get("base_url") or "",
-            "onion_url": onion_url,
-            "tor_enabled": bool(onion_url),
+            "server_id": public["server_id"],
+            "display_name": public["display_name"],
+            "base_url": public.get("base_url") or "",
+            "onion_url": public.get("onion_url") or "",
+            "tor_enabled": bool(public.get("onion_url")),
             "federation_enabled": True,
         }
     }

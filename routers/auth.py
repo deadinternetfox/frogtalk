@@ -111,27 +111,51 @@ def _federated_register_enabled() -> bool:
     return (os.getenv("FROGTALK_FEDERATED_REGISTER_ENABLED", "1") or "1").strip().lower() in ("1", "true", "yes")
 
 
-async def _fanout_registration_to_peers(request: Request, nickname: str, password: str):
-    """Best-effort registration replication so account exists across nodes."""
-    if not _federated_register_enabled():
-        return
+def _tor_mode_enabled() -> bool:
+    return (os.getenv("FROGTALK_TOR_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
 
-    own = {
+
+def _peer_target(row: dict) -> str:
+    base = _norm_base(str(row.get("base_url") or ""))
+    onion = _norm_base(str(row.get("onion_url") or ""))
+    transport = str(row.get("transport_preference") or "auto").strip().lower()
+    if transport == "onion" and onion:
+        return onion
+    if transport == "clearnet" and base:
+        return base
+    if _tor_mode_enabled() and onion:
+        return onion
+    return base or onion
+
+
+def _local_known_urls(request: Request) -> set[str]:
+    urls = {
         _norm_base(str(request.base_url)),
         _norm_base(os.getenv("PUBLIC_URL", "")),
         _norm_base(os.getenv("FROGTALK_BASE_URL", "")),
         _norm_base(os.getenv("FROGTALK_PUBLIC_URL", "")),
     }
+    if _tor_mode_enabled():
+        urls.add(_norm_base(os.getenv("FROGTALK_ONION_URL", "")))
+    return {u for u in urls if u}
+
+
+async def _fanout_registration_to_peers(request: Request, nickname: str, password: str):
+    """Best-effort registration replication so account exists across nodes."""
+    if not _federated_register_enabled():
+        return
+
+    own = _local_known_urls(request)
 
     peers = []
     for row in db.list_federation_servers(official_only=False):
-        base = _norm_base(str(row.get("base_url") or ""))
+        base = _peer_target(row)
         if not base or base in own:
             continue
-        peers.append((base.startswith("https://"), int(row.get("official") or 0), base))
+        peers.append((base.endswith(".onion") or ".onion/" in base, base.startswith("https://"), int(row.get("official") or 0), base))
     peers.sort(reverse=True)
 
-    for _, __, base in peers[:12]:
+    for _, __, ___, base in peers[:12]:
         try:
             await asyncio.to_thread(
                 _post_json,
@@ -165,24 +189,19 @@ async def _try_federated_login_bootstrap(request: Request, nickname: str, passwo
     if not _federated_login_enabled():
         return None
 
-    own = {
-        _norm_base(str(request.base_url)),
-        _norm_base(os.getenv("PUBLIC_URL", "")),
-        _norm_base(os.getenv("FROGTALK_BASE_URL", "")),
-        _norm_base(os.getenv("FROGTALK_PUBLIC_URL", "")),
-    }
+    own = _local_known_urls(request)
 
     candidates = []
     for row in db.list_federation_servers(official_only=False):
-        base = _norm_base(str(row.get("base_url") or ""))
+        base = _peer_target(row)
         if not base or base in own:
             continue
-        candidates.append((base.startswith("https://"), int(row.get("official") or 0), base))
+        candidates.append((base.endswith(".onion") or ".onion/" in base, base.startswith("https://"), int(row.get("official") or 0), base))
 
-    # Prefer https + official entries first.
+    # Prefer the current transport mode, then official entries.
     candidates.sort(reverse=True)
 
-    for _, __, base in candidates[:8]:
+    for _, __, ___, base in candidates[:8]:
         try:
             remote_login, remote_ident = await asyncio.to_thread(_login_against_peer, base, nickname, password)
             if not remote_login:
@@ -213,6 +232,7 @@ class LoginRequest(BaseModel):
 
 class FederationTicketRequest(BaseModel):
     target_base_url: str | None = None
+    target_url: str | None = None
 
 
 class FederationTicketLoginRequest(BaseModel):
@@ -421,10 +441,10 @@ async def create_federation_ticket(
     body: FederationTicketRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    target = _norm_base((body.target_base_url or "").strip())
+    target = _norm_base((body.target_url or body.target_base_url or "").strip())
     if not target:
         return JSONResponse(status_code=400, content={"error": "target_base_url required"})
-    source = _norm_base(str(request.base_url))
+    source = _norm_base(os.getenv("FROGTALK_ONION_URL", "")) if _tor_mode_enabled() else _norm_base(str(request.base_url))
     full_user = db.get_user_by_id(current_user["id"]) or current_user
     ticket = _build_federation_login_ticket(full_user, source, target, ttl_seconds=90)
     if not ticket:
@@ -560,6 +580,9 @@ async def update_profile(body: ProfileUpdateRequest, current_user: dict = Depend
                 "nickname": ident.get("nickname") or current_user.get("nickname") or "",
                 "avatar": ident.get("avatar") or "",
                 "bio": ident.get("bio") or "",
+                "status_msg": ident.get("status_msg") or "",
+                "presence": ident.get("presence") or "online",
+                "mood": ident.get("mood") or "",
                 "identity_pubkey": ident.get("identity_pubkey") or "",
             },
         })

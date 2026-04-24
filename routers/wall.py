@@ -329,9 +329,29 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
         params.append(current_user["id"])
         con.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", params)
         row = con.execute("""
-            SELECT wall_enabled, wall_comments_enabled, mood, custom_css
+            SELECT wall_enabled, wall_comments_enabled, mood, custom_css,
+                   global_user_id, nickname, avatar, bio, status_msg, presence, identity_pubkey
             FROM users WHERE id=?
         """, (current_user["id"],)).fetchone()
+
+    try:
+        if row:
+            db.insert_federation_outbox_event({
+                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+                "event_type": "user.profile.updated",
+                "payload": {
+                    "global_user_id": row["global_user_id"] or "",
+                    "nickname": row["nickname"] or current_user.get("nickname") or "",
+                    "avatar": row["avatar"] or "",
+                    "bio": row["bio"] or "",
+                    "status_msg": row["status_msg"] or "",
+                    "presence": row["presence"] or "online",
+                    "mood": row["mood"] or "",
+                    "identity_pubkey": row["identity_pubkey"] or "",
+                },
+            })
+    except Exception:
+        pass
     
     return dict(row) if row else {"ok": True}
 

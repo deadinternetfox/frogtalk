@@ -171,12 +171,16 @@ const App = {
 
     if (!State.token || !State.user) {
       const switched = params.get('switched') === '1';
+      const switchedTor = params.get('tor') === '1';
       if (switched) {
         const ok = await this.tryAutoLoginFromSwitchTicket();
         if (ok) {
           hideSplash();
           try { await this.launch(); } catch (e) { console.error('[App] launch failed', e); }
           return;
+        }
+        if (switchedTor && typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast('Tor switch detected. Auto-login can fail across onion hops — log in again if needed.', 'info', 6500);
         }
       }
     }

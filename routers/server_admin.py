@@ -2,6 +2,7 @@
 import os
 import time
 import secrets
+import shutil
 from typing import Optional
 
 from fastapi import APIRouter, Request, Response
@@ -55,6 +56,81 @@ def _actor_user_id() -> int:
     if uid:
         return int(uid)
     return 1
+
+
+def _read_meminfo() -> dict:
+    out = {}
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if ":" not in line:
+                    continue
+                k, v = line.split(":", 1)
+                parts = v.strip().split()
+                if not parts:
+                    continue
+                try:
+                    out[k.strip()] = int(parts[0]) * 1024
+                except Exception:
+                    continue
+    except Exception:
+        return {}
+    return out
+
+
+def _resource_snapshot() -> dict:
+    now = int(time.time())
+    cpu_count = os.cpu_count() or 1
+    load1 = load5 = load15 = None
+    cpu_pct_1m = None
+    try:
+        load1, load5, load15 = os.getloadavg()
+        cpu_pct_1m = round((float(load1) / max(1, cpu_count)) * 100.0, 1)
+    except Exception:
+        pass
+
+    mem = _read_meminfo()
+    mem_total = int(mem.get("MemTotal") or 0)
+    mem_available = int(mem.get("MemAvailable") or 0)
+    mem_used = max(0, mem_total - mem_available) if mem_total else 0
+    mem_pct = round((mem_used / mem_total) * 100.0, 1) if mem_total else None
+
+    disk = shutil.disk_usage("/")
+    disk_used = int(disk.used)
+    disk_total = int(disk.total)
+    disk_pct = round((disk_used / disk_total) * 100.0, 1) if disk_total else None
+
+    uptime_s = None
+    try:
+        with open("/proc/uptime", "r", encoding="utf-8", errors="ignore") as f:
+            uptime_s = int(float(f.read().split()[0]))
+    except Exception:
+        pass
+
+    return {
+        "timestamp": now,
+        "cpu": {
+            "cores": cpu_count,
+            "load1": load1,
+            "load5": load5,
+            "load15": load15,
+            "usage_pct_1m": cpu_pct_1m,
+        },
+        "memory": {
+            "total": mem_total,
+            "used": mem_used,
+            "available": mem_available,
+            "used_pct": mem_pct,
+        },
+        "disk": {
+            "path": "/",
+            "total": disk_total,
+            "used": disk_used,
+            "free": int(disk.free),
+            "used_pct": disk_pct,
+        },
+        "uptime_sec": uptime_s,
+    }
 
 
 def _cleanup_sessions() -> None:
@@ -188,8 +264,85 @@ async def server_admin_stats(request: Request):
     return {
         "db": db_stats,
         "ws": ws_stats,
+        "resources": _resource_snapshot(),
         "timestamp": int(time.time()),
     }
+
+
+@router.get("/api/server-admin/nodes")
+async def server_admin_nodes(request: Request, include_disabled: int = 1):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    nodes = db.list_federation_servers_admin(include_disabled=bool(include_disabled))
+    return {"nodes": nodes, "count": len(nodes)}
+
+
+@router.get("/api/server-admin/nodes/{server_id}/probe")
+async def server_admin_probe_node(server_id: str, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    sid = (server_id or "").strip()
+    if not sid:
+        return JSONResponse(status_code=400, content={"error": "server_id required"})
+
+    node = next((n for n in db.list_federation_servers_admin(include_disabled=True) if (n.get("server_id") or "") == sid), None)
+    if not node:
+        return JSONResponse(status_code=404, content={"error": "Node not found"})
+
+    target = federation_router._select_peer_target(node)
+    result = federation_router._probe_url(target, timeout_s=1.6)
+    return {
+        "ok": True,
+        "server_id": sid,
+        "target": target,
+        "healthy": bool(result.get("ok")),
+        "latency_ms": result.get("latency_ms"),
+        "error": result.get("error"),
+    }
+
+
+@router.post("/api/server-admin/nodes/{server_id}/block")
+async def server_admin_block_node(server_id: str, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    ok = db.set_federation_server_enabled(server_id, False)
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "Node not found"})
+    return {"ok": True, "server_id": server_id, "blocked": True}
+
+
+@router.post("/api/server-admin/nodes/{server_id}/unblock")
+async def server_admin_unblock_node(server_id: str, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    ok = db.set_federation_server_enabled(server_id, True)
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "Node not found"})
+    return {"ok": True, "server_id": server_id, "blocked": False}
 
 
 @router.get("/api/server-admin/online-users")

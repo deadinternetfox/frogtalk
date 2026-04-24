@@ -1296,6 +1296,11 @@ def _migrate():
         if "privacy" not in story_cols:
             con.execute("ALTER TABLE stories ADD COLUMN privacy TEXT DEFAULT 'public'")
 
+        # Federation servers: transport_preference column (added later — safe migration)
+        fed_srv_cols = {r["name"] for r in con.execute("PRAGMA table_info(federation_servers)").fetchall()}
+        if fed_srv_cols and "transport_preference" not in fed_srv_cols:
+            con.execute("ALTER TABLE federation_servers ADD COLUMN transport_preference TEXT DEFAULT 'auto'")
+
         con.commit()
 
 
@@ -4201,7 +4206,8 @@ def list_federation_servers(official_only: bool = False) -> List[Dict]:
             rows = con.execute(
                 """
                 SELECT server_id, display_name, base_url, onion_url, region,
-                       official, trust_tier, capabilities_json, enabled, last_seen
+                       official, trust_tier, capabilities_json, enabled, last_seen,
+                       transport_preference
                 FROM federation_servers
                 WHERE enabled=1 AND official=1
                 ORDER BY display_name COLLATE NOCASE
@@ -4211,7 +4217,8 @@ def list_federation_servers(official_only: bool = False) -> List[Dict]:
             rows = con.execute(
                 """
                 SELECT server_id, display_name, base_url, onion_url, region,
-                       official, trust_tier, capabilities_json, enabled, last_seen
+                       official, trust_tier, capabilities_json, enabled, last_seen,
+                       transport_preference
                 FROM federation_servers
                 WHERE enabled=1
                 ORDER BY official DESC, display_name COLLATE NOCASE
@@ -4227,6 +4234,59 @@ def list_federation_servers(official_only: bool = False) -> List[Dict]:
             d.pop("capabilities_json", None)
         out.append(d)
     return out
+
+
+def list_federation_servers_admin(include_disabled: bool = True) -> List[Dict]:
+    """List federation servers for admin panels.
+
+    Includes `enabled` state so operators can block/unblock peers.
+    """
+    with _conn() as con:
+        if include_disabled:
+            rows = con.execute(
+                """
+                SELECT server_id, display_name, base_url, onion_url, region,
+                       official, trust_tier, capabilities_json, enabled, last_seen,
+                       transport_preference
+                FROM federation_servers
+                ORDER BY official DESC, enabled DESC, display_name COLLATE NOCASE
+                """
+            ).fetchall()
+        else:
+            rows = con.execute(
+                """
+                SELECT server_id, display_name, base_url, onion_url, region,
+                       official, trust_tier, capabilities_json, enabled, last_seen,
+                       transport_preference
+                FROM federation_servers
+                WHERE enabled=1
+                ORDER BY official DESC, display_name COLLATE NOCASE
+                """
+            ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["capabilities"] = json.loads(d.pop("capabilities_json") or "[]")
+        except Exception:
+            d["capabilities"] = []
+            d.pop("capabilities_json", None)
+        out.append(d)
+    return out
+
+
+def set_federation_server_enabled(server_id: str, enabled: bool) -> bool:
+    """Enable/disable (block) a federation peer by server_id."""
+    sid = (server_id or "").strip()
+    if not sid:
+        return False
+    with _conn() as con:
+        cur = con.execute(
+            "UPDATE federation_servers SET enabled=? WHERE server_id=?",
+            (1 if enabled else 0, sid),
+        )
+        con.commit()
+    return cur.rowcount > 0
 
 
 def upsert_federation_server(

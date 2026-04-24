@@ -19,6 +19,7 @@
 |---|---|
 | 🔐 **E2E Encryption** | AES-256-GCM, client-side only — the server never sees plaintext |
 | 🌐 **Federated** | Your node joins the global FrogTalk directory and talks to other nodes |
+| 🔁 **Cross-node Sync** | Replicates users/profile status, social follows/posts/stories, rooms, and DMs across nodes |
 | ⚡ **Real-time** | WebSocket messaging with auto-reconnect, typing indicators, reactions |
 | 🔒 **Private Rooms** | Passphrase-protected rooms — only members with the passphrase can decrypt |
 | 💬 **Direct Messages** | Fully encrypted DMs between any two users |
@@ -56,6 +57,23 @@ python main.py                   # → http://localhost:8080
 ```
 
 Default admin login: `admin` / the value of `ADMIN_PASSWORD` in your `.env`.
+
+### Server Web Admin (node management)
+
+Enable the secure node management dashboard:
+
+```bash
+export FROGTALK_SERVER_WEBUI_ENABLED=1
+export FROGTALK_SERVER_WEBUI_USER=serveradmin
+export FROGTALK_SERVER_WEBUI_PASSWORD='set-a-strong-password'
+```
+
+Then open:
+
+- URL: `https://your-host/server`
+- Login: `FROGTALK_SERVER_WEBUI_USER` / `FROGTALK_SERVER_WEBUI_PASSWORD`
+
+Capabilities include live hardware telemetry (CPU/memory/disk/uptime), federation node inventory, node probe, and block/unblock controls.
 
 ### Production (systemd)
 

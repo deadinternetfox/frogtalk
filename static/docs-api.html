@@ -198,7 +198,9 @@ GET    /api/auth/captcha
 POST   /api/auth/register-secure
 POST   /api/auth/recovery-key
 POST   /api/auth/recover
-POST   /api/auth/verify-recovery-key</code></pre>
+POST   /api/auth/verify-recovery-key
+POST   /api/auth/federation-ticket
+POST   /api/auth/federation-ticket-login</code></pre>
         </article>
 
         <article class="panel" id="users">
@@ -485,6 +487,10 @@ POST   /api/server-admin/logout
 GET    /api/server-admin/me
 GET    /api/server-admin/stats
 GET    /api/server-admin/online-users
+GET    /api/server-admin/nodes
+GET    /api/server-admin/nodes/{server_id}/probe
+POST   /api/server-admin/nodes/{server_id}/block
+POST   /api/server-admin/nodes/{server_id}/unblock
 POST   /api/server-admin/control/sync-official-directory
 POST   /api/server-admin/control/kick
 POST   /api/server-admin/control/ban

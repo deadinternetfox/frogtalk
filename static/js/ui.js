@@ -748,6 +748,7 @@ let _networkProbeResults = [];
 let _networkSelectedServer = null;
 let _networkBuildTrustByBase = {};
 let _networkLocalBuildInfo = null;
+let _networkCurrentServerInfo = null;
 
 function ensureNetworkPaneContent() {
   const pane = document.getElementById('set-pane-network');
@@ -864,12 +865,142 @@ function _normalizeNetworkUrl(url) {
   return withScheme.replace(/\/$/, '');
 }
 
+function _isOnionNetworkUrl(url) {
+  return /\.onion(?=\/|$)/i.test(String(url || '').trim());
+}
+
+function _isTorPreferred() {
+  const checkbox = document.getElementById('network-prefer-onion');
+  if (checkbox) return !!checkbox.checked;
+  return localStorage.getItem('ft_network_prefer_onion') === '1';
+}
+
+function _preferredNetworkUrl(server) {
+  const onion = _normalizeNetworkUrl(server?.onion_url || '');
+  const base = _normalizeNetworkUrl(server?.base_url || '');
+  return (_isTorPreferred() && onion) ? onion : (base || onion);
+}
+
+function _networkCurrentServerEntry() {
+  const connectedBase = _normalizeNetworkUrl(window.location.origin || '');
+  const onion = _normalizeNetworkUrl(_networkCurrentServerInfo?.onion_url || '');
+  const base = _normalizeNetworkUrl(_networkCurrentServerInfo?.base_url || connectedBase || '');
+  const publicAddr = (_isTorPreferred() && onion) ? onion : (base || onion || connectedBase);
+  if (!publicAddr) return null;
+  return {
+    server_id: _networkCurrentServerInfo?.server?.server_id || 'current-connected',
+    display_name: _networkCurrentServerInfo?.server?.display_name || 'Current Server',
+    base_url: base || connectedBase,
+    onion_url: onion,
+    region: _guessNetworkRegionFromBaseUrl(base || connectedBase),
+    official: 0,
+    trust_tier: 'community',
+    healthy: true,
+    latency_ms: 0,
+    probe_error: null,
+    _public_addr: publicAddr,
+  };
+}
+
 function _getConnectedServerBaseUrl() {
   try {
-    return _normalizeNetworkUrl(window.location.origin || '');
+    return _networkCurrentServerEntry()?._public_addr || _normalizeNetworkUrl(window.location.origin || '');
   } catch {
     return '';
   }
+}
+
+async function _loadCurrentNetworkStatus() {
+  try {
+    const res = await apiFetch('/api/network/status');
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'status unavailable');
+    _networkCurrentServerInfo = data || null;
+  } catch {
+    _networkCurrentServerInfo = null;
+  }
+}
+
+function _networkAddressRow(address, tone = 'tor') {
+  const safe = UI.escHtml(address || '');
+  const isTor = tone === 'tor';
+  const color = isTor ? '#7fd6a2' : '#9aa3aa';
+  const icon = isTor ? '🧅' : '🌐';
+  const bg = isTor ? 'rgba(51,122,82,.12)' : 'transparent';
+  return `
+    <div style="display:flex;align-items:center;gap:6px;min-width:0;margin-top:4px;background:${bg};border:${isTor ? '1px solid rgba(92,171,118,.22)' : 'none'};border-radius:8px;padding:${isTor ? '6px 8px' : '0'}">
+      <button type="button" onclick="UI.copy('${safe}').then(ok=>UI.showToast(ok?'Tor address copied':'Could not copy address', ok?'success':'error'))" title="Copy address" style="flex:1;min-width:0;background:none;border:none;color:${color};padding:0;text-align:left;cursor:pointer;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+        ${icon} ${safe}
+      </button>
+      <button type="button" onclick="UI.copy('${safe}').then(ok=>UI.showToast(ok?'Tor address copied':'Could not copy address', ok?'success':'error'))" title="Copy address" style="flex:0 0 auto;background:#101010;border:1px solid rgba(255,255,255,.08);color:${color};border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer">Copy</button>
+    </div>
+  `;
+}
+
+async function _showTorModeDialog({ title, body, address = '', confirmLabel = '', showCancel = false } = {}) {
+  return await new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(3,8,6,.72);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:18px';
+    const card = document.createElement('div');
+    card.style.cssText = 'width:min(560px,96vw);background:linear-gradient(180deg,#0f1714 0%,#101312 100%);border:1px solid rgba(95,181,121,.24);border-radius:20px;box-shadow:0 28px 80px rgba(0,0,0,.58);overflow:hidden';
+    const safeAddress = UI.escHtml(address || '');
+    card.innerHTML = `
+      <div style="padding:18px 20px 14px;background:radial-gradient(circle at top left,rgba(91,196,124,.16),transparent 55%)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#173626,#0d1812);display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid rgba(95,181,121,.25)">🧅</div>
+          <div>
+            <div style="font-size:18px;color:#e7f5eb;font-weight:800;letter-spacing:.01em">${UI.escHtml(title || 'Tor Mode')}</div>
+            <div style="font-size:12px;color:#8fb198;margin-top:3px">Use hidden services instead of public clearnet routing.</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding:0 20px 20px">
+        <div style="font-size:13px;line-height:1.65;color:#c8d6cc">${body || ''}</div>
+        ${safeAddress ? `<div style="margin-top:14px;background:#0c1110;border:1px solid rgba(95,181,121,.18);border-radius:14px;padding:12px 12px 10px"><div style="font-size:11px;color:#84ad8f;text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px">Tor Address</div>${_networkAddressRow(safeAddress, 'tor')}</div>` : ''}
+        <div style="margin-top:14px;background:rgba(18,23,22,.92);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:12px 14px;font-size:12px;color:#9eb0a6;line-height:1.6">
+          You need a Tor-connected browser or system Tor setup to open <span style="color:#d7efe0">.onion</span> addresses. FrogTalk will try account handoff automatically, but onion switches can still require a fresh login.
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:18px">
+          <button type="button" data-role="copy" style="background:#101615;border:1px solid rgba(95,181,121,.2);color:#bfe3ca;border-radius:10px;padding:10px 14px;font-size:12px;font-weight:700;cursor:pointer;${safeAddress ? '' : 'display:none;'}">Copy Address</button>
+          ${showCancel ? '<button type="button" data-role="cancel" style="background:#171717;border:1px solid #2a2a2a;color:#b7b7b7;border-radius:10px;padding:10px 14px;font-size:12px;font-weight:700;cursor:pointer">Stay Here</button>' : ''}
+          <button type="button" data-role="confirm" style="background:linear-gradient(135deg,#5cc06f,#4ca65f);border:none;color:#071008;border-radius:10px;padding:10px 16px;font-size:12px;font-weight:800;cursor:pointer">${UI.escHtml(confirmLabel || 'Got it')}</button>
+        </div>
+      </div>
+    `;
+    overlay.appendChild(card);
+    const cleanup = (value) => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay && showCancel) cleanup(false);
+    });
+    card.querySelector('[data-role="confirm"]').onclick = () => cleanup(true);
+    if (showCancel) card.querySelector('[data-role="cancel"]').onclick = () => cleanup(false);
+    const copyBtn = card.querySelector('[data-role="copy"]');
+    if (copyBtn) {
+      copyBtn.onclick = async () => {
+        const ok = await UI.copy(address || '');
+        UI.showToast(ok ? 'Tor address copied' : 'Could not copy address', ok ? 'success' : 'error');
+      };
+    }
+    document.body.appendChild(overlay);
+  });
+}
+
+async function handleNetworkPreferOnionChange(showPopup = true) {
+  const torPreferred = _isTorPreferred();
+  _renderNetworkServersList();
+  _renderNetworkSelection();
+  if (!torPreferred || !showPopup) return;
+  const current = _networkSelectedServer?.onion_url || _networkCurrentServerEntry()?.onion_url || '';
+  await _showTorModeDialog({
+    title: 'Tor Mode Enabled',
+    body: 'FrogTalk will now prefer onion nodes in discovery, probing, and server switching. Location hints are hidden in Tor mode and onion-capable nodes get a dedicated badge.',
+    address: current,
+    confirmLabel: 'Use Tor Mode',
+    showCancel: false,
+  });
 }
 
 function _guessNetworkRegionFromBaseUrl(baseUrl) {
@@ -937,7 +1068,7 @@ async function verifyNetworkBuildIntegrity() {
   if (summaryEl) summaryEl.textContent = 'Verifying peer build hashes...';
 
   try {
-    const urls = [...new Set(_networkProbeResults.map(s => _normalizeNetworkUrl(s.base_url || '')).filter(Boolean))];
+    const urls = [...new Set(_networkProbeResults.map(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '')).filter(Boolean))];
     const res = await apiFetch('/api/network/build/verify-peers', 'POST', { base_urls: urls });
     const data = await res.json();
     if (!res.ok) {
@@ -992,8 +1123,10 @@ function _prettyNetworkRegion(region) {
 function _renderNetworkSelection() {
   const infoEl = document.getElementById('network-current-selection');
   if (!infoEl) return;
-  if (_networkSelectedServer && _networkSelectedServer.base_url) {
-    infoEl.textContent = `Selected: ${_networkSelectedServer.display_name || _networkSelectedServer.server_id} (${_networkSelectedServer.base_url})`;
+  if (_networkSelectedServer && (_networkSelectedServer.base_url || _networkSelectedServer.onion_url)) {
+    const addr = _preferredNetworkUrl(_networkSelectedServer);
+    const via = _isOnionNetworkUrl(addr) ? ' via Tor' : '';
+    infoEl.textContent = `Selected: ${_networkSelectedServer.display_name || _networkSelectedServer.server_id} (${addr}${via})`;
     return;
   }
   const saved = localStorage.getItem('ft_network_selected') || '';
@@ -1009,13 +1142,15 @@ function _renderNetworkServersList() {
   }
   const connectedBase = _getConnectedServerBaseUrl();
   list.innerHTML = _networkProbeResults.map((s) => {
+    const publicAddr = _preferredNetworkUrl(s);
+    const torPreferred = _isTorPreferred();
     const healthy = !!s.healthy;
     const latency = s.latency_ms == null ? 'n/a' : `${s.latency_ms} ms`;
     const region = _prettyNetworkRegion(s.region || _guessNetworkRegionFromBaseUrl(s.base_url));
     const statusColor = healthy ? '#4caf50' : '#f44336';
     const selected = _networkSelectedServer && _networkSelectedServer.server_id === s.server_id;
-    const isConnected = connectedBase && _normalizeNetworkUrl(s.base_url || '') === connectedBase;
-    const trust = _networkBuildTrustByBase[_normalizeNetworkUrl(s.base_url || '')] || null;
+    const isConnected = connectedBase && publicAddr === connectedBase;
+    const trust = _networkBuildTrustByBase[publicAddr] || null;
     const trustChecked = !!trust;
     const isSameHash = !!(trust && trust.same_hash);
     const isOfficialCopy = !!(trust && trust.remote_official);
@@ -1024,10 +1159,17 @@ function _renderNetworkServersList() {
     const chips = [];
     if (isConnected) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#173427;color:#88e7a4;font-size:10px;font-weight:700">CONNECTED</span>');
     if ((s.official || 0) || s.trust_tier === 'official') chips.push('<span style="padding:2px 7px;border-radius:999px;background:#1a2d3f;color:#8fc7ff;font-size:10px;font-weight:700">OFFICIAL DIR</span>');
+    if (s.onion_url) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#17261d;color:#85d7a0;font-size:10px;font-weight:700">ONION</span>');
+    if (torPreferred && s.onion_url) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#24301a;color:#d7f08a;font-size:10px;font-weight:700">TOR MODE</span>');
     if (trustChecked && isSameHash) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#1e3a24;color:#8fffaa;font-size:10px;font-weight:700">SAME HASH</span>');
     if (trustChecked && isOfficialCopy) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#2f2a16;color:#ffd66d;font-size:10px;font-weight:700">LEGIT COPY</span>');
     if (trustChecked && !isSameHash && !trustError) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#3a1d1d;color:#ff9f9f;font-size:10px;font-weight:700">HASH MISMATCH</span>');
     if (trustError) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#35261a;color:#ffbf8f;font-size:10px;font-weight:700">VERIFY ERROR</span>');
+
+    const locationRow = (!torPreferred && region) ? `<div style="font-size:11px;color:#8fa3b6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📍 ${UI.escHtml(region)}</div>` : '';
+    const addressRow = _isOnionNetworkUrl(publicAddr)
+      ? _networkAddressRow(publicAddr, 'tor')
+      : `<div style="font-size:11px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(publicAddr || '')}</div>`;
 
     return `
       <label class="network-server-row ${selected ? 'is-selected' : ''}" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px;border-bottom:1px solid #1a1a1a;cursor:pointer;">
@@ -1035,8 +1177,8 @@ function _renderNetworkServersList() {
           <input type="radio" name="network-server-choice" ${selected ? 'checked' : ''} onchange="selectNetworkServer('${String(s.server_id).replace(/'/g, "\\'")}')">
           <div style="min-width:0">
             <div style="font-size:12px;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(s.display_name || s.server_id || 'Unknown')}</div>
-            <div style="font-size:11px;color:#8fa3b6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📍 ${UI.escHtml(region)}</div>
-            <div style="font-size:11px;color:#777;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(s.base_url || '')}</div>
+            ${locationRow}
+            ${addressRow}
             <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px">${chips.join('')}</div>
           </div>
         </div>
@@ -1066,19 +1208,9 @@ async function refreshNetworkServers() {
     }
     _networkProbeResults = data.servers || [];
     const connectedBase = _getConnectedServerBaseUrl();
-    if (connectedBase && !_networkProbeResults.some(s => _normalizeNetworkUrl(s.base_url || '') === connectedBase)) {
-      _networkProbeResults.unshift({
-        server_id: 'current-connected',
-        display_name: 'Current Server',
-        base_url: connectedBase,
-        onion_url: '',
-        region: _guessNetworkRegionFromBaseUrl(connectedBase),
-        official: 0,
-        trust_tier: 'community',
-        healthy: true,
-        latency_ms: 0,
-        probe_error: null,
-      });
+    const currentServer = _networkCurrentServerEntry();
+    if (connectedBase && currentServer && !_networkProbeResults.some(s => _preferredNetworkUrl(s) === connectedBase)) {
+      _networkProbeResults.unshift(currentServer);
     }
     if (!_networkSelectedServer && _networkProbeResults.length) {
       _networkSelectedServer = _networkProbeResults.find(s => s.healthy) || _networkProbeResults[0];
@@ -1103,19 +1235,9 @@ async function runAutoNetworkSelect() {
     }
     _networkProbeResults = data.candidates || [];
     const connectedBase = _getConnectedServerBaseUrl();
-    if (connectedBase && !_networkProbeResults.some(s => _normalizeNetworkUrl(s.base_url || '') === connectedBase)) {
-      _networkProbeResults.unshift({
-        server_id: 'current-connected',
-        display_name: 'Current Server',
-        base_url: connectedBase,
-        onion_url: '',
-        region: _guessNetworkRegionFromBaseUrl(connectedBase),
-        official: 0,
-        trust_tier: 'community',
-        healthy: true,
-        latency_ms: 0,
-        probe_error: null,
-      });
+    const currentServer = _networkCurrentServerEntry();
+    if (connectedBase && currentServer && !_networkProbeResults.some(s => _preferredNetworkUrl(s) === connectedBase)) {
+      _networkProbeResults.unshift(currentServer);
     }
     _networkSelectedServer = data.selected || _networkSelectedServer;
     _renderNetworkServersList();
@@ -1134,8 +1256,9 @@ function saveNetworkSettings(silent = false) {
   localStorage.setItem('ft_network_mode', mode);
   localStorage.setItem('ft_network_prefer_onion', preferOnion);
   localStorage.setItem('ft_network_custom_url', customUrl);
-  if (_networkSelectedServer?.base_url) {
-    localStorage.setItem('ft_network_selected', _networkSelectedServer.base_url);
+  const selectedAddr = _preferredNetworkUrl(_networkSelectedServer || {});
+  if (selectedAddr) {
+    localStorage.setItem('ft_network_selected', selectedAddr);
   }
   if (!silent) UI.showToast('Network preferences saved', 'success');
 }
@@ -1150,8 +1273,8 @@ async function connectToSelectedServer() {
       UI.showToast('Enter a custom server URL first', 'error');
       return;
     }
-  } else if (_networkSelectedServer?.base_url) {
-    target = _normalizeNetworkUrl(_networkSelectedServer.base_url);
+  } else if (_networkSelectedServer?.onion_url || _networkSelectedServer?.base_url) {
+    target = _preferredNetworkUrl(_networkSelectedServer);
   } else {
     target = localStorage.getItem('ft_network_selected') || '';
   }
@@ -1160,6 +1283,17 @@ async function connectToSelectedServer() {
     return;
   }
   saveNetworkSettings(true);
+
+  if (_isOnionNetworkUrl(target)) {
+    const confirmed = await _showTorModeDialog({
+      title: 'Open Onion Node',
+      body: `You are switching FrogTalk to a Tor hidden service. If your browser is not connected to Tor, this address will not open. Automatic account handoff will be attempted first, but manual login can still be required after the switch.`,
+      address: target,
+      confirmLabel: 'Open Onion Node',
+      showCancel: true,
+    });
+    if (!confirmed) return;
+  }
 
   let switchTicket = '';
   try {
@@ -1172,7 +1306,7 @@ async function connectToSelectedServer() {
           'Content-Type': 'application/json',
           'X-Session-Token': State.token || '',
         },
-        body: JSON.stringify({ target_base_url: targetBase }),
+        body: JSON.stringify({ target_base_url: targetBase, target_url: targetBase }),
       });
       if (r.ok) {
         const d = await r.json().catch(() => ({}));
@@ -1199,6 +1333,7 @@ async function connectToSelectedServer() {
     const next = new URL('/app', target);
     next.searchParams.set('switched', '1');
     next.searchParams.set('register', '1');
+    if (_isOnionNetworkUrl(target)) next.searchParams.set('tor', '1');
     if (window.location?.origin) next.searchParams.set('from', window.location.origin);
     window.location.href = next.toString();
   } catch {
@@ -1214,20 +1349,17 @@ async function loadNetworkSettings() {
   modeEl.value = localStorage.getItem('ft_network_mode') || 'auto';
   onionEl.checked = localStorage.getItem('ft_network_prefer_onion') === '1';
   customEl.value = localStorage.getItem('ft_network_custom_url') || '';
+  if (!onionEl.dataset.bound) {
+    onionEl.addEventListener('change', () => {
+      saveNetworkSettings(true);
+      handleNetworkPreferOnionChange(true);
+    });
+    onionEl.dataset.bound = '1';
+  }
   _networkSelectedServer = null;
-  const connectedBase = _getConnectedServerBaseUrl();
-  _networkProbeResults = connectedBase ? [{
-    server_id: 'current-connected',
-    display_name: 'Current Server',
-    base_url: connectedBase,
-    onion_url: '',
-    region: _guessNetworkRegionFromBaseUrl(connectedBase),
-    official: 0,
-    trust_tier: 'community',
-    healthy: true,
-    latency_ms: 0,
-    probe_error: null,
-  }] : [];
+  await _loadCurrentNetworkStatus();
+  const currentServer = _networkCurrentServerEntry();
+  _networkProbeResults = currentServer ? [currentServer] : [];
   _networkSelectedServer = _networkProbeResults[0] || null;
   _renderNetworkServersList();
   _renderNetworkSelection();
@@ -1238,7 +1370,7 @@ async function loadNetworkSettings() {
     _networkProbeResults = [];
     _renderNetworkServersList();
     await refreshNetworkServers();
-    _networkSelectedServer = _networkProbeResults.find(s => (s.base_url || '') === saved) || _networkSelectedServer;
+    _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved) || _networkSelectedServer;
     _renderNetworkServersList();
     _renderNetworkSelection();
   }

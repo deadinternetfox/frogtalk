@@ -341,6 +341,20 @@ async def create_story(body: CreateStoryRequest, current_user: dict = Depends(ge
         return JSONResponse(status_code=413, content={"error": "Media too large (max 100MB)"})
     privacy = body.privacy if body.privacy in ("public", "followers") else "public"
     story_id = db.create_story(current_user["id"], body.media_data, body.media_type, body.caption, privacy)
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "social.story.created",
+            "payload": {
+                "nickname": current_user["nickname"],
+                "media_data": body.media_data,
+                "media_type": body.media_type,
+                "caption": body.caption,
+                "privacy": privacy,
+            },
+        })
+    except Exception:
+        pass
     return {"ok": True, "id": story_id, "privacy": privacy}
 
 
@@ -367,6 +381,20 @@ async def create_story_upload(
     media_data = f"data:{media_type};base64,{base64.b64encode(raw).decode('ascii')}"
     safe_privacy = privacy if privacy in ("public", "followers") else "public"
     story_id = db.create_story(current_user["id"], media_data, media_type, caption or "", safe_privacy)
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "social.story.created",
+            "payload": {
+                "nickname": current_user["nickname"],
+                "media_data": media_data,
+                "media_type": media_type,
+                "caption": caption or "",
+                "privacy": safe_privacy,
+            },
+        })
+    except Exception:
+        pass
     return {"ok": True, "id": story_id, "privacy": safe_privacy}
 
 
@@ -382,6 +410,17 @@ async def delete_story(story_id: int, current_user: dict = Depends(get_current_u
     ok = db.delete_story(story_id, current_user["id"])
     if not ok:
         return JSONResponse(status_code=404, content={"error": "Story not found or not yours"})
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "social.story.deleted",
+            "payload": {
+                "nickname": current_user["nickname"],
+                "story_id": int(story_id),
+            },
+        })
+    except Exception:
+        pass
     return {"ok": True}
 
 
