@@ -3732,6 +3732,14 @@ def get_suggested_users(user_id: int, limit: int = 10) -> List[Dict]:
               AND u.id NOT IN (SELECT following_id FROM followers WHERE follower_id=?)
               AND u.id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND u.id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+                            AND LOWER(u.nickname) NOT GLOB 'soc[0-9]*'
+                            AND LOWER(u.nickname) NOT GLOB 'socb[0-9]*'
+                            AND (
+                                        TRIM(COALESCE(u.avatar, '')) != ''
+                                 OR TRIM(COALESCE(u.bio, '')) != ''
+                                 OR EXISTS(SELECT 1 FROM wall_posts wp WHERE wp.user_id=u.id)
+                                 OR EXISTS(SELECT 1 FROM followers f WHERE f.following_id=u.id)
+                            )
             GROUP BY LOWER(u.nickname)
             ORDER BY mutual_count DESC, follower_count DESC, post_count DESC, u.id DESC
             LIMIT ?
