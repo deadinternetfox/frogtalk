@@ -423,11 +423,13 @@ async def probe_network_servers(
 
 @router.get("/network/auto-select")
 async def auto_select_network_server(
+    request: Request,
     official_only: int = 1,
     prefer_tor: int = 0,
     timeout_ms: int = 1200,
 ):
     probe = await probe_network_servers(
+        request=request,
         official_only=official_only,
         timeout_ms=timeout_ms,
         include_onion=prefer_tor,

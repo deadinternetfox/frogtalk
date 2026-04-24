@@ -412,33 +412,27 @@ def _run_bot_in_thread(token: str):
 
             channel_id = message.channel.id
             bridge = _bridges.get(channel_id)
+            bridge_enabled = bool(bridge and bridge.get("enabled"))
 
-            if not bridge or not bridge.get("enabled"):
-                # ── Text-command claim path ───────────────────────────────
-                # Requires Message Content intent to read normal channel text.
-                content_raw = (message.content or "").strip()
-
-                if not content_raw:
-                    # Bot cannot read this message (no Message Content intent).
-                    # Respond only if directly mentioned so we don't spam.
-                    if c.user in (message.mentions or []):
-                        await message.channel.send(
-                            "🐸 Use **bridge CODE** to link this channel. If I still cannot "
-                            "read your message, enable **Message Content Intent** for this bot "
-                            "in the Discord Developer Portal and restart the service."
-                        )
-                    return
-
+            # Parse bridge commands first (even in already-linked channels) so
+            # users get explicit feedback instead of silent forwarding.
+            content_raw = (message.content or "").strip()
+            if content_raw:
                 # Strip mention prefix: "@Bot bridge CODE" → "bridge CODE"
                 for pfx in (f"<@{c.user.id}>", f"<@!{c.user.id}>"):
                     if content_raw.lower().startswith(pfx.lower()):
                         content_raw = content_raw[len(pfx):].strip()
                         break
 
-                m = re.match(
-                    r"^bridge\s+([A-Z0-9]{4,})\s*$", content_raw, re.IGNORECASE
-                )
+                m = re.match(r"^bridge\s+([A-Z0-9]{4,})\s*$", content_raw, re.IGNORECASE)
                 if m:
+                    if bridge_enabled:
+                        room = bridge.get("room") or "this FrogTalk room"
+                        await message.channel.send(
+                            f"🐸 This Discord channel is already linked to **#{room}**. "
+                            "Remove the existing bridge first if you want to relink it."
+                        )
+                        return
                     code = re.sub(r"[^A-Z0-9]", "", m.group(1).upper())
                     guild = getattr(message, "guild", None)
                     ok, reply = await _do_claim(
@@ -457,6 +451,20 @@ def _run_bot_in_thread(token: str):
                         "Generate a claim code in FrogTalk settings, then type:\n"
                         "• **bridge CODE**"
                     )
+                    return
+
+            if not bridge_enabled:
+                # ── Text-command claim path ───────────────────────────────
+                if not content_raw:
+                    # Bot cannot read this message (no Message Content intent).
+                    # Respond only if directly mentioned so we don't spam.
+                    if c.user in (message.mentions or []):
+                        await message.channel.send(
+                            "🐸 Use **bridge CODE** to link this channel. If I still cannot "
+                            "read your message, enable **Message Content Intent** for this bot "
+                            "in the Discord Developer Portal and restart the service."
+                        )
+                    return
                 return
 
             # ── Forward inbound Discord messages to FrogTalk ─────────────
