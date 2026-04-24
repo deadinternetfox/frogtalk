@@ -314,9 +314,7 @@ input, select {
   line-height: 1.4;
 }
 .easter-grid {
-  display:grid;
-  grid-template-columns: 1.15fr .85fr;
-  gap: 12px;
+  display: block;
 }
 .easter-toolbar {
   display:flex;
@@ -668,12 +666,6 @@ input, select {
             <div id="easter-editor" class="rich-editor" contenteditable="true" spellcheck="true" data-placeholder="Hidden message waiting for this node."></div>
             <div class="msg" id="easter-msg"></div>
             <input type="file" id="easter-upload-input" accept="image/*,video/*,audio/*" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;overflow:hidden;">
-          </div>
-          <div>
-            <div class="easter-preview" id="easter-preview">
-              <div class="easter-preview-title">Frog signal</div>
-              <div class="easter-preview-body">No popup content configured yet.</div>
-            </div>
           </div>
         </div>
       </div>

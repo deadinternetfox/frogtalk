@@ -25,6 +25,8 @@
   const easterUploadInput = document.getElementById('easter-upload-input');
   let nodeLog = [];
   let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
+  let easterEggLoaded = false;
+  let easterEggDirty = false;
   let frogTapCount = 0;
   let frogTapTimer = null;
 
@@ -110,6 +112,8 @@
     } catch {
       easterEditor.innerHTML += safeHtml;
     }
+    easterEggDirty = true;
+    updateEditorEmptyState();
     renderEasterPreview();
   }
 
@@ -132,13 +136,20 @@
       const url = window.prompt('Link URL');
       if (!url) return;
       document.execCommand('createLink', false, url.trim());
+      easterEggDirty = true;
       return;
     }
     if (command === 'clear') {
-      document.execCommand('removeFormat');
+      easterEditor.innerHTML = '';
+      easterEggDirty = true;
+      updateEditorEmptyState();
+      renderEasterPreview();
       return;
     }
     document.execCommand(command, false);
+    easterEggDirty = true;
+    updateEditorEmptyState();
+    renderEasterPreview();
   }
 
   function renderEasterPreview() {
@@ -176,11 +187,14 @@
     if (easterEnabled) easterEnabled.checked = easterEggConfig.enabled;
     if (easterTitle) easterTitle.value = easterEggConfig.title;
     if (easterEditor) easterEditor.innerHTML = easterEggConfig.html || '';
+    easterEggLoaded = true;
+    easterEggDirty = false;
     updateEditorEmptyState();
     renderEasterPreview();
   }
 
-  async function loadEasterEgg() {
+  async function loadEasterEgg(force = false) {
+    if (easterEggDirty && !force) return;
     try {
       const payload = await api('/api/server-admin/easter-egg');
       syncEasterEditor(payload);
@@ -529,7 +543,7 @@
     renderResources(stats);
     renderUsers(users.users || []);
     await refreshNodes();
-    if (!easterEggConfig?.updated_at) await loadEasterEgg();
+    if (!easterEggLoaded) await loadEasterEgg();
   }
 
   async function ensureAuth() {
@@ -617,12 +631,19 @@
   document.getElementById('sync-dir-btn').addEventListener('click', () => runAction('sync'));
   frogTrigger?.addEventListener('click', handleFrogTap);
   easterEditor?.addEventListener('input', () => {
+    easterEggDirty = true;
     updateEditorEmptyState();
     renderEasterPreview();
   });
   easterEditor?.addEventListener('focus', updateEditorEmptyState);
   easterEditor?.addEventListener('blur', updateEditorEmptyState);
-  easterTitle?.addEventListener('input', renderEasterPreview);
+  easterTitle?.addEventListener('input', () => {
+    easterEggDirty = true;
+    renderEasterPreview();
+  });
+  easterEnabled?.addEventListener('change', () => {
+    easterEggDirty = true;
+  });
   easterPreviewBtn?.addEventListener('click', previewEasterPopup);
   easterSaveBtn?.addEventListener('click', saveEasterEgg);
   easterUploadBtn?.addEventListener('click', openEasterFilePicker);
