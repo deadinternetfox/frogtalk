@@ -200,6 +200,28 @@ app.include_router(ws.router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+_APP_HTML_PATH = "static/index.html"
+_APP_JS_PATH = "static/js/app.js"
+
+
+def _serve_app_shell_response() -> HTMLResponse:
+    with open(_APP_HTML_PATH, "r", encoding="utf-8") as fh:
+        html = fh.read()
+    try:
+        app_asset_version = str(int(os.path.getmtime(_APP_JS_PATH)))
+    except Exception:
+        app_asset_version = str(int(time.time()))
+    html = html.replace("__APP_ASSET_VERSION__", app_asset_version)
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
 @app.get("/invite/{code}")
 async def serve_invite_landing(code: str):
     """Serve invite landing page."""
@@ -563,14 +585,7 @@ async def og_room_image(room_name: str):
 @app.get("/app")
 @app.get("/app/{path:path}")
 async def serve_app(path: str = ""):
-    return FileResponse(
-        "static/index.html",
-        headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
+    return _serve_app_shell_response()
 
 
 @app.get("/favicon.ico")

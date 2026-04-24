@@ -3603,7 +3603,7 @@ window.ConnErr = (function(){
 
   <!-- Server strip -->
   <div id="server-list">
-    <div class="server-icon active" data-tip="Home — Current Channel" data-tip-pos="right" onclick="goHomeChannel()" style="position:relative">
+    <div id="home-frog-icon" class="server-icon active" data-tip="Home — Current Channel" data-tip-pos="right" onclick="goHomeChannel()" style="position:relative">
       🐸
       <span id="frog-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#f85149;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:14px;text-align:center"></span>
     </div>
@@ -5132,6 +5132,6 @@ if ('caches' in window) {
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=192"></script>
 <script src="/static/js/social.js?v=211"></script>
-<script src="/static/js/app.js?v=195"></script>
+<script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>

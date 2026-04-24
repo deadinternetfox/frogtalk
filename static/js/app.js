@@ -405,27 +405,45 @@ const App = {
   },
 
   bindEasterEggTriggers() {
-    const handler = () => this.trackEasterTap();
-    ['server-label', 'self-avatar-el'].forEach((id) => {
-      const el = document.getElementById(id);
-      if (el && !el.dataset.easterBound) {
-        el.dataset.easterBound = '1';
-        el.addEventListener('click', handler);
-      }
-    });
-    document.querySelectorAll('.social-menu-btn').forEach((el) => {
-      if (el.dataset.easterBound) return;
-      el.dataset.easterBound = '1';
+    const bindTap = (el, key = 'easterBound') => {
+      if (!el || el.dataset[key]) return;
+      el.dataset[key] = '1';
+      try {
+        console.debug('[EasterEgg] Bound tap trigger', el.id || el.className || el.tagName);
+      } catch {}
+      let lastTapTs = 0;
+      const handler = () => {
+        const now = Date.now();
+        if (now - lastTapTs < 320) return;
+        lastTapTs = now;
+        this.trackEasterTap();
+      };
       el.addEventListener('click', handler);
+      el.addEventListener('touchend', handler, { passive: true });
+    };
+
+    ['server-label', 'self-avatar-el', 'home-frog-icon'].forEach((id) => {
+      const el = document.getElementById(id);
+      bindTap(el);
+    });
+
+    document.querySelectorAll('.social-menu-btn').forEach((el) => {
+      bindTap(el);
     });
   },
 
   trackEasterTap() {
     this.easterTapCount += 1;
+    try {
+      console.debug('[EasterEgg] Tap count', this.easterTapCount);
+    } catch {}
     clearTimeout(this.easterTapTimer);
     this.easterTapTimer = setTimeout(() => { this.easterTapCount = 0; }, 2600);
     if (this.easterTapCount < 7) return;
     this.easterTapCount = 0;
+    try {
+      console.debug('[EasterEgg] Trigger threshold reached, opening popup');
+    } catch {}
     this.openNodeEasterEgg();
   },
 
@@ -438,10 +456,16 @@ const App = {
     try {
       const res = await fetch('/api/server/easter-egg');
       const data = await res.json().catch(() => ({}));
+      try {
+        console.debug('[EasterEgg] Fetch result', { ok: res.ok, status: res.status, enabled: !!data?.enabled, hasHtml: !!data?.html });
+      } catch {}
       if (!res.ok) return null;
       this.easterEgg = data;
       return data;
     } catch {
+      try {
+        console.debug('[EasterEgg] Fetch failed');
+      } catch {}
       return null;
     }
   },
@@ -449,6 +473,9 @@ const App = {
   async openNodeEasterEgg() {
     const payload = await this.fetchNodeEasterEgg(true);
     if (!payload?.enabled || !payload?.html) {
+      try {
+        console.debug('[EasterEgg] Popup not shown: missing enabled/html');
+      } catch {}
       try { UI.showToast('No hidden node popup configured here yet', 'info'); } catch {}
       return;
     }

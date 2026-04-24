@@ -10,7 +10,7 @@ import urllib.parse
 from typing import Optional
 
 from fastapi import APIRouter, Request, Response, UploadFile, File
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 import database as db
@@ -18,6 +18,9 @@ from ws_manager import manager
 from routers import federation as federation_router
 
 router = APIRouter(tags=["server-admin"])
+
+_SERVER_ADMIN_HTML_PATH = "static/server_admin.html"
+_SERVER_ADMIN_JS_PATH = "static/js/server_admin.js"
 
 _COOKIE_NAME = "ft_server_admin"
 _SESSIONS: dict[str, float] = {}
@@ -311,8 +314,15 @@ async def server_webui_page():
     disabled = _require_enabled()
     if disabled:
         return disabled
-    return FileResponse(
-        "static/server_admin.html",
+    with open(_SERVER_ADMIN_HTML_PATH, "r", encoding="utf-8") as fh:
+        html = fh.read()
+    try:
+        asset_version = str(int(os.path.getmtime(_SERVER_ADMIN_JS_PATH)))
+    except Exception:
+        asset_version = str(int(time.time()))
+    html = html.replace("__SERVER_ADMIN_ASSET_VERSION__", asset_version)
+    return HTMLResponse(
+        html,
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
