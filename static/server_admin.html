@@ -129,6 +129,7 @@ body::after {
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
   animation: panelRise 0.44s ease both;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  min-width: 0;
 }
 .panel:hover {
   transform: translateY(-2px);
@@ -177,6 +178,10 @@ body::after {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+.layout > .panel,
+.layout-3 > .panel {
+  min-width: 0;
+}
 .section-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
 .table {
   width: 100%;
@@ -189,6 +194,7 @@ body::after {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   border-radius: 12px;
+  min-width: 0;
 }
 .nodes-table,
 .users-table {
@@ -337,6 +343,12 @@ input, select {
   color: var(--text);
   overflow: auto;
 }
+.rich-editor.is-empty::before {
+  content: attr(data-placeholder);
+  color: #7f9f8c;
+  opacity: 0.86;
+  pointer-events: none;
+}
 .rich-editor:focus {
   outline: none;
   border-color: rgba(86, 209, 109, 0.65);
@@ -445,7 +457,7 @@ input, select {
     min-height: 140px !important;
   }
   .users-table {
-    min-width: 360px;
+    min-width: 0;
   }
   .nodes-table,
   .nodes-table tbody,
@@ -653,7 +665,7 @@ input, select {
               <button class="editor-btn" type="button" data-editor-cmd="link">Link</button>
               <button class="editor-btn" type="button" data-editor-cmd="clear">Clear</button>
             </div>
-            <div id="easter-editor" class="rich-editor" contenteditable="true" spellcheck="true"></div>
+            <div id="easter-editor" class="rich-editor" contenteditable="true" spellcheck="true" data-placeholder="Hidden message waiting for this node."></div>
             <div class="msg" id="easter-msg"></div>
             <input type="file" id="easter-upload-input" accept="image/*,video/*,audio/*" tabindex="-1" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;overflow:hidden;">
           </div>

@@ -151,6 +151,14 @@
     `;
   }
 
+  function updateEditorEmptyState() {
+    if (!easterEditor) return;
+    const text = (easterEditor.textContent || '').replace(/\u00a0/g, ' ').trim();
+    const html = (easterEditor.innerHTML || '').trim().toLowerCase();
+    const effectivelyEmpty = !text && (html === '' || html === '<br>' || html === '<div><br></div>' || html === '<p><br></p>');
+    easterEditor.classList.toggle('is-empty', effectivelyEmpty);
+  }
+
   function pulseEasterPreview() {
     if (!easterPreview) return;
     easterPreview.classList.remove('preview-pulse');
@@ -167,7 +175,8 @@
     };
     if (easterEnabled) easterEnabled.checked = easterEggConfig.enabled;
     if (easterTitle) easterTitle.value = easterEggConfig.title;
-    if (easterEditor) easterEditor.innerHTML = easterEggConfig.html || '<p>Hidden message waiting for this node.</p>';
+    if (easterEditor) easterEditor.innerHTML = easterEggConfig.html || '';
+    updateEditorEmptyState();
     renderEasterPreview();
   }
 
@@ -607,7 +616,12 @@
   document.getElementById('refresh-btn').addEventListener('click', () => refreshDashboard().catch((e) => setActionMessage(e.message, true)));
   document.getElementById('sync-dir-btn').addEventListener('click', () => runAction('sync'));
   frogTrigger?.addEventListener('click', handleFrogTap);
-  easterEditor?.addEventListener('input', renderEasterPreview);
+  easterEditor?.addEventListener('input', () => {
+    updateEditorEmptyState();
+    renderEasterPreview();
+  });
+  easterEditor?.addEventListener('focus', updateEditorEmptyState);
+  easterEditor?.addEventListener('blur', updateEditorEmptyState);
   easterTitle?.addEventListener('input', renderEasterPreview);
   easterPreviewBtn?.addEventListener('click', previewEasterPopup);
   easterSaveBtn?.addEventListener('click', saveEasterEgg);
