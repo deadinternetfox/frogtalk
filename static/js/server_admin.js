@@ -68,6 +68,25 @@
     easterMsg.style.color = isError ? '#ff9f9f' : '#93ab9a';
   }
 
+  function openEasterFilePicker() {
+    if (!easterUploadInput) {
+      setEasterMessage('Media picker is unavailable on this page.', true);
+      return;
+    }
+    easterUploadInput.value = '';
+    try {
+      if (typeof easterUploadInput.showPicker === 'function') {
+        easterUploadInput.showPicker();
+        return;
+      }
+    } catch {}
+    try {
+      easterUploadInput.click();
+    } catch {
+      setEasterMessage('Could not open the media picker in this browser.', true);
+    }
+  }
+
   async function api(path, opts = {}) {
     const res = await fetch(path, {
       credentials: 'include',
@@ -130,6 +149,13 @@
       <div class="easter-preview-title">${escHtml(title)}</div>
       <div class="easter-preview-body">${html}</div>
     `;
+  }
+
+  function pulseEasterPreview() {
+    if (!easterPreview) return;
+    easterPreview.classList.remove('preview-pulse');
+    void easterPreview.offsetWidth;
+    easterPreview.classList.add('preview-pulse');
   }
 
   function syncEasterEditor(payload) {
@@ -218,6 +244,18 @@
     });
     document.body.appendChild(overlay);
     overlay.querySelector('#node-easter-close')?.addEventListener('click', closeEasterOverlay);
+    pulseEasterPreview();
+    setEasterMessage('Preview opened.');
+  }
+
+  async function previewEasterPopup() {
+    renderEasterPreview();
+    pulseEasterPreview();
+    try {
+      await openEasterOverlay(true);
+    } catch (error) {
+      setEasterMessage((error && error.message) || 'Could not open preview popup.', true);
+    }
   }
 
   function handleFrogTap() {
@@ -571,9 +609,9 @@
   frogTrigger?.addEventListener('click', handleFrogTap);
   easterEditor?.addEventListener('input', renderEasterPreview);
   easterTitle?.addEventListener('input', renderEasterPreview);
-  easterPreviewBtn?.addEventListener('click', () => openEasterOverlay(true));
+  easterPreviewBtn?.addEventListener('click', previewEasterPopup);
   easterSaveBtn?.addEventListener('click', saveEasterEgg);
-  easterUploadBtn?.addEventListener('click', () => easterUploadInput?.click());
+  easterUploadBtn?.addEventListener('click', openEasterFilePicker);
   easterUploadInput?.addEventListener('change', (event) => {
     const file = event.target?.files?.[0];
     uploadEasterAsset(file);

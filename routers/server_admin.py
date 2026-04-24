@@ -311,7 +311,14 @@ async def server_webui_page():
     disabled = _require_enabled()
     if disabled:
         return disabled
-    return FileResponse("static/server_admin.html")
+    return FileResponse(
+        "static/server_admin.html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @router.get("/api/server-admin/config")
