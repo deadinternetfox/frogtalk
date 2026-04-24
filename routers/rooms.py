@@ -1,5 +1,7 @@
 """Room management routes."""
 import re
+import time
+import uuid
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -110,6 +112,17 @@ async def create_room(request: Request, body: CreateRoomRequest,
         db.update_room_settings(body.name, invite_only=1)
     # Auto-join creator
     db.join_room(current_user["id"], room_id)
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "room.member.joined",
+            "payload": {
+                "room_name": body.name,
+                "nickname": current_user["nickname"],
+            },
+        })
+    except Exception:
+        pass
     return {"ok": True, "id": room_id, "name": body.name}
 
 
@@ -357,6 +370,17 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
     db.join_room(current_user["id"], room["id"])
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "room.member.joined",
+            "payload": {
+                "room_name": room_name,
+                "nickname": current_user["nickname"],
+            },
+        })
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -390,6 +414,17 @@ async def leave_room(room_name: str, current_user: dict = Depends(get_current_us
         return JSONResponse(status_code=404, content={"error": "Room not found"})
     was_owner = room.get("owner_id") == current_user["id"]
     db.leave_room(current_user["id"], room["id"])
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "room.member.left",
+            "payload": {
+                "room_name": room_name,
+                "nickname": current_user["nickname"],
+            },
+        })
+    except Exception:
+        pass
     # Determine what happened so the client can react accordingly
     if was_owner:
         after = db.get_room_by_name(room_name)

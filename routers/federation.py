@@ -4,6 +4,7 @@ import time
 import asyncio
 import json
 import hashlib
+import secrets
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -482,7 +483,19 @@ async def network_verify_peer_builds(
         targets.append(url)
 
     # Detect the server's own public base URL to short-circuit loopback requests.
-    own_public = (os.getenv("FROGTALK_PUBLIC_URL") or os.getenv("PUBLIC_URL") or "").rstrip("/").lower()
+    # Prefer explicit env vars, then fall back to persisted federation identity.
+    own_public = (
+        os.getenv("FROGTALK_PUBLIC_URL")
+        or os.getenv("PUBLIC_URL")
+        or os.getenv("FROGTALK_BASE_URL")
+        or ""
+    ).rstrip("/").lower()
+    if not own_public:
+        try:
+            local_ident = db.get_or_create_local_server_identity() or {}
+            own_public = str(local_ident.get("base_url") or "").rstrip("/").lower()
+        except Exception:
+            own_public = ""
 
     results = []
     for base in targets:
@@ -840,53 +853,261 @@ async def federation_outbox_pull(
 
 
 async def federation_inbox_processor():
-    """Background task: apply inbox events with idempotency."""
-    while True:
-        await asyncio.sleep(5)
-        try:
-            events = db.list_federation_inbox_events(status="pending", limit=10)
-            for ev in events:
-                try:
-                    # Idempotency: skip if already applied
-                    if db.is_event_applied(ev["event_id"]):
-                        db.mark_federation_inbox_event(ev["event_id"], "applied")
-                        continue
+    """Process one inbox batch with idempotency (called periodically by task)."""
+    try:
+        events = db.list_federation_inbox_events(status="pending", limit=20)
+        for row in events:
+            event_id = str(row.get("event_id") or "")
+            try:
+                # Idempotency: skip if already applied
+                if db.is_event_applied(event_id):
+                    db.mark_federation_inbox_event(event_id, "applied")
+                    continue
 
-                    event_type = ev.get("event_type", "")
+                payload = {}
+                raw_payload = row.get("payload_json")
+                if isinstance(raw_payload, str) and raw_payload.strip():
+                    try:
+                        payload = json.loads(raw_payload)
+                    except Exception:
+                        payload = {}
 
-                    # Dispatch to handler
-                    if event_type.startswith("message."):
-                        await _handle_message_event(ev)
-                    elif event_type.startswith("room."):
-                        await _handle_room_event(ev)
-                    elif event_type.startswith("user."):
-                        await _handle_user_event(ev)
+                event = {
+                    "event_id": event_id,
+                    "event_type": str(row.get("event_type") or ""),
+                    "origin_server_id": str(row.get("origin_server_id") or ""),
+                    "payload": payload,
+                }
 
-                    db.mark_federation_inbox_event(ev["event_id"], "applied")
-                except Exception as e:
-                    print(f"[Federation] Inbox event {ev['event_id']} error: {e}")
-                    db.mark_federation_inbox_event(ev["event_id"], "failed")
-        except Exception as e:
-            print(f"[Federation] Inbox processor error: {e}")
+                event_type = event["event_type"]
+                if event_type.startswith("message."):
+                    await _handle_message_event(event)
+                elif event_type.startswith("dm."):
+                    await _handle_dm_event(event)
+                elif event_type.startswith("room."):
+                    await _handle_room_event(event)
+                elif event_type.startswith("user."):
+                    await _handle_user_event(event)
+                elif event_type.startswith("social."):
+                    await _handle_social_event(event)
+
+                db.mark_federation_inbox_event(event_id, "applied")
+            except Exception as e:
+                print(f"[Federation] Inbox event {event_id} error: {e}")
+                db.mark_federation_inbox_event(event_id, "failed")
+    except Exception as e:
+        print(f"[Federation] Inbox processor error: {e}")
+
+
+async def federation_outbox_processor():
+    """Push pending outbox events to known peers (best-effort)."""
+    fed_token = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
+    if not fed_token:
+        return
+
+    local = db.get_or_create_local_server_identity()
+    local_server_id = str(local.get("server_id") or "")
+    local_base = _normalize_base_url(
+        (os.getenv("FROGTALK_BASE_URL") or os.getenv("PUBLIC_URL") or local.get("base_url") or "")
+    ).lower()
+
+    peers = db.list_federation_servers(official_only=False)
+    targets = []
+    for srv in peers:
+        if not srv.get("enabled"):
+            continue
+        if str(srv.get("server_id") or "") == local_server_id:
+            continue
+        base = _normalize_base_url(str(srv.get("base_url") or ""))
+        if not base:
+            continue
+        if local_base and base.lower() == local_base:
+            continue
+        targets.append(base)
+
+    if not targets:
+        return
+
+    events = db.list_federation_outbox_events(status="pending", limit=50)
+    if not events:
+        return
+
+    for row in events:
+        event_id = str(row.get("event_id") or "")
+        event_type = str(row.get("event_type") or "")
+        payload = {}
+        raw_payload = row.get("payload_json")
+        if isinstance(raw_payload, str) and raw_payload.strip():
+            try:
+                payload = json.loads(raw_payload)
+            except Exception:
+                payload = {}
+
+        envelope = {
+            "event_id": event_id,
+            "event_type": event_type,
+            "origin_server_id": local_server_id,
+            "payload": payload,
+        }
+
+        delivered = False
+        for base in targets:
+            try:
+                req = urllib.request.Request(
+                    f"{base}/api/federation/events/inbox",
+                    data=json.dumps({"events": [envelope]}).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "User-Agent": "FrogTalk-FederationPush/1.0",
+                        "x-federation-token": fed_token,
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=4.5) as resp:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                reply = json.loads(raw or "{}")
+                if int(reply.get("accepted") or 0) > 0:
+                    delivered = True
+            except Exception:
+                continue
+
+        if delivered:
+            db.mark_outbox_event_sent(event_id, "")
 
 
 async def _handle_message_event(event: dict) -> None:
-    """Handle incoming message event from remote server."""
+    """Handle incoming replicated room message event."""
+    if event.get("event_type") != "message.created":
+        return
     payload = event.get("payload") or {}
-    # Example: sync message from remote server to local DB if room/DM exists
-    # Implementation depends on message replication policy
+    db.save_federated_room_message(str(event.get("event_id") or ""), payload)
 
 
 async def _handle_room_event(event: dict) -> None:
     """Handle incoming room event (create/update/delete)."""
     payload = event.get("payload") or {}
-    # Example: sync room metadata from remote server
+    event_type = str(event.get("event_type") or "")
+    room_name = str(payload.get("room_name") or "").strip()
+    nickname = str(payload.get("nickname") or "").strip()
+    if not room_name or not nickname:
+        return
+
+    room = db.get_room_by_name(room_name)
+    if not room:
+        owner = db.get_or_create_federation_system_user()
+        room_id = db.create_room(room_name, "Federated room", "public", owner, None)
+        if room_id is None:
+            room = db.get_room_by_name(room_name)
+        else:
+            room = db.get_room_by_name(room_name)
+    if not room:
+        return
+
+    user = _ensure_local_user_by_nickname(nickname)
+    if not user:
+        return
+
+    if event_type == "room.member.joined":
+        db.join_room(user["id"], room["id"])
+    elif event_type == "room.member.left":
+        with db._conn() as con:
+            con.execute("DELETE FROM room_members WHERE room_id=? AND user_id=?", (room["id"], user["id"]))
+            con.commit()
 
 
 async def _handle_user_event(event: dict) -> None:
-    """Handle incoming user event (profile update, etc)."""
+    """Handle incoming federated user profile claim/update."""
     payload = event.get("payload") or {}
-    # Example: sync profile claims from remote server
+    if event.get("event_type") not in ("user.profile.updated", "user.created"):
+        return
+    db.upsert_federation_user_profile(
+        global_user_id=str(payload.get("global_user_id") or "").strip(),
+        nickname=str(payload.get("nickname") or "").strip(),
+        avatar=str(payload.get("avatar") or ""),
+        bio=str(payload.get("bio") or ""),
+        identity_pubkey=str(payload.get("identity_pubkey") or ""),
+        origin_server_id=str(event.get("origin_server_id") or ""),
+    )
+
+
+def _ensure_local_user_by_nickname(nickname: str) -> dict | None:
+    nick = (nickname or "").strip()
+    if not nick:
+        return None
+    user = db.get_user_by_nick(nick)
+    if user:
+        return user
+    uid = db.create_user(nick, secrets.token_urlsafe(24))
+    if uid is None:
+        return db.get_user_by_nick(nick)
+    return db.get_user_by_id(uid)
+
+
+async def _handle_dm_event(event: dict) -> None:
+    """Handle incoming federated DM events."""
+    if event.get("event_type") != "dm.message.created":
+        return
+    payload = event.get("payload") or {}
+    sender_nick = str(payload.get("sender_nickname") or "").strip()
+    peer_nick = str(payload.get("peer_nickname") or "").strip()
+    if not sender_nick or not peer_nick:
+        return
+    sender = _ensure_local_user_by_nickname(sender_nick)
+    peer = _ensure_local_user_by_nickname(peer_nick)
+    if not sender or not peer:
+        return
+
+    channel_id = db.get_or_create_dm(sender["id"], peer["id"])
+    db.send_dm_message(
+        channel_id,
+        sender["id"],
+        str(payload.get("content") or ""),
+        payload.get("media_data"),
+        payload.get("media_type"),
+        payload.get("media_name"),
+        payload.get("reply_to"),
+        media_blur=int(payload.get("media_blur") or 0),
+        view_once=int(payload.get("view_once") or 0),
+    )
+
+
+async def _handle_social_event(event: dict) -> None:
+    """Handle incoming social follow/post events."""
+    payload = event.get("payload") or {}
+    event_type = str(event.get("event_type") or "")
+
+    if event_type == "social.post.created":
+        author_nick = str(payload.get("nickname") or "").strip()
+        author = _ensure_local_user_by_nickname(author_nick)
+        if not author:
+            return
+        # Use existing DB helper so post appears in feed/explore as normal.
+        db.create_wall_post(
+            author["id"],
+            str(payload.get("content") or ""),
+            payload.get("media_data"),
+            payload.get("media_type"),
+            str(payload.get("privacy") or "public"),
+            1 if bool(payload.get("allow_comments", True)) else 0,
+            payload.get("track_title") or None,
+            payload.get("track_room") or None,
+            payload.get("track_mood") or None,
+        )
+        return
+
+    if event_type == "social.follow.changed":
+        follower_nick = str(payload.get("follower_nickname") or "").strip()
+        following_nick = str(payload.get("following_nickname") or "").strip()
+        action = str(payload.get("action") or "").strip().lower()
+        follower = _ensure_local_user_by_nickname(follower_nick)
+        following = _ensure_local_user_by_nickname(following_nick)
+        if not follower or not following:
+            return
+        if action == "follow":
+            db.follow_user(follower["id"], following["id"])
+        elif action == "unfollow":
+            db.unfollow_user(follower["id"], following["id"])
 
 
 # ──────────────────────────────────────────────────────────────

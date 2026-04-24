@@ -1,5 +1,7 @@
 """Invite link management routes."""
 import secrets
+import time
+import uuid
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
@@ -130,6 +132,17 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
     # Actually add the user as a member (was missing — invite was accepted but
     # user was never inserted into room_members, so the sidebar never updated).
     db.join_room(current_user["id"], room_id)
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "room.member.joined",
+            "payload": {
+                "room_name": room["name"],
+                "nickname": current_user["nickname"],
+            },
+        })
+    except Exception:
+        pass
     
     return {
         "ok": True,

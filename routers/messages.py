@@ -1,5 +1,7 @@
 """Message REST routes (history, edit, delete, reactions)."""
 from datetime import datetime
+import time
+import uuid
 from fastapi import APIRouter, Request, Depends, Path, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -117,6 +119,25 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
             reply_to_ft_id=body.reply_to,
             media_blur=bool(body.media_blur),
         )
+    except Exception:
+        pass
+
+    # Federation phase-2: replicate message envelope to peer nodes.
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "message.created",
+            "payload": {
+                "room_name": room_name,
+                "nickname": current_user["nickname"],
+                "content": content,
+                "media_data": body.media_data,
+                "media_type": body.media_type,
+                "media_blur": int(body.media_blur or 0),
+                "view_once": int(body.view_once or 0),
+                "created_at": datetime.utcnow().isoformat() + "Z",
+            },
+        })
     except Exception:
         pass
 

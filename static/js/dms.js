@@ -312,6 +312,9 @@ async function openDMChannel (id, nickname, avatar) {
   const _setPlaceholder = (id, v) => { const el = document.getElementById(id); if (el) el.placeholder = v; };
   const _show = (id) => { const el = document.getElementById(id); if (el) el.style.display = ''; };
   _setTxt('ch-desc', _formatLastSeen(_activeDM.other_last_seen));
+  _setTxt('typing-bar', '');
+  const typingBar = document.getElementById('typing-bar');
+  if (typingBar) typingBar.style.display = '';
   _setPlaceholder('msg-input', 'Message ' + nickname + '…');
   // Show call buttons and timer button for DMs — guard every lookup so a
   // missing element can't crash the whole open flow (which was leaving the
@@ -1196,6 +1199,27 @@ function handleWSDMMessage (data) {
       if (pi >= 0) _dmMessages[pi] = { ...data, content: _dmMessages[pi].content };
       return;
     }
+
+    // Fallback reconciliation when server/client nonce is missing: upgrade
+    // the most recent pending bubble from me so sent state doesn't stay dull.
+    if (data.id && area) {
+      const fallback = area.querySelector('.dm-pending');
+      if (fallback) {
+        fallback.classList.remove('dm-pending');
+        fallback.setAttribute('data-dmid', data.id);
+        fallback.style.opacity = '';
+        const tick = fallback.querySelector('.msg-tick');
+        if (tick) {
+          tick.dataset.mid = data.id;
+          tick.textContent = '✓';
+          tick.title = 'Delivered';
+          tick.classList.remove('msg-tick-pending', 'msg-tick-read');
+        }
+        const pi = _dmMessages.findIndex(x => x._pending && ((x.sender_id|0) === (_selfId|0)));
+        if (pi >= 0) _dmMessages[pi] = { ...data, content: _dmMessages[pi].content };
+        return;
+      }
+    }
   }
 
   // Try to decrypt
@@ -1250,7 +1274,10 @@ function sendDMTyping () {
 function handleWSDMTyping (data) {
   if (!_activeDM || data.channel_id !== _activeDM.id) return;
   const bar = document.getElementById('typing-bar');
-  bar.textContent = data.sender_nick + ' is typing…';
+  if (!bar) return;
+  bar.style.display = '';
+  const who = data.sender_nick || data.nickname || 'Someone';
+  bar.textContent = who + ' is typing…';
   clearTimeout(_dmTypingTimer);
   _dmTypingTimer = setTimeout(() => { bar.textContent = ''; }, 3000);
 }

@@ -8,7 +8,9 @@
     "start": "electron .",
     "build": "electron-builder --linux",
     "build-appimage": "electron-builder --linux AppImage",
-    "build-deb": "electron-builder --linux deb"
+    "build-deb": "electron-builder --linux deb",
+    "build-win": "electron-builder --win nsis",
+    "build-all": "electron-builder --linux AppImage deb --win nsis"
   },
   "author": {
     "name": "FrogTalk",
@@ -44,6 +46,18 @@
           "MimeType": "x-scheme-handler/frogtalk;"
         }
       }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "FrogTalk-${version}-Setup.${ext}",
+      "publisherName": "FrogTalk"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     },
     "files": [
       "main.js",

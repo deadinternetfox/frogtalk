@@ -1,5 +1,7 @@
 """Social feed, followers, explore — Instagram-style features."""
 import base64
+import time
+import uuid
 
 from fastapi import APIRouter, Depends, Query, UploadFile, File, Form
 from fastapi.responses import JSONResponse
@@ -27,6 +29,19 @@ async def follow_user(nickname: str, current_user: dict = Depends(get_current_us
     if target["id"] == current_user["id"]:
         return JSONResponse(status_code=400, content={"error": "Cannot follow yourself"})
     ok = db.follow_user(current_user["id"], target["id"])
+    if ok:
+        try:
+            db.insert_federation_outbox_event({
+                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+                "event_type": "social.follow.changed",
+                "payload": {
+                    "action": "follow",
+                    "follower_nickname": current_user["nickname"],
+                    "following_nickname": target["nickname"],
+                },
+            })
+        except Exception:
+            pass
     return {
         "ok": True,
         "following": True,
@@ -40,6 +55,18 @@ async def unfollow_user(nickname: str, current_user: dict = Depends(get_current_
     if not target:
         return JSONResponse(status_code=404, content={"error": "User not found"})
     db.unfollow_user(current_user["id"], target["id"])
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "social.follow.changed",
+            "payload": {
+                "action": "unfollow",
+                "follower_nickname": current_user["nickname"],
+                "following_nickname": target["nickname"],
+            },
+        })
+    except Exception:
+        pass
     return {
         "ok": True,
         "following": False,

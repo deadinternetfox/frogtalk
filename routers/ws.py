@@ -1,6 +1,7 @@
 """WebSocket route - real-time messaging, DM delivery, WebRTC signaling."""
 import json
 import time
+import uuid
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
@@ -442,6 +443,29 @@ async def websocket_endpoint(
                     preview = (content or "📎 Media")[:80]
                     _push(other_id, f"💬 {user['nickname']}", preview, "/app")
 
+                    # Federation phase-2: mirror DM message to peer nodes.
+                    try:
+                        peer = db.get_user_by_id(other_id) or {}
+                        db.insert_federation_outbox_event({
+                            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+                            "event_type": "dm.message.created",
+                            "payload": {
+                                "channel_id": channel_id,
+                                "sender_nickname": user["nickname"],
+                                "peer_nickname": str(peer.get("nickname") or "").strip(),
+                                "content": content,
+                                "media_data": media_data,
+                                "media_type": media_type_dm,
+                                "media_name": media_name,
+                                "reply_to": reply_to_dm,
+                                "media_blur": int(data.get("media_blur") or 0),
+                                "view_once": int(data.get("view_once") or 0),
+                                "created_at": datetime.utcnow().isoformat() + "Z",
+                            },
+                        })
+                    except Exception:
+                        pass
+
             # ── DM typing indicator ───────────────────────────────────
             elif msg_type == "dm_typing":
                 channel_id = int(data.get("channel_id", 0))
@@ -454,6 +478,7 @@ async def websocket_endpoint(
                     await manager.send_to_user(other_id, {
                         "type": "dm_typing",
                         "channel_id": channel_id,
+                        "sender_nick": user["nickname"],
                         "nickname": user["nickname"],
                     })
 

@@ -78,6 +78,18 @@ async def federation_inbox_processor_task():
             print(f"[Federation] Inbox processor error: {e}")
 
 
+async def federation_outbox_processor_task():
+    """Background task to push local federation outbox events to peers."""
+    while True:
+        await asyncio.sleep(5)
+        try:
+            await federation_mod.federation_outbox_processor()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[Federation] Outbox processor error: {e}")
+
+
 async def federation_update_check_task():
     """Background task to keep this node aligned with main-site release feed."""
     interval = int(os.getenv("FROGTALK_UPDATE_CHECK_INTERVAL_SEC", "300"))
@@ -102,6 +114,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(cleanup_task()),
         asyncio.create_task(official_directory_sync_task()),
         asyncio.create_task(federation_inbox_processor_task()),
+        asyncio.create_task(federation_outbox_processor_task()),
         asyncio.create_task(federation_update_check_task()),
     ]
     # Best-effort immediate sync on boot if URL is configured.
@@ -632,6 +645,21 @@ async def download_deb():
     return FileResponse(
         path,
         media_type="application/vnd.debian.binary-package",
+        filename=os.path.basename(path),
+    )
+
+
+@app.get("/download/windows")
+async def download_windows():
+    """Always serves the latest Windows installer/exe build."""
+    import glob
+    candidates = sorted(glob.glob("static/FrogTalk-*-Setup.exe") + glob.glob("static/FrogTalk-*.exe"))
+    path = candidates[-1] if candidates else ""
+    if not path or not os.path.exists(path):
+        return FileResponse("static/index.html")
+    return FileResponse(
+        path,
+        media_type="application/vnd.microsoft.portable-executable",
         filename=os.path.basename(path),
     )
 

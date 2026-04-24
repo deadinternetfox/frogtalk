@@ -1384,6 +1384,10 @@ function _setJumpPipVisible(show) {
 let _typingSent = false;
 
 function sendTyping() {
+  if (typeof isDMView === 'function' && isDMView()) {
+    if (typeof sendDMTyping === 'function') sendDMTyping();
+    return;
+  }
   if (!_typingSent) {
     WS.send({ type: 'typing' });
     _typingSent = true;

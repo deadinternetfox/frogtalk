@@ -1,5 +1,7 @@
 """Direct message routes."""
 from datetime import datetime
+import time
+import uuid
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -238,6 +240,32 @@ async def send_message(channel_id: int, body: DMMessageBody,
     try:
         if ch and peer_id and peer_id != current_user["id"]:
             await manager.send_to_user(peer_id, dm_broadcast)
+    except Exception:
+        pass
+
+    # Federation phase-2: replicate DM envelopes so cross-node switch keeps history.
+    try:
+        peer_nick = ""
+        if peer_id:
+            peer = db.get_user_by_id(peer_id) or {}
+            peer_nick = str(peer.get("nickname") or "").strip()
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "dm.message.created",
+            "payload": {
+                "channel_id": channel_id,
+                "sender_nickname": current_user["nickname"],
+                "peer_nickname": peer_nick,
+                "content": body.content or "",
+                "media_data": body.media_data,
+                "media_type": body.media_type,
+                "media_name": body.media_name,
+                "reply_to": body.reply_to,
+                "media_blur": int(body.media_blur or 0),
+                "view_once": int(body.view_once or 0),
+                "created_at": datetime.utcnow().isoformat() + "Z",
+            },
+        })
     except Exception:
         pass
 

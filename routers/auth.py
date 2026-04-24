@@ -1,6 +1,17 @@
 """Auth routes: register, login, logout, me."""
+import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import os
 import re
-from fastapi import APIRouter, Request, Depends
+import secrets
+import time
+import urllib.error
+import urllib.request
+import uuid
+from fastapi import APIRouter, Request, Depends, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
@@ -16,6 +27,178 @@ limiter = Limiter(key_func=get_remote_address)
 NICKNAME_RE = re.compile(r"^[a-zA-Z0-9_\-]{2,32}$")
 
 MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB in base64
+FED_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FrogTalkFederation/1.0"
+
+
+def _norm_base(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if not raw.startswith("http://") and not raw.startswith("https://"):
+        raw = f"https://{raw}"
+    return raw.rstrip("/")
+
+
+def _post_json(url: str, body: dict, headers: dict | None = None, timeout: float = 3.5):
+    payload = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": FED_UA,
+            **(headers or {}),
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    return json.loads(raw)
+
+
+def _get_json(url: str, headers: dict | None = None, timeout: float = 3.5):
+    req = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": FED_UA,
+            **(headers or {}),
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    return json.loads(raw)
+
+
+def _provision_local_user_from_remote(nickname: str, password: str, remote_login: dict, remote_ident: dict | None = None):
+    user_id = db.create_user(nickname, password)
+    if user_id is None:
+        # Do not overwrite an existing local account with a mismatched password.
+        return None
+
+    try:
+        avatar = remote_login.get("avatar") if isinstance(remote_login, dict) else None
+        bio = remote_login.get("bio") if isinstance(remote_login, dict) else None
+        if avatar is not None or bio is not None:
+            db.update_profile(user_id, avatar=avatar, bio=bio)
+    except Exception:
+        pass
+
+    try:
+        if isinstance(remote_ident, dict):
+            gid = str(remote_ident.get("global_user_id") or "").strip()
+            ipk = str(remote_ident.get("identity_pubkey") or "").strip()
+            with db._conn() as con:
+                if gid:
+                    con.execute("UPDATE users SET global_user_id=? WHERE id=?", (gid, user_id))
+                if ipk:
+                    con.execute("UPDATE users SET identity_pubkey=? WHERE id=?", (ipk, user_id))
+                con.commit()
+    except Exception:
+        pass
+
+    db.auto_join_defaults(user_id)
+    return db.get_user_by_id(user_id)
+
+
+def _federated_login_enabled() -> bool:
+    return (os.getenv("FROGTALK_FEDERATED_LOGIN_ENABLED", "1") or "1").strip().lower() in ("1", "true", "yes")
+
+
+def _federated_register_enabled() -> bool:
+    return (os.getenv("FROGTALK_FEDERATED_REGISTER_ENABLED", "1") or "1").strip().lower() in ("1", "true", "yes")
+
+
+async def _fanout_registration_to_peers(request: Request, nickname: str, password: str):
+    """Best-effort registration replication so account exists across nodes."""
+    if not _federated_register_enabled():
+        return
+
+    own = {
+        _norm_base(str(request.base_url)),
+        _norm_base(os.getenv("PUBLIC_URL", "")),
+        _norm_base(os.getenv("FROGTALK_BASE_URL", "")),
+        _norm_base(os.getenv("FROGTALK_PUBLIC_URL", "")),
+    }
+
+    peers = []
+    for row in db.list_federation_servers(official_only=False):
+        base = _norm_base(str(row.get("base_url") or ""))
+        if not base or base in own:
+            continue
+        peers.append((base.startswith("https://"), int(row.get("official") or 0), base))
+    peers.sort(reverse=True)
+
+    for _, __, base in peers[:12]:
+        try:
+            await asyncio.to_thread(
+                _post_json,
+                f"{base}/api/auth/register",
+                {"nickname": nickname, "password": password},
+                {"X-Federation-Relay": "1"},
+                4.5,
+            )
+        except urllib.error.HTTPError as e:
+            # 409 means account already exists there; keep going.
+            if int(getattr(e, "code", 0) or 0) in (400, 401, 403, 404, 409):
+                continue
+        except Exception:
+            continue
+
+
+def _login_against_peer(base_url: str, nickname: str, password: str):
+    login = _post_json(f"{base_url}/api/auth/login", {"nickname": nickname, "password": password})
+    token = str(login.get("token") or "")
+    if not token:
+        return None, None
+    ident = None
+    try:
+        ident = _get_json(f"{base_url}/api/identity/me", headers={"X-Session-Token": token})
+    except Exception:
+        ident = None
+    return login, ident
+
+
+async def _try_federated_login_bootstrap(request: Request, nickname: str, password: str):
+    if not _federated_login_enabled():
+        return None
+
+    own = {
+        _norm_base(str(request.base_url)),
+        _norm_base(os.getenv("PUBLIC_URL", "")),
+        _norm_base(os.getenv("FROGTALK_BASE_URL", "")),
+        _norm_base(os.getenv("FROGTALK_PUBLIC_URL", "")),
+    }
+
+    candidates = []
+    for row in db.list_federation_servers(official_only=False):
+        base = _norm_base(str(row.get("base_url") or ""))
+        if not base or base in own:
+            continue
+        candidates.append((base.startswith("https://"), int(row.get("official") or 0), base))
+
+    # Prefer https + official entries first.
+    candidates.sort(reverse=True)
+
+    for _, __, base in candidates[:8]:
+        try:
+            remote_login, remote_ident = await asyncio.to_thread(_login_against_peer, base, nickname, password)
+            if not remote_login:
+                continue
+            local_user = _provision_local_user_from_remote(nickname, password, remote_login, remote_ident)
+            if not local_user:
+                continue
+            return {
+                "user": local_user,
+                "remote_base": base,
+            }
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, OSError):
+            continue
+        except Exception:
+            continue
+    return None
 
 
 class RegisterRequest(BaseModel):
@@ -26,6 +209,14 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     nickname: str
     password: str
+
+
+class FederationTicketRequest(BaseModel):
+    target_base_url: str | None = None
+
+
+class FederationTicketLoginRequest(BaseModel):
+    ticket: str
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -50,9 +241,123 @@ class ProfileUpdateRequest(BaseModel):
     hide_active_channels: bool | None = None
 
 
+def _fed_session_secret() -> str:
+    return (
+        os.getenv("FROGTALK_FEDERATION_TOKEN", "").strip()
+        or os.getenv("FROGTALK_SESSION_SECRET", "").strip()
+    )
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _b64url_decode(data: str) -> bytes:
+    raw = str(data or "").strip()
+    if not raw:
+        return b""
+    pad = "=" * ((4 - (len(raw) % 4)) % 4)
+    return base64.urlsafe_b64decode((raw + pad).encode("ascii"))
+
+
+def _build_federation_login_ticket(user: dict, source_base_url: str, target_base_url: str, ttl_seconds: int = 90) -> str | None:
+    secret = _fed_session_secret()
+    if not secret:
+        return None
+    now = int(time.time())
+    payload = {
+        "v": 1,
+        "iat": now,
+        "exp": now + max(15, min(int(ttl_seconds or 90), 300)),
+        "src": _norm_base(source_base_url),
+        "dst": _norm_base(target_base_url),
+        "nickname": str(user.get("nickname") or "").strip(),
+        "global_user_id": str(user.get("global_user_id") or "").strip(),
+        "avatar": user.get("avatar") or "",
+        "bio": user.get("bio") or "",
+    }
+    payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+    return f"{_b64url_encode(payload_bytes)}.{_b64url_encode(sig)}"
+
+
+def _verify_federation_login_ticket(ticket: str, this_base_url: str) -> dict | None:
+    secret = _fed_session_secret()
+    if not secret:
+        return None
+    raw = str(ticket or "").strip()
+    if "." not in raw:
+        return None
+    p_b64, s_b64 = raw.split(".", 1)
+    try:
+        payload_bytes = _b64url_decode(p_b64)
+        sig = _b64url_decode(s_b64)
+    except Exception:
+        return None
+    if not payload_bytes or not sig:
+        return None
+    expect = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+    if not hmac.compare_digest(expect, sig):
+        return None
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except Exception:
+        return None
+    now = int(time.time())
+    if int(payload.get("exp") or 0) < now:
+        return None
+    dst = _norm_base(str(payload.get("dst") or ""))
+    me = _norm_base(this_base_url)
+    if dst and me and dst != me:
+        return None
+    nick = str(payload.get("nickname") or "").strip()
+    if not nick:
+        return None
+    return payload
+
+
+def _ensure_local_user_from_ticket(payload: dict) -> dict | None:
+    nick = str(payload.get("nickname") or "").strip()
+    if not nick:
+        return None
+    user = db.get_user_by_nick(nick)
+    if not user:
+        uid = db.create_user(nick, secrets.token_urlsafe(24))
+        if uid is None:
+            user = db.get_user_by_nick(nick)
+        else:
+            user = db.get_user_by_id(uid)
+            try:
+                db.auto_join_defaults(uid)
+            except Exception:
+                pass
+    if not user:
+        return None
+
+    try:
+        with db._conn() as con:
+            gid = str(payload.get("global_user_id") or "").strip()
+            avatar = payload.get("avatar")
+            bio = payload.get("bio")
+            if gid:
+                con.execute("UPDATE users SET global_user_id=? WHERE id=?", (gid, user["id"]))
+            if avatar is not None:
+                con.execute("UPDATE users SET avatar=? WHERE id=?", (avatar, user["id"]))
+            if bio is not None:
+                con.execute("UPDATE users SET bio=? WHERE id=?", (bio, user["id"]))
+            con.commit()
+    except Exception:
+        pass
+    return db.get_user_by_id(user["id"]) or user
+
+
 @router.post("/register")
 @limiter.limit("10/hour")
-async def register(request: Request, body: RegisterRequest):
+async def register(
+    request: Request,
+    body: RegisterRequest,
+    x_federation_relay: str | None = Header(default=None),
+):
     if not NICKNAME_RE.match(body.nickname):
         return JSONResponse(status_code=400, content={
             "error": "Nickname must be 2-32 characters: letters, numbers, _ or -"
@@ -63,6 +368,26 @@ async def register(request: Request, body: RegisterRequest):
     if user_id is None:
         return JSONResponse(status_code=409, content={"error": "Nickname already taken"})
     db.auto_join_defaults(user_id)
+    try:
+        ident = db.get_user_by_id(user_id) or {}
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "user.created",
+            "payload": {
+                "global_user_id": ident.get("global_user_id") or "",
+                "nickname": ident.get("nickname") or body.nickname,
+                "avatar": ident.get("avatar") or "",
+                "bio": ident.get("bio") or "",
+                "identity_pubkey": ident.get("identity_pubkey") or "",
+            },
+        })
+    except Exception:
+        pass
+    if (x_federation_relay or "").strip() != "1":
+        try:
+            await _fanout_registration_to_peers(request, body.nickname, body.password)
+        except Exception:
+            pass
     token = db.create_session(user_id)
     return {"token": token, "nickname": body.nickname, "user_id": user_id, "is_admin": False}
 
@@ -72,7 +397,13 @@ async def register(request: Request, body: RegisterRequest):
 async def login(request: Request, body: LoginRequest):
     user = db.verify_user(body.nickname, body.password)
     if not user:
-        return JSONResponse(status_code=401, content={"error": "Invalid nickname or password"})
+        # Optional federated bootstrap: if credentials are valid on a known
+        # peer server, create the local account/profile so server switches feel
+        # seamless while each node keeps independent encrypted storage.
+        boot = await _try_federated_login_bootstrap(request, body.nickname, body.password)
+        if not boot:
+            return JSONResponse(status_code=401, content={"error": "Invalid nickname or password"})
+        user = boot["user"]
     token = db.create_session(user["id"])
     return {
         "token": token,
@@ -81,6 +412,47 @@ async def login(request: Request, body: LoginRequest):
         "is_admin": bool(user["is_admin"]),
         "avatar": user["avatar"],
         "bio": user["bio"],
+    }
+
+
+@router.post("/federation-ticket")
+async def create_federation_ticket(
+    request: Request,
+    body: FederationTicketRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    target = _norm_base((body.target_base_url or "").strip())
+    if not target:
+        return JSONResponse(status_code=400, content={"error": "target_base_url required"})
+    source = _norm_base(str(request.base_url))
+    full_user = db.get_user_by_id(current_user["id"]) or current_user
+    ticket = _build_federation_login_ticket(full_user, source, target, ttl_seconds=90)
+    if not ticket:
+        return JSONResponse(status_code=503, content={"error": "Federation ticket secret not configured"})
+    return {"ticket": ticket, "expires_in": 90}
+
+
+@router.post("/federation-ticket-login")
+async def login_with_federation_ticket(
+    request: Request,
+    body: FederationTicketLoginRequest,
+):
+    payload = _verify_federation_login_ticket(body.ticket, str(request.base_url))
+    if not payload:
+        return JSONResponse(status_code=401, content={"error": "Invalid or expired ticket"})
+
+    user = _ensure_local_user_from_ticket(payload)
+    if not user:
+        return JSONResponse(status_code=409, content={"error": "Could not provision account on this node"})
+
+    token = db.create_session(user["id"])
+    return {
+        "token": token,
+        "nickname": user["nickname"],
+        "user_id": user["id"],
+        "is_admin": bool(user.get("is_admin")),
+        "avatar": user.get("avatar"),
+        "bio": user.get("bio"),
     }
 
 
@@ -177,6 +549,22 @@ async def update_profile(body: ProfileUpdateRequest, current_user: dict = Depend
                     con.execute("UPDATE users SET presence=? WHERE id=?",
                                 (body.presence, current_user["id"]))
             con.commit()
+
+    try:
+        ident = db.get_user_by_id(current_user["id"]) or {}
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "user.profile.updated",
+            "payload": {
+                "global_user_id": ident.get("global_user_id") or "",
+                "nickname": ident.get("nickname") or current_user.get("nickname") or "",
+                "avatar": ident.get("avatar") or "",
+                "bio": ident.get("bio") or "",
+                "identity_pubkey": ident.get("identity_pubkey") or "",
+            },
+        })
+    except Exception:
+        pass
     if body.profile_public is not None or body.allow_friend_requests is not None:
         profile_public = body.profile_public if body.profile_public is not None else True
         allow_fr = body.allow_friend_requests if body.allow_friend_requests is not None else True
@@ -360,7 +748,11 @@ class RegisterWithCaptchaRequest(BaseModel):
 
 @router.post("/register-secure")
 @limiter.limit("10/hour")
-async def register_with_captcha(request: Request, body: RegisterWithCaptchaRequest):
+async def register_with_captcha(
+    request: Request,
+    body: RegisterWithCaptchaRequest,
+    x_federation_relay: str | None = Header(default=None),
+):
     """Register with CAPTCHA verification (bot-proof)."""
     # Verify CAPTCHA first
     if not db.verify_captcha(body.captcha_id, body.captcha_answer):
@@ -378,6 +770,26 @@ async def register_with_captcha(request: Request, body: RegisterWithCaptchaReque
     if user_id is None:
         return JSONResponse(status_code=409, content={"error": "Nickname already taken"})
     db.auto_join_defaults(user_id)
+    try:
+        ident = db.get_user_by_id(user_id) or {}
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "user.created",
+            "payload": {
+                "global_user_id": ident.get("global_user_id") or "",
+                "nickname": ident.get("nickname") or body.nickname,
+                "avatar": ident.get("avatar") or "",
+                "bio": ident.get("bio") or "",
+                "identity_pubkey": ident.get("identity_pubkey") or "",
+            },
+        })
+    except Exception:
+        pass
+    if (x_federation_relay or "").strip() != "1":
+        try:
+            await _fanout_registration_to_peers(request, body.nickname, body.password)
+        except Exception:
+            pass
     token = db.create_session(user_id)
     return {"token": token, "nickname": body.nickname, "user_id": user_id, "is_admin": False}
 

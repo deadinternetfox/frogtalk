@@ -64,6 +64,50 @@ const App = {
     try { localStorage.removeItem(this.PENDING_CALL_KEY); } catch {}
   },
 
+  consumeSwitchTicket() {
+    try {
+      const raw = String(window.name || '').trim();
+      if (!raw) return '';
+      const obj = JSON.parse(raw);
+      const ticket = String(obj?.ft_switch_ticket || '').trim();
+      const ts = Number(obj?.ts || 0);
+      window.name = '';
+      if (!ticket) return '';
+      if (!Number.isFinite(ts) || (Date.now() - ts) > 2 * 60 * 1000) return '';
+      return ticket;
+    } catch {
+      try { window.name = ''; } catch {}
+      return '';
+    }
+  },
+
+  async tryAutoLoginFromSwitchTicket(ticket = '') {
+    const t = String(ticket || this.consumeSwitchTicket() || '').trim();
+    if (!t) return false;
+    try {
+      const res = await fetch('/api/auth/federation-ticket-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket: t }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (!data?.token || !data?.user_id) return false;
+      State.token = data.token;
+      State.user = {
+        id: data.user_id,
+        nickname: data.nickname,
+        avatar: data.avatar,
+        bio: data.bio,
+        is_admin: data.is_admin,
+      };
+      State.save();
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   async init() {
     if (await this.ensureFreshAssets()) return;
 
@@ -123,6 +167,18 @@ const App = {
       window.history.replaceState({}, '', window.location.pathname);
     } else {
       this.pendingIncomingCall = this.getPendingIncomingCall();
+    }
+
+    if (!State.token || !State.user) {
+      const switched = params.get('switched') === '1';
+      if (switched) {
+        const ok = await this.tryAutoLoginFromSwitchTicket();
+        if (ok) {
+          hideSplash();
+          try { await this.launch(); } catch (e) { console.error('[App] launch failed', e); }
+          return;
+        }
+      }
     }
 
     if (State.token && State.user) {

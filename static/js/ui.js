@@ -772,10 +772,10 @@ function ensureNetworkPaneContent() {
       <div style="font-size:11px;color:#93ab9a;line-height:1.5">
         💡 <strong>Run your own server:</strong> FrogTalk is open-source and free to self-host for complete privacy and control.<br>
         <span style="margin-top:6px;display:inline-block">
-          Setup guide: <a href="/docs/node" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">Local setup</a> • 
-          <a href="/docs/node" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">Remote deployment</a> • 
-          <a href="/docs/node" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">Docker</a> • 
-          <a href="/docs/api" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">API docs</a>
+          Setup guide: <a href="https://github.com/deadinternetfox/frogtalk#docker" target="_blank" rel="noopener noreferrer" style="color:#4caf50;text-decoration:underline;font-weight:600">Docker</a> • 
+          <a href="/docs/api" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">API docs</a> • 
+          <a href="/docs/node" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">Run a node doc</a> • 
+          <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer" style="color:#4caf50;text-decoration:underline;font-weight:600">GitHub</a>
         </span>
       </div>
     </div>
@@ -1140,7 +1140,7 @@ function saveNetworkSettings(silent = false) {
   if (!silent) UI.showToast('Network preferences saved', 'success');
 }
 
-function connectToSelectedServer() {
+async function connectToSelectedServer() {
   const mode = document.getElementById('network-mode')?.value || 'auto';
   const customUrl = _normalizeNetworkUrl(document.getElementById('network-custom-url')?.value || '');
   let target = '';
@@ -1160,7 +1160,50 @@ function connectToSelectedServer() {
     return;
   }
   saveNetworkSettings(true);
-  window.location.href = target;
+
+  let switchTicket = '';
+  try {
+    const targetBase = _normalizeNetworkUrl(target || '');
+    const hereBase = _normalizeNetworkUrl(window.location.origin || '');
+    if (targetBase && hereBase && targetBase !== hereBase && State.token) {
+      const r = await fetch('/api/auth/federation-ticket', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': State.token || '',
+        },
+        body: JSON.stringify({ target_base_url: targetBase }),
+      });
+      if (r.ok) {
+        const d = await r.json().catch(() => ({}));
+        switchTicket = String(d.ticket || '');
+      }
+    }
+  } catch {}
+
+  if (switchTicket) {
+    try {
+      window.name = JSON.stringify({
+        ft_switch_ticket: switchTicket,
+        ts: Date.now(),
+      });
+    } catch {}
+  }
+
+  try {
+    // Sessions are per-node; clear stale token before hopping servers so the
+    // next node starts in a clean auth state instead of carrying invalid creds.
+    State.clear();
+  } catch {}
+  try {
+    const next = new URL('/app', target);
+    next.searchParams.set('switched', '1');
+    next.searchParams.set('register', '1');
+    if (window.location?.origin) next.searchParams.set('from', window.location.origin);
+    window.location.href = next.toString();
+  } catch {
+    window.location.href = target;
+  }
 }
 
 async function loadNetworkSettings() {

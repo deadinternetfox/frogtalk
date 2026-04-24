@@ -1,4 +1,6 @@
 """Profile wall/posts routes - Facebook-style social features."""
+import time
+import uuid
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -109,6 +111,25 @@ async def create_wall_post(body: CreatePostRequest, current_user: dict = Depends
         (body.track_room or None),
         (body.track_mood or None),
     )
+
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "social.post.created",
+            "payload": {
+                "nickname": current_user["nickname"],
+                "content": body.content.strip(),
+                "media_data": body.media_data,
+                "media_type": body.media_type,
+                "privacy": body.privacy,
+                "allow_comments": bool(body.allow_comments),
+                "track_title": body.track_title,
+                "track_room": body.track_room,
+                "track_mood": body.track_mood,
+            },
+        })
+    except Exception:
+        pass
     
     return {
         "id": post_id,

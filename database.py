@@ -885,6 +885,30 @@ def _migrate():
         )
         con.execute(
             """
+            CREATE TABLE IF NOT EXISTS federation_user_profiles (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                global_user_id   TEXT NOT NULL UNIQUE,
+                nickname         TEXT NOT NULL,
+                avatar           TEXT DEFAULT '',
+                bio              TEXT DEFAULT '',
+                identity_pubkey  TEXT DEFAULT '',
+                origin_server_id TEXT DEFAULT '',
+                updated_at       TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_message_events (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id         TEXT NOT NULL UNIQUE,
+                message_id       INTEGER,
+                applied_at       TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS official_build_manifests (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 platform   TEXT NOT NULL,
@@ -4434,14 +4458,24 @@ def mark_outbox_event_sent(event_id: str, target_server_id: str) -> bool:
     """Mark outbox event as successfully sent."""
     try:
         with _conn() as con:
-            con.execute(
-                """
-                UPDATE federation_outbox_events
-                SET status='sent'
-                WHERE event_id=? AND target_server_id=?
-                """,
-                (event_id, target_server_id),
-            )
+            if target_server_id:
+                con.execute(
+                    """
+                    UPDATE federation_outbox_events
+                    SET status='sent'
+                    WHERE event_id=? AND target_server_id=?
+                    """,
+                    (event_id, target_server_id),
+                )
+            else:
+                con.execute(
+                    """
+                    UPDATE federation_outbox_events
+                    SET status='sent'
+                    WHERE event_id=?
+                    """,
+                    (event_id,),
+                )
             con.commit()
         return True
     except Exception:
@@ -4488,6 +4522,103 @@ def mark_federation_inbox_event(event_id: str, status: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def get_or_create_federation_system_user() -> int:
+    """Dedicated local user used to store replicated remote messages."""
+    nick = "federation_sync"
+    with _conn() as con:
+        row = con.execute("SELECT id FROM users WHERE nickname=? COLLATE NOCASE", (nick,)).fetchone()
+        if row:
+            return int(row["id"])
+    uid = create_user(nick, secrets.token_urlsafe(24))
+    if uid is not None:
+        return int(uid)
+    with _conn() as con:
+        row = con.execute("SELECT id FROM users WHERE nickname=? COLLATE NOCASE", (nick,)).fetchone()
+    return int(row["id"]) if row else 1
+
+
+def upsert_federation_user_profile(
+    global_user_id: str,
+    nickname: str,
+    avatar: str = "",
+    bio: str = "",
+    identity_pubkey: str = "",
+    origin_server_id: str = "",
+) -> bool:
+    gid = (global_user_id or "").strip()
+    nick = (nickname or "").strip()
+    if not gid or not nick:
+        return False
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO federation_user_profiles
+            (global_user_id, nickname, avatar, bio, identity_pubkey, origin_server_id, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(global_user_id) DO UPDATE SET
+                nickname=excluded.nickname,
+                avatar=excluded.avatar,
+                bio=excluded.bio,
+                identity_pubkey=excluded.identity_pubkey,
+                origin_server_id=excluded.origin_server_id,
+                updated_at=datetime('now')
+            """,
+            (gid, nick, avatar or "", bio or "", identity_pubkey or "", origin_server_id or ""),
+        )
+        con.commit()
+    return True
+
+
+def save_federated_room_message(event_id: str, payload: Dict) -> Optional[int]:
+    """Apply replicated message event idempotently into local room timeline."""
+    eid = (event_id or "").strip()
+    if not eid:
+        return None
+    room_name = str(payload.get("room_name") or "").strip()
+    nickname = str(payload.get("nickname") or "remote").strip() or "remote"
+    content = str(payload.get("content") or "")
+    media_data = payload.get("media_data")
+    media_type = payload.get("media_type")
+    media_blur = int(payload.get("media_blur") or 0)
+    view_once = int(payload.get("view_once") or 0)
+    if not room_name:
+        return None
+
+    with _conn() as con:
+        seen = con.execute(
+            "SELECT message_id FROM federation_message_events WHERE event_id=?",
+            (eid,),
+        ).fetchone()
+        if seen:
+            return int(seen["message_id"] or 0) or None
+
+        room = con.execute("SELECT id FROM rooms WHERE name=?", (room_name,)).fetchone()
+        if not room:
+            owner_id = get_or_create_federation_system_user()
+            con.execute(
+                "INSERT OR IGNORE INTO rooms (name, description, type, owner_id, room_key_hint, channel_type) VALUES (?,?,?,?,?,?)",
+                (room_name, "Federated room", "public", owner_id, None, "text"),
+            )
+
+        user_id = get_or_create_federation_system_user()
+        cur = con.execute(
+            """
+            INSERT INTO messages (room_name, user_id, nickname, content, media_data, media_type,
+                                  media_blur, view_once, bridge_platform, bridge_avatar, reply_to)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (room_name, user_id, nickname, content, media_data, media_type,
+             media_blur, view_once, "federation", None, None),
+        )
+        msg_id = int(cur.lastrowid)
+        con.execute(
+            "INSERT INTO federation_message_events (event_id, message_id) VALUES (?, ?)",
+            (eid, msg_id),
+        )
+        con.commit()
+        return msg_id
 
 
 # ──────────────────────────────────────────────────────────────
