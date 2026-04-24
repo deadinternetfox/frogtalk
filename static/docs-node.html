@@ -4,13 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Run Your FrogTalk Node</title>
-<meta name="description" content="Production guide to run your own FrogTalk federation node with update channel and trust verification.">
+<meta name="description" content="Production guide to run your own FrogTalk federation node with Tor/onion deployment, update channel, and trust verification.">
 <link rel="canonical" href="https://frogtalk.xyz/docs/node">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://frogtalk.xyz/docs/node">
 <meta property="og:title" content="Run Your FrogTalk Node">
-<meta property="og:description" content="Self-hosting guide for a FrogTalk federation node with update feed, legitimacy checks, and federation-safe setup.">
+<meta property="og:description" content="Self-hosting guide for a FrogTalk federation node with Tor/onion reverse-proxy setup, update feed, legitimacy checks, and federation-safe routing.">
 <meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta property="og:image:secure_url" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta property="og:image:type" content="image/png">
@@ -123,11 +123,12 @@
 <body>
   <div class="top">
     <div class="top-inner">
-      <a href="/" class="brand">Run FrogTalk Node</a>
+      <a href="/app" class="brand">Run FrogTalk Node</a>
       <div class="links">
+        <a href="/app">Open App</a>
         <a href="/">Home</a>
         <a href="/docs/api">API Docs</a>
-        <a href="/app">Open App</a>
+        <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer">GitHub</a>
       </div>
     </div>
   </div>
@@ -135,7 +136,7 @@
   <main class="wrap">
     <section class="hero">
       <h1>Self-Host A Federation Node</h1>
-      <p class="sub">Production setup with update feed, legitimacy checks, and federation-safe update flow.</p>
+      <p class="sub">Production setup with update feed, legitimacy checks, onion-first routing, and federation-safe update flow.</p>
     </section>
 
     <section class="step">
@@ -168,6 +169,20 @@ FROGTALK_SERVICE_NAME=frogtalk</code></pre>
     </section>
 
     <section class="step">
+      <h2>2.5) Run Behind Tor / Onion</h2>
+      <p class="hint">If you want the node to be reachable over Tor, point clients and federation peers at the onion app URL, not the marketing home page.</p>
+      <pre><code># /opt/frogtalk/.env
+FROGTALK_TOR_ENABLED=1
+FROGTALK_ONION_URL=http://yourhiddenserviceaddress.onion
+# Optional: keep empty for onion-only nodes so the public IP never appears in directory output
+FROGTALK_BASE_URL=
+
+# Tor Browser and other clients should open:
+# http://yourhiddenserviceaddress.onion/app</code></pre>
+      <div class="callout">Use <code>/app</code> for client handoff links and network-tab switches. The Node Control and network UI now prefer onion app links so users land inside the chat client, not the marketing site.</div>
+    </section>
+
+    <section class="step">
       <h2>3) Start Service</h2>
       <pre><code>sudo systemctl daemon-reload
 sudo systemctl enable frogtalk
@@ -181,6 +196,7 @@ sudo systemctl status frogtalk --no-pager</code></pre>
 curl -s https://your-node.example/api/network/build/local
 curl -s https://your-node.example/api/network/update/status</code></pre>
       <p class="hint">`build_hash` should match the approved release from main-site feed for federation stability.</p>
+      <p class="hint">For onion-only nodes, verify the same endpoints through your Tor endpoint and test the user-facing app at <code>http://yourhiddenserviceaddress.onion/app</code>.</p>
     </section>
 
     <section class="step">
@@ -204,6 +220,7 @@ curl -s https://your-node.example/api/network/update/status</code></pre>
       <ul>
         <li>Probe nodes and view latency</li>
         <li>Verify legitimacy badges (`SAME HASH`, `LEGIT COPY`, mismatch alerts)</li>
+        <li>Switch to Tor-enabled nodes using onion <code>/app</code> links with automatic handoff when possible</li>
         <li>Check/apply updates from the official feed</li>
       </ul>
     </section>

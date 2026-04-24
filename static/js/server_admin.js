@@ -5,10 +5,37 @@
   const actionMsg = document.getElementById('action-msg');
   const statsGrid = document.getElementById('stats-grid');
   const resourceGrid = document.getElementById('resource-grid');
+  const nodeSummaryGrid = document.getElementById('node-summary-grid');
   const onlineUsersBody = document.getElementById('online-users-body');
   const nodesBody = document.getElementById('nodes-body');
   const nodeMsg = document.getElementById('node-msg');
   const latencyBadge = document.getElementById('latency-badge');
+  const privacyBadge = document.getElementById('privacy-badge');
+  const federationBadge = document.getElementById('federation-badge');
+  const updatedBadge = document.getElementById('updated-badge');
+  const frogTrigger = document.getElementById('node-frog-trigger');
+  const easterEnabled = document.getElementById('easter-enabled');
+  const easterTitle = document.getElementById('easter-title');
+  const easterEditor = document.getElementById('easter-editor');
+  const easterMsg = document.getElementById('easter-msg');
+  const easterPreview = document.getElementById('easter-preview');
+  const easterPreviewBtn = document.getElementById('easter-preview-btn');
+  const easterSaveBtn = document.getElementById('easter-save-btn');
+  const easterUploadBtn = document.getElementById('easter-upload-btn');
+  const easterUploadInput = document.getElementById('easter-upload-input');
+  let nodeLog = [];
+  let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
+  let frogTapCount = 0;
+  let frogTapTimer = null;
+
+  function escHtml(value) {
+    return String(value || '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
 
   function setLoginMessage(msg, isError = false) {
     loginMsg.textContent = msg || '';
@@ -21,8 +48,24 @@
   }
 
   function setNodeMessage(msg, isError = false) {
-    nodeMsg.textContent = msg || '';
-    nodeMsg.style.color = isError ? '#ff9f9f' : '#93ab9a';
+    const line = String(msg || '').trim();
+    if (!line) return;
+    nodeLog = [{
+      stamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      text: line,
+      isError: !!isError,
+    }, ...nodeLog].slice(0, 14);
+    nodeMsg.innerHTML = nodeLog.map((entry) => `
+      <div class="log-line ${entry.isError ? 'error' : 'ok'}">
+        <span class="log-time">${escHtml(entry.stamp)}</span>
+        <span class="log-text">${escHtml(entry.text)}</span>
+      </div>
+    `).join('');
+  }
+
+  function setEasterMessage(msg, isError = false) {
+    easterMsg.textContent = msg || '';
+    easterMsg.style.color = isError ? '#ff9f9f' : '#93ab9a';
   }
 
   async function api(path, opts = {}) {
@@ -39,6 +82,180 @@
     return data;
   }
 
+  function insertHtmlAtCursor(html) {
+    const safeHtml = String(html || '');
+    if (!safeHtml || !easterEditor) return;
+    easterEditor.focus();
+    try {
+      document.execCommand('insertHTML', false, safeHtml);
+    } catch {
+      easterEditor.innerHTML += safeHtml;
+    }
+    renderEasterPreview();
+  }
+
+  function applyEditorCommand(command) {
+    if (!easterEditor) return;
+    easterEditor.focus();
+    if (command === 'h2') {
+      document.execCommand('formatBlock', false, 'h2');
+      return;
+    }
+    if (command === 'blockquote') {
+      document.execCommand('formatBlock', false, 'blockquote');
+      return;
+    }
+    if (command === 'ul') {
+      document.execCommand('insertUnorderedList');
+      return;
+    }
+    if (command === 'link') {
+      const url = window.prompt('Link URL');
+      if (!url) return;
+      document.execCommand('createLink', false, url.trim());
+      return;
+    }
+    if (command === 'clear') {
+      document.execCommand('removeFormat');
+      return;
+    }
+    document.execCommand(command, false);
+  }
+
+  function renderEasterPreview() {
+    if (!easterPreview) return;
+    const title = (easterTitle?.value || 'Frog signal').trim() || 'Frog signal';
+    const html = (easterEditor?.innerHTML || '').trim() || 'No popup content configured yet.';
+    easterPreview.innerHTML = `
+      <div class="easter-preview-title">${escHtml(title)}</div>
+      <div class="easter-preview-body">${html}</div>
+    `;
+  }
+
+  function syncEasterEditor(payload) {
+    easterEggConfig = {
+      enabled: !!payload?.enabled,
+      title: payload?.title || 'Frog signal',
+      html: payload?.html || '',
+      updated_at: payload?.updated_at || '',
+    };
+    if (easterEnabled) easterEnabled.checked = easterEggConfig.enabled;
+    if (easterTitle) easterTitle.value = easterEggConfig.title;
+    if (easterEditor) easterEditor.innerHTML = easterEggConfig.html || '<p>Hidden message waiting for this node.</p>';
+    renderEasterPreview();
+  }
+
+  async function loadEasterEgg() {
+    try {
+      const payload = await api('/api/server-admin/easter-egg');
+      syncEasterEditor(payload);
+    } catch (e) {
+      setEasterMessage(e.message, true);
+    }
+  }
+
+  async function saveEasterEgg() {
+    setEasterMessage('Saving popup...');
+    try {
+      const payload = await api('/api/server-admin/easter-egg', {
+        method: 'PUT',
+        body: JSON.stringify({
+          enabled: !!easterEnabled?.checked,
+          title: easterTitle?.value || '',
+          html: easterEditor?.innerHTML || '',
+        }),
+      });
+      syncEasterEditor(payload);
+      setEasterMessage('Node popup saved.');
+    } catch (e) {
+      setEasterMessage(e.message, true);
+    }
+  }
+
+  function closeEasterOverlay() {
+    document.getElementById('node-easter-overlay')?.remove();
+  }
+
+  async function openEasterOverlay(useEditorState = false) {
+    closeEasterOverlay();
+    let payload = null;
+    if (useEditorState) {
+      payload = {
+        enabled: !!easterEnabled?.checked,
+        title: easterTitle?.value || 'Frog signal',
+        html: easterEditor?.innerHTML || '',
+      };
+    } else {
+      try {
+        payload = await api('/api/server-admin/easter-egg');
+      } catch (e) {
+        setEasterMessage(e.message, true);
+        return;
+      }
+    }
+    if (!payload?.enabled && !useEditorState) {
+      setEasterMessage('Popup is disabled for this node.', true);
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.id = 'node-easter-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:14050;background:rgba(4,8,5,.76);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:18px';
+    overlay.innerHTML = `
+      <div style="width:min(720px,96vw);max-height:min(84vh,820px);overflow:auto;border-radius:24px;border:1px solid rgba(86,209,109,.25);background:linear-gradient(160deg,rgba(15,27,20,.98),rgba(7,12,9,.98));box-shadow:0 32px 90px rgba(0,0,0,.55);position:relative;padding:22px;">
+        <button type="button" id="node-easter-close" style="position:absolute;top:14px;right:14px;border:none;background:#13241a;color:#dbeadf;width:38px;height:38px;border-radius:12px;cursor:pointer;font-size:18px">✕</button>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+          <div style="width:54px;height:54px;border-radius:18px;background:linear-gradient(135deg,#1c422a,#0c170f);display:flex;align-items:center;justify-content:center;font-size:28px;box-shadow:0 12px 30px rgba(0,0,0,.28)">🐸</div>
+          <div>
+            <div style="font-size:24px;font-weight:800;color:#f1fff5">${escHtml(payload.title || 'Frog signal')}</div>
+            <div style="font-size:12px;color:#96b49f">Secret node popup</div>
+          </div>
+        </div>
+        <div style="color:#deede2;line-height:1.7" class="easter-preview-body">${payload.html || '<p>No content configured.</p>'}</div>
+      </div>
+    `;
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) closeEasterOverlay();
+    });
+    document.body.appendChild(overlay);
+    overlay.querySelector('#node-easter-close')?.addEventListener('click', closeEasterOverlay);
+  }
+
+  function handleFrogTap() {
+    frogTapCount += 1;
+    clearTimeout(frogTapTimer);
+    frogTapTimer = setTimeout(() => { frogTapCount = 0; }, 2600);
+    if (frogTapCount >= 7) {
+      frogTapCount = 0;
+      openEasterOverlay(false).catch((e) => setEasterMessage(e.message, true));
+    }
+  }
+
+  async function uploadEasterAsset(file) {
+    if (!file) return;
+    setEasterMessage(`Uploading ${file.name}...`);
+    try {
+      const form = new FormData();
+      form.append('media', file);
+      const res = await fetch('/api/server-admin/easter-egg/upload', {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(payload.error || 'Upload failed');
+      if (payload.tag === 'img') {
+        insertHtmlAtCursor(`<img src="${payload.media_data}" alt="${escHtml(payload.filename || 'image')}">`);
+      } else if (payload.tag === 'video') {
+        insertHtmlAtCursor(`<video controls playsinline src="${payload.media_data}"></video>`);
+      } else {
+        insertHtmlAtCursor(`<audio controls src="${payload.media_data}"></audio>`);
+      }
+      setEasterMessage('Media inserted into popup.');
+    } catch (e) {
+      setEasterMessage(e.message, true);
+    }
+  }
+
   function statCard(label, value, meta = '') {
     return `
       <div class="card">
@@ -47,6 +264,45 @@
         <div class="card-meta">${meta}</div>
       </div>
     `;
+  }
+
+  function summaryCard(label, value, meta = '', tone = '') {
+    return `
+      <div class="card summary-card ${tone}">
+        <div class="card-label">${label}</div>
+        <div class="card-value">${value}</div>
+        <div class="card-meta">${meta}</div>
+      </div>
+    `;
+  }
+
+  function fmtWhen(value) {
+    if (!value) return 'n/a';
+    let date = null;
+    if (typeof value === 'number' || /^\d+$/.test(String(value))) {
+      const numeric = Number(value);
+      date = new Date(numeric < 2_000_000_000 ? numeric * 1000 : numeric);
+    } else {
+      date = new Date(value);
+    }
+    if (!date || Number.isNaN(date.getTime())) return 'n/a';
+    const deltaSec = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+    if (deltaSec < 60) return `${deltaSec}s ago`;
+    if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}m ago`;
+    if (deltaSec < 86400) return `${Math.floor(deltaSec / 3600)}h ago`;
+    return `${Math.floor(deltaSec / 86400)}d ago`;
+  }
+
+  function renderServerMeta(payload) {
+    const server = payload.server || {};
+    const privacyText = server.privacy_mode === 'tor'
+      ? `Privacy: Tor-routed · ${server.public_endpoint || 'hidden onion endpoint'}`
+      : `Privacy: Direct route · ${server.public_endpoint || 'hidden endpoint'}`;
+    privacyBadge.textContent = privacyText;
+    privacyBadge.className = `badge ${server.privacy_mode === 'tor' ? 'success' : 'warn'}`;
+    federationBadge.textContent = `Node: ${server.display_name || 'FrogTalk Node'} · ${server.server_id || 'local'}`;
+    const lastSync = server.directory_last_sync ? `Directory sync ${fmtWhen(server.directory_last_sync)}` : 'Directory sync pending';
+    updatedBadge.textContent = `Updated ${fmtWhen(payload.timestamp)} · ${lastSync}`;
   }
 
   function renderStats(payload, pingMs) {
@@ -102,6 +358,21 @@
     ].join('');
   }
 
+  function renderNodeSummary(nodes) {
+    if (!nodeSummaryGrid) return;
+    const list = Array.isArray(nodes) ? nodes : [];
+    const enabled = list.filter((n) => n.enabled).length;
+    const blocked = list.length - enabled;
+    const tor = list.filter((n) => n.route_mode === 'tor').length;
+    const official = list.filter((n) => n.official).length;
+    nodeSummaryGrid.innerHTML = [
+      summaryCard('Reachable Set', enabled, `${blocked} blocked or disabled`, enabled ? 'success' : 'warn'),
+      summaryCard('Tor Routes', tor, `${Math.max(list.length - tor, 0)} direct routes`, tor ? 'success' : 'warn'),
+      summaryCard('Official Peers', official, `${Math.max(list.length - official, 0)} community peers`),
+      summaryCard('Registry Size', list.length, 'Known federation nodes'),
+    ].join('');
+  }
+
   function renderUsers(users) {
     if (!Array.isArray(users) || !users.length) {
       onlineUsersBody.innerHTML = '<tr><td colspan="3" style="color:#93ab9a">No users online</td></tr>';
@@ -129,19 +400,29 @@
   function renderNodes(nodes) {
     if (!Array.isArray(nodes) || !nodes.length) {
       nodesBody.innerHTML = '<tr><td colspan="4" style="color:#93ab9a">No federation nodes found</td></tr>';
+      renderNodeSummary([]);
       return;
     }
+    renderNodeSummary(nodes);
     nodesBody.innerHTML = nodes.map((n) => {
       const blocked = !Boolean(n.enabled);
       const status = blocked ? 'blocked' : 'enabled';
+      const trust = n.trust_tier || 'community';
+      const lastSeen = n.last_seen ? `Seen ${fmtWhen(n.last_seen)}` : 'No recent heartbeat';
+      const caps = Array.isArray(n.capabilities) ? n.capabilities.length : 0;
       return `
         <tr>
           <td>
-            <div>${n.display_name || n.server_id}</div>
-            <div style="font-size:11px;color:#93ab9a">${n.base_url || ''}</div>
+            <div class="node-name-row">
+              <span class="node-name">${escHtml(n.display_name || n.server_id || 'Unknown node')}</span>
+              ${n.official ? '<span class="mini-badge success">official</span>' : ''}
+              ${n.onion_available ? '<span class="mini-badge">onion</span>' : ''}
+            </div>
+            <div class="node-endpoint">${escHtml(n.display_endpoint || 'hidden endpoint')}</div>
+            <div class="node-meta">${escHtml(n.transport_label || 'Route unknown')} · ${escHtml(n.privacy_label || 'Privacy unknown')} · ${escHtml(n.region || 'Unknown region')} · ${caps} cap${caps === 1 ? '' : 's'} · ${escHtml(lastSeen)}</div>
           </td>
-          <td>${status}</td>
-          <td>${n.trust_tier || 'community'}</td>
+          <td><span class="mini-badge ${blocked ? 'danger' : 'success'}">${escHtml(status)}</span></td>
+          <td><span class="mini-badge ${trust === 'official' ? 'success' : ''}">${escHtml(trust)}</span></td>
           <td style="display:flex; gap:6px; flex-wrap:wrap;">${nodeActionButton(n)}<button class="btn" data-node-probe="${n.server_id || ''}">Probe</button></td>
         </tr>
       `;
@@ -181,9 +462,9 @@
     try {
       const data = await api(`/api/server-admin/nodes/${encodeURIComponent(serverId)}/probe`);
       if (data.healthy) {
-        setNodeMessage(`${serverId} healthy (${data.latency_ms ?? '--'} ms) via ${data.target}`);
+        setNodeMessage(`${serverId} healthy (${data.latency_ms ?? '--'} ms) over ${data.transport_label || 'network route'} via ${data.display_target || 'hidden endpoint'}`);
       } else {
-        setNodeMessage(`${serverId} probe failed: ${data.error || 'unknown error'}`, true);
+        setNodeMessage(`${serverId} probe failed over ${data.transport_label || 'network route'}: ${data.error || 'unknown error'}`, true);
       }
     } catch (e) {
       setNodeMessage(e.message, true);
@@ -196,10 +477,12 @@
     const users = await api('/api/server-admin/online-users');
     const pingMs = Math.max(1, Math.round(performance.now() - t0));
     latencyBadge.textContent = `Latency: ${pingMs} ms`;
+    renderServerMeta(stats);
     renderStats(stats, pingMs);
     renderResources(stats);
     renderUsers(users.users || []);
     await refreshNodes();
+    if (!easterEggConfig?.updated_at) await loadEasterEgg();
   }
 
   async function ensureAuth() {
@@ -285,6 +568,20 @@
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('refresh-btn').addEventListener('click', () => refreshDashboard().catch((e) => setActionMessage(e.message, true)));
   document.getElementById('sync-dir-btn').addEventListener('click', () => runAction('sync'));
+  frogTrigger?.addEventListener('click', handleFrogTap);
+  easterEditor?.addEventListener('input', renderEasterPreview);
+  easterTitle?.addEventListener('input', renderEasterPreview);
+  easterPreviewBtn?.addEventListener('click', () => openEasterOverlay(true));
+  easterSaveBtn?.addEventListener('click', saveEasterEgg);
+  easterUploadBtn?.addEventListener('click', () => easterUploadInput?.click());
+  easterUploadInput?.addEventListener('change', (event) => {
+    const file = event.target?.files?.[0];
+    uploadEasterAsset(file);
+    event.target.value = '';
+  });
+  document.querySelectorAll('[data-editor-cmd]').forEach((btn) => {
+    btn.addEventListener('click', () => applyEditorCommand(btn.getAttribute('data-editor-cmd')));
+  });
 
   document.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', () => runAction(btn.getAttribute('data-action')));

@@ -1022,14 +1022,15 @@
 
 <section class="section" id="federation">
   <div class="section-title">Federation Reliability</div>
-  <div class="section-sub">Keep every FrogTalk node in sync with official release metadata, build hashes, and trust checks.</div>
+  <div class="section-sub">Keep every FrogTalk node in sync with official release metadata, build hashes, Tor routing preferences, and trust checks.</div>
   <div class="federation-spotlight">
     <div>
       <div class="fed-title">Ship Once From frogtalk.xyz, Propagate Everywhere</div>
-      <div class="fed-sub">Main site publishes a release feed with package SHA-256 and build hash. Nodes poll the feed, verify legitimacy, and apply updates safely.</div>
+      <div class="fed-sub">Main site publishes a release feed with package SHA-256 and build hash. Nodes poll the feed, verify legitimacy, prefer onion routes when available, and apply updates safely without leaking onion-only peers.</div>
       <div class="fed-badges">
         <span class="fed-badge ok">SAME HASH</span>
         <span class="fed-badge ok">LEGIT COPY</span>
+        <span class="fed-badge ok">🧅 TOR READY</span>
         <span class="fed-badge warn">HASH MISMATCH ALERT</span>
       </div>
       <div class="fed-actions">
@@ -1044,11 +1045,15 @@
       </div>
       <div class="fed-mini">
         <h4>Trust Badges In Network UI</h4>
-        <p>Operators instantly see connected state, official directory status, hash match, and legitimacy badges.</p>
+        <p>Operators instantly see connected state, official directory status, onion capability, hash match, and legitimacy badges.</p>
       </div>
       <div class="fed-mini">
         <h4>Safe Apply Flow</h4>
         <p>Node downloads update package, verifies checksum, syncs files, and restarts service without drift.</p>
+      </div>
+      <div class="fed-mini">
+        <h4>Tor-Enabled Server Handoffs</h4>
+        <p>The app switches users to the node app at <strong>/app</strong>, preserves handoff tickets when possible, and keeps onion links pointed at the real chat surface instead of the marketing home page.</p>
       </div>
     </div>
   </div>

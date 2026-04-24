@@ -1061,8 +1061,7 @@ async def _handle_room_event(event: dict) -> None:
     payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
     room_name = str(payload.get("room_name") or "").strip()
-    nickname = str(payload.get("nickname") or "").strip()
-    if not room_name or not nickname:
+    if not room_name:
         return
 
     room = db.get_room_by_name(room_name)
@@ -1076,6 +1075,14 @@ async def _handle_room_event(event: dict) -> None:
     if not room:
         return
 
+    if event_type.startswith("room.music."):
+        await _handle_room_music_event(room_name, event_type, payload)
+        return
+
+    nickname = str(payload.get("nickname") or "").strip()
+    if not nickname:
+        return
+
     user = _ensure_local_user_by_nickname(nickname)
     if not user:
         return
@@ -1086,6 +1093,141 @@ async def _handle_room_event(event: dict) -> None:
         with db._conn() as con:
             con.execute("DELETE FROM room_members WHERE room_id=? AND user_id=?", (room["id"], user["id"]))
             con.commit()
+
+
+def _set_music_anchor(room_name: str, track_id: int, started_unix: float | int | None) -> None:
+    if started_unix is None:
+        return
+    try:
+        from routers import rooms as rooms_router
+        rooms_router.set_music_head_anchor(room_name, int(track_id), float(started_unix))
+    except Exception:
+        pass
+
+
+def _clear_music_anchor(room_name: str) -> None:
+    try:
+        from routers import rooms as rooms_router
+        rooms_router.clear_music_head_anchor(room_name)
+    except Exception:
+        pass
+
+
+async def _broadcast_music_ws(room_name: str, message: dict) -> None:
+    try:
+        from ws_manager import manager
+        await manager.broadcast_room(room_name, message)
+    except Exception:
+        pass
+
+
+async def _handle_room_music_event(room_name: str, event_type: str, payload: dict) -> None:
+    if event_type == "room.music.track.added":
+        provider = str(payload.get("provider") or "").strip()
+        video_id = str(payload.get("video_id") or "").strip()
+        url = str(payload.get("url") or "").strip()
+        if not provider or not video_id or not url:
+            return
+        submitter_nick = str(payload.get("submitter_nick") or "federation_sync").strip() or "federation_sync"
+        submitter = _ensure_local_user_by_nickname(submitter_nick)
+        submitter_id = int(submitter["id"]) if submitter else int(db.get_or_create_federation_system_user())
+        track_id = db.music_add_track(
+            room_name=room_name,
+            submitter_id=submitter_id,
+            submitter_nick=submitter_nick,
+            provider=provider,
+            video_id=video_id,
+            url=url,
+            title=str(payload.get("title") or ""),
+            thumbnail=str(payload.get("thumbnail") or ""),
+            duration=int(payload.get("duration") or 0),
+        )
+        if bool(payload.get("make_current")):
+            _set_music_anchor(room_name, int(track_id), payload.get("start_unix"))
+        await _broadcast_music_ws(room_name, {
+            "type": "music_track_added",
+            "room": room_name,
+            "track": {
+                "id": track_id,
+                "room_name": room_name,
+                "submitter_id": submitter_id,
+                "submitter_nick": submitter_nick,
+                "provider": provider,
+                "video_id": video_id,
+                "url": url,
+                "title": str(payload.get("title") or ""),
+                "thumbnail": str(payload.get("thumbnail") or ""),
+                "duration": int(payload.get("duration") or 0),
+                "played": 0,
+            },
+        })
+        return
+
+    if event_type == "room.music.track.removed":
+        provider = str(payload.get("provider") or "").strip()
+        video_id = str(payload.get("video_id") or "").strip()
+        url = str(payload.get("url") or "").strip()
+        removed_id = None
+        with db._conn() as con:
+            row = con.execute(
+                """
+                SELECT id FROM music_queue
+                WHERE room_name=? AND played=0 AND provider=? AND video_id=? AND url=?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (room_name, provider, video_id, url),
+            ).fetchone()
+            if row:
+                removed_id = int(row["id"])
+                con.execute("DELETE FROM music_queue WHERE id=?", (removed_id,))
+                con.commit()
+        if removed_id is not None:
+            if bool(payload.get("removed_was_head")):
+                next_current = db.music_get_current(room_name)
+                if next_current:
+                    _set_music_anchor(room_name, int(next_current["id"]), payload.get("next_start_unix") or time.time())
+                else:
+                    _clear_music_anchor(room_name)
+            await _broadcast_music_ws(room_name, {
+                "type": "music_track_removed",
+                "room": room_name,
+                "track_id": removed_id,
+            })
+        return
+
+    if event_type == "room.music.track.skipped":
+        current = db.music_get_current(room_name)
+        skipped_id = None
+        if current:
+            skipped_id = int(current["id"])
+            db.music_mark_played(skipped_id, room_name)
+        next_current = db.music_get_current(room_name)
+        if next_current:
+            _set_music_anchor(room_name, int(next_current["id"]), payload.get("next_start_unix") or time.time())
+        else:
+            _clear_music_anchor(room_name)
+        await _broadcast_music_ws(room_name, {
+            "type": "music_track_skipped",
+            "room": room_name,
+            "track_id": skipped_id,
+        })
+        return
+
+    if event_type == "room.music.queue.cleared":
+        db.music_clear_queue(room_name)
+        _clear_music_anchor(room_name)
+        await _broadcast_music_ws(room_name, {"type": "music_queue_cleared", "room": room_name})
+        return
+
+    if event_type == "room.music.dj_only.changed":
+        db.room_set_dj_only(room_name, 1 if payload.get("dj_only") else 0)
+        await _broadcast_music_ws(room_name, {
+            "type": "music_dj_only_changed",
+            "room": room_name,
+            "dj_only": bool(payload.get("dj_only")),
+        })
+        return
 
 
 async def _handle_user_event(event: dict) -> None:

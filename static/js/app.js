@@ -6,6 +6,9 @@ const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
   ASSET_RESET_VERSION: 'telegram-botfather-bridge-copy-v2',
+  easterEgg: null,
+  easterTapCount: 0,
+  easterTapTimer: null,
 
   async ensureFreshAssets() {
     try {
@@ -280,6 +283,7 @@ const App = {
     document.getElementById('self-name').textContent = u.nickname;
     const sa = document.getElementById('self-avatar-el');
     sa.innerHTML = UI.avatarEl(u.avatar, u.nickname, 36);
+    this.bindEasterEggTriggers();
     // Render presence + status msg under the name
     try { UI.renderSelfStatus && UI.renderSelfStatus(); } catch {}
 
@@ -398,6 +402,78 @@ const App = {
     if (typeof Social !== 'undefined' && Social._initUploadRecovery) {
       try { Social._initUploadRecovery(); } catch {}
     }
+  },
+
+  bindEasterEggTriggers() {
+    const handler = () => this.trackEasterTap();
+    ['server-label', 'self-avatar-el'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el && !el.dataset.easterBound) {
+        el.dataset.easterBound = '1';
+        el.addEventListener('click', handler);
+      }
+    });
+    document.querySelectorAll('.social-menu-btn').forEach((el) => {
+      if (el.dataset.easterBound) return;
+      el.dataset.easterBound = '1';
+      el.addEventListener('click', handler);
+    });
+  },
+
+  trackEasterTap() {
+    this.easterTapCount += 1;
+    clearTimeout(this.easterTapTimer);
+    this.easterTapTimer = setTimeout(() => { this.easterTapCount = 0; }, 2600);
+    if (this.easterTapCount < 7) return;
+    this.easterTapCount = 0;
+    this.openNodeEasterEgg();
+  },
+
+  closeNodeEasterEgg() {
+    document.getElementById('ft-node-easter-overlay')?.remove();
+  },
+
+  async fetchNodeEasterEgg(force = false) {
+    if (this.easterEgg && !force) return this.easterEgg;
+    try {
+      const res = await fetch('/api/server/easter-egg');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return null;
+      this.easterEgg = data;
+      return data;
+    } catch {
+      return null;
+    }
+  },
+
+  async openNodeEasterEgg() {
+    const payload = await this.fetchNodeEasterEgg(true);
+    if (!payload?.enabled || !payload?.html) {
+      try { UI.showToast('No hidden node popup configured here yet', 'info'); } catch {}
+      return;
+    }
+    this.closeNodeEasterEgg();
+    const overlay = document.createElement('div');
+    overlay.id = 'ft-node-easter-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:14060;background:rgba(3,7,5,.76);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:18px';
+    overlay.innerHTML = `
+      <div style="width:min(760px,96vw);max-height:min(86vh,860px);overflow:auto;border-radius:24px;border:1px solid rgba(86,209,109,.26);background:linear-gradient(165deg,rgba(10,19,14,.98),rgba(7,10,8,.98));box-shadow:0 34px 100px rgba(0,0,0,.58);position:relative;padding:22px;">
+        <button type="button" id="ft-node-easter-close" style="position:absolute;top:14px;right:14px;border:none;background:#102016;color:#dcebe0;width:38px;height:38px;border-radius:12px;cursor:pointer;font-size:18px">✕</button>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
+          <div style="width:56px;height:56px;border-radius:18px;background:linear-gradient(135deg,#1b4329,#0c170f);display:flex;align-items:center;justify-content:center;font-size:28px;">🐸</div>
+          <div>
+            <div style="font-size:24px;font-weight:800;color:#f1fff5">${UI.escHtml(payload.title || 'Frog signal')}</div>
+            <div style="font-size:12px;color:#95b39e">Hidden node message</div>
+          </div>
+        </div>
+        <div style="color:#dfede3;line-height:1.72" class="easter-preview-body">${payload.html}</div>
+      </div>
+    `;
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) this.closeNodeEasterEgg();
+    });
+    document.body.appendChild(overlay);
+    overlay.querySelector('#ft-node-easter-close')?.addEventListener('click', () => this.closeNodeEasterEgg());
   },
 
   async recoverIncomingCall(pending) {

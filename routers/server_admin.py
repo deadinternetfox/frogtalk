@@ -1,11 +1,15 @@
 """Secure server management WebUI routes and APIs."""
+import base64
+import ipaddress
 import os
+import re
 import time
 import secrets
 import shutil
+import urllib.parse
 from typing import Optional
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Request, Response, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -17,6 +21,13 @@ router = APIRouter(tags=["server-admin"])
 
 _COOKIE_NAME = "ft_server_admin"
 _SESSIONS: dict[str, float] = {}
+_EASTER_EGG_HTML_MAX = 512_000
+_EASTER_EGG_UPLOAD_MAX = 16 * 1024 * 1024
+_ALLOWED_EASTER_MEDIA = (
+    "image/",
+    "video/",
+    "audio/",
+)
 
 
 def _is_true(value: str | None) -> bool:
@@ -133,6 +144,73 @@ def _resource_snapshot() -> dict:
     }
 
 
+def _safe_host_label(url: str) -> str:
+    target = (url or "").strip()
+    if not target:
+        return ""
+    try:
+        host = (urllib.parse.urlparse(target).hostname or "").strip().lower()
+    except Exception:
+        host = ""
+    if not host:
+        return "hidden endpoint"
+    if federation_router._url_uses_tor(target):
+        if len(host) <= 28:
+            return host
+        return f"{host[:14]}...{host[-10:]}"
+    try:
+        ipaddress.ip_address(host)
+        return "hidden clearnet ip"
+    except Exception:
+        pass
+    if len(host) <= 36:
+        return host
+    return f"{host[:18]}...{host[-10:]}"
+
+
+def _admin_node_view(node: dict) -> dict:
+    raw = dict(node or {})
+    try:
+        target = federation_router._select_peer_target(raw)
+    except Exception:
+        target = str(raw.get("onion_url") or raw.get("base_url") or "").strip()
+    onion_url = str(raw.get("onion_url") or "").strip()
+    route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
+    display_endpoint = _safe_host_label(onion_url if route_mode == "tor" and onion_url else target)
+    transport_preference = str(raw.get("transport_preference") or "auto").strip().lower() or "auto"
+    return {
+        "server_id": raw.get("server_id"),
+        "display_name": raw.get("display_name"),
+        "region": raw.get("region") or "",
+        "official": bool(raw.get("official")),
+        "trust_tier": raw.get("trust_tier") or "community",
+        "enabled": bool(raw.get("enabled", True)),
+        "last_seen": raw.get("last_seen"),
+        "capabilities": raw.get("capabilities") or [],
+        "onion_available": bool(onion_url),
+        "route_mode": route_mode,
+        "transport_preference": transport_preference,
+        "display_endpoint": display_endpoint,
+        "transport_label": "Tor onion route" if route_mode == "tor" else "Direct clearnet route",
+        "privacy_label": "IP hidden" if route_mode == "tor" or display_endpoint == "hidden clearnet ip" else "Public host",
+    }
+
+
+def _local_admin_server_view() -> dict:
+    local = db.get_or_create_local_server_identity() or {}
+    public = federation_router._public_server_view(local, onion_only=federation_router._tor_mode_enabled())
+    endpoint = federation_router._public_server_target(public)
+    tor_enabled = bool(federation_router._tor_mode_enabled())
+    return {
+        "server_id": public.get("server_id") or "",
+        "display_name": public.get("display_name") or "FrogTalk Node",
+        "tor_enabled": tor_enabled,
+        "public_endpoint": _safe_host_label(endpoint),
+        "privacy_mode": "tor" if tor_enabled else "standard",
+        "directory_last_sync": db.get_config("federation.official_directory_last_sync") or "",
+    }
+
+
 def _cleanup_sessions() -> None:
     now = time.time()
     dead = [token for token, exp in _SESSIONS.items() if exp <= now]
@@ -177,6 +255,57 @@ class ModerationBody(BaseModel):
     duration_minutes: int = 60
 
 
+class EasterEggBody(BaseModel):
+    enabled: bool = False
+    title: str = ""
+    html: str = ""
+
+
+def _cfg_easter_enabled() -> bool:
+    return _is_true(db.get_config("server.webui.easter_egg.enabled") or "0")
+
+
+def _cfg_easter_title() -> str:
+    return (db.get_config("server.webui.easter_egg.title") or "Frog signal").strip() or "Frog signal"
+
+
+def _cfg_easter_html() -> str:
+    return db.get_config("server.webui.easter_egg.html") or ""
+
+
+def _sanitize_easter_html(html: str) -> str:
+    out = str(html or "")[:_EASTER_EGG_HTML_MAX]
+    out = re.sub(r"<\s*(script|style|object|embed)\b[^>]*>.*?<\s*/\s*\1\s*>", "", out, flags=re.I | re.S)
+    out = re.sub(r"on[a-zA-Z]+\s*=\s*(['\"]).*?\1", "", out, flags=re.I | re.S)
+    out = re.sub(r"on[a-zA-Z]+\s*=\s*[^\s>]+", "", out, flags=re.I)
+    out = re.sub(r"(href|src)\s*=\s*(['\"])\s*javascript:[^\2]*\2", r"\1=\2#\2", out, flags=re.I)
+    out = re.sub(r"(href|src)\s*=\s*(['\"])\s*data:text/html[^\2]*\2", r"\1=\2#\2", out, flags=re.I)
+    return out.strip()
+
+
+def _current_easter_egg_payload() -> dict:
+    raw_html = _cfg_easter_html()
+    safe_html = _sanitize_easter_html(raw_html)
+    if safe_html != raw_html:
+        db.set_config("server.webui.easter_egg.html", safe_html)
+    return {
+        "enabled": _cfg_easter_enabled(),
+        "title": _cfg_easter_title(),
+        "html": safe_html,
+        "updated_at": db.get_config("server.webui.easter_egg.updated_at") or "",
+    }
+
+
+def _save_easter_egg(enabled: bool, title: str, html: str) -> dict:
+    safe_title = (title or "").strip()[:120] or "Frog signal"
+    safe_html = _sanitize_easter_html(html)
+    db.set_config("server.webui.easter_egg.enabled", "1" if enabled else "0")
+    db.set_config("server.webui.easter_egg.title", safe_title)
+    db.set_config("server.webui.easter_egg.html", safe_html)
+    db.set_config("server.webui.easter_egg.updated_at", str(int(time.time())))
+    return _current_easter_egg_payload()
+
+
 @router.get("/server")
 async def server_webui_page():
     disabled = _require_enabled()
@@ -193,7 +322,70 @@ async def server_webui_config():
     return {
         "enabled": True,
         "username_hint": _webui_username(),
+        "easter_egg": _current_easter_egg_payload(),
     }
+
+
+@router.get("/api/server-admin/easter-egg")
+async def server_admin_get_easter_egg(request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    auth = _require_auth(request)
+    if auth:
+        return auth
+    return _current_easter_egg_payload()
+
+
+@router.put("/api/server-admin/easter-egg")
+async def server_admin_put_easter_egg(body: EasterEggBody, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    auth = _require_auth(request)
+    if auth:
+        return auth
+    return _save_easter_egg(bool(body.enabled), body.title, body.html)
+
+
+@router.post("/api/server-admin/easter-egg/upload")
+async def server_admin_upload_easter_egg_asset(request: Request, media: UploadFile = File(...)):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    auth = _require_auth(request)
+    if auth:
+        return auth
+    if not media:
+        return JSONResponse(status_code=400, content={"error": "Media required"})
+    content_type = str(media.content_type or "application/octet-stream").strip().lower()
+    if not any(content_type.startswith(prefix) for prefix in _ALLOWED_EASTER_MEDIA):
+        return JSONResponse(status_code=400, content={"error": "Only image, video, and audio files are allowed"})
+    raw = await media.read()
+    if not raw:
+        return JSONResponse(status_code=400, content={"error": "Empty upload"})
+    if len(raw) > _EASTER_EGG_UPLOAD_MAX:
+        return JSONResponse(status_code=413, content={"error": "Upload too large (max 16MB)"})
+    media_data = f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+    tag = "img" if content_type.startswith("image/") else ("video" if content_type.startswith("video/") else "audio")
+    return {
+        "ok": True,
+        "content_type": content_type,
+        "media_data": media_data,
+        "tag": tag,
+        "filename": str(media.filename or "asset"),
+    }
+
+
+@router.get("/api/server/easter-egg")
+async def public_server_easter_egg():
+    payload = _current_easter_egg_payload()
+    if not payload.get("enabled") or not payload.get("html"):
+        return JSONResponse(status_code=404, content={"error": "Not configured"})
+    return payload
 
 
 @router.post("/api/server-admin/login")
@@ -265,6 +457,7 @@ async def server_admin_stats(request: Request):
         "db": db_stats,
         "ws": ws_stats,
         "resources": _resource_snapshot(),
+        "server": _local_admin_server_view(),
         "timestamp": int(time.time()),
     }
 
@@ -279,7 +472,10 @@ async def server_admin_nodes(request: Request, include_disabled: int = 1):
     if auth:
         return auth
 
-    nodes = db.list_federation_servers_admin(include_disabled=bool(include_disabled))
+    nodes = [
+        _admin_node_view(node)
+        for node in db.list_federation_servers_admin(include_disabled=bool(include_disabled))
+    ]
     return {"nodes": nodes, "count": len(nodes)}
 
 
@@ -303,10 +499,13 @@ async def server_admin_probe_node(server_id: str, request: Request):
 
     target = federation_router._select_peer_target(node)
     result = federation_router._probe_url(target, timeout_s=1.6)
+    route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
     return {
         "ok": True,
         "server_id": sid,
-        "target": target,
+        "display_target": _safe_host_label(target),
+        "route_mode": route_mode,
+        "transport_label": "Tor onion route" if route_mode == "tor" else "Direct clearnet route",
         "healthy": bool(result.get("ok")),
         "latency_ms": result.get("latency_ms"),
         "error": result.get("error"),

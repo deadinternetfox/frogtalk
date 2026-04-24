@@ -3838,6 +3838,47 @@ def music_get_current(room_name: str) -> Optional[Dict]:
     return dict(row) if row else None
 
 
+def _music_anchor_config_key(room_name: str) -> str:
+    return f"music.anchor.{str(room_name or '').strip().lower()}"
+
+
+def set_music_room_anchor(room_name: str, track_id: int, started_unix: float) -> bool:
+    try:
+        payload = json.dumps({
+            "track_id": int(track_id),
+            "started_unix": float(started_unix),
+        })
+        set_config(_music_anchor_config_key(room_name), payload)
+        return True
+    except Exception:
+        return False
+
+
+def get_music_room_anchor(room_name: str) -> Optional[Dict]:
+    raw = get_config(_music_anchor_config_key(room_name))
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+        track_id = int(payload.get("track_id") or 0)
+        started_unix = float(payload.get("started_unix") or 0)
+        if track_id <= 0 or started_unix <= 0:
+            return None
+        return {
+            "track_id": track_id,
+            "started_unix": started_unix,
+        }
+    except Exception:
+        return None
+
+
+def clear_music_room_anchor(room_name: str) -> bool:
+    with _conn() as con:
+        cur = con.execute("DELETE FROM config WHERE key=?", (_music_anchor_config_key(room_name),))
+        con.commit()
+        return cur.rowcount > 0
+
+
 def dj_add(room_name: str, user_id: int, granted_by: int) -> bool:
     try:
         with _conn() as con:

@@ -776,6 +776,7 @@ function ensureNetworkPaneContent() {
           Setup guide: <a href="https://github.com/deadinternetfox/frogtalk#docker" target="_blank" rel="noopener noreferrer" style="color:#4caf50;text-decoration:underline;font-weight:600">Docker</a> • 
           <a href="/docs/api" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">API docs</a> • 
           <a href="/docs/node" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">Run a node doc</a> • 
+          <a href="/app" target="_blank" style="color:#4caf50;text-decoration:underline;font-weight:600">Open app</a> • 
           <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer" style="color:#4caf50;text-decoration:underline;font-weight:600">GitHub</a>
         </span>
       </div>
@@ -865,6 +866,16 @@ function _normalizeNetworkUrl(url) {
   return withScheme.replace(/\/$/, '');
 }
 
+function _networkAppUrl(url) {
+  const base = _normalizeNetworkUrl(url || '');
+  if (!base) return '';
+  try {
+    return new URL('/app', base).toString();
+  } catch {
+    return `${base}/app`;
+  }
+}
+
 function _isOnionNetworkUrl(url) {
   return /\.onion(?=\/|$)/i.test(String(url || '').trim());
 }
@@ -922,17 +933,19 @@ async function _loadCurrentNetworkStatus() {
 }
 
 function _networkAddressRow(address, tone = 'tor') {
-  const safe = UI.escHtml(address || '');
+  const appUrl = _networkAppUrl(address || '');
+  const safe = UI.escHtml(appUrl || address || '');
   const isTor = tone === 'tor';
   const color = isTor ? '#7fd6a2' : '#9aa3aa';
   const icon = isTor ? '🧅' : '🌐';
   const bg = isTor ? 'rgba(51,122,82,.12)' : 'transparent';
   return `
     <div style="display:flex;align-items:center;gap:6px;min-width:0;margin-top:4px;background:${bg};border:${isTor ? '1px solid rgba(92,171,118,.22)' : 'none'};border-radius:8px;padding:${isTor ? '6px 8px' : '0'}">
-      <button type="button" onclick="UI.copy('${safe}').then(ok=>UI.showToast(ok?'Tor address copied':'Could not copy address', ok?'success':'error'))" title="Copy address" style="flex:1;min-width:0;background:none;border:none;color:${color};padding:0;text-align:left;cursor:pointer;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+      <button type="button" onclick="UI.copy('${safe}').then(ok=>UI.showToast(ok?'App link copied':'Could not copy address', ok?'success':'error'))" title="Copy app link" style="flex:1;min-width:0;background:none;border:none;color:${color};padding:0;text-align:left;cursor:pointer;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
         ${icon} ${safe}
       </button>
-      <button type="button" onclick="UI.copy('${safe}').then(ok=>UI.showToast(ok?'Tor address copied':'Could not copy address', ok?'success':'error'))" title="Copy address" style="flex:0 0 auto;background:#101010;border:1px solid rgba(255,255,255,.08);color:${color};border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer">Copy</button>
+      <button type="button" onclick="window.open('${safe}','_blank','noopener')" title="Open app" style="flex:0 0 auto;background:#101010;border:1px solid rgba(255,255,255,.08);color:${color};border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer">Open</button>
+      <button type="button" onclick="UI.copy('${safe}').then(ok=>UI.showToast(ok?'App link copied':'Could not copy address', ok?'success':'error'))" title="Copy app link" style="flex:0 0 auto;background:#101010;border:1px solid rgba(255,255,255,.08);color:${color};border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer">Copy</button>
     </div>
   `;
 }
@@ -1131,13 +1144,13 @@ function _renderNetworkSelection() {
   const infoEl = document.getElementById('network-current-selection');
   if (!infoEl) return;
   if (_networkSelectedServer && (_networkSelectedServer.base_url || _networkSelectedServer.onion_url)) {
-    const addr = _preferredNetworkUrl(_networkSelectedServer);
+    const addr = _networkAppUrl(_preferredNetworkUrl(_networkSelectedServer));
     const via = _isOnionNetworkUrl(addr) ? ' via Tor' : '';
     infoEl.textContent = `Selected: ${_networkSelectedServer.display_name || _networkSelectedServer.server_id} (${addr}${via})`;
     return;
   }
   const saved = localStorage.getItem('ft_network_selected') || '';
-  infoEl.textContent = saved ? `Selected: ${saved}` : 'Selected: current server';
+  infoEl.textContent = saved ? `Selected: ${_networkAppUrl(saved) || saved}` : 'Selected: current server';
 }
 
 function _renderNetworkServersList() {

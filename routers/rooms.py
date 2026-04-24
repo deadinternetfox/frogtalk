@@ -534,6 +534,38 @@ import time as _time
 _music_head_started: dict = {}  # room_name -> (track_id, unix_seconds)
 
 
+def set_music_head_anchor(room_name: str, track_id: int, started_unix: float) -> None:
+    """Set shared playhead anchor for a room's current head track."""
+    try:
+        room_key = str(room_name)
+        track_num = int(track_id)
+        started_num = float(started_unix)
+        _music_head_started[room_key] = (track_num, started_num)
+        db.set_music_room_anchor(room_key, track_num, started_num)
+    except Exception:
+        pass
+
+
+def clear_music_head_anchor(room_name: str) -> None:
+    room_key = str(room_name)
+    _music_head_started.pop(room_key, None)
+    try:
+        db.clear_music_room_anchor(room_key)
+    except Exception:
+        pass
+
+
+def _emit_federation_room_event(event_type: str, payload: dict) -> None:
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": event_type,
+            "payload": payload,
+        })
+    except Exception:
+        pass
+
+
 def _music_position_sec(room_name: str, current_track: dict | None) -> int:
     """Return elapsed seconds since the current head track started playing.
 
@@ -542,13 +574,18 @@ def _music_position_sec(room_name: str, current_track: dict | None) -> int:
     add-to-empty / clear) the stamp is replaced or cleared.
     """
     if not current_track:
-        _music_head_started.pop(room_name, None)
+        clear_music_head_anchor(room_name)
         return 0
     tid = current_track.get("id")
     rec = _music_head_started.get(room_name)
+    if not rec:
+        persisted = db.get_music_room_anchor(room_name)
+        if persisted and int(persisted.get("track_id") or 0) == int(tid or 0):
+            rec = (int(persisted["track_id"]), float(persisted["started_unix"]))
+            _music_head_started[room_name] = rec
     now = _time.time()
     if not rec or rec[0] != tid:
-        _music_head_started[room_name] = (tid, now)
+        set_music_head_anchor(room_name, int(tid), now)
         return 0
     return max(0, int(now - rec[1]))
 
@@ -604,6 +641,7 @@ async def music_add_to_queue(room_name: str, body: AddTrackRequest,
             title = "SoundCloud track"
         thumb = ""
 
+    had_current = db.music_get_current(room_name)
     track_id = db.music_add_track(
         room_name=room_name,
         submitter_id=current_user["id"],
@@ -622,6 +660,24 @@ async def music_add_to_queue(room_name: str, body: AddTrackRequest,
         "url": body.url.strip(), "title": title, "thumbnail": thumb,
         "played": 0,
     }
+    start_unix = None
+    if not had_current:
+        start_unix = int(time.time())
+        set_music_head_anchor(room_name, int(track_id), float(start_unix))
+
+    _emit_federation_room_event("room.music.track.added", {
+        "room_name": room_name,
+        "submitter_nick": current_user["nickname"],
+        "provider": provider,
+        "video_id": video_id,
+        "url": body.url.strip(),
+        "title": title,
+        "thumbnail": thumb,
+        "duration": 0,
+        "make_current": not bool(had_current),
+        "start_unix": start_unix,
+    })
+
     # Broadcast to room participants
     try:
         from ws_manager import manager
@@ -641,9 +697,10 @@ async def music_delete_track(room_name: str, track_id: int,
         return JSONResponse(status_code=404, content={"error": "Room not found"})
     is_admin = bool(current_user.get("is_admin"))
     # Submitter can delete their own track; controllers can delete anything
+    current = db.music_get_current(room_name)
     with db._conn() as con:
         row = con.execute(
-            "SELECT submitter_id FROM music_queue WHERE id=? AND room_name=?",
+            "SELECT * FROM music_queue WHERE id=? AND room_name=?",
             (track_id, room_name)
         ).fetchone()
     if not row:
@@ -652,7 +709,26 @@ async def music_delete_track(room_name: str, track_id: int,
     if not (is_submitter or _can_control(room_name, current_user["id"], is_admin)):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
 
+    removed_was_head = bool(current and int(current.get("id") or 0) == int(track_id))
     db.music_delete_track(track_id, room_name)
+    next_start_unix = None
+    if removed_was_head:
+        next_current = db.music_get_current(room_name)
+        if next_current:
+            next_start_unix = int(time.time())
+            set_music_head_anchor(room_name, int(next_current["id"]), float(next_start_unix))
+        else:
+            clear_music_head_anchor(room_name)
+
+    _emit_federation_room_event("room.music.track.removed", {
+        "room_name": room_name,
+        "provider": str(row["provider"] or ""),
+        "video_id": str(row["video_id"] or ""),
+        "url": str(row["url"] or ""),
+        "removed_was_head": removed_was_head,
+        "next_start_unix": next_start_unix,
+    })
+
     try:
         from ws_manager import manager
         await manager.broadcast_room(room_name, {
@@ -672,8 +748,18 @@ async def music_skip(room_name: str, current_user: dict = Depends(get_current_us
     current = db.music_get_current(room_name)
     if current:
         db.music_mark_played(current["id"], room_name)
-    # Drop cached head timestamp so the next track starts at 0s for joiners.
-    _music_head_started.pop(room_name, None)
+    next_current = db.music_get_current(room_name)
+    next_start_unix = int(time.time()) if next_current else None
+    if next_current:
+        set_music_head_anchor(room_name, int(next_current["id"]), float(next_start_unix))
+    else:
+        clear_music_head_anchor(room_name)
+
+    _emit_federation_room_event("room.music.track.skipped", {
+        "room_name": room_name,
+        "next_start_unix": next_start_unix,
+    })
+
     try:
         from ws_manager import manager
         await manager.broadcast_room(room_name, {
@@ -691,7 +777,12 @@ async def music_clear(room_name: str, current_user: dict = Depends(get_current_u
     if not _can_control(room_name, current_user["id"], is_admin):
         return JSONResponse(status_code=403, content={"error": "Only DJs or mods can clear queue"})
     n = db.music_clear_queue(room_name)
-    _music_head_started.pop(room_name, None)
+    clear_music_head_anchor(room_name)
+
+    _emit_federation_room_event("room.music.queue.cleared", {
+        "room_name": room_name,
+    })
+
     try:
         from ws_manager import manager
         await manager.broadcast_room(room_name, {"type": "music_queue_cleared", "room": room_name})
@@ -706,6 +797,10 @@ async def music_toggle_dj_only(room_name: str, body: ToggleDJOnlyRequest,
     if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
     db.room_set_dj_only(room_name, 1 if body.dj_only else 0)
+    _emit_federation_room_event("room.music.dj_only.changed", {
+        "room_name": room_name,
+        "dj_only": bool(body.dj_only),
+    })
     try:
         from ws_manager import manager
         await manager.broadcast_room(room_name, {

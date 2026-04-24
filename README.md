@@ -28,7 +28,7 @@
 | 🔔 **Push Notifications** | Web push for mobile and desktop |
 | 🛡️ **Admin Dashboard** | Moderation tools, live server stats, user management |
 | 🧩 **Bot API** | Full REST + WebSocket API for building bots and integrations |
-| 🧅 **Tor / Onion Routing** | Nodes can advertise a `.onion` address; federation traffic and client connections route through Tor when onion mode is enabled. Clearnet address is never leaked for onion-only nodes |
+| 🧅 **Tor / Onion Routing** | Nodes can advertise a `.onion` address; federation traffic and client connections route through Tor when onion mode is enabled. Onion handoff links target `/app`, and clearnet address is never leaked for onion-only nodes |
 
 ---
 
@@ -76,6 +76,8 @@ Then open:
 
 Capabilities include live hardware telemetry (CPU/memory/disk/uptime), federation node inventory, node probe, and block/unblock controls.
 
+Node Control also includes a per-node easter-egg editor: upload images/audio/video, format rich text, and set the hidden popup that appears after seven taps on the frog trigger for that node.
+
 ### Tor / Onion Hidden Service
 
 To run your node as a Tor hidden service (`.onion` only, no clearnet exposure):
@@ -84,6 +86,12 @@ To run your node as a Tor hidden service (`.onion` only, no clearnet exposure):
 export FROGTALK_TOR_ENABLED=1
 export FROGTALK_ONION_URL=http://youronionaddress.onion
 # Leave FROGTALK_BASE_URL unset or empty to be onion-only
+```
+
+Use the onion app surface for user links and server switching:
+
+```text
+http://youronionaddress.onion/app
 ```
 
 Clients using *Prefer onion endpoints* in Network Settings will automatically route all federation traffic through Tor. The clearnet IP is never shared with the directory or other nodes when `FROGTALK_TOR_ENABLED=1` and no `FROGTALK_BASE_URL` is set.

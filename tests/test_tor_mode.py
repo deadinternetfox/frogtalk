@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest import mock
 
-from routers import auth, federation
+from routers import auth, federation, server_admin
 
 
 class TorModeTests(unittest.TestCase):
@@ -39,6 +39,52 @@ class TorModeTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["base_url"], "")
         self.assertEqual(row["onion_url"], "http://examplehiddenservice.onion")
+
+    @mock.patch.dict(os.environ, {"FROGTALK_TOR_ENABLED": "1"}, clear=False)
+    @mock.patch("database.get_federation_server_transport", return_value="auto")
+    def test_admin_node_view_prefers_tor_safe_endpoint(self, _transport_mock):
+        view = server_admin._admin_node_view({
+            "server_id": "srv_test",
+            "display_name": "Test",
+            "base_url": "http://31.220.92.120",
+            "onion_url": "http://examplehiddenserviceabcdefghijklmnop.onion",
+            "trust_tier": "community",
+            "enabled": 1,
+            "official": 0,
+            "capabilities": [],
+        })
+        self.assertEqual(view["route_mode"], "tor")
+        self.assertTrue(view["onion_available"])
+        self.assertIn("onion", view["display_endpoint"])
+        self.assertEqual(view["privacy_label"], "IP hidden")
+
+    def test_admin_node_view_redacts_clearnet_ip(self):
+        view = server_admin._admin_node_view({
+            "server_id": "srv_test",
+            "display_name": "Test",
+            "base_url": "http://31.220.92.120",
+            "onion_url": "",
+            "trust_tier": "community",
+            "enabled": 1,
+            "official": 0,
+            "capabilities": [],
+        })
+        self.assertEqual(view["route_mode"], "clearnet")
+        self.assertEqual(view["display_endpoint"], "hidden clearnet ip")
+
+    def test_easter_egg_sanitizer_removes_script_and_handlers(self):
+        raw = '<div onclick="alert(1)">ok</div><script>alert(2)</script><a href="javascript:alert(3)">x</a>'
+        cleaned = server_admin._sanitize_easter_html(raw)
+        self.assertNotIn('script', cleaned.lower())
+        self.assertNotIn('onclick', cleaned.lower())
+        self.assertNotIn('javascript:', cleaned.lower())
+        self.assertIn('<div', cleaned)
+
+    def test_easter_egg_sanitizer_keeps_video_markup(self):
+        raw = '<p>Hello</p><video controls src="data:video/mp4;base64,AAAA"></video>'
+        cleaned = server_admin._sanitize_easter_html(raw)
+        self.assertIn('<video', cleaned)
+        self.assertIn('data:video/mp4', cleaned)
 
     @mock.patch.dict(os.environ, {"FROGTALK_TOR_ENABLED": "1"}, clear=False)
     def test_auth_peer_target_prefers_onion_in_tor_mode(self):
