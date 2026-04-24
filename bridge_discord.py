@@ -28,6 +28,7 @@ FROGTALK_API = os.getenv(
 )
 _bridges: Dict[int, dict] = {}  # discord_channel_id -> {room, token, bot_name, enabled, direction}
 _client = None  # discord.Client instance
+_message_content_available = True  # False when bot lacks Message Content privileged intent
 
 
 def get_channel_access_snapshot(channel_id: int) -> Optional[dict]:
@@ -352,54 +353,55 @@ def _run_bot_in_thread(token: str):
             intents.message_content = True
         return discord.Client(intents=intents)
 
-    def _register_events(c):
-        async def _try_claim_pending_bridge(message):
-            content = (message.content or "").strip()
-            match = re.match(r"^bridge\s*\(?\s*([A-Z0-9]{4,})\s*\)?$", content, re.IGNORECASE)
-            if not match:
-                return False
-            code = re.sub(r"[^A-Z0-9]", "", match.group(1).upper())
-            guild = getattr(message, "guild", None)
-            payload = {
-                "code": code,
-                "discord_channel_id": int(message.channel.id),
-                "discord_guild_id": int(getattr(guild, "id", 0) or 0),
-                "discord_channel_name": getattr(message.channel, "name", "channel") or "channel",
-                "discord_guild_name": getattr(guild, "name", "Discord Server") or "Discord Server",
-            }
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.post(f"{FROGTALK_API}/api/discord-bridges/claim-code", json=payload)
-                if resp.status_code == 200:
-                    info = resp.json() if resp.content else {}
-                    room = info.get("room_name") or "your FrogTalk room"
-                    await message.channel.send(
-                        f"🐸 Linked successfully. This Discord channel now mirrors **#{room}** in FrogTalk."
-                    )
-                    load_bridges()
-                    return True
-                detail = ""
-                try:
-                    detail = (resp.json() or {}).get("detail") or (resp.json() or {}).get("error") or ""
-                except Exception:
-                    detail = (resp.text or "").strip()
-                await message.channel.send(
-                    f"🐸 Could not claim that bridge code. {detail or 'Check that the code is still valid and try again.'}"
+    # ── Shared claim logic ────────────────────────────────────────────────
+    async def _do_claim(channel_id: int, guild_id: int,
+                        channel_name: str, guild_name: str,
+                        code: str) -> tuple[bool, str]:
+        """Call FrogTalk's local claim endpoint.  Returns (ok, reply_text)."""
+        code = re.sub(r"[^A-Z0-9]", "", (code or "").upper())
+        if not code:
+            return False, "🐸 That doesn't look like a valid claim code."
+        payload = {
+            "code": code,
+            "discord_channel_id": int(channel_id),
+            "discord_guild_id": int(guild_id or 0),
+            "discord_channel_name": channel_name or "channel",
+            "discord_guild_name": guild_name or "Discord Server",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    f"{FROGTALK_API}/api/discord-bridges/claim-code", json=payload
                 )
-                return True
-            except Exception as e:
-                log.error("Discord bridge claim failed for channel %s: %s", message.channel.id, e)
-                try:
-                    await message.channel.send(
-                        "🐸 I could not reach FrogTalk to confirm that bridge code. Try again in a moment."
-                    )
-                except Exception:
-                    pass
-                return True
+            if resp.status_code == 200:
+                info = (resp.json() if resp.content else {}) or {}
+                room = info.get("room_name") or "your FrogTalk room"
+                load_bridges()
+                return True, (
+                    "✅ **Bridge confirmed**\n"
+                    f"Discord channel: **#{channel_name or 'channel'}**\n"
+                    f"FrogTalk room: **#{room}**\n"
+                    "Messages will now mirror both ways automatically."
+                )
+            detail = ""
+            try:
+                detail = ((resp.json() or {}).get("detail")
+                          or (resp.json() or {}).get("error") or "")
+            except Exception:
+                detail = (resp.text or "").strip()
+            return False, (
+                f"🐸 Could not claim that code. "
+                f"{detail or 'Check the code is still valid (15 min window) and try again.'}"
+            )
+        except Exception as e:
+            log.error("Discord bridge claim failed for channel %s: %s", channel_id, e)
+            return False, "🐸 Could not reach FrogTalk right now. Try again in a moment."
 
+    # ── Register events on a client ───────────────────────────────────────
+    def _register_events(c, message_content_ok: bool = True):
         @c.event
         async def on_ready():
-            log.info("Discord bridge bot: %s (ID: %s)", c.user.name, c.user.id)
+            log.info("Discord bridge bot ready: %s (ID: %s)", c.user.name, c.user.id)
             log.info("Connected to %d guilds", len(c.guilds))
 
         @c.event
@@ -409,19 +411,54 @@ def _run_bot_in_thread(token: str):
 
             channel_id = message.channel.id
             bridge = _bridges.get(channel_id)
+
             if not bridge or not bridge.get("enabled"):
-                if await _try_claim_pending_bridge(message):
+                # ── Text-command claim path ───────────────────────────────
+                # Requires Message Content intent to read normal channel text.
+                content_raw = (message.content or "").strip()
+
+                if not content_raw:
+                    # Bot cannot read this message (no Message Content intent).
+                    # Respond only if directly mentioned so we don't spam.
+                    if c.user in (message.mentions or []):
+                        await message.channel.send(
+                            "🐸 Use **bridge CODE** to link this channel. If I still cannot "
+                            "read your message, enable **Message Content Intent** for this bot "
+                            "in the Discord Developer Portal and restart the service."
+                        )
                     return
-                if (message.content or "").strip() == "!bridge":
+
+                # Strip mention prefix: "@Bot bridge CODE" → "bridge CODE"
+                for pfx in (f"<@{c.user.id}>", f"<@!{c.user.id}>"):
+                    if content_raw.lower().startswith(pfx.lower()):
+                        content_raw = content_raw[len(pfx):].strip()
+                        break
+
+                m = re.match(
+                    r"^bridge\s+([A-Z0-9]{4,})\s*$", content_raw, re.IGNORECASE
+                )
+                if m:
+                    code = re.sub(r"[^A-Z0-9]", "", m.group(1).upper())
+                    guild = getattr(message, "guild", None)
+                    ok, reply = await _do_claim(
+                        channel_id=channel_id,
+                        guild_id=int(getattr(guild, "id", 0) or 0),
+                        channel_name=getattr(message.channel, "name", "channel") or "channel",
+                        guild_name=getattr(guild, "name", "Discord Server") or "Discord Server",
+                        code=code,
+                    )
+                    await message.channel.send(reply)
+                    return
+
+                if content_raw.lower() in ("!bridge", "bridge"):
                     await message.channel.send(
                         "🐸 **FrogTalk Bridge**\n\n"
-                        "This channel is not linked to a FrogTalk room yet.\n"
-                        "Use the FrogTalk web app to generate a claim code, then send:\n"
-                        "**bridge CODE**"
+                        "Generate a claim code in FrogTalk settings, then type:\n"
+                        "• **bridge CODE**"
                     )
                 return
 
-            # Honor direction: 'out' means FrogTalk→Discord only — drop inbound.
+            # ── Forward inbound Discord messages to FrogTalk ─────────────
             direction = (bridge.get("direction") or "both").lower()
             if direction == "out":
                 return
@@ -446,10 +483,6 @@ def _run_bot_in_thread(token: str):
             if message.attachments:
                 att = message.attachments[0]
                 ctype = (att.content_type or "").lower()
-                # Forward images, gifs, videos and audio as rich media so the
-                # FrogTalk side renders a real <img>/<video>/<audio> instead
-                # of a dead URL. Everything else (pdf, zip, etc.) falls
-                # through to a 📎 link in the text body.
                 if ctype.startswith(("image/", "video/", "audio/")):
                     media_url = att.url
                 elif att.url and any(att.url.lower().endswith(ext)
@@ -459,7 +492,6 @@ def _run_bot_in_thread(token: str):
                     media_url = att.url
                 elif att.url:
                     content += f"\n📎 {att.url}"
-                # Multiple attachments: append the rest as links
                 for extra in message.attachments[1:]:
                     if extra.url:
                         content += f"\n📎 {extra.url}"
@@ -478,20 +510,29 @@ def _run_bot_in_thread(token: str):
                     reply_to_remote_id=reply_to_remote_id,
                 )
 
+    # ── Start the bot ─────────────────────────────────────────────────────
     client = _make_client(with_message_content=True)
     _client = client
-    _register_events(client)
+    _register_events(client, message_content_ok=True)
 
-    # Run in this thread's event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         loop.run_until_complete(client.start(token))
     except discord.PrivilegedIntentsRequired:
-        log.warning("Message Content intent not enabled — retrying without it. Enable it at https://discord.com/developers/applications/")
+        log.warning(
+            "Discord bot: Message Content privileged intent is NOT enabled. "
+            "Text 'bridge CODE' will not work until this intent is enabled. "
+            "To enable: https://discord.com/developers/applications → your bot → Bot → "
+            "Privileged Gateway Intents → Message Content."
+        )
+        global _message_content_available
+        _message_content_available = False
+        # Rebuild client without the privileged intent so the bot still connects,
+        # but bridge claim commands in text channels cannot be read.
         client = _make_client(with_message_content=False)
         _client = client
-        _register_events(client)
+        _register_events(client, message_content_ok=False)
         try:
             loop.run_until_complete(client.start(token))
         except Exception as e:

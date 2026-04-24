@@ -479,6 +479,9 @@ async def network_verify_peer_builds(
         seen.add(url)
         targets.append(url)
 
+    # Detect the server's own public base URL to short-circuit loopback requests.
+    own_public = (os.getenv("FROGTALK_PUBLIC_URL") or os.getenv("PUBLIC_URL") or "").rstrip("/").lower()
+
     results = []
     for base in targets:
         entry = {
@@ -490,13 +493,33 @@ async def network_verify_peer_builds(
             "remote_official": False,
             "error": None,
         }
+        # If the peer URL points at this server itself, skip the outbound
+        # HTTP round-trip (which loopbacks through nginx and often times out)
+        # and just reuse the already-computed local build info directly.
+        is_self = bool(own_public and base.rstrip("/").lower() == own_public)
+        if not is_self:
+            # Also treat 127.0.0.1 / localhost targets as self.
+            try:
+                from urllib.parse import urlparse as _up
+                _h = _up(base).hostname or ""
+                is_self = _h in ("127.0.0.1", "::1", "localhost")
+            except Exception:
+                pass
+        if is_self:
+            entry["reachable"] = True
+            entry["remote_hash"] = local_hash
+            entry["remote_version"] = local.get("version") or ""
+            entry["remote_official"] = bool(local.get("official"))
+            entry["same_hash"] = True
+            results.append(entry)
+            continue
         try:
             req = urllib.request.Request(
                 f"{base}/api/network/build/local",
                 headers={"User-Agent": "FrogTalk-BuildVerify/1.0", "Accept": "application/json"},
                 method="GET",
             )
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
             payload = json.loads(raw)
             remote_hash = str(payload.get("build_hash") or "")

@@ -1026,7 +1026,7 @@ function _renderNetworkServersList() {
     if ((s.official || 0) || s.trust_tier === 'official') chips.push('<span style="padding:2px 7px;border-radius:999px;background:#1a2d3f;color:#8fc7ff;font-size:10px;font-weight:700">OFFICIAL DIR</span>');
     if (trustChecked && isSameHash) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#1e3a24;color:#8fffaa;font-size:10px;font-weight:700">SAME HASH</span>');
     if (trustChecked && isOfficialCopy) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#2f2a16;color:#ffd66d;font-size:10px;font-weight:700">LEGIT COPY</span>');
-    if (trustChecked && !isSameHash) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#3a1d1d;color:#ff9f9f;font-size:10px;font-weight:700">HASH MISMATCH</span>');
+    if (trustChecked && !isSameHash && !trustError) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#3a1d1d;color:#ff9f9f;font-size:10px;font-weight:700">HASH MISMATCH</span>');
     if (trustError) chips.push('<span style="padding:2px 7px;border-radius:999px;background:#35261a;color:#ffbf8f;font-size:10px;font-weight:700">VERIFY ERROR</span>');
 
     return `

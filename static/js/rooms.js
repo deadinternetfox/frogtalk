@@ -1580,12 +1580,18 @@ window.generateDiscordBridgeCode = generateDiscordBridgeCode;
 
 async function _copyDiscordBridgeCode(ev) {
   try {
-    const code = document.getElementById('ch-bridge-discord-code')?.textContent?.trim() || '';
+    const codeEl = document.getElementById('ch-bridge-discord-code');
+    // Read only the first text node to avoid picking up child element text
+    const code = (codeEl?.firstChild?.nodeType === Node.TEXT_NODE
+      ? codeEl.firstChild.textContent
+      : codeEl?.textContent
+    )?.trim() || '';
     if (!code || code === '------') return;
     const text = 'bridge ' + code;
     const copied = await UI.copy(text);
     if (!copied) throw new Error('clipboard failed');
-    const line = ev?.currentTarget;
+    // ev.currentTarget is null for inline onclick — walk up from ev.target
+    const line = ev?.currentTarget || ev?.target?.closest?.('.bridge-claim-line');
     if (line) {
       line.classList.add('copied');
       const copyEl = line.querySelector('.bridge-claim-copy');

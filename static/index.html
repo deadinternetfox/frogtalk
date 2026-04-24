@@ -2154,7 +2154,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   box-shadow:0 0 0 1px rgba(76,175,80,.08) inset, 0 4px 16px rgba(0,0,0,.3)}
 .bridge-claim-label{font-size:11px;color:#7a9a7a;margin-bottom:10px;text-transform:uppercase;
   letter-spacing:.08em;font-weight:600}
-.bridge-claim-line{display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;
+.bridge-claim-line{user-select:none;-webkit-user-select:none;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px 16px;
   background:#0a0a0a;border:1px dashed #4caf50;border-radius:8px;cursor:pointer;
   font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;transition:all .15s ease;user-select:all;
   width:100%;max-width:100%;flex-wrap:wrap;overflow:hidden}
@@ -4193,7 +4193,7 @@ window.ConnErr = (function(){
               <span class="bridge-step-num">4</span>
               <div class="bridge-step-body">
                 <div class="bridge-step-title">Send the code inside the target Discord channel</div>
-                <div class="bridge-step-hint">Open the exact Discord channel you want to bridge and send the generated line below. Then click the check button to link once posted.</div>
+                <div class="bridge-step-hint">In the Discord channel you want to bridge, send the exact command below. Keep Message Content Intent enabled so the bot can read your one-time claim code.</div>
                 <div id="ch-bridge-discord-code-box" style="display:none;margin-top:10px">
                   <div class="bridge-claim-card">
                     <div class="bridge-claim-label">Send this in the target Discord channel (valid 15 min):</div>
@@ -5119,8 +5119,8 @@ if ('caches' in window) {
 <script src="/static/js/notifications.js?v=195"></script>
 <script src="/static/js/ws.js?v=195"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=202"></script>
-<script src="/static/js/rooms.js?v=198"></script>
+<script src="/static/js/ui.js?v=203"></script>
+<script src="/static/js/rooms.js?v=199"></script>
 <script src="/static/js/messages.js?v=193"></script>
 <script src="/static/js/users.js?v=191"></script>
 <script src="/static/js/emoji.js?v=191"></script>
