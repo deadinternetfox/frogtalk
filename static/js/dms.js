@@ -25,7 +25,7 @@ async function _fetchWithTimeout(url, timeoutMs) {
   ]);
 }
 
-async function _fetchDMPageResilient(url, attempts = 3, timeoutMs = 16000) {
+async function _fetchDMPageResilient(url, attempts = 2, timeoutMs = 25000) {
   let lastErr = null;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -557,6 +557,7 @@ function openDMsPanel () {
 async function loadDMMessages (pageOffset = 0, options = {}) {
   if (!_activeDM) return;
   const afterId = Number(options?.afterId || 0);
+  const uiRetry = Number(options?.uiRetry || 0);
   const isDelta = pageOffset === 0 && afterId > 0;
   const _reqRoomId = _activeDM.id;
   const _reqSeq = ++_dmLoadReqSeq;
@@ -576,9 +577,19 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   try {
     // One built-in retry smooths transient network hiccups so users rarely
     // need to click Retry manually.
-    r = await _fetchDMPageResilient(url, 3, 16000);
+    r = await _fetchDMPageResilient(url, 2, 25000);
   } catch (e) {
     if (!_isReqCurrent()) return;
+    // First visible load failure gets one silent reconnect attempt before we
+    // show the hard retry panel.
+    if (pageOffset === 0 && uiRetry < 1) {
+      const area = document.getElementById('messages-area');
+      const hasVisible = !!(_dmMessages && _dmMessages.length);
+      if (area && !hasVisible) area.innerHTML = inlineSpinner('Reconnecting…');
+      await _sleep(500);
+      if (!_isReqCurrent()) return;
+      return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
+    }
     // Network errors hit here — show a clickable retry instead of an endless spinner.
     if (pageOffset === 0) {
       const area = document.getElementById('messages-area');
@@ -596,6 +607,15 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   }
   if (!r || !r.ok) {
     if (!_isReqCurrent()) return;
+    // Soft-retry once on transient server errors before showing error UI.
+    if (pageOffset === 0 && uiRetry < 1 && r && r.status >= 500) {
+      const area = document.getElementById('messages-area');
+      const hasVisible = !!(_dmMessages && _dmMessages.length);
+      if (area && !hasVisible) area.innerHTML = inlineSpinner('Reconnecting…');
+      await _sleep(500);
+      if (!_isReqCurrent()) return;
+      return loadDMMessages(pageOffset, { ...options, uiRetry: uiRetry + 1 });
+    }
     if (pageOffset === 0) {
       const area = document.getElementById('messages-area');
       const hasVisible = !!(_dmMessages && _dmMessages.length);
