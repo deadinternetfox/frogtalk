@@ -5,7 +5,7 @@
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'composer-align-sw-refresh-v1',
+  ASSET_RESET_VERSION: 'channel-align-sendstate-v1',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,

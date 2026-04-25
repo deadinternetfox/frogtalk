@@ -1440,7 +1440,7 @@ async function sendMessage() {
   Messages._isSending = true;
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
-  if (attachment) btn.textContent = '⏳';
+  btn.textContent = '⏳';
 
   try {
     const key = State.roomKeys[State.currentRoom];
