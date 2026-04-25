@@ -17,7 +17,7 @@ const Notifications = (() => {
       await new Promise(res => window.addEventListener('load', res, { once: true }));
     }
     try {
-      _swReg = await navigator.serviceWorker.register('/sw.js?v=188', { scope: '/' });
+      _swReg = await navigator.serviceWorker.register('/sw.js?v=189', { scope: '/' });
       console.log('[SW] registered, scope:', _swReg.scope);
       // Listen for SW-to-page messages (used by notification-click actions on
       // incoming calls so the user can hit Accept/Decline right from the OS
