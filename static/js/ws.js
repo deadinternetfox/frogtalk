@@ -87,8 +87,21 @@ const WS = (() => {
     const room = _room;
     switch (data.type) {
       case 'history': {
+        const incoming = data.messages || [];
+        const cached = (State.messages && State.messages[room]) ? State.messages[room] : [];
+        // If server resent the same history window, skip expensive decrypt +
+        // full DOM rebuild. Presence still updates below.
+        if (cached.length && incoming.length) {
+          const sameLen = cached.length === incoming.length;
+          const sameFirst = Number(cached[0]?.id || 0) === Number(incoming[0]?.id || 0);
+          const sameLast = Number(cached[cached.length - 1]?.id || 0) === Number(incoming[incoming.length - 1]?.id || 0);
+          if (sameLen && sameFirst && sameLast) {
+            Users.updateList(data.online || []);
+            break;
+          }
+        }
         const decrypted = await Promise.all(
-          (data.messages || []).map(m => decryptMsg(m, room))
+          incoming.map(m => decryptMsg(m, room))
         );
         Messages.loadHistory(room, decrypted);
         Users.updateList(data.online || []);

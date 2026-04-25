@@ -388,6 +388,9 @@ const Messages = (() => {
     const area = document.getElementById('messages-area');
     _lastNick = null;
     _lastDate = null;
+    // Reset room cache before rebuilding so repeated loadHistory calls
+    // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
+    State.messages[room] = [];
 
     let html = '';
     const urlRe = /https?:\/\/[^\s<>"]+/g;
@@ -410,7 +413,6 @@ const Messages = (() => {
       html += _msgHtml(msg, isCont);
       _lastNick = msg.nickname;
 
-      if (!State.messages[room]) State.messages[room] = [];
       State.messages[room].push(msg);
       
       // Collect URLs for link previews

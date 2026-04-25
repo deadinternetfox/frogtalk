@@ -440,8 +440,8 @@ const Rooms = (() => {
     State.currentRoomType = type;
     State.currentChannelType = channelType;
     State.dmPeer = dmPeer;
-    State.messages[name] = [];
-    State.oldestMsgId = null;
+    if (!State.messages[name]) State.messages[name] = [];
+    State.oldestMsgId = State.messages[name].length ? State.messages[name][0].id : null;
 
     // Persist the last-opened channel so the next launch can jump straight
     // back to it instead of flashing the default welcome header. DMs are
@@ -604,16 +604,22 @@ const Rooms = (() => {
     if (typeof Messages !== 'undefined' && Messages.clearReply) Messages.clearReply();
     if (type !== 'dm' && typeof clearReplyToDM === 'function') clearReplyToDM();
 
-    // For text/DM channels, show a brief loading state until WS history arrives
+    // For text/DM channels, prefer rendering cached history instantly.
+    // Show spinner only when there is no cache yet.
     if (chType !== 'voice' && msgArea) {
-      const label = type === 'dm'
-        ? `Loading conversation with ${dmPeer}…`
-        : `Loading #${name}…`;
-      msgArea.innerHTML = `
-        <div class="ch-loading-state" id="ch-loading-state">
-          <div class="ch-spin"></div>
-          <div>${label.replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]))}</div>
-        </div>`;
+      const hasCached = type !== 'dm' && Array.isArray(State.messages[name]) && State.messages[name].length;
+      if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
+        try { Messages.loadHistory(name, State.messages[name]); } catch {}
+      } else {
+        const label = type === 'dm'
+          ? `Loading conversation with ${dmPeer}…`
+          : `Loading #${name}…`;
+        msgArea.innerHTML = `
+          <div class="ch-loading-state" id="ch-loading-state">
+            <div class="ch-spin"></div>
+            <div>${label.replace(/[<>&]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;' }[c]))}</div>
+          </div>`;
+      }
     }
     
     // For voice channels, show a prompt to join voice
