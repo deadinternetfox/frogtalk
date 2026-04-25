@@ -1394,6 +1394,22 @@ function deleteChannelFromSettings() { Rooms.deleteChannelFromSettings(); }
 function selectRoomType(type) { Rooms.selectRoomType(type); }
 function selectChannelType(type) { Rooms.selectChannelType(type); }
 function selectSettingsChannelType(type) { Rooms.selectSettingsChannelType(type); }
+function toggleSecretVisibility(inputId, buttonId) {
+  if (window.Rooms && typeof Rooms.toggleSecretVisibility === 'function') {
+    return Rooms.toggleSecretVisibility(inputId, buttonId);
+  }
+  // Fallback for mixed-cache situations where Rooms API is stale.
+  const input = document.getElementById(inputId);
+  const btn = document.getElementById(buttonId);
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  if (btn) {
+    btn.textContent = show ? '🙈' : '👁️';
+    btn.setAttribute('aria-label', show ? 'Hide shared secret' : 'Show shared secret');
+    btn.setAttribute('title', show ? 'Hide shared secret' : 'Show shared secret');
+  }
+}
 
 function triggerRoomIconUpload(kind) { Rooms.triggerRoomIconUpload(kind); }
 function handleCreateRoomIconSelect(input) { Rooms.handleCreateRoomIconSelect(input); }
