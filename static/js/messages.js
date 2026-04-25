@@ -1504,15 +1504,50 @@ async function sendMessage() {
       reactions: {},
       created_at: new Date().toISOString(),
     };
-    Messages.appendMessage(State.currentRoom, _tempMsg);
-    try {
-      const pend = document.getElementById(`msg-${_tempId}`);
-      if (pend) {
-        pend.classList.add('msg-pending');
-        pend.setAttribute('data-own', '1');
-        pend.setAttribute('data-nonce', _nonce);
+    // Render pending message immediately with dull styling (like Discord)
+    // instead of relying on appending and then finding/updating
+    const area = document.getElementById('messages-area');
+    if (area) {
+      try {
+        // Build HTML for pending message
+        const isCont = _shouldContinue(_tempMsg);
+        let html = '';
+        const dateLabel = _dateChanged(_tempMsg);
+        if (dateLabel) {
+          html += `<div class="msg-date-divider">${UI.escHtml(dateLabel)}</div>`;
+          _lastNick = null;
+        }
+        html += _msgHtml(_tempMsg, isCont);
+        _lastNick = _tempMsg.nickname;
+        
+        // Create and append element
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = html;
+        let msgEl = null;
+        while (wrapper.firstChild) {
+          const child = wrapper.firstChild;
+          area.appendChild(child);
+          // Capture the message element (not the date divider)
+          if (child.id && child.id.startsWith('msg-')) msgEl = child;
+        }
+        
+        // Add pending styling and nonce immediately
+        if (msgEl) {
+          msgEl.classList.add('msg-pending');
+          msgEl.setAttribute('data-own', '1');
+          msgEl.setAttribute('data-nonce', _nonce);
+        }
+        
+        // Cache the message
+        if (!State.messages[State.currentRoom]) State.messages[State.currentRoom] = [];
+        State.messages[State.currentRoom].push(_tempMsg);
+        
+        // Scroll to bottom so user sees the pending message
+        area.scrollTop = area.scrollHeight;
+      } catch (e) {
+        console.warn('Failed to render pending message:', e);
       }
-    } catch {}
+    }
   }
 
   try {
