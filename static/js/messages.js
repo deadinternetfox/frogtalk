@@ -1507,6 +1507,7 @@ async function sendMessage() {
     // Render pending message immediately with dull styling (like Discord)
     // instead of relying on appending and then finding/updating
     const area = document.getElementById('messages-area');
+    console.log('[PENDING] Starting pending message render. area exists:', !!area, 'tempId:', _tempId, 'nonce:', _nonce);
     if (area) {
       try {
         // Build HTML for pending message
@@ -1519,6 +1520,7 @@ async function sendMessage() {
         }
         html += _msgHtml(_tempMsg, isCont);
         _lastNick = _tempMsg.nickname;
+        console.log('[PENDING] HTML built, length:', html.length);
         
         // Create and append element
         const wrapper = document.createElement('div');
@@ -1530,23 +1532,30 @@ async function sendMessage() {
           // Capture the message element (not the date divider)
           if (child.id && child.id.startsWith('msg-')) msgEl = child;
         }
+        console.log('[PENDING] Element appended. msgEl:', msgEl ? msgEl.id : 'null');
         
         // Add pending styling and nonce immediately
         if (msgEl) {
           msgEl.classList.add('msg-pending');
           msgEl.setAttribute('data-own', '1');
           msgEl.setAttribute('data-nonce', _nonce);
+          console.log('[PENDING] Styled as pending. Class:', msgEl.className);
+        } else {
+          console.warn('[PENDING] No msgEl found to style!');
         }
         
         // Cache the message
         if (!State.messages[State.currentRoom]) State.messages[State.currentRoom] = [];
         State.messages[State.currentRoom].push(_tempMsg);
+        console.log('[PENDING] Cached. Total msgs:', State.messages[State.currentRoom].length);
         
         // Scroll to bottom so user sees the pending message
         area.scrollTop = area.scrollHeight;
       } catch (e) {
-        console.warn('Failed to render pending message:', e);
+        console.error('[PENDING] Error rendering pending message:', e);
       }
+    } else {
+      console.warn('[PENDING] messages-area not found!');
     }
   }
 
