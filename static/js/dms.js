@@ -12,6 +12,7 @@ const _dmPeerPubKeyCache = new Map();
 const _dmSharedKeyCache = new Map();
 let _dmLoadReqSeq = 0;
 const _dmHistoryCache = new Map();
+const _dmHistoryMeta = new Map();
 
 function _sleep(ms) {
   return new Promise(res => setTimeout(res, ms));
@@ -24,7 +25,7 @@ async function _fetchWithTimeout(url, timeoutMs) {
   ]);
 }
 
-async function _fetchDMPageResilient(url, attempts = 2, timeoutMs = 12000) {
+async function _fetchDMPageResilient(url, attempts = 3, timeoutMs = 16000) {
   let lastErr = null;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -372,7 +373,14 @@ async function openDMChannel (id, nickname, avatar) {
   // spinner never went away. Now it runs in the background while the chat
   // opens immediately.
   const _openId = id;
-  const msgsP = loadDMMessages().catch(e => console.error('loadDMMessages', e));
+  const _meta = _dmHistoryMeta.get(id);
+  const _cacheFreshMs = 15000;
+  const _cacheIsFresh = !!(_meta && (Date.now() - _meta.fetchedAt) < _cacheFreshMs);
+  const _cacheMatchesLast = !!(_meta && Number(_meta.lastMsgId || 0) === Number(existing.last_msg_id || 0));
+  const _canSkipInitialFetch = !!(_dmMessages.length && _cacheIsFresh && _cacheMatchesLast && !(existing.unread > 0));
+  const msgsP = _canSkipInitialFetch
+    ? Promise.resolve()
+    : loadDMMessages().catch(e => console.error('loadDMMessages', e));
   const timerP = loadDisappearTimer().catch(e => console.error('loadDisappearTimer', e));
 
   // Fire-and-forget: fetch peer user_id + public key for calls/encryption.
@@ -549,6 +557,7 @@ async function loadDMMessages (pageOffset = 0) {
   if (!_activeDM) return;
   const _reqRoomId = _activeDM.id;
   const _reqSeq = ++_dmLoadReqSeq;
+  const _isReqCurrent = () => !!(_activeDM && _activeDM.id === _reqRoomId && _reqSeq === _dmLoadReqSeq);
   if (pageOffset === 0) {
     const area = document.getElementById('messages-area');
     // Preserve already-rendered content (cache or prior load) and only show a
@@ -562,27 +571,37 @@ async function loadDMMessages (pageOffset = 0) {
   try {
     // One built-in retry smooths transient network hiccups so users rarely
     // need to click Retry manually.
-    r = await _fetchDMPageResilient(url, 2, 12000);
+    r = await _fetchDMPageResilient(url, 3, 16000);
   } catch (e) {
+    if (!_isReqCurrent()) return;
     // Network errors hit here — show a clickable retry instead of an endless spinner.
     if (pageOffset === 0) {
       const area = document.getElementById('messages-area');
-      if (area) area.innerHTML = `<div style="text-align:center;color:#888;padding:32px">
+      const hasVisible = !!(_dmMessages && _dmMessages.length);
+      if (area && !hasVisible) area.innerHTML = `<div style="text-align:center;color:#888;padding:32px">
         <div style="font-size:36px;margin-bottom:8px">⚠️</div>
         <div>Couldn't load messages — check your connection.</div>
         <button class="modal-btn" style="margin-top:12px" onclick="loadDMMessages(0)">Retry</button>
       </div>`;
+      else if (hasVisible && typeof toast === 'function') {
+        toast('Connection hiccup. Showing cached messages.', 'info', 2200);
+      }
     }
     return;
   }
   if (!r || !r.ok) {
+    if (!_isReqCurrent()) return;
     if (pageOffset === 0) {
       const area = document.getElementById('messages-area');
-      if (area) area.innerHTML = `<div style="text-align:center;color:#888;padding:32px">
+      const hasVisible = !!(_dmMessages && _dmMessages.length);
+      if (area && !hasVisible) area.innerHTML = `<div style="text-align:center;color:#888;padding:32px">
         <div style="font-size:36px;margin-bottom:8px">⚠️</div>
         <div>Couldn't load messages (server error).</div>
         <button class="modal-btn" style="margin-top:12px" onclick="loadDMMessages(0)">Retry</button>
       </div>`;
+      else if (hasVisible && typeof toast === 'function') {
+        toast('Server slow right now. Keeping current messages.', 'info', 2200);
+      }
     }
     return;
   }
@@ -615,6 +634,10 @@ async function loadDMMessages (pageOffset = 0) {
   if (pageOffset === 0) {
     _dmMessages = msgs;
     _dmHistoryCache.set(_reqRoomId, msgs.map(m => ({ ...m })));
+    _dmHistoryMeta.set(_reqRoomId, {
+      fetchedAt: Date.now(),
+      lastMsgId: Number((_dmMessages[_dmMessages.length - 1]?.id) || 0),
+    });
     renderDMChat();
     scrollChatBottom();
   } else {
@@ -1318,6 +1341,13 @@ function appendDMMessage (m) {
   // then WS echo arrives), skip the second append.
   if (m.id && _dmMessages.some(x => x.id === m.id)) return;
   _dmMessages.push(m);
+  if (_activeDM?.id) {
+    _dmHistoryCache.set(_activeDM.id, _dmMessages.map(x => ({ ...x })));
+    _dmHistoryMeta.set(_activeDM.id, {
+      fetchedAt: Date.now(),
+      lastMsgId: Number((_dmMessages[_dmMessages.length - 1]?.id) || 0),
+    });
+  }
   const area = document.getElementById('messages-area');
   if (!area) return;
   const atBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 80;
