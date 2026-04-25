@@ -9,6 +9,8 @@ const WS = (() => {
   let _reconnectDelay = 1000;
   let _pingInterval = null;
   let _stableTimer = null;
+  const _historyInFlight = new Map();
+  const _historyLastApplied = new Map();
 
   function connect(room) {
     if (_ws && _room === room) {
@@ -88,23 +90,39 @@ const WS = (() => {
     switch (data.type) {
       case 'history': {
         const incoming = data.messages || [];
-        const cached = (State.messages && State.messages[room]) ? State.messages[room] : [];
-        // If server resent the same history window, skip expensive decrypt +
-        // full DOM rebuild. Presence still updates below.
-        if (cached.length && incoming.length) {
-          const sameLen = cached.length === incoming.length;
-          const sameFirst = Number(cached[0]?.id || 0) === Number(incoming[0]?.id || 0);
-          const sameLast = Number(cached[cached.length - 1]?.id || 0) === Number(incoming[incoming.length - 1]?.id || 0);
-          if (sameLen && sameFirst && sameLast) {
-            Users.updateList(data.online || []);
-            break;
-          }
+        const histSig = `${incoming.length}:${incoming[0]?.id || 0}:${incoming[incoming.length - 1]?.id || 0}`;
+        const prevApplied = _historyLastApplied.get(room);
+        // Drop duplicate history packets while the first one is still being
+        // decrypted/rendered, and suppress immediate replays of the same
+        // history window.
+        if (_historyInFlight.get(room) === histSig || prevApplied === histSig) {
+          Users.updateList(data.online || []);
+          break;
         }
-        const decrypted = await Promise.all(
-          incoming.map(m => decryptMsg(m, room))
-        );
-        Messages.loadHistory(room, decrypted);
-        Users.updateList(data.online || []);
+        _historyInFlight.set(room, histSig);
+        try {
+          const cached = (State.messages && State.messages[room]) ? State.messages[room] : [];
+          // If server resent the same history window, skip expensive decrypt +
+          // full DOM rebuild. Presence still updates below.
+          if (cached.length && incoming.length) {
+            const sameLen = cached.length === incoming.length;
+            const sameFirst = Number(cached[0]?.id || 0) === Number(incoming[0]?.id || 0);
+            const sameLast = Number(cached[cached.length - 1]?.id || 0) === Number(incoming[incoming.length - 1]?.id || 0);
+            if (sameLen && sameFirst && sameLast) {
+              _historyLastApplied.set(room, histSig);
+              Users.updateList(data.online || []);
+              break;
+            }
+          }
+          const decrypted = await Promise.all(
+            incoming.map(m => decryptMsg(m, room))
+          );
+          Messages.loadHistory(room, decrypted);
+          _historyLastApplied.set(room, histSig);
+          Users.updateList(data.online || []);
+        } finally {
+          _historyInFlight.delete(room);
+        }
         break;
       }
       case 'message': {
