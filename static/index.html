@@ -689,6 +689,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .msg-tick-read{color:#4fc3f7}
 .msg-tick-seen{color:#4fc3f7} /* legacy alias */
 .msg-content{font-size:15px;line-height:1.48;word-break:break-word;color:#d0d0d0}
+.msg-pending{opacity:.62}
+.msg-pending .msg-actions,
+.msg-pending .msg-more-trigger{display:none !important}
+.msg-pending .msg-content,
+.msg-pending .msg-time{color:#9a9a9a !important}
 .msg-content.encrypted{color:#555;font-style:italic;font-size:13px}
 .msg-media{max-width:min(360px,100%);max-height:300px;width:auto;height:auto;border-radius:8px;margin-top:6px;cursor:pointer;display:block;object-fit:contain}
 .media-lazy-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:200px;height:100px;border-radius:8px;margin-top:6px;background:#1a1a1a;border:1px dashed #333;cursor:pointer;transition:background .2s}

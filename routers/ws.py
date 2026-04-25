@@ -274,6 +274,7 @@ async def websocket_endpoint(
                     "type": "message",
                     "id": msg_id,
                     "room": room_name,
+                    "client_nonce": data.get("client_nonce"),
                     "nickname": user["nickname"],
                     "user_id": user["id"],
                     "avatar": user.get("avatar"),

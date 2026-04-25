@@ -516,6 +516,30 @@ const Messages = (() => {
       }
       return;
     }
+
+    // Reconcile optimistic pending message from this client with the server
+    // echo so the temporary dull row is replaced by the real delivered one.
+    try {
+      const isOwnIncoming = !!(msg && State.user && msg.nickname === State.user.nickname && !msg._pending);
+      if (isOwnIncoming) {
+        const nonce = String(msg.client_nonce || '').trim();
+        let pendingEl = null;
+        if (nonce) {
+          pendingEl = document.querySelector('.msg-pending[data-nonce="' + nonce + '"]');
+        }
+        // Fallback when nonce is missing in an edge path.
+        if (!pendingEl) {
+          pendingEl = document.querySelector('.msg-pending[data-own="1"]');
+        }
+        if (pendingEl) {
+          pendingEl.remove();
+          const cached = State.messages[room] || [];
+          const idx = cached.findIndex(m => m && m._pending && (nonce ? m._nonce === nonce : true));
+          if (idx >= 0) cached.splice(idx, 1);
+        }
+      }
+    } catch {}
+
     const area = document.getElementById('messages-area');
     // "At bottom" with a generous threshold so tiny composer-height shifts /
     // reply preview / attachment preview don't flip us into "user scrolled up".
@@ -542,7 +566,7 @@ const Messages = (() => {
     State.messages[room].push(msg);
 
     const newEl = document.getElementById(`msg-${msg.id}`);
-    if (newEl) _attachLongPress(newEl, msg.id);
+    if (newEl && !msg._pending) _attachLongPress(newEl, msg.id);
 
     if (atBottom || isOwn) {
       // Double-rAF so late-loading media/embeds (images decoding, link
@@ -1515,10 +1539,37 @@ async function sendMessage() {
       }
       UI.showProgressToast('Sent!', 100);
     } else {
+      const _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const _tempId = -Math.floor(Date.now() + Math.random() * 10000);
+      const _tempMsg = {
+        id: _tempId,
+        _pending: true,
+        _nonce: _nonce,
+        room: State.currentRoom,
+        nickname: State.user?.nickname,
+        user_id: State.user?.id,
+        avatar: State.user?.avatar,
+        content: text,
+        media_data: null,
+        media_type: null,
+        edited: false,
+        reactions: {},
+        created_at: new Date().toISOString(),
+      };
+      Messages.appendMessage(State.currentRoom, _tempMsg);
+      try {
+        const pend = document.getElementById(`msg-${_tempId}`);
+        if (pend) {
+          pend.classList.add('msg-pending');
+          pend.setAttribute('data-own', '1');
+          pend.setAttribute('data-nonce', _nonce);
+        }
+      } catch {}
       WS.send({
         type: 'message',
         content: encrypted,
         reply_to: Messages.getReplyToId(),
+        client_nonce: _nonce,
         bridge_plain: hasOutbound ? text : undefined,
       });
     }
