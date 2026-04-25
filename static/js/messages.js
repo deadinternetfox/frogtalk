@@ -1453,10 +1453,8 @@ function handleInputKey(e) {
 }
 
 async function sendMessage() {
-  console.log('[SEND] sendMessage() called');
   // Delegate to DM handler when in DM view
   if (typeof isDMView === 'function' && isDMView()) {
-    console.log('[SEND] In DM view, delegating to sendDMMessage');
     return sendDMMessage();
   }
 
@@ -1474,8 +1472,6 @@ async function sendMessage() {
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
   const attachment = State.pendingAttachment || window._pendingAttachment;
-  
-  console.log('[SEND] text:', text.substring(0, 50), 'attachment:', !!attachment, '_isSending:', Messages._isSending);
 
   if (!text && !attachment) return;
 
@@ -1487,12 +1483,10 @@ async function sendMessage() {
   let _nonce = null;
   let _tempId = null;
   let _wsDispatched = false;
-  console.log('[SEND] About to check if text exists. text.length:', text.length);
   // Always show instant pending feedback for channel text, even if an
   // attachment object is present (stale or in-flight), so users see immediate
   // Discord-style send state.
   if (text) {
-    console.log('[SEND] Text exists, building pending message');
     _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     _tempId = -Math.floor(Date.now() + Math.random() * 10000);
     const _tempMsg = {
@@ -1510,59 +1504,17 @@ async function sendMessage() {
       reactions: {},
       created_at: new Date().toISOString(),
     };
-    // Render pending message immediately with dull styling (like Discord)
-    // instead of relying on appending and then finding/updating
-    const area = document.getElementById('messages-area');
-    console.log('[PENDING] Starting pending message render. area exists:', !!area, 'tempId:', _tempId, 'nonce:', _nonce);
-    if (area) {
-      try {
-        // Build HTML for pending message
-        const isCont = _shouldContinue(_tempMsg);
-        let html = '';
-        const dateLabel = _dateChanged(_tempMsg);
-        if (dateLabel) {
-          html += `<div class="msg-date-divider">${UI.escHtml(dateLabel)}</div>`;
-          _lastNick = null;
-        }
-        html += _msgHtml(_tempMsg, isCont);
-        _lastNick = _tempMsg.nickname;
-        console.log('[PENDING] HTML built, length:', html.length);
-        
-        // Create and append element
-        const wrapper = document.createElement('div');
-        wrapper.innerHTML = html;
-        let msgEl = null;
-        while (wrapper.firstChild) {
-          const child = wrapper.firstChild;
-          area.appendChild(child);
-          // Capture the message element (not the date divider)
-          if (child.id && child.id.startsWith('msg-')) msgEl = child;
-        }
-        console.log('[PENDING] Element appended. msgEl:', msgEl ? msgEl.id : 'null');
-        
-        // Add pending styling and nonce immediately
-        if (msgEl) {
-          msgEl.classList.add('msg-pending');
-          msgEl.setAttribute('data-own', '1');
-          msgEl.setAttribute('data-nonce', _nonce);
-          console.log('[PENDING] Styled as pending. Class:', msgEl.className);
-        } else {
-          console.warn('[PENDING] No msgEl found to style!');
-        }
-        
-        // Cache the message
-        if (!State.messages[State.currentRoom]) State.messages[State.currentRoom] = [];
-        State.messages[State.currentRoom].push(_tempMsg);
-        console.log('[PENDING] Cached. Total msgs:', State.messages[State.currentRoom].length);
-        
-        // Scroll to bottom so user sees the pending message
-        area.scrollTop = area.scrollHeight;
-      } catch (e) {
-        console.error('[PENDING] Error rendering pending message:', e);
+    // Render pending message immediately with dull styling (like Discord).
+    // Use Messages.appendMessage so the bubble is built via module internals.
+    Messages.appendMessage(State.currentRoom, _tempMsg);
+    try {
+      const pend = document.getElementById(`msg-${_tempId}`);
+      if (pend) {
+        pend.classList.add('msg-pending');
+        pend.setAttribute('data-own', '1');
+        pend.setAttribute('data-nonce', _nonce);
       }
-    } else {
-      console.warn('[PENDING] messages-area not found!');
-    }
+    } catch {}
   }
 
   try {
