@@ -1453,8 +1453,10 @@ function handleInputKey(e) {
 }
 
 async function sendMessage() {
+  console.log('[SEND] sendMessage() called');
   // Delegate to DM handler when in DM view
   if (typeof isDMView === 'function' && isDMView()) {
+    console.log('[SEND] In DM view, delegating to sendDMMessage');
     return sendDMMessage();
   }
 
@@ -1472,6 +1474,8 @@ async function sendMessage() {
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
   const attachment = State.pendingAttachment || window._pendingAttachment;
+  
+  console.log('[SEND] text:', text.substring(0, 50), 'attachment:', !!attachment, '_isSending:', Messages._isSending);
 
   if (!text && !attachment) return;
 
@@ -1483,10 +1487,12 @@ async function sendMessage() {
   let _nonce = null;
   let _tempId = null;
   let _wsDispatched = false;
+  console.log('[SEND] About to check if text exists. text.length:', text.length);
   // Always show instant pending feedback for channel text, even if an
   // attachment object is present (stale or in-flight), so users see immediate
   // Discord-style send state.
   if (text) {
+    console.log('[SEND] Text exists, building pending message');
     _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     _tempId = -Math.floor(Date.now() + Math.random() * 10000);
     const _tempMsg = {
