@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Message
 import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
@@ -68,6 +69,36 @@ class MainActivity : AppCompatActivity() {
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermissionRequest: PermissionRequest? = null
     private var musicPlaybackActive: Boolean = false
+
+    private fun shouldOpenExternally(uri: Uri): Boolean {
+        val scheme = (uri.scheme ?: "").lowercase()
+        if (scheme.isBlank()) return false
+        if (scheme != "http" && scheme != "https") return true
+
+        val host = (uri.host ?: "").lowercase()
+        if (host.isBlank()) return false
+
+        val appHost = (Uri.parse(APP_URL).host ?: "").lowercase()
+        if (appHost.isBlank()) return false
+
+        return !(host == appHost || host.endsWith(".$appHost"))
+    }
+
+    private fun openExternalUri(uri: Uri): Boolean {
+        return try {
+            val i = Intent(Intent.ACTION_VIEW, uri).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
+            startActivity(i)
+            true
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "No activity found to open external URL: $uri", e)
+            false
+        } catch (e: Throwable) {
+            Log.w(TAG, "Could not open external URL: $uri", e)
+            false
+        }
+    }
 
     // These must be registered before onStart, which property-init guarantees
     private val fileChooserLauncher: ActivityResultLauncher<Intent> =
@@ -228,6 +259,8 @@ class MainActivity : AppCompatActivity() {
             allowContentAccess = true
             mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             setSupportZoom(false)
+            setSupportMultipleWindows(true)
+            javaScriptCanOpenWindowsAutomatically = true
             useWideViewPort = true
             loadWithOverviewMode = true
             cacheMode = WebSettings.LOAD_NO_CACHE
@@ -266,16 +299,11 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(
                 view: WebView, request: WebResourceRequest
             ): Boolean {
-                val url = request.url.toString()
-                return if (url.contains("frogtalk.xyz")) {
-                    false
+                val uri = request.url
+                return if (shouldOpenExternally(uri)) {
+                    openExternalUri(uri)
                 } else {
-                    try {
-                        startActivity(Intent(Intent.ACTION_VIEW, request.url))
-                    } catch (_: ActivityNotFoundException) {
-                        return false
-                    }
-                    true
+                    false
                 }
             }
 
@@ -299,6 +327,37 @@ class MainActivity : AppCompatActivity() {
         }
 
         wv.webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(
+                view: WebView?,
+                isDialog: Boolean,
+                isUserGesture: Boolean,
+                resultMsg: Message?
+            ): Boolean {
+                val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+                val popupWebView = WebView(this@MainActivity)
+                popupWebView.settings.javaScriptEnabled = true
+                popupWebView.webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView,
+                        request: WebResourceRequest
+                    ): Boolean {
+                        val uri = request.url
+                        if (shouldOpenExternally(uri)) {
+                            val handled = openExternalUri(uri)
+                            try { view.destroy() } catch (_: Throwable) {}
+                            return handled
+                        }
+                        // Internal URLs open in the main app WebView.
+                        webView?.loadUrl(uri.toString())
+                        try { view.destroy() } catch (_: Throwable) {}
+                        return true
+                    }
+                }
+                transport.webView = popupWebView
+                resultMsg.sendToTarget()
+                return true
+            }
+
             override fun onPermissionRequest(request: PermissionRequest) {
                 val resources = request.resources
                 val permsNeeded = mutableListOf<String>()
