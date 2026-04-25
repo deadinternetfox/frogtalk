@@ -45,6 +45,29 @@ async function _fetchDMPageResilient(url, attempts = 2, timeoutMs = 25000) {
   throw lastErr || new Error('fetch_failed');
 }
 
+async function _repairActiveDMChannelId() {
+  if (!_activeDM?.nickname) return false;
+  try {
+    const r = await apiFetch('/api/dms');
+    if (!r || !r.ok) return false;
+    const data = await r.json();
+    const channels = data.channels || data || [];
+    const targetNick = String(_activeDM.nickname || '').toLowerCase();
+    const match = channels.find(ch => {
+      const nick = String(ch.other_nick || ch.nickname || '').toLowerCase();
+      return !!nick && nick === targetNick;
+    });
+    const nextId = Number(match?.id || 0);
+    if (!nextId) return false;
+    const curId = Number(_activeDM.id || 0);
+    if (nextId === curId) return false;
+    _activeDM.id = nextId;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function _voSeenKey(msgId, channelId) {
   const uid = STATE.user?.id || '0';
   return `ft_dm_vo_seen:${uid}:${channelId || 0}:${msgId}`;
@@ -580,9 +603,13 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     r = await _fetchDMPageResilient(url, 2, 25000);
   } catch (e) {
     if (!_isReqCurrent()) return;
+    // Delta fetch failed — fall back to a full refresh before showing error UI.
+    if (isDelta && uiRetry < 1) {
+      return loadDMMessages(0, { ...options, afterId: 0, uiRetry: uiRetry + 1 });
+    }
     // First visible load failure gets one silent reconnect attempt before we
     // show the hard retry panel.
-    if (pageOffset === 0 && uiRetry < 1) {
+    if (pageOffset === 0 && uiRetry < 2) {
       const area = document.getElementById('messages-area');
       const hasVisible = !!(_dmMessages && _dmMessages.length);
       if (area && !hasVisible) area.innerHTML = inlineSpinner('Reconnecting…');
@@ -607,8 +634,20 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   }
   if (!r || !r.ok) {
     if (!_isReqCurrent()) return;
+    // Delta fetch got a bad response — retry once as a full load.
+    if (isDelta && uiRetry < 1) {
+      return loadDMMessages(0, { ...options, afterId: 0, uiRetry: uiRetry + 1 });
+    }
+    // Some errors can happen with stale channel ids after reconnect/resync;
+    // refresh DM channel mapping and retry once automatically.
+    if (pageOffset === 0 && uiRetry < 2 && r && (r.status === 403 || r.status === 404 || r.status === 422)) {
+      const repaired = await _repairActiveDMChannelId();
+      if (repaired) {
+        return loadDMMessages(0, { ...options, afterId: 0, uiRetry: uiRetry + 1 });
+      }
+    }
     // Soft-retry once on transient server errors before showing error UI.
-    if (pageOffset === 0 && uiRetry < 1 && r && r.status >= 500) {
+    if (pageOffset === 0 && uiRetry < 2 && r && r.status >= 500) {
       const area = document.getElementById('messages-area');
       const hasVisible = !!(_dmMessages && _dmMessages.length);
       if (area && !hasVisible) area.innerHTML = inlineSpinner('Reconnecting…');
