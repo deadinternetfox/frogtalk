@@ -10,6 +10,39 @@ let _dmTypingTimer = null;
 let _dmReplyTo   = null;  // {id, content, nickname}
 const _dmPeerPubKeyCache = new Map();
 const _dmSharedKeyCache = new Map();
+let _dmLoadReqSeq = 0;
+const _dmHistoryCache = new Map();
+
+function _sleep(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
+async function _fetchWithTimeout(url, timeoutMs) {
+  return Promise.race([
+    apiFetch(url),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs)),
+  ]);
+}
+
+async function _fetchDMPageResilient(url, attempts = 2, timeoutMs = 12000) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await _fetchWithTimeout(url, timeoutMs);
+      // Retry once on transient server errors; leave auth/4xx alone.
+      if (res && !res.ok && res.status >= 500 && i < attempts - 1) {
+        await _sleep(250 * (i + 1));
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (i >= attempts - 1) break;
+      await _sleep(250 * (i + 1));
+    }
+  }
+  throw lastErr || new Error('fetch_failed');
+}
 
 function _voSeenKey(msgId, channelId) {
   const uid = STATE.user?.id || '0';
@@ -276,6 +309,7 @@ async function openDMChannel (id, nickname, avatar) {
   const existing = _dmChannels.find(c => c.id === id) || {};
   _activeDM    = {
     id, nickname, avatar,
+    user_id: existing.with_user_id || existing.other_id || null,
     peer_last_read: existing.peer_last_read || 0,
     my_last_read:   existing.my_last_read   || 0,
     last_msg_id:    existing.last_msg_id    || 0,
@@ -283,8 +317,16 @@ async function openDMChannel (id, nickname, avatar) {
     other_show_read_receipts: existing.other_show_read_receipts !== false,
   };
   _dmPage      = 0;
-  _dmMessages  = [];
+  const _cached = _dmHistoryCache.get(id);
+  _dmMessages  = Array.isArray(_cached) ? _cached.map(m => ({ ...m })) : [];
   clearReplyToDM();
+
+  // If we have recent cached history for this DM, render instantly and refresh
+  // in the background to avoid blank-screen flash when switching threads.
+  if (_dmMessages.length) {
+    renderDMChat();
+    scrollChatBottom();
+  }
 
   // Switch app to DM view
   selectServer('dms');
@@ -342,17 +384,23 @@ async function openDMChannel (id, nickname, avatar) {
       new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
     ]);
     try {
-      const rp = await withTimeout(apiFetch('/api/users/search?q=' + encodeURIComponent(nickname)), 5000);
-      if (!rp || !rp.ok) return;
-      const data  = await rp.json();
-      const users = Array.isArray(data) ? data : (data.users || []);
-      const u = users.find(x => x.nickname === nickname);
-      if (!u) return;
+      let peerUserId = _activeDM?.user_id || null;
+      // Fast path: DM list already contains peer user_id. Fallback to search
+      // only when opening from contexts that don't provide with_user_id.
+      if (!peerUserId) {
+        const rp = await withTimeout(apiFetch('/api/users/search?q=' + encodeURIComponent(nickname)), 5000);
+        if (!rp || !rp.ok) return;
+        const data  = await rp.json();
+        const users = Array.isArray(data) ? data : (data.users || []);
+        const u = users.find(x => x.nickname === nickname);
+        if (!u) return;
+        peerUserId = u.id;
+      }
       // User may have switched away from this DM while we were waiting —
       // only mutate state if we're still on the same conversation.
       if (!_activeDM || _activeDM.id !== _openId) return;
-      _activeDM.user_id = u.id;
-      const rk = await withTimeout(apiFetch('/api/users/' + u.id + '/pubkey'), 5000);
+      _activeDM.user_id = peerUserId;
+      const rk = await withTimeout(apiFetch('/api/users/' + peerUserId + '/pubkey'), 5000);
       if (!rk || !rk.ok) return;
       const kd = await rk.json();
       const peerPubKey = kd.ecdh_pub_key || kd.pub_key || null;
@@ -366,9 +414,6 @@ async function openDMChannel (id, nickname, avatar) {
           _enc.style.display = STATE.sharedSecret ? '' : 'none';
         }
       } catch {}
-      if (_activeDM && _activeDM.id === _openId && STATE.sharedSecret) {
-        loadDMMessages(0).catch(e => console.error('reloadDMMessagesAfterKey', e));
-      }
     } catch (e) { /* silent — encryption is best-effort */ }
   })();
 
@@ -502,19 +547,22 @@ function openDMsPanel () {
 /* ── Load messages ─────────────────────────────────────────────────────────── */
 async function loadDMMessages (pageOffset = 0) {
   if (!_activeDM) return;
+  const _reqRoomId = _activeDM.id;
+  const _reqSeq = ++_dmLoadReqSeq;
   if (pageOffset === 0) {
     const area = document.getElementById('messages-area');
-    if (area) area.innerHTML = inlineSpinner('Loading conversation…');
+    // Preserve already-rendered content (cache or prior load) and only show a
+    // full spinner when there is nothing to display yet.
+    if (area && (!_dmMessages || !_dmMessages.length)) {
+      area.innerHTML = inlineSpinner('Loading conversation…');
+    }
   }
-  const url = `/api/dms/${_activeDM.id}/messages?limit=${DM_PER_PAGE}&offset=${pageOffset * DM_PER_PAGE}`;
+  const url = `/api/dms/${_reqRoomId}/messages?limit=${DM_PER_PAGE}&offset=${pageOffset * DM_PER_PAGE}`;
   let r;
   try {
-    // Hard 10s timeout — a stalled fetch (proxy, dead socket, captive portal)
-    // used to leave the "Opening conversation with…" spinner up forever.
-    r = await Promise.race([
-      apiFetch(url),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
-    ]);
+    // One built-in retry smooths transient network hiccups so users rarely
+    // need to click Retry manually.
+    r = await _fetchDMPageResilient(url, 2, 12000);
   } catch (e) {
     // Network errors hit here — show a clickable retry instead of an endless spinner.
     if (pageOffset === 0) {
@@ -539,11 +587,13 @@ async function loadDMMessages (pageOffset = 0) {
     return;
   }
   const data = await r.json();
+  // Ignore stale responses from older requests or previous DM sessions.
+  if (!_activeDM || _activeDM.id !== _reqRoomId || _reqSeq !== _dmLoadReqSeq) return;
   const rawMsgs = Array.isArray(data) ? data : (data.messages || []);
   // Resolve peer identity for decryption. _activeDM.user_id is set by the
   // background ECDH task but may not be ready yet — fall back to the
   // channel list entry which always has with_user_id populated.
-  const _dmChanEntry = _dmChannels.find(c => c.id === _activeDM?.id);
+  const _dmChanEntry = _dmChannels.find(c => c.id === _reqRoomId);
   const _peerUserId  = _activeDM?.user_id || _dmChanEntry?.with_user_id || 0;
   const _peerNick    = _activeDM?.nickname || '';
   const msgs = await Promise.all(rawMsgs.map(async (msg) => {
@@ -559,11 +609,12 @@ async function loadDMMessages (pageOffset = 0) {
   }));
   for (const m of msgs) {
     if (!m || !m.view_once) continue;
-    const cid = m.channel_id || _activeDM?.id || 0;
+    const cid = m.channel_id || _reqRoomId || 0;
     if (_isViewOnceSeenLocal(m.id, cid)) m.viewed_by_me = 1;
   }
   if (pageOffset === 0) {
     _dmMessages = msgs;
+    _dmHistoryCache.set(_reqRoomId, msgs.map(m => ({ ...m })));
     renderDMChat();
     scrollChatBottom();
   } else {
@@ -575,7 +626,7 @@ async function loadDMMessages (pageOffset = 0) {
     area.scrollTop = area.scrollHeight - prevH;
   }
   // Clear unread badge
-  const ch = _dmChannels.find(c => c.id === _activeDM.id);
+  const ch = _dmChannels.find(c => c.id === _reqRoomId);
   if (ch) { ch.unread = 0; renderDMChannels(); }
 }
 
