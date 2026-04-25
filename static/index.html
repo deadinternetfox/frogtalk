@@ -3826,7 +3826,10 @@ window.ConnErr = (function(){
     </div>
     <div id="new-room-secret-section" style="display:none;background:#1a1a1a;border-radius:8px;padding:12px;margin-bottom:12px">
       <label class="modal-label">Shared secret</label>
-      <input class="modal-input" id="new-room-secret" type="password" placeholder="Required for private channels">
+      <div style="position:relative">
+        <input class="modal-input" id="new-room-secret" type="password" placeholder="Required for private channels" style="padding-right:42px">
+        <button type="button" id="new-room-secret-toggle" onclick="Rooms.toggleSecretVisibility('new-room-secret','new-room-secret-toggle')" aria-label="Show shared secret" title="Show shared secret" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#7f8a80;font-size:15px;cursor:pointer;opacity:.82;line-height:1">👁️</button>
+      </div>
       <label class="modal-label" style="margin-top:8px">Hint (optional)</label>
       <input class="modal-input" id="new-room-secret-hint" placeholder="Shown to invited members when they join">
       <div style="font-size:11px;color:#888;margin-top:8px">Everyone in this private channel must use the same shared secret.</div>
@@ -3847,7 +3850,10 @@ window.ConnErr = (function(){
           <div id="room-secret-room-name" style="font-size:13px;color:#98a39a;margin-bottom:6px"></div>
           <div id="room-secret-hint" style="display:none;font-size:12px;color:#9ecaa2;background:#1a2a1d;border:1px solid #2f4d34;border-radius:10px;padding:10px 12px;margin-bottom:10px"></div>
           <label class="modal-label" style="margin-bottom:6px">Shared secret</label>
-          <input class="modal-input" id="room-secret-input" type="password" placeholder="Enter channel shared secret" autocomplete="off">
+          <div style="position:relative">
+            <input class="modal-input" id="room-secret-input" type="password" placeholder="Enter channel shared secret" autocomplete="off" style="padding-right:42px">
+            <button type="button" id="room-secret-toggle" onclick="Rooms.toggleSecretVisibility('room-secret-input','room-secret-toggle')" aria-label="Show shared secret" title="Show shared secret" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:#90a392;font-size:15px;cursor:pointer;opacity:.82;line-height:1">👁️</button>
+          </div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;font-size:11px;color:#7f8a80">
             <label style="display:flex;align-items:center;gap:7px;cursor:pointer">
               <input type="checkbox" id="room-secret-remember" checked style="width:14px;height:14px;accent-color:#4caf50;cursor:pointer">

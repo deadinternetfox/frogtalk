@@ -31,11 +31,31 @@ const Rooms = (() => {
     } catch {}
   }
 
+  function toggleSecretVisibility(inputId, buttonId) {
+    const input = document.getElementById(inputId);
+    const btn = document.getElementById(buttonId);
+    if (!input) return;
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    if (btn) {
+      btn.textContent = show ? '🙈' : '👁️';
+      btn.setAttribute('aria-label', show ? 'Hide shared secret' : 'Show shared secret');
+      btn.setAttribute('title', show ? 'Hide shared secret' : 'Show shared secret');
+    }
+  }
+
   function _closePrivateSecretModal() {
     const input = document.getElementById('room-secret-input');
     if (input) {
       input.onkeydown = null;
       input.value = '';
+      input.type = 'password';
+    }
+    const toggle = document.getElementById('room-secret-toggle');
+    if (toggle) {
+      toggle.textContent = '👁️';
+      toggle.setAttribute('aria-label', 'Show shared secret');
+      toggle.setAttribute('title', 'Show shared secret');
     }
     const hint = document.getElementById('room-secret-hint');
     if (hint) {
@@ -644,6 +664,13 @@ const Rooms = (() => {
     const ddEl  = document.getElementById('new-room-dir-desc');    if (ddEl)  ddEl.value = '';
     const tagEl = document.getElementById('new-room-tags');        if (tagEl) tagEl.value = '';
     const secretEl = document.getElementById('new-room-secret');   if (secretEl) secretEl.value = '';
+    if (secretEl) secretEl.type = 'password';
+    const secretToggleEl = document.getElementById('new-room-secret-toggle');
+    if (secretToggleEl) {
+      secretToggleEl.textContent = '👁️';
+      secretToggleEl.setAttribute('aria-label', 'Show shared secret');
+      secretToggleEl.setAttribute('title', 'Show shared secret');
+    }
     const hintEl = document.getElementById('new-room-secret-hint'); if (hintEl) hintEl.value = '';
     const dirFields = document.getElementById('new-room-directory-fields');
     if (dirFields) dirFields.style.display = 'none';
@@ -1350,7 +1377,8 @@ const Rooms = (() => {
     triggerRoomIconUpload, handleCreateRoomIconSelect, handleChannelRoomIconSelect, handleChannelBannerSelect,
     createInvite, revokeInvite, fetchInvites, showChannelAbout,
     renderMuteState, renderRooms, openChannelLink,
-    cancelPrivateSecretPrompt, submitPrivateSecretPrompt
+    cancelPrivateSecretPrompt, submitPrivateSecretPrompt,
+    toggleSecretVisibility
   };
 })();
 
