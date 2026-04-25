@@ -10,6 +10,7 @@ const Rooms = (() => {
   let _currentRoomData = null;
   const ROOM_ICON_MAX_BYTES = 2 * 1024 * 1024;
   const ROOM_SECRET_PREFIX = 'ft-room-secret-v1:';
+  let _secretPromptResolver = null;
 
   function _roomSecretStorageKey(name) {
     return `${ROOM_SECRET_PREFIX}${String(name || '').toLowerCase()}`;
@@ -30,19 +31,89 @@ const Rooms = (() => {
     } catch {}
   }
 
+  function _closePrivateSecretModal() {
+    const input = document.getElementById('room-secret-input');
+    if (input) {
+      input.onkeydown = null;
+      input.value = '';
+    }
+    const hint = document.getElementById('room-secret-hint');
+    if (hint) {
+      hint.style.display = 'none';
+      hint.textContent = '';
+    }
+    closeModal('modal-room-secret');
+  }
+
+  function cancelPrivateSecretPrompt() {
+    const resolve = _secretPromptResolver;
+    _secretPromptResolver = null;
+    _closePrivateSecretModal();
+    if (resolve) resolve(undefined);
+  }
+
+  function submitPrivateSecretPrompt() {
+    const input = document.getElementById('room-secret-input');
+    const rememberEl = document.getElementById('room-secret-remember');
+    const resolve = _secretPromptResolver;
+    if (!resolve) return;
+    const secret = (input?.value || '').trim();
+    if (!secret) {
+      UI.showToast('Private rooms require a shared secret', 'error');
+      input?.focus();
+      return;
+    }
+    _secretPromptResolver = null;
+    _closePrivateSecretModal();
+    resolve({ secret, remember: !!rememberEl?.checked });
+  }
+
+  function _promptPrivateRoomSecret(name, hintText) {
+    return new Promise((resolve) => {
+      _secretPromptResolver = resolve;
+      const roomNameEl = document.getElementById('room-secret-room-name');
+      const hintEl = document.getElementById('room-secret-hint');
+      const input = document.getElementById('room-secret-input');
+      const rememberEl = document.getElementById('room-secret-remember');
+
+      if (roomNameEl) roomNameEl.textContent = `Channel: #${name}`;
+      if (hintEl) {
+        const h = (hintText || '').trim();
+        if (h) {
+          hintEl.textContent = `Hint: ${h}`;
+          hintEl.style.display = '';
+        } else {
+          hintEl.textContent = '';
+          hintEl.style.display = 'none';
+        }
+      }
+      if (rememberEl) rememberEl.checked = true;
+      if (input) {
+        input.value = '';
+        input.onkeydown = (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            submitPrivateSecretPrompt();
+          }
+        };
+      }
+      openModal('modal-room-secret');
+      setTimeout(() => input?.focus(), 30);
+    });
+  }
+
   async function _resolvePrivateRoomKey(name) {
     const room = (State.rooms || []).find(r => r.name === name) || null;
     let secret = _getStoredRoomSecret(name);
     if (!secret) {
-      const hint = room?.room_key_hint ? `\nHint: ${room.room_key_hint}` : '';
-      const entered = window.prompt(`Enter the shared secret for #${name}.${hint}`, '');
-      if (entered == null) return undefined;
-      secret = entered.trim();
+      const entered = await _promptPrivateRoomSecret(name, room?.room_key_hint || '');
+      if (!entered) return undefined;
+      secret = entered.secret;
       if (!secret) {
         UI.showToast('Private rooms require a shared secret', 'error');
         return undefined;
       }
-      _storeRoomSecret(name, secret);
+      if (entered.remember) _storeRoomSecret(name, secret);
     }
     return Crypto.getRoomKey(name, secret);
   }
@@ -1278,7 +1349,8 @@ const Rooms = (() => {
     selectRoomType, selectChannelType, selectSettingsChannelType,
     triggerRoomIconUpload, handleCreateRoomIconSelect, handleChannelRoomIconSelect, handleChannelBannerSelect,
     createInvite, revokeInvite, fetchInvites, showChannelAbout,
-    renderMuteState, renderRooms, openChannelLink
+    renderMuteState, renderRooms, openChannelLink,
+    cancelPrivateSecretPrompt, submitPrivateSecretPrompt
   };
 })();
 
