@@ -3824,6 +3824,13 @@ window.ConnErr = (function(){
         🔒 Private
       </div>
     </div>
+    <div id="new-room-secret-section" style="display:none;background:#1a1a1a;border-radius:8px;padding:12px;margin-bottom:12px">
+      <label class="modal-label">Shared secret</label>
+      <input class="modal-input" id="new-room-secret" type="password" placeholder="Required for private channels">
+      <label class="modal-label" style="margin-top:8px">Hint (optional)</label>
+      <input class="modal-input" id="new-room-secret-hint" placeholder="Shown to invited members when they join">
+      <div style="font-size:11px;color:#888;margin-top:8px">Everyone in this private channel must use the same shared secret.</div>
+    </div>
     <div style="background:#1a1a1a;border-radius:8px;padding:10px 12px;margin-bottom:12px">
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
         <input type="checkbox" id="new-room-invite-only" style="width:16px;height:16px;accent-color:#4caf50;cursor:pointer">

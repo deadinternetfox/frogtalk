@@ -572,8 +572,12 @@ const Rooms = (() => {
     const catEl = document.getElementById('new-room-category');    if (catEl) catEl.value = '';
     const ddEl  = document.getElementById('new-room-dir-desc');    if (ddEl)  ddEl.value = '';
     const tagEl = document.getElementById('new-room-tags');        if (tagEl) tagEl.value = '';
+    const secretEl = document.getElementById('new-room-secret');   if (secretEl) secretEl.value = '';
+    const hintEl = document.getElementById('new-room-secret-hint'); if (hintEl) hintEl.value = '';
     const dirFields = document.getElementById('new-room-directory-fields');
     if (dirFields) dirFields.style.display = 'none';
+    const secretSec = document.getElementById('new-room-secret-section');
+    if (secretSec) secretSec.style.display = 'none';
     _selectedRoomType = 'public';
     _selectedChannelType = 'text';
     document.getElementById('type-public').classList.add('selected');
@@ -595,6 +599,8 @@ const Rooms = (() => {
     // Hide directory section when not public
     const dirSec = document.getElementById('new-room-directory-section');
     if (dirSec) dirSec.style.display = (type === 'public') ? '' : 'none';
+    const secretSec = document.getElementById('new-room-secret-section');
+    if (secretSec) secretSec.style.display = (type === 'private') ? '' : 'none';
   }
 
   function selectChannelType(type) {
@@ -612,16 +618,15 @@ const Rooms = (() => {
     if (!name) return;
     let roomKeyHint = null;
     if (_selectedRoomType === 'private') {
-      const enteredSecret = window.prompt(`Choose a shared secret for #${name}. Everyone in the room will need it.`, '');
-      if (enteredSecret == null) return;
-      const trimmedSecret = enteredSecret.trim();
+      const enteredSecret = (document.getElementById('new-room-secret')?.value || '').trim();
+      const trimmedSecret = enteredSecret;
       if (!trimmedSecret) {
         UI.showToast('Private rooms require a shared secret', 'error');
+        document.getElementById('new-room-secret')?.focus();
         return;
       }
       _storeRoomSecret(name, trimmedSecret);
-      const hint = window.prompt('Optional hint for invited members (leave blank to skip):', '');
-      roomKeyHint = (hint || '').trim() || null;
+      roomKeyHint = (document.getElementById('new-room-secret-hint')?.value || '').trim() || null;
     }
 
     const res = await fetch('/api/rooms', {
