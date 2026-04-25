@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.os.Message
@@ -69,6 +70,7 @@ class MainActivity : AppCompatActivity() {
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermissionRequest: PermissionRequest? = null
     private var musicPlaybackActive: Boolean = false
+    private var pendingBatteryPromptAfterNotifications: Boolean = false
 
     private fun shouldOpenExternally(uri: Uri): Boolean {
         val scheme = (uri.scheme ?: "").lowercase()
@@ -100,6 +102,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun handleRequestedUrl(url: String?): Boolean {
+        val raw = url?.trim().orEmpty()
+        if (raw.isEmpty()) return false
+        return try {
+            val uri = Uri.parse(raw)
+            if (shouldOpenExternally(uri)) {
+                openExternalUri(uri)
+            } else {
+                webView?.loadUrl(uri.toString())
+                true
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Could not handle requested URL: $raw", e)
+            false
+        }
+    }
+
     // These must be registered before onStart, which property-init guarantees
     private val fileChooserLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -120,7 +139,7 @@ class MainActivity : AppCompatActivity() {
         }
 
     private val permissionLauncher: ActivityResultLauncher<Array<String>> =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
             try {
                 val req = pendingPermissionRequest
                 if (req != null) {
@@ -150,6 +169,22 @@ class MainActivity : AppCompatActivity() {
                 pendingPermissionRequest?.deny()
             }
             pendingPermissionRequest = null
+        }
+
+    private val notificationPermissionLauncher: ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            if (pendingBatteryPromptAfterNotifications) {
+                pendingBatteryPromptAfterNotifications = false
+                maybePromptDisableBatteryOptimizations()
+            }
+        }
+
+    private val batteryOptimizationLauncher: ActivityResultLauncher<Intent> =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            try {
+                val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                prefs.edit().putBoolean(PREF_BATTERY_PROMPTED, true).apply()
+            } catch (_: Throwable) {}
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -195,21 +230,22 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        // Notification permission (Android 13+)
+        startFirstRunPromptFlow()
+    }
+
+    private fun startFirstRunPromptFlow() {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED
-                ) {
-                    ActivityCompat.requestPermissions(
-                        this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001
-                    )
-                }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                pendingBatteryPromptAfterNotifications = true
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
             }
         } catch (e: Throwable) {
             Log.w(TAG, "Notification permission request failed", e)
         }
-
         maybePromptDisableBatteryOptimizations()
     }
 
@@ -226,8 +262,7 @@ class MainActivity : AppCompatActivity() {
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
             }
-            startActivity(intent)
-            prefs.edit().putBoolean(PREF_BATTERY_PROMPTED, true).apply()
+            batteryOptimizationLauncher.launch(intent)
         } catch (e: Throwable) {
             Log.w(TAG, "Battery optimization prompt failed", e)
         }
@@ -307,6 +342,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            @Suppress("DEPRECATION")
+            @Deprecated("Deprecated in Java")
+            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                return handleRequestedUrl(url)
+            }
+
             override fun onRenderProcessGone(
                 view: WebView, detail: RenderProcessGoneDetail
             ): Boolean {
@@ -333,6 +374,11 @@ class MainActivity : AppCompatActivity() {
                 isUserGesture: Boolean,
                 resultMsg: Message?
             ): Boolean {
+                val hitUrl = view?.hitTestResult?.extra
+                if (!hitUrl.isNullOrBlank()) {
+                    return handleRequestedUrl(hitUrl)
+                }
+
                 val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
                 val popupWebView = WebView(this@MainActivity)
                 popupWebView.settings.javaScriptEnabled = true
@@ -341,16 +387,26 @@ class MainActivity : AppCompatActivity() {
                         view: WebView,
                         request: WebResourceRequest
                     ): Boolean {
-                        val uri = request.url
-                        if (shouldOpenExternally(uri)) {
-                            val handled = openExternalUri(uri)
-                            try { view.destroy() } catch (_: Throwable) {}
-                            return handled
-                        }
-                        // Internal URLs open in the main app WebView.
-                        webView?.loadUrl(uri.toString())
+                        val handled = handleRequestedUrl(request.url.toString())
                         try { view.destroy() } catch (_: Throwable) {}
-                        return true
+                        return handled
+                    }
+
+                    @Suppress("DEPRECATION")
+                    @Deprecated("Deprecated in Java")
+                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                        val handled = handleRequestedUrl(url)
+                        try { view?.destroy() } catch (_: Throwable) {}
+                        return handled
+                    }
+
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        if (!url.isNullOrBlank()) {
+                            handleRequestedUrl(url)
+                            try { view?.stopLoading() } catch (_: Throwable) {}
+                            try { view?.destroy() } catch (_: Throwable) {}
+                        }
                     }
                 }
                 transport.webView = popupWebView
