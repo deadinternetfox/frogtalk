@@ -378,9 +378,10 @@ async function openDMChannel (id, nickname, avatar) {
   const _cacheIsFresh = !!(_meta && (Date.now() - _meta.fetchedAt) < _cacheFreshMs);
   const _cacheMatchesLast = !!(_meta && Number(_meta.lastMsgId || 0) === Number(existing.last_msg_id || 0));
   const _canSkipInitialFetch = !!(_dmMessages.length && _cacheIsFresh && _cacheMatchesLast && !(existing.unread > 0));
+  const _lastCachedId = Number((_dmMessages[_dmMessages.length - 1]?.id) || 0);
   const msgsP = _canSkipInitialFetch
     ? Promise.resolve()
-    : loadDMMessages().catch(e => console.error('loadDMMessages', e));
+    : loadDMMessages(0, { afterId: _lastCachedId }).catch(e => console.error('loadDMMessages', e));
   const timerP = loadDisappearTimer().catch(e => console.error('loadDisappearTimer', e));
 
   // Fire-and-forget: fetch peer user_id + public key for calls/encryption.
@@ -553,12 +554,14 @@ function openDMsPanel () {
 }
 
 /* ── Load messages ─────────────────────────────────────────────────────────── */
-async function loadDMMessages (pageOffset = 0) {
+async function loadDMMessages (pageOffset = 0, options = {}) {
   if (!_activeDM) return;
+  const afterId = Number(options?.afterId || 0);
+  const isDelta = pageOffset === 0 && afterId > 0;
   const _reqRoomId = _activeDM.id;
   const _reqSeq = ++_dmLoadReqSeq;
   const _isReqCurrent = () => !!(_activeDM && _activeDM.id === _reqRoomId && _reqSeq === _dmLoadReqSeq);
-  if (pageOffset === 0) {
+  if (pageOffset === 0 && !isDelta) {
     const area = document.getElementById('messages-area');
     // Preserve already-rendered content (cache or prior load) and only show a
     // full spinner when there is nothing to display yet.
@@ -566,7 +569,9 @@ async function loadDMMessages (pageOffset = 0) {
       area.innerHTML = inlineSpinner('Loading conversation…');
     }
   }
-  const url = `/api/dms/${_reqRoomId}/messages?limit=${DM_PER_PAGE}&offset=${pageOffset * DM_PER_PAGE}`;
+  const url = isDelta
+    ? `/api/dms/${_reqRoomId}/messages?limit=${DM_PER_PAGE}&after=${afterId}`
+    : `/api/dms/${_reqRoomId}/messages?limit=${DM_PER_PAGE}&offset=${pageOffset * DM_PER_PAGE}`;
   let r;
   try {
     // One built-in retry smooths transient network hiccups so users rarely
@@ -632,14 +637,30 @@ async function loadDMMessages (pageOffset = 0) {
     if (_isViewOnceSeenLocal(m.id, cid)) m.viewed_by_me = 1;
   }
   if (pageOffset === 0) {
-    _dmMessages = msgs;
-    _dmHistoryCache.set(_reqRoomId, msgs.map(m => ({ ...m })));
+    if (isDelta) {
+      if (msgs.length) {
+        const seen = new Set(_dmMessages.map(m => Number(m.id || 0)));
+        const merged = [..._dmMessages];
+        for (const m of msgs) {
+          const mid = Number(m?.id || 0);
+          if (!mid || seen.has(mid)) continue;
+          seen.add(mid);
+          merged.push(m);
+        }
+        _dmMessages = merged;
+      }
+    } else {
+      _dmMessages = msgs;
+    }
+    _dmHistoryCache.set(_reqRoomId, _dmMessages.map(m => ({ ...m })));
     _dmHistoryMeta.set(_reqRoomId, {
       fetchedAt: Date.now(),
       lastMsgId: Number((_dmMessages[_dmMessages.length - 1]?.id) || 0),
     });
-    renderDMChat();
-    scrollChatBottom();
+    if (!isDelta || msgs.length) {
+      renderDMChat();
+      scrollChatBottom();
+    }
   } else {
     _dmMessages = [...msgs, ..._dmMessages];
     // Re-render but keep scroll position

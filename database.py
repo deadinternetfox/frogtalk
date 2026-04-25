@@ -1886,7 +1886,8 @@ def get_privacy_read_receipts(user_id: int) -> bool:
 
 
 def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
-                    before_id: Optional[int] = None) -> Tuple[List[Dict], bool]:
+                    before_id: Optional[int] = None,
+                    after_id: Optional[int] = None) -> Tuple[List[Dict], bool]:
     """Returns (messages, user_is_member)."""
     with _conn() as con:
         # Verify membership
@@ -1896,7 +1897,17 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
         ).fetchone()
         if not row:
             return [], False
-        if before_id:
+        if after_id:
+            rows = con.execute("""
+                SELECT dm.id, dm.sender_id, dm.content, dm.media_data, dm.media_type,
+                       dm.media_name, dm.reply_to, dm.edited, dm.deleted, dm.created_at,
+                       dm.media_blur, dm.view_once,
+                       u.nickname AS sender_nick, u.avatar AS sender_avatar
+                FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
+                WHERE dm.channel_id=? AND dm.id > ? AND dm.deleted=0
+                ORDER BY dm.id ASC LIMIT ?
+            """, (channel_id, after_id, limit)).fetchall()
+        elif before_id:
             rows = con.execute("""
                 SELECT dm.id, dm.sender_id, dm.content, dm.media_data, dm.media_type,
                        dm.media_name, dm.reply_to, dm.edited, dm.deleted, dm.created_at,
@@ -1916,6 +1927,8 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                 WHERE dm.channel_id=? AND dm.deleted=0
                 ORDER BY dm.id DESC LIMIT ?
             """, (channel_id, limit)).fetchall()
+    if after_id:
+        return [dict(r) for r in rows], True
     return list(reversed([dict(r) for r in rows])), True
 
 

@@ -138,10 +138,11 @@ async def mark_read(channel_id: int, body: dict = None,
 
 
 @router.get("/{channel_id}/messages")
-async def get_messages(channel_id: int, before: Optional[int] = None, limit: int = 50,
+async def get_messages(channel_id: int, before: Optional[int] = None,
+                       after: Optional[int] = None, limit: int = 50,
                        current_user: dict = Depends(get_current_user)):
     limit = min(limit, 100)
-    msgs, ok = db.get_dm_messages(channel_id, current_user["id"], limit, before)
+    msgs, ok = db.get_dm_messages(channel_id, current_user["id"], limit, before, after)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
     # Strip heavy media_data from history; clients fetch via /media endpoint
