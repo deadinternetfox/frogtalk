@@ -1483,7 +1483,10 @@ async function sendMessage() {
   let _nonce = null;
   let _tempId = null;
   let _wsDispatched = false;
-  if (!attachment && text) {
+  // Always show instant pending feedback for channel text, even if an
+  // attachment object is present (stale or in-flight), so users see immediate
+  // Discord-style send state.
+  if (text) {
     _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     _tempId = -Math.floor(Date.now() + Math.random() * 10000);
     const _tempMsg = {
