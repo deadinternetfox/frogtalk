@@ -202,13 +202,17 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 _APP_HTML_PATH = "static/index.html"
 _APP_JS_PATH = "static/js/app.js"
+_MESSAGES_JS_PATH = "static/js/messages.js"
 
 
 def _serve_app_shell_response() -> HTMLResponse:
     with open(_APP_HTML_PATH, "r", encoding="utf-8") as fh:
         html = fh.read()
     try:
-        app_asset_version = str(int(os.path.getmtime(_APP_JS_PATH)))
+        app_asset_version = str(int(max(
+            os.path.getmtime(_APP_JS_PATH),
+            os.path.getmtime(_MESSAGES_JS_PATH),
+        )))
     except Exception:
         app_asset_version = str(int(time.time()))
     html = html.replace("__APP_ASSET_VERSION__", app_asset_version)
