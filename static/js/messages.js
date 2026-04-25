@@ -1480,6 +1480,38 @@ async function sendMessage() {
   btn.disabled = true;
   btn.textContent = '⏳';
 
+  let _nonce = null;
+  let _tempId = null;
+  let _wsDispatched = false;
+  if (!attachment && text) {
+    _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    _tempId = -Math.floor(Date.now() + Math.random() * 10000);
+    const _tempMsg = {
+      id: _tempId,
+      _pending: true,
+      _nonce: _nonce,
+      room: State.currentRoom,
+      nickname: State.user?.nickname,
+      user_id: State.user?.id,
+      avatar: State.user?.avatar,
+      content: text,
+      media_data: null,
+      media_type: null,
+      edited: false,
+      reactions: {},
+      created_at: new Date().toISOString(),
+    };
+    Messages.appendMessage(State.currentRoom, _tempMsg);
+    try {
+      const pend = document.getElementById(`msg-${_tempId}`);
+      if (pend) {
+        pend.classList.add('msg-pending');
+        pend.setAttribute('data-own', '1');
+        pend.setAttribute('data-nonce', _nonce);
+      }
+    } catch {}
+  }
+
   try {
     const key = State.roomKeys[State.currentRoom];
 
@@ -1553,32 +1585,9 @@ async function sendMessage() {
       }
       UI.showProgressToast('Sent!', 100);
     } else {
-      const _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-      const _tempId = -Math.floor(Date.now() + Math.random() * 10000);
-      const _tempMsg = {
-        id: _tempId,
-        _pending: true,
-        _nonce: _nonce,
-        room: State.currentRoom,
-        nickname: State.user?.nickname,
-        user_id: State.user?.id,
-        avatar: State.user?.avatar,
-        content: text,
-        media_data: null,
-        media_type: null,
-        edited: false,
-        reactions: {},
-        created_at: new Date().toISOString(),
-      };
-      Messages.appendMessage(State.currentRoom, _tempMsg);
-      try {
-        const pend = document.getElementById(`msg-${_tempId}`);
-        if (pend) {
-          pend.classList.add('msg-pending');
-          pend.setAttribute('data-own', '1');
-          pend.setAttribute('data-nonce', _nonce);
-        }
-      } catch {}
+      if (!_nonce) {
+        _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      }
       WS.send({
         type: 'message',
         content: encrypted,
@@ -1586,6 +1595,7 @@ async function sendMessage() {
         client_nonce: _nonce,
         bridge_plain: hasOutbound ? text : undefined,
       });
+      _wsDispatched = true;
     }
 
     input.value = '';
@@ -1596,6 +1606,15 @@ async function sendMessage() {
     try { scrollToBottom(true); } catch {}
   } catch (e) {
     console.error('Send error:', e);
+    if (_nonce && !_wsDispatched) {
+      try {
+        const pend = document.querySelector('.msg-pending[data-nonce="' + _nonce + '"]');
+        if (pend) pend.remove();
+        const cached = State.messages[State.currentRoom] || [];
+        const idx = cached.findIndex(m => m && m._pending && m._nonce === _nonce);
+        if (idx >= 0) cached.splice(idx, 1);
+      } catch {}
+    }
     UI.showToast(e.message || 'Failed to send message', 'error');
   } finally {
     Messages._isSending = false;
