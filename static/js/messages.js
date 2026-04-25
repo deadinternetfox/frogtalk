@@ -518,24 +518,38 @@ const Messages = (() => {
     }
 
     // Reconcile optimistic pending message from this client with the server
-    // echo so the temporary dull row is replaced by the real delivered one.
+    // echo in-place so it never disappears before becoming delivered.
     try {
       const isOwnIncoming = !!(msg && State.user && msg.nickname === State.user.nickname && !msg._pending);
       if (isOwnIncoming) {
+        const area = document.getElementById('messages-area');
         const nonce = String(msg.client_nonce || '').trim();
         let pendingEl = null;
         if (nonce) {
-          pendingEl = document.querySelector('.msg-pending[data-nonce="' + nonce + '"]');
+          pendingEl = area?.querySelector('.msg-pending[data-nonce="' + nonce + '"]') || null;
         }
         // Fallback when nonce is missing in an edge path.
         if (!pendingEl) {
-          pendingEl = document.querySelector('.msg-pending[data-own="1"]');
+          pendingEl = area?.querySelector('.msg-pending[data-own="1"]') || null;
         }
         if (pendingEl) {
-          pendingEl.remove();
+          pendingEl.classList.remove('msg-pending');
+          pendingEl.removeAttribute('data-own');
+          pendingEl.removeAttribute('data-nonce');
+          pendingEl.id = `msg-${msg.id}`;
+          const contentEl = pendingEl.querySelector('.msg-content');
+          if (contentEl) contentEl.innerHTML = _formatContent(msg.content || '');
+          const timeEl = pendingEl.querySelector('.msg-time');
+          if (timeEl) timeEl.textContent = UI.formatTime(msg.created_at);
+          _attachLongPress(pendingEl, msg.id);
+          const urlRe = /https?:\/\/[^\s<>"]+/g;
+          const urls = (msg.content || '').match(urlRe);
+          if (urls && urls.length) setTimeout(() => _loadLinkPreview(msg.id, urls[0]), 100);
           const cached = State.messages[room] || [];
           const idx = cached.findIndex(m => m && m._pending && (nonce ? m._nonce === nonce : true));
-          if (idx >= 0) cached.splice(idx, 1);
+          if (idx >= 0) cached[idx] = msg;
+          else cached.push(msg);
+          return;
         }
       }
     } catch {}
