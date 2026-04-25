@@ -127,6 +127,16 @@ async def websocket_endpoint(
     )
     db.update_last_seen(user["id"])
 
+    # Auto-add to room_members on connect so they appear in the offline list
+    # when they're not connected. Skip DM channels (prefixed with "dm-").
+    if not room_name.startswith("dm-"):
+        try:
+            _room_data = db.get_room_by_name(room_name)
+            if _room_data:
+                db.join_room(user["id"], _room_data["id"])
+        except Exception:
+            pass
+
     async def _emit_dm_call_log(caller_id: int, callee_id: int, call_type: str,
                                 title: str, subtitle: str, icon: str = "📵",
                                 kind: str = "missed"):

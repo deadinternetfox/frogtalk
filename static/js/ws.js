@@ -221,12 +221,7 @@ const WS = (() => {
       // ── DM events ────────────────────────────────
       case 'dm_message': {
         if (typeof handleWSDMMessage === 'function') handleWSDMMessage(data);
-        // Don't notify for our own DMs (echoed back by server)
-        const _selfId = (typeof STATE !== 'undefined' && STATE.user?.id) || (typeof State !== 'undefined' && State.user?.id);
-        const _selfNick = (typeof STATE !== 'undefined' && STATE.user?.nickname) || (typeof State !== 'undefined' && State.user?.nickname);
-        const _isMine = (data.sender_id && _selfId && data.sender_id === _selfId) ||
-                        (data.sender_nick && _selfNick && data.sender_nick === _selfNick);
-        if (!_isMine && (document.hidden || !data._isActive)) Notifications.notifyDM(data);
+        // Notification is now fired from handleWSDMMessage with decrypted content
         break;
       }
       case 'dm_typing': {

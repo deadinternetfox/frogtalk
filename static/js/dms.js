@@ -540,14 +540,20 @@ async function loadDMMessages (pageOffset = 0) {
   }
   const data = await r.json();
   const rawMsgs = Array.isArray(data) ? data : (data.messages || []);
+  // Resolve peer identity for decryption. _activeDM.user_id is set by the
+  // background ECDH task but may not be ready yet — fall back to the
+  // channel list entry which always has with_user_id populated.
+  const _dmChanEntry = _dmChannels.find(c => c.id === _activeDM?.id);
+  const _peerUserId  = _activeDM?.user_id || _dmChanEntry?.with_user_id || 0;
+  const _peerNick    = _activeDM?.nickname || '';
   const msgs = await Promise.all(rawMsgs.map(async (msg) => {
     if (!msg) return msg;
     const next = { ...msg };
     if (next.content) {
-      try { next.content = await decryptMsg(next.content); } catch {}
+      try { next.content = await _decryptDMPreviewContent(next.content, _peerUserId, _peerNick); } catch {}
     }
     if (next.reply_content) {
-      try { next.reply_content = await decryptMsg(next.reply_content); } catch {}
+      try { next.reply_content = await _decryptDMPreviewContent(next.reply_content, _peerUserId, _peerNick); } catch {}
     }
     return next;
   }));
@@ -1165,6 +1171,14 @@ function handleWSDMMessage (data) {
         const idx = _dmChannels.indexOf(ch);
         if (idx > 0) { _dmChannels.splice(idx, 1); _dmChannels.unshift(ch); }
         renderDMChannels();
+        // Notify with decrypted content so the system notification shows plaintext
+        if (!_isMine && (document.hidden || !data._isActive)) {
+          try {
+            if (typeof Notifications !== 'undefined' && Notifications.notifyDM) {
+              Notifications.notifyDM({ ...data, content: previewContent });
+            }
+          } catch {}
+        }
       } else {
         // Unknown channel — fall back to refresh (rare path).
         loadDMChannels();
@@ -1173,9 +1187,20 @@ function handleWSDMMessage (data) {
   })();
 
   if (!_activeDM || data.channel_id !== _activeDM.id) {
+    // Not in this DM — async-decrypt and toast with readable text
     if (!_isMine) {
-      const preview = _dmPreviewText(data.content, data.has_media, data.media_type);
-      toast(`💬 ${data.sender_nick}: ${preview ? preview.substring(0,60) : 'Media'}`, 'info', 4000);
+      (async () => {
+        try {
+          const ch2 = _dmChannels.find(c => c.id === data.channel_id);
+          const toastContent = await _decryptDMPreviewContent(
+            data.content || '',
+            data.sender_id || ch2?.with_user_id || 0,
+            data.sender_nick || ch2?.nickname || '',
+          );
+          const preview = _dmPreviewText(toastContent, data.has_media, data.media_type);
+          toast(`💬 ${data.sender_nick}: ${preview ? preview.substring(0,60) : 'Media'}`, 'info', 4000);
+        } catch {}
+      })();
     }
     return;
   }
@@ -1225,8 +1250,11 @@ function handleWSDMMessage (data) {
   // Try to decrypt
   (async () => {
     let content = data.content || '';
-    if (content && STATE.sharedSecret) {
-      try { content = await decryptMsg(content); } catch {}
+    if (content) {
+      const _dmChanEntry2 = _dmChannels.find(c => c.id === _activeDM?.id);
+      const _peerUid  = _activeDM?.user_id || _dmChanEntry2?.with_user_id || 0;
+      const _peerNk   = _activeDM?.nickname || '';
+      try { content = await _decryptDMPreviewContent(content, _peerUid, _peerNk); } catch {}
     }
     appendDMMessage({ ...data, content });
     // Active chat — immediately mark as read
