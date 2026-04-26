@@ -466,9 +466,9 @@ const Messages = (() => {
 
       State.messages[room].push(msg);
       
-      // Collect URLs for link previews
+      // Collect URLs for link previews (skip invite URLs — rendered as cards)
       const urls = (msg.content || '').match(urlRe);
-      if (urls && urls.length) {
+      if (urls && urls.length && !/\/invite\/[A-Za-z0-9]{6,16}/.test(urls[0])) {
         linksToPreview.push({ id: msg.id, url: urls[0] });
       }
     });
@@ -610,7 +610,7 @@ const Messages = (() => {
           _attachLongPress(pendingEl, msg.id);
           const urlRe = /https?:\/\/[^\s<>"]+/g;
           const urls = (msg.content || '').match(urlRe);
-          if (urls && urls.length) setTimeout(() => _loadLinkPreview(msg.id, urls[0]), 100);
+          if (urls && urls.length && !/\/invite\/[A-Za-z0-9]{6,16}/.test(urls[0])) setTimeout(() => _loadLinkPreview(msg.id, urls[0]), 100);
           const invCodes = (msg.content || '').match(/\/invite\/([A-Za-z0-9]{6,16})/g);
           if (invCodes) invCodes.forEach(m => _loadInviteCard(msg.id, m.replace('/invite/', '')));
           const cached = State.messages[room] || [];
