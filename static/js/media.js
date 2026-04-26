@@ -283,24 +283,35 @@ function showRecordingUI (stream) {
 function handleFileSelect (input) {
   const file = input.files?.[0];
   if (!file) return;
+  addPendingAttachmentFile(file);
+  input.value = '';
+}
+
+/* Reusable helper for any source (file picker, paste, camera). */
+function addPendingAttachmentFile (file, opts = {}) {
+  if (!file) return false;
+  const mime = file.type || 'application/octet-stream';
+  const name = opts.name || file.name || `attachment-${Date.now()}`;
+
   // Music channels: only images / GIFs are allowed to keep the DJ set clean.
-  if (document.body.classList.contains('in-music-channel') && !file.type.startsWith('image/')) {
+  if (document.body.classList.contains('in-music-channel') && !mime.startsWith('image/')) {
     toast('Only pictures and GIFs are allowed in music channels', 'info');
-    input.value = '';
-    return;
+    return false;
   }
   const MAX = 20 * 1024 * 1024;
-  if (file.size > MAX) { toast('File too large (max 20 MB)', 'error'); input.value = ''; return; }
+  if ((file.size || 0) > MAX) {
+    toast('File too large (max 20 MB)', 'error');
+    return false;
+  }
 
-  window._pendingAttachment = { blob: file, name: file.name, type: file.type };
-
+  window._pendingAttachment = { blob: file, name, type: mime };
   _renderAttachmentPreview({
     blob: file,
-    name: file.name,
-    type: file.type,
+    name,
+    type: mime,
     sizeBytes: file.size,
   });
-  input.value = '';
+  return true;
 }
 
 /* Shared attachment preview renderer. Produces:

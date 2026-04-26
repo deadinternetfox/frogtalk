@@ -872,10 +872,10 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .msg-pending .msg-time{color:#9a9a9a !important}
 .msg-content.encrypted{color:#555;font-style:italic;font-size:13px}
 .msg-media{max-width:min(360px,100%);max-height:300px;width:auto;height:auto;border-radius:8px;margin-top:6px;cursor:pointer;display:block;object-fit:contain}
-.media-lazy-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:200px;height:100px;border-radius:8px;margin-top:6px;background:#1a1a1a;border:1px dashed #333;cursor:pointer;transition:background .2s}
-.media-lazy-placeholder:hover{background:#222}
+.media-lazy-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:200px;height:100px;border-radius:8px;margin-top:6px;background:linear-gradient(180deg,#12231d,#0f1d18);border:1px dashed #2f5548;cursor:pointer;transition:background .2s,border-color .2s}
+.media-lazy-placeholder:hover{background:linear-gradient(180deg,#152922,#11211c);border-color:#3e6a5b}
 .media-lazy-placeholder.media-lazy-auto{cursor:default}
-.media-lazy-spinner{width:14px;height:14px;border:2px solid #333;border-top-color:#4caf50;border-radius:50%;animation:spin .8s linear infinite}
+.media-lazy-spinner{width:14px;height:14px;border:2px solid #2f5548;border-top-color:#6bb698;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .msg-reactions{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
 
@@ -1213,7 +1213,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .att-preview-item.is-spoiler img,
 .att-preview-item.is-spoiler video{filter:blur(14px) saturate(1.1);transition:filter .2s}
 .att-preview-sub{
-  display:block;font-size:11px;color:#888;margin-top:4px;
+  display:block;font-size:11px;color:#85a89a;margin-top:4px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;line-height:1.25
 }
 .preview-close{background:none;border:none;color:#ff5555;cursor:pointer;font-size:16px;margin-left:8px}
@@ -4119,7 +4119,7 @@ window.ConnErr = (function(){
         </div>
         <div class="input-row">
           <textarea id="msg-input" rows="1" placeholder="Message #general" maxlength="10000"
-                    oninput="autoResize(this);sendTyping();handleMentionInput(this)" onkeydown="handleInputKey(event)"></textarea>
+                    oninput="autoResize(this);sendTyping();handleMentionInput(this)" onkeydown="handleInputKey(event)" onpaste="handlePasteAttachment(event)"></textarea>
           <button class="send-btn" id="send-btn" onclick="sendMessage()" data-tip="Send">➤</button>
         </div>
       </div>
@@ -5636,9 +5636,9 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/users.js?v=191"></script>
 <script src="/static/js/emoji.js?v=191"></script>
 <script src="/static/js/friends.js?v=__APP_ASSET_VERSION__"></script>
-<script src="/static/js/dms.js?v=205"></script>
+<script src="/static/js/dms.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/calls.js?v=200"></script>
-<script src="/static/js/media.js?v=193"></script>
+<script src="/static/js/media.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/gifs.js?v=191"></script>
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=192"></script>

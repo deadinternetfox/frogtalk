@@ -145,7 +145,7 @@ const Messages = (() => {
     // YouTube embed
     if (preview.type === 'youtube' && preview.video_id) {
       html = `
-        <div class="yt-embed" style="margin-top:8px;max-width:480px;border-radius:8px;overflow:hidden;background:#0a0a0a;border:1px solid #222">
+        <div class="yt-embed" style="margin-top:8px;max-width:480px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
             <iframe 
               src="https://www.youtube.com/embed/${UI.escHtml(preview.video_id)}" 
@@ -154,12 +154,12 @@ const Messages = (() => {
               allowfullscreen
             ></iframe>
           </div>
-          <div style="padding:8px 12px;border-top:1px solid #222">
+          <div style="padding:8px 12px;border-top:1px solid #2f5548;background:rgba(12,28,22,.52)">
             <div style="font-size:11px;color:#ff0000;display:flex;align-items:center;gap:4px;margin-bottom:4px">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path fill="#fff" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
               YouTube${preview.author ? ` • ${UI.escHtml(preview.author)}` : ''}
             </div>
-            <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" style="font-weight:600;color:#e0e0e0;font-size:13px;text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(preview.title || 'YouTube Video')}</a>
+            <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" style="font-weight:600;color:#dff5e8;font-size:13px;text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(preview.title || 'YouTube Video')}</a>
           </div>
         </div>
       `;
@@ -183,28 +183,28 @@ const Messages = (() => {
     // Twitter/X - show link preview (can't embed due to restrictions)
     else if (preview.type === 'twitter') {
       html = `
-        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:#1a1a1a;border-left:4px solid #1da1f2;border-radius:4px;overflow:hidden;text-decoration:none;color:inherit;max-width:400px;padding:12px">
+        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-left:4px solid #1da1f2;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:400px;padding:12px;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           <div style="font-size:11px;color:#1da1f2;display:flex;align-items:center;gap:4px;margin-bottom:4px">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="#1da1f2"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
             X (Twitter)
           </div>
-          <div style="font-weight:500;color:#e0e0e0;font-size:13px">View post on X</div>
-          <div style="font-size:12px;color:#666;margin-top:4px">${UI.escHtml(preview.url)}</div>
+          <div style="font-weight:500;color:#dff5e8;font-size:13px">View post on X</div>
+          <div style="font-size:12px;color:#85a89a;margin-top:4px">${UI.escHtml(preview.url)}</div>
         </a>
       `;
     }
     // Standard link preview
     else {
       html = `
-        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:400px">
+        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:400px;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           ${preview.image ? `<img src="${UI.escHtml(preview.image)}" alt="" style="width:100%;max-height:200px;object-fit:cover" onerror="this.style.display='none'">` : ''}
-          <div style="padding:10px">
-            <div style="font-size:11px;color:#666;display:flex;align-items:center;gap:4px;margin-bottom:4px">
+          <div style="padding:10px;background:rgba(12,28,22,.52)">
+            <div style="font-size:11px;color:#85a89a;display:flex;align-items:center;gap:4px;margin-bottom:4px">
               ${preview.favicon ? `<img src="${UI.escHtml(preview.favicon)}" style="width:14px;height:14px;border-radius:2px" onerror="this.style.display='none'">` : ''}
               ${UI.escHtml(preview.site_name || '')}
             </div>
-            ${preview.title ? `<div style="font-weight:600;color:#e0e0e0;margin-bottom:4px;font-size:14px">${UI.escHtml(preview.title)}</div>` : ''}
-            ${preview.description ? `<div style="font-size:12px;color:#888;line-height:1.4">${UI.escHtml(preview.description.substring(0, 150))}${preview.description.length > 150 ? '…' : ''}</div>` : ''}
+            ${preview.title ? `<div style="font-weight:600;color:#dff5e8;margin-bottom:4px;font-size:14px">${UI.escHtml(preview.title)}</div>` : ''}
+            ${preview.description ? `<div style="font-size:12px;color:#85a89a;line-height:1.4">${UI.escHtml(preview.description.substring(0, 150))}${preview.description.length > 150 ? '…' : ''}</div>` : ''}
           </div>
         </a>
       `;
@@ -244,7 +244,7 @@ const Messages = (() => {
         <div class="media-lazy-placeholder media-lazy-auto" onclick="Messages.loadMedia(${msg.id})">
           <span class="media-lazy-icon" style="font-size:20px">${kind}</span>
           <span class="media-lazy-spinner" aria-hidden="true"></span>
-          <span style="font-size:12px;color:#888">Loading media…</span>
+          <span style="font-size:12px;color:#85a89a">Loading media…</span>
         </div>
       </div>`;
     }
@@ -1126,7 +1126,7 @@ const Messages = (() => {
     const container = document.getElementById(`media-lazy-${msgId}`);
     if (!container) return;
     const isBlur = container.getAttribute('data-blur') === '1';
-    container.innerHTML = '<div style="padding:12px;color:#888;font-size:13px">Loading…</div>';
+    container.innerHTML = '<div style="padding:12px;color:#85a89a;font-size:13px">Loading…</div>';
     try {
       const res = await apiFetch(`/api/messages/media/${msgId}`);
       if (!res.ok) throw new Error('Failed');
@@ -1164,7 +1164,7 @@ const Messages = (() => {
       }
       container.outerHTML = html;
     } catch {
-      container.innerHTML = '<div style="padding:12px;color:#f44;font-size:13px">Failed to load media</div>';
+      container.innerHTML = '<div style="padding:12px;color:#d9a89f;font-size:13px">Failed to load media</div>';
     }
   }
 
@@ -1545,6 +1545,26 @@ function handleInputKey(e) {
         break;
       }
     }
+  }
+}
+
+function handlePasteAttachment(e) {
+  const dt = e?.clipboardData;
+  if (!dt?.items?.length) return;
+  for (const item of dt.items) {
+    if (item.kind !== 'file') continue;
+    const file = item.getAsFile?.();
+    if (!file || !(file.type || '').startsWith('image/')) continue;
+    const ext = (file.type || 'image/png').split('/')[1] || 'png';
+    const name = `pasted-${Date.now()}.${ext}`;
+
+    // Route pasted images through the same attachment pipeline used by picker/camera.
+    if (typeof addPendingAttachmentFile === 'function') {
+      e.preventDefault();
+      addPendingAttachmentFile(file, { name, source: 'paste' });
+      return;
+    }
+    break;
   }
 }
 

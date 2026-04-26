@@ -968,7 +968,7 @@ function renderDMMessage (m) {
       <div class="media-lazy-placeholder media-lazy-auto" onclick="loadDMMedia(${m.id}, ${m.channel_id || _activeDM?.id || 0})">
         <span class="media-lazy-icon" style="font-size:20px">${icon}</span>
         <span class="media-lazy-spinner" aria-hidden="true"></span>
-        <span style="font-size:12px;color:#888">Loading media…</span>
+        <span style="font-size:12px;color:#85a89a">Loading media…</span>
       </div>
     </div>`;
   }
@@ -1203,7 +1203,7 @@ window.handleWSDMViewOnceViewedByPeer = handleWSDMViewOnceViewedByPeer;
 async function loadDMMedia (msgId, channelId) {
   const container = document.getElementById(`dm-media-lazy-${msgId}`);
   if (!container) return;
-  container.innerHTML = '<div style="padding:12px;color:#888;font-size:13px">Loading…</div>';
+  container.innerHTML = '<div style="padding:12px;color:#85a89a;font-size:13px">Loading…</div>';
   try {
     const res = await apiFetch(`/api/dms/${channelId}/messages/${msgId}/media`);
     if (!res.ok) throw new Error('Failed');
@@ -1223,7 +1223,7 @@ async function loadDMMedia (msgId, channelId) {
     }
     container.outerHTML = html;
   } catch {
-    container.innerHTML = '<div style="padding:12px;color:#f44;font-size:13px">Failed to load media</div>';
+    container.innerHTML = '<div style="padding:12px;color:#d9a89f;font-size:13px">Failed to load media</div>';
   }
 }
 
