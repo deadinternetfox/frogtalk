@@ -2055,7 +2055,23 @@ if ($singleThread) {
 
         /* ── FROGTALK MINI WIDGET (replaces Swamp Chat) ── */
         .frog-mini-headline { color:#00ff41; font-size:12px; margin:0; display:flex; align-items:center; gap:6px; }
-        .frog-mini-note { color:#4a8f4a; font-size:11px; }
+        .frog-mini-status { display:flex; align-items:center; gap:8px; min-width:0; }
+        .frog-mini-note { color:#4a8f4a; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px; }
+        .frog-mini-open-app {
+            display:none;
+            border:1px solid rgba(0,255,65,0.24);
+            background:rgba(0,255,65,0.07);
+            color:#8df28d;
+            border-radius:999px;
+            padding:2px 8px;
+            font-family:'Courier New', monospace;
+            font-size:10px;
+            line-height:1.25;
+            cursor:pointer;
+            white-space:nowrap;
+        }
+        .frog-mini-open-app:hover { border-color:rgba(0,255,65,0.45); color:#c8ffc8; background:rgba(0,255,65,0.12); }
+        .frog-mini-open-app.show { display:inline-flex; align-items:center; }
         .frog-mini-wrap { display:none; height: 360px; border-top:1px solid rgba(0,255,65,0.15); position: relative; background:#0b120b; overflow:hidden; }
         .frog-mini-wrap.open { display:block; }
         .frog-mini-frame { width:100%; height:100%; border:none; background:#0b120b; opacity:0; transition:opacity .22s ease; }
@@ -3624,7 +3640,10 @@ if ($singleThread) {
     <div class="chat-widget" id="chatWidget">
         <div class="chat-header" onclick="toggleFrogMini()">
             <h4 class="frog-mini-headline">🐸 Frogtalk</h4>
-            <span class="frog-mini-note" id="frogMiniState">Not logged in</span>
+            <div class="frog-mini-status">
+                <span class="frog-mini-note" id="frogMiniState">Not logged in</span>
+                <button type="button" id="frogMiniOpenAppBtn" class="frog-mini-open-app" onclick="frogMiniOpenFull(event)">Open App ↗</button>
+            </div>
             <button class="chat-toggle" id="chatToggleBtn">▲</button>
         </div>
         <div class="chat-body" id="chatBody" style="display:block;max-height:none;">
@@ -5684,6 +5703,27 @@ if ($singleThread) {
         } catch (e) { return ''; }
     }
 
+    function _frogMiniIsNativeClient() {
+        try {
+            var ua = String((navigator && navigator.userAgent) || '');
+            return /Electron|wv\)|; wv|FrogTalkAndroid|FrogTalkDesktop/i.test(ua);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function _frogMiniSetOpenAppVisible(visible) {
+        const btn = document.getElementById('frogMiniOpenAppBtn');
+        if (!btn) return;
+        if (visible) btn.classList.add('show');
+        else btn.classList.remove('show');
+    }
+
+    function frogMiniOpenFull(ev) {
+        if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();
+        window.open('/app', '_blank', 'noopener,noreferrer');
+    }
+
     function _frogMiniGetMessageContainer(doc) {
         if (!doc) return null;
         return doc.querySelector('#messages, .messages, #message-list, .message-list, .chat-messages, [data-role="messages"], main .msgs, main .chat-log');
@@ -5785,6 +5825,7 @@ if ($singleThread) {
         if (frogMiniLogged) {
             var nick = _frogMiniUserNick();
             stateEl.textContent = nick ? ('Logged in as ' + nick) : 'Logged in';
+            _frogMiniSetOpenAppVisible(!_frogMiniIsNativeClient());
             guest.style.display = 'none';
             wrap.classList.add('open');
             if (!frame.src || frame.src === 'about:blank') {
@@ -5797,6 +5838,7 @@ if ($singleThread) {
             }
         } else {
             stateEl.textContent = 'Not logged in';
+            _frogMiniSetOpenAppVisible(false);
             guest.style.display = 'flex';
             wrap.classList.remove('open');
             _frogMiniSetLoading(false);
