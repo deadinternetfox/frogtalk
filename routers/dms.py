@@ -276,32 +276,47 @@ async def send_message(channel_id: int, body: DMMessageBody,
 @router.post("/{channel_id}/messages/{msg_id}/view")
 async def mark_dm_viewed(channel_id: int, msg_id: int,
                          current_user: dict = Depends(get_current_user)):
-    """Consume view-once DM media for current user only."""
+    """Consume view-once DM media for current user only. Notify sender if receiver views."""
     # Verify membership
     _, ok = db.get_dm_messages(channel_id, current_user["id"], 1)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
     with db._conn() as con:
         row = con.execute(
-            "SELECT id, view_once FROM dm_messages WHERE id=? AND channel_id=?",
+            "SELECT id, view_once, sender_id FROM dm_messages WHERE id=? AND channel_id=?",
             (msg_id, channel_id)
         ).fetchone()
     if not row:
         return JSONResponse(status_code=404, content={"error": "Message not found"})
     if not row["view_once"]:
         return JSONResponse(status_code=400, content={"error": "Not a view-once message"})
-    db.mark_dm_view_once_viewed(msg_id, current_user["id"])
-    # Sync consumed state across all sessions/devices for this same account.
+    sender_id = row["sender_id"]
+    viewer_id = current_user["id"]
+    is_sender = (sender_id == viewer_id)
+    
+    # Only mark as consumed if the viewer is NOT the sender
+    if not is_sender:
+        db.mark_dm_view_once_viewed(msg_id, viewer_id)
+    
+    # Sync state: always notify the viewer, and if receiver viewed, notify sender
     try:
-        await manager.send_to_user(current_user["id"], {
+        await manager.send_to_user(viewer_id, {
             "type": "dm_view_once_viewed",
             "channel_id": channel_id,
             "msg_id": msg_id,
-            "user_id": current_user["id"],
+            "user_id": viewer_id,
+            "is_sender": is_sender,
         })
+        if not is_sender and sender_id:
+            await manager.send_to_user(sender_id, {
+                "type": "dm_view_once_viewed_by_peer",
+                "channel_id": channel_id,
+                "msg_id": msg_id,
+                "viewer_id": viewer_id,
+            })
     except Exception:
         pass
-    return {"ok": True, "viewed_by_me": 1}
+    return {"ok": True, "viewed_by_me": 1 if not is_sender else 0}
 
 
 @router.put("/{channel_id}/messages/{msg_id}")

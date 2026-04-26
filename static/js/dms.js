@@ -1022,15 +1022,21 @@ function revealDMSpoiler (wrap, ev) {
 }
 window.revealDMSpoiler = revealDMSpoiler;
 
-/* Reveal a DM view-once image — load full media, show 10-second overlay, then consume. */
+/* Reveal a DM view-once image — load full media, show overlay. Consume only if receiver. */
 async function revealDMViewOnce (msgId) {
+  const msgIdx = _dmMessages.findIndex(x => +x.id === +msgId);
+  const msg = msgIdx >= 0 ? _dmMessages[msgIdx] : null;
+  const isSender = msg && msg.sender_id === (STATE.user?.id || 0);
+
   const _markViewedLocal = () => {
     const i = _dmMessages.findIndex(x => +x.id === +msgId);
     const cid = (i >= 0 && _dmMessages[i].channel_id) ? _dmMessages[i].channel_id : (_activeDM?.id || 0);
-    if (i >= 0) _dmMessages[i].viewed_by_me = 1;
-    _markViewOnceSeenLocal(msgId, cid);
-    const fresh = document.getElementById(`vo-dm-${msgId}`);
-    if (fresh) fresh.outerHTML = '<div class="view-once-viewed">🔥 <em>Viewed</em></div>';
+    if (i >= 0 && !isSender) _dmMessages[i].viewed_by_me = 1;
+    if (!isSender) _markViewOnceSeenLocal(msgId, cid);
+    const el = document.getElementById(`vo-dm-${msgId}`);
+    if (el) el.outerHTML = isSender 
+      ? '<div class="view-once-preview">🔥 <em>Sent • Awaiting view</em></div>'
+      : '<div class="view-once-viewed">🔥 <em>Viewed</em></div>';
   };
 
   const el = document.getElementById(`vo-dm-${msgId}`);
@@ -1081,17 +1087,20 @@ async function revealDMViewOnce (msgId) {
     return;
   }
 
-  // Open in fullscreen lightbox overlay — close/backdrop click marks as viewed
+  // Open in fullscreen lightbox overlay — close/backdrop click marks as viewed (receiver only)
   const overlay = document.createElement('div');
   overlay.className = 'vo-overlay';
   const safeMime = mimeType || '';
   const mediaEl = safeMime.startsWith('video')
     ? `<video class="vo-media" src="${mediaData}" autoplay controls playsinline></video>`
     : `<img class="vo-media" src="${mediaData}" alt="">`;
+  const hintText = isSender
+    ? '🔥 Sent • Waiting for them to open…'
+    : '🔥 View Once • tap outside or close to dismiss';
   overlay.innerHTML = `
     <button class="vo-close" title="Close">✕</button>
     ${mediaEl}
-    <div class="vo-hint">🔥 View Once • tap outside or close to dismiss</div>`;
+    <div class="vo-hint">${hintText}</div>`;
   document.body.appendChild(overlay);
 
   let closed = false;
@@ -1101,7 +1110,10 @@ async function revealDMViewOnce (msgId) {
     document.removeEventListener('keydown', onKey);
     overlay.remove();
     _markViewedLocal();
-    try { await apiFetch(`/api/dms/${channelId}/messages/${msgId}/view`, 'POST'); } catch {}
+    // Only consume (call /view) if receiver
+    if (!isSender) {
+      try { await apiFetch(`/api/dms/${channelId}/messages/${msgId}/view`, 'POST'); } catch {}
+    }
     delete el.dataset.opening;
   };
 
@@ -1119,12 +1131,24 @@ function handleWSDMViewOnceViewed (data) {
   if (myId && data.user_id && +data.user_id !== +myId) return;
   const i = _dmMessages.findIndex(x => +x.id === +data.msg_id);
   const cid = data.channel_id || ((i >= 0 && _dmMessages[i].channel_id) ? _dmMessages[i].channel_id : (_activeDM?.id || 0));
-  if (i >= 0) _dmMessages[i].viewed_by_me = 1;
-  _markViewOnceSeenLocal(data.msg_id, cid);
+  if (i >= 0) {
+    if (!data.is_sender) _dmMessages[i].viewed_by_me = 1;
+    _dmMessages[i].viewed_by_other = 1;
+  }
+  if (!data.is_sender) _markViewOnceSeenLocal(data.msg_id, cid);
   const el = document.getElementById(`vo-dm-${data.msg_id}`);
-  if (el) el.outerHTML = '<div class="view-once-viewed">🔥 <em>Viewed</em></div>';
+  if (el) el.outerHTML = '<div class="view-once-viewed">🔥 ✓ <em>Seen</em></div>';
 }
 window.handleWSDMViewOnceViewed = handleWSDMViewOnceViewed;
+
+function handleWSDMViewOnceViewedByPeer (data) {
+  if (!data || !data.msg_id) return;
+  const i = _dmMessages.findIndex(x => +x.id === +data.msg_id);
+  if (i >= 0) _dmMessages[i].viewed_by_other = 1;
+  const el = document.getElementById(`vo-dm-${data.msg_id}`);
+  if (el) el.outerHTML = '<div class="view-once-viewed">🔥 ✓ <em>Seen</em></div>';
+}
+window.handleWSDMViewOnceViewedByPeer = handleWSDMViewOnceViewedByPeer;
 
 /* ── Lazy-load DM media ──────────────────────────────────────────────────────── */
 async function loadDMMedia (msgId, channelId) {
