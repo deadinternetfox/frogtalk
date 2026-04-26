@@ -222,6 +222,7 @@ _APP_HTML_PATH = "static/index.html"
 _APP_JS_PATH = "static/js/app.js"
 _MESSAGES_JS_PATH = "static/js/messages.js"
 _UI_JS_PATH = "static/js/ui.js"
+_FRIENDS_JS_PATH = "static/js/friends.js"
 
 
 def _serve_app_shell_response() -> HTMLResponse:
@@ -232,6 +233,7 @@ def _serve_app_shell_response() -> HTMLResponse:
             os.path.getmtime(_APP_JS_PATH),
             os.path.getmtime(_MESSAGES_JS_PATH),
             os.path.getmtime(_UI_JS_PATH),
+            os.path.getmtime(_FRIENDS_JS_PATH),
         )))
     except Exception:
         app_asset_version = str(int(time.time()))
