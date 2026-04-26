@@ -85,12 +85,27 @@ const UI = (() => {
     if (inputEl && document.activeElement !== inputEl) inputEl.value = msg;
   }
 
-  function toggleSelfStatusComposer(open) {
+  async function _refreshSelfStatusFromApi() {
+    try {
+      const res = await fetch('/api/auth/me', { headers: { 'X-Session-Token': State.token } });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data || !State.user) return;
+      if (typeof data.presence === 'string') State.user.presence = data.presence;
+      if (typeof data.status_msg === 'string') State.user.status_msg = data.status_msg;
+      if (typeof State.save === 'function') State.save();
+      renderSelfStatus();
+      renderSelfQuickStatus();
+    } catch {}
+  }
+
+  async function toggleSelfStatusComposer(open) {
     const wrap = document.getElementById('self-quick-editor');
     const input = document.getElementById('self-quick-input');
     const tick = document.getElementById('self-quick-save');
     if (!wrap || !input) return;
     const wantOpen = (typeof open === 'boolean') ? open : !wrap.classList.contains('is-open');
+    if (wantOpen) await _refreshSelfStatusFromApi();
     wrap.classList.toggle('is-open', wantOpen);
     if (tick) tick.classList.toggle('is-active', wantOpen);
     if (wantOpen) {
@@ -113,9 +128,10 @@ const UI = (() => {
     toggleSelfStatusComposer(false);
   }
 
-  function openStatusPicker(ev) {
+  async function openStatusPicker(ev) {
     try { ev?.stopPropagation?.(); } catch {}
     if (!State?.user) return;
+    await _refreshSelfStatusFromApi();
     let pop = document.getElementById('status-picker-popover');
     if (!pop) {
       pop = document.createElement('div');
@@ -134,7 +150,9 @@ const UI = (() => {
       `;
       document.body.appendChild(pop);
       document.addEventListener('click', (e) => {
-        if (!pop.contains(e.target) && e.target.id !== 'self-status') {
+        const statusAnchor = document.getElementById('self-status');
+        const clickedStatusAnchor = !!(statusAnchor && statusAnchor.contains(e.target));
+        if (!pop.contains(e.target) && !clickedStatusAnchor) {
           pop.style.display = 'none';
         }
       });

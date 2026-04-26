@@ -304,12 +304,13 @@ function openFriendsPanel() {
         top: 0;
         width: 300px;
         height: 100vh;
-        background: #141414;
-        border-right: 1px solid #2a2a2a;
+        background: linear-gradient(180deg,#132520 0%,#0f1d19 58%,#0c1714 100%);
+        border-right: 1px solid #2a4a3f;
         z-index: 500;
         display: none;
         flex-direction: column;
         animation: slideInLeft .2s ease;
+        box-shadow: 4px 0 22px rgba(0,0,0,.3);
       }
       .frog-friends-panel.open { display: flex; }
       @keyframes slideInLeft {
@@ -322,27 +323,28 @@ function openFriendsPanel() {
         align-items: center;
         padding: 16px;
         font-weight: 600;
-        color: #e0e0e0;
-        border-bottom: 1px solid #2a2a2a;
+        color: #dff3e9;
+        border-bottom: 1px solid #2a4a3f;
+        background: linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));
       }
       .ffp-tabs {
         display: flex;
         padding: 8px;
         gap: 4px;
-        border-bottom: 1px solid #2a2a2a;
+        border-bottom: 1px solid #29453b;
       }
       .ffp-tab {
         flex: 1;
         background: transparent;
         border: none;
-        color: #888;
+        color: #97b3a8;
         padding: 8px;
         border-radius: 6px;
         cursor: pointer;
         font-size: 12px;
       }
-      .ffp-tab:hover { background: #1e1e1e; color: #e0e0e0; }
-      .ffp-tab.active { background: #1a3a1a; color: #4caf50; }
+      .ffp-tab:hover { background: rgba(30,61,50,.72); color: #e7f5ee; }
+      .ffp-tab.active { background: linear-gradient(180deg,#234238,#1b332b); color: #79cf9f; }
       .ffp-content {
         flex: 1;
         overflow-y: auto;
@@ -355,9 +357,14 @@ function openFriendsPanel() {
         padding: 10px;
         border-radius: 8px;
         cursor: pointer;
-        transition: background .15s;
+        transition: background .15s, border-color .15s, transform .1s;
+        border: 1px solid transparent;
       }
-      .ffp-friend:hover { background: #1e1e1e; }
+      .ffp-friend:hover {
+        background: linear-gradient(180deg,rgba(27,54,45,.65),rgba(20,40,33,.65));
+        border-color: rgba(110,178,147,.25);
+        transform: translateY(-1px);
+      }
       .ffp-avatar {
         font-size: 1.8rem;
         position: relative;
@@ -370,16 +377,16 @@ function openFriendsPanel() {
         width: 10px;
         height: 10px;
         border-radius: 50%;
-        border: 2px solid #141414;
+        border: 2px solid #12231d;
       }
       .ffp-info { flex: 1; min-width: 0; }
-      .ffp-name { font-weight: 600; font-size: 14px; color: #e0e0e0; }
-      .ffp-status { font-size: 12px; color: #888; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ffp-name { font-weight: 600; font-size: 14px; color: #dff3e9; }
+      .ffp-status { font-size: 12px; color: #9cb9ae; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .ffp-actions { display: flex; gap: 4px; }
       .ffp-empty {
         text-align: center;
         padding: 40px 16px;
-        color: #666;
+        color: #8aa498;
       }
     `;
     document.head.appendChild(style);
