@@ -261,8 +261,8 @@ const UI = (() => {
       document.body.appendChild(stack);
     }
     const icons  = { error: '⚠️', success: '✓',   info: 'ℹ️',  warn: '⚠️' };
-    const accent = { error: '#ff5555', success: '#4caf50', info: '#4a9eff', warn: '#ffb84a' };
-    const bg     = { error: '#1f0f0f', success: '#0f1f12', info: '#0f141f', warn: '#1f1808' };
+    const accent = { error: '#ff8a8a', success: '#7fd8a5', info: '#9fd8c0', warn: '#e7cf8b' };
+    const bg     = { error: '#2a1517', success: '#152721', info: '#14231f', warn: '#2a2316' };
     const color  = accent[type] || accent.info;
     const toast = document.createElement('div');
     toast.className = 'ft-toast ft-toast-enter';
@@ -272,7 +272,7 @@ const UI = (() => {
       border:1px solid ${color}55;border-left:3px solid ${color};
       color:#e8e8e8;border-radius:10px;padding:10px 16px 10px 12px;
       font-size:14px;line-height:1.35;
-      box-shadow:0 8px 28px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.2);
+      box-shadow:0 8px 28px rgba(0,0,0,.5),0 0 0 1px rgba(126,199,166,.08);
       backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
       transition:transform .22s cubic-bezier(.22,1.02,.36,1),opacity .22s ease;
       transform:translateY(16px) scale(.96);opacity:0
@@ -310,17 +310,18 @@ const UI = (() => {
       el.id = 'progress-toast';
       el.style.cssText = `
         position:fixed;bottom:70px;left:50%;transform:translateX(-50%);
-        background:#141414;border:1px solid #2a2a2a;border-radius:12px;
+        background:linear-gradient(180deg,#153028,#112720);
+        border:1px solid #305d4d;border-radius:12px;
         padding:12px 20px;z-index:1000;box-shadow:0 4px 24px rgba(0,0,0,.6);
         min-width:220px;transition:opacity .3s;
       `;
       el.innerHTML = `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <span id="progress-toast-label" style="font-size:13px;color:#e0e0e0;flex:1"></span>
-          <span id="progress-toast-pct" style="font-size:12px;color:#4caf50;font-weight:700;min-width:36px;text-align:right"></span>
+          <span id="progress-toast-label" style="font-size:13px;color:#e4f3ec;flex:1"></span>
+          <span id="progress-toast-pct" style="font-size:12px;color:#7fd8a5;font-weight:700;min-width:36px;text-align:right"></span>
         </div>
-        <div style="height:4px;background:#2a2a2a;border-radius:2px;overflow:hidden">
-          <div id="progress-toast-bar" style="height:100%;background:linear-gradient(90deg,#4caf50,#66bb6a);border-radius:2px;transition:width .3s ease;width:0%"></div>
+        <div style="height:4px;background:#1d3a31;border-radius:2px;overflow:hidden">
+          <div id="progress-toast-bar" style="height:100%;background:linear-gradient(90deg,#6bc29a,#8adbb3);border-radius:2px;transition:width .3s ease;width:0%"></div>
         </div>
       `;
       document.body.appendChild(el);
