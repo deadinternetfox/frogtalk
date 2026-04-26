@@ -54,29 +54,29 @@ function renderFriendTab () {
     : _allFriends;
 
   if (!list.length) {
-    el.innerHTML = `<div style="color:#888;text-align:center;padding:32px 0">
+    el.innerHTML = `<div style="color:#9ec4b2;text-align:center;padding:32px 0">
       ${_currentFriendTab === 'friends' ? 'No friends online' : 'No friends yet'}<br>
-      <small style="font-size:12px;color:#555">Use the Add tab to find people</small>
+      <small style="font-size:12px;color:#7fa392">Use the Add tab to find people</small>
     </div>`;
     return;
   }
 
   el.innerHTML = list.map(f => `
-    <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1a1a">
+    <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
       <div style="position:relative;flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center">
         ${fmtAv(f.avatar, f.nickname, 40)}
         <span style="position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;
-          background:${presenceColor(f.presence)};border:2px solid #141414"></span>
+          background:${presenceColor(f.presence)};border:2px solid #12231d"></span>
       </div>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:14px">${esc(f.nickname)}</div>
-        <div style="font-size:12px;color:#888">${esc(f.status_msg||presenceLabel(f.presence))}</div>
+        <div style="font-weight:600;font-size:14px;color:#e3f6ec">${esc(f.nickname)}</div>
+        <div style="font-size:12px;color:#9dc4b2">${esc(f.status_msg||presenceLabel(f.presence))}</div>
       </div>
       <div style="display:flex;gap:4px">
         <button class="icon-btn" onclick="closeFriends();openDMWithNick('${esc(f.nickname)}')" title="Message">💬</button>
         <button class="icon-btn" onclick="closeFriends();callNick('${esc(f.nickname)}','voice')" title="Call">📞</button>
         <button class="icon-btn" onclick="openFriendSoundEditor('${esc(f.nickname)}')" title="Custom sounds">🔔</button>
-        <button class="icon-btn" onclick="removeFriend('${esc(f.nickname)}', this)" title="Remove" style="color:#888">✕</button>
+        <button class="icon-btn" onclick="removeFriend('${esc(f.nickname)}', this)" title="Remove" style="color:#95b9a8">✕</button>
       </div>
     </div>`).join('');
 }
@@ -86,17 +86,17 @@ function renderPending (el) {
   const outgoing = _allFriends.filter ? [] : []; // we re-fetch outgoing below if needed
 
   if (!incoming.length) {
-    el.innerHTML = `<div style="color:#888;text-align:center;padding:32px 0">No pending requests</div>`;
+    el.innerHTML = `<div style="color:#9ec4b2;text-align:center;padding:32px 0">No pending requests</div>`;
     return;
   }
 
-  el.innerHTML = `<div style="font-size:12px;color:#888;font-weight:600;margin-bottom:8px">INCOMING</div>` +
+  el.innerHTML = `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin-bottom:8px;letter-spacing:.4px">INCOMING</div>` +
     incoming.map(f => `
-      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1a1a">
+      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${fmtAv(f.avatar, f.nickname, 40)}</div>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:14px">${esc(f.nickname)}</div>
-          <div style="font-size:12px;color:#888">${esc(f.bio||'')}</div>
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec">${esc(f.nickname)}</div>
+          <div style="font-size:12px;color:#9dc4b2">${esc(f.bio||'')}</div>
         </div>
         <div style="display:flex;gap:6px">
           <button class="modal-btn primary" style="padding:4px 10px;font-size:12px" onclick="acceptFriend('${esc(f.nickname)}', this)">✓ Accept</button>
@@ -127,18 +127,18 @@ async function searchFriends () {
     const users = Array.isArray(data) ? data : (data.users || []);
     const el = document.getElementById('friend-search-results');
     if (!el) return;
-    if (!users.length) { el.innerHTML='<div style="color:#888;text-align:center;padding:16px">No users found</div>'; return; }
+    if (!users.length) { el.innerHTML='<div style="color:#9ec4b2;text-align:center;padding:16px">No users found</div>'; return; }
     const myNick = STATE.user?.nickname;
     el.innerHTML = users.filter(u => u.nickname !== myNick).map(u => {
       const isFriend = _allFriends.some(f => f.nickname === u.nickname);
-      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #1a1a1a">
+      return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${fmtAv(u.avatar, u.nickname, 40)}</div>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:14px">${esc(u.nickname)}</div>
-          <div style="font-size:12px;color:#888">${esc(u.bio||'')}</div>
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec">${esc(u.nickname)}</div>
+          <div style="font-size:12px;color:#9dc4b2">${esc(u.bio||'')}</div>
         </div>
         ${isFriend
-          ? `<span style="font-size:12px;color:#4caf50">Friends</span>`
+          ? `<span style="font-size:12px;color:#7fd2a7">Friends</span>`
           : `<button class="modal-btn primary" style="padding:4px 12px;font-size:12px"
                onclick="sendFriendReq('${esc(u.nickname)}',this)">+ Add</button>`}
       </div>`;

@@ -5208,16 +5208,16 @@ window.ConnErr = (function(){
 
 <!-- ═══════════ FRIENDS PANEL (replaces users panel when in friends view) ══════ -->
 <div id="friends-panel" class="modal-overlay hidden" style="z-index:400">
-  <div class="modal" style="max-width:480px;max-height:85vh">
+  <div class="modal" style="max-width:480px;max-height:85vh;background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%);border:1px solid #3b6c59;box-shadow:0 20px 46px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.08)">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-      <div class="modal-title" style="margin-bottom:0">👥 Friends</div>
+      <div class="modal-title" style="margin-bottom:0;color:#dff5e8">👥 Friends</div>
       <button class="icon-btn" onclick="closeFriends()">✕</button>
     </div>
-    <div style="display:flex;gap:4px;margin-bottom:16px;background:#0d0d0d;border-radius:8px;padding:4px">
-      <div class="auth-tab active" id="ftab-friends" onclick="switchFriendTab('friends')" style="flex:1;padding:6px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px">Online</div>
-      <div class="auth-tab" id="ftab-all" onclick="switchFriendTab('all')" style="flex:1;padding:6px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px">All Friends</div>
-      <div class="auth-tab" id="ftab-pending" onclick="switchFriendTab('pending')" style="flex:1;padding:6px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px">Pending <span id="pending-badge"></span></div>
-      <div class="auth-tab" id="ftab-add" onclick="switchFriendTab('add')" style="flex:1;padding:6px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px">Add</div>
+    <div style="display:flex;gap:4px;margin-bottom:16px;background:linear-gradient(180deg,#10231b,#0d1d17);border:1px solid #2f594a;border-radius:10px;padding:4px">
+      <div class="auth-tab active" id="ftab-friends" onclick="switchFriendTab('friends')" style="flex:1;padding:6px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;color:#d8f1e4">Online</div>
+      <div class="auth-tab" id="ftab-all" onclick="switchFriendTab('all')" style="flex:1;padding:6px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;color:#b8d5c8">All Friends</div>
+      <div class="auth-tab" id="ftab-pending" onclick="switchFriendTab('pending')" style="flex:1;padding:6px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;color:#b8d5c8">Pending <span id="pending-badge"></span></div>
+      <div class="auth-tab" id="ftab-add" onclick="switchFriendTab('add')" style="flex:1;padding:6px;text-align:center;border-radius:6px;cursor:pointer;font-size:13px;color:#b8d5c8">Add</div>
     </div>
     <div id="friends-content"></div>
   </div>
