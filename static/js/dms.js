@@ -1279,6 +1279,7 @@ async function sendDMMessage () {
       const el = tmp.firstElementChild;
       if (el) {
         el.classList.add('dm-pending');
+        el.setAttribute('data-own', '1');
         el.setAttribute('data-nonce', _nonce);
         el.style.opacity = '0.65';
         area.appendChild(el);
@@ -1368,7 +1369,10 @@ function handleWSDMMessage (data) {
     const pend = area?.querySelector('.dm-pending[data-nonce="' + (data.client_nonce || '') + '"]');
     if (pend && data.id) {
       pend.classList.remove('dm-pending');
+      pend.removeAttribute('data-own');
+      pend.removeAttribute('data-nonce');
       pend.setAttribute('data-dmid', data.id);
+      pend.style.opacity = '';
       const tick = pend.querySelector('.msg-tick');
       if (tick) {
         tick.dataset.mid = data.id;
@@ -1385,9 +1389,12 @@ function handleWSDMMessage (data) {
     // Fallback reconciliation when server/client nonce is missing: upgrade
     // the most recent pending bubble from me so sent state doesn't stay dull.
     if (data.id && area) {
-      const fallback = area.querySelector('.dm-pending');
+      const pendingEls = Array.from(area.querySelectorAll('.dm-pending[data-own="1"], .dm-pending'));
+      const fallback = pendingEls.length ? pendingEls[pendingEls.length - 1] : null;
       if (fallback) {
         fallback.classList.remove('dm-pending');
+        fallback.removeAttribute('data-own');
+        fallback.removeAttribute('data-nonce');
         fallback.setAttribute('data-dmid', data.id);
         fallback.style.opacity = '';
         const tick = fallback.querySelector('.msg-tick');
@@ -1397,7 +1404,11 @@ function handleWSDMMessage (data) {
           tick.title = 'Delivered';
           tick.classList.remove('msg-tick-pending', 'msg-tick-read');
         }
-        const pi = _dmMessages.findIndex(x => x._pending && ((x.sender_id|0) === (_selfId|0)));
+        let pi = -1;
+        for (let i = _dmMessages.length - 1; i >= 0; i--) {
+          const x = _dmMessages[i];
+          if (x && x._pending && ((x.sender_id|0) === (_selfId|0))) { pi = i; break; }
+        }
         if (pi >= 0) _dmMessages[pi] = { ...data, content: _dmMessages[pi].content };
         return;
       }
