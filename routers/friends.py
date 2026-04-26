@@ -8,6 +8,7 @@ from typing import Optional
 
 import database as db
 from deps import get_current_user
+from ws_manager import manager
 
 router = APIRouter(prefix="/friends", tags=["friends"])
 users_router = APIRouter(prefix="/users", tags=["users_ext"])
@@ -207,8 +208,24 @@ async def block_user(nickname: str, current_user: dict = Depends(get_current_use
 
 @router.get("")
 async def list_friends(current_user: dict = Depends(get_current_user)):
+    friends = db.get_friends(current_user["id"])
+    try:
+        online_ids = {int(u.get("user_id")) for u in manager.online_users_snapshot() if u.get("user_id") is not None}
+    except Exception:
+        online_ids = set()
+
+    # Presence in DB can remain stale after abrupt disconnects. Normalize to
+    # offline when there is no live websocket session for that friend.
+    for f in friends:
+        try:
+            fid = int(f.get("id"))
+        except Exception:
+            continue
+        if fid not in online_ids:
+            f["presence"] = "offline"
+
     return {
-        "friends": db.get_friends(current_user["id"]),
+        "friends": friends,
         "requests_in": db.get_friend_requests_in(current_user["id"]),
         "requests_out": db.get_friend_requests_out(current_user["id"]),
     }

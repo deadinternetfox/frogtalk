@@ -140,6 +140,16 @@
 #members-panel{background:var(--surface-color) !important;border-color:var(--border-color) !important}
 #voice-bar{background:var(--surface-color) !important;border-color:var(--border-color) !important}
 
+/* Keep Friends popup on the green theme even with global .modal !important rules */
+#friends-panel .modal{
+  background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%) !important;
+  border:1px solid #3b6c59 !important;
+  color:#dff5e8 !important;
+}
+#friends-panel .modal-title{color:#dff5e8 !important}
+#friends-panel .auth-tab{color:#b8d5c8 !important}
+#friends-panel .auth-tab.active{color:#7fd2a7 !important;background:linear-gradient(180deg,#214438,#18362c) !important}
+
 /* Chat/Channel UI refresh — move core surfaces off flat dark/grey */
 #server-list{
   background:linear-gradient(180deg,#0c1713 0%,#0a1411 55%,#08110e 100%) !important;
