@@ -3724,8 +3724,8 @@ window.ConnErr = (function(){
       <span id="friends-sidebar-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#f85149;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:14px;text-align:center"></span>
     </div>
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="showChannelDirectory()">🧭</div>
-    <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" id="social-server-icon" onclick="Social.open('feed')" style="background:linear-gradient(135deg,#0d1f0d,#1e3a1e);color:#4caf50;font-weight:700">🐸</div>
-    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🐸</div>
+    <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" id="social-server-icon" onclick="Social.open('feed')" style="background:linear-gradient(135deg,#0d1f0d,#1e3a1e);color:#4caf50;font-weight:700">🌐</div>
+    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🧵</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="showProfile()">⚙️</div>
   </div>
@@ -3770,8 +3770,8 @@ window.ConnErr = (function(){
         <button class="icon-btn" onclick="openDMsPanel()" data-tip="DMs">💬</button>
         <button class="icon-btn" onclick="openFriends()" data-tip="Friends">👥</button>
         <button class="icon-btn" onclick="showChannelDirectory()" data-tip="Directory">🧭</button>
-        <button class="icon-btn" onclick="Social.open('feed')" data-tip="Social">🐸</button>
-        <button class="icon-btn" onclick="openFrogBoard()" data-tip="Frog Channel">🐸</button>
+        <button class="icon-btn" onclick="Social.open('feed')" data-tip="Social">🌐</button>
+        <button class="icon-btn" onclick="openFrogBoard()" data-tip="Frog Channel">🧵</button>
         <button class="icon-btn" onclick="showProfile()" data-tip="Settings">⚙️</button>
         <button class="icon-btn" onclick="doLogout()" data-tip="Logout">🚪</button>
       </div>
@@ -5277,7 +5277,6 @@ window.ConnErr = (function(){
       <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="closeFrogBoard();showChannelDirectory()">🧭</div>
       <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" onclick="closeFrogBoard();Social.open('feed')">🐸</div>
       <div class="server-divider"></div>
-      <a class="server-icon" data-tip="Open Frog Channel in new tab" data-tip-pos="right" href="/board/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">🗂️</a>
       <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="closeFrogBoard();showProfile()">⚙️</div>
       <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="closeFrogBoard()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
       <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
@@ -5333,12 +5332,6 @@ function isNativeFrogClient() {
   }
 }
 
-function syncBrandMetaVisibility() {
-  const meta = document.getElementById('social-topbar-meta');
-  if (!meta) return;
-  meta.hidden = isNativeFrogClient() || hasFrogTalkSession();
-}
-
 function openFrogBoard() {
   const ol = document.getElementById('board-overlay');
   const frame = document.getElementById('board-frame');
@@ -5353,7 +5346,6 @@ function updateBoardSideMenuAuth() {
   const menu = document.getElementById('board-side-menu');
   if (!menu) return;
   menu.classList.toggle('guest-menu', !hasFrogTalkSession());
-  syncBrandMetaVisibility();
 }
 
 function openBoardAuth(mode) {
@@ -5377,7 +5369,6 @@ function closeFrogBoard() {
 window.addEventListener('storage', updateBoardSideMenuAuth);
 window.addEventListener('focus', updateBoardSideMenuAuth);
 document.getElementById('board-frame')?.addEventListener('load', updateBoardSideMenuAuth);
-syncBrandMetaVisibility();
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoard(); });
 </script>
 <script src="/static/js/crypto.js?v=191"></script>
