@@ -227,7 +227,7 @@ function presenceLabel (p) {
 
 function isFriendOnlinePresence(friend) {
   const p = String((friend && friend.presence) || '').toLowerCase();
-  return p === 'online' || p === 'away' || p === 'dnd';
+  return p === 'online';
 }
 
 /* ── Receive WS push notification for friend request ───────────────────────── */
