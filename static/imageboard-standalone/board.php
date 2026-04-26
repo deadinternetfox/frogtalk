@@ -2745,7 +2745,7 @@ if ($singleThread) {
         <div class="container">
             <div class="nav-branding">
                 <a href="/" style="text-decoration:none;color:inherit;"><h1 class="logo">&#x1F438; Frog Channel</h1></a>
-                <p class="logo-meta">powered by FrogTalk</p>
+                <p class="logo-meta" id="boardLogoMeta">powered by FrogTalk</p>
                 <p class="tagline">ANONYMOUS IMAGEBOARD &middot; SPEAK FREELY</p>
             </div>
             <div class="nav-links">
@@ -5728,6 +5728,15 @@ if ($singleThread) {
         if (visible) btn.classList.add('show');
         else btn.classList.remove('show');
     }
+
+    function _frogBoardSyncBrandMeta() {
+        const meta = document.getElementById('boardLogoMeta');
+        if (!meta) return;
+        const loggedIn = !!(_frogMiniToken() && _frogMiniUserNick());
+        meta.hidden = _frogMiniIsNativeClient() || loggedIn;
+    }
+
+    _frogBoardSyncBrandMeta();
 
     function frogMiniOpenFull(ev) {
         if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation();

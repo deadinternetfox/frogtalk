@@ -3724,8 +3724,8 @@ window.ConnErr = (function(){
       <span id="friends-sidebar-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#f85149;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:14px;text-align:center"></span>
     </div>
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="showChannelDirectory()">🧭</div>
-    <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" id="social-server-icon" onclick="Social.open('feed')" style="background:linear-gradient(135deg,#0d1f0d,#1e3a1e);color:#4caf50;font-weight:700">🌐</div>
-    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🧵</div>
+    <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" id="social-server-icon" onclick="Social.open('feed')" style="background:linear-gradient(135deg,#0d1f0d,#1e3a1e);color:#4caf50;font-weight:700">🐸</div>
+    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🐸</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="showProfile()">⚙️</div>
   </div>
@@ -3770,8 +3770,8 @@ window.ConnErr = (function(){
         <button class="icon-btn" onclick="openDMsPanel()" data-tip="DMs">💬</button>
         <button class="icon-btn" onclick="openFriends()" data-tip="Friends">👥</button>
         <button class="icon-btn" onclick="showChannelDirectory()" data-tip="Directory">🧭</button>
-        <button class="icon-btn" onclick="Social.open('feed')" data-tip="Social">🌐</button>
-        <button class="icon-btn" onclick="openFrogBoard()" data-tip="Frog Channel">🧵</button>
+        <button class="icon-btn" onclick="Social.open('feed')" data-tip="Social">🐸</button>
+        <button class="icon-btn" onclick="openFrogBoard()" data-tip="Frog Channel">🐸</button>
         <button class="icon-btn" onclick="showProfile()" data-tip="Settings">⚙️</button>
         <button class="icon-btn" onclick="doLogout()" data-tip="Logout">🚪</button>
       </div>
@@ -5183,7 +5183,7 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openDMsPanel()">💬</div>
     <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFriends()">👥</div>
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();showChannelDirectory()">🧭</div>
-    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🧵</div>
+    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🐸</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="Social.navTo('profile')">⚙️</div>
     <div class="ssm-spacer"></div>
@@ -5191,10 +5191,10 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="Social.navTo('logout')" style="background:#2a1414;color:#f85149">🚪</div>
   </aside>
   <div class="social-topbar">
-    <button class="social-menu-btn" onclick="Social.openSideMenu()" title="Menu" aria-label="Open menu">🌐</button>
+    <button class="social-menu-btn" onclick="Social.openSideMenu()" title="Menu" aria-label="Open menu">🐸</button>
     <div class="social-topbar-title-wrap">
       <span class="social-topbar-title">FrogSocial</span>
-      <span class="social-topbar-meta">powered by FrogTalk</span>
+      <span class="social-topbar-meta" id="social-topbar-meta">powered by FrogTalk</span>
     </div>
     <nav class="social-nav">
       <button class="social-nav-btn active" onclick="Social.switchTab('feed')" data-tab="feed">Feed</button>
@@ -5264,7 +5264,7 @@ window.ConnErr = (function(){
 <!-- ═══════════════════════ FROG CHANNEL OVERLAY ═════════════════════════════════ -->
 <div id="board-overlay" class="board-overlay hidden">
   <div class="board-overlay-topbar">
-    <button class="board-menu-btn" onclick="document.getElementById('board-side-menu').classList.toggle('open')" title="Menu" aria-label="Open menu">🧵</button>
+    <button class="board-menu-btn" onclick="document.getElementById('board-side-menu').classList.toggle('open')" title="Menu" aria-label="Open menu">🐸</button>
     <span class="board-overlay-title">Frog Channel</span>
     <button class="board-overlay-close" onclick="closeFrogBoard()" title="Close">✕</button>
   </div>
@@ -5275,7 +5275,7 @@ window.ConnErr = (function(){
       <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="closeFrogBoard();openDMsPanel()">💬</div>
       <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="closeFrogBoard();openFriends()">👥</div>
       <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="closeFrogBoard();showChannelDirectory()">🧭</div>
-      <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" onclick="closeFrogBoard();Social.open('feed')">🌐</div>
+      <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" onclick="closeFrogBoard();Social.open('feed')">🐸</div>
       <div class="server-divider"></div>
       <a class="server-icon" data-tip="Open Frog Channel in new tab" data-tip-pos="right" href="/board/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">🗂️</a>
       <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="closeFrogBoard();showProfile()">⚙️</div>
@@ -5303,6 +5303,22 @@ if ('caches' in window) {
 }
 </script>
 <script>
+function isNativeFrogClient() {
+  try {
+    const ua = String((navigator && navigator.userAgent) || '');
+    return /Electron|wv\)|; wv|FrogTalkAndroid|FrogTalkDesktop/i.test(ua);
+  } catch (e) {
+    return false;
+  }
+}
+
+function syncBrandMetaVisibility() {
+  const meta = document.getElementById('social-topbar-meta');
+  if (!meta) return;
+  const loggedIn = !!(window.State && State.token && State.user);
+  meta.hidden = isNativeFrogClient() || loggedIn;
+}
+
 function openFrogBoard() {
   const ol = document.getElementById('board-overlay');
   const frame = document.getElementById('board-frame');
@@ -5318,6 +5334,7 @@ function updateBoardSideMenuAuth() {
   if (!menu) return;
   const loggedIn = !!(window.State && State.token && State.user);
   menu.classList.toggle('guest-menu', !loggedIn);
+  syncBrandMetaVisibility();
 }
 
 function openBoardAuth(mode) {
@@ -5337,6 +5354,7 @@ function closeFrogBoard() {
   if (menu) menu.classList.remove('open');
   document.getElementById('board-server-icon')?.classList.remove('active');
 }
+syncBrandMetaVisibility();
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoard(); });
 </script>
 <script src="/static/js/crypto.js?v=191"></script>
