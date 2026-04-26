@@ -2038,7 +2038,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .social-topbar-title{font-family:'Pacifico','Brush Script MT','Segoe Script','Lucida Handwriting',cursive;font-size:22px;font-weight:400;color:#fff;letter-spacing:.3px;text-shadow:0 1px 2px rgba(0,0,0,.35);background:linear-gradient(135deg,#ffffff 0%,#b8f0c0 60%,#4caf50 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;line-height:1.02}
 .social-topbar-meta{font-size:10px;color:#6fbf7e;letter-spacing:.7px;text-transform:uppercase;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .social-nav{display:flex;gap:2px;background:#0d0d0d;border-radius:8px;padding:3px}
-.social-nav-btn{padding:7px 16px;border:none;background:transparent;color:#888;font-size:13px;font-weight:600;cursor:pointer;border-radius:6px;transition:all .15s}
+.social-nav-btn{padding:7px 16px;border:none;background:transparent;color:#888;font-size:13px;font-weight:600;cursor:pointer;border-radius:6px;transition:all .15s;white-space:nowrap;line-height:1.15}
 .social-nav-btn.active{background:#1a3a1a;color:#4caf50}
 .social-nav-btn:hover:not(.active){color:#e0e0e0}
 .social-close-btn{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px}
@@ -2661,9 +2661,24 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 
 /* Social responsive */
 @media(max-width:640px){
-  .social-nav{gap:1px;padding:2px}
+  .social-topbar{
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    grid-template-areas:
+      "menu title close"
+      "nav nav nav";
+    align-items:center;
+    row-gap:7px;
+    column-gap:8px;
+    padding:10px 12px;
+  }
+  .social-topbar > .social-menu-btn{grid-area:menu}
+  .social-topbar > .social-topbar-title-wrap{grid-area:title}
+  .social-topbar > .social-nav{grid-area:nav}
+  .social-topbar > .social-close-btn{grid-area:close}
+  .social-nav{gap:1px;padding:2px;width:100%;justify-content:flex-start;min-width:0;overflow-x:auto;scrollbar-width:none}
+  .social-nav::-webkit-scrollbar{display:none}
   .social-nav-btn{padding:5px 10px;font-size:12px}
-  .social-topbar{padding:10px 12px;gap:8px}
   .social-topbar-title{font-size:15px}
   .social-topbar-meta{font-size:8px;letter-spacing:.45px;line-height:1}
   .social-grid{grid-template-columns:repeat(3,1fr);gap:2px;padding:2px}
@@ -2680,17 +2695,15 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   .explore-toolbar{padding:6px 10px}
   .explore-tab{padding:4px 10px;font-size:11px}
   .snp-box{padding:18px;margin:10px}
-  /* Social topbar on mobile: make the title compact so the nav + close fit */
-  .social-topbar-title-wrap{flex:0 1 auto;max-width:34vw}
+  /* Keep title compact with powered-by line while tabs move to second row */
+  .social-topbar-title-wrap{max-width:100%;min-width:0}
   .social-topbar-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .social-nav{flex:1;justify-content:center;min-width:0;overflow-x:auto;scrollbar-width:none}
-  .social-nav::-webkit-scrollbar{display:none}
 }
 @media(max-width:400px){
   .social-grid{grid-template-columns:repeat(2,1fr)}
   .social-nav-btn{padding:4px 8px;font-size:11px}
   .social-topbar-meta{font-size:7px;letter-spacing:.35px}
-  .social-topbar-title-wrap{max-width:28vw}
+  .social-topbar-title-wrap{max-width:100%}
   .social-topbar-title{font-size:13px}
 }
 
