@@ -193,6 +193,7 @@ body{
   display:flex;flex-direction:column;align-items:center;
   padding:12px 0;gap:4px;overflow-y:auto;border-right:1px solid #1a1a1a
 }
+#server-list .server-spacer{flex:1 1 auto;min-height:8px}
 .server-icon{
   width:48px;height:48px;border-radius:50%;background:#1e3a1e;
   display:flex;align-items:center;justify-content:center;
@@ -3717,9 +3718,6 @@ window.ConnErr = (function(){
       <span id="frog-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#f85149;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:14px;text-align:center"></span>
     </div>
     <div class="server-divider"></div>
-    <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" id="dm-server-icon" onclick="openDMsPanel()" style="position:relative">💬
-      <span id="dm-sidebar-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#f85149;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:14px;text-align:center"></span>
-    </div>
     <div class="server-icon" data-tip="Friends" data-tip-pos="right" id="friends-server-icon" onclick="openFriends()" style="position:relative">👥
       <span id="friends-sidebar-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#f85149;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:14px;text-align:center"></span>
     </div>
@@ -3729,6 +3727,7 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🍀</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="showProfile()">⚙️</div>
+    <div class="server-spacer"></div>
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
   </div>
 
@@ -5185,11 +5184,13 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openDMsPanel()">💬</div>
     <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFriends()">👥</div>
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();showChannelDirectory()">🧭</div>
+    <div class="server-divider"></div>
     <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🍀</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="Social.navTo('profile')">⚙️</div>
     <div class="ssm-spacer"></div>
     <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
+    <div class="server-divider"></div>
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="Social.navTo('logout')" style="background:#2a1414;color:#f85149">🚪</div>
   </aside>
   <div class="social-topbar">
@@ -5282,6 +5283,7 @@ window.ConnErr = (function(){
       <div class="server-divider"></div>
       <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="closeFrogBoard();showProfile()">⚙️</div>
       <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="closeFrogBoard()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
+      <div class="server-divider"></div>
       <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
     </div>
     <div id="board-auth-card" class="board-auth-card" aria-live="polite">

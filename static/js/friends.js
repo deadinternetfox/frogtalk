@@ -50,7 +50,7 @@ function renderFriendTab () {
   if (_currentFriendTab === 'pending') { renderPending(el); return; }
 
   const list = _currentFriendTab === 'friends'
-    ? _allFriends.filter(f => f.online || f.presence === 'online' || f.presence === 'away' || f.presence === 'dnd')
+    ? _allFriends.filter(isFriendOnlinePresence)
     : _allFriends;
 
   if (!list.length) {
@@ -223,6 +223,11 @@ function presenceColor (p) {
 function presenceLabel (p) {
   const m = {online:'Online',away:'Away',dnd:'Do Not Disturb',offline:'Offline'};
   return m[p] || 'Offline';
+}
+
+function isFriendOnlinePresence(friend) {
+  const p = String((friend && friend.presence) || '').toLowerCase();
+  return p === 'online' || p === 'away' || p === 'dnd';
 }
 
 /* ── Receive WS push notification for friend request ───────────────────────── */
@@ -433,7 +438,7 @@ function renderFfpContent(tab) {
   
   let list;
   if (tab === 'online') {
-    list = _allFriends.filter(f => f.presence === 'online' || f.presence === 'away' || f.presence === 'dnd');
+    list = _allFriends.filter(isFriendOnlinePresence);
   } else {
     list = _allFriends;
   }
