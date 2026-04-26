@@ -707,14 +707,13 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   border:1px solid #233423;border-radius:10px;
   display:flex;flex-direction:column;gap:8px
 }
-.sqm-status-pill{
+.sqm-status-line{
   width:100%;display:flex;align-items:center;gap:8px;
   background:#121c12;border:1px solid #2b402b;color:#c9e7c9;
-  border-radius:8px;padding:8px 10px;cursor:pointer;font-size:12px;
-  transition:background .15s,border-color .15s,transform .08s
+  border-radius:8px;padding:8px 10px;cursor:text;font-size:12px;
+  transition:background .15s,border-color .15s
 }
-.sqm-status-pill:hover{background:#172517;border-color:#3a583a}
-.sqm-status-pill:active{transform:scale(.99)}
+.sqm-status-line:hover{background:#172517;border-color:#3a583a}
 .sqm-status-icon{font-size:13px;opacity:.9;flex-shrink:0}
 .sqm-status-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .sqm-actions{display:flex;gap:6px}
@@ -729,13 +728,22 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .sqm-action-btn.friends:hover{background:#183018;border-color:#3d5a3d}
 .sqm-editor{display:none;gap:6px;flex-direction:column}
 .sqm-editor.is-open{display:flex}
+.sqm-edit-row{display:flex;align-items:center;gap:6px}
 .sqm-input{
   width:100%;height:34px;background:#0f0f0f;border:1px solid #2a2a2a;
   border-radius:8px;padding:0 10px;color:#e0e0e0;font-size:12px;outline:none;box-sizing:border-box
 }
 .sqm-input:focus{border-color:#4caf50}
-.sqm-editor-actions{display:flex;gap:6px}
-.sqm-save{background:#4caf50;border:none;color:#071107;font-weight:700}
+.sqm-tick{
+  width:26px;height:26px;border-radius:50%;border:none;
+  background:#4caf50;color:#071107;font-weight:900;font-size:13px;line-height:1;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  opacity:0;pointer-events:none;transform:scale(.9);
+  transition:opacity .12s,transform .12s,filter .12s
+}
+.sqm-edit-row:focus-within .sqm-tick,
+.sqm-tick.is-active{opacity:1;pointer-events:auto;transform:scale(1)}
+.sqm-tick:hover{filter:brightness(1.08)}
 .icon-btn{
   width:34px;height:34px;min-height:34px;background:none;border:none;
   color:#888;cursor:pointer;border-radius:6px;
@@ -3906,20 +3914,18 @@ window.ConnErr = (function(){
         <div class="self-status" id="self-status" onclick="openStatusPicker(event)" title="Click to set status">🟢 Online</div>
       </div>
       <div class="self-quick-menu" id="self-quick-menu" aria-label="Quick profile actions">
-        <button class="sqm-status-pill" id="self-quick-status-btn" type="button" onclick="toggleSelfStatusComposer(true)" title="Update your status">
+        <div class="sqm-status-line" id="self-quick-status-btn" onclick="toggleSelfStatusComposer(true)" title="Click to edit your status">
           <span class="sqm-status-icon">📝</span>
-          <span class="sqm-status-text" id="self-quick-status-text">Set a status</span>
-        </button>
+          <span class="sqm-status-text" id="self-quick-status-text">Online</span>
+        </div>
         <div class="sqm-actions">
           <button class="sqm-action-btn friends" type="button" onclick="openFriends()">👥 Friends</button>
-          <button class="sqm-action-btn" type="button" onclick="toggleSelfStatusComposer(true)">✏️ Update</button>
         </div>
         <div class="sqm-editor" id="self-quick-editor">
-          <input id="self-quick-input" class="sqm-input" type="text" maxlength="128" placeholder="Set status message..."
-                 onkeydown="if(event.key==='Enter'){event.preventDefault();submitSelfQuickStatus()}else if(event.key==='Escape'){cancelSelfQuickStatus()}" />
-          <div class="sqm-editor-actions">
-            <button class="sqm-action-btn" type="button" onclick="cancelSelfQuickStatus()">Cancel</button>
-            <button class="sqm-action-btn sqm-save" type="button" onclick="submitSelfQuickStatus()">Save</button>
+          <div class="sqm-edit-row">
+            <input id="self-quick-input" class="sqm-input" type="text" maxlength="128" placeholder="Set status message..."
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();submitSelfQuickStatus()}else if(event.key==='Escape'){cancelSelfQuickStatus()}" />
+            <button class="sqm-tick" id="self-quick-save" type="button" onclick="submitSelfQuickStatus()" aria-label="Save status">✓</button>
           </div>
         </div>
       </div>

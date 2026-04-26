@@ -78,20 +78,21 @@ const UI = (() => {
   function renderSelfQuickStatus() {
     const textEl = document.getElementById('self-quick-status-text');
     const inputEl = document.getElementById('self-quick-input');
-    if (!textEl) return;
     const p = (State?.user?.presence) || 'online';
     const msg = (State?.user?.status_msg || '').trim();
     const labels = { online: 'Online', away: 'Away', dnd: 'Do Not Disturb', invisible: 'Invisible' };
-    textEl.textContent = msg || labels[p] || 'Online';
+    if (textEl) textEl.textContent = msg || labels[p] || 'Online';
     if (inputEl && document.activeElement !== inputEl) inputEl.value = msg;
   }
 
   function toggleSelfStatusComposer(open) {
     const wrap = document.getElementById('self-quick-editor');
     const input = document.getElementById('self-quick-input');
+    const tick = document.getElementById('self-quick-save');
     if (!wrap || !input) return;
     const wantOpen = (typeof open === 'boolean') ? open : !wrap.classList.contains('is-open');
     wrap.classList.toggle('is-open', wantOpen);
+    if (tick) tick.classList.toggle('is-active', wantOpen);
     if (wantOpen) {
       input.value = (State?.user?.status_msg || '').trim();
       try { input.focus(); input.setSelectionRange(input.value.length, input.value.length); } catch {}
