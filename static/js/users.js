@@ -77,7 +77,7 @@ const Users = (() => {
 
     if (onlineShown.length) {
       const header = document.createElement('div');
-      header.className = 'users-section';
+      header.className = 'users-section users-section-online';
       header.textContent = _filter ? `Online matches — ${onlineShown.length}` : `Online — ${onlineShown.length}`;
       list.appendChild(header);
       onlineShown.forEach(u => list.appendChild(_renderUserRow(u, true)));
@@ -85,7 +85,7 @@ const Users = (() => {
 
     if (offlineShown.length) {
       const header = document.createElement('div');
-      header.className = 'users-section';
+      header.className = 'users-section users-section-offline';
       header.textContent = _filter ? `Offline matches — ${offlineShown.length}` : `Offline — ${offlineShown.length}`;
       list.appendChild(header);
       offlineShown.forEach(u => list.appendChild(_renderUserRow(u, false)));

@@ -2210,8 +2210,50 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .explore-refresh:hover{transform:rotate(180deg)}
 
 /* Member search */
-.member-search-input{width:100%;padding:6px 10px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#e0e0e0;font-size:13px;outline:none;box-sizing:border-box;margin-bottom:4px}
-.member-search-input:focus{border-color:#4caf50}
+.member-search-input{
+  width:100%;padding:6px 10px;
+  background:linear-gradient(180deg,#12231e,#0f1d19);
+  border:1px solid #2f5548;border-radius:8px;
+  color:#e8f4ee;font-size:13px;outline:none;box-sizing:border-box;margin-bottom:6px;
+  transition:border-color .14s ease,box-shadow .14s ease,background .14s ease,transform .1s ease;
+}
+.member-search-input::placeholder{color:#85a89a}
+.member-search-input:hover{border-color:#3e6a5b;background:linear-gradient(180deg,#152922,#11211c)}
+.member-search-input:focus{border-color:#6bb698;box-shadow:0 0 0 2px rgba(107,182,152,.18)}
+
+.users-section{
+  padding:8px 8px 2px;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.9px;
+  font-weight:700;
+}
+.users-section-online{color:#cfe8dd;text-shadow:0 0 8px rgba(130,203,171,.16)}
+.users-section-offline{color:#7f9289}
+
+/* Subtle production polish for channel + member list hover states */
+.channel-item{
+  transition:background .16s ease,color .16s ease,border-color .16s ease,transform .12s ease,box-shadow .16s ease;
+}
+#public-channels .channel-item:hover,
+#dm-channels .channel-item:hover{
+  box-shadow:0 3px 10px rgba(0,0,0,.24), inset 0 0 0 1px rgba(120,196,162,.08);
+}
+#public-channels .channel-item.active,
+#dm-channels .channel-item.active{
+  box-shadow:0 5px 14px rgba(0,0,0,.3), inset 0 0 0 1px rgba(127,208,157,.16);
+}
+
+.user-item{
+  transition:background .14s ease,border-color .14s ease,transform .1s ease,box-shadow .14s ease,opacity .14s ease;
+  border:1px solid transparent;
+}
+.user-item:hover{
+  background:linear-gradient(180deg,rgba(28,53,45,.55),rgba(22,41,35,.55));
+  border-color:rgba(120,184,156,.24);
+  transform:translateY(-1px);
+  box-shadow:0 3px 10px rgba(0,0,0,.2);
+}
 
 /* Post detail overlay */
 #social-post-detail{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;animation:fadeIn .15s ease}
