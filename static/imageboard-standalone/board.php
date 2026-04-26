@@ -1451,10 +1451,13 @@ if ($singleThread) {
         .clearfix::after { content: ''; display: table; clear: both; }
         
         /* Board footer */
-        .board-footer { text-align: center; padding: 30px 15px; color: #3a6f3a; font-size: 12px; }
-        .board-footer a { color: #4a8f4a; text-decoration: none; }
+        .board-footer { text-align: center; padding: 14px 10px 20px; color: #4a8f4a; font-size: 12px; line-height: 1.4; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 7px; }
+        .board-footer a { color: #66b566; text-decoration: none; }
         .board-footer a:hover { color: #00ff41; }
-        .footer-online { color: #4a8f4a; }
+        .footer-brand { font-weight: 700; }
+        .footer-top-link { font-weight: 700; }
+        .footer-sep { color: #2f5f2f; }
+        .footer-online { color: #4a8f4a; white-space: nowrap; }
         .footer-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #00ff41; vertical-align: middle; box-shadow: 0 0 4px rgba(0,255,65,0.5); }
         
         /* Pagination */
@@ -1762,10 +1765,11 @@ if ($singleThread) {
         body[data-theme="read"] .board-footer { color: #9a8060 !important; }
         body[data-theme="read"] .board-footer a { color: #7a6040 !important; }
         body[data-theme="read"] .board-footer a:hover { color: #4a3018 !important; }
+        body[data-theme="read"] .footer-sep { color: #b09070 !important; }
         body[data-theme="read"] .footer-online { color: #7a6040 !important; }
         body[data-theme="read"] .footer-dot { background: #a07030 !important; box-shadow: none !important; }
-        body[data-theme="read"] .board-footer::before { color: rgba(92,61,14,0.06) !important; }
-        body[data-theme="read"] .board-footer::after { background: linear-gradient(90deg, transparent, rgba(92,61,14,0.15), transparent) !important; }
+        body[data-theme="read"] .board-footer::before { display: none !important; }
+        body[data-theme="read"] .board-footer::after { display: none !important; }
         /* ── Read mode: pagination ── */
         body[data-theme="read"] .board-pagination { border-top-color: rgba(92,61,14,0.12) !important; border-bottom-color: rgba(92,61,14,0.12) !important; background: rgba(92,61,14,0.03) !important; }
         body[data-theme="read"] .board-pagination .page-btn { color: #7a6040 !important; border-color: rgba(92,61,14,0.2) !important; background: rgba(92,61,14,0.04) !important; text-shadow: none !important; }
@@ -2440,7 +2444,7 @@ if ($singleThread) {
         .board-container { animation: screenFlicker 8s infinite; }
         
         /* Nordic rune on board footer */
-        .board-footer::before { content: 'ᛟ'; display: block; font-size: 2em; color: rgba(0,255,65,0.06); margin-bottom: 10px; letter-spacing: 0; text-shadow: 0 0 20px rgba(0,255,65,0.04); }
+        .board-footer::before { display: none; }
         
         /* Nav layout spacing */
         .top-nav { padding: 10px 0; }
@@ -2509,7 +2513,7 @@ if ($singleThread) {
             body[data-theme="read"] .nav-links { background: #e8e0cf !important; border-bottom-color: #cfc4ae !important; }        }
         
         /* Subtle smoke/mist at bottom */
-        .board-footer::after { content: ''; display: block; width: 100%; height: 2px; margin-top: 15px; background: linear-gradient(90deg, transparent, rgba(0,255,65,0.15), transparent); }
+        .board-footer::after { display: none; }
 
         @media (max-width: 768px) {
             .board-header h2 { font-size: 1.3em; }
@@ -2722,7 +2726,7 @@ if ($singleThread) {
         .post-comment a { word-break: break-all; }
     </style>
 </head>
-<body>
+<body id="top">
 <script>(function(){var t=localStorage.getItem('ph_theme');if(t){document.body.setAttribute('data-theme',t);document.documentElement.setAttribute('data-theme',t);}})()</script>
     <div class="matrix-bg"></div>
     <div class="header-bg-overlay"></div>
@@ -3545,12 +3549,12 @@ if ($singleThread) {
             <?php endif; ?><!-- /singleThread check -->
 
             <div class="board-footer">
-                <a href="/" style="font-weight:700;">🐸 Frog Channel</a>
-                <?php if ($isAdmin): ?> · <a href="/board/admin" style="color: #ff8c00;">🔧 Admin</a><?php endif; ?>
-                <br>
+                <a href="/" class="footer-brand">🐸 Frog Channel</a>
+                <?php if ($isAdmin): ?><span class="footer-sep">·</span><a href="/board/admin" class="footer-admin">🔧 Admin</a><?php endif; ?>
+                <span class="footer-sep">·</span>
                 <span class="footer-online"><span class="footer-views">👁 <?= number_format($totalViews) ?> views</span> · <span class="online-dot footer-dot"></span> <span class="footer-online-count"><?= $onlineCount ?> online</span></span>
-                <br><br>
-                <span>🐸 The swamp remembers everything.</span>
+                <span class="footer-sep">·</span>
+                <a href="#top" class="footer-top-link">Back to top ↑</a>
             </div>
         </div>
     </main>
