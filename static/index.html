@@ -5303,6 +5303,27 @@ if ('caches' in window) {
 }
 </script>
 <script>
+function getStoredFrogUser() {
+  try {
+    const raw = localStorage.getItem('fc_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function hasFrogTalkSession() {
+  try {
+    const stateLoggedIn = !!(window.State && State.token && State.user);
+    const token = localStorage.getItem('fc_token') || localStorage.getItem('token') || '';
+    const storedUser = getStoredFrogUser();
+    const storedLoggedIn = !!(token && storedUser && storedUser.nickname);
+    return stateLoggedIn || storedLoggedIn;
+  } catch (e) {
+    return !!(window.State && State.token && State.user);
+  }
+}
+
 function isNativeFrogClient() {
   try {
     const ua = String((navigator && navigator.userAgent) || '');
@@ -5315,8 +5336,7 @@ function isNativeFrogClient() {
 function syncBrandMetaVisibility() {
   const meta = document.getElementById('social-topbar-meta');
   if (!meta) return;
-  const loggedIn = !!(window.State && State.token && State.user);
-  meta.hidden = isNativeFrogClient() || loggedIn;
+  meta.hidden = isNativeFrogClient() || hasFrogTalkSession();
 }
 
 function openFrogBoard() {
@@ -5332,8 +5352,7 @@ function openFrogBoard() {
 function updateBoardSideMenuAuth() {
   const menu = document.getElementById('board-side-menu');
   if (!menu) return;
-  const loggedIn = !!(window.State && State.token && State.user);
-  menu.classList.toggle('guest-menu', !loggedIn);
+  menu.classList.toggle('guest-menu', !hasFrogTalkSession());
   syncBrandMetaVisibility();
 }
 
@@ -5354,6 +5373,10 @@ function closeFrogBoard() {
   if (menu) menu.classList.remove('open');
   document.getElementById('board-server-icon')?.classList.remove('active');
 }
+
+window.addEventListener('storage', updateBoardSideMenuAuth);
+window.addEventListener('focus', updateBoardSideMenuAuth);
+document.getElementById('board-frame')?.addEventListener('load', updateBoardSideMenuAuth);
 syncBrandMetaVisibility();
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoard(); });
 </script>
