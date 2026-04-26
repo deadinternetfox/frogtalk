@@ -48,8 +48,8 @@ if ($boardMode) {
     // Header bar
     imagefilledrectangle($img, 0, 0, $w, 80, $darkPanel);
     imageline($img, 0, 80, $w, 80, $greenBright);
-    imagestring($img, 5, 40, 12, "FROG BOARD", $greenBright);
-    imagestring($img, 4, 40, 35, "Anonymous Imageboard", $greenDark);
+    imagestring($img, 5, 40, 12, "FROG CHANNELS", $greenBright);
+    imagestring($img, 4, 40, 35, "FrogTalk Anonymous Boards", $greenDark);
     
     // Stats line
     $totalReplies = 0;
@@ -94,7 +94,7 @@ if ($boardMode) {
     // Bottom bar
     imagefilledrectangle($img, 0, $h - 50, $w, $h, $darkPanel);
     imageline($img, 0, $h - 50, $w, $h - 50, $greenDark);
-    imagestring($img, 4, 40, $h - 38, "/board  |  Frog Board on FrogTalk.", $greenMid);
+    imagestring($img, 4, 40, $h - 38, "/board  |  Frog Channels on FrogTalk.", $greenMid);
     
     // Frog
     $frogX = $w - 60; $frogY = $h - 35;
@@ -153,10 +153,10 @@ imagefilledrectangle($img, 0, 0, $w, $h, $bgColor);
 imagefilledrectangle($img, 0, 0, $w, 60, $darkPanel);
 imageline($img, 0, 60, $w, 60, $greenBright);
 
-// "🐸 Frog Board" header
+// "🐸 Frog Channels" header
 $headerFont = 5; // built-in font
-imagestring($img, $headerFont, 30, 10, "FROG BOARD", $greenBright);
-imagestring($img, 3, 30, 35, "Anonymous Imageboard", $greenDark);
+imagestring($img, $headerFont, 30, 10, "FROG CHANNELS", $greenBright);
+imagestring($img, 3, 30, 35, "FrogTalk Anonymous Boards", $greenDark);
 
 // Right side: stats
 $replyCount = count($thread['replies'] ?? []);
