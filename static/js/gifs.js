@@ -8,12 +8,41 @@ const GIFs = (() => {
   let _currentTab = 'gifs';  // 'gifs' or 'stickers'
   let _stickerPacks = [];
   let _gifReqSeq = 0;
+  let _gifAbortController = null;
 
-  async function _fetchGifApi(url, timeoutMs = 12000) {
-    return Promise.race([
-      apiFetch(url),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('gif_timeout')), timeoutMs)),
-    ]);
+  async function _fetchGifApi(url, timeoutMs = 8000) {
+    if (_gifAbortController) _gifAbortController.abort();
+    const controller = new AbortController();
+    _gifAbortController = controller;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(url, {
+        headers: { 'X-Session-Token': State.token || '' },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+      if (_gifAbortController === controller) _gifAbortController = null;
+    }
+  }
+
+  function _renderGifGrid(grid, gifs, emptyText) {
+    if (!Array.isArray(gifs) || gifs.length === 0) {
+      grid.innerHTML = `<div class="gif-empty">${emptyText}</div>`;
+      return;
+    }
+
+    grid.innerHTML = gifs.map(gif => {
+      const safeUrl = String(gif?.url || '').replace(/'/g, '&#39;');
+      const safePreview = String(gif?.preview || gif?.url || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;');
+      return `
+        <div class="gif-item" onclick="GIFs.send('${safeUrl}')" title="Click to send">
+          <img src="${safePreview}" alt="GIF" loading="lazy">
+        </div>
+      `;
+    }).join('');
   }
 
   function createPicker() {
@@ -391,16 +420,17 @@ const GIFs = (() => {
 
   function handleSearch(query) {
     clearTimeout(_searchTimeout);
+    const trimmed = String(query || '').trim();
     _searchTimeout = setTimeout(() => {
       if (_currentTab === 'gifs') {
-        if (query.length > 1) {
-          searchGifs(query);
+        if (trimmed.length > 1) {
+          searchGifs(trimmed);
         } else {
           loadTrending();
         }
       } else {
         // Filter stickers locally
-        filterStickers(query);
+        filterStickers(trimmed);
       }
     }, 300);
   }
@@ -496,19 +526,10 @@ const GIFs = (() => {
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
       if (reqSeq !== _gifReqSeq) return;
-      
-      if (!data.gifs || data.gifs.length === 0) {
-        grid.innerHTML = '<div class="gif-empty">No GIFs found</div>';
-        return;
-      }
-      
-      grid.innerHTML = data.gifs.map(gif => `
-        <div class="gif-item" onclick="GIFs.send('${gif.url}')" title="Click to send">
-          <img src="${gif.preview || gif.url}" alt="GIF" loading="lazy">
-        </div>
-      `).join('');
+      _renderGifGrid(grid, data.gifs || data.results || [], 'No GIFs found');
     } catch (e) {
       if (reqSeq !== _gifReqSeq) return;
+      if (e?.name === 'AbortError') return;
       grid.innerHTML = '<div class="gif-empty">Failed to load GIFs</div>';
     }
   }
@@ -517,32 +538,25 @@ const GIFs = (() => {
     const grid = document.getElementById('gif-grid');
     if (!grid) return;
     const reqSeq = ++_gifReqSeq;
+    const trimmed = String(query || '').trim();
     grid.innerHTML = '<div class="gif-loading">Searching...</div>';
     
     try {
-      const res = await _fetchGifApi(`/api/media/gifs/search?q=${encodeURIComponent(query)}`);
+      const res = await _fetchGifApi(`/api/media/gifs/search?q=${encodeURIComponent(trimmed)}`);
       if (reqSeq !== _gifReqSeq) return;
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
       if (reqSeq !== _gifReqSeq) return;
-      
-      if (!data.gifs || data.gifs.length === 0) {
-        grid.innerHTML = '<div class="gif-empty">No GIFs found for "' + UI.escHtml(query) + '"</div>';
-        return;
-      }
-      
-      grid.innerHTML = data.gifs.map(gif => `
-        <div class="gif-item" onclick="GIFs.send('${gif.url}')" title="Click to send">
-          <img src="${gif.preview || gif.url}" alt="GIF" loading="lazy">
-        </div>
-      `).join('');
+      _renderGifGrid(grid, data.gifs || data.results || [], 'No GIFs found for "' + UI.escHtml(trimmed) + '"');
     } catch (e) {
       if (reqSeq !== _gifReqSeq) return;
+      if (e?.name === 'AbortError') return;
       grid.innerHTML = '<div class="gif-empty">Failed to search GIFs</div>';
     }
     
     // Update search input
-    document.getElementById('gif-search').value = query;
+    const searchInput = document.getElementById('gif-search');
+    if (searchInput) searchInput.value = trimmed;
   }
 
   async function loadStickerPacks() {

@@ -11,6 +11,25 @@ const Crypto = (() => {
   const _ecdhPairCache = new Map();
   const _payloadPrefix = 'ftenc:';
 
+  function _bytesToBase64(bytes) {
+    const chunkSize = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode.apply(null, chunk);
+    }
+    return btoa(binary);
+  }
+
+  function _base64ToBytes(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
   function _getIdentityScope() {
     try {
       const state = window.STATE || window.State || {};
@@ -137,7 +156,7 @@ const Crypto = (() => {
     const combined = new Uint8Array(iv.byteLength + cipherBuf.byteLength);
     combined.set(iv, 0);
     combined.set(new Uint8Array(cipherBuf), iv.byteLength);
-    return btoa(String.fromCharCode(...combined));
+    return _bytesToBase64(combined);
   }
 
   /**
@@ -148,7 +167,7 @@ const Crypto = (() => {
    */
   async function decrypt(b64, key) {
     try {
-      const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      const bytes = _base64ToBytes(b64);
       const iv = bytes.slice(0, 12);
       const data = bytes.slice(12);
       const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);

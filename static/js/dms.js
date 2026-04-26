@@ -14,6 +14,16 @@ let _dmLoadReqSeq = 0;
 const _dmHistoryCache = new Map();
 const _dmHistoryMeta = new Map();
 
+function _normalizeDMMessage(message) {
+  if (!message) return message;
+  const normalized = { ...message };
+  if (Number(normalized.id || 0) > 0) {
+    delete normalized._pending;
+    delete normalized._nonce;
+  }
+  return normalized;
+}
+
 function _sleep(ms) {
   return new Promise(res => setTimeout(res, ms));
 }
@@ -684,7 +694,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
   const _peerNick    = _activeDM?.nickname || '';
   const msgs = await Promise.all(rawMsgs.map(async (msg) => {
     if (!msg) return msg;
-    const next = { ...msg };
+    const next = _normalizeDMMessage(msg);
     if (next.content) {
       try { next.content = await _decryptDMPreviewContent(next.content, _peerUserId, _peerNick); } catch {}
     }
@@ -748,6 +758,7 @@ function renderDMChat () {
     </div>`;
     return;
   }
+  _dmMessages = _dmMessages.map(m => _normalizeDMMessage(m));
   area.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
   // Attach reaction buttons
   area.querySelectorAll('.dm-react-btn').forEach(btn => {
@@ -1382,7 +1393,7 @@ function handleWSDMMessage (data) {
       }
       // Replace any cached pending entry
       const pi = _dmMessages.findIndex(x => x._nonce === data.client_nonce);
-      if (pi >= 0) _dmMessages[pi] = { ...data, content: _dmMessages[pi].content };
+      if (pi >= 0) _dmMessages[pi] = _normalizeDMMessage({ ...data, content: _dmMessages[pi].content });
       return;
     }
 
@@ -1409,7 +1420,7 @@ function handleWSDMMessage (data) {
           const x = _dmMessages[i];
           if (x && x._pending && ((x.sender_id|0) === (_selfId|0))) { pi = i; break; }
         }
-        if (pi >= 0) _dmMessages[pi] = { ...data, content: _dmMessages[pi].content };
+        if (pi >= 0) _dmMessages[pi] = _normalizeDMMessage({ ...data, content: _dmMessages[pi].content });
         return;
       }
     }
@@ -1431,6 +1442,7 @@ function handleWSDMMessage (data) {
 }
 
 function appendDMMessage (m) {
+  m = _normalizeDMMessage(m);
   // Dedup: if a message with this id already exists (e.g. REST-sent media
   // then WS echo arrives), skip the second append.
   if (m.id && _dmMessages.some(x => x.id === m.id)) return;
