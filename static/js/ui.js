@@ -137,7 +137,8 @@ const UI = (() => {
   async function openStatusPicker(ev) {
     try { ev?.stopPropagation?.(); } catch {}
     if (!State?.user) return;
-    await _refreshSelfStatusFromApi();
+    // Open instantly using local state; refresh in background to avoid UI lag.
+    _refreshSelfStatusFromApi();
 
     // Always destroy + recreate so stale DOM / old styles never show
     const old = document.getElementById('status-picker-popover');
@@ -160,7 +161,6 @@ const UI = (() => {
     });
     pop.innerHTML = `
       <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:8px">Set status</div>
-      <div id="sp-current" style="font-size:12px;color:#d0ead8;background:#132b22;border:1px solid rgba(90,160,125,.45);border-radius:9px;padding:8px 11px;margin-bottom:10px;line-height:1.4"></div>
       <div id="sp-opts" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
       <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:7px">Status message</div>
       <input id="sp-msg" type="text" maxlength="128" placeholder="What are you up to?"
@@ -181,13 +181,6 @@ const UI = (() => {
     });
     // Populate presence options (reflect current)
     const curP = State.user.presence || 'online';
-    const curStatusMsg = (State.user.status_msg || '').trim();
-    const currentText = curStatusMsg || 'Click to set status';
-    const currentRow = pop.querySelector('#sp-current');
-    if (currentRow) {
-      currentRow.textContent = currentText;
-      currentRow.style.color = curStatusMsg ? '#d8eee3' : '#9fb8ad';
-    }
     const opts = [
       { k: 'online',    d: '🟢', l: 'Online' },
       { k: 'away',      d: '🟡', l: 'Away' },
@@ -215,12 +208,19 @@ const UI = (() => {
     pop.querySelector('#sp-msg').value = State.user.status_msg || '';
     // Close immediately, save in background — no blocking lag
     pop.querySelector('#sp-clear').onclick = () => {
+      const presence = pop.dataset.pendingPresence || State?.user?.presence || 'online';
+      State.user.presence = presence;
+      State.user.status_msg = '';
+      renderSelfStatus();
       pop.remove();
-      _saveStatus('online', '');
+      _saveStatus(presence, '');
     };
     pop.querySelector('#sp-save').onclick = () => {
       const presence = pop.dataset.pendingPresence || 'online';
       const msg = pop.querySelector('#sp-msg').value.slice(0, 128);
+      State.user.presence = presence;
+      State.user.status_msg = msg;
+      renderSelfStatus();
       pop.remove();
       _saveStatus(presence, msg);
     };
