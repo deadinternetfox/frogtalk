@@ -965,38 +965,47 @@ const Rooms = (() => {
     const input = document.getElementById('ch-add-mod-input');
     const nickname = input.value.trim();
     if (!nickname) return;
-    
-    // Find user ID by nickname
-    const users = await fetch('/api/users', { headers: { 'X-Session-Token': State.token } })
-      .then(r => r.json()).then(d => d.users);
-    const user = users.find(u => u.nickname.toLowerCase() === nickname.toLowerCase());
-    
-    if (!user) {
-      UI.showToast('User not found', 'error');
-      return;
+
+    try {
+      // Find user ID by nickname
+      const usersRes = await apiFetch('/api/users');
+      const usersData = await usersRes.json().catch(() => ({}));
+      if (!usersRes.ok) {
+        UI.showToast(usersData.error || 'Failed to load users', 'error');
+        return;
+      }
+      const users = Array.isArray(usersData.users) ? usersData.users : [];
+      const user = users.find(u => String(u.nickname || '').toLowerCase() === nickname.toLowerCase());
+
+      if (!user) {
+        UI.showToast('User not found', 'error');
+        return;
+      }
+
+      const res = await fetch(`/api/rooms/${encodeURIComponent(_currentSettingsRoom)}/moderators`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+        body: JSON.stringify({ user_id: user.id })
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        UI.showToast(data.error || 'Failed to add moderator', 'error');
+        return;
+      }
+
+      input.value = '';
+      UI.showToast(`${nickname} is now a moderator`);
+
+      // Refresh moderators list
+      const roomRes = await fetch(`/api/rooms/${encodeURIComponent(_currentSettingsRoom)}`, {
+        headers: { 'X-Session-Token': State.token }
+      });
+      const roomData = await roomRes.json().catch(() => ({}));
+      renderModerators(roomData.moderators || []);
+    } catch {
+      UI.showToast('Failed to add moderator', 'error');
     }
-    
-    const res = await fetch(`/api/rooms/${encodeURIComponent(_currentSettingsRoom)}/moderators`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
-      body: JSON.stringify({ user_id: user.id })
-    });
-    
-    if (!res.ok) {
-      const data = await res.json();
-      UI.showToast(data.error || 'Failed to add moderator', 'error');
-      return;
-    }
-    
-    input.value = '';
-    UI.showToast(`${nickname} is now a moderator`);
-    
-    // Refresh moderators list
-    const roomRes = await fetch(`/api/rooms/${encodeURIComponent(_currentSettingsRoom)}`, {
-      headers: { 'X-Session-Token': State.token }
-    });
-    const roomData = await roomRes.json();
-    renderModerators(roomData.moderators);
   }
 
   async function removeModerator(userId) {

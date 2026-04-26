@@ -95,6 +95,31 @@ async function apiFetch (url, method = 'GET', body = null) {
   }
   try {
     const res = await fetch(url, opts);
+    const _u = String(url || '');
+    const _isApi = _u.startsWith('/api');
+    if (_isApi) {
+      const ct = String(res.headers?.get('content-type') || '').toLowerCase();
+      const isJson = ct.includes('application/json') || ct.includes('+json');
+      const looksHtml = ct.includes('text/html');
+      // Some proxy/auth edge paths can return HTML for API calls; normalize
+      // this into JSON so callers don't crash with "Unexpected token <".
+      if (!isJson && looksHtml) {
+        let preview = '';
+        try { preview = (await res.clone().text()).slice(0, 120); } catch {}
+        const mappedStatus = res.status === 200 ? 502 : res.status;
+        const payload = {
+          error: 'Invalid non-JSON API response',
+          status: res.status,
+          content_type: ct || 'unknown',
+          preview,
+        };
+        if (typeof ConnErr !== 'undefined') ConnErr.onNetOk();
+        return new Response(JSON.stringify(payload), {
+          status: mappedStatus,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
     if (typeof ConnErr !== 'undefined') ConnErr.onNetOk();
     return res;
   } catch (err) {
