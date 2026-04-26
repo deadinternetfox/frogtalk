@@ -6410,7 +6410,7 @@ if ($singleThread) {
     }
     
     // ── Background chat poll for @mention badges ──
-    <?php if ($settings['chat_enabled'] && !$isBanned): ?>
+    <?php if (false && $settings['chat_enabled'] && !$isBanned): ?>
     (function() {
         // Light background poll — only to detect @mentions when chat is closed
         setTimeout(function() {
