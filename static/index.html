@@ -1203,26 +1203,36 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #msg-input:focus-visible{outline:none !important;box-shadow:none !important;border-color:transparent !important}
 #msg-input::placeholder{color:#444}
 .send-btn{
-  background:radial-gradient(circle at 30% 30%,#86e0ad 0%,#4caf50 48%,#2f8a42 100%);
-  border:1px solid #56b471;color:#08200f;border-radius:11px;
+  position:relative;overflow:hidden;
+  background:linear-gradient(155deg,#9ef6c2 0%,#61d989 26%,#3aa95a 58%,#2a8647 100%);
+  border:1px solid #67c688;color:#06200f;border-radius:12px;
   width:34px;height:34px;min-height:34px;cursor:pointer;font-size:15px;font-weight:900;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;transition:transform .14s,filter .14s,box-shadow .18s,background .2s,border-color .2s,color .2s;
-  box-shadow:0 4px 12px rgba(30,86,47,.34),inset 0 1px 0 rgba(255,255,255,.34),inset 0 -1px 0 rgba(0,0,0,.22)
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .14s,filter .14s,box-shadow .18s,background .2s,border-color .2s,color .2s;
+  box-shadow:0 6px 14px rgba(25,88,47,.4),inset 0 1px 0 rgba(255,255,255,.45),inset 0 -2px 0 rgba(6,30,13,.25)
+}
+.send-btn::after{
+  content:'';position:absolute;left:-38%;top:-52%;width:80%;height:190%;pointer-events:none;
+  background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.34),rgba(255,255,255,0));
+  transform:rotate(20deg);opacity:.88
 }
 .send-btn:hover{
-  background:radial-gradient(circle at 30% 25%,#9ae8be 0%,#5abf66 45%,#358f48 100%);
-  border-color:#73cc8d;transform:translateY(-1px) scale(1.03);
-  box-shadow:0 7px 15px rgba(42,108,62,.4),inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(0,0,0,.2)
+  background:linear-gradient(155deg,#b0ffd0 0%,#75e69f 24%,#43b665 58%,#2f944f 100%);
+  border-color:#85dfa9;transform:translateY(-1px) scale(1.04);
+  box-shadow:0 9px 18px rgba(36,103,58,.46),inset 0 1px 0 rgba(255,255,255,.55),inset 0 -2px 0 rgba(7,32,15,.22)
 }
-.send-btn:active{transform:translateY(0) scale(.96);filter:saturate(1.06)}
+.send-btn:hover::after{left:112%;transition:left .45s ease}
+.send-btn:active{transform:translateY(0) scale(.95);filter:saturate(1.08) brightness(.98)}
 .send-btn:focus-visible{outline:2px solid rgba(141,231,176,.8);outline-offset:2px}
 .send-btn:disabled,
 .send-btn.is-sending{
-  background:linear-gradient(180deg,#264934,#1d3c2c);
-  border-color:#3f6f59;color:#8fd8af;cursor:not-allowed;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 2px 6px rgba(0,0,0,.25);
+  background:linear-gradient(180deg,#2a523b,#1f3f2e);
+  border-color:#4c8168;color:#9de1bc;cursor:not-allowed;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 2px 6px rgba(0,0,0,.25);
   transform:none
 }
+.send-btn:disabled::after,
+.send-btn.is-sending::after{display:none}
 .send-btn.is-sending{animation:sendPulse .95s ease-in-out infinite}
 @keyframes sendPulse{
   0%,100%{filter:brightness(1)}
