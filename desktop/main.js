@@ -132,7 +132,77 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadURL(APP_URL);
+  mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>FrogTalk</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          background: linear-gradient(135deg, #0c1713 0%, #0a1411 50%, #08110e 100%);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          height: 100vh;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+          color: #dff5e8;
+        }
+        .load-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 20px;
+          text-align: center;
+        }
+        .load-logo {
+          font-size: 48px;
+          margin-bottom: 10px;
+          animation: bounce 2s infinite;
+        }
+        .load-title {
+          font-size: 24px;
+          font-weight: 700;
+          color: #4caf50;
+          letter-spacing: 1px;
+        }
+        .load-spinner {
+          width: 40px;
+          height: 40px;
+          border: 3px solid #2f5548;
+          border-top-color: #4caf50;
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
+        .load-text {
+          font-size: 13px;
+          color: #85a89a;
+          letter-spacing: 0.5px;
+        }
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="load-container">
+        <div class="load-logo">🐸</div>
+        <div class="load-title">FrogTalk</div>
+        <div class="load-spinner"></div>
+        <div class="load-text">Loading channels…</div>
+      </div>
+    </body>
+    </html>
+  `)}`);
+  
+  setTimeout(() => {
+    mainWindow.loadURL(APP_URL);
+  }, 500);
 
   // Open external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {

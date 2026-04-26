@@ -1,0 +1,3 @@
+6541a5279ca7d00a7ef5b72b46e715d0df25437f51f06a69ccfeb127d925d901  github-build-mirror/FrogTalk-1.3.9.AppImage
+b80fa6879f12ed832accce6f18b455cf6c3031e24731301aa36248751fab166d  github-build-mirror/frogtalk_1.3.9_amd64.deb
+f3ff8b16ee126cf284c4cb18fabc609ebd570453322662597f35140fe63bfca2  github-build-mirror/FrogTalk-1.3.9-Setup.exe

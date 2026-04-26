@@ -383,7 +383,7 @@ function _fmtAttachSub (name, bytes) {
   if (!bytes && bytes !== 0) return nm;
   const kb = bytes / 1024;
   const size = kb >= 1024 ? (kb / 1024).toFixed(1) + ' MB' : Math.max(1, Math.round(kb)) + ' KB';
-  return `${nm} <span style="color:#555">\u00b7</span> <span style="color:#666">${size}</span>`;
+  return `${nm} <span style="color:#6a9a86">\u00b7</span> <span style="color:#85a89a">${size}</span>`;
 }
 
 function clearAttachment () {
@@ -525,13 +525,13 @@ function openCameraCapture (onReady) {
           <div id="cam-empty" style="display:flex;flex-direction:column;gap:10px;align-items:center;padding:28px 0;width:100%">
             <div style="color:#85a89a;font-size:13px;text-align:center">Take a new photo or pick one from your gallery</div>
             <button onclick="_camOpenLiveCamera()" style="background:#4caf50;color:#000;border:0;padding:12px 20px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;width:100%;max-width:280px">📷 Take photo</button>
-            <button onclick="document.getElementById('cam-input-gallery').click()" style="background:#1e1e1e;color:#e0e0e0;border:1px solid #333;padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer;width:100%;max-width:280px">🖼️ Pick from gallery</button>
+            <button onclick="document.getElementById('cam-input-gallery').click()" style="background:linear-gradient(180deg,#1a3a2d,#143027);color:#dff5e8;border:1px solid #2f5548;padding:10px 20px;border-radius:10px;font-size:14px;cursor:pointer;width:100%;max-width:280px;transition:background .15s">🖼️ Pick from gallery</button>
           </div>
           <img id="cam-preview" style="display:none;max-width:100%;max-height:52vh;border-radius:10px;background:#000">
           <div id="cam-filters" style="display:none;flex-wrap:wrap;gap:6px;justify-content:center;width:100%"></div>
           <div id="cam-sliders" style="display:none;flex-direction:column;gap:6px;width:100%;padding:0 6px;font-size:12px;color:#85a89a"></div>
           <div id="cam-actions" style="display:none;gap:8px;width:100%;padding:4px 0 2px">
-            <button onclick="_camRetake()" style="flex:1;background:#1e1e1e;color:#e0e0e0;border:1px solid #333;padding:10px;border-radius:8px;cursor:pointer">↺ Retake</button>
+            <button onclick="_camRetake()" style="flex:1;background:linear-gradient(180deg,#1a3a2d,#143027);color:#dff5e8;border:1px solid #2f5548;padding:10px;border-radius:8px;cursor:pointer;transition:background .15s">↺ Retake</button>
             <button onclick="_camAttach()" style="flex:2;background:#4caf50;color:#000;border:0;padding:10px;border-radius:8px;font-weight:700;cursor:pointer">✓ Attach</button>
           </div>
         </div>
@@ -633,8 +633,8 @@ async function _camOpenLiveCamera () {
     live.innerHTML = `
       <div id="cam-live-stage" style="position:relative;width:100%;max-width:420px;aspect-ratio:3/4;background:#000;border-radius:10px;overflow:hidden;touch-action:none;user-select:none">
         <video id="cam-live-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center"></video>
-        <button id="cam-live-flip" title="Flip camera" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,.55);color:#fff;border:1px solid #333;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:3">🔄</button>
-        <button id="cam-live-flash" title="Flash" style="position:absolute;top:8px;right:52px;background:rgba(0,0,0,.55);color:#fff;border:1px solid #333;border-radius:18px;min-width:36px;height:36px;padding:0 10px;font-size:13px;font-weight:700;cursor:pointer;z-index:3;display:none;gap:4px;align-items:center;justify-content:center;white-space:nowrap">⚡ Off</button>
+        <button id="cam-live-flip" title="Flip camera" style="position:absolute;top:8px;right:8px;background:rgba(12,28,22,.7);color:#dff5e8;border:1px solid #2f5548;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:3;transition:background .15s">🔄</button>
+        <button id="cam-live-flash" title="Flash" style="position:absolute;top:8px;right:52px;background:rgba(12,28,22,.7);color:#dff5e8;border:1px solid #2f5548;border-radius:18px;min-width:36px;height:36px;padding:0 10px;font-size:13px;font-weight:700;cursor:pointer;z-index:3;display:none;gap:4px;align-items:center;justify-content:center;white-space:nowrap;transition:background .15s">⚡ Off</button>
         <div id="cam-zoom-badge" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.55);color:#fff;border:1px solid #333;border-radius:14px;padding:4px 10px;font-size:12px;font-weight:600;display:none;z-index:3">1.0×</div>
         <div id="cam-rec-badge" style="position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(220,40,40,.85);color:#fff;border-radius:14px;padding:4px 12px;font-size:12px;font-weight:700;display:none;z-index:3;letter-spacing:.5px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#fff;margin-right:6px;animation:cam-rec-pulse 1s infinite"></span><span id="cam-rec-timer">0:00</span></div>
       </div>
