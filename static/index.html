@@ -707,6 +707,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .self-avatar img{width:100%;height:100%;object-fit:cover}
 .self-info{flex:1;min-width:0;overflow:hidden}
 .self-name{font-size:14px;font-weight:700;color:#e6f6ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.self-status-display{
+  font-size:11px;color:#7ecfa3;margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
+  line-height:1.3;pointer-events:none
+}
 .self-quick-menu{
   width:100%;margin-top:4px;padding:8px;
   background:linear-gradient(135deg,#152d25,#10221c);
@@ -3990,6 +3995,7 @@ window.ConnErr = (function(){
       <div class="self-avatar" id="self-avatar-el" onclick="showProfile()">🐸</div>
       <div class="self-info">
         <div class="self-name" id="self-name">Loading…</div>
+        <div class="self-status-display" id="self-status-display">🟢 Online</div>
       </div>
       <div class="self-quick-menu" id="self-quick-menu" aria-label="Quick profile actions">
         <button class="sqm-status-btn" id="self-status" type="button" onclick="openStatusPicker(event)" title="Click to set status">🟢 Online</button>

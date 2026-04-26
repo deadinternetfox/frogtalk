@@ -72,6 +72,12 @@ const UI = (() => {
       ? `<span style="opacity:.9">${dot}</span> <span style="color:#bbb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;display:inline-block;vertical-align:bottom">${escHtml(msg)}</span>`
       : `${dot} ${escHtml(name)}`;
     el.title = msg ? `${name} — ${msg} (click to change)` : `${name} (click to change)`;
+    // Update the under-avatar status display
+    const disp = document.getElementById('self-status-display');
+    if (disp) {
+      disp.textContent = msg ? `${dot} ${msg}` : `${dot} ${name}`;
+      disp.style.color = msg ? '#b2dfc3' : '#7ecfa3';
+    }
     renderSelfQuickStatus();
   }
 
@@ -133,20 +139,25 @@ const UI = (() => {
     if (!State?.user) return;
     await _refreshSelfStatusFromApi();
     let pop = document.getElementById('status-picker-popover');
+    const POP_THEME = 'position:fixed;z-index:1000;' +
+      'background:linear-gradient(160deg,#22473a 0%,#1b3a2e 38%,#162f25 100%);' +
+      'border:1px solid #4a9070;border-radius:14px;padding:14px;' +
+      'width:min(320px,calc(100vw - 24px));' +
+      'box-shadow:0 20px 48px rgba(0,0,0,.6),0 4px 12px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1);' +
+      'backdrop-filter:blur(6px);display:none';
     if (!pop) {
       pop = document.createElement('div');
       pop.id = 'status-picker-popover';
-      pop.style.cssText = 'position:fixed;z-index:1000;background:radial-gradient(circle at top,#1d3b31 0%,#132720 52%,#10201a 100%);border:1px solid #3f7a63;border-radius:14px;padding:13px;width:min(320px,calc(100vw - 24px));box-shadow:0 18px 44px rgba(0,0,0,.54), inset 0 1px 0 rgba(255,255,255,.08);display:none;backdrop-filter:blur(4px)';
       pop.innerHTML = `
-        <div style="font-size:11px;color:#9ae4bb;font-weight:800;letter-spacing:.55px;text-transform:uppercase;margin-bottom:6px">Set status</div>
-        <div id="sp-current" style="font-size:12px;color:#cfe8dc;background:linear-gradient(180deg,rgba(28,58,47,.8),rgba(21,43,35,.8));border:1px solid rgba(123,193,161,.35);border-radius:9px;padding:8px 10px;margin-bottom:10px;line-height:1.35"></div>
+        <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:8px">Set status</div>
+        <div id="sp-current" style="font-size:12px;color:#d0ead8;background:rgba(14,34,26,.55);border:1px solid rgba(90,160,125,.4);border-radius:9px;padding:8px 11px;margin-bottom:10px;line-height:1.4"></div>
         <div id="sp-opts" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
-        <div style="font-size:11px;color:#9ae4bb;font-weight:800;letter-spacing:.55px;text-transform:uppercase;margin-bottom:6px">Status message</div>
-        <input id="sp-msg" type="text" maxlength="128" placeholder="Click to set status"
-          style="width:100%;background:linear-gradient(180deg,#193328,#142a22);border:1px solid #3e6f5b;border-radius:9px;padding:9px 10px;color:#ecfaf2;font-size:13px;outline:none;box-sizing:border-box">
-        <div style="display:flex;gap:8px;margin-top:11px">
-          <button id="sp-clear" style="flex:1;background:linear-gradient(180deg,#1b352c,#142720);border:1px solid #3a6655;color:#b4cebf;padding:9px;border-radius:9px;cursor:pointer;font-size:12px">Clear</button>
-          <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#59bc63,#47a950);border:1px solid #5fc070;color:#041704;font-weight:800;padding:9px;border-radius:9px;cursor:pointer;font-size:12px">Save</button>
+        <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:7px">Status message</div>
+        <input id="sp-msg" type="text" maxlength="128" placeholder="What are you up to?"
+          style="width:100%;background:rgba(12,28,22,.7);border:1px solid #4a8068;border-radius:9px;padding:9px 11px;color:#e8f8ee;font-size:13px;outline:none;box-sizing:border-box">
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button id="sp-clear" style="flex:1;background:rgba(22,48,37,.8);border:1px solid #3d6a58;color:#a8ccb8;padding:10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600">Clear</button>
+          <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#5abf65,#48aa52);border:1px solid #65c870;color:#041704;font-weight:800;padding:10px;border-radius:9px;cursor:pointer;font-size:13px">Save</button>
         </div>
       `;
       document.body.appendChild(pop);
@@ -158,6 +169,8 @@ const UI = (() => {
         }
       });
     }
+    // Always refresh theme CSS so cached old DOM gets the new look:
+    pop.style.cssText = POP_THEME;
     // Populate presence options (reflect current)
     const curP = State.user.presence || 'online';
     const curStatusMsg = (State.user.status_msg || '').trim();
