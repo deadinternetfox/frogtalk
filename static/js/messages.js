@@ -1574,6 +1574,8 @@ async function sendMessage() {
   Messages._isSending = true;
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
+  btn.classList.add('is-sending');
+  btn.setAttribute('aria-busy', 'true');
   btn.textContent = '⏳';
 
   let _nonce = null;
@@ -1720,6 +1722,8 @@ async function sendMessage() {
   } finally {
     Messages._isSending = false;
     btn.disabled = false;
+    btn.classList.remove('is-sending');
+    btn.removeAttribute('aria-busy');
     btn.textContent = '➤';
   }
 }

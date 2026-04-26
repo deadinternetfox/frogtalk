@@ -692,62 +692,45 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 
 /* User self panel at bottom of sidebar */
 #self-panel{
-  padding:12px;background:#0d0d0d;border-top:1px solid #1a1a1a;
+  padding:12px;
+  background:linear-gradient(180deg,#0f1f1a 0%,#0c1814 100%);
+  border-top:1px solid #26453a;
   display:flex;flex-wrap:wrap;align-items:center;gap:8px
 }
 .self-avatar{
-  width:36px;height:36px;border-radius:50%;background:#1e3a1e;
+  width:38px;height:38px;border-radius:50%;
+  background:radial-gradient(circle at 30% 30%,#2b5f4c,#1a3b31);
   display:flex;align-items:center;justify-content:center;font-size:18px;
-  cursor:pointer;overflow:hidden;flex-shrink:0
+  cursor:pointer;overflow:hidden;flex-shrink:0;
+  box-shadow:0 0 0 1px rgba(120,194,162,.28),0 4px 10px rgba(0,0,0,.25)
 }
 .self-avatar img{width:100%;height:100%;object-fit:cover}
 .self-info{flex:1;min-width:0;overflow:hidden}
-.self-name{font-size:14px;font-weight:600;color:#e0e0e0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.self-status{font-size:11px;color:#4caf50;cursor:default;padding:2px 4px;margin:-2px -4px;border-radius:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.self-name{font-size:14px;font-weight:700;color:#e6f6ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.self-status{
+  font-size:11px;color:#89d6ad;cursor:pointer;
+  padding:3px 7px;margin-top:2px;border-radius:999px;display:inline-flex;align-items:center;gap:4px;
+  background:rgba(22,53,43,.65);border:1px solid rgba(103,178,145,.36);
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  transition:background .15s,border-color .15s,transform .1s
+}
+.self-status:hover{background:rgba(28,64,52,.75);border-color:rgba(123,205,169,.52);transform:translateY(-1px)}
 .self-quick-menu{
   width:100%;margin-top:2px;padding:8px;
-  background:linear-gradient(135deg,#101910,#0f1410);
-  border:1px solid #233423;border-radius:10px;
+  background:linear-gradient(135deg,#152d25,#10221c);
+  border:1px solid #2b5142;border-radius:10px;
   display:flex;flex-direction:column;gap:8px
 }
-.sqm-status-line{
-  width:100%;display:flex;align-items:center;gap:8px;
-  background:#121c12;border:1px solid #2b402b;color:#c9e7c9;
-  border-radius:8px;padding:8px 10px;cursor:pointer;font-size:12px;
-  transition:background .15s,border-color .15s
-}
-.sqm-status-line:hover{background:#172517;border-color:#3a583a}
-.sqm-status-icon{font-size:13px;opacity:.9;flex-shrink:0}
-.sqm-status-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .sqm-actions{display:flex;gap:6px}
 .sqm-action-btn{
-  flex:1;height:32px;border-radius:8px;border:1px solid #2a2a2a;
-  background:#141414;color:#ddd;cursor:pointer;font-size:12px;font-weight:600;
+  flex:1;height:32px;border-radius:8px;border:1px solid #2d5545;
+  background:linear-gradient(180deg,#1b362c,#162c24);color:#dff3e9;cursor:pointer;font-size:12px;font-weight:700;
   display:flex;align-items:center;justify-content:center;gap:6px;
   transition:background .15s,border-color .15s,color .15s
 }
-.sqm-action-btn:hover{background:#1a1a1a;border-color:#3a3a3a}
-.sqm-action-btn.friends{border-color:#2f462f;color:#aee5ae;background:#132013}
-.sqm-action-btn.friends:hover{background:#183018;border-color:#3d5a3d}
-.sqm-editor{display:none;gap:6px;flex-direction:column}
-.sqm-editor.is-open{display:flex}
-.sqm-edit-row{display:flex;align-items:center;gap:6px}
-.sqm-input{
-  width:100%;height:34px;background:#0f0f0f;border:1px solid #2a2a2a;
-  border-radius:8px;padding:0 10px;color:#e0e0e0;font-size:12px;outline:none;box-sizing:border-box
-}
-.sqm-input:focus{border-color:#4caf50}
-.sqm-tick{
-  width:26px;height:26px;border-radius:50%;border:none;
-  background:#4caf50;color:#071107;font-weight:900;font-size:13px;line-height:1;
-  display:flex;align-items:center;justify-content:center;cursor:pointer;
-  opacity:0;pointer-events:none;transform:scale(.9);
-  transition:opacity .12s,transform .12s,filter .12s
-}
-.sqm-edit-row:focus-within .sqm-tick,
-.sqm-tick.is-active{opacity:1;pointer-events:auto;transform:scale(1)}
-.sqm-tick:hover{filter:brightness(1.08)}
-.sqm-edit-hint{font-size:10px;color:#8ea79b;padding:0 2px}
+.sqm-action-btn:hover{background:linear-gradient(180deg,#214235,#1b352c);border-color:#3c6d5a;color:#ebfaf4}
+.sqm-action-btn.friends{border-color:#3b6f5a;color:#bcefd1;background:linear-gradient(180deg,#1d3a2f,#173026)}
+.sqm-action-btn.friends:hover{background:linear-gradient(180deg,#264a3c,#1e3d31);border-color:#4f8f76}
 .icon-btn{
   width:34px;height:34px;min-height:34px;background:none;border:none;
   color:#888;cursor:pointer;border-radius:6px;
@@ -1215,14 +1198,31 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #msg-input:focus-visible{outline:none !important;box-shadow:none !important;border-color:transparent !important}
 #msg-input::placeholder{color:#444}
 .send-btn{
-  background:linear-gradient(135deg,#4caf50,#45a049);border:none;color:#000;border-radius:8px;
-  width:34px;height:34px;min-height:34px;cursor:pointer;font-size:16px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;transition:all .2s;
-  box-shadow:0 2px 8px rgba(76,175,80,.25)
+  background:radial-gradient(circle at 30% 30%,#86e0ad 0%,#4caf50 48%,#2f8a42 100%);
+  border:1px solid #56b471;color:#08200f;border-radius:11px;
+  width:34px;height:34px;min-height:34px;cursor:pointer;font-size:15px;font-weight:900;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;transition:transform .14s,filter .14s,box-shadow .18s,background .2s,border-color .2s,color .2s;
+  box-shadow:0 4px 12px rgba(30,86,47,.34),inset 0 1px 0 rgba(255,255,255,.34),inset 0 -1px 0 rgba(0,0,0,.22)
 }
-.send-btn:hover{background:linear-gradient(135deg,#5bc661,#4caf50);transform:scale(1.05);box-shadow:0 3px 12px rgba(76,175,80,.35)}
-.send-btn:active{transform:scale(.95)}
-.send-btn:disabled{background:#2a4a2a;color:#4caf50;cursor:not-allowed;box-shadow:none;transform:none}
+.send-btn:hover{
+  background:radial-gradient(circle at 30% 25%,#9ae8be 0%,#5abf66 45%,#358f48 100%);
+  border-color:#73cc8d;transform:translateY(-1px) scale(1.03);
+  box-shadow:0 7px 15px rgba(42,108,62,.4),inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(0,0,0,.2)
+}
+.send-btn:active{transform:translateY(0) scale(.96);filter:saturate(1.06)}
+.send-btn:focus-visible{outline:2px solid rgba(141,231,176,.8);outline-offset:2px}
+.send-btn:disabled,
+.send-btn.is-sending{
+  background:linear-gradient(180deg,#264934,#1d3c2c);
+  border-color:#3f6f59;color:#8fd8af;cursor:not-allowed;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 2px 6px rgba(0,0,0,.25);
+  transform:none
+}
+.send-btn.is-sending{animation:sendPulse .95s ease-in-out infinite}
+@keyframes sendPulse{
+  0%,100%{filter:brightness(1)}
+  50%{filter:brightness(1.14)}
+}
 .attach-btn{
   background:none;border:none;color:#666;cursor:pointer;font-size:18px;
   width:34px;height:34px;min-height:34px;padding:0;flex-shrink:0;transition:all .15s;
@@ -3978,19 +3978,8 @@ window.ConnErr = (function(){
         <div class="self-status" id="self-status" onclick="openStatusPicker(event)" title="Click to set status">🟢 Online</div>
       </div>
       <div class="self-quick-menu" id="self-quick-menu" aria-label="Quick profile actions">
-        <div class="sqm-status-line" id="self-quick-status-btn" onclick="toggleSelfStatusComposer(true)" title="Click to edit your status">
-          <span class="sqm-status-icon">📝</span>
-          <span class="sqm-status-text" id="self-quick-status-text">Online</span>
-        </div>
         <div class="sqm-actions">
           <button class="sqm-action-btn friends" type="button" onclick="openFriends()">👥 Friends</button>
-        </div>
-        <div class="sqm-editor" id="self-quick-editor">
-          <div class="sqm-edit-row">
-            <input id="self-quick-input" class="sqm-input" type="text" maxlength="128" placeholder="Set status message..."
-                   onkeydown="if(event.key==='Enter'){event.preventDefault();submitSelfQuickStatus()}else if(event.key==='Escape'){cancelSelfQuickStatus()}" />
-            <button class="sqm-tick" id="self-quick-save" type="button" onclick="submitSelfQuickStatus()" aria-label="Save status">✓</button>
-          </div>
         </div>
       </div>
     </div>
