@@ -703,8 +703,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .self-avatar img{width:100%;height:100%;object-fit:cover}
 .self-info{flex:1;min-width:0;overflow:hidden}
 .self-name{font-size:14px;font-weight:600;color:#e0e0e0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.self-status{font-size:11px;color:#4caf50;cursor:pointer;padding:2px 4px;margin:-2px -4px;border-radius:4px;transition:background .15s;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.self-status:hover{background:#1a2a1a}
+.self-status{font-size:11px;color:#4caf50;cursor:default;padding:2px 4px;margin:-2px -4px;border-radius:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .self-quick-menu{
   width:100%;margin-top:2px;padding:8px;
   background:linear-gradient(135deg,#101910,#0f1410);
@@ -714,7 +713,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .sqm-status-line{
   width:100%;display:flex;align-items:center;gap:8px;
   background:#121c12;border:1px solid #2b402b;color:#c9e7c9;
-  border-radius:8px;padding:8px 10px;cursor:text;font-size:12px;
+  border-radius:8px;padding:8px 10px;cursor:pointer;font-size:12px;
   transition:background .15s,border-color .15s
 }
 .sqm-status-line:hover{background:#172517;border-color:#3a583a}
@@ -748,6 +747,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .sqm-edit-row:focus-within .sqm-tick,
 .sqm-tick.is-active{opacity:1;pointer-events:auto;transform:scale(1)}
 .sqm-tick:hover{filter:brightness(1.08)}
+.sqm-edit-hint{font-size:10px;color:#8ea79b;padding:0 2px}
 .icon-btn{
   width:34px;height:34px;min-height:34px;background:none;border:none;
   color:#888;cursor:pointer;border-radius:6px;
@@ -1083,6 +1083,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #typing-bar{
   padding:4px 16px;min-height:24px;font-size:12px;color:#95b2a4;flex-shrink:0;
   background:linear-gradient(180deg,#11221c,#10201b)
+}
+#typing-bar:empty{
+  display:none;
+  min-height:0;
+  padding:0;
 }
 
 /* Input area */

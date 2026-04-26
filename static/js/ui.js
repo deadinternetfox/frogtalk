@@ -136,16 +136,17 @@ const UI = (() => {
     if (!pop) {
       pop = document.createElement('div');
       pop.id = 'status-picker-popover';
-      pop.style.cssText = 'position:fixed;z-index:1000;background:#141414;border:1px solid #2a4a2a;border-radius:12px;padding:12px;width:280px;box-shadow:0 12px 36px rgba(0,0,0,.6);display:none';
+      pop.style.cssText = 'position:fixed;z-index:1000;background:linear-gradient(180deg,#132720,#0f1d19);border:1px solid #2f5a4a;border-radius:12px;padding:12px;width:292px;box-shadow:0 14px 36px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.03);display:none';
       pop.innerHTML = `
-        <div style="font-size:11px;color:#4caf50;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">Set status</div>
+        <div style="font-size:11px;color:#7ed2a5;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Set status</div>
+        <div id="sp-current" style="font-size:12px;color:#b9d7c8;background:rgba(24,49,40,.65);border:1px solid rgba(110,176,147,.25);border-radius:8px;padding:7px 9px;margin-bottom:8px;line-height:1.35"></div>
         <div id="sp-opts" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px"></div>
-        <div style="font-size:11px;color:#4caf50;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">Status message</div>
-        <input id="sp-msg" type="text" maxlength="128" placeholder="What are you up to?"
-          style="width:100%;background:#0f0f0f;border:1px solid #222;border-radius:8px;padding:8px 10px;color:#e0e0e0;font-size:13px;outline:none;box-sizing:border-box">
+        <div style="font-size:11px;color:#7ed2a5;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">Status text</div>
+        <input id="sp-msg" type="text" maxlength="128" placeholder="Click to set status"
+          style="width:100%;background:linear-gradient(180deg,#152b23,#12241e);border:1px solid #335b4c;border-radius:8px;padding:8px 10px;color:#e7f4ee;font-size:13px;outline:none;box-sizing:border-box">
         <div style="display:flex;gap:6px;margin-top:10px">
-          <button id="sp-clear" style="flex:1;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:8px;border-radius:8px;cursor:pointer;font-size:12px">Clear</button>
-          <button id="sp-save" style="flex:1;background:#4caf50;border:none;color:#000;font-weight:700;padding:8px;border-radius:8px;cursor:pointer;font-size:12px">Save</button>
+          <button id="sp-clear" style="flex:1;background:linear-gradient(180deg,#172d25,#12221d);border:1px solid #305545;color:#9db9ad;padding:8px;border-radius:8px;cursor:pointer;font-size:12px">Clear</button>
+          <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#4caf50,#409c45);border:none;color:#041204;font-weight:700;padding:8px;border-radius:8px;cursor:pointer;font-size:12px">Save</button>
         </div>
       `;
       document.body.appendChild(pop);
@@ -159,6 +160,13 @@ const UI = (() => {
     }
     // Populate presence options (reflect current)
     const curP = State.user.presence || 'online';
+    const curStatusMsg = (State.user.status_msg || '').trim();
+    const currentText = curStatusMsg || 'Click to set status';
+    const currentRow = pop.querySelector('#sp-current');
+    if (currentRow) {
+      currentRow.textContent = currentText;
+      currentRow.style.color = curStatusMsg ? '#d8eee3' : '#9fb8ad';
+    }
     const opts = [
       { k: 'online',    d: '🟢', l: 'Online' },
       { k: 'away',      d: '🟡', l: 'Away' },
@@ -167,7 +175,7 @@ const UI = (() => {
     ];
     pop.querySelector('#sp-opts').innerHTML = opts.map(o => `
       <button type="button" data-presence="${o.k}"
-        style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;background:${o.k===curP?'#162116':'#0f0f0f'};border:1px solid ${o.k===curP?'#4caf50':'#222'};color:${o.k===curP?'#4caf50':'#ddd'};font-size:13px;cursor:pointer;text-align:left">
+        style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;background:${o.k===curP?'#1a382f':'#152720'};border:1px solid ${o.k===curP?'#62bf94':'#2f5546'};color:${o.k===curP?'#78d0a3':'#d7ece2'};font-size:13px;cursor:pointer;text-align:left">
         <span style="font-size:14px">${o.d}</span><span style="flex:1">${o.l}</span>${o.k===curP?'<span>✓</span>':''}
       </button>
     `).join('');
@@ -175,9 +183,9 @@ const UI = (() => {
       btn.onclick = () => {
         pop.querySelectorAll('[data-presence]').forEach(b => {
           const k = b.dataset.presence;
-          b.style.background = k === btn.dataset.presence ? '#162116' : '#0f0f0f';
-          b.style.borderColor = k === btn.dataset.presence ? '#4caf50' : '#222';
-          b.style.color = k === btn.dataset.presence ? '#4caf50' : '#ddd';
+          b.style.background = k === btn.dataset.presence ? '#1a382f' : '#152720';
+          b.style.borderColor = k === btn.dataset.presence ? '#62bf94' : '#2f5546';
+          b.style.color = k === btn.dataset.presence ? '#78d0a3' : '#d7ece2';
         });
         pop.dataset.pendingPresence = btn.dataset.presence;
       };
