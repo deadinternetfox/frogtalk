@@ -374,11 +374,56 @@ function saveViews(array $views): void {
     file_put_contents(DATA_DIR . '/views.json', json_encode($views), LOCK_EX);
 }
 
+function getViewKey(): string {
+    $uid = $_COOKIE['frog_view_uid'] ?? '';
+    if (empty($uid) || strlen($uid) < 16) {
+        $uid = bin2hex(random_bytes(16));
+        $opts = [
+            'expires' => time() + 86400 * 365,
+            'path' => '/',
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ];
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            $opts['secure'] = true;
+        }
+        setcookie('frog_view_uid', $uid, $opts);
+        $_COOKIE['frog_view_uid'] = $uid;
+    }
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    $ua = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    return hash('sha256', $uid . '|' . $ip . '|' . $ua . '|frog-view-v1');
+}
+
+function loadViewSeen(): array {
+    $file = DATA_DIR . '/view_seen.json';
+    if (!file_exists($file)) return [];
+    $data = json_decode(file_get_contents($file), true);
+    return is_array($data) ? $data : [];
+}
+
+function saveViewSeen(array $seen): void {
+    file_put_contents(DATA_DIR . '/view_seen.json', json_encode($seen), LOCK_EX);
+}
+
 function trackView(string $threadId): int {
     $views = loadViews();
     if (!isset($views[$threadId])) $views[$threadId] = 0;
-    $views[$threadId]++;
-    saveViews($views);
+
+    $seen = loadViewSeen();
+    if (!isset($seen[$threadId]) || !is_array($seen[$threadId])) {
+        $seen[$threadId] = [];
+    }
+
+    $viewKey = getViewKey();
+    if (!isset($seen[$threadId][$viewKey])) {
+        $views[$threadId]++;
+        $seen[$threadId][$viewKey] = time();
+        saveViews($views);
+        saveViewSeen($seen);
+    }
+
     return $views[$threadId];
 }
 
