@@ -153,7 +153,9 @@ const Rooms = (() => {
     if (isImageIcon(safeIcon)) {
       return `<span class="${className} is-image"><img src="${UI.escHtml(safeIcon)}" alt="Room icon"></span>`;
     }
-    return `<span class="${className}">${UI.escHtml(safeIcon || defaultIconForType(type, channelType))}</span>`;
+    const renderedIcon = safeIcon || defaultIconForType(type, channelType);
+    const fallbackHashClass = (!safeIcon && renderedIcon === '#') ? ' is-fallback-hash' : '';
+    return `<span class="${className}${fallbackHashClass}">${UI.escHtml(renderedIcon)}</span>`;
   }
 
   function setRoomHeader(name, type, roomIcon = null, dmPeer = null, channelType = 'text') {
