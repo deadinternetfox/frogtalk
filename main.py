@@ -106,6 +106,42 @@ async def federation_update_check_task():
             print(f"[Federation] Update check task error: {e}")
 
 
+async def _run_boot_sync_nonblocking():
+    """Run one-time directory sync without blocking app startup."""
+    try:
+        boot_sync = await asyncio.wait_for(
+            federation_mod.sync_official_directory_once(), timeout=10
+        )
+        if boot_sync.get("ok"):
+            print(f"[Federation] Boot sync imported={boot_sync.get('imported', 0)} skipped={boot_sync.get('skipped', 0)}")
+    except asyncio.TimeoutError:
+        print("[Federation] Boot sync timed out; continuing startup")
+    except Exception as e:
+        print(f"[Federation] Boot sync error: {e}")
+
+
+async def _start_discord_bridge_nonblocking():
+    """Start Discord bridge with timeout guard so startup cannot deadlock."""
+    try:
+        from bridge_discord import start_discord_bridge
+        await asyncio.wait_for(start_discord_bridge(), timeout=10)
+    except asyncio.TimeoutError:
+        print("[Discord Bridge] Startup timed out; continuing without blocking")
+    except Exception as e:
+        print(f"[Discord Bridge] Could not start: {e}")
+
+
+async def _start_telegram_bridge_nonblocking():
+    """Start Telegram bridge with timeout guard so startup cannot deadlock."""
+    try:
+        from bridge_telegram import start_telegram_bridge
+        await asyncio.wait_for(start_telegram_bridge(), timeout=12)
+    except asyncio.TimeoutError:
+        print("[Telegram Bridge] Startup timed out; continuing without blocking")
+    except Exception as e:
+        print(f"[Telegram Bridge] Could not start: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -116,28 +152,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(federation_inbox_processor_task()),
         asyncio.create_task(federation_outbox_processor_task()),
         asyncio.create_task(federation_update_check_task()),
+        asyncio.create_task(_run_boot_sync_nonblocking()),
+        asyncio.create_task(_start_discord_bridge_nonblocking()),
+        asyncio.create_task(_start_telegram_bridge_nonblocking()),
     ]
-    # Best-effort immediate sync on boot if URL is configured.
-    try:
-        boot_sync = await federation_mod.sync_official_directory_once()
-        if boot_sync.get("ok"):
-            print(f"[Federation] Boot sync imported={boot_sync.get('imported', 0)} skipped={boot_sync.get('skipped', 0)}")
-    except Exception as e:
-        print(f"[Federation] Boot sync error: {e}")
-    # Start Discord bridge if token is set
-    try:
-        from bridge_discord import start_discord_bridge
-        await start_discord_bridge()
-    except Exception as e:
-        print(f"[Discord Bridge] Could not start: {e}")
-    # Start Telegram bridge if token is set — without this, /claim CODE
-    # messages in Telegram groups are never received so the bridge link
-    # silently fails even though the UI hands out codes.
-    try:
-        from bridge_telegram import start_telegram_bridge
-        await start_telegram_bridge()
-    except Exception as e:
-        print(f"[Telegram Bridge] Could not start: {e}")
     yield
     # Cancel background tasks on shutdown
     for t in tasks:
