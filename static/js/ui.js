@@ -138,39 +138,47 @@ const UI = (() => {
     try { ev?.stopPropagation?.(); } catch {}
     if (!State?.user) return;
     await _refreshSelfStatusFromApi();
-    let pop = document.getElementById('status-picker-popover');
-    const POP_THEME = 'position:fixed;z-index:1000;' +
-      'background:linear-gradient(160deg,#22473a 0%,#1b3a2e 38%,#162f25 100%);' +
-      'border:1px solid #4a9070;border-radius:14px;padding:14px;' +
-      'width:min(320px,calc(100vw - 24px));' +
-      'box-shadow:0 20px 48px rgba(0,0,0,.6),0 4px 12px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1);' +
-      'backdrop-filter:blur(6px);display:none';
-    if (!pop) {
-      pop = document.createElement('div');
-      pop.id = 'status-picker-popover';
-      pop.innerHTML = `
-        <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:8px">Set status</div>
-        <div id="sp-current" style="font-size:12px;color:#d0ead8;background:rgba(14,34,26,.55);border:1px solid rgba(90,160,125,.4);border-radius:9px;padding:8px 11px;margin-bottom:10px;line-height:1.4"></div>
-        <div id="sp-opts" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
-        <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:7px">Status message</div>
-        <input id="sp-msg" type="text" maxlength="128" placeholder="What are you up to?"
-          style="width:100%;background:rgba(12,28,22,.7);border:1px solid #4a8068;border-radius:9px;padding:9px 11px;color:#e8f8ee;font-size:13px;outline:none;box-sizing:border-box">
-        <div style="display:flex;gap:8px;margin-top:12px">
-          <button id="sp-clear" style="flex:1;background:rgba(22,48,37,.8);border:1px solid #3d6a58;color:#a8ccb8;padding:10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600">Clear</button>
-          <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#5abf65,#48aa52);border:1px solid #65c870;color:#041704;font-weight:800;padding:10px;border-radius:9px;cursor:pointer;font-size:13px">Save</button>
-        </div>
-      `;
-      document.body.appendChild(pop);
-      document.addEventListener('click', (e) => {
-        const statusAnchor = document.getElementById('self-status');
-        const clickedStatusAnchor = !!(statusAnchor && statusAnchor.contains(e.target));
-        if (!pop.contains(e.target) && !clickedStatusAnchor) {
-          pop.style.display = 'none';
-        }
-      });
-    }
-    // Always refresh theme CSS so cached old DOM gets the new look:
-    pop.style.cssText = POP_THEME;
+
+    // Always destroy + recreate so stale DOM / old styles never show
+    const old = document.getElementById('status-picker-popover');
+    if (old) old.remove();
+
+    const pop = document.createElement('div');
+    pop.id = 'status-picker-popover';
+    // No backdrop-filter — it renders black on Android Chrome when unsupported
+    Object.assign(pop.style, {
+      position: 'fixed',
+      zIndex: '1000',
+      background: 'linear-gradient(160deg,#234d3e 0%,#1c3d30 40%,#172f25 100%)',
+      border: '1px solid #4f9675',
+      borderRadius: '14px',
+      padding: '14px',
+      width: 'min(320px, calc(100vw - 24px))',
+      boxShadow: '0 20px 50px rgba(0,0,0,.65), 0 4px 14px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.1)',
+      display: 'none',
+      boxSizing: 'border-box',
+    });
+    pop.innerHTML = `
+      <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:8px">Set status</div>
+      <div id="sp-current" style="font-size:12px;color:#d0ead8;background:#132b22;border:1px solid rgba(90,160,125,.45);border-radius:9px;padding:8px 11px;margin-bottom:10px;line-height:1.4"></div>
+      <div id="sp-opts" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
+      <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:7px">Status message</div>
+      <input id="sp-msg" type="text" maxlength="128" placeholder="What are you up to?"
+        style="width:100%;background:#0f2219;border:1px solid #4a8068;border-radius:9px;padding:9px 11px;color:#e8f8ee;font-size:13px;outline:none;box-sizing:border-box">
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button id="sp-clear" style="flex:1;background:#1a3c2d;border:1px solid #3d6a58;color:#a8ccb8;padding:10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600">Clear</button>
+        <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#5abf65,#48aa52);border:1px solid #65c870;color:#041704;font-weight:800;padding:10px;border-radius:9px;cursor:pointer;font-size:13px">Save</button>
+      </div>
+    `;
+    document.body.appendChild(pop);
+    document.addEventListener('click', function _spClose(e) {
+      const statusAnchor = document.getElementById('self-status');
+      const clickedAnchor = !!(statusAnchor && statusAnchor.contains(e.target));
+      if (!pop.contains(e.target) && !clickedAnchor) {
+        pop.remove();
+        document.removeEventListener('click', _spClose);
+      }
+    });
     // Populate presence options (reflect current)
     const curP = State.user.presence || 'online';
     const curStatusMsg = (State.user.status_msg || '').trim();
@@ -205,19 +213,23 @@ const UI = (() => {
     });
     pop.dataset.pendingPresence = curP;
     pop.querySelector('#sp-msg').value = State.user.status_msg || '';
-    pop.querySelector('#sp-clear').onclick = async () => { await _saveStatus('online', ''); pop.style.display = 'none'; };
-    pop.querySelector('#sp-save').onclick  = async () => {
+    // Close immediately, save in background — no blocking lag
+    pop.querySelector('#sp-clear').onclick = () => {
+      pop.remove();
+      _saveStatus('online', '');
+    };
+    pop.querySelector('#sp-save').onclick = () => {
       const presence = pop.dataset.pendingPresence || 'online';
       const msg = pop.querySelector('#sp-msg').value.slice(0, 128);
-      await _saveStatus(presence, msg);
-      pop.style.display = 'none';
+      pop.remove();
+      _saveStatus(presence, msg);
     };
     // Position above the self-status element
     const anchor = document.getElementById('self-status');
     const r = anchor.getBoundingClientRect();
     pop.style.display = 'block';
-    const popH = pop.offsetHeight || 260;
-    pop.style.left = Math.max(8, Math.min(window.innerWidth - 290, r.left)) + 'px';
+    const popH = pop.offsetHeight || 300;
+    pop.style.left = Math.max(8, Math.min(window.innerWidth - 330, r.left)) + 'px';
     pop.style.top  = Math.max(8, r.top - popH - 8) + 'px';
   }
 
