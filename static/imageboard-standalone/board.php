@@ -2007,9 +2007,40 @@ if ($singleThread) {
         /* ── FROGTALK MINI WIDGET (replaces Swamp Chat) ── */
         .frog-mini-headline { color:#00ff41; font-size:12px; margin:0; display:flex; align-items:center; gap:6px; }
         .frog-mini-note { color:#4a8f4a; font-size:11px; }
-        .frog-mini-wrap { display:none; height: 360px; border-top:1px solid rgba(0,255,65,0.15); }
+        .frog-mini-wrap { display:none; height: 360px; border-top:1px solid rgba(0,255,65,0.15); position: relative; background:#0b120b; overflow:hidden; }
         .frog-mini-wrap.open { display:block; }
-        .frog-mini-frame { width:100%; height:100%; border:none; background:#0b120b; }
+        .frog-mini-frame { width:100%; height:100%; border:none; background:#0b120b; opacity:0; transition:opacity .22s ease; }
+        .frog-mini-wrap.ready .frog-mini-frame { opacity:1; }
+        .frog-mini-loader {
+            position:absolute;
+            inset:0;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:center;
+            gap:10px;
+            background:linear-gradient(180deg, rgba(5,12,5,0.96) 0%, rgba(6,16,6,0.98) 100%);
+            color:#6fb86f;
+            font-size:11px;
+            letter-spacing:.4px;
+            opacity:0;
+            visibility:hidden;
+            pointer-events:none;
+            transition:opacity .18s ease, visibility .18s ease;
+        }
+        .frog-mini-wrap.loading .frog-mini-loader { opacity:1; visibility:visible; }
+        .frog-mini-wrap.loading .frog-mini-frame { opacity:0; }
+        .frog-mini-loader-spinner {
+            width:22px;
+            height:22px;
+            border-radius:50%;
+            border:2px solid rgba(0,255,65,0.2);
+            border-top-color:#00ff41;
+            animation:frogMiniSpin .9s linear infinite;
+        }
+        .frog-mini-loader-text { color:#7bc57b; font-size:11px; }
+        .frog-mini-loader-sub { color:#4a8f4a; font-size:10px; }
+        @keyframes frogMiniSpin { to { transform:rotate(360deg); } }
         .frog-mini-guest { display:flex; flex-direction:column; gap:10px; align-items:stretch; padding:12px; border-top:1px solid rgba(0,255,65,0.15); }
         .frog-mini-guest-title { color:#8cff8c; font-size:13px; font-weight:700; }
         .frog-mini-guest-copy { color:#7eb07e; font-size:12px; line-height:1.4; }
@@ -3557,6 +3588,11 @@ if ($singleThread) {
                 </div>
             </div>
             <div id="frogMiniWrap" class="frog-mini-wrap">
+                <div id="frogMiniLoader" class="frog-mini-loader" aria-live="polite" aria-busy="true">
+                    <div class="frog-mini-loader-spinner"></div>
+                    <div id="frogMiniLoaderText" class="frog-mini-loader-text">Loading FrogTalk...</div>
+                    <div class="frog-mini-loader-sub">Preparing channels and DMs</div>
+                </div>
                 <iframe id="frogMiniFrame" class="frog-mini-frame" src="about:blank" title="FrogTalk mini channels and DMs"></iframe>
             </div>
         </div>
@@ -5582,6 +5618,7 @@ if ($singleThread) {
     // ── FrogTalk Mini Widget ──
     let frogMiniOpen = false;
     let frogMiniLogged = false;
+    let frogMiniFrameBound = false;
 
     function _frogMiniToken() {
         try { return localStorage.getItem('fc_token') || localStorage.getItem('token') || ''; } catch (e) { return ''; }
@@ -5596,6 +5633,36 @@ if ($singleThread) {
         } catch (e) { return ''; }
     }
 
+    function _frogMiniSetLoading(active, text) {
+        const wrap = document.getElementById('frogMiniWrap');
+        const loader = document.getElementById('frogMiniLoader');
+        const loaderText = document.getElementById('frogMiniLoaderText');
+        if (!wrap || !loader) return;
+        if (text && loaderText) loaderText.textContent = text;
+        if (active) {
+            wrap.classList.add('loading');
+            wrap.classList.remove('ready');
+            loader.setAttribute('aria-busy', 'true');
+        } else {
+            wrap.classList.remove('loading');
+            wrap.classList.add('ready');
+            loader.setAttribute('aria-busy', 'false');
+        }
+    }
+
+    function _frogMiniBindFrameEvents() {
+        if (frogMiniFrameBound) return;
+        const frame = document.getElementById('frogMiniFrame');
+        if (!frame) return;
+        frame.addEventListener('load', function() {
+            _frogMiniSetLoading(false);
+        });
+        frame.addEventListener('error', function() {
+            _frogMiniSetLoading(false, 'Could not load FrogTalk');
+        });
+        frogMiniFrameBound = true;
+    }
+
     function _frogMiniApplyState() {
         const stateEl = document.getElementById('frogMiniState');
         const guest = document.getElementById('frogMiniGuest');
@@ -5603,17 +5670,25 @@ if ($singleThread) {
         const frame = document.getElementById('frogMiniFrame');
         if (!stateEl || !guest || !wrap || !frame) return;
 
+        _frogMiniBindFrameEvents();
+
         frogMiniLogged = !!_frogMiniToken();
         if (frogMiniLogged) {
             var nick = _frogMiniUserNick();
             stateEl.textContent = nick ? ('Logged in as ' + nick) : 'Logged in';
             guest.style.display = 'none';
             wrap.classList.add('open');
-            if (!frame.src || frame.src === 'about:blank') frame.src = '/app';
+            if (!frame.src || frame.src === 'about:blank') {
+                _frogMiniSetLoading(true, 'Loading FrogTalk...');
+                frame.src = '/app';
+            } else {
+                _frogMiniSetLoading(false);
+            }
         } else {
             stateEl.textContent = 'Not logged in';
             guest.style.display = 'flex';
             wrap.classList.remove('open');
+            _frogMiniSetLoading(false);
             frame.src = 'about:blank';
         }
     }
@@ -5632,6 +5707,8 @@ if ($singleThread) {
         const wrap = document.getElementById('frogMiniWrap');
         const guest = document.getElementById('frogMiniGuest');
         if (!frame || !wrap || !guest) return;
+        _frogMiniBindFrameEvents();
+        _frogMiniSetLoading(true, mode === 'register' ? 'Opening register...' : 'Opening sign in...');
         frame.src = mode === 'register' ? '/app?register=1' : '/app';
         guest.style.display = 'none';
         wrap.classList.add('open');
@@ -5640,6 +5717,7 @@ if ($singleThread) {
     (function initFrogMini() {
         const body = document.getElementById('chatBody');
         if (body) body.style.display = 'none';
+        _frogMiniBindFrameEvents();
         _frogMiniApplyState();
     })();
     

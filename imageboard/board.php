@@ -1,7 +1,7 @@
 <?php
 /**
- * FrogTalk — Frog Board — Anonymous Image Board
- * Features: 4chan-style posting, image approval, and live chat.
+ * FrogTalk — Frog Channel — Anonymous Image Board
+ * Features: 4chan-style posting, image approval, live chat, YouTube embeds,
  *           greentext, threaded replies, per-thread OG preview images
  */
 session_start();
@@ -852,7 +852,7 @@ $isAdmin = isAdminLoggedIn();
 
 // Build dynamic OG tags
 $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
-$ogTitle = '🐸 Frog Board';
+$ogTitle = '🐸 Frog Channel';
 $ogDesc = 'Anonymous image board. ' . count($threads) . ' threads active. Post frogs, discuss topics, share media. No accounts, no tracking.';
 $ogImage = $baseUrl . '/board_preview.php?board=index';
 $ogUrl = $baseUrl . '/board';
@@ -863,7 +863,7 @@ if ($singleThread) {
     $replyC = count($singleThread['replies'] ?? []);
     $likeC = getLikeCount($singleThread['id']);
     $viewC = getViewCount($singleThread['id']);
-    $ogTitle = $subj . ' — Frog Board #' . $singleThread['id'];
+    $ogTitle = $subj . ' — Frog Channel #' . $singleThread['id'];
     $ogDesc = mb_substr(strip_tags($singleThread['comment']), 0, 200);
     if (mb_strlen($singleThread['comment']) > 200) $ogDesc .= '...';
     $ogDesc .= " · {$replyC} replies · {$viewC} views · {$likeC} 🐸";
@@ -888,7 +888,7 @@ if ($singleThread) {
         if ($specificPost) {
             $rText = mb_substr(strip_tags($specificPost['comment'] ?? ''), 0, 220);
             if (mb_strlen($specificPost['comment'] ?? '') > 220) $rText .= '…';
-            $ogTitle = 'Re: ' . ($singleThread['subject'] ?: 'Anonymous Thread') . ' — Frog Board';
+            $ogTitle = 'Re: ' . ($singleThread['subject'] ?: 'Anonymous Thread') . ' — Frog Channel';
             $ogDesc  = $rText ?: '(image post)';
             // Prefer reply image, fall back to thread-level image
             if (!empty($specificPost['image']['file']) && ($specificPost['image']['approved'] ?? true)) {
@@ -926,7 +926,7 @@ if ($singleThread) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Critical: prevent FOUC white flash before style.css loads -->
     <style>html,body{background:#0a0e0a;color:#00ff41;}</style>
-    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — Frog Board') : 'Frog Board' ?></title>
+    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — Frog Channel') : 'Frog Channel' ?></title>
     
     <meta name="title" content="<?= htmlspecialchars($ogTitle) ?>">
     <meta name="description" content="<?= htmlspecialchars($ogDesc) ?>">
@@ -939,7 +939,7 @@ if ($singleThread) {
     <meta property="og:image" content="<?= htmlspecialchars($ogImage) ?>">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:site_name" content="Frog Board">
+    <meta property="og:site_name" content="Frog Channel">
     
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="<?= htmlspecialchars($ogTitle) ?>">
@@ -967,6 +967,14 @@ if ($singleThread) {
         /* Announcement */
         .board-announcement { background: rgba(255,140,0,0.08); border: 1px solid rgba(255,140,0,0.3); border-radius: 6px; padding: 10px 15px; margin-bottom: 15px; color: #ffaa33; font-size: 13px; }
         .board-announcement strong { color: #ff8c00; }
+        
+        /* Tip dropbox disclaimer */
+        .tip-disclaimer { background: rgba(0,255,65,0.04); border: 1px solid rgba(0,255,65,0.15); border-radius: 6px; padding: 12px 16px; margin-bottom: 15px; display: flex; align-items: flex-start; gap: 12px; }
+        .tip-disclaimer .tip-icon { font-size: 1.6em; flex-shrink: 0; margin-top: 2px; }
+        .tip-disclaimer .tip-text { font-size: 12px; color: #6baf6b; line-height: 1.6; }
+        .tip-disclaimer .tip-text strong { color: #00ff41; }
+        .tip-disclaimer .tip-text a { color: #5fffaf; text-decoration: none; font-weight: bold; }
+        .tip-disclaimer .tip-text a:hover { text-decoration: underline; color: #7fffcf; }
         
         /* Ban notice */
         .ban-notice { background: linear-gradient(135deg, rgba(255,0,0,0.08), rgba(80,0,0,0.15)); border: 1px solid rgba(255,68,68,0.5); border-left: 4px solid #ff4444; border-radius: 8px; padding: 24px 28px; margin-bottom: 24px; position: relative; overflow: hidden; }
@@ -1124,6 +1132,15 @@ if ($singleThread) {
         .post-comment .greentext { color: #789922; }
         .post-comment .post-ref { color: #5fffaf; text-decoration: none; }
         .post-comment .post-ref:hover { text-decoration: underline; color: #7fffcf; }
+        .post-comment .yt-embed { margin: 10px 0; clear: both; display: inline-block; max-width: 100%; }
+        .post-comment .yt-embed .yt-toggle { position: relative; display: inline-block; cursor: pointer; }
+        .post-comment .yt-embed .yt-thumb { display: block; max-width: 320px; width: 100%; border-radius: 4px; border: 1px solid rgba(0,255,65,0.2); }
+        .post-comment .yt-embed .yt-play-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgba(0,0,0,0.45); border-radius: 4px; transition: background 0.2s; }
+        .post-comment .yt-embed .yt-toggle:hover .yt-play-overlay { background: rgba(0,0,0,0.22); }
+        .post-comment .yt-embed .yt-play-btn { font-size: 30px; color: #ff3333; text-shadow: 0 0 12px rgba(255,0,0,0.5); }
+        .post-comment .yt-embed .yt-show-label { font-family: 'Courier New', monospace; font-size: 9px; color: #8aff8a; letter-spacing: 1px; }
+        .post-comment .yt-embed .yt-hide-btn { display: block; background: rgba(255,0,0,0.1); border: 1px solid rgba(255,0,0,0.3); color: #ff7777; font-family: 'Courier New', monospace; font-size: 9px; padding: 3px 8px; cursor: pointer; margin-bottom: 4px; border-radius: 2px; }
+        .post-comment .yt-embed .yt-frame-wrap iframe { max-width: 100%; border-radius: 5px; border: 1px solid rgba(0,255,65,0.15); }
         
         /* Backlinks — inline inside post-header after No. */
         .post-backlinks { display: inline; font-size: 11px; margin-left: 4px; }
@@ -1708,6 +1725,39 @@ if ($singleThread) {
         body[data-theme="read"] .board-pagination .page-btn.disabled { color: #b0a090 !important; border-color: rgba(92,61,14,0.08) !important; }
         body[data-theme="read"] .board-pagination .page-ellipsis { color: #9a8060 !important; }
         body[data-theme="read"] .board-pagination .page-info { color: #9a8060 !important; }
+        /* ── Read mode: katsa result cards (if embedded) ── */
+        body[data-theme="read"] .katsa-result-card { background: #fff8ee !important; border-color: #d8c8ae !important; }
+        body[data-theme="read"] .katsa-result-header { background: rgba(92,61,14,0.06) !important; border-bottom-color: #d8c8ae !important; }
+        body[data-theme="read"] .katsa-result-title { color: #5c2e08 !important; text-shadow: none !important; }
+        body[data-theme="read"] .katsa-result-badge { background: rgba(92,61,14,0.1) !important; color: #7a3a10 !important; border-color: rgba(92,61,14,0.25) !important; }
+        body[data-theme="read"] .katsa-result-body { color: #2c2010 !important; }
+        body[data-theme="read"] .katsa-results { background: transparent !important; }
+        /* ── Read mode: katsa inline widget ── */
+        body[data-theme="read"] .katsa-inline-widget { background: #f4ede0 !important; border-color: #d8c8ae !important; font-family: Georgia, 'Times New Roman', serif !important; }
+        body[data-theme="read"] .katsa-inline-header { background: rgba(92,61,14,0.06) !important; border-bottom-color: #d8c8ae !important; }
+        body[data-theme="read"] .katsa-inline-label { color: #6a5030 !important; }
+        body[data-theme="read"] .katsa-inline-label strong { color: #5c2e08 !important; text-shadow: none !important; }
+        body[data-theme="read"] .katsa-inline-icon { filter: sepia(0.6) saturate(0.5) !important; }
+        body[data-theme="read"] .katsa-inline-run { background: rgba(92,61,14,0.08) !important; border-color: rgba(92,61,14,0.3) !important; color: #5c2e08 !important; box-shadow: none !important; filter: none !important; }
+        body[data-theme="read"] .katsa-inline-run:hover { background: rgba(92,61,14,0.15) !important; box-shadow: none !important; }
+        body[data-theme="read"] .katsa-inline-toggle { color: #9a8060 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-status { color: #7a6040 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-site { background: rgba(92,61,14,0.06) !important; border-color: rgba(92,61,14,0.18) !important; color: #7a3a10 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-site:hover { background: rgba(92,61,14,0.14) !important; border-color: rgba(92,61,14,0.35) !important; color: #5c2008 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-summary { color: #7a6040 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-summary strong { color: #5c2e08 !important; }
+        body[data-theme="read"] .katsa-inline-results a { color: #7a3a10 !important; }
+        /* Override all inline-style colors and backgrounds inside katsa results for read mode */
+        body[data-theme="read"] .katsa-inline-results * { color: #5c3010 !important; }
+        body[data-theme="read"] .katsa-inline-results > div[style] { background: rgba(92,61,14,0.04) !important; border-color: rgba(92,61,14,0.15) !important; }
+        body[data-theme="read"] .katsa-inline-results div[style*="background"] { background: rgba(92,61,14,0.04) !important; border-color: rgba(92,61,14,0.15) !important; }
+        body[data-theme="read"] .katsa-inline-results strong { color: #3a1e08 !important; }
+        body[data-theme="read"] .katsa-inline-results details { background: rgba(92,61,14,0.04) !important; border-color: rgba(92,61,14,0.18) !important; }
+        body[data-theme="read"] .katsa-inline-results summary { color: #7a4820 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-summary { color: #7a6040 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-summary strong { color: #3a1e08 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-site { background: rgba(92,61,14,0.06) !important; border-color: rgba(92,61,14,0.18) !important; color: #7a3a10 !important; }
+        body[data-theme="read"] .katsa-inline-results .katsa-il-site:hover { background: rgba(92,61,14,0.14) !important; border-color: rgba(92,61,14,0.35) !important; color: #5c2008 !important; }
         /* ── Read mode: boost/tip badges ── */
         body[data-theme="read"] .boost-badge { opacity: 0.8 !important; }
         /* ── Read mode: boost $GOYIM modal ── */
@@ -1810,6 +1860,10 @@ if ($singleThread) {
         body[data-theme="read"] .car-prev:hover, body[data-theme="read"] .car-next:hover { background: rgba(92,61,14,0.9) !important; }
         body[data-theme="read"] .car-dot { background: rgba(92,61,14,0.15) !important; border-color: rgba(92,61,14,0.35) !important; }
         body[data-theme="read"] .car-dot.active { background: #a07030 !important; border-color: #a07030 !important; }
+        /* ── Read mode: YouTube embed elements ── */
+        body[data-theme="read"] .post-comment .yt-embed .yt-thumb { border-color: rgba(92,61,14,0.2) !important; }
+        body[data-theme="read"] .post-comment .yt-embed .yt-show-label { color: #9a8060 !important; }
+        body[data-theme="read"] .post-comment .yt-embed .yt-frame-wrap iframe { border-color: rgba(92,61,14,0.18) !important; }
         /* ── Read mode: scrollbars ── */
         html[data-theme="read"] { scrollbar-color: #c4b090 #ede4d2; scrollbar-width: thin; }
         html[data-theme="read"]::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -1949,6 +2003,21 @@ if ($singleThread) {
         .chat-input-row.voice-mode input,
         .chat-input-row.voice-mode #chatSendBtn { display: none !important; }
         .mrb-pending-notice { flex: 1; min-width: 0; padding: 6px 10px; font-size: 11px; color: #7a6040; font-family: 'Courier New', monospace; background: rgba(92,61,14,0.04); border: 1px dashed rgba(92,61,14,0.25); border-radius: 4px; line-height: 1.4; }
+
+        /* ── FROGTALK MINI WIDGET (replaces Swamp Chat) ── */
+        .frog-mini-headline { color:#00ff41; font-size:12px; margin:0; display:flex; align-items:center; gap:6px; }
+        .frog-mini-note { color:#4a8f4a; font-size:11px; }
+        .frog-mini-wrap { display:none; height: 360px; border-top:1px solid rgba(0,255,65,0.15); }
+        .frog-mini-wrap.open { display:block; }
+        .frog-mini-frame { width:100%; height:100%; border:none; background:#0b120b; }
+        .frog-mini-guest { display:flex; flex-direction:column; gap:10px; align-items:stretch; padding:12px; border-top:1px solid rgba(0,255,65,0.15); }
+        .frog-mini-guest-title { color:#8cff8c; font-size:13px; font-weight:700; }
+        .frog-mini-guest-copy { color:#7eb07e; font-size:12px; line-height:1.4; }
+        .frog-mini-actions { display:flex; gap:8px; }
+        .frog-mini-btn { flex:1; border:none; border-radius:8px; padding:8px 10px; font-family:'Courier New', monospace; font-size:12px; font-weight:700; cursor:pointer; }
+        .frog-mini-btn.login { background:#2a4a2a; color:#d9ffd9; }
+        .frog-mini-btn.register { background:#4caf50; color:#041304; }
+        .frog-mini-btn:hover { filter:brightness(1.05); }
         
         /* ── OCCULT VISUAL EFFECTS ── */
         
@@ -2434,6 +2503,121 @@ if ($singleThread) {
         details summary::-webkit-details-marker { display: none; }
         details[open] summary .tool-chevron { transform: rotate(90deg); }
         
+        /* Katsa inline widget in posts */
+        .katsa-inline-widget {
+            margin: 10px 0;
+            border: 1px solid rgba(0,255,65,0.2);
+            border-radius: 6px;
+            background: rgba(0,20,0,0.5);
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+        .katsa-inline-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(0,255,65,0.06);
+            border-bottom: 1px solid rgba(0,255,65,0.1);
+            flex-wrap: wrap;
+        }
+        .katsa-inline-icon { font-size: 16px; }
+        .katsa-inline-label {
+            color: #4a8f4a;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            flex: 1;
+        }
+        .katsa-inline-label strong { color: #00ff41; }
+        .katsa-inline-run {
+            padding: 4px 12px;
+            background: rgba(0,255,65,0.1);
+            border: 1px solid rgba(0,255,65,0.3);
+            color: #00ff41;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: all 0.2s;
+        }
+        .katsa-inline-run:hover {
+            background: rgba(0,255,65,0.2);
+            box-shadow: 0 0 8px rgba(0,255,65,0.2);
+        }
+        .katsa-inline-run:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .katsa-inline-results {
+            padding: 0;
+        }
+        .katsa-inline-results.has-results {
+            padding: 10px 12px;
+        }
+        .katsa-inline-results .katsa-il-status {
+            color: #4a8f4a;
+            font-size: 11px;
+            padding: 8px 12px;
+        }
+        .katsa-inline-results .katsa-il-sites {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .katsa-inline-results .katsa-il-site {
+            display: inline-block;
+            padding: 3px 8px;
+            background: rgba(0,255,65,0.06);
+            border: 1px solid rgba(0,255,65,0.1);
+            border-radius: 3px;
+            color: #5fffaf;
+            font-size: 10px;
+            text-decoration: none;
+            transition: all 0.15s;
+        }
+        .katsa-inline-results .katsa-il-site:hover {
+            background: rgba(0,255,65,0.15);
+            border-color: rgba(0,255,65,0.3);
+            color: #00ff41;
+        }
+        .katsa-inline-results .katsa-il-summary {
+            margin-top: 6px;
+            font-size: 11px;
+            color: #4a8f4a;
+        }
+        .katsa-inline-results .katsa-il-summary strong {
+            color: #00ff41;
+        }
+        .katsa-inline-results a {
+            text-decoration: none;
+        }
+        .katsa-inline-toggle {
+            color: #4a8f4a;
+            font-size: 10px;
+            margin-left: 4px;
+            transition: transform 0.2s ease;
+            user-select: none;
+        }
+        .katsa-inline-widget.collapsed .katsa-inline-results {
+            display: none;
+        }
+        .katsa-inline-widget.collapsed .katsa-inline-toggle {
+            transform: rotate(-90deg);
+        }
+        .katsa-inline-widget.collapsed .katsa-inline-header {
+            border-bottom: none;
+        }
+        /* Mobile fixes for katsa widget */
+        @media (max-width: 768px) {
+            .katsa-inline-widget { margin: 6px 0; }
+            .katsa-inline-header { padding: 6px 8px; gap: 4px; }
+            .katsa-inline-label { font-size: 10px; min-width: 0; word-break: break-word; }
+            .katsa-inline-run { padding: 3px 8px; font-size: 10px; white-space: nowrap; }
+            .katsa-inline-results.has-results { padding: 6px 8px; }
+            .katsa-inline-results .katsa-il-site { font-size: 9px; padding: 2px 5px; max-width: calc(50vw - 30px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .katsa-inline-results .katsa-il-sites { gap: 3px; }
+            .katsa-inline-results details summary { font-size: 8px !important; }
+        }
         /* Prevent horizontal scrolling globally */
         html, body { max-width: 100vw; overflow-x: hidden; }
         .post, .thread, .reply { max-width: 100%; overflow-wrap: break-word; word-wrap: break-word; word-break: break-word; }
@@ -2455,114 +2639,14 @@ if ($singleThread) {
     <nav class="top-nav">
         <div class="container">
             <div class="nav-branding">
-                <a href="/" style="text-decoration:none;color:inherit;"><h1 class="logo">&#x1F438; Frog Board</h1></a>
+                <a href="/" style="text-decoration:none;color:inherit;"><h1 class="logo">&#x1F438; FrogTalk</h1></a>
                 <p class="tagline">ANONYMOUS IMAGEBOARD &middot; SPEAK FREELY</p>
             </div>
             <div class="nav-links">
-                <div class="nav-item" data-dropdown>
-                    <a href="/gnosis" class="nav-link" style="color:#bb86fc;">&#x1F52E; GNOSIS <span class="nd-caret">&#x25BE;</span></a>
-                    <div class="nav-dropdown">
-                        <a href="/gnosis">&#x1F5C2;&#xFE0F; Overview</a>
-                        <a href="/parallel">&#x2699;&#xFE0F; Parallel Systems</a>
-                        <a href="/guide">&#x1F4D6; Guide Book</a>
-                    </div>
-                </div>
-                <div class="nav-item" data-dropdown>
-                    <a href="/magic" class="nav-link" style="color:#64dfff;">&#x2728; MAGIC <span class="nd-caret">&#x25BE;</span></a>
-                    <div class="nav-dropdown">
-                        <a href="/magic">&#x1F5C2;&#xFE0F; Overview</a>
-                        <a href="/board">&#x1F5E8;&#xFE0F; The Board</a>
-                    </div>
-                </div>
-                <div class="nav-item" data-dropdown>
-                    <a href="/red-notices" class="nav-link" style="color:#ff4444;">&#x1F534; RED NOTICES <span class="nd-caret">&#x25BE;</span></a>
-                    <div class="nav-dropdown">
-                        <a href="/red-notices">&#x1F4CB; All Notices</a>
-                        <a href="/brice" style="color:#ff8888;">&#x1F6A8; Brice Gordon</a>
-                        <a href="/nadia-marcinko" style="color:#ff8888;">&#x1F6A8; Nadia Marcinko</a>
-                    </div>
-                </div>
-                <div class="nav-item" data-dropdown>
-                    <a href="https://t.me/goyimconz" target="_blank" class="nav-link telegram">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
-                        TELEGRAM <span class="nd-caret">&#x25BE;</span>
-                    </a>
-                    <div class="nav-dropdown">
-                        <a href="https://t.me/goyimconz" target="_blank">&#x1F4AC; Main Channel</a>
-                    </div>
-                </div>
-                <div class="nav-item" data-dropdown>
-                    <a href="/token" class="nav-link" style="color:#ffa500;">&#x1F525; $GOYIM <span class="nd-caret">&#x25BE;</span></a>
-                    <div class="nav-dropdown">
-                        <a href="/treasury" style="color:#ffa500;">&#x1F3DB;&#xFE0F; GOYIM TREASURY</a>
-                        <a href="/token">&#x1F4CA; Token Page</a>
-                        <a href="/token#how-to-buy">&#x1F6D2; How to Buy</a>
-                        <a href="/token#tokenomics">&#x1F4C8; Tokenomics</a>
-                    </div>
-                </div>
-                <div class="nav-item" data-dropdown>
-                    <a href="/#donate" class="nav-link submit-tip">/// DONATE <span class="nd-caret">&#x25BE;</span></a>
-                    <div class="nav-dropdown">
-                        <a href="/#donate">&#x1F4B8; Crypto Donation</a>
-                        <a href="/token">&#x1F525; $GOYIM Token</a>
-                    </div>
-                </div>
-                <div id="walletWidget" class="wallet-widget">
-                    <button id="connectWallet" class="wallet-widget-btn" title="Connect wallet">&#x1F45B; WALLET</button>
-                    <div id="walletInfo" class="wallet-panel hidden">
-                        <div class="wp-drag-handle"><span></span></div>
-                        <div class="wp-header">
-                            <span class="wp-dot"></span>
-                            <span class="wp-label">CONNECTED</span>
-                            <button id="disconnectWallet" class="wp-disconnect" title="Disconnect">&#x2715; DISCONNECT</button>
-                        </div>
-                        <div class="wp-address-row">
-                            <span class="wp-address-icon">&#x1F45B;</span>
-                            <span class="wp-address" id="walletAddress"></span>
-                            <button class="wp-copy-btn" onclick="copyFullWalletAddress(this)" title="Copy address">&#x29C9;</button>
-                        </div>
-                        <div class="wp-meta-row">
-                            <span class="wp-network-tag" id="wpNetworkTag">ETH</span>
-                            <button class="wp-switch-btn" onclick="wpSwitchNetwork()">&#x21C4; NETWORK</button>
-                            <button class="wp-switch-btn" onclick="wpSwitchAccount()">&#x1F464; ACCOUNT</button>
-                        </div>
-                        <div class="wp-network-list hidden" id="wpNetworkList">
-                            <button class="wp-net-item" data-chainid="0x1" onclick="wpSwitchTo(1,'ETH')">&#x27E0; Ethereum</button>
-                            <button class="wp-net-item" data-chainid="0x2105" onclick="wpSwitchTo(8453,'BASE')">&#x1F535; Base</button>
-                            <button class="wp-net-item" data-chainid="0x89" onclick="wpSwitchTo(137,'MATIC')">&#x1F7E3; Polygon</button>
-                            <button class="wp-net-item" data-chainid="0x38" onclick="wpSwitchTo(56,'BNB')">&#x1F7E1; BNB Chain</button>
-                            <button class="wp-net-item" data-chainid="0xa4b1" onclick="wpSwitchTo(42161,'ARB')">&#x1F537; Arbitrum</button>
-                            <button class="wp-net-item" data-chainid="0xa" onclick="wpSwitchTo(10,'OP')">&#x1F534; Optimism</button>
-                            <button class="wp-net-item" data-chainid="0xe708" onclick="wpSwitchTo(59144,'LINEA')">&#x1F7E2; Linea</button>
-                        </div>
-                        <div class="wp-balance-primary">
-                            <span class="wp-balance-label">BALANCE</span>
-                            <span class="wp-balance-value" id="walletBalance">Loading...</span>
-                        </div>
-                        <button id="showMoreBalances" class="wp-expand-btn">&#x25BC; ALL NETWORKS</button>
-                        <div id="allBalancesPanel" class="all-balances-panel hidden">
-                            <div class="balances-grid">
-                                <div class="balance-row"><span class="token-icon">⟠</span><span class="token-name">ETH</span><span id="bal-ETH">-</span></div>
-                                <div class="balance-row"><span class="token-icon">🔵</span><span class="token-name">Base</span><span id="bal-BASE">-</span></div>
-                                <div class="balance-row"><span class="token-icon">🟢</span><span class="token-name">Linea</span><span id="bal-LINEA">-</span></div>
-                                <div class="balance-row"><span class="token-icon">🔷</span><span class="token-name">Arbitrum</span><span id="bal-ARB">-</span></div>
-                                <div class="balance-row"><span class="token-icon">🔴</span><span class="token-name">Optimism</span><span id="bal-OP">-</span></div>
-                                <div class="balance-row"><span class="token-icon">🟡</span><span class="token-name">BNB</span><span id="bal-BNB">-</span></div>
-                                <div class="balance-row"><span class="token-icon">🟣</span><span class="token-name">Polygon</span><span id="bal-MATIC">-</span></div>
-                                <div class="balance-row separator"><span>── STABLECOINS ──</span></div>
-                                <div class="balance-row"><span class="token-icon">💵</span><span class="token-name">USDT</span><span id="bal-USDT">-</span></div>
-                                <div class="balance-row"><span class="token-icon">💵</span><span class="token-name">USDC</span><span id="bal-USDC">-</span></div>
-                                <div class="balance-row"><span class="token-icon">💵</span><span class="token-name">DAI</span><span id="bal-DAI">-</span></div>
-                                <div class="balance-row separator"><span>── NON-EVM ──</span></div>
-                                <div class="balance-row muted"><span class="token-icon">₿</span><span class="token-name">Bitcoin</span><span id="bal-BTC">N/A</span></div>
-                                <div class="balance-row muted"><span class="token-icon">◎</span><span class="token-name">Solana</span><span id="bal-SOL">N/A</span></div>
-                                <div class="balance-row muted"><span class="token-icon">◈</span><span class="token-name">Tron</span><span id="bal-TRX">N/A</span></div>
-                            </div>
-                        </div>
+</div>
                     </div>
                 </div>
             </div>
-            <button class="nav-minimize-btn" onclick="toggleNavMinimize()" title="Toggle menu"><span class="chevron">&#x25B2;</span></button>
         </div>
     </nav>
     <div id="walletBackdrop" class="wallet-backdrop hidden" onclick="closeWalletPanel()"></div>
@@ -2570,7 +2654,7 @@ if ($singleThread) {
     <main>
         <div class="board-container">
             <div class="board-header">
-                <h2>🐸 Frog Board</h2>
+                <h2>🐸 Frog Channel</h2>
                 <p class="board-subtitle">Anonymous discussion board. No accounts. No tracking. Speak freely.</p>
                 <div class="board-stats">
                     <span class="stat-item">📋 Threads: <span class="stat-val"><?= $threadCount ?></span></span>
@@ -2615,6 +2699,7 @@ if ($singleThread) {
                     <strong>📢 ANNOUNCEMENT:</strong> <?= htmlspecialchars($settings['announcement']) ?>
                 </div>
             <?php endif; ?>
+
 
             <?php if ($isBanned): ?>
                 <div class="ban-notice">
@@ -2767,9 +2852,9 @@ if ($singleThread) {
                                 <div class="share-dropdown">
                                     <button onclick="copyThreadLink('<?= $singleThread['id'] ?>', this)"><span class="share-icon">🔗</span> Copy Link</button>
                                     <div class="share-sep"></div>
-                                    <a href="https://x.com/intent/tweet?text=<?= urlencode(($singleThread['subject'] ?: 'Check this thread') . ' — Frog Board') ?>&url=<?= urlencode($baseUrl . '/board?thread=' . $singleThread['id']) ?>" target="_blank"><span class="share-icon">𝕏</span> Share on X</a>
-                                    <a href="https://t.me/share/url?url=<?= urlencode($baseUrl . '/board?thread=' . $singleThread['id']) ?>&text=<?= urlencode('🐸 ' . ($singleThread['subject'] ?: 'Thread') . ' — Frog Board') ?>" target="_blank"><span class="share-icon">✈️</span> Telegram</a>
-                                    <a href="https://reddit.com/submit?url=<?= urlencode($baseUrl . '/board?thread=' . $singleThread['id']) ?>&title=<?= urlencode(($singleThread['subject'] ?: 'Thread') . ' — Frog Board') ?>" target="_blank"><span class="share-icon">🔺</span> Reddit</a>
+                                    <a href="https://x.com/intent/tweet?text=<?= urlencode(($singleThread['subject'] ?: 'Check this thread') . ' — Frog Channel') ?>&url=<?= urlencode($baseUrl . '/board?thread=' . $singleThread['id']) ?>" target="_blank"><span class="share-icon">𝕏</span> Share on X</a>
+                                    <a href="https://t.me/share/url?url=<?= urlencode($baseUrl . '/board?thread=' . $singleThread['id']) ?>&text=<?= urlencode('🐸 ' . ($singleThread['subject'] ?: 'Thread') . ' — Frog Channel') ?>" target="_blank"><span class="share-icon">✈️</span> Telegram</a>
+                                    <a href="https://reddit.com/submit?url=<?= urlencode($baseUrl . '/board?thread=' . $singleThread['id']) ?>&title=<?= urlencode(($singleThread['subject'] ?: 'Thread') . ' — Frog Channel') ?>" target="_blank"><span class="share-icon">🔺</span> Reddit</a>
                                     <a href="https://www.facebook.com/sharer/sharer.php?u=<?= urlencode($baseUrl . '/board?thread=' . $singleThread['id']) ?>" target="_blank"><span class="share-icon">📘</span> Facebook</a>
                                 </div>
                             </div>
@@ -2942,7 +3027,7 @@ if ($singleThread) {
                     <div style="font-size: 64px; margin-bottom: 16px;">🐸</div>
                     <div style="font-size: 22px; color: #ff4444; font-family: 'Courier New', monospace; margin-bottom: 10px;">404 — Thread Not Found</div>
                     <div style="font-size: 13px; color: #7a9a7a; margin-bottom: 24px;">This thread no longer exists. It may have been deleted or pruned.</div>
-                    <a href="/board" style="display:inline-block; padding: 8px 20px; background: #1a3a1a; border: 1px solid #2a5a2a; color: #5fffaf; text-decoration: none; font-family: 'Courier New', monospace; font-size: 13px;">← Return to Frog Board</a>
+                    <a href="/board" style="display:inline-block; padding: 8px 20px; background: #1a3a1a; border: 1px solid #2a5a2a; color: #5fffaf; text-decoration: none; font-family: 'Courier New', monospace; font-size: 13px;">← Return to Frog Channel</a>
                     <a href="/board?mode=catalog" style="display:inline-block; padding: 8px 20px; margin-left: 10px; background: #1a3a1a; border: 1px solid #2a5a2a; color: #4a8f4a; text-decoration: none; font-family: 'Courier New', monospace; font-size: 13px;">📸 Catalog</a>
                 </div>
 
@@ -2962,7 +3047,7 @@ if ($singleThread) {
                             <input type="text" name="subject" placeholder="Subject (optional)" maxlength="100">
                         </div>
                         <div class="form-row">
-                            <textarea name="comment" placeholder="Comment... (>greentext supported)" maxlength="5000"></textarea>
+                            <textarea name="comment" placeholder="Comment... (>greentext, paste YouTube links to embed)" maxlength="5000"></textarea>
                         </div>
                         <div class="form-bottom">
                             <?php if ($_anyMedia): ?><div class="media-rec-bar" id="mrb-thr">
@@ -3033,7 +3118,7 @@ if ($singleThread) {
                 <?php if (empty($threads)): ?>
                     <div class="empty-board">
                         <div class="empty-frog">🐸</div>
-                        <p>Frog Board is empty. Be the first to post!</p>
+                        <p>Frog Channel is empty. Be the first to post!</p>
                         <p style="color: #4a8f4a;">Be the first to start a thread.</p>
                     </div>
                 <?php else: ?>
@@ -3269,9 +3354,9 @@ if ($singleThread) {
                                     <div class="share-dropdown">
                                         <button onclick="copyThreadLink('<?= $thread['id'] ?>', this)"><span class="share-icon">&#x1F517;</span> Copy Link</button>
                                         <div class="share-sep"></div>
-                                        <a href="https://x.com/intent/tweet?text=<?= urlencode(($thread['subject'] ?: 'Thread') . ' — Frog Board') ?>&url=<?= urlencode($baseUrl . '/board?thread=' . $thread['id']) ?>" target="_blank"><span class="share-icon">𝕏</span> X / Twitter</a>
+                                        <a href="https://x.com/intent/tweet?text=<?= urlencode(($thread['subject'] ?: 'Thread') . ' — FrogTalk') ?>&url=<?= urlencode($baseUrl . '/board?thread=' . $thread['id']) ?>" target="_blank"><span class="share-icon">𝕏</span> X / Twitter</a>
                                         <a href="https://t.me/share/url?url=<?= urlencode($baseUrl . '/board?thread=' . $thread['id']) ?>&text=<?= urlencode('🐸 ' . ($thread['subject'] ?: 'Thread')) ?>" target="_blank"><span class="share-icon">✈️</span> Telegram</a>
-                                        <a href="https://reddit.com/submit?url=<?= urlencode($baseUrl . '/board?thread=' . $thread['id']) ?>&title=<?= urlencode(($thread['subject'] ?: 'Thread') . ' — Frog Board') ?>" target="_blank"><span class="share-icon">&#x1F53A;</span> Reddit</a>
+                                        <a href="https://reddit.com/submit?url=<?= urlencode($baseUrl . '/board?thread=' . $thread['id']) ?>&title=<?= urlencode(($thread['subject'] ?: 'Thread') . ' — FrogTalk') ?>" target="_blank"><span class="share-icon">&#x1F53A;</span> Reddit</a>
                                     </div>
                                 </div>
                                 <a href="/board?thread=<?= $thread['id'] ?>" class="thread-link">View Thread &#x2192;</a>
@@ -3362,16 +3447,14 @@ if ($singleThread) {
             <?php endif; ?><!-- /singleThread check -->
 
             <div class="board-footer">
-                <a href="/">← Main Hunt</a> ·
-                <a href="/guide">Guide Book</a> ·
-                <a href="/nadia">Nadia</a> ·
-                <a href="/parallel">Parallel</a> ·
-                <a href="/">FrogTalk</a>
+                <a href="/" style="font-weight:700;">🐸 FrogTalk</a>
                 <?php if ($isAdmin): ?> · <a href="/board/admin" style="color: #ff8c00;">🔧 Admin</a><?php endif; ?>
+                <br>
+                <span style="font-size:11px;color:#6baf6b;letter-spacing:.2px;">powered by FrogTalk</span>
                 <br>
                 <span class="footer-online"><span class="footer-views">👁 <?= number_format($totalViews) ?> views</span> · <span class="online-dot footer-dot"></span> <span class="footer-online-count"><?= $onlineCount ?> online</span></span>
                 <br><br>
-                <span>🐸 Frog Board on FrogTalk.</span>
+                <span>🐸 The swamp remembers everything.</span>
             </div>
         </div>
     </main>
@@ -3457,25 +3540,25 @@ if ($singleThread) {
     </div>
 
     <?php if ($settings['chat_enabled'] && !$isBanned): ?>
-    <!-- ═══ LIVE CHAT WIDGET ═══ -->
+    <!-- ═══ FROGTALK MINI WIDGET ═══ -->
     <div class="chat-widget" id="chatWidget">
-        <div class="chat-header" onclick="toggleChat()">
-            <h4>💬 SWAMP CHAT <span class="chat-unread" id="chatUnread">0</span></h4>
-            <span class="chat-online" id="chatOnline">...</span>
+        <div class="chat-header" onclick="toggleFrogMini()">
+            <h4 class="frog-mini-headline">🐸 FROGTALK MINI</h4>
+            <span class="frog-mini-note" id="frogMiniState">Checking login…</span>
             <button class="chat-toggle" id="chatToggleBtn">▲</button>
         </div>
-        <div class="chat-body" id="chatBody">
-            <div class="chat-messages" id="chatMessages">
-                <div style="text-align: center; color: #3a6f3a; padding: 20px;">Loading chat...</div>
+        <div class="chat-body" id="chatBody" style="display:block;max-height:none;">
+            <div id="frogMiniGuest" class="frog-mini-guest">
+                <div class="frog-mini-guest-title">Sign in to use Channels + DMs</div>
+                <div class="frog-mini-guest-copy">Use your FrogTalk account to open mini chat while browsing Frog Channel.</div>
+                <div class="frog-mini-actions">
+                    <button class="frog-mini-btn login" type="button" onclick="frogMiniAuth('login')">Sign In</button>
+                    <button class="frog-mini-btn register" type="button" onclick="frogMiniAuth('register')">Register</button>
+                </div>
             </div>
-            <div class="chat-error" id="chatError" style="display:none;"></div>
-            <div class="chat-input-row" id="chatInputRow">
-                <input type="text" id="chatInput" placeholder="Type a message..." maxlength="500" autocomplete="off">
-                <div class="chat-recording-indicator" id="chatRecordingInd">🎤 Recording…</div>
-                <button type="button" class="chat-mic-btn" id="chatMicBtn" onclick="toggleChatVoice()" title="Voice note">🎤</button>
-                <button id="chatSendBtn" onclick="sendChatMessage()">SEND</button>
+            <div id="frogMiniWrap" class="frog-mini-wrap">
+                <iframe id="frogMiniFrame" class="frog-mini-frame" src="about:blank" title="FrogTalk mini channels and DMs"></iframe>
             </div>
-            <div class="chat-voice-preview" id="chatVoicePreview"></div>
         </div>
     </div>
     <?php endif; ?>
@@ -3503,20 +3586,12 @@ if ($singleThread) {
             });
         }
     })();
-    // ── Mobile Nav Minimize ──
+    // Nav minimize was removed from the UI; force expanded nav and clear old state.
     (function() {
-        var stored = localStorage.getItem('navMinimized');
-        var isMobile = window.matchMedia('(max-width: 920px)').matches;
-        // Mobile: auto-minimize unless user explicitly opened it (stored='0')
-        // Desktop: only minimize if user explicitly closed it (stored='1')
-        if (isMobile ? stored !== '0' : stored === '1') {
-            document.body.classList.add('nav-minimized');
-        }
+        document.body.classList.remove('nav-minimized');
+        try { localStorage.removeItem('navMinimized'); } catch (e) {}
     })();
-    function toggleNavMinimize() {
-        document.body.classList.toggle('nav-minimized');
-        localStorage.setItem('navMinimized', document.body.classList.contains('nav-minimized') ? '1' : '0');
-    }
+    function toggleNavMinimize() {}
 
     // ── View Mode Bar mobile toggle ──
     (function() {
@@ -3537,6 +3612,42 @@ if ($singleThread) {
         try { localStorage.setItem('vmbCollapsed', collapsed ? '1' : '0'); } catch(e) {}
     }
 
+    // ── YouTube embed toggle ──
+    function toggleYT(uid) {
+        var el = document.getElementById(uid);
+        if (!el) return;
+        var toggle = el.querySelector('.yt-toggle');
+        var frame  = el.querySelector('.yt-frame-wrap');
+        if (!frame) return;
+        var isOpen = frame.style.display !== 'none';
+        if (isOpen) {
+            // Close: remove iframe from DOM entirely so sort moves won't reload it
+            var existing = frame.querySelector('iframe');
+            if (existing) existing.remove();
+            frame.style.display = 'none';
+            if (toggle) toggle.style.display = '';
+        } else {
+            // Open: inject iframe now (lazy) using data attrs on parent .yt-embed
+            var ytId   = el.dataset.ytId   || '';
+            var ytTime = el.dataset.ytTime  || '0';
+            if (!ytId) return;
+            if (!frame.querySelector('iframe')) {
+                var src = 'https://www.youtube-nocookie.com/embed/' + ytId
+                        + '?autoplay=1' + (ytTime !== '0' ? '&start=' + ytTime : '')
+                        + '&rel=0';
+                var iframe = document.createElement('iframe');
+                iframe.width = '560'; iframe.height = '315';
+                iframe.src = src;
+                iframe.setAttribute('frameborder', '0');
+                iframe.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+                iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+                iframe.setAttribute('allowfullscreen', '');
+                frame.appendChild(iframe);
+            }
+            frame.style.display = '';
+            if (toggle) toggle.style.display = 'none';
+        }
+    }
 
     // ── Nav Dropdown (touch support for board.php) ──
     (function(){
@@ -5147,7 +5258,7 @@ if ($singleThread) {
         } catch(e) {}
     })();
 
-    <?php if ($settings['chat_enabled'] && !$isBanned): ?>
+    <?php if (false && $settings['chat_enabled'] && !$isBanned): ?>
     // ── Live Chat ──
     let chatOpen = false;
     let chatLastTime = parseInt(localStorage.getItem('chatLastTime') || '0'); // resume from last seen to stop stale @mention re-fires on refresh
@@ -5467,6 +5578,60 @@ if ($singleThread) {
     
     // Auto-open chat on load (minimized) - start polling only if opened
     <?php endif; ?>
+
+    // ── FrogTalk Mini Widget ──
+    let frogMiniOpen = false;
+    let frogMiniLogged = false;
+
+    function _frogMiniToken() {
+        try { return localStorage.getItem('token') || ''; } catch (e) { return ''; }
+    }
+
+    function _frogMiniApplyState() {
+        const stateEl = document.getElementById('frogMiniState');
+        const guest = document.getElementById('frogMiniGuest');
+        const wrap = document.getElementById('frogMiniWrap');
+        const frame = document.getElementById('frogMiniFrame');
+        if (!stateEl || !guest || !wrap || !frame) return;
+
+        frogMiniLogged = !!_frogMiniToken();
+        if (frogMiniLogged) {
+            stateEl.textContent = 'Auto-signed in';
+            guest.style.display = 'none';
+            wrap.classList.add('open');
+            if (!frame.src || frame.src === 'about:blank') frame.src = '/app';
+        } else {
+            stateEl.textContent = 'Guest mode';
+            guest.style.display = 'flex';
+            wrap.classList.remove('open');
+            frame.src = 'about:blank';
+        }
+    }
+
+    function toggleFrogMini() {
+        frogMiniOpen = !frogMiniOpen;
+        const body = document.getElementById('chatBody');
+        const toggle = document.getElementById('chatToggleBtn');
+        if (body) body.style.display = frogMiniOpen ? 'block' : 'none';
+        if (toggle) toggle.textContent = frogMiniOpen ? '▼' : '▲';
+        if (frogMiniOpen) _frogMiniApplyState();
+    }
+
+    function frogMiniAuth(mode) {
+        const frame = document.getElementById('frogMiniFrame');
+        const wrap = document.getElementById('frogMiniWrap');
+        const guest = document.getElementById('frogMiniGuest');
+        if (!frame || !wrap || !guest) return;
+        frame.src = mode === 'register' ? '/app?register=1' : '/app';
+        guest.style.display = 'none';
+        wrap.classList.add('open');
+    }
+
+    (function initFrogMini() {
+        const body = document.getElementById('chatBody');
+        if (body) body.style.display = 'none';
+        _frogMiniApplyState();
+    })();
     
     // ── Live Refresh System ──
     let boardSortMode = localStorage.getItem('boardSortMode') || 'frog';
@@ -6245,6 +6410,419 @@ if ($singleThread) {
         setInterval(spawnSymbol, 6000);
     })();
     
+    // ── Inline Katsa OSINT Widget (Multi-Field) ──
+    async function runInlineKatsa(widgetId) {
+        var widget = document.getElementById(widgetId);
+        var btn = document.querySelector('#' + widgetId + ' .katsa-inline-run');
+        var resultsDiv = document.getElementById(widgetId + '_results');
+        if (!btn || !resultsDiv || !widget) return;
+        
+        var username = widget.getAttribute('data-username') || '';
+        var email = widget.getAttribute('data-email') || '';
+        var phone = widget.getAttribute('data-phone') || '';
+        var nsfw = widget.getAttribute('data-nsfw') === '1';
+        
+        if (!username && !email && !phone) {
+            resultsDiv.innerHTML = '<div class="katsa-il-status" style="color:#ff4444;">❌ No search targets specified</div>';
+            return;
+        }
+        
+        btn.disabled = true;
+        btn.textContent = '⏳ SCANNING...';
+        
+        // Build status message
+        var targets = [];
+        if (username) targets.push('👤 @' + username);
+        if (email) targets.push('📧 ' + email);
+        if (phone) targets.push('📱 ' + phone);
+        resultsDiv.innerHTML = '<div class="katsa-il-status">🔍 Multi-scan: ' + targets.join(' · ') + '...</div>';
+        resultsDiv.className = 'katsa-inline-results has-results';
+        
+        var totalSearches = (username ? 1 : 0) + (email ? 2 : 0) + (phone ? 1 : 0);
+        var completedSearches = 0;
+        var allHtml = '';
+        var anyError = false;
+        var reportUrl = '';
+        var reportFileUrl = '';
+        
+        function updateProgress() {
+            completedSearches++;
+            if (completedSearches < totalSearches) {
+                btn.textContent = '⏳ ' + completedSearches + '/' + totalSearches + '...';
+            }
+        }
+        
+        function renderFinal() {
+            if (completedSearches < totalSearches) return;
+            if (!allHtml) {
+                allHtml = '<div class="katsa-il-status">No results found across all searches.</div>';
+            }
+            // Link to generated report file or share URL
+            var linkTarget = reportFileUrl || reportUrl || '/katsa';
+            // Append #results anchor for file pages so it scrolls past the header
+            if (reportFileUrl && reportFileUrl.indexOf('#') === -1) linkTarget = reportFileUrl + '?from=board#intel-summary';
+            var linkLabel = (reportFileUrl || reportUrl) ? '📂 view full report →' : '🔎 scan on katsa →';
+            allHtml += '<div style="margin-top:6px;text-align:right;"><a href="' + linkTarget + '" target="_blank" style="color:#4a6a4a;font-size:8px;font-family:monospace;text-decoration:none;letter-spacing:0.5px;">' + linkLabel + '</a></div>';
+            resultsDiv.innerHTML = allHtml;
+            btn.textContent = '✅ DONE';
+            btn.style.borderColor = 'rgba(0,255,65,0.3)';
+            btn.style.color = '#00ff41';
+            btn.disabled = true;
+            // Persist scan results in localStorage
+            try { localStorage.setItem('katsa_scan_' + widgetId, JSON.stringify({ html: allHtml, ts: Date.now() })); } catch(e) {}
+            // Don't auto-collapse on first scan — user needs to see the results
+            // Only auto-collapse when restored from cache (see restore logic below)
+        }
+        
+        // ── Username scan (board_scan API — async with polling) ──
+        if (username) {
+            (async function() {
+                try {
+                    var formData = new FormData();
+                    formData.append('api_action', 'board_scan');
+                    formData.append('username', username);
+                    if (nsfw) formData.append('nsfw', '1');
+                    var resp = await fetch('/katsa', { method: 'POST', body: formData });
+                    var data = await resp.json();
+                    
+                    // If server returned immediately with scanning status, poll for results
+                    if (data.status === 'scanning') {
+                        var phaseLabels = { 'starting': 'launching...', 'sherlock': 'sherlock scan...', 'verifying': 'verifying URLs...', 'secondary': 'deep scan...', 'merging': 'merging results...' };
+                        btn.textContent = '🔍 ' + (phaseLabels[data.phase] || 'scanning...');
+                        
+                        // Poll board_scan_status every 3 seconds
+                        var pollCount = 0;
+                        var maxPolls = 80; // 80 * 3s = 4 min max
+                        data = await new Promise(function(resolve, reject) {
+                            var pollTimer = setInterval(async function() {
+                                pollCount++;
+                                if (pollCount > maxPolls) {
+                                    clearInterval(pollTimer);
+                                    resolve({ error: 'Scan timed out' });
+                                    return;
+                                }
+                                try {
+                                    var pf = new FormData();
+                                    pf.append('api_action', 'board_scan_status');
+                                    pf.append('username', username);
+                                    var pr = await fetch('/katsa', { method: 'POST', body: pf });
+                                    var pd = await pr.json();
+                                    
+                                    if (pd.status === 'scanning') {
+                                        // Update progress indicator
+                                        var label = phaseLabels[pd.phase] || 'scanning...';
+                                        if (pd.sherlock_count) label = pd.sherlock_count + ' found, ' + label;
+                                        btn.textContent = '🔍 ' + label;
+                                    } else if (pd.status === 'error') {
+                                        clearInterval(pollTimer);
+                                        resolve({ error: pd.error || 'Scan failed' });
+                                    } else if (pd.success || pd.verified_count !== undefined) {
+                                        // Got full results
+                                        clearInterval(pollTimer);
+                                        resolve(pd);
+                                    } else if (pd.status === 'not_found') {
+                                        clearInterval(pollTimer);
+                                        resolve({ error: 'Scan lost' });
+                                    }
+                                } catch(pe) {
+                                    // Network glitch — keep polling
+                                }
+                            }, 3000);
+                        });
+                    }
+                    
+                    if (!data.error) {
+                        if (data.share_url) reportUrl = data.share_url;
+                        if (data.file_url) reportFileUrl = data.file_url;
+                        var vCount = data.verified_count || 0;
+                        var uCount = data.uncertain_count || 0;
+                        var html = '';
+                        // Header
+                        html += '<div style="margin-top:6px;padding:6px 8px;background:rgba(0,255,65,0.04);border:1px solid rgba(0,255,65,0.15);border-radius:3px;">';
+                        html += '<div style="color:#00ff41;font-size:9px;font-family:monospace;letter-spacing:1px;margin-bottom:4px;">👤 USERNAME: @' + username + '</div>';
+                        if (data.cached) {
+                            var ageText = data.cache_age < 60 ? 'just now' : data.cache_age < 3600 ? Math.floor(data.cache_age/60) + 'm ago' : Math.floor(data.cache_age/3600) + 'h ago';
+                            html += '<div style="font-size:8px;color:#00c8ff;margin-bottom:3px;">⚡ cached ' + ageText + '</div>';
+                        }
+                        html += '<div class="katsa-il-summary"><strong>' + vCount + '</strong> confirmed';
+                        if (uCount > 0) html += ', <span style="color:#ffd700;">' + uCount + ' not found</span>';
+                        html += '</div>';
+                        if (data.results && data.results.length > 0) {
+                            var mainResults = data.results.filter(function(r) { return r.status === 'verified' && !r.nsfw; });
+                            var nsfwResults = nsfw ? data.results.filter(function(r) { return r.status === 'verified' && r.nsfw; }) : [];
+                            if (mainResults.length > 0) {
+                                html += '<details style="margin:3px 0;"><summary style="cursor:pointer;color:#00ff41;font-size:9px;font-family:monospace;list-style:none;display:flex;align-items:center;gap:4px;user-select:none;padding:2px 0;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:8px;">▶</span> ✅ ' + mainResults.length + ' confirmed</summary>';
+                                html += '<div class="katsa-il-sites" style="margin-top:3px;">';
+                                mainResults.forEach(function(r) {
+                                    var srcTag = r.source === 'linkook' ? ' <span style="color:#00c8ff;font-size:7px;">🔗</span>' : '';
+                                    html += '<a href="' + r.url.replace(/"/g, '&quot;') + '" target="_blank" class="katsa-il-site">' + r.site + srcTag + ' ✅</a>';
+                                });
+                                html += '</div></details>';
+                            }
+                            if (nsfwResults.length > 0) {
+                                html += '<details style="margin-top:4px;"><summary style="color:#ff6496;font-size:9px;cursor:pointer;">🔞 ' + nsfwResults.length + ' adult accounts</summary>';
+                                html += '<div class="katsa-il-sites" style="margin-top:3px;">';
+                                nsfwResults.forEach(function(r) {
+                                    html += '<a href="' + r.url.replace(/"/g, '&quot;') + '" target="_blank" class="katsa-il-site" style="border-color:rgba(255,100,150,0.2);color:#ff6496;">' + r.site + ' 🔞</a>';
+                                });
+                                html += '</div></details>';
+                            }
+                        }
+                        // Linkook intel
+                        if (data.linkook) {
+                            var lk = data.linkook;
+                            if ((lk.related_usernames && lk.related_usernames.length > 0) || (lk.emails && lk.emails.length > 0)) {
+                                var lkCnt = (lk.related_usernames ? lk.related_usernames.length : 0) + (lk.emails ? lk.emails.length : 0);
+                                html += '<details style="margin-top:4px;border:1px solid rgba(0,200,255,0.15);border-radius:3px;background:rgba(0,200,255,0.04);"><summary style="padding:3px 6px;cursor:pointer;color:#00c8ff;font-size:8px;font-family:monospace;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 🔗 LINKOOK — ' + lkCnt + ' items</summary><div style="padding:3px 6px;">';
+                                if (lk.related_usernames && lk.related_usernames.length > 0) {
+                                    html += '<div style="font-size:8px;color:#4a8a8a;">Aliases: <strong style="color:#00c8ff;">' + lk.related_usernames.join('</strong>, <strong style="color:#00c8ff;">') + '</strong></div>';
+                                }
+                                if (lk.emails && lk.emails.length > 0) {
+                                    lk.emails.forEach(function(e) {
+                                        html += '<div style="font-size:8px;color:#4a8a8a;">📧 ' + e.email + (e.breached ? ' <span style="color:#ff4444;font-size:7px;">⚠ BREACHED</span>' : '') + '</div>';
+                                    });
+                                }
+                                html += '</div></details>';
+                            }
+                        }
+                        // Maigret results (included in board_scan response)
+                        if (data.maigret && data.maigret.found_count > 0) {
+                            var mData = data.maigret;
+                            html += '<details style="margin-top:4px;border:1px solid rgba(148,0,255,0.15);border-radius:3px;background:rgba(148,0,255,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#9400ff;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 🕵️ MAIGRET — ' + mData.found_count + ' accounts</summary><div style="padding:3px 6px;">';
+                            if (mData.results && mData.results.length > 0) {
+                                html += '<div class="katsa-il-sites" style="margin-top:4px;">';
+                                mData.results.slice(0, 20).forEach(function(r) {
+                                    var name = r.site_name || r.site || 'Unknown';
+                                    html += '<a href="' + (r.url || '#').replace(/"/g, '&quot;') + '" target="_blank" class="katsa-il-site" style="border-color:rgba(148,0,255,0.2);color:#9400ff;">' + name + ' ✅</a>';
+                                });
+                                if (mData.results.length > 20) html += '<span style="color:#9400ff;font-size:8px;">+' + (mData.results.length - 20) + ' more</span>';
+                                html += '</div>';
+                            }
+                            html += '</div></details>';
+                        }
+                        // WhatsMyName results (included in board_scan response)
+                        if (data.whatsmyname && data.whatsmyname.found_count > 0) {
+                            var wData = data.whatsmyname;
+                            html += '<details style="margin-top:4px;border:1px solid rgba(0,200,100,0.15);border-radius:3px;background:rgba(0,200,100,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#00c864;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 🌐 WMN — ' + wData.found_count + ' accounts</summary><div style="padding:3px 6px;">';
+                            if (wData.results && wData.results.length > 0) {
+                                html += '<div class="katsa-il-sites" style="margin-top:4px;">';
+                                wData.results.slice(0, 15).forEach(function(r) {
+                                    var name = r.site || 'Unknown';
+                                    html += '<a href="' + (r.url || '#').replace(/"/g, '&quot;') + '" target="_blank" class="katsa-il-site" style="border-color:rgba(0,200,100,0.2);color:#00c864;">' + name + ' ✅</a>';
+                                });
+                                if (wData.results.length > 15) html += '<span style="color:#00c864;font-size:8px;">+' + (wData.results.length - 15) + ' more</span>';
+                                html += '</div>';
+                            }
+                            html += '</div></details>';
+                        }
+                        html += '</div>';
+                        allHtml += html;
+                    }
+                } catch(err) { anyError = true; }
+                updateProgress();
+                renderFinal();
+            })();
+        }
+        
+                // ── Email scan (email_search API) ──
+        if (email) {
+            (async function() {
+                try {
+                    var formData = new FormData();
+                    formData.append('api_action', 'email_search');
+                    formData.append('email', email);
+                    var resp = await fetch('/katsa', { method: 'POST', body: formData });
+                    var data = await resp.json();
+                    if (!data.error) {
+                        var found = data.accounts_found || 0;
+                        var results = data.results || [];
+                        var html = '<details style="margin-top:4px;border:1px solid rgba(255,200,0,0.15);border-radius:3px;background:rgba(255,200,0,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#ffd700;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 📧 EMAIL — ' + found + ' sites</summary><div style="padding:3px 6px;">';
+                        if (data.cached) html += '<div style="font-size:8px;color:#00c8ff;margin-bottom:3px;">⚡ cached</div>';
+                        html += '<div class="katsa-il-summary">Registered on <strong>' + found + '</strong> sites</div>';
+                        if (found > 0) {
+                            html += '<div class="katsa-il-sites" style="margin-top:4px;">';
+                            results.forEach(function(r) {
+                                var site = r.site || r.name || 'Unknown';
+                                html += '<span class="katsa-il-site" style="border-color:rgba(255,200,0,0.2);color:#ffd700;">' + site + ' ✅</span>';
+                            });
+                            html += '</div>';
+                        }
+                        html += '</div></details>';
+                        allHtml += html;
+                    }
+                } catch(err) { anyError = true; }
+                updateProgress();
+                renderFinal();
+            })();
+        }
+        
+        // ── GHunt scan (email) ──
+        if (email) {
+            (async function() {
+                try {
+                    var formData = new FormData();
+                    formData.append('api_action', 'ghunt_scan');
+                    formData.append('email', email);
+                    var resp = await fetch('/katsa', { method: 'POST', body: formData });
+                    var data = await resp.json();
+                    if (!data.error && data.found && !data.needs_setup) {
+                        var gid = data.google_id || '';
+                        var html = '<details style="margin-top:4px;border:1px solid rgba(66,133,244,0.15);border-radius:3px;background:rgba(66,133,244,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#4285f4;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 🔍 GHUNT — ' + (data.google_name || 'Google Intel') + '</summary><div style="padding:3px 6px;">';
+                        if (data.cached) html += '<div style="font-size:8px;color:#00c8ff;margin-bottom:3px;">⚡ cached</div>';
+                        if (data.profile_photos && data.profile_photos.length > 0) { html += '<div style="margin-bottom:3px;">'; data.profile_photos.forEach(function(url) { html += '<img src="' + url + '" style="width:36px;height:36px;border-radius:50%;border:1px solid rgba(66,133,244,0.3);object-fit:cover;" />'; }); html += '</div>'; }
+                        if (data.google_name) html += '<div style="font-size:9px;color:#e8e8e8;">Name: <strong style="color:#4285f4;">' + data.google_name + '</strong></div>';
+                        if (data.google_id) html += '<div style="font-size:8px;color:#6a8a8a;">Gaia ID: <span style="user-select:all;">' + data.google_id + '</span></div>';
+                        if (data.last_edit) html += '<div style="font-size:8px;color:#6a8a8a;">Last edit: ' + data.last_edit + '</div>';
+                        if (data.entity_type) html += '<div style="font-size:8px;color:#6a8a8a;">Entity: ' + data.entity_type + '</div>';
+                        if (data.flathash) html += '<div style="font-size:8px;color:#6a8a8a;">Flathash: <code style="color:#4285f4;">' + data.flathash + '</code></div>';
+                        if (data.activated_services && data.activated_services.length > 0) {
+                            var svcLinks = { 'Maps': gid ? 'https://www.google.com/maps/contrib/' + gid : null, 'Photos': gid ? 'https://get.google.com/albumarchive/' + gid : null };
+                            html += '<div style="font-size:8px;color:#6a8a8a;margin-top:2px;">Services: ';
+                            data.activated_services.forEach(function(s) {
+                                var sl = svcLinks[s] || null;
+                                if (sl) html += '<a href="' + sl + '" target="_blank" style="color:#4285f4;font-size:8px;text-decoration:none;background:rgba(66,133,244,0.1);padding:0 4px;border-radius:2px;margin:0 1px;">' + s + ' ↗</a>';
+                                else html += '<span style="color:#4285f4;font-size:8px;margin:0 1px;">' + s + '</span>';
+                            });
+                            html += '</div>';
+                        }
+                        if (data.youtube_channel) html += '<div style="font-size:8px;"><a href="' + data.youtube_channel + '" target="_blank" style="color:#ff0000;">▶ YouTube ↗</a></div>';
+                        if (data.google_maps_url || data.google_maps) html += '<div style="font-size:8px;"><a href="' + (data.google_maps_url || data.google_maps) + '" target="_blank" style="color:#34a853;">🗺 Maps ↗</a></div>';
+                        if (data.maps_reviews) html += '<div style="font-size:8px;color:#6a8a8a;">Reviews: ' + data.maps_reviews + '</div>';
+                        html += '</div></details>';
+                        allHtml += html;
+                    }
+                } catch(err) {}
+                updateProgress();
+                renderFinal();
+            })();
+        }
+        
+                // ── Phone scan (phone_search API) ──
+        if (phone) {
+            (async function() {
+                try {
+                    // Parse country code from phone
+                    var cleanPhone = phone.replace(/^\+/, '');
+                    var countryCode = '+1';
+                    var phoneNum = cleanPhone;
+                    if (cleanPhone.length >= 11) {
+                        if (cleanPhone.startsWith('1') && cleanPhone.length === 11) { countryCode = '+1'; phoneNum = cleanPhone.substring(1); }
+                        else if (cleanPhone.startsWith('44')) { countryCode = '+44'; phoneNum = cleanPhone.substring(2); }
+                        else if (cleanPhone.startsWith('61')) { countryCode = '+61'; phoneNum = cleanPhone.substring(2); }
+                        else if (cleanPhone.startsWith('64')) { countryCode = '+64'; phoneNum = cleanPhone.substring(2); }
+                        else if (cleanPhone.startsWith('353')) { countryCode = '+353'; phoneNum = cleanPhone.substring(3); }
+                        else { countryCode = '+' + cleanPhone.substring(0,1); phoneNum = cleanPhone.substring(1); }
+                    }
+                    var formData = new FormData();
+                    formData.append('api_action', 'phone_search');
+                    formData.append('phone', phoneNum);
+                    formData.append('country_code', countryCode);
+                    var resp = await fetch('/katsa', { method: 'POST', body: formData });
+                    var data = await resp.json();
+                    if (!data.error) {
+                        var found = data.accounts_found || 0;
+                        var results = data.results || [];
+                        var html = '<details style="margin-top:4px;border:1px solid rgba(0,255,150,0.15);border-radius:3px;background:rgba(0,255,150,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#00ff96;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 📱 PHONE — ' + found + ' sites</summary><div style="padding:3px 6px;">';
+                        if (data.cached) html += '<div style="font-size:8px;color:#00c8ff;margin-bottom:3px;">⚡ cached</div>';
+                        html += '<div class="katsa-il-summary">Registered on <strong>' + found + '</strong> sites</div>';
+                        if (found > 0) {
+                            html += '<div class="katsa-il-sites" style="margin-top:4px;">';
+                            results.forEach(function(r) {
+                                var site = r.site || 'Unknown';
+                                html += '<span class="katsa-il-site" style="border-color:rgba(0,255,150,0.2);color:#00ff96;">' + site + ' ✅</span>';
+                            });
+                            html += '</div>';
+                        }
+                        html += '</div></details>';
+                        allHtml += html;
+                    }
+                } catch(err) { anyError = true; }
+                updateProgress();
+                renderFinal();
+            })();
+        }
+    }
+
+    // ── Toggle collapse/expand katsa widget ──
+    function toggleKatsaWidget(widgetId, event) {
+        // Don't toggle if clicking the RUN SCAN button
+        if (event && event.target.closest('.katsa-inline-run')) return;
+        var widget = document.getElementById(widgetId);
+        if (!widget) return;
+        widget.classList.toggle('collapsed');
+        try {
+            localStorage.setItem('katsa_collapse_' + widgetId, widget.classList.contains('collapsed') ? '1' : '0');
+        } catch(e) {}
+    }
+
+    // ── Restore cached scan results + collapse state from localStorage ──
+    document.addEventListener('DOMContentLoaded', function() {
+        document.querySelectorAll('.katsa-inline-widget').forEach(function(widget) {
+            var wid = widget.id;
+            try {
+                var saved = localStorage.getItem('katsa_scan_' + wid);
+                if (saved) {
+                    var data = JSON.parse(saved);
+                    // Only restore if less than 24h old
+                    if (data.html && data.ts && (Date.now() - data.ts) < 86400000) {
+                        var resultsDiv = document.getElementById(wid + '_results');
+                        if (resultsDiv) {
+                            resultsDiv.innerHTML = data.html;
+                            resultsDiv.className = 'katsa-inline-results has-results';
+                        }
+                        var btn = widget.querySelector('.katsa-inline-run');
+                        if (btn) {
+                            btn.textContent = '✅ DONE';
+                            btn.style.borderColor = 'rgba(0,255,65,0.3)';
+                            btn.style.color = '#00ff41';
+                            btn.disabled = true;
+                        }
+                    } else {
+                        // Expired — clean up
+                        localStorage.removeItem('katsa_scan_' + wid);
+                        localStorage.removeItem('katsa_collapse_' + wid);
+                    }
+                }
+                // Restore collapse state independently — always respect user's last toggle
+                var collapseState = localStorage.getItem('katsa_collapse_' + wid);
+                if (collapseState === '1') {
+                    widget.classList.add('collapsed');
+                } else if (collapseState === '0') {
+                    widget.classList.remove('collapsed');
+                }
+            } catch(e) {}
+        });
+    });
+
+    // ── Katsa scan queue: only 1 widget scans at a time to prevent lag ──
+    var katsaScanQueue = [];
+    var katsaScanRunning = false;
+
+    function queueInlineKatsa(widgetId) {
+        var btn = document.querySelector('#' + widgetId + ' .katsa-inline-run');
+        if (btn && btn.disabled) return; // already running or done
+        if (btn) {
+            btn.textContent = '⏳ QUEUED...';
+            btn.disabled = true;
+        }
+        katsaScanQueue.push(widgetId);
+        processKatsaQueue();
+    }
+
+    async function processKatsaQueue() {
+        if (katsaScanRunning || katsaScanQueue.length === 0) return;
+        katsaScanRunning = true;
+        var widgetId = katsaScanQueue.shift();
+        try {
+            await runInlineKatsa(widgetId);
+        } catch(e) {}
+        katsaScanRunning = false;
+        // Process next in queue after a short delay
+        if (katsaScanQueue.length > 0) {
+            setTimeout(processKatsaQueue, 300);
+        }
+    }
+
     // ════ BOOST BADGE LIVE COUNTDOWN & DECAY ════
 
     function _boostFmtTime(secs) {

@@ -1628,6 +1628,50 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .share-card-name{font-size:14px;font-weight:700;color:#e0e0e0;margin-bottom:2px}
 .share-card-bio{font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+/* ─── Invite card ─────────────────────────────────────────────────────────── */
+.invite-card{
+  display:block;margin-top:8px;max-width:420px;
+  background:#1e2124;border:1px solid #2e3136;border-radius:10px;overflow:hidden;
+}
+.invite-card-header{
+  padding:8px 14px;background:#18191c;font-size:11px;color:#72767d;
+  text-transform:uppercase;letter-spacing:0.6px;font-weight:600;
+  border-bottom:1px solid #2e3136;
+}
+.invite-card-body{
+  display:flex;align-items:center;gap:14px;padding:14px;
+}
+.invite-card-icon{
+  font-size:32px;flex-shrink:0;width:48px;height:48px;
+  background:#36393f;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;line-height:1;
+}
+.invite-card-info{flex:1;min-width:0}
+.invite-card-name{font-size:16px;font-weight:700;color:#e0e0e0;margin-bottom:3px}
+.invite-card-desc{font-size:12px;color:#888;line-height:1.4;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.invite-card-by{font-size:11px;color:#72767d}
+.invite-card-by strong{color:#a0a0a0}
+.invite-join-btn{
+  flex-shrink:0;padding:8px 20px;border-radius:4px;border:none;cursor:pointer;
+  background:#3ba55d;color:#fff;font-size:13px;font-weight:700;
+  transition:background .15s,transform .1s;white-space:nowrap;
+}
+.invite-join-btn:hover{background:#2d7d46}
+.invite-join-btn:active{transform:scale(.97)}
+.invite-join-btn:disabled{background:#555;cursor:not-allowed}
+.invite-join-btn--already{background:#4f545c}
+.invite-join-btn--already:hover{background:#5d6269}
+.invite-card-invalid{
+  display:inline-block;margin-top:6px;font-size:12px;color:#888;
+  background:#1a1a1a;border:1px solid #2e3136;border-radius:6px;padding:6px 12px;
+}
+.invite-card-loading{
+  display:inline-block;margin-top:6px;font-size:12px;color:#72767d;
+  background:#1a1a1a;border:1px solid #2e3136;border-radius:6px;padding:6px 12px;
+  animation:fadeInOut 1.5s ease-in-out infinite;
+}
+@keyframes fadeInOut{0%,100%{opacity:.6}50%{opacity:1}}
+
 /* ─── Responsive: collapse panels on small screens ──────────── */
 @media(max-width:900px){
   #server-list{
@@ -3245,20 +3289,31 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sul-nick{font-size:14px;font-weight:600;color:#e0e0e0}
 .sul-bio{font-size:12px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-/* ── Frog Chan overlay ───────────────────────────────────────── */
+/* ── Frog Channel overlay ───────────────────────────────────────── */
 .board-overlay{position:fixed;inset:0;background:#0a0a0a;z-index:600;display:flex;flex-direction:column;overflow:hidden}
 .board-overlay.hidden{display:none}
 .board-overlay-topbar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#111;border-bottom:1px solid #1a1a1a;flex-shrink:0}
 .board-menu-btn{background:none;border:none;color:#888;font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:color .15s}
 .board-menu-btn:hover{color:#e0e0e0;background:#1a1a1a}
 .board-overlay-icon{font-size:20px;line-height:1}
-.board-overlay-title{font-family:'Pacifico','Brush Script MT',cursive;font-size:20px;font-weight:400;color:#fff;flex:1;background:linear-gradient(135deg,#ffffff 0%,#b8f0c0 60%,#4caf50 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.board-overlay-title{font-family:'Inter','Segoe UI',sans-serif;font-size:17px;font-weight:700;letter-spacing:.5px;flex:1;background:linear-gradient(90deg,#ff9800 0%,#ffc107 60%,#ffeb3b 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .board-overlay-close{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:color .15s}
 .board-overlay-close:hover{color:#e0e0e0;background:#1a1a1a}
 #board-side-menu{position:absolute;top:52px;left:0;bottom:0;width:68px;background:#0d0d0d;border-right:1px solid #1a1a1a;transform:translateX(-100%);transition:transform .22s ease;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4);z-index:2}
 #board-side-menu.open{transform:translateX(0)}
+#board-side-menu.guest-menu{width:min(86vw,300px);align-items:stretch;padding:12px 10px;gap:10px}
+#board-side-menu .board-menu-icons{display:flex;flex-direction:column;align-items:center;gap:4px}
 #board-side-menu .server-icon{margin:2px 0}
 #board-side-menu .ssm-spacer{flex:1}
+.board-auth-card{display:none;background:#121b12;border:1px solid #2b472b;border-radius:12px;padding:12px;color:#bde7bd}
+#board-side-menu.guest-menu .board-auth-card{display:block}
+.board-auth-title{font-size:13px;font-weight:700;color:#7be07b;margin-bottom:4px}
+.board-auth-text{font-size:12px;color:#86b886;line-height:1.4;margin-bottom:10px}
+.board-auth-actions{display:flex;gap:8px}
+.board-auth-btn{flex:1;border:none;border-radius:8px;padding:9px 10px;font-size:12px;font-weight:700;cursor:pointer}
+.board-auth-btn.signin{background:#2a4a2a;color:#d9ffd9}
+.board-auth-btn.register{background:#4caf50;color:#041304}
+.board-auth-btn:hover{filter:brightness(1.06)}
 .board-overlay-frame{flex:1;border:none;width:100%;height:100%}
 
 /* CSS preset buttons */
@@ -3651,7 +3706,7 @@ window.ConnErr = (function(){
     </div>
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="showChannelDirectory()">🧭</div>
     <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" id="social-server-icon" onclick="Social.open('feed')" style="background:linear-gradient(135deg,#0d1f0d,#1e3a1e);color:#4caf50;font-weight:700">🌐</div>
-    <div class="server-icon" data-tip="Frog Chan" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🧵</div>
+    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🧵</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="showProfile()">⚙️</div>
   </div>
@@ -3697,7 +3752,7 @@ window.ConnErr = (function(){
         <button class="icon-btn" onclick="openFriends()" data-tip="Friends">👥</button>
         <button class="icon-btn" onclick="showChannelDirectory()" data-tip="Directory">🧭</button>
         <button class="icon-btn" onclick="Social.open('feed')" data-tip="Social">🌐</button>
-        <button class="icon-btn" onclick="openFrogBoard()" data-tip="Frog Chan">🧵</button>
+        <button class="icon-btn" onclick="openFrogBoard()" data-tip="Frog Channel">🧵</button>
         <button class="icon-btn" onclick="showProfile()" data-tip="Settings">⚙️</button>
         <button class="icon-btn" onclick="doLogout()" data-tip="Logout">🚪</button>
       </div>
@@ -5109,7 +5164,7 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openDMsPanel()">💬</div>
     <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFriends()">👥</div>
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();showChannelDirectory()">🧭</div>
-    <div class="server-icon" data-tip="Frog Chan" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🧵</div>
+    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🧵</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="Social.navTo('profile')">⚙️</div>
     <div class="ssm-spacer"></div>
@@ -5117,7 +5172,7 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="Social.navTo('logout')" style="background:#2a1414;color:#f85149">🚪</div>
   </aside>
   <div class="social-topbar">
-    <button class="social-menu-btn" onclick="Social.openSideMenu()" title="Menu" aria-label="Open menu">🐸</button>
+    <button class="social-menu-btn" onclick="Social.openSideMenu()" title="Menu" aria-label="Open menu">🌐</button>
     <span class="social-topbar-title">FrogSocial</span>
     <nav class="social-nav">
       <button class="social-nav-btn active" onclick="Social.switchTab('feed')" data-tab="feed">Feed</button>
@@ -5184,25 +5239,35 @@ window.ConnErr = (function(){
   </div>
 </div>
 
-<!-- ═══════════════════════ FROG CHAN OVERLAY ═════════════════════════════════ -->
+<!-- ═══════════════════════ FROG CHANNEL OVERLAY ═════════════════════════════════ -->
 <div id="board-overlay" class="board-overlay hidden">
   <div class="board-overlay-topbar">
     <button class="board-menu-btn" onclick="document.getElementById('board-side-menu').classList.toggle('open')" title="Menu" aria-label="Open menu">🧵</button>
-    <span class="board-overlay-title">Frog Chan</span>
+    <span class="board-overlay-title">Frog Channel</span>
     <button class="board-overlay-close" onclick="closeFrogBoard()" title="Close">✕</button>
   </div>
-  <aside id="board-side-menu" aria-label="Frog Chan quick switch menu">
-    <div class="server-icon" data-tip="FrogTalk Home" data-tip-pos="right" onclick="closeFrogBoard();goHomeChannel()">🐸</div>
-    <div class="server-divider"></div>
-    <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="closeFrogBoard();openDMsPanel()">💬</div>
-    <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="closeFrogBoard();openFriends()">👥</div>
-    <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="closeFrogBoard();showChannelDirectory()">🧭</div>
-    <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" onclick="closeFrogBoard();Social.open('feed')">🌐</div>
-    <div class="server-divider"></div>
-    <a class="server-icon" data-tip="Open Frog Chan in new tab" data-tip-pos="right" href="/board/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">🔖</a>
-    <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="closeFrogBoard();showProfile()">⚙️</div>
-    <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="closeFrogBoard()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
-    <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
+  <aside id="board-side-menu" aria-label="Frog Channel quick switch menu">
+    <div class="board-menu-icons">
+      <div class="server-icon" data-tip="FrogTalk Home" data-tip-pos="right" onclick="closeFrogBoard();goHomeChannel()">🐸</div>
+      <div class="server-divider"></div>
+      <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="closeFrogBoard();openDMsPanel()">💬</div>
+      <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="closeFrogBoard();openFriends()">👥</div>
+      <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="closeFrogBoard();showChannelDirectory()">🧭</div>
+      <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" onclick="closeFrogBoard();Social.open('feed')">🌐</div>
+      <div class="server-divider"></div>
+      <a class="server-icon" data-tip="Open Frog Channel in new tab" data-tip-pos="right" href="/board/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">🗂️</a>
+      <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="closeFrogBoard();showProfile()">⚙️</div>
+      <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="closeFrogBoard()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
+      <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
+    </div>
+    <div id="board-auth-card" class="board-auth-card" aria-live="polite">
+      <div class="board-auth-title">Use FrogTalk while browsing</div>
+      <div class="board-auth-text">Sign in or create an account to open your channels and DMs from this menu.</div>
+      <div class="board-auth-actions">
+        <button class="board-auth-btn signin" onclick="openBoardAuth('login')">Sign In</button>
+        <button class="board-auth-btn register" onclick="openBoardAuth('register')">Register</button>
+      </div>
+    </div>
     <div class="ssm-spacer"></div>
   </aside>
   <iframe id="board-frame" src="" class="board-overlay-frame" allowfullscreen></iframe>
@@ -5220,9 +5285,28 @@ function openFrogBoard() {
   const ol = document.getElementById('board-overlay');
   const frame = document.getElementById('board-frame');
   if (!ol) return;
+  updateBoardSideMenuAuth();
   ol.classList.remove('hidden');
   document.getElementById('board-server-icon')?.classList.add('active');
-  if (!frame.src || frame.src === window.location.href) frame.src = '/board/';
+  if (!frame.src || !frame.src.includes('/board')) frame.src = '/board/';
+}
+
+function updateBoardSideMenuAuth() {
+  const menu = document.getElementById('board-side-menu');
+  if (!menu) return;
+  const loggedIn = !!(window.State && State.token && State.user);
+  menu.classList.toggle('guest-menu', !loggedIn);
+}
+
+function openBoardAuth(mode) {
+  closeFrogBoard();
+  const overlay = document.getElementById('auth-overlay');
+  const app = document.getElementById('app');
+  if (overlay) overlay.classList.remove('hidden');
+  if (app) app.classList.add('hidden');
+  if (typeof switchAuthTab === 'function') switchAuthTab(mode === 'register' ? 'register' : 'login');
+  const nick = document.getElementById('auth-nickname');
+  if (nick) nick.focus();
 }
 function closeFrogBoard() {
   const ol = document.getElementById('board-overlay');

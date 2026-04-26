@@ -1,6 +1,6 @@
 <?php
 /**
- * GOYIM.CO.NZ — /board/admin — Admin Panel
+ * FrogTalk — /board/admin — Admin Panel
  * Moderation: approve images, ban users, delete posts, board settings
  */
 session_start();

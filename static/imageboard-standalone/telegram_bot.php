@@ -1,6 +1,6 @@
 <?php
 /**
- * GOYIM.CO.NZ — Telegram Bot Integration
+ * FrogTalk — Telegram Bot Integration
  * Forwards encrypted tips to the Telegram group/channel
  * 
  * SETUP:
@@ -74,7 +74,7 @@ class PeasantHuntTelegramBot {
                  . "🌐 *IP Hash:* `" . substr($ipHash, 0, 12) . "...`\n"
                  . "━━━━━━━━━━━━━━━━━━━━━\n\n"
                  . "💡 _Decrypt:_ `php decrypt_tips.js`\n"
-                 . "🔗 [Dashboard](https://goyim.co.nz/)";
+                 . "🔗 [Dashboard](https://frogtalk.xyz/)";
         
         return $this->sendMessage($message, 'Markdown');
     }
@@ -110,7 +110,7 @@ class PeasantHuntTelegramBot {
                  . "━━━━━━━━━━━━━━━━━━━━━\n\n"
                  . "💬 _{$preview}_\n\n"
                  . "📊 Total threads: {$totalThreads}\n"
-                 . "🔗 [View Thread](https://goyim.co.nz/board?thread={$threadId})";
+                 . "🔗 [View Thread](https://frogtalk.xyz/board?thread={$threadId})";
         
         $msgId = null;
         
@@ -184,7 +184,7 @@ class PeasantHuntTelegramBot {
                  . "━━━━━━━━━━━━━━━━━━━━━\n\n"
                  . "💬 _{$preview}_\n\n"
                  . "📊 Total threads: {$total}\n"
-                 . "🔗 [View Thread](https://goyim.co.nz/board?thread={$threadId})";
+                 . "🔗 [View Thread](https://frogtalk.xyz/board?thread={$threadId})";
         
         // Delete placeholder, then send photo
         $this->deleteMessage($oldMsgId);
@@ -368,7 +368,7 @@ class PeasantHuntTelegramBot {
         $msg .= "🔗 Tx: `" . $txHash . "`\n";
         $msg .= "[View on Solscan](https://solscan.io/tx/" . $txHash . ")\n\n";
         $msg .= "✅ *Purchase a Prezzy Virtual Visa for NZD \\$" . number_format($cardAmount, 2) . " and email the card code to the address above.*\n";
-        $msg .= "[GOYIM TREASURY Admin](https://goyim.co.nz/treasury?admin_orders=1)";
+        $msg .= "[Treasury Admin](https://frogtalk.xyz/treasury?admin_orders=1)";
         $ok = $this->sendMessage($msg, 'Markdown');
         // Also DM admin personally
         $this->sendAdminDm($msg, 'Markdown');
@@ -396,7 +396,7 @@ class PeasantHuntTelegramBot {
         $msg .= "🔗 Tx: `" . $txHash . "`\n";
         $msg .= "[View on Solscan](https://solscan.io/tx/" . $txHash . ")\n\n";
         $msg .= "✅ *Process bank transfer of " . $currency . " " . $fiatFmt . " to the destination above.*\n";
-        $msg .= "[GOYIM TREASURY Admin](https://goyim.co.nz/treasury)";
+        $msg .= "[Treasury Admin](https://frogtalk.xyz/treasury)";
         $ok = $this->sendMessage($msg, 'Markdown');
         // Also DM admin personally
         $this->sendAdminDm($msg, 'Markdown');
@@ -563,7 +563,7 @@ if (php_sapi_name() === 'cli' && isset($argv[1])) {
                 echo "❌ Bot not configured. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env\n";
                 exit(1);
             }
-            $result = $bot->sendAlert("🧪 Test message from GOYIM.CO.NZ\nTimestamp: " . date('Y-m-d H:i:s'));
+            $result = $bot->sendAlert("🧪 Test message from FrogTalk\nTimestamp: " . date('Y-m-d H:i:s'));
             echo $result ? "✅ Test message sent!\n" : "❌ Failed to send\n";
             break;
             
@@ -573,7 +573,7 @@ if (php_sapi_name() === 'cli' && isset($argv[1])) {
             break;
             
         case 'setup':
-            echo "🐸 Telegram Bot Setup for GOYIM.CO.NZ\n";
+            echo "🐸 Telegram Bot Setup for FrogTalk\n";
             echo "================================================\n\n";
             echo "1. Open Telegram and message @BotFather\n";
             echo "2. Send /newbot\n";

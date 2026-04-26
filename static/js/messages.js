@@ -57,13 +57,64 @@ const Messages = (() => {
     escaped = escaped.replace(/(^|[\s(\[>])#([a-zA-Z0-9][a-zA-Z0-9_-]{1,31})\b/g,
       (m, pre, name) => `${pre}<span class="room-mention" data-room="${UI.escHtml(name)}" onclick="Rooms.openChannelLink('${UI.escHtml(name).replace(/'/g,"\\'")}')">#${UI.escHtml(name)}</span>`);
 
-    escaped = escaped.replace(urlRe, url => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${UI.escHtml(url)}">${url}</a>`);
+    // FrogTalk invite URLs → render a card placeholder instead of a plain link
+    const inviteRe = /https?:\/\/(?:frogtalk\.xyz|localhost(?::\d+)?)\/invite\/([A-Za-z0-9]{6,16})/g;
+    escaped = escaped.replace(inviteRe, (url, code) =>
+      `<span class="invite-card-placeholder" data-invite-code="${UI.escHtml(code)}">` +
+      `<span class="invite-card-loading">🐸 Loading invite…</span></span>`
+    );
+
+    escaped = escaped.replace(urlRe, url => {
+      // Skip invite URLs — already replaced above
+      if (/\/invite\/[A-Za-z0-9]{6,16}/.test(url)) return url;
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${UI.escHtml(url)}">${url}</a>`;
+    });
     
     // Render custom emojis
     if (typeof renderCustomEmojisInText === 'function') {
       escaped = renderCustomEmojisInText(escaped);
     }
     return escaped;
+  }
+
+  // Fetch invite info and render a join card
+  async function _loadInviteCard(msgId, code) {
+    const msgEl = document.getElementById(`msg-${msgId}`);
+    if (!msgEl) return;
+    const placeholder = msgEl.querySelector(`.invite-card-placeholder[data-invite-code="${code}"]`);
+    if (!placeholder) return;
+
+    try {
+      const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}`);
+      const data = await res.json();
+      if (!res.ok || !data.valid) {
+        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Invite invalid or expired</span>`;
+        return;
+      }
+      const icon = UI.escHtml(data.room_icon || '💬');
+      const name = UI.escHtml(data.room_name || '');
+      const desc = data.room_desc ? `<div class="invite-card-desc">${UI.escHtml(data.room_desc.substring(0, 100))}</div>` : '';
+      const by = data.created_by ? `<span class="invite-card-by">Invited by <strong>${UI.escHtml(data.created_by)}</strong></span>` : '';
+      const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
+      const btnHtml = alreadyJoined
+        ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`
+        : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join</button>`;
+      placeholder.outerHTML = `
+        <div class="invite-card">
+          <div class="invite-card-header">You've been invited to join a channel</div>
+          <div class="invite-card-body">
+            <div class="invite-card-icon">${icon}</div>
+            <div class="invite-card-info">
+              <div class="invite-card-name">#${name}</div>
+              ${desc}
+              ${by}
+            </div>
+            ${btnHtml}
+          </div>
+        </div>`;
+    } catch (e) {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load invite</span>`;
+    }
   }
 
   // Fetch and render link preview
@@ -487,6 +538,19 @@ const Messages = (() => {
     linksToPreview.slice(-5).forEach(({ id, url }) => {
       setTimeout(() => _loadLinkPreview(id, url), 100);
     });
+
+    // Load invite cards
+    const area2 = document.getElementById('messages-area');
+    if (area2) {
+      area2.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
+        const msgEl = el.closest('[id^="msg-"]');
+        const code = el.dataset.inviteCode;
+        if (msgEl && code) {
+          const msgId = msgEl.id.replace('msg-', '');
+          setTimeout(() => _loadInviteCard(msgId, code), 150);
+        }
+      });
+    }
   }
 
   function appendMessage(room, msg) {
@@ -547,6 +611,8 @@ const Messages = (() => {
           const urlRe = /https?:\/\/[^\s<>"]+/g;
           const urls = (msg.content || '').match(urlRe);
           if (urls && urls.length) setTimeout(() => _loadLinkPreview(msg.id, urls[0]), 100);
+          const invCodes = (msg.content || '').match(/\/invite\/([A-Za-z0-9]{6,16})/g);
+          if (invCodes) invCodes.forEach(m => _loadInviteCard(msg.id, m.replace('/invite/', '')));
           const cached = State.messages[room] || [];
           const idx = cached.findIndex(m => m && m._pending && (nonce ? m._nonce === nonce : true));
           if (idx >= 0) cached[idx] = msg;
@@ -613,8 +679,12 @@ const Messages = (() => {
     const urlRe = /https?:\/\/[^\s<>"]+/g;
     const urls = (msg.content || '').match(urlRe);
     if (urls && urls.length) {
-      setTimeout(() => _loadLinkPreview(msg.id, urls[0]), 200);
+      const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(urls[0]);
+      if (!isInvite) setTimeout(() => _loadLinkPreview(msg.id, urls[0]), 200);
     }
+    // Load invite card if present
+    const invMatch = (msg.content || '').match(/\/invite\/([A-Za-z0-9]{6,16})/);
+    if (invMatch) setTimeout(() => _loadInviteCard(msg.id, invMatch[1]), 200);
   }
 
   function updateEdited(id, content, room) {
@@ -1384,7 +1454,31 @@ const Messages = (() => {
     }, 0);
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom };
+  async function joinViaInvite(code, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+    try {
+      const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}/join`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        if (btn) {
+          const card = btn.closest('.invite-card');
+          if (card) {
+            btn.outerHTML = `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${UI.escHtml(data.room)}')">Open Channel</button>`;
+          }
+        }
+        await Rooms.loadRooms?.();
+        Rooms.openChannelLink(data.room);
+      } else {
+        if (btn) { btn.disabled = false; btn.textContent = 'Join'; }
+        UI.toast(data.error || 'Could not join channel');
+      }
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Join'; }
+      UI.toast('Could not join channel');
+    }
+  }
+
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
