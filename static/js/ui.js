@@ -136,17 +136,17 @@ const UI = (() => {
     if (!pop) {
       pop = document.createElement('div');
       pop.id = 'status-picker-popover';
-      pop.style.cssText = 'position:fixed;z-index:1000;background:linear-gradient(180deg,#132720,#0f1d19);border:1px solid #2f5a4a;border-radius:12px;padding:12px;width:292px;box-shadow:0 14px 36px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.03);display:none';
+      pop.style.cssText = 'position:fixed;z-index:1000;background:radial-gradient(circle at top,#1d3b31 0%,#132720 52%,#10201a 100%);border:1px solid #3f7a63;border-radius:14px;padding:13px;width:min(320px,calc(100vw - 24px));box-shadow:0 18px 44px rgba(0,0,0,.54), inset 0 1px 0 rgba(255,255,255,.08);display:none;backdrop-filter:blur(4px)';
       pop.innerHTML = `
-        <div style="font-size:11px;color:#7ed2a5;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px">Set status</div>
-        <div id="sp-current" style="font-size:12px;color:#b9d7c8;background:rgba(24,49,40,.65);border:1px solid rgba(110,176,147,.25);border-radius:8px;padding:7px 9px;margin-bottom:8px;line-height:1.35"></div>
-        <div id="sp-opts" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px"></div>
-        <div style="font-size:11px;color:#7ed2a5;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">Status text</div>
+        <div style="font-size:11px;color:#9ae4bb;font-weight:800;letter-spacing:.55px;text-transform:uppercase;margin-bottom:6px">Set status</div>
+        <div id="sp-current" style="font-size:12px;color:#cfe8dc;background:linear-gradient(180deg,rgba(28,58,47,.8),rgba(21,43,35,.8));border:1px solid rgba(123,193,161,.35);border-radius:9px;padding:8px 10px;margin-bottom:10px;line-height:1.35"></div>
+        <div id="sp-opts" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px"></div>
+        <div style="font-size:11px;color:#9ae4bb;font-weight:800;letter-spacing:.55px;text-transform:uppercase;margin-bottom:6px">Status message</div>
         <input id="sp-msg" type="text" maxlength="128" placeholder="Click to set status"
-          style="width:100%;background:linear-gradient(180deg,#152b23,#12241e);border:1px solid #335b4c;border-radius:8px;padding:8px 10px;color:#e7f4ee;font-size:13px;outline:none;box-sizing:border-box">
-        <div style="display:flex;gap:6px;margin-top:10px">
-          <button id="sp-clear" style="flex:1;background:linear-gradient(180deg,#172d25,#12221d);border:1px solid #305545;color:#9db9ad;padding:8px;border-radius:8px;cursor:pointer;font-size:12px">Clear</button>
-          <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#4caf50,#409c45);border:none;color:#041204;font-weight:700;padding:8px;border-radius:8px;cursor:pointer;font-size:12px">Save</button>
+          style="width:100%;background:linear-gradient(180deg,#193328,#142a22);border:1px solid #3e6f5b;border-radius:9px;padding:9px 10px;color:#ecfaf2;font-size:13px;outline:none;box-sizing:border-box">
+        <div style="display:flex;gap:8px;margin-top:11px">
+          <button id="sp-clear" style="flex:1;background:linear-gradient(180deg,#1b352c,#142720);border:1px solid #3a6655;color:#b4cebf;padding:9px;border-radius:9px;cursor:pointer;font-size:12px">Clear</button>
+          <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#59bc63,#47a950);border:1px solid #5fc070;color:#041704;font-weight:800;padding:9px;border-radius:9px;cursor:pointer;font-size:12px">Save</button>
         </div>
       `;
       document.body.appendChild(pop);
@@ -175,7 +175,7 @@ const UI = (() => {
     ];
     pop.querySelector('#sp-opts').innerHTML = opts.map(o => `
       <button type="button" data-presence="${o.k}"
-        style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;background:${o.k===curP?'#1a382f':'#152720'};border:1px solid ${o.k===curP?'#62bf94':'#2f5546'};color:${o.k===curP?'#78d0a3':'#d7ece2'};font-size:13px;cursor:pointer;text-align:left">
+        style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:${o.k===curP?'linear-gradient(180deg,#214438,#1a372d)':'linear-gradient(180deg,#182e25,#13261f)'};border:1px solid ${o.k===curP?'#66c596':'#355f4f'};color:${o.k===curP?'#9ce2be':'#deefe7'};font-size:13px;cursor:pointer;text-align:left">
         <span style="font-size:14px">${o.d}</span><span style="flex:1">${o.l}</span>${o.k===curP?'<span>✓</span>':''}
       </button>
     `).join('');
@@ -183,9 +183,9 @@ const UI = (() => {
       btn.onclick = () => {
         pop.querySelectorAll('[data-presence]').forEach(b => {
           const k = b.dataset.presence;
-          b.style.background = k === btn.dataset.presence ? '#1a382f' : '#152720';
-          b.style.borderColor = k === btn.dataset.presence ? '#62bf94' : '#2f5546';
-          b.style.color = k === btn.dataset.presence ? '#78d0a3' : '#d7ece2';
+          b.style.background = k === btn.dataset.presence ? 'linear-gradient(180deg,#214438,#1a372d)' : 'linear-gradient(180deg,#182e25,#13261f)';
+          b.style.borderColor = k === btn.dataset.presence ? '#66c596' : '#355f4f';
+          b.style.color = k === btn.dataset.presence ? '#9ce2be' : '#deefe7';
         });
         pop.dataset.pendingPresence = btn.dataset.presence;
       };

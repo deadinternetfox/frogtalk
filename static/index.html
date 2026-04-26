@@ -707,21 +707,26 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .self-avatar img{width:100%;height:100%;object-fit:cover}
 .self-info{flex:1;min-width:0;overflow:hidden}
 .self-name{font-size:14px;font-weight:700;color:#e6f6ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.self-status{
-  font-size:11px;color:#89d6ad;cursor:pointer;
-  padding:3px 7px;margin-top:2px;border-radius:999px;display:inline-flex;align-items:center;gap:4px;
-  background:rgba(22,53,43,.65);border:1px solid rgba(103,178,145,.36);
-  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  transition:background .15s,border-color .15s,transform .1s
-}
-.self-status:hover{background:rgba(28,64,52,.75);border-color:rgba(123,205,169,.52);transform:translateY(-1px)}
 .self-quick-menu{
-  width:100%;margin-top:2px;padding:8px;
+  width:100%;margin-top:4px;padding:8px;
   background:linear-gradient(135deg,#152d25,#10221c);
   border:1px solid #2b5142;border-radius:10px;
   display:flex;flex-direction:column;gap:8px
 }
 .sqm-actions{display:flex;gap:6px}
+.sqm-status-btn{
+  width:100%;height:34px;border-radius:9px;
+  border:1px solid #387560;
+  background:linear-gradient(180deg,#1f4034,#173126);
+  color:#c9efdb;cursor:pointer;font-size:12px;font-weight:700;
+  display:flex;align-items:center;justify-content:flex-start;gap:8px;
+  padding:0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:background .15s,border-color .15s,color .15s,transform .1s
+}
+.sqm-status-btn:hover{
+  background:linear-gradient(180deg,#275243,#1d3f33);
+  border-color:#4a9679;color:#e7faf0;transform:translateY(-1px)
+}
 .sqm-action-btn{
   flex:1;height:32px;border-radius:8px;border:1px solid #2d5545;
   background:linear-gradient(180deg,#1b362c,#162c24);color:#dff3e9;cursor:pointer;font-size:12px;font-weight:700;
@@ -3975,9 +3980,9 @@ window.ConnErr = (function(){
       <div class="self-avatar" id="self-avatar-el" onclick="showProfile()">🐸</div>
       <div class="self-info">
         <div class="self-name" id="self-name">Loading…</div>
-        <div class="self-status" id="self-status" onclick="openStatusPicker(event)" title="Click to set status">🟢 Online</div>
       </div>
       <div class="self-quick-menu" id="self-quick-menu" aria-label="Quick profile actions">
+        <button class="sqm-status-btn" id="self-status" type="button" onclick="openStatusPicker(event)" title="Click to set status">🟢 Online</button>
         <div class="sqm-actions">
           <button class="sqm-action-btn friends" type="button" onclick="openFriends()">👥 Friends</button>
         </div>
