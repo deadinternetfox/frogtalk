@@ -852,9 +852,13 @@ $isAdmin = isAdminLoggedIn();
 
 // Build dynamic OG tags
 $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
-$ogTitle = '🐸 Frog Channel';
-$ogDesc = 'Anonymous image board. ' . count($threads) . ' threads active. Post frogs, discuss topics, share media. No accounts, no tracking.';
+$ogTitle = '🐸 Frog Channels on FrogTalk';
+$ogDesc = 'Frog Channels is the anonymous imageboard on FrogTalk. ' . count($threads) . ' active threads. Post images, discuss freely, and share media.';
 $ogImage = $baseUrl . '/board_preview.php?board=index';
+$ogImageType = 'image/png';
+$ogImageWidth = 1200;
+$ogImageHeight = 630;
+$ogImageAlt = 'Frog Channels board preview';
 $ogUrl = $baseUrl . '/board';
 $ogType = 'website';
 
@@ -863,15 +867,36 @@ if ($singleThread) {
     $replyC = count($singleThread['replies'] ?? []);
     $likeC = getLikeCount($singleThread['id']);
     $viewC = getViewCount($singleThread['id']);
-    $ogTitle = $subj . ' — Frog Channel #' . $singleThread['id'];
+    $ogTitle = $subj . ' — Frog Channels #' . $singleThread['id'];
     $ogDesc = mb_substr(strip_tags($singleThread['comment']), 0, 200);
     if (mb_strlen($singleThread['comment']) > 200) $ogDesc .= '...';
     $ogDesc .= " · {$replyC} replies · {$viewC} views · {$likeC} 🐸";
     // Use thread's actual image for richer social preview, fall back to generated
     if ($singleThread['image'] && ($singleThread['image']['approved'] ?? true) && !empty($singleThread['image']['file'])) {
-        $ogImage = $baseUrl . '/board_uploads/' . $singleThread['image']['file'];
+        $ogFileRel = '/board_uploads/' . $singleThread['image']['file'];
+        $ogImage = $baseUrl . $ogFileRel;
+        $ogImageAlt = 'Frog Channels thread image preview';
+        $ogExt = strtolower(pathinfo((string)$singleThread['image']['file'], PATHINFO_EXTENSION));
+        $ogImageType = match ($ogExt) {
+            'jpg', 'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            'gif' => 'image/gif',
+            default => 'image/png',
+        };
+        $ogFsPath = UPLOAD_DIR . '/' . (string)$singleThread['image']['file'];
+        if (is_file($ogFsPath)) {
+            $dim = @getimagesize($ogFsPath);
+            if (is_array($dim)) {
+                $ogImageWidth = (int)($dim[0] ?? 1200);
+                $ogImageHeight = (int)($dim[1] ?? 630);
+            }
+        }
     } else {
         $ogImage = $baseUrl . '/board_preview.php?thread=' . $singleThread['id'];
+        $ogImageType = 'image/png';
+        $ogImageWidth = 1200;
+        $ogImageHeight = 630;
+        $ogImageAlt = 'Frog Channels thread preview';
     }
     $ogUrl = $baseUrl . '/board?thread=' . $singleThread['id'];
     $ogType = 'article';
@@ -888,11 +913,28 @@ if ($singleThread) {
         if ($specificPost) {
             $rText = mb_substr(strip_tags($specificPost['comment'] ?? ''), 0, 220);
             if (mb_strlen($specificPost['comment'] ?? '') > 220) $rText .= '…';
-            $ogTitle = 'Re: ' . ($singleThread['subject'] ?: 'Anonymous Thread') . ' — Frog Channel';
+            $ogTitle = 'Re: ' . ($singleThread['subject'] ?: 'Anonymous Thread') . ' — Frog Channels';
             $ogDesc  = $rText ?: '(image post)';
             // Prefer reply image, fall back to thread-level image
             if (!empty($specificPost['image']['file']) && ($specificPost['image']['approved'] ?? true)) {
-                $ogImage = $baseUrl . '/board_uploads/' . $specificPost['image']['file'];
+                $replyRel = '/board_uploads/' . $specificPost['image']['file'];
+                $ogImage = $baseUrl . $replyRel;
+                $ogImageAlt = 'Frog Channels reply image preview';
+                $replyExt = strtolower(pathinfo((string)$specificPost['image']['file'], PATHINFO_EXTENSION));
+                $ogImageType = match ($replyExt) {
+                    'jpg', 'jpeg' => 'image/jpeg',
+                    'webp' => 'image/webp',
+                    'gif' => 'image/gif',
+                    default => 'image/png',
+                };
+                $replyFsPath = UPLOAD_DIR . '/' . (string)$specificPost['image']['file'];
+                if (is_file($replyFsPath)) {
+                    $dim = @getimagesize($replyFsPath);
+                    if (is_array($dim)) {
+                        $ogImageWidth = (int)($dim[0] ?? 1200);
+                        $ogImageHeight = (int)($dim[1] ?? 630);
+                    }
+                }
             }
             $ogUrl = $baseUrl . '/board?thread=' . $singleThread['id'] . '&post=' . $specificPost['id'];
         }
@@ -926,7 +968,7 @@ if ($singleThread) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Critical: prevent FOUC white flash before style.css loads -->
     <style>html,body{background:#0a0e0a;color:#00ff41;}</style>
-    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — Frog Channel') : 'Frog Channel' ?></title>
+    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — Frog Channels') : 'Frog Channels' ?></title>
     
     <meta name="title" content="<?= htmlspecialchars($ogTitle) ?>">
     <meta name="description" content="<?= htmlspecialchars($ogDesc) ?>">
@@ -937,14 +979,21 @@ if ($singleThread) {
     <meta property="og:title" content="<?= htmlspecialchars($ogTitle) ?>">
     <meta property="og:description" content="<?= htmlspecialchars($ogDesc) ?>">
     <meta property="og:image" content="<?= htmlspecialchars($ogImage) ?>">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-    <meta property="og:site_name" content="Frog Channel">
+    <meta property="og:image:secure_url" content="<?= htmlspecialchars($ogImage) ?>">
+    <meta property="og:image:type" content="<?= htmlspecialchars($ogImageType) ?>">
+    <meta property="og:image:width" content="<?= (int)$ogImageWidth ?>">
+    <meta property="og:image:height" content="<?= (int)$ogImageHeight ?>">
+    <meta property="og:image:alt" content="<?= htmlspecialchars($ogImageAlt) ?>">
+    <meta property="og:site_name" content="Frog Channels">
+    <meta property="og:locale" content="en_US">
     
     <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@frogtalk">
+    <meta name="twitter:url" content="<?= htmlspecialchars($ogUrl) ?>">
     <meta name="twitter:title" content="<?= htmlspecialchars($ogTitle) ?>">
     <meta name="twitter:description" content="<?= htmlspecialchars($ogDesc) ?>">
     <meta name="twitter:image" content="<?= htmlspecialchars($ogImage) ?>">
+    <meta name="twitter:image:alt" content="<?= htmlspecialchars($ogImageAlt) ?>">
     <link rel="canonical" href="<?= htmlspecialchars($ogUrl) ?>">
     
     <meta name="theme-color" content="#00ff41">
@@ -5619,6 +5668,8 @@ if ($singleThread) {
     let frogMiniOpen = false;
     let frogMiniLogged = false;
     let frogMiniFrameBound = false;
+    let frogMiniAutoScrollInterval = null;
+    let frogMiniLastSignature = '';
 
     function _frogMiniToken() {
         try { return localStorage.getItem('fc_token') || localStorage.getItem('token') || ''; } catch (e) { return ''; }
@@ -5631,6 +5682,59 @@ if ($singleThread) {
             var u = JSON.parse(raw);
             return (u && u.nickname) ? String(u.nickname) : '';
         } catch (e) { return ''; }
+    }
+
+    function _frogMiniGetMessageContainer(doc) {
+        if (!doc) return null;
+        return doc.querySelector('#messages, .messages, #message-list, .message-list, .chat-messages, [data-role="messages"], main .msgs, main .chat-log');
+    }
+
+    function _frogMiniMessageSignature(container) {
+        if (!container) return '';
+        var nodes = container.querySelectorAll('.message, .msg, .chat-msg, .bubble, [data-msg-id], [data-message-id], li');
+        var count = nodes.length;
+        var last = nodes.length ? nodes[nodes.length - 1] : null;
+        var tail = '';
+        if (last) {
+            tail = (last.getAttribute('data-msg-id') || last.getAttribute('data-message-id') || last.id || (last.textContent || '').slice(-24)).trim();
+        }
+        return [count, container.scrollHeight, tail].join('|');
+    }
+
+    function _frogMiniScrollToNewest(force) {
+        const frame = document.getElementById('frogMiniFrame');
+        if (!frame || !frame.contentDocument) return;
+        let doc;
+        try {
+            doc = frame.contentDocument;
+        } catch (e) {
+            return;
+        }
+        const container = _frogMiniGetMessageContainer(doc);
+        if (!container) return;
+
+        const signature = _frogMiniMessageSignature(container);
+        const atBottom = (container.scrollHeight - (container.scrollTop + container.clientHeight)) < 120;
+        const hasNew = signature !== frogMiniLastSignature;
+
+        if (force || hasNew || atBottom) {
+            container.scrollTop = container.scrollHeight;
+        }
+
+        frogMiniLastSignature = signature;
+    }
+
+    function _frogMiniStartAutoScroll() {
+        if (frogMiniAutoScrollInterval) return;
+        frogMiniAutoScrollInterval = setInterval(function() {
+            _frogMiniScrollToNewest(false);
+        }, 900);
+    }
+
+    function _frogMiniStopAutoScroll() {
+        if (!frogMiniAutoScrollInterval) return;
+        clearInterval(frogMiniAutoScrollInterval);
+        frogMiniAutoScrollInterval = null;
     }
 
     function _frogMiniSetLoading(active, text) {
@@ -5656,9 +5760,14 @@ if ($singleThread) {
         if (!frame) return;
         frame.addEventListener('load', function() {
             _frogMiniSetLoading(false);
+            frogMiniLastSignature = '';
+            _frogMiniStartAutoScroll();
+            setTimeout(function() { _frogMiniScrollToNewest(true); }, 120);
+            setTimeout(function() { _frogMiniScrollToNewest(true); }, 650);
         });
         frame.addEventListener('error', function() {
             _frogMiniSetLoading(false, 'Could not load FrogTalk');
+            _frogMiniStopAutoScroll();
         });
         frogMiniFrameBound = true;
     }
@@ -5683,12 +5792,15 @@ if ($singleThread) {
                 frame.src = '/app';
             } else {
                 _frogMiniSetLoading(false);
+                _frogMiniStartAutoScroll();
+                _frogMiniScrollToNewest(true);
             }
         } else {
             stateEl.textContent = 'Not logged in';
             guest.style.display = 'flex';
             wrap.classList.remove('open');
             _frogMiniSetLoading(false);
+            _frogMiniStopAutoScroll();
             frame.src = 'about:blank';
         }
     }
@@ -5699,7 +5811,15 @@ if ($singleThread) {
         const toggle = document.getElementById('chatToggleBtn');
         if (body) body.style.display = frogMiniOpen ? 'block' : 'none';
         if (toggle) toggle.textContent = frogMiniOpen ? '▼' : '▲';
-        if (frogMiniOpen) _frogMiniApplyState();
+        if (frogMiniOpen) {
+            _frogMiniApplyState();
+            if (frogMiniLogged) {
+                _frogMiniStartAutoScroll();
+                _frogMiniScrollToNewest(true);
+            }
+        } else {
+            _frogMiniStopAutoScroll();
+        }
     }
 
     function frogMiniAuth(mode) {
@@ -5709,6 +5829,7 @@ if ($singleThread) {
         if (!frame || !wrap || !guest) return;
         _frogMiniBindFrameEvents();
         _frogMiniSetLoading(true, mode === 'register' ? 'Opening register...' : 'Opening sign in...');
+        _frogMiniStartAutoScroll();
         frame.src = mode === 'register' ? '/app?register=1' : '/app';
         guest.style.display = 'none';
         wrap.classList.add('open');
