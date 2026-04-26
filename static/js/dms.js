@@ -327,6 +327,9 @@ async function openDMChannel (id, nickname, avatar) {
   // DMs have no voice channel — always hide the presence bar.
   const vpb = document.getElementById('voice-presence-bar');
   if (vpb) vpb.style.display = 'none';
+  // If user came from a voice-only channel, the composer may still be hidden.
+  const inputArea = document.getElementById('input-area');
+  if (inputArea) inputArea.style.display = '';
   // Close mobile sidebar so chat is visible
   if (typeof closeMobileSidebar === 'function') closeMobileSidebar();
 

@@ -7,6 +7,14 @@ const GIFs = (() => {
   let _searchTimeout = null;
   let _currentTab = 'gifs';  // 'gifs' or 'stickers'
   let _stickerPacks = [];
+  let _gifReqSeq = 0;
+
+  async function _fetchGifApi(url, timeoutMs = 12000) {
+    return Promise.race([
+      apiFetch(url),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('gif_timeout')), timeoutMs)),
+    ]);
+  }
 
   function createPicker() {
     if (document.getElementById('gif-picker')) return;
@@ -478,12 +486,16 @@ const GIFs = (() => {
 
   async function loadTrending() {
     const grid = document.getElementById('gif-grid');
+    if (!grid) return;
+    const reqSeq = ++_gifReqSeq;
     grid.innerHTML = '<div class="gif-loading">Loading...</div>';
     
     try {
-      const res = await apiFetch('/api/media/gifs/trending');
+      const res = await _fetchGifApi('/api/media/gifs/trending');
+      if (reqSeq !== _gifReqSeq) return;
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
+      if (reqSeq !== _gifReqSeq) return;
       
       if (!data.gifs || data.gifs.length === 0) {
         grid.innerHTML = '<div class="gif-empty">No GIFs found</div>';
@@ -496,18 +508,23 @@ const GIFs = (() => {
         </div>
       `).join('');
     } catch (e) {
+      if (reqSeq !== _gifReqSeq) return;
       grid.innerHTML = '<div class="gif-empty">Failed to load GIFs</div>';
     }
   }
 
   async function searchGifs(query) {
     const grid = document.getElementById('gif-grid');
+    if (!grid) return;
+    const reqSeq = ++_gifReqSeq;
     grid.innerHTML = '<div class="gif-loading">Searching...</div>';
     
     try {
-      const res = await apiFetch(`/api/media/gifs/search?q=${encodeURIComponent(query)}`);
+      const res = await _fetchGifApi(`/api/media/gifs/search?q=${encodeURIComponent(query)}`);
+      if (reqSeq !== _gifReqSeq) return;
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
+      if (reqSeq !== _gifReqSeq) return;
       
       if (!data.gifs || data.gifs.length === 0) {
         grid.innerHTML = '<div class="gif-empty">No GIFs found for "' + UI.escHtml(query) + '"</div>';
@@ -520,6 +537,7 @@ const GIFs = (() => {
         </div>
       `).join('');
     } catch (e) {
+      if (reqSeq !== _gifReqSeq) return;
       grid.innerHTML = '<div class="gif-empty">Failed to search GIFs</div>';
     }
     

@@ -118,6 +118,12 @@ const WS = (() => {
             incoming.map(m => decryptMsg(m, room))
           );
           Messages.loadHistory(room, decrypted);
+          try {
+            if (State.currentRoom === room && State.currentChannelType !== 'voice') {
+              const inputArea = document.getElementById('input-area');
+              if (inputArea) inputArea.style.display = '';
+            }
+          } catch {}
           _historyLastApplied.set(room, histSig);
           Users.updateList(data.online || []);
         } finally {
