@@ -896,15 +896,19 @@ function renderDMMessage (m) {
   // View-once: already consumed — show burned placeholder
   const chIdForSeen = m.channel_id || (_activeDM?.id ?? 0);
   const seenByMe = !!m.viewed_by_me || _isViewOnceSeenLocal(m.id, chIdForSeen);
-  if (m.view_once && (seenByMe || (!mediaUrl && !m.has_media))) {
-    mediaHtml = '<div class="view-once-viewed">🔥 View Once — <em>already viewed</em></div>';
+  const seenByOther = !!m.viewed_by_other;
+  if (m.view_once && ((mine && seenByOther) || (!mine && seenByMe) || (!mediaUrl && !m.has_media))) {
+    mediaHtml = '<div class="view-once-viewed">🔥 ✓ <em>Seen</em></div>';
   // View-once: media present — show spoiler-style tap-to-view overlay
   } else if (m.view_once && (mediaUrl || m.has_media)) {
     const chId = m.channel_id || (_activeDM?.id ?? 0);
+    const senderLabel = seenByOther ? 'Seen' : 'Sent • Awaiting view';
+    const receiverLabel = 'Tap to view once';
+    const label = mine ? senderLabel : receiverLabel;
     mediaHtml = `<div class="view-once-wrap" id="vo-dm-${m.id}" data-mtype="${esc(mimeType)}" data-channel="${chId}" data-media="${esc(mediaUrl || '')}" role="button" tabindex="0" onclick="revealDMViewOnce(${m.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();revealDMViewOnce(${m.id})}">
       <div class="view-once-overlay">
         <span class="view-once-icon">🔥</span>
-        <span class="view-once-label">Tap to view once</span>
+        <span class="view-once-label">${label}</span>
       </div>
     </div>`;
   } else if (mediaUrl) {

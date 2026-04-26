@@ -273,6 +273,10 @@ const WS = (() => {
         if (typeof handleWSDMViewOnceViewed === 'function') handleWSDMViewOnceViewed(data);
         break;
       }
+      case 'dm_view_once_viewed_by_peer': {
+        if (typeof handleWSDMViewOnceViewedByPeer === 'function') handleWSDMViewOnceViewedByPeer(data);
+        break;
+      }
       // ── WebRTC call signaling ─────────────────────
       case 'call_offer': {
         if (typeof handleCallOffer === 'function') handleCallOffer(data);
