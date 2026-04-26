@@ -96,6 +96,29 @@ function _parseDMCallLog(content) {
   try { return JSON.parse(content.slice('[[CALLLOG]]'.length)); } catch { return null; }
 }
 
+function _looksEncryptedBlob(content) {
+  if (typeof content !== 'string') return false;
+  const s = content.trim();
+  if (!s || s.length < 40) return false;
+  if (s.startsWith('[[CALLLOG]]')) return false;
+  if (s.startsWith('{') || s.startsWith('[')) {
+    try {
+      const obj = JSON.parse(s);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        const keys = Object.keys(obj).map(k => String(k).toLowerCase());
+        const hasEncKeys = keys.includes('iv') || keys.includes('ciphertext') || keys.includes('ct') || keys.includes('tag') || keys.includes('salt');
+        if (hasEncKeys) return true;
+      }
+    } catch {
+      // Non-JSON payloads that begin with { or [ are not treated as encrypted by this branch.
+    }
+    return false;
+  }
+  if (/\s/.test(s)) return false;
+  if (/^https?:\/\//i.test(s)) return false;
+  return /^[A-Za-z0-9+/_=-]+$/.test(s);
+}
+
 function _dmPreviewText(content, hasMedia, mediaType) {
   const c = _parseDMCallLog(content);
   if (c) return c.subtitle || c.title || 'Call update';
@@ -152,7 +175,8 @@ async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
     }
   } catch {}
 
-  return raw;
+  // If decrypt fails and this still looks like ciphertext, do not leak it in UI.
+  return _looksEncryptedBlob(raw) ? '' : raw;
 }
 
 /* ── Sidebar DM list ────────────────────────────────────────────────────────── */
@@ -897,6 +921,7 @@ function renderDMMessage (m) {
   const chIdForSeen = m.channel_id || (_activeDM?.id ?? 0);
   const seenByMe = !!m.viewed_by_me || _isViewOnceSeenLocal(m.id, chIdForSeen);
   const seenByOther = !!m.viewed_by_other;
+  const isViewOnceConsumed = !!(m.view_once && ((mine && seenByOther) || (!mine && seenByMe) || (!mediaUrl && !m.has_media)));
   if (m.view_once && ((mine && seenByOther) || (!mine && seenByMe) || (!mediaUrl && !m.has_media))) {
     mediaHtml = '<div class="view-once-viewed">🔥 ✓ <em>Seen</em></div>';
   // View-once: media present — show spoiler-style tap-to-view overlay
@@ -950,8 +975,11 @@ function renderDMMessage (m) {
 
   // Content with formatting (links, mentions, custom emoji)
   let contentHtml = '';
-  if (m.content) {
-    contentHtml = esc(m.content);
+  const safeContent = (m.view_once || isViewOnceConsumed)
+    ? ''
+    : ((typeof m.content === 'string' && _looksEncryptedBlob(m.content)) ? '' : m.content);
+  if (safeContent) {
+    contentHtml = esc(safeContent);
     const urlRe = /https?:\/\/[^\s<>"]+/g;
     contentHtml = contentHtml.replace(/@(\w+)/g, (match, nick) => {
       const isSelf = nick.toLowerCase() === STATE.user?.nickname?.toLowerCase();
@@ -965,10 +993,12 @@ function renderDMMessage (m) {
   if (!contentHtml && !mediaHtml) contentHtml = '<em style="color:#444">Media</em>';
 
   // Reply quote
+  const replyPreviewRaw = String(m.reply_content || '…');
+  const replyPreviewSafe = _looksEncryptedBlob(replyPreviewRaw) ? 'Encrypted message' : replyPreviewRaw;
   const replyQuote = m.reply_to
     ? `<div class="msg-reply-quote" onclick="document.querySelector('[data-dmid=&quot;${m.reply_to}&quot;]')?.scrollIntoView({behavior:'smooth',block:'center'})">
         <span class="reply-quote-nick">${esc(m.reply_nick || senderNick || '?')}</span>
-        <span class="reply-quote-text">${esc((m.reply_content || '…').substring(0, 80))}</span>
+        <span class="reply-quote-text">${esc(replyPreviewSafe.substring(0, 80))}</span>
       </div>`
     : '';
 
@@ -978,7 +1008,7 @@ function renderDMMessage (m) {
   // Actions (same style as channel messages)
   const actions = `
     <div class="msg-actions">
-      <button class="msg-act-btn" title="Reply" onclick="replyToDM(${m.id},'${esc(senderNick)}','${esc((m.content||'').substring(0,80))}')">↩️</button>
+      <button class="msg-act-btn" title="Reply" onclick="replyToDM(${m.id},'${esc(senderNick)}','${esc((safeContent||'').substring(0,80))}')">↩️</button>
       <button class="msg-act-btn dm-react-btn" data-dmid="${m.id}" data-emoji="👍" title="React">👍</button>
       ${mine ? `<button class="msg-act-btn" title="Edit" onclick="editDMMsg(${m.id})">✏️</button>` : ''}
       <button class="msg-act-btn danger" title="Delete" onclick="deleteDMMsg(${m.id})">🗑️</button>
