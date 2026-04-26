@@ -1009,6 +1009,8 @@ if ($singleThread) {
         .board-stats .stat-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
         .board-stats .stat-sep { color: #1a3a1a; }
         .board-stats span.stat-val { color: #00ff41; font-weight: bold; }
+        .board-stats .stat-top-link { color: #66b566; text-decoration: none; font-weight: 700; }
+        .board-stats .stat-top-link:hover { color: #00ff41; text-decoration: underline; }
         .board-stats .online-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #00ff41; box-shadow: 0 0 6px rgba(0,255,65,0.6); animation: pulseDot 2s infinite; }
         .board-stats .stat-moderated { color: #ff8c00; }
         @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
@@ -1652,6 +1654,8 @@ if ($singleThread) {
         body[data-theme="read"] .board-stats { color: #7a6040 !important; background: rgba(92,61,14,0.04) !important; border-color: rgba(92,61,14,0.12) !important; }
         body[data-theme="read"] .board-stats .stat-val { color: #5c2e08 !important; }
         body[data-theme="read"] .board-stats .stat-sep { color: #c0a880 !important; }
+        body[data-theme="read"] .board-stats .stat-top-link { color: #7a6040 !important; }
+        body[data-theme="read"] .board-stats .stat-top-link:hover { color: #4a3018 !important; }
         body[data-theme="read"] .board-stats .online-dot { background: #c07020 !important; box-shadow: 0 0 5px rgba(192,112,32,0.4) !important; animation: none !important; }
         body[data-theme="read"] .board-stats .stat-moderated { color: #b06020 !important; }
         body[data-theme="read"] .board-stats .stat-moderated { color: #a06010 !important; }
@@ -2778,6 +2782,8 @@ if ($singleThread) {
                         <span class="stat-sep">·</span>
                         <span class="stat-item stat-moderated"><?= implode('/', $_modParts) ?>: MODERATED</span>
                     <?php endif; ?>
+                    <span class="stat-sep">·</span>
+                    <span class="stat-item"><a href="#top" class="stat-top-link">Back to top ↑</a></span>
                 </div>
             </div>
 
