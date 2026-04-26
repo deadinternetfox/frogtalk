@@ -3245,6 +3245,19 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sul-nick{font-size:14px;font-weight:600;color:#e0e0e0}
 .sul-bio{font-size:12px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
+/* ── Frog Chan overlay ───────────────────────────────────────── */
+.board-overlay{position:fixed;inset:0;background:#0a0a0a;z-index:600;display:flex;flex-direction:column;overflow:hidden}
+.board-overlay.hidden{display:none}
+.board-overlay-topbar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#111;border-bottom:1px solid #1a1a1a;flex-shrink:0}
+.board-overlay-icon{font-size:20px;line-height:1}
+.board-overlay-title{font-family:'Pacifico','Brush Script MT',cursive;font-size:20px;font-weight:400;color:#fff;flex:1;background:linear-gradient(135deg,#ffffff 0%,#b8f0c0 60%,#4caf50 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.board-overlay-close{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:color .15s}
+.board-overlay-close:hover{color:#e0e0e0;background:#1a1a1a}
+#board-side-menu{position:absolute;top:52px;left:0;bottom:0;width:68px;background:#0d0d0d;border-right:1px solid #1a1a1a;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4);z-index:2}
+#board-side-menu .server-icon{margin:2px 0}
+#board-side-menu .ssm-spacer{flex:1}
+.board-overlay-frame{flex:1;border:none;width:100%;height:100%;margin-left:68px}
+
 /* CSS preset buttons */
 .css-preset-btn{color:#e0e0e0;transition:all .2s}
 .css-preset-btn:hover{border-color:#4caf50 !important;transform:translateY(-1px);box-shadow:0 4px 12px rgba(76,175,80,.15)}
@@ -3633,8 +3646,9 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Friends" data-tip-pos="right" id="friends-server-icon" onclick="openFriends()" style="position:relative">👥
       <span id="friends-sidebar-badge" style="display:none;position:absolute;top:-2px;right:-2px;background:#f85149;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:14px;text-align:center"></span>
     </div>
-    <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" id="social-server-icon" onclick="Social.open('feed')" style="background:linear-gradient(135deg,#0d1f0d,#1e3a1e);color:#4caf50;font-weight:700">🌐</div>
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="showChannelDirectory()">🧭</div>
+    <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" id="social-server-icon" onclick="Social.open('feed')" style="background:linear-gradient(135deg,#0d1f0d,#1e3a1e);color:#4caf50;font-weight:700">🌐</div>
+    <div class="server-icon" data-tip="Frog Chan" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🧵</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="showProfile()">⚙️</div>
   </div>
@@ -3676,8 +3690,11 @@ window.ConnErr = (function(){
         <div class="self-status" id="self-status" onclick="openStatusPicker(event)" title="Click to set status">🟢 Online</div>
       </div>
       <div class="self-actions">
-        <button class="icon-btn" onclick="Social.open('feed')" data-tip="Social">🌐</button>
+        <button class="icon-btn" onclick="openDMsPanel()" data-tip="DMs">💬</button>
         <button class="icon-btn" onclick="openFriends()" data-tip="Friends">👥</button>
+        <button class="icon-btn" onclick="showChannelDirectory()" data-tip="Directory">🧭</button>
+        <button class="icon-btn" onclick="Social.open('feed')" data-tip="Social">🌐</button>
+        <button class="icon-btn" onclick="openFrogBoard()" data-tip="Frog Chan">🧵</button>
         <button class="icon-btn" onclick="showProfile()" data-tip="Settings">⚙️</button>
         <button class="icon-btn" onclick="doLogout()" data-tip="Logout">🚪</button>
       </div>
@@ -5084,16 +5101,16 @@ window.ConnErr = (function(){
 <div id="social-overlay" class="hidden">
   <div id="social-side-backdrop" onclick="Social.closeSideMenu()"></div>
   <aside id="social-side-menu" aria-label="Frog Social menu">
-    <div class="server-icon" data-tip="Home — Current Channel" data-tip-pos="right" onclick="Social.navTo('home')">🐸</div>
+    <div class="server-icon" data-tip="FrogTalk Home" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();goHomeChannel()">🐸</div>
     <div class="server-divider"></div>
-    <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="Social.navTo('dms')">💬</div>
-    <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="Social.navTo('friends')">👥</div>
-    <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="Social.navTo('directory')">🧭</div>
+    <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openDMsPanel()">💬</div>
+    <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFriends()">👥</div>
+    <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();showChannelDirectory()">🧭</div>
+    <div class="server-icon" data-tip="Frog Chan" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🧵</div>
     <div class="server-divider"></div>
-    <div class="server-icon" data-tip="Profile &amp; Settings" data-tip-pos="right" onclick="Social.navTo('profile')">⚙️</div>
+    <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="Social.navTo('profile')">⚙️</div>
     <div class="ssm-spacer"></div>
-    <div class="server-icon" data-tip="Back to chat" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu()" style="background:#1a3a1a;color:#4caf50;font-size:26px;font-weight:900">⬅️</div>
-    <div class="server-icon" data-tip="Log out" data-tip-pos="right" onclick="Social.navTo('logout')" style="background:#2a1414;color:#f85149">🚪</div>
+    <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="Social.navTo('logout')" style="background:#2a1414;color:#f85149">🚪</div>
   </aside>
   <div class="social-topbar">
     <button class="social-menu-btn" onclick="Social.openSideMenu()" title="Menu" aria-label="Open menu">🐸</button>
@@ -5163,12 +5180,50 @@ window.ConnErr = (function(){
   </div>
 </div>
 
+<!-- ═══════════════════════ FROG CHAN OVERLAY ═════════════════════════════════ -->
+<div id="board-overlay" class="board-overlay hidden">
+  <div class="board-overlay-topbar">
+    <span class="board-overlay-icon">🧵</span>
+    <span class="board-overlay-title">Frog Chan</span>
+    <button class="board-overlay-close" onclick="closeFrogBoard()" title="Close">✕</button>
+  </div>
+  <aside id="board-side-menu" aria-label="Frog Chan quick switch menu">
+    <div class="server-icon" data-tip="FrogTalk Home" data-tip-pos="right" onclick="closeFrogBoard();goHomeChannel()">🐸</div>
+    <div class="server-divider"></div>
+    <div class="server-icon" data-tip="Direct Messages" data-tip-pos="right" onclick="closeFrogBoard();openDMsPanel()">💬</div>
+    <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="closeFrogBoard();openFriends()">👥</div>
+    <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="closeFrogBoard();showChannelDirectory()">🧭</div>
+    <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" onclick="closeFrogBoard();Social.open('feed')">🌐</div>
+    <div class="server-divider"></div>
+    <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="closeFrogBoard();showProfile()">⚙️</div>
+    <div class="ssm-spacer"></div>
+    <a class="server-icon" data-tip="Open Frog Chan in new tab" data-tip-pos="right" href="/board/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">↗</a>
+  </aside>
+  <iframe id="board-frame" src="" class="board-overlay-frame" allowfullscreen></iframe>
+</div>
+
 <!-- ═════════════════════ SCRIPTS ═══════════════════════════════ -->
 <script>
 // Force clear all service worker caches on load
 if ('caches' in window) {
   caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
 }
+</script>
+<script>
+function openFrogBoard() {
+  const ol = document.getElementById('board-overlay');
+  const frame = document.getElementById('board-frame');
+  if (!ol) return;
+  ol.classList.remove('hidden');
+  document.getElementById('board-server-icon')?.classList.add('active');
+  if (!frame.src || frame.src === window.location.href) frame.src = '/board/';
+}
+function closeFrogBoard() {
+  const ol = document.getElementById('board-overlay');
+  if (ol) ol.classList.add('hidden');
+  document.getElementById('board-server-icon')?.classList.remove('active');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoard(); });
 </script>
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/state.js?v=191"></script>
@@ -5182,7 +5237,7 @@ if ('caches' in window) {
 <script src="/static/js/users.js?v=191"></script>
 <script src="/static/js/emoji.js?v=191"></script>
 <script src="/static/js/friends.js?v=191"></script>
-<script src="/static/js/dms.js?v=204"></script>
+<script src="/static/js/dms.js?v=205"></script>
 <script src="/static/js/calls.js?v=200"></script>
 <script src="/static/js/media.js?v=193"></script>
 <script src="/static/js/gifs.js?v=191"></script>

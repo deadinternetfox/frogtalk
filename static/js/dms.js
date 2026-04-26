@@ -1032,15 +1032,27 @@ async function revealDMViewOnce (msgId) {
   const msg = msgIdx >= 0 ? _dmMessages[msgIdx] : null;
   const isSender = msg && msg.sender_id === (STATE.user?.id || 0);
 
-  const _markViewedLocal = () => {
+  const _markViewedLocal = (forceSeenForSender = false) => {
     const i = _dmMessages.findIndex(x => +x.id === +msgId);
     const cid = (i >= 0 && _dmMessages[i].channel_id) ? _dmMessages[i].channel_id : (_activeDM?.id || 0);
-    if (i >= 0 && !isSender) _dmMessages[i].viewed_by_me = 1;
-    if (!isSender) _markViewOnceSeenLocal(msgId, cid);
     const el = document.getElementById(`vo-dm-${msgId}`);
-    if (el) el.outerHTML = isSender 
-      ? '<div class="view-once-preview">🔥 <em>Sent • Awaiting view</em></div>'
-      : '<div class="view-once-viewed">🔥 <em>Viewed</em></div>';
+    if (isSender) {
+      if (i >= 0 && forceSeenForSender) _dmMessages[i].viewed_by_other = 1;
+      const seenByOther = (i >= 0 && !!_dmMessages[i].viewed_by_other) || forceSeenForSender;
+      if (el) {
+        if (seenByOther) {
+          el.outerHTML = '<div class="view-once-viewed">🔥 ✓ <em>Seen</em></div>';
+        } else {
+          const lbl = el.querySelector('.view-once-label');
+          if (lbl) lbl.textContent = 'Sent • Awaiting view';
+        }
+      }
+      return;
+    }
+
+    if (i >= 0) _dmMessages[i].viewed_by_me = 1;
+    _markViewOnceSeenLocal(msgId, cid);
+    if (el) el.outerHTML = '<div class="view-once-viewed">🔥 <em>Viewed</em></div>';
   };
 
   const el = document.getElementById(`vo-dm-${msgId}`);
@@ -1063,7 +1075,7 @@ async function revealDMViewOnce (msgId) {
       try {
         const res = await apiFetch(`/api/dms/${channelId}/messages/${msgId}/media`);
         if (res.status === 410) {
-          _markViewedLocal();
+          _markViewedLocal(isSender);
           delete el.dataset.opening;
           return;
         }
@@ -1083,6 +1095,9 @@ async function revealDMViewOnce (msgId) {
       delete el.dataset.opening;
       return;
     }
+
+    // Cache fetched media for repeat opens (important for sender re-open flow).
+    el.dataset.media = mediaData || '';
   }
 
   if (!mediaData) {
