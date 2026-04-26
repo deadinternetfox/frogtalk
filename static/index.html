@@ -3249,14 +3249,17 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .board-overlay{position:fixed;inset:0;background:#0a0a0a;z-index:600;display:flex;flex-direction:column;overflow:hidden}
 .board-overlay.hidden{display:none}
 .board-overlay-topbar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#111;border-bottom:1px solid #1a1a1a;flex-shrink:0}
+.board-menu-btn{background:none;border:none;color:#888;font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:color .15s}
+.board-menu-btn:hover{color:#e0e0e0;background:#1a1a1a}
 .board-overlay-icon{font-size:20px;line-height:1}
 .board-overlay-title{font-family:'Pacifico','Brush Script MT',cursive;font-size:20px;font-weight:400;color:#fff;flex:1;background:linear-gradient(135deg,#ffffff 0%,#b8f0c0 60%,#4caf50 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .board-overlay-close{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:color .15s}
 .board-overlay-close:hover{color:#e0e0e0;background:#1a1a1a}
-#board-side-menu{position:absolute;top:52px;left:0;bottom:0;width:68px;background:#0d0d0d;border-right:1px solid #1a1a1a;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4);z-index:2}
+#board-side-menu{position:absolute;top:52px;left:0;bottom:0;width:68px;background:#0d0d0d;border-right:1px solid #1a1a1a;transform:translateX(-100%);transition:transform .22s ease;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4);z-index:2}
+#board-side-menu.open{transform:translateX(0)}
 #board-side-menu .server-icon{margin:2px 0}
 #board-side-menu .ssm-spacer{flex:1}
-.board-overlay-frame{flex:1;border:none;width:100%;height:100%;margin-left:68px}
+.board-overlay-frame{flex:1;border:none;width:100%;height:100%}
 
 /* CSS preset buttons */
 .css-preset-btn{color:#e0e0e0;transition:all .2s}
@@ -5110,6 +5113,7 @@ window.ConnErr = (function(){
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="Social.navTo('profile')">⚙️</div>
     <div class="ssm-spacer"></div>
+    <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="Social.navTo('logout')" style="background:#2a1414;color:#f85149">🚪</div>
   </aside>
   <div class="social-topbar">
@@ -5183,7 +5187,7 @@ window.ConnErr = (function(){
 <!-- ═══════════════════════ FROG CHAN OVERLAY ═════════════════════════════════ -->
 <div id="board-overlay" class="board-overlay hidden">
   <div class="board-overlay-topbar">
-    <span class="board-overlay-icon">🧵</span>
+    <button class="board-menu-btn" onclick="document.getElementById('board-side-menu').classList.toggle('open')" title="Menu" aria-label="Open menu">🧵</button>
     <span class="board-overlay-title">Frog Chan</span>
     <button class="board-overlay-close" onclick="closeFrogBoard()" title="Close">✕</button>
   </div>
@@ -5195,9 +5199,11 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="closeFrogBoard();showChannelDirectory()">🧭</div>
     <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" onclick="closeFrogBoard();Social.open('feed')">🌐</div>
     <div class="server-divider"></div>
+    <a class="server-icon" data-tip="Open Frog Chan in new tab" data-tip-pos="right" href="/board/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">🔖</a>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="closeFrogBoard();showProfile()">⚙️</div>
+    <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="closeFrogBoard()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
+    <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
     <div class="ssm-spacer"></div>
-    <a class="server-icon" data-tip="Open Frog Chan in new tab" data-tip-pos="right" href="/board/" target="_blank" rel="noopener noreferrer" style="text-decoration:none">↗</a>
   </aside>
   <iframe id="board-frame" src="" class="board-overlay-frame" allowfullscreen></iframe>
 </div>
@@ -5220,7 +5226,9 @@ function openFrogBoard() {
 }
 function closeFrogBoard() {
   const ol = document.getElementById('board-overlay');
+  const menu = document.getElementById('board-side-menu');
   if (ol) ol.classList.add('hidden');
+  if (menu) menu.classList.remove('open');
   document.getElementById('board-server-icon')?.classList.remove('active');
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoard(); });
