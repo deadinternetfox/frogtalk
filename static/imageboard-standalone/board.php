@@ -2755,6 +2755,7 @@ if ($singleThread) {
     <main>
         <div class="board-container">
             <div class="board-header">
+                <h2>&#x1F438; Frog Channel</h2>
                 <p class="board-subtitle">Anonymous discussion board. No accounts. No tracking. Speak freely.</p>
                 <div class="board-stats">
                     <span class="stat-item">📋 Threads: <span class="stat-val"><?= $threadCount ?></span></span>
@@ -7236,9 +7237,28 @@ if ($singleThread) {
         media.setAttribute('playsinline', '');
         media.preload = 'metadata';
         if (type === 'audio') {
-            media.style.cssText = 'flex:1;min-width:0;width:100%;';
+            // Style as post-voice-note for visual consistency with rendered posts
+            wrap.classList.add('post-voice-note');
+            wrap.style.cssText = 'max-width:100%;width:auto;';
+            var row = document.createElement('div');
+            row.className = 'pvn-row';
+            var icon = document.createElement('span');
+            icon.className = 'pvn-icon';
+            icon.textContent = '🎤';
+            var audWrap = document.createElement('div');
+            audWrap.className = 'pvn-audio';
+            media.style.cssText = 'display:block;width:100%;';
+            audWrap.appendChild(media);
+            row.appendChild(icon);
+            row.appendChild(audWrap);
+            wrap.appendChild(row);
+            var lbl = document.createElement('div');
+            lbl.className = 'pvn-label';
+            lbl.textContent = 'voice note preview';
+            wrap.appendChild(lbl);
         } else {
             media.style.cssText = 'width:100%;max-height:110px;display:block;border-radius:4px;';
+            wrap.appendChild(media);
         }
 
         media.onerror = function() {
@@ -7252,8 +7272,6 @@ if ($singleThread) {
                 : '⚠ Preview error (code ' + code + ') — file may still upload';
             wrap.appendChild(notice);
         };
-
-        wrap.appendChild(media);
 
         /* _init(): set src directly — setting src already triggers auto-load, no need to call load() */
         wrap._init = function() {
