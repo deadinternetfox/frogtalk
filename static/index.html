@@ -229,6 +229,201 @@
 #modal-profile hr,
 #modal-profile .modal-divider{border-color:#25463a !important;background:#25463a !important}
 
+/* Theme override — when user picks a non-green theme (Light/Midnight/Cyberpunk/
+   Ocean/Sunset), drop the hardcoded green look on new surfaces and use the
+   theme vars so the Appearance theme editor still recolors everything. Dark
+   and Forest keep the polished green gradient. */
+body[data-theme="light"] #modal-profile .modal,
+body[data-theme="midnight"] #modal-profile .modal,
+body[data-theme="cyberpunk"] #modal-profile .modal,
+body[data-theme="ocean"] #modal-profile .modal,
+body[data-theme="sunset"] #modal-profile .modal{
+  background:var(--surface-color) !important;
+  border:1px solid var(--border-color) !important;
+  color:var(--text-color) !important;
+}
+body[data-theme="light"] #modal-profile .modal-title,
+body[data-theme="midnight"] #modal-profile .modal-title,
+body[data-theme="cyberpunk"] #modal-profile .modal-title,
+body[data-theme="ocean"] #modal-profile .modal-title,
+body[data-theme="sunset"] #modal-profile .modal-title{
+  color:var(--text-color) !important;
+  border-bottom:1px solid var(--border-color) !important;
+}
+body[data-theme="light"] #modal-profile .modal-label,
+body[data-theme="midnight"] #modal-profile .modal-label,
+body[data-theme="cyberpunk"] #modal-profile .modal-label,
+body[data-theme="ocean"] #modal-profile .modal-label,
+body[data-theme="sunset"] #modal-profile .modal-label{color:var(--text-muted) !important}
+body[data-theme="light"] #modal-profile .modal-input,
+body[data-theme="midnight"] #modal-profile .modal-input,
+body[data-theme="cyberpunk"] #modal-profile .modal-input,
+body[data-theme="ocean"] #modal-profile .modal-input,
+body[data-theme="sunset"] #modal-profile .modal-input,
+body[data-theme="light"] #modal-profile textarea.modal-input,
+body[data-theme="midnight"] #modal-profile textarea.modal-input,
+body[data-theme="cyberpunk"] #modal-profile textarea.modal-input,
+body[data-theme="ocean"] #modal-profile textarea.modal-input,
+body[data-theme="sunset"] #modal-profile textarea.modal-input,
+body[data-theme="light"] #modal-profile select.modal-input,
+body[data-theme="midnight"] #modal-profile select.modal-input,
+body[data-theme="cyberpunk"] #modal-profile select.modal-input,
+body[data-theme="ocean"] #modal-profile select.modal-input,
+body[data-theme="sunset"] #modal-profile select.modal-input{
+  background:var(--bg-color) !important;
+  border:1px solid var(--border-color) !important;
+  color:var(--text-color) !important;
+}
+body[data-theme="light"] #modal-profile .modal-input:focus,
+body[data-theme="midnight"] #modal-profile .modal-input:focus,
+body[data-theme="cyberpunk"] #modal-profile .modal-input:focus,
+body[data-theme="ocean"] #modal-profile .modal-input:focus,
+body[data-theme="sunset"] #modal-profile .modal-input:focus{
+  border-color:var(--accent-color) !important;
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 25%, transparent) !important;
+  background:var(--bg-color) !important;
+}
+body[data-theme="light"] #modal-profile .modal-btn.secondary,
+body[data-theme="midnight"] #modal-profile .modal-btn.secondary,
+body[data-theme="cyberpunk"] #modal-profile .modal-btn.secondary,
+body[data-theme="ocean"] #modal-profile .modal-btn.secondary,
+body[data-theme="sunset"] #modal-profile .modal-btn.secondary{
+  background:var(--bg-color) !important;
+  color:var(--text-color) !important;
+  border:1px solid var(--border-color) !important;
+}
+body[data-theme="light"] #modal-profile .modal-btn.primary,
+body[data-theme="midnight"] #modal-profile .modal-btn.primary,
+body[data-theme="cyberpunk"] #modal-profile .modal-btn.primary,
+body[data-theme="ocean"] #modal-profile .modal-btn.primary,
+body[data-theme="sunset"] #modal-profile .modal-btn.primary{
+  background:var(--accent-color) !important;
+  color:#fff !important;
+  box-shadow:0 4px 14px color-mix(in srgb, var(--accent-color) 30%, transparent) !important;
+}
+body[data-theme="light"] #modal-profile .settings-tab,
+body[data-theme="midnight"] #modal-profile .settings-tab,
+body[data-theme="cyberpunk"] #modal-profile .settings-tab,
+body[data-theme="ocean"] #modal-profile .settings-tab,
+body[data-theme="sunset"] #modal-profile .settings-tab{color:var(--text-muted) !important}
+body[data-theme="light"] #modal-profile .settings-tab.active,
+body[data-theme="midnight"] #modal-profile .settings-tab.active,
+body[data-theme="cyberpunk"] #modal-profile .settings-tab.active,
+body[data-theme="ocean"] #modal-profile .settings-tab.active,
+body[data-theme="sunset"] #modal-profile .settings-tab.active{
+  background:var(--accent-dim) !important;
+  color:var(--accent-color) !important;
+  border-color:var(--accent-color) !important;
+}
+body[data-theme="light"] #modal-profile .settings-tabs,
+body[data-theme="midnight"] #modal-profile .settings-tabs,
+body[data-theme="cyberpunk"] #modal-profile .settings-tabs,
+body[data-theme="ocean"] #modal-profile .settings-tabs,
+body[data-theme="sunset"] #modal-profile .settings-tabs{
+  border-bottom:1px solid var(--border-color) !important;
+}
+/* Same for the Friends popup, social/board sidebars, and overlay topbars */
+body[data-theme="light"] #friends-panel .modal,
+body[data-theme="midnight"] #friends-panel .modal,
+body[data-theme="cyberpunk"] #friends-panel .modal,
+body[data-theme="ocean"] #friends-panel .modal,
+body[data-theme="sunset"] #friends-panel .modal{
+  background:var(--surface-color) !important;
+  border:1px solid var(--border-color) !important;
+  color:var(--text-color) !important;
+}
+body[data-theme="light"] #board-side-menu,
+body[data-theme="midnight"] #board-side-menu,
+body[data-theme="cyberpunk"] #board-side-menu,
+body[data-theme="ocean"] #board-side-menu,
+body[data-theme="sunset"] #board-side-menu,
+body[data-theme="light"] #social-side-menu,
+body[data-theme="midnight"] #social-side-menu,
+body[data-theme="cyberpunk"] #social-side-menu,
+body[data-theme="ocean"] #social-side-menu,
+body[data-theme="sunset"] #social-side-menu{
+  background:var(--bg-color) !important;
+  border-right:1px solid var(--border-color) !important;
+}
+body[data-theme="light"] .social-topbar,
+body[data-theme="midnight"] .social-topbar,
+body[data-theme="cyberpunk"] .social-topbar,
+body[data-theme="ocean"] .social-topbar,
+body[data-theme="sunset"] .social-topbar,
+body[data-theme="light"] .board-overlay-topbar,
+body[data-theme="midnight"] .board-overlay-topbar,
+body[data-theme="cyberpunk"] .board-overlay-topbar,
+body[data-theme="ocean"] .board-overlay-topbar,
+body[data-theme="sunset"] .board-overlay-topbar{
+  background:var(--surface-color) !important;
+  border-bottom:1px solid var(--border-color) !important;
+}
+
+/* Drop the green gradients on the main chat surfaces too when the user
+   selects a non-default theme, so the Appearance theme editor recolors the
+   whole app and not just the message text. */
+body[data-theme="light"] #server-list,
+body[data-theme="midnight"] #server-list,
+body[data-theme="cyberpunk"] #server-list,
+body[data-theme="ocean"] #server-list,
+body[data-theme="sunset"] #server-list{
+  background:var(--bg-color) !important;
+  border-right:1px solid var(--border-color) !important;
+}
+body[data-theme="light"] #sidebar,
+body[data-theme="midnight"] #sidebar,
+body[data-theme="cyberpunk"] #sidebar,
+body[data-theme="ocean"] #sidebar,
+body[data-theme="sunset"] #sidebar{
+  background:var(--surface-color) !important;
+  border-right:1px solid var(--border-color) !important;
+}
+body[data-theme="light"] #main,
+body[data-theme="midnight"] #main,
+body[data-theme="cyberpunk"] #main,
+body[data-theme="ocean"] #main,
+body[data-theme="sunset"] #main{
+  background:var(--bg-color) !important;
+}
+body[data-theme="light"] #messages-area,
+body[data-theme="midnight"] #messages-area,
+body[data-theme="cyberpunk"] #messages-area,
+body[data-theme="ocean"] #messages-area,
+body[data-theme="sunset"] #messages-area{
+  background:var(--bg-color) !important;
+}
+body[data-theme="light"] #chat-header,
+body[data-theme="midnight"] #chat-header,
+body[data-theme="cyberpunk"] #chat-header,
+body[data-theme="ocean"] #chat-header,
+body[data-theme="sunset"] #chat-header{
+  background:var(--surface-color) !important;
+  border-bottom:1px solid var(--border-color) !important;
+}
+body[data-theme="light"] #input-area,
+body[data-theme="midnight"] #input-area,
+body[data-theme="cyberpunk"] #input-area,
+body[data-theme="ocean"] #input-area,
+body[data-theme="sunset"] #input-area{
+  background:var(--surface-color) !important;
+}
+body[data-theme="light"] #users-panel,
+body[data-theme="midnight"] #users-panel,
+body[data-theme="cyberpunk"] #users-panel,
+body[data-theme="ocean"] #users-panel,
+body[data-theme="sunset"] #users-panel{
+  background:var(--surface-color) !important;
+  border-left:1px solid var(--border-color) !important;
+}
+body[data-theme="light"] #self-panel,
+body[data-theme="midnight"] #self-panel,
+body[data-theme="cyberpunk"] #self-panel,
+body[data-theme="ocean"] #self-panel,
+body[data-theme="sunset"] #self-panel{
+  background:var(--bg-color) !important;
+  border-top:1px solid var(--border-color) !important;
+}
+
 /* Chat/Channel UI refresh — move core surfaces off flat dark/grey */
 #server-list{
   background:linear-gradient(180deg,#0c1713 0%,#0a1411 55%,#08110e 100%) !important;
