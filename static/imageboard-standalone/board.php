@@ -2541,7 +2541,7 @@ if ($singleThread) {
             .post-timeago { display: none; }
             .post-wallet { font-size: 10px; }
             .post-image-container, .image-pending { float: none; margin: 0 0 10px 0; }
-            .post-image-container img { max-width: 100%; }
+            .post-image-container img { max-width: 100%; border: none; outline: 1px solid rgba(0,255,65,0.2); }
             .image-pending { width: 100%; }
             .post-carousel { float: none; margin: 0 0 10px 0; width: 100%; }
             .post-carousel img { max-width: 100%; }
@@ -2769,7 +2769,6 @@ if ($singleThread) {
     <main>
         <div class="board-container">
             <div class="board-header">
-                <h2>🐸 Frog Channel</h2>
                 <p class="board-subtitle">Anonymous discussion board. No accounts. No tracking. Speak freely.</p>
                 <div class="board-stats">
                     <span class="stat-item">📋 Threads: <span class="stat-val"><?= $threadCount ?></span></span>
