@@ -861,13 +861,14 @@ $_host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? 'frogtalk
 // Pin canonical host so previews always point to the public origin Discord can fetch
 if (stripos($_host, 'frogtalk.xyz') === false) { $_host = 'frogtalk.xyz'; }
 $baseUrl = ($_isHttps ? 'https' : 'https') . '://' . $_host;
-$ogTitle = '🐸 Frog Channels on FrogTalk';
-$ogDesc = 'Frog Channels is the anonymous imageboard on FrogTalk. ' . count($threads) . ' active threads. Post images, discuss freely, and share media.';
+$_boardName = htmlspecialchars_decode((string)($settings['board_name'] ?? 'Frog General'), ENT_QUOTES);
+$ogTitle = '🐸 ' . $_boardName . ' on FrogTalk';
+$ogDesc = $_boardName . ' is the anonymous imageboard on FrogTalk. ' . count($threads) . ' active threads. Post images, discuss freely, and share media.';
 $ogImage = $baseUrl . '/board_preview.php?board=index';
 $ogImageType = 'image/png';
 $ogImageWidth = 1200;
 $ogImageHeight = 630;
-$ogImageAlt = 'Frog Channels board preview';
+$ogImageAlt = $_boardName . ' board preview';
 $ogUrl = $baseUrl . '/board';
 $ogType = 'website';
 
@@ -876,7 +877,7 @@ if ($singleThread) {
     $replyC = count($singleThread['replies'] ?? []);
     $likeC = getLikeCount($singleThread['id']);
     $viewC = getViewCount($singleThread['id']);
-    $ogTitle = $subj . ' — Frog Channels #' . $singleThread['id'];
+    $ogTitle = $subj . ' — ' . $_boardName . ' #' . $singleThread['id'];
     $ogDesc = mb_substr(strip_tags($singleThread['comment']), 0, 200);
     if (mb_strlen($singleThread['comment']) > 200) $ogDesc .= '...';
     $ogDesc .= " · {$replyC} replies · {$viewC} views · {$likeC} 🐸";
@@ -884,7 +885,7 @@ if ($singleThread) {
     if ($singleThread['image'] && ($singleThread['image']['approved'] ?? true) && !empty($singleThread['image']['file'])) {
         $ogFileRel = '/board_uploads/' . $singleThread['image']['file'];
         $ogImage = $baseUrl . $ogFileRel;
-        $ogImageAlt = 'Frog Channels thread image preview';
+        $ogImageAlt = $_boardName . ' thread image preview';
         $ogExt = strtolower(pathinfo((string)$singleThread['image']['file'], PATHINFO_EXTENSION));
         $ogImageType = match ($ogExt) {
             'jpg', 'jpeg' => 'image/jpeg',
@@ -905,7 +906,7 @@ if ($singleThread) {
         $ogImageType = 'image/png';
         $ogImageWidth = 1200;
         $ogImageHeight = 630;
-        $ogImageAlt = 'Frog Channels thread preview';
+        $ogImageAlt = $_boardName . ' thread preview';
     }
     $ogUrl = $baseUrl . '/board?thread=' . $singleThread['id'];
     $ogType = 'article';
@@ -922,13 +923,13 @@ if ($singleThread) {
         if ($specificPost) {
             $rText = mb_substr(strip_tags($specificPost['comment'] ?? ''), 0, 220);
             if (mb_strlen($specificPost['comment'] ?? '') > 220) $rText .= '…';
-            $ogTitle = 'Re: ' . ($singleThread['subject'] ?: 'Anonymous Thread') . ' — Frog Channels';
+            $ogTitle = 'Re: ' . ($singleThread['subject'] ?: 'Anonymous Thread') . ' — ' . $_boardName;
             $ogDesc  = $rText ?: '(image post)';
             // Prefer reply image, fall back to thread-level image
             if (!empty($specificPost['image']['file']) && ($specificPost['image']['approved'] ?? true)) {
                 $replyRel = '/board_uploads/' . $specificPost['image']['file'];
                 $ogImage = $baseUrl . $replyRel;
-                $ogImageAlt = 'Frog Channels reply image preview';
+                $ogImageAlt = $_boardName . ' reply image preview';
                 $replyExt = strtolower(pathinfo((string)$specificPost['image']['file'], PATHINFO_EXTENSION));
                 $ogImageType = match ($replyExt) {
                     'jpg', 'jpeg' => 'image/jpeg',
@@ -977,7 +978,7 @@ if ($singleThread) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Critical: prevent FOUC white flash before style.css loads -->
     <style>html,body{background:#0a0e0a;color:#00ff41;}</style>
-    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — Frog Channels') : 'Frog Channels' ?></title>
+    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — ' . $_boardName) : htmlspecialchars($_boardName) ?></title>
     
     <meta name="title" content="<?= htmlspecialchars($ogTitle) ?>">
     <meta name="description" content="<?= htmlspecialchars($ogDesc) ?>">
@@ -993,7 +994,7 @@ if ($singleThread) {
     <meta property="og:image:width" content="<?= (int)$ogImageWidth ?>">
     <meta property="og:image:height" content="<?= (int)$ogImageHeight ?>">
     <meta property="og:image:alt" content="<?= htmlspecialchars($ogImageAlt) ?>">
-    <meta property="og:site_name" content="Frog Channels">
+    <meta property="og:site_name" content="<?= htmlspecialchars($_boardName) ?>">
     <meta property="og:locale" content="en_US">
     
     <meta name="twitter:card" content="summary_large_image">

@@ -9,6 +9,9 @@ require_once __DIR__ . '/board_config.php';
 
 $boardMode = ($_GET['board'] ?? '') === 'index';
 $threadId = $_GET['thread'] ?? '';
+$_settings  = function_exists('loadSettings') ? loadSettings() : [];
+$_boardName = (string)($_settings['board_name'] ?? 'Frog General');
+$_boardNameUpper = strtoupper($_boardName);
 
 if (!$boardMode && empty($threadId)) {
     http_response_code(404);
@@ -48,7 +51,7 @@ if ($boardMode) {
     // Header bar
     imagefilledrectangle($img, 0, 0, $w, 80, $darkPanel);
     imageline($img, 0, 80, $w, 80, $greenBright);
-    imagestring($img, 5, 40, 12, "FROG CHANNELS", $greenBright);
+    imagestring($img, 5, 40, 12, $_boardNameUpper, $greenBright);
     imagestring($img, 4, 40, 35, "FrogTalk Anonymous Boards", $greenDark);
     
     // Stats line
@@ -94,7 +97,7 @@ if ($boardMode) {
     // Bottom bar
     imagefilledrectangle($img, 0, $h - 50, $w, $h, $darkPanel);
     imageline($img, 0, $h - 50, $w, $h - 50, $greenDark);
-    imagestring($img, 4, 40, $h - 38, "/board  |  Frog Channels on FrogTalk.", $greenMid);
+    imagestring($img, 4, 40, $h - 38, "/board  |  " . $_boardName . " on FrogTalk.", $greenMid);
     
     // Frog
     $frogX = $w - 60; $frogY = $h - 35;
@@ -153,9 +156,9 @@ imagefilledrectangle($img, 0, 0, $w, $h, $bgColor);
 imagefilledrectangle($img, 0, 0, $w, 60, $darkPanel);
 imageline($img, 0, 60, $w, 60, $greenBright);
 
-// "🐸 Frog Channels" header
+// "🐸 Frog General" header
 $headerFont = 5; // built-in font
-imagestring($img, $headerFont, 30, 10, "FROG CHANNELS", $greenBright);
+imagestring($img, $headerFont, 30, 10, $_boardNameUpper, $greenBright);
 imagestring($img, 3, 30, 35, "FrogTalk Anonymous Boards", $greenDark);
 
 // Right side: stats
