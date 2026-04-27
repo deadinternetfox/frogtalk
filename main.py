@@ -246,22 +246,41 @@ _FRIENDS_JS_PATH = "static/js/friends.js"
 _DMS_JS_PATH = "static/js/dms.js"
 _MEDIA_JS_PATH = "static/js/media.js"
 
+# Cached app shell. The shell is ~300 KB and was previously read from disk
+# on every page load. Caching it in memory cuts the cold-path overhead and
+# eliminates 7 stat() syscalls per request. We invalidate on index.html
+# mtime change so live edits still apply without a restart.
+_SHELL_CACHE: dict = {"mtime": 0.0, "asset_version": "", "html": ""}
+
+def _shell_asset_paths() -> tuple:
+    return (
+        _APP_JS_PATH, _MESSAGES_JS_PATH, _UI_JS_PATH,
+        _FRIENDS_JS_PATH, _DMS_JS_PATH, _MEDIA_JS_PATH,
+    )
+
 
 def _serve_app_shell_response() -> HTMLResponse:
-    with open(_APP_HTML_PATH, "r", encoding="utf-8") as fh:
-        html = fh.read()
     try:
-        app_asset_version = str(int(max(
-            os.path.getmtime(_APP_JS_PATH),
-            os.path.getmtime(_MESSAGES_JS_PATH),
-            os.path.getmtime(_UI_JS_PATH),
-            os.path.getmtime(_FRIENDS_JS_PATH),
-            os.path.getmtime(_DMS_JS_PATH),
-            os.path.getmtime(_MEDIA_JS_PATH),
-        )))
+        html_mtime = os.path.getmtime(_APP_HTML_PATH)
     except Exception:
-        app_asset_version = str(int(time.time()))
-    html = html.replace("__APP_ASSET_VERSION__", app_asset_version)
+        html_mtime = 0.0
+    try:
+        asset_mtime = max(os.path.getmtime(p) for p in _shell_asset_paths())
+        asset_version = str(int(asset_mtime))
+    except Exception:
+        asset_version = str(int(time.time()))
+    cached = _SHELL_CACHE
+    if (cached["html"]
+            and cached["mtime"] == html_mtime
+            and cached["asset_version"] == asset_version):
+        html = cached["html"]
+    else:
+        with open(_APP_HTML_PATH, "r", encoding="utf-8") as fh:
+            raw = fh.read()
+        html = raw.replace("__APP_ASSET_VERSION__", asset_version)
+        cached["html"] = html
+        cached["mtime"] = html_mtime
+        cached["asset_version"] = asset_version
     return HTMLResponse(
         html,
         headers={

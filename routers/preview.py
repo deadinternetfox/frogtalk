@@ -177,14 +177,38 @@ async def get_link_preview(
     # Basic URL validation
     if not url.startswith(('http://', 'https://')):
         return JSONResponse(status_code=400, content={"error": "Invalid URL"})
-    
-    # Block internal/private URLs
+
+    # SSRF guard. Reject any URL whose hostname resolves to a non-public
+    # address (loopback, private RFC1918, link-local, multicast, reserved,
+    # unspecified). Resolves once here so a malicious DNS record that points
+    # at 127.0.0.1 / 10.x / 169.254.x / fc00::/7 etc. is blocked before we
+    # ever issue the outbound HTTP request. The previous string-prefix
+    # blacklist allowed both DNS-rebinding and false-positives like
+    # `172.217.x.x` (Google) being blocked while `100.64.x.x` (CGNAT) and
+    # most IPv6 private ranges slipped through.
+    import ipaddress, socket
     from urllib.parse import urlparse
     parsed = urlparse(url)
-    blocked = ['localhost', '127.0.0.1', '0.0.0.0', '192.168.', '10.', '172.']
-    if any(b in parsed.netloc for b in blocked):
+    host = (parsed.hostname or "").strip()
+    if not host:
         return JSONResponse(status_code=400, content={"error": "Invalid URL"})
-    
+    # Block obvious metadata hostnames up-front (cloud IMDS endpoints).
+    bad_names = {"metadata.google.internal", "metadata.goog", "metadata"}
+    if host.lower() in bad_names:
+        return JSONResponse(status_code=400, content={"error": "Invalid URL"})
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid URL"})
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "Invalid URL"})
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_multicast or ip.is_reserved or ip.is_unspecified):
+            return JSONResponse(status_code=400, content={"error": "Invalid URL"})
+
     og = await fetch_og_data(url)
     
     if not og:

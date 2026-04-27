@@ -1,4 +1,5 @@
 """Room management routes."""
+import asyncio
 import re
 import time
 import uuid
@@ -520,9 +521,14 @@ async def _fetch_yt_meta(video_id: str):
             "format": "json"
         })
         req = urllib.request.Request(u, headers={"User-Agent": "FrogTalk/1.0"})
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            data = _json.loads(resp.read().decode("utf-8"))
-            return data.get("title", ""), data.get("thumbnail_url", "")
+        # Run the blocking urlopen in a worker thread so the event loop
+        # is not stalled for up to 4s while we wait on YouTube.
+        def _blocking_fetch():
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                return resp.read().decode("utf-8")
+        raw = await asyncio.to_thread(_blocking_fetch)
+        data = _json.loads(raw)
+        return data.get("title", ""), data.get("thumbnail_url", "")
     except Exception:
         return "", f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
