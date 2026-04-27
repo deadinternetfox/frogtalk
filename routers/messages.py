@@ -162,11 +162,11 @@ async def get_history(
     _: dict = Depends(get_current_user),
 ):
     msgs = db.get_messages(room_name, limit=limit, before_id=before_id)
-    # Strip heavy media_data from history; client fetches via /media endpoint
+    # has_media is now returned directly from SQL as 0/1; coerce to bool so
+    # the client gets a stable shape. media_data is no longer selected for
+    # history requests \u2014 clients fetch via /messages/<id>/media on demand.
     for msg in msgs:
-        if msg.get("media_data"):
-            msg["has_media"] = True
-            del msg["media_data"]
+        msg["has_media"] = bool(msg.get("has_media"))
     return {"messages": msgs}
 
 

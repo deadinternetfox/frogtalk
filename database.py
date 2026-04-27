@@ -519,44 +519,60 @@ def lookup_bridge_remote_id(platform: str, chat_id, ft_msg_id: int) -> Optional[
 
 
 def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = None) -> List[Dict]:
+    # PERF: select reactions in a separate aggregate query rather than via a
+    # per-message correlated subquery joined into a GROUP BY. Also avoid
+    # SELECT-ing m.media_data (potentially MB of base64 per row); the API
+    # surfaces a has_media flag and clients lazy-load via /messages/<id>/media.
     with _conn() as con:
         if before_id:
             rows = con.execute(
-                """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content, m.media_data, m.media_type,
-                          m.edited, m.created_at, m.media_blur, m.view_once, m.reply_to,
-                          m.bridge_platform,
+                """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content,
+                          (m.media_data IS NOT NULL AND length(m.media_data) > 0) AS has_media,
+                          m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
+                          m.reply_to, m.bridge_platform,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           (SELECT nickname FROM messages WHERE id=m.reply_to) AS reply_nickname,
-                          (SELECT substr(content,1,120) FROM messages WHERE id=m.reply_to) AS reply_content,
-                          json_group_array(json_object('emoji', r.emoji, 'count',
-                              (SELECT COUNT(*) FROM reactions r2 WHERE r2.message_id=m.id AND r2.emoji=r.emoji)
-                          )) FILTER (WHERE r.id IS NOT NULL) AS reactions
+                          (SELECT substr(content,1,120) FROM messages WHERE id=m.reply_to) AS reply_content
                    FROM messages m
-                   LEFT JOIN reactions r ON m.id=r.message_id
                    LEFT JOIN users u ON m.user_id=u.id
                    WHERE m.room_name=? AND m.id < ?
-                   GROUP BY m.id ORDER BY m.id DESC LIMIT ?""",
+                   ORDER BY m.id DESC LIMIT ?""",
                 (room_name, before_id, limit)
             ).fetchall()
         else:
             rows = con.execute(
-                """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content, m.media_data, m.media_type,
-                          m.edited, m.created_at, m.media_blur, m.view_once, m.reply_to,
-                          m.bridge_platform,
+                """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content,
+                          (m.media_data IS NOT NULL AND length(m.media_data) > 0) AS has_media,
+                          m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
+                          m.reply_to, m.bridge_platform,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           (SELECT nickname FROM messages WHERE id=m.reply_to) AS reply_nickname,
-                          (SELECT substr(content,1,120) FROM messages WHERE id=m.reply_to) AS reply_content,
-                          json_group_array(json_object('emoji', r.emoji, 'count',
-                              (SELECT COUNT(*) FROM reactions r2 WHERE r2.message_id=m.id AND r2.emoji=r.emoji)
-                          )) FILTER (WHERE r.id IS NOT NULL) AS reactions
+                          (SELECT substr(content,1,120) FROM messages WHERE id=m.reply_to) AS reply_content
                    FROM messages m
-                   LEFT JOIN reactions r ON m.id=r.message_id
                    LEFT JOIN users u ON m.user_id=u.id
                    WHERE m.room_name=?
-                   GROUP BY m.id ORDER BY m.id DESC LIMIT ?""",
+                   ORDER BY m.id DESC LIMIT ?""",
                 (room_name, limit)
             ).fetchall()
-    return list(reversed([dict(r) for r in rows]))
+        msgs = [dict(r) for r in rows]
+        if msgs:
+            ids = [m["id"] for m in msgs]
+            placeholders = ",".join(["?"] * len(ids))
+            rx = con.execute(
+                f"SELECT message_id, emoji, COUNT(*) AS c FROM reactions "
+                f"WHERE message_id IN ({placeholders}) GROUP BY message_id, emoji",
+                ids,
+            ).fetchall()
+            grouped: Dict[int, list] = {}
+            for r in rx:
+                grouped.setdefault(int(r["message_id"]), []).append(
+                    {"emoji": r["emoji"], "count": int(r["c"])}
+                )
+            import json as _json
+            for m in msgs:
+                lst = grouped.get(int(m["id"]))
+                m["reactions"] = _json.dumps(lst) if lst else None
+    return list(reversed(msgs))
 
 
 def get_message(msg_id: int) -> Optional[Dict]:
@@ -664,6 +680,16 @@ def get_dm_view_once_viewed_map(msg_ids: List[int], user_id: int) -> Dict[int, i
             (user_id, *msg_ids)
         ).fetchall()
     return {int(r["msg_id"]): 1 for r in rows}
+
+
+def is_dm_member(channel_id: int, user_id: int) -> bool:
+    """Cheap membership check for a DM channel (single PK lookup)."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM dm_channels WHERE id=? AND (user_a=? OR user_b=?)",
+            (channel_id, user_id, user_id)
+        ).fetchone()
+    return bool(row)
 
 
 def toggle_reaction(msg_id: int, user_id: int, emoji: str) -> Dict:
@@ -839,6 +865,11 @@ def _migrate():
             )
         """)
         con.execute("CREATE INDEX IF NOT EXISTS idx_dm_vo_user ON dm_view_once_views(user_id, msg_id)")
+        # Hot paths: latest-N by id within a channel/room and reaction lookup.
+        con.execute("CREATE INDEX IF NOT EXISTS idx_dm_messages_channel_id ON dm_messages(channel_id, id DESC)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_name, id DESC)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_reactions_msg ON reactions(message_id)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_dm_messages_sender ON dm_messages(channel_id, sender_id, id)")
 
         # Federation metadata and replication queues (additive/non-breaking).
         con.execute(
@@ -1781,8 +1812,18 @@ def get_or_create_dm(user_a: int, user_b: int) -> int:
 
 
 def get_dm_channels(user_id: int) -> List[Dict]:
+    # Single query: pick latest visible message per channel via a window-style
+    # MAX(id) join, and compute unread count in the same SELECT instead of
+    # opening a new connection for every channel (was N+1 connections + 4
+    # correlated subqueries per row, ~20-50ms × N for users with many DMs).
     with _conn() as con:
         rows = con.execute("""
+            WITH last_msg AS (
+                SELECT channel_id, MAX(id) AS last_id
+                FROM dm_messages
+                WHERE deleted=0
+                GROUP BY channel_id
+            )
             SELECT dc.id, dc.created_at,
                    dc.user_a, dc.user_b,
                    COALESCE(dc.last_read_a, 0) AS last_read_a,
@@ -1792,41 +1833,33 @@ def get_dm_channels(user_id: int) -> List[Dict]:
                    u.last_seen AS other_last_seen,
                    u.show_last_seen AS other_show_last_seen,
                    COALESCE(u.show_read_receipts, 1) AS other_show_read_receipts,
-                   (SELECT dm.id FROM dm_messages dm
-                    WHERE dm.channel_id=dc.id AND dm.deleted=0
-                    ORDER BY dm.id DESC LIMIT 1) AS last_msg_id,
-                   (SELECT dm.content FROM dm_messages dm
-                    WHERE dm.channel_id=dc.id AND dm.deleted=0
-                    ORDER BY dm.id DESC LIMIT 1) AS last_msg,
-                   (SELECT dm.created_at FROM dm_messages dm
-                    WHERE dm.channel_id=dc.id AND dm.deleted=0
-                    ORDER BY dm.id DESC LIMIT 1) AS last_msg_at,
-                   (SELECT dm.sender_id FROM dm_messages dm
-                    WHERE dm.channel_id=dc.id AND dm.deleted=0
-                    ORDER BY dm.id DESC LIMIT 1) AS last_sender_id
+                   lm.last_id AS last_msg_id,
+                   dm.content AS last_msg,
+                   dm.created_at AS last_msg_at,
+                   dm.sender_id AS last_sender_id,
+                   (SELECT COUNT(*) FROM dm_messages x
+                      WHERE x.channel_id=dc.id AND x.deleted=0
+                        AND x.sender_id != ?
+                        AND x.id > CASE WHEN dc.user_a=? THEN COALESCE(dc.last_read_a,0)
+                                                        ELSE COALESCE(dc.last_read_b,0) END
+                   ) AS unread
             FROM dm_channels dc
             JOIN users u ON u.id = CASE WHEN dc.user_a=? THEN dc.user_b ELSE dc.user_a END
+            LEFT JOIN last_msg lm ON lm.channel_id=dc.id
+            LEFT JOIN dm_messages dm ON dm.id = lm.last_id
             WHERE (dc.user_a=? OR dc.user_b=?)
               AND NOT (
                   (dc.user_a=? AND COALESCE(dc.hidden_by_a, 0)=1) OR
                   (dc.user_b=? AND COALESCE(dc.hidden_by_b, 0)=1)
               )
             ORDER BY last_msg_at DESC
-        """, (user_id, user_id, user_id, user_id, user_id)).fetchall()
+        """, (user_id, user_id, user_id, user_id, user_id, user_id, user_id)).fetchall()
     result = []
     for r in rows:
         d = dict(r)
         is_a = d["user_a"] == user_id
         my_read = d["last_read_a"] if is_a else d["last_read_b"]
         peer_read = d["last_read_b"] if is_a else d["last_read_a"]
-        # Compute unread: count messages from other side with id > my_read
-        with _conn() as con:
-            ur = con.execute(
-                """SELECT COUNT(*) AS c FROM dm_messages
-                   WHERE channel_id=? AND deleted=0 AND sender_id!=? AND id>?""",
-                (d["id"], user_id, my_read)
-            ).fetchone()
-        d["unread"] = ur["c"] if ur else 0
         d["my_last_read"] = my_read
         d["peer_last_read"] = peer_read
         # Hide internal fields
@@ -1912,11 +1945,16 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
         ).fetchone()
         if not row:
             return [], False
+        # NOTE: do NOT SELECT dm.media_data here. Histories with image/audio/
+        # video attachments stored as base64 data URIs would otherwise return
+        # several MB just to be stripped client-side. Use has_media flag
+        # instead — the client lazy-loads media via /messages/<id>/media.
         if after_id:
             rows = con.execute("""
-                SELECT dm.id, dm.sender_id, dm.content, dm.media_data, dm.media_type,
-                       dm.media_name, dm.reply_to, dm.edited, dm.deleted, dm.created_at,
-                       dm.media_blur, dm.view_once,
+                SELECT dm.id, dm.sender_id, dm.content,
+                       (dm.media_data IS NOT NULL AND length(dm.media_data) > 0) AS has_media,
+                       dm.media_type, dm.media_name, dm.reply_to, dm.edited,
+                       dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id > ? AND dm.deleted=0
@@ -1924,9 +1962,10 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
             """, (channel_id, after_id, limit)).fetchall()
         elif before_id:
             rows = con.execute("""
-                SELECT dm.id, dm.sender_id, dm.content, dm.media_data, dm.media_type,
-                       dm.media_name, dm.reply_to, dm.edited, dm.deleted, dm.created_at,
-                       dm.media_blur, dm.view_once,
+                SELECT dm.id, dm.sender_id, dm.content,
+                       (dm.media_data IS NOT NULL AND length(dm.media_data) > 0) AS has_media,
+                       dm.media_type, dm.media_name, dm.reply_to, dm.edited,
+                       dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id < ? AND dm.deleted=0
@@ -1934,9 +1973,10 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
             """, (channel_id, before_id, limit)).fetchall()
         else:
             rows = con.execute("""
-                SELECT dm.id, dm.sender_id, dm.content, dm.media_data, dm.media_type,
-                       dm.media_name, dm.reply_to, dm.edited, dm.deleted, dm.created_at,
-                       dm.media_blur, dm.view_once,
+                SELECT dm.id, dm.sender_id, dm.content,
+                       (dm.media_data IS NOT NULL AND length(dm.media_data) > 0) AS has_media,
+                       dm.media_type, dm.media_name, dm.reply_to, dm.edited,
+                       dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.deleted=0

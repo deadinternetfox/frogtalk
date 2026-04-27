@@ -153,9 +153,8 @@ async def get_messages(channel_id: int, before: Optional[int] = None,
         viewed_map = {}
     for msg in msgs:
         msg["channel_id"] = channel_id
-        if msg.get("media_data"):
-            msg["has_media"] = True
-            del msg["media_data"]
+        # has_media is now returned directly from SQL as 0/1; coerce to bool.
+        msg["has_media"] = bool(msg.get("has_media"))
         if msg.get("view_once"):
             msg["viewed_by_me"] = 1 if viewed_map.get(int(msg.get("id") or 0)) else 0
     return {"messages": msgs}
@@ -165,9 +164,8 @@ async def get_messages(channel_id: int, before: Optional[int] = None,
 async def get_dm_media(channel_id: int, msg_id: int,
                        current_user: dict = Depends(get_current_user)):
     """Fetch media_data for a single DM message (lazy load)."""
-    # Verify membership
-    _, ok = db.get_dm_messages(channel_id, current_user["id"], 1)
-    if not ok:
+    # Verify membership (cheap PK lookup)
+    if not db.is_dm_member(channel_id, current_user["id"]):
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
     with db._conn() as con:
         row = con.execute(
@@ -191,9 +189,8 @@ async def send_message(channel_id: int, body: DMMessageBody,
             return JSONResponse(status_code=413, content={"error": "Media too large (max 20MB)"})
         if not _is_allowed_media_payload(body.media_data):
             return JSONResponse(status_code=400, content={"error": "Unsupported media type"})
-    # Verify membership
-    _, ok = db.get_dm_messages(channel_id, current_user["id"], 1)
-    if not ok:
+    # Verify membership (cheap PK lookup)
+    if not db.is_dm_member(channel_id, current_user["id"]):
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
     # Resolve the other participant and block-guard before writing
     try:
@@ -277,9 +274,8 @@ async def send_message(channel_id: int, body: DMMessageBody,
 async def mark_dm_viewed(channel_id: int, msg_id: int,
                          current_user: dict = Depends(get_current_user)):
     """Consume view-once DM media for current user only. Notify sender if receiver views."""
-    # Verify membership
-    _, ok = db.get_dm_messages(channel_id, current_user["id"], 1)
-    if not ok:
+    # Verify membership (cheap PK lookup)
+    if not db.is_dm_member(channel_id, current_user["id"]):
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
     with db._conn() as con:
         row = con.execute(
