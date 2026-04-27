@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="frog_green">#4CAF50</color>
-    <color name="frog_dark">#0D0D0D</color>
+    <color name="frog_dark">#08110E</color>
     <color name="frog_dark_green">#1A2E1A</color>
+    <color name="frog_loading_bg">#0A1411</color>
+    <color name="frog_loading_surface">#12231E</color>
+    <color name="frog_loading_border">#2F5548</color>
+    <color name="frog_loading_text">#85A89A</color>
     <color name="ic_launcher_background">#FFFFFF</color>
     <color name="white">#FFFFFF</color>
     <color name="black">#000000</color>

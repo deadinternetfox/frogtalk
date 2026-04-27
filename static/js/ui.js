@@ -951,6 +951,16 @@ function switchSettingsTab(tab) {
   }
   // Update char count on style tab
   if (tab === 'style') updateCssCharCount();
+  // Pre-fill custom theme color inputs and highlight the saved theme button
+  if (tab === 'appear') {
+    try { loadCustomThemeIntoInputs(); } catch {}
+    try {
+      const saved = document.body.dataset.theme || localStorage.getItem('frogtalk-theme') || 'dark';
+      document.querySelectorAll('.theme-btn').forEach(btn => {
+        btn.style.borderColor = btn.dataset.theme === saved ? '#4caf50' : '#333';
+      });
+    } catch {}
+  }
 }
 
 function _normalizeNetworkUrl(url) {
@@ -1031,12 +1041,11 @@ function _networkAddressRow(address, tone = 'tor') {
   const safe = UI.escHtml(appUrl || address || '');
   const isTor = tone === 'tor';
   const color = isTor ? '#7fd6a2' : '#9aa3aa';
-  const icon = isTor ? '🧅' : '🌐';
   const bg = isTor ? 'rgba(51,122,82,.12)' : 'transparent';
   return `
     <div style="display:flex;align-items:center;gap:6px;min-width:0;margin-top:4px;background:${bg};border:${isTor ? '1px solid rgba(92,171,118,.22)' : 'none'};border-radius:8px;padding:${isTor ? '6px 8px' : '0'}">
       <button type="button" onclick="UI.copy('${safe}').then(ok=>UI.showToast(ok?'App link copied':'Could not copy address', ok?'success':'error'))" title="Copy app link" style="flex:1;min-width:0;background:none;border:none;color:${color};padding:0;text-align:left;cursor:pointer;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-        ${icon} ${safe}
+        ${safe}
       </button>
       <button type="button" onclick="window.open('${safe}','_blank','noopener')" title="Open app" style="flex:0 0 auto;background:#101010;border:1px solid rgba(255,255,255,.08);color:${color};border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer">Open</button>
       <button type="button" onclick="UI.copy('${safe}').then(ok=>UI.showToast(ok?'App link copied':'Could not copy address', ok?'success':'error'))" title="Copy app link" style="flex:0 0 auto;background:#101010;border:1px solid rgba(255,255,255,.08);color:${color};border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer">Copy</button>
@@ -1054,7 +1063,7 @@ async function _showTorModeDialog({ title, body, address = '', confirmLabel = ''
     card.innerHTML = `
       <div style="padding:18px 20px 14px;background:radial-gradient(circle at top left,rgba(91,196,124,.16),transparent 55%)">
         <div style="display:flex;align-items:center;gap:12px">
-          <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#173626,#0d1812);display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid rgba(95,181,121,.25)">🧅</div>
+          <div style="width:44px;height:44px;border-radius:14px;background:linear-gradient(135deg,#173626,#0d1812);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;letter-spacing:.06em;color:#85d7a0;border:1px solid rgba(95,181,121,.25)">TOR</div>
           <div>
             <div style="font-size:18px;color:#e7f5eb;font-weight:800;letter-spacing:.01em">${UI.escHtml(title || 'Tor Mode')}</div>
             <div style="font-size:12px;color:#8fb198;margin-top:3px">Use hidden services instead of public clearnet routing.</div>
@@ -1292,16 +1301,16 @@ function _renderNetworkServersList() {
     const chips = [];
     if (isConnected) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(62,207,101,.15);border:1px solid rgba(62,207,101,.3);color:#88e7a4;font-size:10px;font-weight:700;letter-spacing:.03em">CONNECTED</span>');
     if ((s.official || 0) || s.trust_tier === 'official') chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(52,130,255,.12);border:1px solid rgba(52,130,255,.25);color:#8fc7ff;font-size:10px;font-weight:700;letter-spacing:.03em">OFFICIAL DIR</span>');
-    if (s.onion_url) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(62,170,101,.13);border:1px solid rgba(133,215,160,.28);color:#85d7a0;font-size:10px;font-weight:700;letter-spacing:.03em">🧅 ONION</span>');
+    if (s.onion_url) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(62,170,101,.13);border:1px solid rgba(133,215,160,.28);color:#85d7a0;font-size:10px;font-weight:700;letter-spacing:.03em">TOR</span>');
     if (torPreferred && s.onion_url) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(120,180,40,.13);border:1px solid rgba(180,230,80,.22);color:#d7f08a;font-size:10px;font-weight:700;letter-spacing:.03em">TOR MODE</span>');
     if (trustChecked && isSameHash) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(30,58,36,.8);border:1px solid rgba(80,220,120,.22);color:#8fffaa;font-size:10px;font-weight:700;letter-spacing:.03em">✓ SAME HASH</span>');
     if (trustChecked && isOfficialCopy) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(47,42,22,.8);border:1px solid rgba(255,200,60,.2);color:#ffd66d;font-size:10px;font-weight:700;letter-spacing:.03em">LEGIT COPY</span>');
     if (trustChecked && !isSameHash && !trustError) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(58,29,29,.8);border:1px solid rgba(255,80,80,.2);color:#ff9f9f;font-size:10px;font-weight:700;letter-spacing:.03em">⚠ HASH MISMATCH</span>');
     if (trustError) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(53,38,26,.8);border:1px solid rgba(255,150,80,.2);color:#ffbf8f;font-size:10px;font-weight:700;letter-spacing:.03em">VERIFY ERROR</span>');
 
-    const locationIcon = region === 'Tor Hidden Service' ? '🧅' : '📍';
-    const locationRow = (!torPreferred && region)
-      ? `<div style="font-size:11px;color:#7a94a6;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${locationIcon} ${UI.escHtml(region)}</div>`
+    const isTorRegion = region === 'Tor Hidden Service';
+    const locationRow = (!torPreferred && region && !isTorRegion)
+      ? `<div style="font-size:11px;color:#7a94a6;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">📍 ${UI.escHtml(region)}</div>`
       : '';
     const addressRow = _isOnionNetworkUrl(publicAddr)
       ? _networkAddressRow(publicAddr, 'tor')
@@ -1784,6 +1793,18 @@ function applyTheme(theme) {
 
 function _applyThemeVars(theme) {
   const root = document.documentElement;
+  if (theme === 'custom') {
+    try {
+      const d = JSON.parse(localStorage.getItem('frogtalk-custom-theme') || '{}');
+      if (d.accent) root.style.setProperty('--accent-color', d.accent);
+      if (d.bg) root.style.setProperty('--bg-color', d.bg);
+      if (d.surface) root.style.setProperty('--surface-color', d.surface);
+      if (d.border) root.style.setProperty('--border-color', d.border);
+      if (d.text) root.style.setProperty('--text-color', d.text);
+      if (d.muted) root.style.setProperty('--text-muted', d.muted);
+      return;
+    } catch {}
+  }
   const themes = {
     dark: { bg: '#0d0d0d', surface: '#1e1e1e', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#4caf50' },
     light: { bg: '#f5f5f5', surface: '#ffffff', text: '#333333', muted: '#666', border: '#ddd', accent: '#4caf50' },
@@ -1791,7 +1812,10 @@ function _applyThemeVars(theme) {
     forest: { bg: '#0a1a0a', surface: '#152015', text: '#c0e0c0', muted: '#88aa88', border: '#254025', accent: '#4caf50' },
     cyberpunk: { bg: '#0a000f', surface: '#1a0a24', text: '#e0d0ff', muted: '#9988bb', border: '#3a1a50', accent: '#bf5af2' },
     ocean: { bg: '#040d18', surface: '#0a1628', text: '#c8ddf0', muted: '#6899bb', border: '#162a45', accent: '#2196f3' },
-    sunset: { bg: '#1a0a05', surface: '#2a1208', text: '#f0d8c8', muted: '#bb8866', border: '#3a2010', accent: '#ff7043' }
+    sunset: { bg: '#1a0a05', surface: '#2a1208', text: '#f0d8c8', muted: '#bb8866', border: '#3a2010', accent: '#ff7043' },
+    rose: { bg: '#1a0814', surface: '#240a18', text: '#f5d8e6', muted: '#bb8aa3', border: '#3a1a2a', accent: '#ff6b9d' },
+    solarized: { bg: '#002b36', surface: '#073642', text: '#93a1a1', muted: '#586e75', border: '#0a4a55', accent: '#b58900' },
+    mono: { bg: '#0a0a0a', surface: '#1a1a1a', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#cccccc' }
   };
   const t = themes[theme] || themes.dark;
   root.style.setProperty('--bg-color', t.bg);
@@ -1801,6 +1825,85 @@ function _applyThemeVars(theme) {
   root.style.setProperty('--border-color', t.border);
   root.style.setProperty('--accent-color', t.accent);
 }
+
+// ── Custom theme editor ──────────────────────────────────────────────────────
+function _customThemeFromInputs() {
+  const get = id => (document.getElementById(id) || {}).value;
+  return {
+    accent: get('ct-accent'),
+    bg: get('ct-bg'),
+    surface: get('ct-surface'),
+    border: get('ct-border'),
+    text: get('ct-text'),
+    muted: get('ct-muted')
+  };
+}
+function updateCustomTheme() {
+  const root = document.documentElement;
+  const d = _customThemeFromInputs();
+  if (d.accent) root.style.setProperty('--accent-color', d.accent);
+  if (d.bg) root.style.setProperty('--bg-color', d.bg);
+  if (d.surface) root.style.setProperty('--surface-color', d.surface);
+  if (d.border) root.style.setProperty('--border-color', d.border);
+  if (d.text) root.style.setProperty('--text-color', d.text);
+  if (d.muted) root.style.setProperty('--text-muted', d.muted);
+  document.body.dataset.theme = 'custom';
+}
+function saveCustomTheme() {
+  const d = _customThemeFromInputs();
+  localStorage.setItem('frogtalk-custom-theme', JSON.stringify(d));
+  localStorage.setItem('frogtalk-theme', 'custom');
+  document.body.dataset.theme = 'custom';
+  updateCustomTheme();
+  if (typeof toast === 'function') toast('Custom theme saved!', 'success');
+  else if (typeof UI !== 'undefined' && UI.showToast) UI.showToast('Custom theme saved!', 'success');
+}
+function resetCustomTheme() {
+  localStorage.removeItem('frogtalk-custom-theme');
+  applyTheme('dark');
+  loadCustomThemeIntoInputs();
+  if (typeof toast === 'function') toast('Reset to Dark', 'success');
+}
+function exportThemeJson() {
+  const d = _customThemeFromInputs();
+  const json = JSON.stringify(d, null, 2);
+  if (navigator.clipboard) navigator.clipboard.writeText(json).catch(() => {});
+  prompt('Theme JSON (copied to clipboard if supported):', json);
+}
+function importThemeJson() {
+  const txt = prompt('Paste theme JSON:');
+  if (!txt) return;
+  try {
+    const d = JSON.parse(txt);
+    ['accent', 'bg', 'surface', 'border', 'text', 'muted'].forEach(k => {
+      const el = document.getElementById('ct-' + k);
+      if (el && typeof d[k] === 'string' && /^#[0-9a-f]{3,8}$/i.test(d[k])) el.value = d[k];
+    });
+    saveCustomTheme();
+  } catch {
+    if (typeof toast === 'function') toast('Invalid theme JSON', 'error');
+  }
+}
+function loadCustomThemeIntoInputs() {
+  const raw = localStorage.getItem('frogtalk-custom-theme');
+  if (!raw) return;
+  try {
+    const d = JSON.parse(raw);
+    ['accent', 'bg', 'surface', 'border', 'text', 'muted'].forEach(k => {
+      const el = document.getElementById('ct-' + k);
+      if (el && d[k]) el.value = d[k];
+    });
+  } catch {}
+}
+// Expose globally so onclick=... handlers in index.html can find them.
+try {
+  window.updateCustomTheme = updateCustomTheme;
+  window.saveCustomTheme = saveCustomTheme;
+  window.resetCustomTheme = resetCustomTheme;
+  window.exportThemeJson = exportThemeJson;
+  window.importThemeJson = importThemeJson;
+  window.loadCustomThemeIntoInputs = loadCustomThemeIntoInputs;
+} catch {}
 
 async function confirmDeleteAccount() {
   const confirmed = confirm('⚠️ Are you absolutely sure you want to delete your account?\n\nThis action CANNOT be undone. All your messages, friends, and data will be permanently deleted.');

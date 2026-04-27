@@ -1,6 +1,6 @@
 {
   "name": "frogtalk",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "FrogTalk - End-to-end encrypted chat with voice & video calls",
   "main": "main.js",
   "homepage": "https://frogtalk.xyz",
@@ -9,8 +9,8 @@
     "build": "electron-builder --linux",
     "build-appimage": "electron-builder --linux AppImage",
     "build-deb": "electron-builder --linux deb",
-    "build-win": "electron-builder --win nsis",
-    "build-all": "electron-builder --linux AppImage deb --win nsis"
+    "build-win": "electron-builder --win zip portable",
+    "build-all": "electron-builder --linux AppImage deb --win zip portable"
   },
   "author": {
     "name": "FrogTalk",
@@ -49,10 +49,15 @@
     },
     "win": {
       "target": [
-        "nsis"
+        "zip",
+        "portable"
       ],
-      "artifactName": "FrogTalk-${version}-Setup.${ext}",
-      "publisherName": "FrogTalk"
+      "artifactName": "FrogTalk-${version}-win-x64.${ext}",
+      "publisherName": "FrogTalk",
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "FrogTalk-${version}-win-x64-portable.${ext}"
     },
     "nsis": {
       "oneClick": false,

@@ -745,15 +745,52 @@ async def download_deb():
 
 @app.get("/download/windows")
 async def download_windows():
-    """Always serves the latest Windows installer/exe build."""
+    """Serves the latest Windows portable .exe (preferred), falling back to .zip."""
     import glob
-    candidates = sorted(glob.glob("static/FrogTalk-*-Setup.exe") + glob.glob("static/FrogTalk-*.exe"))
+    # Prefer portable .exe (single-file, just run it). Fall back to zip / installer.
+    candidates = sorted(
+        glob.glob("static/FrogTalk-*-win-x64-portable.exe")
+        + glob.glob("static/FrogTalk-*-portable.exe")
+        + glob.glob("static/FrogTalk-*-Setup.exe")
+        + glob.glob("static/FrogTalk-*-win-x64.zip")
+        + glob.glob("static/FrogTalk-*-win.zip")
+    )
+    # Sort so portable.exe wins even if zip has higher-looking version: re-prioritize
+    portable = [p for p in candidates if "portable" in p.lower()]
+    setups = [p for p in candidates if p.endswith(".exe") and "portable" not in p.lower()]
+    zips = [p for p in candidates if p.endswith(".zip")]
+    ordered = (sorted(portable) + sorted(setups) + sorted(zips))
+    path = ordered[-1] if portable else (ordered[0] if ordered else "")
+    if portable:
+        path = sorted(portable)[-1]
+    if not path or not os.path.exists(path):
+        return FileResponse("static/index.html")
+    media = (
+        "application/zip"
+        if path.endswith(".zip")
+        else "application/vnd.microsoft.portable-executable"
+    )
+    return FileResponse(
+        path,
+        media_type=media,
+        filename=os.path.basename(path),
+    )
+
+
+@app.get("/download/windows-zip")
+async def download_windows_zip():
+    """Serves the latest Windows .zip build (extract & run)."""
+    import glob
+    candidates = sorted(
+        glob.glob("static/FrogTalk-*-win-x64.zip")
+        + glob.glob("static/FrogTalk-*-win.zip")
+    )
     path = candidates[-1] if candidates else ""
     if not path or not os.path.exists(path):
         return FileResponse("static/index.html")
     return FileResponse(
         path,
-        media_type="application/vnd.microsoft.portable-executable",
+        media_type="application/zip",
         filename=os.path.basename(path),
     )
 

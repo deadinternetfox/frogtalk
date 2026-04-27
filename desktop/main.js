@@ -141,51 +141,65 @@ function createWindow() {
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-          background: linear-gradient(135deg, #0c1713 0%, #0a1411 50%, #08110e 100%);
+          background:
+            radial-gradient(900px 380px at 10% 0%, rgba(76,175,80,.10), transparent 60%),
+            radial-gradient(900px 420px at 110% 110%, rgba(111,199,150,.08), transparent 60%),
+            linear-gradient(180deg, #12231e 0%, #0a1411 60%, #08110e 100%);
           display: flex;
           align-items: center;
           justify-content: center;
           height: 100vh;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
           color: #dff5e8;
+          overflow: hidden;
         }
         .load-container {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 20px;
+          gap: 18px;
           text-align: center;
+          padding: 28px 36px;
+          background: linear-gradient(180deg, rgba(23,48,39,.55) 0%, rgba(16,32,24,.55) 100%);
+          border: 1px solid #2f5548;
+          border-radius: 18px;
+          box-shadow: 0 18px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(76,175,80,.08);
+          backdrop-filter: blur(8px);
         }
         .load-logo {
-          font-size: 48px;
-          margin-bottom: 10px;
-          animation: bounce 2s infinite;
+          font-size: 56px;
+          margin-bottom: 4px;
+          animation: bounce 1.6s ease-in-out infinite;
+          filter: drop-shadow(0 4px 12px rgba(76,175,80,.35));
         }
         .load-title {
-          font-size: 24px;
+          font-size: 26px;
           font-weight: 700;
-          color: #4caf50;
           letter-spacing: 1px;
+          background: linear-gradient(135deg, #ffffff 0%, #b8f0c0 60%, #4caf50 100%);
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
         .load-spinner {
-          width: 40px;
-          height: 40px;
-          border: 3px solid #2f5548;
+          width: 38px;
+          height: 38px;
+          border: 3px solid #1f3a30;
           border-top-color: #4caf50;
+          border-right-color: #6fbf7e;
           border-radius: 50%;
           animation: spin 1s linear infinite;
         }
         .load-text {
-          font-size: 13px;
+          font-size: 12px;
           color: #85a89a;
-          letter-spacing: 0.5px;
+          letter-spacing: 0.8px;
+          text-transform: uppercase;
         }
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
+        @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes bounce {
           0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-10px); }
+          50% { transform: translateY(-8px); }
         }
       </style>
     </head>
@@ -194,7 +208,7 @@ function createWindow() {
         <div class="load-logo">🐸</div>
         <div class="load-title">FrogTalk</div>
         <div class="load-spinner"></div>
-        <div class="load-text">Loading channels…</div>
+        <div class="load-text">Connecting to the pond…</div>
       </div>
     </body>
     </html>

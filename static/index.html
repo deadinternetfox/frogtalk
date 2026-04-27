@@ -228,133 +228,79 @@
 #modal-profile .profile-avatar-hint{color:#9bbfaf !important}
 #modal-profile hr,
 #modal-profile .modal-divider{border-color:#25463a !important;background:#25463a !important}
+.theme-color-row{display:flex;align-items:center;gap:8px;background:linear-gradient(180deg,#12231e,#0f1d19);border:1px solid #2f5548;border-radius:8px;padding:8px 10px;cursor:pointer}
+.theme-color-row span{flex:1;font-size:12px;color:#dff5e8}
+.theme-color-row input[type=color]{width:36px;height:28px;border:1px solid #2f5548;border-radius:6px;background:transparent;cursor:pointer;padding:0}
+body[data-theme="sunset"] .theme-color-row,
+body[data-theme="rose"] .theme-color-row,
+body[data-theme="solarized"] .theme-color-row,
+body[data-theme="mono"] .theme-color-row{
+  background:var(--bg-color) !important;
+  border:1px solid var(--border-color) !important;
+}
+body[data-theme="sunset"] .theme-color-row span,
+body[data-theme="rose"] .theme-color-row span,
+body[data-theme="solarized"] .theme-color-row span,
+body[data-theme="mono"] .theme-color-row span{color:var(--text-color) !important}
 
 /* Theme override — when user picks a non-green theme (Light/Midnight/Cyberpunk/
    Ocean/Sunset), drop the hardcoded green look on new surfaces and use the
    theme vars so the Appearance theme editor still recolors everything. Dark
    and Forest keep the polished green gradient. */
-body[data-theme="light"] #modal-profile .modal,
-body[data-theme="midnight"] #modal-profile .modal,
-body[data-theme="cyberpunk"] #modal-profile .modal,
-body[data-theme="ocean"] #modal-profile .modal,
-body[data-theme="sunset"] #modal-profile .modal{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .modal{
   background:var(--surface-color) !important;
   border:1px solid var(--border-color) !important;
   color:var(--text-color) !important;
 }
-body[data-theme="light"] #modal-profile .modal-title,
-body[data-theme="midnight"] #modal-profile .modal-title,
-body[data-theme="cyberpunk"] #modal-profile .modal-title,
-body[data-theme="ocean"] #modal-profile .modal-title,
-body[data-theme="sunset"] #modal-profile .modal-title{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .modal-title{
   color:var(--text-color) !important;
   border-bottom:1px solid var(--border-color) !important;
 }
-body[data-theme="light"] #modal-profile .modal-label,
-body[data-theme="midnight"] #modal-profile .modal-label,
-body[data-theme="cyberpunk"] #modal-profile .modal-label,
-body[data-theme="ocean"] #modal-profile .modal-label,
-body[data-theme="sunset"] #modal-profile .modal-label{color:var(--text-muted) !important}
-body[data-theme="light"] #modal-profile .modal-input,
-body[data-theme="midnight"] #modal-profile .modal-input,
-body[data-theme="cyberpunk"] #modal-profile .modal-input,
-body[data-theme="ocean"] #modal-profile .modal-input,
-body[data-theme="sunset"] #modal-profile .modal-input,
-body[data-theme="light"] #modal-profile textarea.modal-input,
-body[data-theme="midnight"] #modal-profile textarea.modal-input,
-body[data-theme="cyberpunk"] #modal-profile textarea.modal-input,
-body[data-theme="ocean"] #modal-profile textarea.modal-input,
-body[data-theme="sunset"] #modal-profile textarea.modal-input,
-body[data-theme="light"] #modal-profile select.modal-input,
-body[data-theme="midnight"] #modal-profile select.modal-input,
-body[data-theme="cyberpunk"] #modal-profile select.modal-input,
-body[data-theme="ocean"] #modal-profile select.modal-input,
-body[data-theme="sunset"] #modal-profile select.modal-input{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .modal-label{color:var(--text-muted) !important}
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .modal-input,
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile textarea.modal-input,
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile select.modal-input{
   background:var(--bg-color) !important;
   border:1px solid var(--border-color) !important;
   color:var(--text-color) !important;
 }
-body[data-theme="light"] #modal-profile .modal-input:focus,
-body[data-theme="midnight"] #modal-profile .modal-input:focus,
-body[data-theme="cyberpunk"] #modal-profile .modal-input:focus,
-body[data-theme="ocean"] #modal-profile .modal-input:focus,
-body[data-theme="sunset"] #modal-profile .modal-input:focus{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .modal-input:focus{
   border-color:var(--accent-color) !important;
   box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 25%, transparent) !important;
   background:var(--bg-color) !important;
 }
-body[data-theme="light"] #modal-profile .modal-btn.secondary,
-body[data-theme="midnight"] #modal-profile .modal-btn.secondary,
-body[data-theme="cyberpunk"] #modal-profile .modal-btn.secondary,
-body[data-theme="ocean"] #modal-profile .modal-btn.secondary,
-body[data-theme="sunset"] #modal-profile .modal-btn.secondary{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .modal-btn.secondary{
   background:var(--bg-color) !important;
   color:var(--text-color) !important;
   border:1px solid var(--border-color) !important;
 }
-body[data-theme="light"] #modal-profile .modal-btn.primary,
-body[data-theme="midnight"] #modal-profile .modal-btn.primary,
-body[data-theme="cyberpunk"] #modal-profile .modal-btn.primary,
-body[data-theme="ocean"] #modal-profile .modal-btn.primary,
-body[data-theme="sunset"] #modal-profile .modal-btn.primary{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .modal-btn.primary{
   background:var(--accent-color) !important;
   color:#fff !important;
   box-shadow:0 4px 14px color-mix(in srgb, var(--accent-color) 30%, transparent) !important;
 }
-body[data-theme="light"] #modal-profile .settings-tab,
-body[data-theme="midnight"] #modal-profile .settings-tab,
-body[data-theme="cyberpunk"] #modal-profile .settings-tab,
-body[data-theme="ocean"] #modal-profile .settings-tab,
-body[data-theme="sunset"] #modal-profile .settings-tab{color:var(--text-muted) !important}
-body[data-theme="light"] #modal-profile .settings-tab.active,
-body[data-theme="midnight"] #modal-profile .settings-tab.active,
-body[data-theme="cyberpunk"] #modal-profile .settings-tab.active,
-body[data-theme="ocean"] #modal-profile .settings-tab.active,
-body[data-theme="sunset"] #modal-profile .settings-tab.active{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .settings-tab{color:var(--text-muted) !important}
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .settings-tab.active{
   background:var(--accent-dim) !important;
   color:var(--accent-color) !important;
   border-color:var(--accent-color) !important;
 }
-body[data-theme="light"] #modal-profile .settings-tabs,
-body[data-theme="midnight"] #modal-profile .settings-tabs,
-body[data-theme="cyberpunk"] #modal-profile .settings-tabs,
-body[data-theme="ocean"] #modal-profile .settings-tabs,
-body[data-theme="sunset"] #modal-profile .settings-tabs{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #modal-profile .settings-tabs{
   border-bottom:1px solid var(--border-color) !important;
 }
 /* Same for the Friends popup, social/board sidebars, and overlay topbars */
-body[data-theme="light"] #friends-panel .modal,
-body[data-theme="midnight"] #friends-panel .modal,
-body[data-theme="cyberpunk"] #friends-panel .modal,
-body[data-theme="ocean"] #friends-panel .modal,
-body[data-theme="sunset"] #friends-panel .modal{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #friends-panel .modal{
   background:var(--surface-color) !important;
   border:1px solid var(--border-color) !important;
   color:var(--text-color) !important;
 }
-body[data-theme="light"] #board-side-menu,
-body[data-theme="midnight"] #board-side-menu,
-body[data-theme="cyberpunk"] #board-side-menu,
-body[data-theme="ocean"] #board-side-menu,
-body[data-theme="sunset"] #board-side-menu,
-body[data-theme="light"] #social-side-menu,
-body[data-theme="midnight"] #social-side-menu,
-body[data-theme="cyberpunk"] #social-side-menu,
-body[data-theme="ocean"] #social-side-menu,
-body[data-theme="sunset"] #social-side-menu{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #board-side-menu,
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #social-side-menu{
   background:var(--bg-color) !important;
   border-right:1px solid var(--border-color) !important;
 }
-body[data-theme="light"] .social-topbar,
-body[data-theme="midnight"] .social-topbar,
-body[data-theme="cyberpunk"] .social-topbar,
-body[data-theme="ocean"] .social-topbar,
-body[data-theme="sunset"] .social-topbar,
-body[data-theme="light"] .board-overlay-topbar,
-body[data-theme="midnight"] .board-overlay-topbar,
-body[data-theme="cyberpunk"] .board-overlay-topbar,
-body[data-theme="ocean"] .board-overlay-topbar,
-body[data-theme="sunset"] .board-overlay-topbar{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) .social-topbar,
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) .board-overlay-topbar{
   background:var(--surface-color) !important;
   border-bottom:1px solid var(--border-color) !important;
 }
@@ -362,64 +308,32 @@ body[data-theme="sunset"] .board-overlay-topbar{
 /* Drop the green gradients on the main chat surfaces too when the user
    selects a non-default theme, so the Appearance theme editor recolors the
    whole app and not just the message text. */
-body[data-theme="light"] #server-list,
-body[data-theme="midnight"] #server-list,
-body[data-theme="cyberpunk"] #server-list,
-body[data-theme="ocean"] #server-list,
-body[data-theme="sunset"] #server-list{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #server-list{
   background:var(--bg-color) !important;
   border-right:1px solid var(--border-color) !important;
 }
-body[data-theme="light"] #sidebar,
-body[data-theme="midnight"] #sidebar,
-body[data-theme="cyberpunk"] #sidebar,
-body[data-theme="ocean"] #sidebar,
-body[data-theme="sunset"] #sidebar{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #sidebar{
   background:var(--surface-color) !important;
   border-right:1px solid var(--border-color) !important;
 }
-body[data-theme="light"] #main,
-body[data-theme="midnight"] #main,
-body[data-theme="cyberpunk"] #main,
-body[data-theme="ocean"] #main,
-body[data-theme="sunset"] #main{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #main{
   background:var(--bg-color) !important;
 }
-body[data-theme="light"] #messages-area,
-body[data-theme="midnight"] #messages-area,
-body[data-theme="cyberpunk"] #messages-area,
-body[data-theme="ocean"] #messages-area,
-body[data-theme="sunset"] #messages-area{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #messages-area{
   background:var(--bg-color) !important;
 }
-body[data-theme="light"] #chat-header,
-body[data-theme="midnight"] #chat-header,
-body[data-theme="cyberpunk"] #chat-header,
-body[data-theme="ocean"] #chat-header,
-body[data-theme="sunset"] #chat-header{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #chat-header{
   background:var(--surface-color) !important;
   border-bottom:1px solid var(--border-color) !important;
 }
-body[data-theme="light"] #input-area,
-body[data-theme="midnight"] #input-area,
-body[data-theme="cyberpunk"] #input-area,
-body[data-theme="ocean"] #input-area,
-body[data-theme="sunset"] #input-area{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #input-area{
   background:var(--surface-color) !important;
 }
-body[data-theme="light"] #users-panel,
-body[data-theme="midnight"] #users-panel,
-body[data-theme="cyberpunk"] #users-panel,
-body[data-theme="ocean"] #users-panel,
-body[data-theme="sunset"] #users-panel{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #users-panel{
   background:var(--surface-color) !important;
   border-left:1px solid var(--border-color) !important;
 }
-body[data-theme="light"] #self-panel,
-body[data-theme="midnight"] #self-panel,
-body[data-theme="cyberpunk"] #self-panel,
-body[data-theme="ocean"] #self-panel,
-body[data-theme="sunset"] #self-panel{
+body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #self-panel{
   background:var(--bg-color) !important;
   border-top:1px solid var(--border-color) !important;
 }
@@ -1556,8 +1470,14 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 }
 .gif-btn:hover{color:#4caf50;background:rgba(76,175,80,.08)}
 .encrypt-indicator{
-  font-size:11px;color:#4caf50;display:flex;align-items:center;gap:4px;
-  padding:4px 16px 0;flex-shrink:0
+  font-size:11px;display:flex;align-items:center;gap:6px;
+  padding:6px 16px 0;flex-shrink:0;
+  background:linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);
+  border-bottom:1px solid #1f3a30;
+  color:#85d7a0;font-weight:600;letter-spacing:.04em;text-transform:uppercase
+}
+.encrypt-indicator .enc-lock{
+  filter:drop-shadow(0 0 4px rgba(76,175,80,.45));opacity:.95;margin:0
 }
 
 /* ─── Users panel (right sidebar) ──────────────────────────── */
@@ -5192,36 +5112,74 @@ window.ConnErr = (function(){
     <div id="set-pane-appear" style="display:none">
       <label class="modal-label">Theme</label>
       <div id="theme-options" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
-        <button class="theme-btn" data-theme="dark" style="padding:12px;border:2px solid #333;background:#0d0d0d;color:#e0e0e0;border-radius:8px;cursor:pointer">
+        <button class="theme-btn" data-theme="dark" onclick="selectTheme('dark')" style="padding:12px;border:2px solid #333;background:#0d0d0d;color:#e0e0e0;border-radius:8px;cursor:pointer">
           <div style="font-size:20px">🌙</div>
           <div style="font-size:13px;margin-top:4px">Dark</div>
         </button>
-        <button class="theme-btn" data-theme="light" style="padding:12px;border:2px solid #333;background:#f5f5f5;color:#333;border-radius:8px;cursor:pointer">
+        <button class="theme-btn" data-theme="light" onclick="selectTheme('light')" style="padding:12px;border:2px solid #333;background:#f5f5f5;color:#333;border-radius:8px;cursor:pointer">
           <div style="font-size:20px">☀️</div>
           <div style="font-size:13px;margin-top:4px">Light</div>
         </button>
-        <button class="theme-btn" data-theme="midnight" style="padding:12px;border:2px solid #333;background:#0a0a1a;color:#8888ff;border-radius:8px;cursor:pointer">
+        <button class="theme-btn" data-theme="midnight" onclick="selectTheme('midnight')" style="padding:12px;border:2px solid #333;background:#0a0a1a;color:#8888ff;border-radius:8px;cursor:pointer">
           <div style="font-size:20px">🌌</div>
           <div style="font-size:13px;margin-top:4px">Midnight</div>
         </button>
-        <button class="theme-btn" data-theme="forest" style="padding:12px;border:2px solid #333;background:#0a1a0a;color:#4caf50;border-radius:8px;cursor:pointer">
+        <button class="theme-btn" data-theme="forest" onclick="selectTheme('forest')" style="padding:12px;border:2px solid #333;background:#0a1a0a;color:#4caf50;border-radius:8px;cursor:pointer">
           <div style="font-size:20px">🌲</div>
           <div style="font-size:13px;margin-top:4px">Forest</div>
         </button>
-        <button class="theme-btn" data-theme="cyberpunk" style="padding:12px;border:2px solid #333;background:linear-gradient(135deg,#0a000f,#1a0a24);color:#bf5af2;border-radius:8px;cursor:pointer">
+        <button class="theme-btn" data-theme="cyberpunk" onclick="selectTheme('cyberpunk')" style="padding:12px;border:2px solid #333;background:linear-gradient(135deg,#0a000f,#1a0a24);color:#bf5af2;border-radius:8px;cursor:pointer">
           <div style="font-size:20px">🌆</div>
           <div style="font-size:13px;margin-top:4px">Cyberpunk</div>
         </button>
-        <button class="theme-btn" data-theme="ocean" style="padding:12px;border:2px solid #333;background:linear-gradient(135deg,#040d18,#0a1628);color:#2196f3;border-radius:8px;cursor:pointer">
+        <button class="theme-btn" data-theme="ocean" onclick="selectTheme('ocean')" style="padding:12px;border:2px solid #333;background:linear-gradient(135deg,#040d18,#0a1628);color:#2196f3;border-radius:8px;cursor:pointer">
           <div style="font-size:20px">🌊</div>
           <div style="font-size:13px;margin-top:4px">Ocean</div>
         </button>
-        <button class="theme-btn" data-theme="sunset" style="padding:12px;border:2px solid #333;background:linear-gradient(135deg,#1a0a05,#2a1208);color:#ff7043;border-radius:8px;cursor:pointer">
+        <button class="theme-btn" data-theme="sunset" onclick="selectTheme('sunset')" style="padding:12px;border:2px solid #333;background:linear-gradient(135deg,#1a0a05,#2a1208);color:#ff7043;border-radius:8px;cursor:pointer">
           <div style="font-size:20px">🌅</div>
           <div style="font-size:13px;margin-top:4px">Sunset</div>
         </button>
+        <button class="theme-btn" data-theme="rose" onclick="selectTheme('rose')" style="padding:12px;border:2px solid #333;background:linear-gradient(135deg,#1a0814,#240a18);color:#ff6b9d;border-radius:8px;cursor:pointer">
+          <div style="font-size:20px">🌹</div>
+          <div style="font-size:13px;margin-top:4px">Rose</div>
+        </button>
+        <button class="theme-btn" data-theme="solarized" onclick="selectTheme('solarized')" style="padding:12px;border:2px solid #333;background:#002b36;color:#b58900;border-radius:8px;cursor:pointer">
+          <div style="font-size:20px">☀️</div>
+          <div style="font-size:13px;margin-top:4px">Solarized</div>
+        </button>
+        <button class="theme-btn" data-theme="mono" onclick="selectTheme('mono')" style="padding:12px;border:2px solid #333;background:#111;color:#e0e0e0;border-radius:8px;cursor:pointer">
+          <div style="font-size:20px">⬛</div>
+          <div style="font-size:13px;margin-top:4px">Mono</div>
+        </button>
+        <button class="theme-btn" data-theme="custom" onclick="selectTheme('custom')" style="padding:12px;border:2px solid #333;background:linear-gradient(135deg,#1a3329,#142a21);color:#7fd2a7;border-radius:8px;cursor:pointer">
+          <div style="font-size:20px">🎨</div>
+          <div style="font-size:13px;margin-top:4px">Custom</div>
+        </button>
       </div>
-      <div style="color:#666;font-size:12px;text-align:center">Theme changes are applied instantly</div>
+
+      <!-- Custom theme editor -->
+      <div class="theme-custom-section" style="margin-top:6px;border-top:1px solid #25463a;padding-top:14px">
+        <label class="modal-label" style="display:flex;align-items:center;justify-content:space-between">
+          <span>🎨 Custom theme</span>
+          <span style="font-size:11px;color:#85a89a;font-weight:400">Live-edits the running app</span>
+        </label>
+        <div class="theme-color-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <label class="theme-color-row"><span>Accent</span><input type="color" id="ct-accent" value="#4caf50" oninput="updateCustomTheme()"></label>
+          <label class="theme-color-row"><span>Background</span><input type="color" id="ct-bg" value="#0d0d0d" oninput="updateCustomTheme()"></label>
+          <label class="theme-color-row"><span>Surface</span><input type="color" id="ct-surface" value="#1e1e1e" oninput="updateCustomTheme()"></label>
+          <label class="theme-color-row"><span>Border</span><input type="color" id="ct-border" value="#2a2a2a" oninput="updateCustomTheme()"></label>
+          <label class="theme-color-row"><span>Text</span><input type="color" id="ct-text" value="#e0e0e0" oninput="updateCustomTheme()"></label>
+          <label class="theme-color-row"><span>Muted</span><input type="color" id="ct-muted" value="#888888" oninput="updateCustomTheme()"></label>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="modal-btn primary" onclick="saveCustomTheme()" style="flex:1;min-width:100px">Save</button>
+          <button class="modal-btn secondary" onclick="exportThemeJson()" style="flex:1;min-width:100px">Export</button>
+          <button class="modal-btn secondary" onclick="importThemeJson()" style="flex:1;min-width:100px">Import</button>
+          <button class="modal-btn secondary" onclick="resetCustomTheme()" style="flex:1;min-width:100px">Reset</button>
+        </div>
+      </div>
+      <div style="color:#85a89a;font-size:12px;text-align:center;margin-top:10px">Theme changes are applied instantly</div>
     </div>
     <!-- Style Tab (Custom Profile CSS) -->
     <div id="set-pane-style" style="display:none">

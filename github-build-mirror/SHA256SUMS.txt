@@ -1,3 +1,4 @@
-6541a5279ca7d00a7ef5b72b46e715d0df25437f51f06a69ccfeb127d925d901  github-build-mirror/FrogTalk-1.3.9.AppImage
-b80fa6879f12ed832accce6f18b455cf6c3031e24731301aa36248751fab166d  github-build-mirror/frogtalk_1.3.9_amd64.deb
-f3ff8b16ee126cf284c4cb18fabc609ebd570453322662597f35140fe63bfca2  github-build-mirror/FrogTalk-1.3.9-Setup.exe
+d55e684a798362f6ab6957724173fb0c7e40b3ed40c22a5064b446966d91a36c  FrogTalk-1.4.1.AppImage
+0939f2e0e22ff4f235e13d07f39aa0821a896996a4294e58ec13840814e0c6b3  FrogTalk-1.4.1-win-x64.zip
+eac5f3a1e2a5e3972e837272a3e5a125b20f5ec46bc649d9c3d5462d05d8e2c7  FrogTalk-1.4.1-win-x64-portable.exe
+b01c19646da09b988f20e93c789ef6b1ffeae6eb15a49bd338b84b55d7f43cb2  frogtalk-v189.apk

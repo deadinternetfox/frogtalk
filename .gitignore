@@ -49,3 +49,10 @@ android/local.properties
 android/app/google-services.json
 *.apk
 *.aab
+
+# ── Build mirror (binaries published to GitHub) ────────────────
+!github-build-mirror/*.apk
+!github-build-mirror/*.AppImage
+!github-build-mirror/*.deb
+!github-build-mirror/*.exe
+!github-build-mirror/*.zip
