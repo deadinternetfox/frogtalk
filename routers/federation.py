@@ -1043,7 +1043,7 @@ async def federation_outbox_processor():
     if not targets:
         return
 
-    events = db.list_federation_outbox_events(status="pending", limit=50)
+    events = db.list_federation_outbox_events(status="pending", limit=10)
     if not events:
         return
 
@@ -1068,7 +1068,8 @@ async def federation_outbox_processor():
         delivered = False
         for base in targets:
             try:
-                raw = _fetch_url_bytes(
+                raw = await asyncio.to_thread(
+                    _fetch_url_bytes,
                     f"{base}/api/federation/events/inbox",
                     timeout_s=4.5,
                     method="POST",
