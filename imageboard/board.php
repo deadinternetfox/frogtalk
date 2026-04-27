@@ -3541,14 +3541,14 @@ if ($singleThread) {
     <!-- ═══ FROGTALK MINI WIDGET ═══ -->
     <div class="chat-widget" id="chatWidget">
         <div class="chat-header" onclick="toggleFrogMini()">
-            <h4 class="frog-mini-headline">🐸 FROGTALK MINI</h4>
+            <h4 class="frog-mini-headline">🐸 FrogTalk</h4>
             <span class="frog-mini-note" id="frogMiniState">Checking login…</span>
             <button class="chat-toggle" id="chatToggleBtn">▲</button>
         </div>
         <div class="chat-body" id="chatBody" style="display:block;max-height:none;">
             <div id="frogMiniGuest" class="frog-mini-guest">
-                <div class="frog-mini-guest-title">Sign in to use Channels + DMs</div>
-                <div class="frog-mini-guest-copy">Use your FrogTalk account to open mini chat while browsing Frog Channel.</div>
+                <div class="frog-mini-guest-title">Sign in to use FrogTalk while browsing</div>
+                <div class="frog-mini-guest-copy">Open your channels and DMs in this side panel without leaving Frog Channel.</div>
                 <div class="frog-mini-actions">
                     <button class="frog-mini-btn login" type="button" onclick="frogMiniAuth('login')">Sign In</button>
                     <button class="frog-mini-btn register" type="button" onclick="frogMiniAuth('register')">Register</button>
@@ -5599,7 +5599,7 @@ if ($singleThread) {
             wrap.classList.add('open');
             if (!frame.src || frame.src === 'about:blank') frame.src = '/app';
         } else {
-            stateEl.textContent = 'Guest mode';
+            stateEl.textContent = 'Not logged in';
             guest.style.display = 'flex';
             wrap.classList.remove('open');
             frame.src = 'about:blank';
