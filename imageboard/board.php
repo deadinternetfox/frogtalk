@@ -2639,8 +2639,6 @@ if ($singleThread) {
     <nav class="top-nav">
         <div class="container">
             <div class="nav-branding">
-                <a href="/" style="text-decoration:none;color:inherit;"><h1 class="logo">&#x1F438; FrogTalk</h1></a>
-                <p class="tagline">ANONYMOUS IMAGEBOARD &middot; SPEAK FREELY</p>
             </div>
             <div class="nav-links">
 </div>
