@@ -2274,7 +2274,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #social-side-backdrop{position:absolute;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:20}
 #social-side-backdrop.open{opacity:1;pointer-events:auto}
 /* Mirror the main chat #server-list look inside Frog Social */
-#social-side-menu{position:absolute;top:0;left:0;bottom:0;width:68px;background:#0d0d0d;border-right:1px solid #1a1a1a;transform:translateX(-100%);transition:transform .22s ease;z-index:25;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4)}
+#social-side-menu{position:absolute;top:0;left:0;bottom:0;width:68px;background:linear-gradient(180deg,#0c1713 0%,#0a1411 55%,#08110e 100%);border-right:1px solid #1d342b;transform:translateX(-100%);transition:transform .22s ease;z-index:25;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4)}
 #social-side-menu.open{transform:translateX(0)}
 #social-side-menu .server-icon{margin:2px 0}
 #social-side-menu .ssm-spacer{flex:1}
@@ -3588,7 +3588,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .board-overlay-meta{font-size:10px;color:#6fbf7e;letter-spacing:.7px;text-transform:uppercase;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .board-overlay-close{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:color .15s}
 .board-overlay-close:hover{color:#e0e0e0;background:#1a1a1a}
-#board-side-menu{position:absolute;top:52px;left:0;bottom:0;width:68px;background:#0d0d0d;border-right:1px solid #1a1a1a;transform:translateX(-100%);transition:transform .22s ease;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4);z-index:25}
+#board-side-menu{position:absolute;top:52px;left:0;bottom:0;width:68px;background:linear-gradient(180deg,#0c1713 0%,#0a1411 55%,#08110e 100%);border-right:1px solid #1d342b;transform:translateX(-100%);transition:transform .22s ease;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4);z-index:25}
 #board-side-menu.open{transform:translateX(0)}
 #board-side-backdrop{position:absolute;top:52px;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:20}
 #board-side-backdrop.open{opacity:1;pointer-events:auto}
@@ -3606,6 +3606,12 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .board-auth-btn.register{background:#4caf50;color:#041304}
 .board-auth-btn:hover{filter:brightness(1.06)}
 .board-overlay-frame{flex:1;border:none;width:100%;height:100%}
+.board-loading{position:absolute;top:52px;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:radial-gradient(900px 380px at 50% 30%,rgba(76,175,80,.10),transparent 62%),linear-gradient(180deg,#0f1b18 0%,#0a1411 100%);color:#86b886;font-size:13px;letter-spacing:.5px;z-index:5;transition:opacity .25s ease}
+.board-loading.hidden{opacity:0;pointer-events:none}
+.board-loading::before{content:'🐸';font-size:48px;line-height:1;animation:boardHop 1.4s ease-in-out infinite;filter:drop-shadow(0 0 12px rgba(76,175,80,.45))}
+.board-loading-spinner{width:34px;height:34px;border:3px solid rgba(76,175,80,.18);border-top-color:#4caf50;border-radius:50%;animation:spin .8s linear infinite}
+.board-loading-text{font-family:'Inter','Segoe UI',sans-serif;color:#7be07b;font-weight:600;text-transform:uppercase;font-size:12px}
+@keyframes boardHop{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
 
 /* CSS preset buttons */
 .css-preset-btn{color:#e0e0e0;transition:all .2s}
@@ -5542,8 +5548,7 @@ window.ConnErr = (function(){
     </div>
     <button class="board-overlay-close" onclick="closeFrogBoard()" title="Close">✕</button>
   </div>
-  <div id="board-side-backdrop" onclick="closeBoardSideMenu()"></div>
-  <aside id="board-side-menu" aria-label="Frog Channel quick switch menu">
+  <div id="board-side-backdrop" onclick="closeBoardSideMenu()"></div>  <aside id="board-side-menu" aria-label="Frog Channel quick switch menu">
     <div class="board-menu-icons">
       <div class="server-icon" data-tip="FrogTalk Home" data-tip-pos="right" onclick="closeFrogBoard();goHomeChannel()">🐸</div>
       <div class="server-divider"></div>
@@ -5569,6 +5574,10 @@ window.ConnErr = (function(){
     <div class="ssm-spacer"></div>
   </aside>
   <iframe id="board-frame" src="" class="board-overlay-frame" allowfullscreen></iframe>
+  <div id="board-loading" class="board-loading">
+    <div class="board-loading-spinner"></div>
+    <div class="board-loading-text">Loading Frog Channel…</div>
+  </div>
 </div>
 
 <!-- ═════════════════════ SCRIPTS ═══════════════════════════════ -->
@@ -5612,11 +5621,18 @@ function isNativeFrogClient() {
 function openFrogBoard() {
   const ol = document.getElementById('board-overlay');
   const frame = document.getElementById('board-frame');
+  const loading = document.getElementById('board-loading');
   if (!ol) return;
   updateBoardSideMenuAuth();
   ol.classList.remove('hidden');
   document.getElementById('board-server-icon')?.classList.add('active');
-  if (!frame.src || !frame.src.includes('/board')) frame.src = '/board/';
+  if (loading) loading.classList.remove('hidden');
+  if (!frame.src || !frame.src.includes('/board')) {
+    frame.src = '/board/';
+  } else if (loading) {
+    // Already loaded previously — hide loader after a short fade-friendly tick.
+    setTimeout(() => loading.classList.add('hidden'), 120);
+  }
 }
 
 function updateBoardSideMenuAuth() {
@@ -5663,7 +5679,10 @@ function closeBoardSideMenu() {
 
 window.addEventListener('storage', updateBoardSideMenuAuth);
 window.addEventListener('focus', updateBoardSideMenuAuth);
-document.getElementById('board-frame')?.addEventListener('load', updateBoardSideMenuAuth);
+document.getElementById('board-frame')?.addEventListener('load', () => {
+  updateBoardSideMenuAuth();
+  document.getElementById('board-loading')?.classList.add('hidden');
+});
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoard(); });
 </script>
 <script src="/static/js/crypto.js?v=191"></script>
