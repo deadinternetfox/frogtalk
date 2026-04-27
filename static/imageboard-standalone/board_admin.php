@@ -46,6 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     switch ($action) {
         case 'save_settings':
+            $settings['board_name'] = substr(trim($_POST['board_name'] ?? 'Frog General'), 0, 60) ?: 'Frog General';
             $settings['require_image_approval'] = isset($_POST['require_image_approval']);
             $settings['board_locked'] = isset($_POST['board_locked']);
             $settings['chat_enabled'] = isset($_POST['chat_enabled']);
@@ -1112,6 +1113,13 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
                     </div>
 
                     <h3 style="color:#00ff41;font-size:13px;margin:18px 0 10px;letter-spacing:1px;text-transform:uppercase">📋 Moderation / Approval</h3>
+                    <h3 style="color:#00ff41;font-size:13px;margin:18px 0 10px;letter-spacing:1px;text-transform:uppercase">🏠 Board Identity</h3>
+                    <div class="form-group">
+                        <label>Board name (shown in header)</label>
+                        <input type="text" name="board_name" value="<?= htmlspecialchars($settings['board_name'] ?? 'Frog General', ENT_QUOTES, 'UTF-8') ?>" maxlength="60" placeholder="Frog General">
+                        <div class="hint">Displayed as the main heading above the subtitle. Default: Frog General</div>
+                    </div>
+
                     <div class="checkbox-row">
                         <input type="checkbox" name="require_image_approval" id="ria" <?= $settings['require_image_approval'] ? 'checked' : '' ?>>
                         <label for="ria">🖼️ Require admin approval for images</label>

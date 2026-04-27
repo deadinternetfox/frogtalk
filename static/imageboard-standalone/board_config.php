@@ -34,6 +34,7 @@ foreach ([DATA_DIR, UPLOAD_DIR, PREVIEW_DIR] as $dir) {
 function loadSettings(): array {
     $file = DATA_DIR . '/settings.json';
     $defaults = [
+        'board_name' => 'Frog General',
         'require_image_approval' => false,
         'board_locked' => false,
         'max_file_size_mb' => 5,
