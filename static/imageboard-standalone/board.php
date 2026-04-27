@@ -2750,25 +2750,12 @@ if ($singleThread) {
     <div class="vignette"></div>
     <div class="sigil-watermark">ᛟ</div>
 
-    <nav class="top-nav">
-        <div class="container">
-            <div class="nav-branding">
-                <a href="/" style="text-decoration:none;color:inherit;"><h1 class="logo">&#x1F438; Frog Channel</h1></a>
-                <p class="logo-meta" id="boardLogoMeta">powered by FrogTalk</p>
-                <p class="tagline">ANONYMOUS IMAGEBOARD &middot; SPEAK FREELY</p>
-            </div>
-            <div class="nav-links">
-</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </nav>
     <div id="walletBackdrop" class="wallet-backdrop hidden" onclick="closeWalletPanel()"></div>
 
     <main>
         <div class="board-container">
             <div class="board-header">
+                <p class="board-subtitle">Anonymous discussion board. No accounts. No tracking. Speak freely.</p>
                 <div class="board-stats">
                     <span class="stat-item">📋 Threads: <span class="stat-val"><?= $threadCount ?></span></span>
                     <span class="stat-sep">·</span>
