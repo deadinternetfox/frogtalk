@@ -97,11 +97,19 @@ async def federation_update_check_task():
     while True:
         await asyncio.sleep(interval)
         try:
-            result = federation_mod.run_update_check_background()
+            # Run the blocking HTTP fetch in a thread so it never stalls the
+            # single uvicorn event loop. Cap the total wait so a slow/hung
+            # upstream cannot freeze background processing.
+            result = await asyncio.wait_for(
+                asyncio.to_thread(federation_mod.run_update_check_background),
+                timeout=20,
+            )
             if not result.get("ok"):
                 print(f"[Federation] Update check failed: {result.get('error')}")
             elif result.get("update_available"):
                 print("[Federation] Update available from main-site feed")
+        except asyncio.TimeoutError:
+            print("[Federation] Update check task timed out; will retry next interval")
         except Exception as e:
             print(f"[Federation] Update check task error: {e}")
 
@@ -216,6 +224,18 @@ app.include_router(server_admin_mod.router)
 app.include_router(ws.router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+# Legacy stale-service-worker shim: very old PWA installs cached `/app.js`
+# at the root path and keep firing 404s on every load, polluting logs and
+# adding request latency. Redirect once to the real /static/js/* path so
+# those clients self-heal on the next load.
+from fastapi.responses import RedirectResponse as _RedirectResponse
+
+@app.get("/app.js", include_in_schema=False)
+async def _legacy_app_js():
+    return _RedirectResponse(url="/static/js/app.js", status_code=308)
+
 
 
 _APP_HTML_PATH = "static/index.html"

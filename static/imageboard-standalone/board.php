@@ -850,8 +850,17 @@ if ($viewThread) {
 
 $isAdmin = isAdminLoggedIn();
 
-// Build dynamic OG tags
-$baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
+// Build dynamic OG tags — honor reverse-proxy headers (Cloudflare/nginx)
+$_isHttps = (
+    (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' && $_SERVER['HTTPS'] !== '')
+    || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower(explode(',', $_SERVER['HTTP_X_FORWARDED_PROTO'])[0]) === 'https')
+    || (isset($_SERVER['HTTP_CF_VISITOR']) && stripos($_SERVER['HTTP_CF_VISITOR'], 'https') !== false)
+    || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
+);
+$_host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? 'frogtalk.xyz';
+// Pin canonical host so previews always point to the public origin Discord can fetch
+if (stripos($_host, 'frogtalk.xyz') === false) { $_host = 'frogtalk.xyz'; }
+$baseUrl = ($_isHttps ? 'https' : 'https') . '://' . $_host;
 $ogTitle = '🐸 Frog Channels on FrogTalk';
 $ogDesc = 'Frog Channels is the anonymous imageboard on FrogTalk. ' . count($threads) . ' active threads. Post images, discuss freely, and share media.';
 $ogImage = $baseUrl . '/board_preview.php?board=index';
@@ -5716,7 +5725,12 @@ if ($singleThread) {
     function _frogMiniIsNativeClient() {
         try {
             var ua = String((navigator && navigator.userAgent) || '');
-            return /Electron|wv\)|; wv|FrogTalkAndroid|FrogTalkDesktop/i.test(ua);
+            // Only treat genuine FrogTalk native shells as "native".
+            // Avoid matching generic Electron / Android WebView (which includes
+            // Discord, Twitter, Facebook in-app browsers and regular mobile
+            // browsers) — otherwise the "powered by FrogTalk" tag is hidden
+            // for ordinary mobile visitors.
+            return /FrogTalkAndroid|FrogTalkDesktop/i.test(ua);
         } catch (e) {
             return false;
         }

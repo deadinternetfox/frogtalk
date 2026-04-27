@@ -196,13 +196,65 @@ function finaliseVoiceMemo () {
     isVoice: true,
   };
 
-  // Show preview
+  // Show preview using the same chat-bubble look the recipient will see.
+  // Wrapped in .att-preview-item so it inherits the same composer-preview
+  // padding/background as image/file attachments instead of the old
+  // browser-default dark <audio controls> bar.
   const url   = URL.createObjectURL(blob);
   const thumb = document.getElementById('attachment-thumb');
   const prev  = document.getElementById('attachment-preview');
-  thumb.innerHTML = `<audio src="${url}" controls style="width:180px;vertical-align:middle"></audio>
-    <span style="font-size:12px;color:#85a89a;margin-left:6px">Voice note · ${formatRecDuration(_recSeconds).replace('● REC ', '')}</span>`;
+  const dur   = formatRecDuration(_recSeconds).replace('● REC ', '');
+  const waveBars = Array.from({length: 20},
+    () => `<div class="wave-bar" style="height:${4 + Math.random() * 20}px"></div>`
+  ).join('');
+  const _inDM = typeof isDMView === 'function' && isDMView();
+  const _voBtn = _inDM
+    ? `<button type="button" class="att-viewonce-fire" title="View once — disappears after viewing"
+                onclick="toggleMediaFlag('view_once')" aria-pressed="false">🔥</button>`
+    : '';
+  thumb.innerHTML = `
+    <div class="att-preview-item att-preview-voice" id="att-preview-item">
+      <div class="att-media-wrap" style="max-width:280px;width:100%">
+        <div class="audio-msg att-voice-bubble" data-src="${url}">
+          <button type="button" class="audio-play-btn" onclick="_attPreviewPlayVoice(this,event)">▶</button>
+          <div class="audio-waves">${waveBars}</div>
+          <div class="audio-meta"><span class="audio-label">Voice</span><span class="audio-duration">${dur}</span></div>
+        </div>
+        ${_voBtn}
+      </div>
+      <div class="att-preview-sub">Voice note · ${dur}</div>
+    </div>`;
   prev.style.display = 'flex';
+}
+
+/* Lightweight inline play/pause for the composer voice preview. Uses a
+   single shared <audio> element so we never leak streams when the user
+   re-records or clears the attachment. */
+let _attPreviewAudio = null;
+function _attPreviewPlayVoice (btn, ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  const wrap = btn.closest('.audio-msg');
+  if (!wrap) return;
+  const src = wrap.getAttribute('data-src');
+  if (!src) return;
+  if (!_attPreviewAudio) _attPreviewAudio = new Audio();
+  // Toggle: same source + currently playing = pause
+  if (_attPreviewAudio.src === src && !_attPreviewAudio.paused) {
+    _attPreviewAudio.pause();
+    wrap.classList.remove('playing');
+    btn.textContent = '▶';
+    return;
+  }
+  if (_attPreviewAudio.src !== src) _attPreviewAudio.src = src;
+  _attPreviewAudio.currentTime = 0;
+  _attPreviewAudio.play().then(() => {
+    wrap.classList.add('playing');
+    btn.textContent = '⏸';
+  }).catch(() => {});
+  _attPreviewAudio.onended = () => {
+    wrap.classList.remove('playing');
+    btn.textContent = '▶';
+  };
 }
 
 function finaliseVideoNote () {
@@ -243,23 +295,33 @@ function showRecordingUI (stream) {
     const thumb = document.getElementById('attachment-thumb');
     prev.style.display = 'flex';
 
-    // Build the canvas
+    // Build the canvas — transparent so it sits cleanly on the new
+    // attachment-preview gradient instead of showing the old dark slab.
     let canvas = document.getElementById('rec-canvas');
     if (!canvas) {
       canvas = document.createElement('canvas');
       canvas.id = 'rec-canvas';
-      canvas.width  = 120;
-      canvas.height = 28;
-      canvas.style.cssText = 'border-radius:8px;background:#0f1d18;vertical-align:middle';
+      canvas.width  = 160;
+      canvas.height = 32;
+      canvas.style.cssText = 'border-radius:18px;background:transparent;vertical-align:middle';
     }
     thumb.innerHTML = '';
-    thumb.appendChild(canvas);
-
+    // Wrap waveform in a chat-style bubble so the recording preview matches
+    // the .audio-msg look used in messages / finished preview.
+    const bubble = document.createElement('div');
+    bubble.className = 'audio-msg att-voice-bubble att-voice-recording';
+    bubble.style.cssText = 'min-width:220px;cursor:default;padding:8px 14px;gap:10px';
+    const recDot = document.createElement('span');
+    recDot.style.cssText = 'width:10px;height:10px;border-radius:50%;background:#f85149;box-shadow:0 0 8px #f85149;flex-shrink:0;animation:wave-bounce .9s ease-in-out infinite alternate';
+    bubble.appendChild(recDot);
+    bubble.appendChild(canvas);
     const dur = document.createElement('span');
     dur.id    = 'rec-duration';
-    dur.style.cssText = 'font-size:12px;color:#f85149;margin-left:8px;font-weight:600';
+    dur.className = 'audio-duration';
+    dur.style.cssText = 'color:#f85149;font-weight:700;white-space:nowrap;font-size:12px';
     dur.textContent   = '● REC 0:00';
-    thumb.appendChild(dur);
+    bubble.appendChild(dur);
+    thumb.appendChild(bubble);
 
     const ctx = canvas.getContext('2d');
     const buf = new Uint8Array(_analyser.frequencyBinCount);

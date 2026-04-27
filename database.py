@@ -19,9 +19,24 @@ DB_PATH = Path(os.getenv("DB_PATH", "data/frogtalk.db"))
 
 def _conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH, detect_types=sqlite3.PARSE_DECLTYPES)
+    # 5s busy timeout avoids "database is locked" errors when multiple
+    # short writes contend (WS broadcast + DM insert + presence update).
+    con = sqlite3.connect(
+        DB_PATH,
+        detect_types=sqlite3.PARSE_DECLTYPES,
+        timeout=5.0,
+    )
     con.row_factory = sqlite3.Row
+    # WAL + NORMAL sync is the standard "fast and safe under WAL" combo.
+    # temp_store=MEMORY keeps sort/temp tables off disk.
+    # 64 MiB page cache + 128 MiB mmap dramatically reduces read latency on
+    # hot tables (messages, dm_messages, sessions). All of these stay
+    # crash-consistent; only OS power-loss can lose a few last writes.
     con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA synchronous=NORMAL")
+    con.execute("PRAGMA temp_store=MEMORY")
+    con.execute("PRAGMA cache_size=-65536")
+    con.execute("PRAGMA mmap_size=134217728")
     con.execute("PRAGMA foreign_keys=ON")
     return con
 

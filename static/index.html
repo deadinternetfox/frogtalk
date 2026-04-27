@@ -1142,6 +1142,16 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .att-preview-item{display:inline-flex;flex-direction:column;align-items:flex-start;max-width:200px;gap:4px}
 .att-preview-item img,.att-preview-item video{max-width:200px;max-height:140px;border-radius:8px;display:block}
 .att-preview-icon{font-size:28px;padding:6px 2px}
+/* Voice-note variant of the composer attachment preview: wider so the
+   chat-style audio-msg bubble (play button + waveform + duration) fits
+   without wrapping, and uses the same green gradient as messages. */
+.att-preview-voice{max-width:300px}
+.att-voice-bubble{min-width:0;max-width:100%;width:100%;padding:8px 14px;gap:10px;cursor:pointer}
+.att-voice-bubble .audio-play-btn{width:32px;height:32px;font-size:14px}
+.att-voice-bubble .audio-waves{height:24px}
+.att-voice-bubble .audio-meta{min-width:36px}
+.att-voice-recording{cursor:default}
+.att-voice-recording .audio-waves{display:none}
 .att-preview-name{font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.2}
 /* Attachment preview v2 — eye overlay acts as the spoiler toggle */
 .att-media-wrap{position:relative;display:inline-block;max-width:200px}

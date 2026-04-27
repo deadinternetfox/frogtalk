@@ -286,6 +286,48 @@ def _check_update_once(auto_apply: bool = False) -> dict:
     if not feed_url:
         return {"ok": False, "error": "update_feed_not_configured"}
 
+    # Self-loop guard: if the configured feed URL points back at this very
+    # server (the common case on the main site itself), skip the outbound
+    # HTTPS round-trip. With a single uvicorn worker this would otherwise
+    # deadlock the event loop on itself via nginx loopback. Read the local
+    # feed config rows directly instead — semantically identical.
+    try:
+        from urllib.parse import urlparse as _urlparse
+        feed_host = (_urlparse(feed_url).hostname or "").lower()
+        own_hosts = {"127.0.0.1", "localhost", "::1"}
+        try:
+            local_ident = db.get_or_create_local_server_identity() or {}
+            own_base = (local_ident.get("base_url") or "").strip()
+            if own_base:
+                own_hosts.add((_urlparse(own_base).hostname or "").lower())
+        except Exception:
+            pass
+        env_host = (_urlparse(os.getenv("FROGTALK_PUBLIC_BASE_URL", "") or "").hostname or "").lower()
+        if env_host:
+            own_hosts.add(env_host)
+        if feed_host and feed_host in own_hosts:
+            latest = {
+                "version": db.get_config("update.feed.version") or "",
+                "package_url": db.get_config("update.feed.package_url") or "",
+                "package_sha256": db.get_config("update.feed.package_sha256") or "",
+                "build_hash": db.get_config("update.feed.build_hash") or "",
+                "notes": db.get_config("update.feed.notes") or "",
+                "published_at": db.get_config("update.feed.published_at") or "",
+            }
+            db.set_config("update.last_checked_at", now)
+            db.set_config("update.last_error", "")
+            return {
+                "ok": True,
+                "feed_url": feed_url,
+                "local": local,
+                "latest": latest,
+                "update_available": False,
+                "applied": None,
+                "self_loop_skipped": True,
+            }
+    except Exception:
+        pass
+
     try:
         latest = _fetch_update_manifest(feed_url)
     except Exception as e:
