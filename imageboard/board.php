@@ -2652,7 +2652,7 @@ if ($singleThread) {
     <main>
         <div class="board-container">
             <div class="board-header">
-                <h2>🐸 Frog Channel</h2>
+                <h2>🐸 Frog General</h2>
                 <p class="board-subtitle">Anonymous discussion board. No accounts. No tracking. Speak freely.</p>
                 <div class="board-stats">
                     <span class="stat-item">📋 Threads: <span class="stat-val"><?= $threadCount ?></span></span>

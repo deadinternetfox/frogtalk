@@ -3588,8 +3588,10 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .board-overlay-meta{font-size:10px;color:#6fbf7e;letter-spacing:.7px;text-transform:uppercase;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .board-overlay-close{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:color .15s}
 .board-overlay-close:hover{color:#e0e0e0;background:#1a1a1a}
-#board-side-menu{position:absolute;top:52px;left:0;bottom:0;width:68px;background:#0d0d0d;border-right:1px solid #1a1a1a;transform:translateX(-100%);transition:transform .22s ease;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4);z-index:2}
+#board-side-menu{position:absolute;top:52px;left:0;bottom:0;width:68px;background:#0d0d0d;border-right:1px solid #1a1a1a;transform:translateX(-100%);transition:transform .22s ease;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;overflow-y:auto;box-shadow:2px 0 24px rgba(0,0,0,.4);z-index:25}
 #board-side-menu.open{transform:translateX(0)}
+#board-side-backdrop{position:absolute;top:52px;left:0;right:0;bottom:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:20}
+#board-side-backdrop.open{opacity:1;pointer-events:auto}
 #board-side-menu.guest-menu{width:min(86vw,300px);align-items:stretch;padding:12px 10px;gap:10px}
 #board-side-menu .board-menu-icons{display:flex;flex-direction:column;align-items:center;gap:4px}
 #board-side-menu .server-icon{margin:2px 0}
@@ -5533,13 +5535,14 @@ window.ConnErr = (function(){
 <!-- ═══════════════════════ FROG CHANNEL OVERLAY ═════════════════════════════════ -->
 <div id="board-overlay" class="board-overlay hidden">
   <div class="board-overlay-topbar">
-    <button class="board-menu-btn" onclick="document.getElementById('board-side-menu').classList.toggle('open')" title="Menu" aria-label="Open menu">🐸</button>
+    <button class="board-menu-btn" onclick="toggleBoardSideMenu()" title="Menu" aria-label="Open menu">🐸</button>
     <div class="board-overlay-title-wrap">
       <span class="board-overlay-title">FrogChannel</span>
       <span class="board-overlay-meta">powered by FrogTalk</span>
     </div>
     <button class="board-overlay-close" onclick="closeFrogBoard()" title="Close">✕</button>
   </div>
+  <div id="board-side-backdrop" onclick="closeBoardSideMenu()"></div>
   <aside id="board-side-menu" aria-label="Frog Channel quick switch menu">
     <div class="board-menu-icons">
       <div class="server-icon" data-tip="FrogTalk Home" data-tip-pos="right" onclick="closeFrogBoard();goHomeChannel()">🐸</div>
@@ -5635,9 +5638,27 @@ function openBoardAuth(mode) {
 function closeFrogBoard() {
   const ol = document.getElementById('board-overlay');
   const menu = document.getElementById('board-side-menu');
+  const back = document.getElementById('board-side-backdrop');
   if (ol) ol.classList.add('hidden');
   if (menu) menu.classList.remove('open');
+  if (back) back.classList.remove('open');
   document.getElementById('board-server-icon')?.classList.remove('active');
+}
+
+function toggleBoardSideMenu() {
+  const menu = document.getElementById('board-side-menu');
+  const back = document.getElementById('board-side-backdrop');
+  if (!menu) return;
+  const willOpen = !menu.classList.contains('open');
+  menu.classList.toggle('open', willOpen);
+  if (back) back.classList.toggle('open', willOpen);
+}
+
+function closeBoardSideMenu() {
+  const menu = document.getElementById('board-side-menu');
+  const back = document.getElementById('board-side-backdrop');
+  if (menu) menu.classList.remove('open');
+  if (back) back.classList.remove('open');
 }
 
 window.addEventListener('storage', updateBoardSideMenuAuth);
