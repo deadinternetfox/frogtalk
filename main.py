@@ -68,26 +68,36 @@ async def official_directory_sync_task():
 
 async def federation_inbox_processor_task():
     """Background task to process incoming federation events with idempotency."""
+    idle_sleep = 30
+    busy_sleep = 5
+    delay = busy_sleep
     while True:
-        await asyncio.sleep(5)
+        await asyncio.sleep(delay)
         try:
-            await federation_mod.federation_inbox_processor()
+            processed = await federation_mod.federation_inbox_processor()
+            delay = busy_sleep if processed else idle_sleep
         except asyncio.CancelledError:
             break
         except Exception as e:
             print(f"[Federation] Inbox processor error: {e}")
+            delay = idle_sleep
 
 
 async def federation_outbox_processor_task():
     """Background task to push local federation outbox events to peers."""
+    idle_sleep = 30
+    busy_sleep = 5
+    delay = busy_sleep
     while True:
-        await asyncio.sleep(5)
+        await asyncio.sleep(delay)
         try:
-            await federation_mod.federation_outbox_processor()
+            sent = await federation_mod.federation_outbox_processor()
+            delay = busy_sleep if sent else idle_sleep
         except asyncio.CancelledError:
             break
         except Exception as e:
             print(f"[Federation] Outbox processor error: {e}")
+            delay = idle_sleep
 
 
 async def federation_update_check_task():

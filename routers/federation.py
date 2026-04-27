@@ -109,7 +109,12 @@ def _fetch_url_bytes(
 
 
 def _select_peer_target(server: dict) -> str:
-    transport = str(db.get_federation_server_transport(str(server.get("server_id") or "")) or "auto").strip().lower()
+    # Prefer transport_preference already on the row (avoids per-peer DB roundtrip
+    # when called in a hot loop). Fall back to a single SELECT only if missing.
+    transport_raw = server.get("transport_preference")
+    if transport_raw is None:
+        transport_raw = db.get_federation_server_transport(str(server.get("server_id") or ""))
+    transport = str(transport_raw or "auto").strip().lower()
     base_url = _normalize_base_url(str(server.get("base_url") or ""))
     onion_url = _normalize_base_url(str(server.get("onion_url") or ""))
     tor_enabled = _tor_mode_enabled()
@@ -848,6 +853,17 @@ async def get_user_identity_claim(
     return claim
 
 
+def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
+    accepted = 0
+    rejected = 0
+    for ev in events:
+        if db.insert_federation_inbox_event(ev):
+            accepted += 1
+        else:
+            rejected += 1
+    return accepted, rejected
+
+
 @router.post("/federation/events/inbox")
 async def federation_inbox(
     body: FederationInboxBody,
@@ -856,13 +872,9 @@ async def federation_inbox(
     if not _fed_token_ok(x_federation_token):
         return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
 
-    accepted = 0
-    rejected = 0
-    for ev in body.events:
-        if db.insert_federation_inbox_event(ev):
-            accepted += 1
-        else:
-            rejected += 1
+    # Run all SQLite writes on a worker thread so the event loop stays
+    # responsive to user requests even when peers spam events.
+    accepted, rejected = await asyncio.to_thread(_insert_inbox_events_sync, body.events)
     return {"accepted": accepted, "rejected": rejected}
 
 
@@ -965,61 +977,67 @@ async def federation_outbox_pull(
     }
 
 
-async def federation_inbox_processor():
-    """Process one inbox batch with idempotency (called periodically by task)."""
+async def federation_inbox_processor() -> int:
+    """Process one inbox batch with idempotency. Returns events processed.
+
+    DB reads/writes are pushed onto worker threads so the single uvicorn event
+    loop stays responsive while we drain federation events. The async handlers
+    themselves may hit the DB synchronously but each call is short.
+    """
     try:
-        events = db.list_federation_inbox_events(status="pending", limit=20)
-        for row in events:
-            event_id = str(row.get("event_id") or "")
-            try:
-                # Idempotency: skip if already applied
-                if db.is_event_applied(event_id):
-                    db.mark_federation_inbox_event(event_id, "applied")
-                    continue
-
-                payload = {}
-                raw_payload = row.get("payload_json")
-                if isinstance(raw_payload, str) and raw_payload.strip():
-                    try:
-                        payload = json.loads(raw_payload)
-                    except Exception:
-                        payload = {}
-
-                event = {
-                    "event_id": event_id,
-                    "event_type": str(row.get("event_type") or ""),
-                    "origin_server_id": str(row.get("origin_server_id") or ""),
-                    "payload": payload,
-                }
-
-                event_type = event["event_type"]
-                if event_type.startswith("message."):
-                    await _handle_message_event(event)
-                elif event_type.startswith("dm."):
-                    await _handle_dm_event(event)
-                elif event_type.startswith("room."):
-                    await _handle_room_event(event)
-                elif event_type.startswith("user."):
-                    await _handle_user_event(event)
-                elif event_type.startswith("social."):
-                    await _handle_social_event(event)
-                elif event_type.startswith("friend."):
-                    await _handle_friend_event(event)
-
-                db.mark_federation_inbox_event(event_id, "applied")
-            except Exception as e:
-                print(f"[Federation] Inbox event {event_id} error: {e}")
-                db.mark_federation_inbox_event(event_id, "failed")
+        events = await asyncio.to_thread(
+            db.list_federation_inbox_events, "pending", 20
+        )
     except Exception as e:
-        print(f"[Federation] Inbox processor error: {e}")
+        print(f"[Federation] Inbox processor list error: {e}")
+        return 0
+
+    processed = 0
+    for row in events:
+        event_id = str(row.get("event_id") or "")
+        try:
+            payload = {}
+            raw_payload = row.get("payload_json")
+            if isinstance(raw_payload, str) and raw_payload.strip():
+                try:
+                    payload = json.loads(raw_payload)
+                except Exception:
+                    payload = {}
+
+            event = {
+                "event_id": event_id,
+                "event_type": str(row.get("event_type") or ""),
+                "origin_server_id": str(row.get("origin_server_id") or ""),
+                "payload": payload,
+            }
+
+            event_type = event["event_type"]
+            if event_type.startswith("message."):
+                await _handle_message_event(event)
+            elif event_type.startswith("dm."):
+                await _handle_dm_event(event)
+            elif event_type.startswith("room."):
+                await _handle_room_event(event)
+            elif event_type.startswith("user."):
+                await _handle_user_event(event)
+            elif event_type.startswith("social."):
+                await _handle_social_event(event)
+            elif event_type.startswith("friend."):
+                await _handle_friend_event(event)
+
+            await asyncio.to_thread(db.mark_federation_inbox_event, event_id, "applied")
+            processed += 1
+        except Exception as e:
+            print(f"[Federation] Inbox event {event_id} error: {e}")
+            try:
+                await asyncio.to_thread(db.mark_federation_inbox_event, event_id, "failed")
+            except Exception:
+                pass
+    return processed
 
 
-async def federation_outbox_processor():
-    """Push pending outbox events to known peers (best-effort)."""
-    fed_token = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
-    if not fed_token:
-        return
-
+def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
+    """Gather (local_server_id, peer_targets, pending_events) in one thread hop."""
     local = db.get_or_create_local_server_identity()
     local_server_id = str(local.get("server_id") or "")
     local_base = _normalize_base_url(
@@ -1027,12 +1045,13 @@ async def federation_outbox_processor():
     ).lower()
 
     peers = db.list_federation_servers(official_only=False)
-    targets = []
+    targets: list[str] = []
     for srv in peers:
         if not srv.get("enabled"):
             continue
         if str(srv.get("server_id") or "") == local_server_id:
             continue
+        # transport_preference is on the row already; no extra query.
         target = _select_peer_target(srv)
         if not target:
             continue
@@ -1041,12 +1060,27 @@ async def federation_outbox_processor():
         targets.append(target)
 
     if not targets:
-        return
-
+        return local_server_id, targets, []
     events = db.list_federation_outbox_events(status="pending", limit=10)
-    if not events:
-        return
+    return local_server_id, targets, events
 
+
+async def federation_outbox_processor() -> int:
+    """Push pending outbox events to known peers (best-effort). Returns events sent."""
+    fed_token = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
+    if not fed_token:
+        return 0
+
+    try:
+        local_server_id, targets, events = await asyncio.to_thread(_outbox_collect_targets_sync)
+    except Exception as e:
+        print(f"[Federation] Outbox collect error: {e}")
+        return 0
+
+    if not targets or not events:
+        return 0
+
+    sent = 0
     for row in events:
         event_id = str(row.get("event_id") or "")
         event_type = str(row.get("event_type") or "")
@@ -1064,6 +1098,13 @@ async def federation_outbox_processor():
             "origin_server_id": local_server_id,
             "payload": payload,
         }
+        body = json.dumps({"events": [envelope]}).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "FrogTalk-FederationPush/1.0",
+            "x-federation-token": fed_token,
+        }
 
         delivered = False
         for base in targets:
@@ -1073,13 +1114,8 @@ async def federation_outbox_processor():
                     f"{base}/api/federation/events/inbox",
                     timeout_s=4.5,
                     method="POST",
-                    data=json.dumps({"events": [envelope]}).encode("utf-8"),
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "application/json",
-                        "User-Agent": "FrogTalk-FederationPush/1.0",
-                        "x-federation-token": fed_token,
-                    },
+                    data=body,
+                    headers=headers,
                 )
                 reply = json.loads(raw.decode("utf-8", errors="replace") or "{}")
                 if int(reply.get("accepted") or 0) > 0:
@@ -1088,7 +1124,12 @@ async def federation_outbox_processor():
                 continue
 
         if delivered:
-            db.mark_outbox_event_sent(event_id, "")
+            try:
+                await asyncio.to_thread(db.mark_outbox_event_sent, event_id, "")
+                sent += 1
+            except Exception:
+                pass
+    return sent
 
 
 async def _handle_message_event(event: dict) -> None:
