@@ -82,13 +82,13 @@ const GIFs = (() => {
         width: 360px;
         max-width: 95vw;
         height: 450px;
-        background: linear-gradient(180deg,#1a1a1a 0%,#121212 100%);
-        border: 1px solid #2a2a2a;
+        background: linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);
+        border: 1px solid #1f3a30;
         border-radius: 14px;
         display: none;
         flex-direction: column;
         z-index: 1000;
-        box-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(76,175,80,.08);
+        box-shadow: 0 12px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(76,175,80,.10), inset 0 1px 0 rgba(76,175,80,.06);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         overflow: hidden;
@@ -103,13 +103,13 @@ const GIFs = (() => {
         justify-content: space-between;
         align-items: center;
         padding: 10px 12px;
-        border-bottom: 1px solid #222;
+        border-bottom: 1px solid #1f3a30;
       }
-      .gif-tabs { display: flex; gap: 4px; background:#0d0d0d; padding:3px; border-radius:8px; }
+      .gif-tabs { display: flex; gap: 4px; background:rgba(0,0,0,.35); padding:3px; border-radius:8px; box-shadow: inset 0 0 0 1px rgba(76,175,80,.10); }
       .gif-tab {
         background: transparent;
         border: none;
-        color: #888;
+        color: #9bbf9b;
         cursor: pointer;
         padding: 6px 14px;
         border-radius: 6px;
@@ -117,33 +117,33 @@ const GIFs = (() => {
         font-weight: 600;
         transition: background .12s, color .12s;
       }
-      .gif-tab:hover { color: #e0e0e0; }
-      .gif-tab.active { background: #1a3a1a; color: #4caf50; }
+      .gif-tab:hover { color: #cfe8d2; }
+      .gif-tab.active { background: linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 100%); color: #7fd08a; box-shadow: inset 0 0 0 1px rgba(76,175,80,.25); }
       .gif-close {
         background: none;
         border: none;
-        color: #888;
+        color: #9bbf9b;
         cursor: pointer;
         font-size: 18px;
         width: 28px; height: 28px;
         border-radius: 6px;
         transition: background .12s, color .12s;
       }
-      .gif-close:hover { color: #e0e0e0; background: #222; }
+      .gif-close:hover { color: #cfe8d2; background: rgba(76,175,80,.12); }
       .gif-search-wrap { padding: 8px 12px; }
       .gif-search {
         width: 100%;
-        background: #0f0f0f;
-        border: 1px solid #2a2a2a;
+        background: rgba(0,0,0,.35);
+        border: 1px solid #1f3a30;
         border-radius: 8px;
         padding: 9px 12px;
-        color: #e0e0e0;
+        color: #d6ecda;
         font-size: 13px;
         outline: none;
         box-sizing: border-box;
         transition: border-color .12s, box-shadow .12s;
       }
-      .gif-search:focus { border-color: #4caf50; box-shadow: 0 0 0 3px rgba(76,175,80,.12); }
+      .gif-search:focus { border-color: #4caf50; box-shadow: 0 0 0 3px rgba(76,175,80,.18); }
       .gif-categories {
         display: flex;
         gap: 6px;
@@ -172,9 +172,9 @@ const GIFs = (() => {
         display: none;
         align-items: center;
         justify-content: center;
-        background: #141414;
-        border: 1px solid #2a2a2a;
-        color: #e0e0e0;
+        background: rgba(0,0,0,.35);
+        border: 1px solid #1f3a30;
+        color: #cfe8d2;
         font-size: 18px;
         font-weight: 700;
         line-height: 1;
@@ -187,7 +187,7 @@ const GIFs = (() => {
         z-index: 3;
       }
       .gif-cat-scroll:hover {
-        background: #1a3a1a; border-color: #4caf50; color: #4caf50;
+        background: linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 100%); border-color: #4caf50; color: #7fd08a;
         transform: scale(1.08);
       }
       .gif-cat-scroll:active { transform: scale(.95); }
@@ -202,8 +202,8 @@ const GIFs = (() => {
         opacity:0;transition:opacity .15s;
       }
       /* 8px wrap padding + 26px arrow + 2px gap = 36px from the edge */
-      .gif-cat-wrap::after  { right:36px; background:linear-gradient(270deg,#141414,transparent); }
-      .gif-cat-wrap::before { left:36px;  background:linear-gradient(90deg,#141414,transparent); }
+      .gif-cat-wrap::after  { right:36px; background:linear-gradient(270deg,#101f1b,transparent); }
+      .gif-cat-wrap::before { left:36px;  background:linear-gradient(90deg,#101f1b,transparent); }
       .gif-cat-wrap.can-scroll-right::after { opacity:1; }
       .gif-cat-wrap.can-scroll-left::before { opacity:1; }
       /* When arrows are hidden (no overflow on that side), the fade would
@@ -217,9 +217,9 @@ const GIFs = (() => {
         .gif-categories { padding: 4px 12px 10px; }
       }
       .gif-category {
-        background: #1f1f1f;
-        border: 1px solid #2a2a2a;
-        color: #bbb;
+        background: rgba(0,0,0,.30);
+        border: 1px solid #1f3a30;
+        color: #9bbf9b;
         cursor: pointer;
         padding: 5px 12px;
         border-radius: 14px;
@@ -229,7 +229,7 @@ const GIFs = (() => {
         flex-shrink: 0;
         transition: background .12s, color .12s, border-color .12s;
       }
-      .gif-category:hover { background: #252525; color: #e0e0e0; border-color: #333; }
+      .gif-category:hover { background: rgba(76,175,80,.12); color: #cfe8d2; border-color: rgba(76,175,80,.35); }
       .gif-grid {
         flex: 1;
         overflow-y: auto;
@@ -238,19 +238,19 @@ const GIFs = (() => {
         gap: 6px;
         padding: 8px 12px 12px;
         scrollbar-width: thin;
-        scrollbar-color: #2a2a2a transparent;
+        scrollbar-color: rgba(76,175,80,.4) transparent;
       }
       .gif-grid::-webkit-scrollbar { width: 6px; }
-      .gif-grid::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+      .gif-grid::-webkit-scrollbar-thumb { background: rgba(76,175,80,.35); border-radius: 3px; }
       .gif-item {
         cursor: pointer;
         border-radius: 8px;
         overflow: hidden;
-        background: #0f0f0f;
+        background: rgba(0,0,0,.35);
         aspect-ratio: 1;
         transition: transform .12s, box-shadow .12s;
       }
-      .gif-item:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+      .gif-item:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.5), 0 0 0 1px rgba(76,175,80,.25); }
       .gif-item img {
         width: 100%;
         height: 100%;
@@ -265,7 +265,7 @@ const GIFs = (() => {
         background: transparent;
         transition: background .2s, transform .12s;
       }
-      .sticker-item:hover { background: #1f1f1f; transform: translateY(-1px); }
+      .sticker-item:hover { background: rgba(76,175,80,.12); transform: translateY(-1px); }
       .sticker-item img {
         width: 100%;
         height: auto;
@@ -275,24 +275,24 @@ const GIFs = (() => {
       .sticker-pack-header {
         grid-column: 1 / -1;
         padding: 8px 4px 4px;
-        color: #888;
+        color: #7fd08a;
         font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: .5px;
-        border-bottom: 1px solid #222;
+        border-bottom: 1px solid #1f3a30;
       }
       .gif-loading {
         grid-column: 1 / -1;
         text-align: center;
         padding: 40px;
-        color: #666;
+        color: #6fbf7e;
       }
       .gif-empty {
         grid-column: 1 / -1;
         text-align: center;
         padding: 40px;
-        color: #666;
+        color: #6fbf7e;
       }
     `;
     document.head.appendChild(style);

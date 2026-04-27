@@ -1918,32 +1918,32 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 /* ─── Emoji picker ──────────────────────────────────────────── */
 #emoji-picker{
   position:absolute;bottom:70px;right:70px;
-  background:linear-gradient(180deg,#1a1a1a 0%,#121212 100%);
-  border:1px solid #2a2a2a;border-radius:14px;padding:12px;
+  background:linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);
+  border:1px solid #1f3a30;border-radius:14px;padding:12px;
   width:280px;z-index:200;display:none;
-  box-shadow:0 12px 32px rgba(0,0,0,.55),0 0 0 1px rgba(76,175,80,.08);
+  box-shadow:0 12px 32px rgba(0,0,0,.6),0 0 0 1px rgba(76,175,80,.10),inset 0 1px 0 rgba(76,175,80,.06);
   backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   animation:epPop .14s ease-out
 }
 @keyframes epPop{from{opacity:0;transform:translateY(6px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
 #emoji-picker.active{display:block}
-.emoji-grid{display:flex;flex-wrap:wrap;gap:4px;max-height:200px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#2a2a2a transparent}
+.emoji-grid{display:flex;flex-wrap:wrap;gap:4px;max-height:200px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:rgba(76,175,80,.4) transparent}
 .emoji-grid::-webkit-scrollbar{width:6px}
-.emoji-grid::-webkit-scrollbar-thumb{background:#2a2a2a;border-radius:3px}
+.emoji-grid::-webkit-scrollbar-thumb{background:rgba(76,175,80,.35);border-radius:3px}
 .ep-emoji{
   width:34px;height:34px;display:flex;align-items:center;justify-content:center;
   font-size:22px;cursor:pointer;border-radius:8px;transition:background .12s,transform .08s
 }
-.ep-emoji:hover{background:#252525}
+.ep-emoji:hover{background:rgba(76,175,80,.14)}
 .ep-emoji:active{transform:scale(.9)}
 .ep-categories{display:flex;gap:4px;margin-bottom:8px;overflow-x:auto;scrollbar-width:none}
 .ep-categories::-webkit-scrollbar{display:none}
 .ep-cat{
   padding:5px 11px;border-radius:8px;font-size:12px;cursor:pointer;
-  color:#888;white-space:nowrap;transition:background .12s,color .12s;flex-shrink:0
+  color:#9bbf9b;white-space:nowrap;transition:background .12s,color .12s;flex-shrink:0
 }
-.ep-cat:hover{background:#1f1f1f;color:#bbb}
-.ep-cat.active{background:#1a3a1a;color:#4caf50}
+.ep-cat:hover{background:rgba(76,175,80,.10);color:#cfe8d2}
+.ep-cat.active{background:linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 100%);color:#7fd08a;box-shadow:inset 0 0 0 1px rgba(76,175,80,.25)}
 
 /* ─── Encryption lock icon ──────────────────────────────────── */
 .enc-lock{font-size:12px;opacity:.7;margin-right:4px}
