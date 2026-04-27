@@ -97,6 +97,8 @@ function createWindow() {
     title: 'FrogTalk',
     icon: path.join(__dirname, 'icon.png'),
     autoHideMenuBar: true,
+    // Identify ourselves so the web app can hide redundant "Open FrogTalk"
+    // / mini-widget UI when running inside the desktop shell.
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       // Explicit persistent partition prevents login/session storage from
@@ -114,6 +116,15 @@ function createWindow() {
 
   // Prevent the OS from suspending audio/WebRTC when the window is hidden.
   mainWindow.webContents.setBackgroundThrottling(false);
+
+  // Tag UA so the web shell (and the imageboard / Frog Channel widget) can
+  // detect a genuine FrogTalk desktop client and hide redundant UI.
+  try {
+    const baseUA = mainWindow.webContents.getUserAgent();
+    if (baseUA && !/FrogTalkDesktop/i.test(baseUA)) {
+      mainWindow.webContents.setUserAgent(baseUA + ' FrogTalkDesktop/1.0');
+    }
+  } catch {}
 
   let restoredThisRun = false;
   mainWindow.webContents.on('did-finish-load', async () => {

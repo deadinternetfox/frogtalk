@@ -3656,6 +3656,22 @@ if ($singleThread) {
 
     <?php if ($settings['chat_enabled'] && !$isBanned): ?>
     <!-- ═══ FROGTALK MINI WIDGET ═══ -->
+    <!-- Hide the mini widget when running inside the native FrogTalk
+         desktop / Android shell — users are already in the app. -->
+    <script>
+        (function () {
+            try {
+                var ua = String((navigator && navigator.userAgent) || '');
+                if (/FrogTalkAndroid|FrogTalkDesktop/i.test(ua)) {
+                    document.documentElement.classList.add('frog-native-shell');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <style>
+        html.frog-native-shell .chat-widget,
+        html.frog-native-shell #chatWidget { display: none !important; }
+    </style>
     <div class="chat-widget" id="chatWidget">
         <div class="chat-header" onclick="toggleFrogMini()">
             <h4 class="frog-mini-headline">🐸 Frogtalk</h4>

@@ -209,6 +209,70 @@
   }
   .hero-cta { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
 
+  /* ── Direct download box (under CTA) ── */
+  .hero-downloads {
+    margin: 1.5rem auto 0;
+    max-width: 880px;
+    padding: 1rem 1.1rem 1.05rem;
+    border: 1px solid #1f3a30;
+    border-radius: 14px;
+    background: linear-gradient(180deg,rgba(18,35,30,.55) 0%,rgba(13,26,22,.55) 100%);
+    box-shadow: 0 6px 28px rgba(0,0,0,.35), 0 0 0 1px rgba(74,222,128,.05) inset;
+    backdrop-filter: blur(6px);
+  }
+  .hero-downloads .hd-title {
+    font-size: .68rem; letter-spacing: .14em; text-transform: uppercase;
+    color: #6fcf8a; text-align: center; margin-bottom: .65rem; font-weight: 700;
+  }
+  .hero-downloads .hd-grid {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: .55rem;
+  }
+  .hero-downloads .hd-item {
+    flex: 1 1 calc(20% - .55rem);
+    max-width: calc(20% - .55rem);
+    display: flex; align-items: center; gap: .5rem;
+    padding: .55rem .65rem;
+    border: 1px solid rgba(74,222,128,.12);
+    border-radius: 10px;
+    background: rgba(13,26,22,.45);
+    color: var(--text);
+    text-decoration: none;
+    transition: transform .15s ease, border-color .15s ease, background .15s ease;
+    min-height: 44px;
+    min-width: 0;
+  }
+  .hero-downloads .hd-item:hover,
+  .hero-downloads .hd-item:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(74,222,128,.45);
+    background: rgba(20,40,30,.7);
+    outline: none;
+  }
+  .hero-downloads .hd-icon { font-size: 1.05rem; line-height: 1; flex-shrink: 0; }
+  .hero-downloads .hd-label {
+    font-size: .8rem; font-weight: 600; flex: 1; min-width: 0;
+  }
+  .hero-downloads .hd-ext {
+    font-size: .62rem; letter-spacing: .08em; text-transform: uppercase;
+    color: #9ad9a8; opacity: .8; font-weight: 700; flex-shrink: 0;
+  }
+  @media (max-width: 900px) {
+    .hero-downloads .hd-item { flex: 0 1 calc(33.333% - .55rem); max-width: calc(33.333% - .55rem); }
+  }
+  @media (max-width: 560px) {
+    .hero-downloads {
+      margin: 1.25rem .25rem 0;
+      padding: .9rem .85rem .95rem;
+      border-radius: 12px;
+    }
+    .hero-downloads .hd-grid { gap: .5rem; }
+    .hero-downloads .hd-item { flex: 0 1 calc(50% - .5rem); max-width: calc(50% - .5rem); padding: .55rem .6rem; }
+    .hero-downloads .hd-label { font-size: .78rem; }
+  }
+
   /* ── STATS ── */
   .stats {
     display: flex; gap: 3rem; justify-content: center; flex-wrap: wrap;
@@ -371,17 +435,17 @@
   /* ── DEMO PREVIEW ── */
   .demo-preview {
     max-width: 960px; margin: 0 auto 0;
-    background: var(--bg2);
-    border: 1px solid var(--border);
+    background: linear-gradient(180deg,#102018 0%,#0d1a14 100%);
+    border: 1px solid #1f3a30;
     border-radius: 16px;
     overflow: hidden;
-    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    box-shadow: 0 20px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(74,222,128,.04) inset;
   }
   .demo-topbar {
-    background: var(--bg3);
+    background: linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);
     padding: .75rem 1rem;
     display: flex; align-items: center; gap: .5rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid #1f3a30;
   }
   .demo-dot { width: 12px; height: 12px; border-radius: 50%; }
   .demo-dot.r { background: #f85149; }
@@ -392,8 +456,8 @@
   /* Server strip (mirrors real app) */
   .demo-strip {
     width: 60px; flex-shrink: 0;
-    background: #0d0d0d;
-    border-right: 1px solid var(--border);
+    background: #0a1410;
+    border-right: 1px solid #1f3a30;
     display: flex; flex-direction: column; align-items: center;
     padding: .75rem 0; gap: .4rem;
   }
@@ -409,8 +473,8 @@
   .demo-strip .ds-divider { width: 30px; height: 2px; background: #2a2a2a; border-radius: 2px; margin: .2rem 0; }
   .demo-sidebar {
     width: 190px; flex-shrink: 0;
-    background: rgba(0,0,0,.2);
-    border-right: 1px solid var(--border);
+    background: rgba(10,20,15,.55);
+    border-right: 1px solid #1f3a30;
     padding: .75rem .5rem;
     display: flex; flex-direction: column; gap: .15rem;
   }
@@ -435,21 +499,24 @@
   .demo-msg { display: flex; gap: .75rem; align-items: flex-start; }
   .demo-av {
     width: 32px; height: 32px; border-radius: 50%;
-    background: var(--bg3); border: 1px solid var(--border);
+    background: linear-gradient(135deg,#0d1f15,#1e3a2a);
+    border: 1px solid #1f3a30;
     display: flex; align-items: center; justify-content: center;
     font-size: .9rem; flex-shrink: 0;
   }
   .demo-msg-body {}
   .demo-msg-name { font-size: .75rem; color: var(--green); font-weight: 600; margin-bottom: .15rem; }
   .demo-msg-text {
-    background: var(--bg3); border: 1px solid var(--border);
-    border-radius: 0 8px 8px 8px; padding: .5rem .75rem;
+    background: linear-gradient(180deg,#102018 0%,#0d1a14 100%);
+    border: 1px solid #1f3a30;
+    border-radius: 0 10px 10px 10px; padding: .55rem .8rem;
     font-size: .8rem; color: var(--text); max-width: 380px;
+    box-shadow: 0 1px 0 rgba(74,222,128,.04) inset;
   }
   .demo-msg-text.enc { color: var(--text-muted); font-style: italic; font-size: .75rem; }
   .demo-reactions { display: flex; gap: .3rem; margin-top: .3rem; }
   .demo-reaction {
-    background: var(--bg3); border: 1px solid var(--border);
+    background: rgba(13,26,22,.6); border: 1px solid #1f3a30;
     border-radius: 10px; padding: 1px 6px;
     font-size: .7rem; color: var(--text-muted);
   }
@@ -463,27 +530,29 @@
   }
   .demo-input-row {
     padding: .75rem 1rem;
-    border-top: 1px solid var(--border);
-    background: var(--bg3);
+    border-top: 1px solid #1f3a30;
+    background: linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);
     display: flex; gap: .5rem; align-items: center;
   }
   .demo-input {
-    flex: 1; background: var(--bg2); border: 1px solid var(--border);
-    border-radius: 8px; padding: .5rem .75rem; color: var(--text-muted);
+    flex: 1; background: rgba(13,26,22,.7); border: 1px solid #1f3a30;
+    border-radius: 10px; padding: .55rem .8rem; color: var(--text-muted);
     font-size: .8rem; outline: none;
   }
   .demo-send-btn {
-    width: 32px; height: 32px; border-radius: 8px;
-    background: rgba(74,222,128,.2); border: 1px solid rgba(74,222,128,.4);
-    color: var(--green); cursor: pointer;
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(135deg,#16a34a 0%,#15803d 100%);
+    border: 1px solid rgba(74,222,128,.5);
+    color: #fff; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 2px 12px rgba(22,163,74,.35);
   }
 
   /* Mobile-first app preview (shown only on small screens) */
   .demo-mobile {
     display: none;
     height: 100%;
-    background: #111;
+    background: linear-gradient(180deg,#0d1a14 0%,#0a1410 100%);
     color: #e0e0e0;
     flex-direction: column;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -492,14 +561,16 @@
   .dmob-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 10px 12px;
-    background: #111;
-    border-bottom: 1px solid #1e1e1e;
+    background: linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);
+    border-bottom: 1px solid #1f3a30;
     flex-shrink: 0;
   }
   .dmob-header-left { display: flex; align-items: center; gap: 8px; }
   .dmob-ch-av {
     width: 30px; height: 30px; border-radius: 50%;
-    background: #1e3a1e; display: flex; align-items: center;
+    background: linear-gradient(135deg,#0d1f15,#1e3a2a);
+    border: 1px solid #1f3a30;
+    display: flex; align-items: center;
     justify-content: center; font-size: 14px; flex-shrink: 0;
   }
   .dmob-ch-name { font-size: 13px; font-weight: 700; color: #e0e0e0; line-height: 1.2; }
@@ -512,7 +583,9 @@
   .dmob-msg { display: flex; align-items: flex-start; gap: 8px; padding: 3px 10px; margin: 0; text-align: left; }
   .dmob-av {
     width: 32px; height: 32px; border-radius: 50%;
-    background: #1e3a1e; flex-shrink: 0;
+    background: linear-gradient(135deg,#0d1f15,#1e3a2a);
+    border: 1px solid #1f3a30;
+    flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
     font-size: 16px; margin-top: 2px;
   }
@@ -542,14 +615,14 @@
   }
   .dmob-reactions { display: flex; gap: 5px; margin-top: 3px; }
   .dmob-reaction {
-    font-size: 11px; background: #1e1e1e;
-    border: 1px solid #333; border-radius: 8px;
+    font-size: 11px; background: rgba(13,26,22,.7);
+    border: 1px solid #1f3a30; border-radius: 8px;
     padding: 1px 7px; color: #aaa;
   }
   .dmob-reaction.mine { border-color: rgba(74,222,128,.4); background: rgba(74,222,128,.08); color: #4caf50; }
   .dmob-input-bar {
-    background: #0d0d0d;
-    border-top: 1px solid #1e1e1e;
+    background: linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);
+    border-top: 1px solid #1f3a30;
     flex-shrink: 0; padding: 6px 10px 8px;
   }
   .dmob-toolbar {
@@ -557,20 +630,23 @@
     padding-bottom: 6px; color: #666; font-size: 18px;
   }
   .dmob-gif-btn {
-    background: #222; border: 1px solid #333; border-radius: 4px;
-    padding: 1px 5px; font-size: 11px; font-weight: 700; color: #ccc; line-height: 1.4;
+    background: rgba(13,26,22,.7); border: 1px solid #1f3a30; border-radius: 4px;
+    padding: 1px 5px; font-size: 11px; font-weight: 700; color: #9ad9a8; line-height: 1.4;
   }
   .dmob-input-row { display: flex; align-items: center; gap: 8px; }
   .dmob-input-field {
-    flex: 1; background: #1a1a1a; border: 1px solid #2a2a2a;
-    border-radius: 8px; padding: 8px 12px;
-    font-size: 13px; color: #555;
+    flex: 1; background: rgba(13,26,22,.7); border: 1px solid #1f3a30;
+    border-radius: 10px; padding: 8px 12px;
+    font-size: 13px; color: #6a8a78;
   }
   .dmob-send-btn {
-    width: 36px; height: 36px; border-radius: 10px;
-    background: #16a34a; flex-shrink: 0;
+    width: 36px; height: 36px; border-radius: 12px;
+    background: linear-gradient(135deg,#16a34a 0%,#15803d 100%);
+    border: 1px solid rgba(74,222,128,.5);
+    flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
     color: #fff; font-size: 16px;
+    box-shadow: 0 2px 12px rgba(22,163,74,.35);
   }
 
   @media (max-width: 900px) {
@@ -727,12 +803,15 @@
     <a href="/app" class="btn btn-primary btn-lg">🐸 Join the Pond</a>
     <a href="#features" class="btn btn-ghost btn-lg">See Features ↓</a>
   </div>
-  <div style="margin-top:1.2rem;display:flex;gap:1.2rem;justify-content:center;flex-wrap:wrap;">
-    <a href="/download/android" download style="color:var(--muted);font-size:.9rem;text-decoration:none;">📱 Android APK</a>
-    <a href="/download/linux" download style="color:var(--muted);font-size:.9rem;text-decoration:none;">🐧 Linux AppImage</a>
-    <a href="/download/deb" download style="color:var(--muted);font-size:.9rem;text-decoration:none;">📦 Debian / Ubuntu .deb</a>
-    <a href="/download/windows" download style="color:var(--muted);font-size:.9rem;text-decoration:none;">🪟 Windows portable .exe</a>
-    <a href="/download/windows-zip" download style="color:var(--muted);font-size:.9rem;text-decoration:none;">🪟 Windows .zip</a>
+  <div class="hero-downloads" aria-label="Direct downloads">
+    <div class="hd-title">Direct downloads</div>
+    <div class="hd-grid">
+      <a href="/download/android" download class="hd-item"><span class="hd-icon">📱</span><span class="hd-label">Android</span><span class="hd-ext">APK</span></a>
+      <a href="/download/linux" download class="hd-item"><span class="hd-icon">🐧</span><span class="hd-label">Linux</span><span class="hd-ext">AppImage</span></a>
+      <a href="/download/deb" download class="hd-item"><span class="hd-icon">📦</span><span class="hd-label">Debian</span><span class="hd-ext">.deb</span></a>
+      <a href="/download/windows" download class="hd-item"><span class="hd-icon">🪟</span><span class="hd-label">Windows portable</span><span class="hd-ext">.exe</span></a>
+      <a href="/download/windows-zip" download class="hd-item"><span class="hd-icon">🪟</span><span class="hd-label">Windows</span><span class="hd-ext">.zip</span></a>
+    </div>
   </div>
 
   <!-- DEMO PREVIEW -->
