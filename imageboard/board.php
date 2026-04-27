@@ -4,6 +4,12 @@
  * Features: 4chan-style posting, image approval, live chat, YouTube embeds,
  *           greentext, threaded replies, per-thread OG preview images
  */
+// Force fresh HTML for WebView/Android/Electron clients that aggressively
+// cache the board shell. Static assets (CSS/JS/images) are still cached by
+// nginx; only this PHP page is forced no-store.
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 session_start();
 require_once __DIR__ . '/board_config.php';
 
