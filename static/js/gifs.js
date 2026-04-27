@@ -82,8 +82,8 @@ const GIFs = (() => {
         width: 360px;
         max-width: 95vw;
         height: 450px;
-        background: linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);
-        border: 1px solid #1f3a30;
+        background: linear-gradient(180deg,#1a3329 0%,#15291f 55%,#102016 100%);
+        border: 1px solid #2a5a3a;
         border-radius: 14px;
         display: none;
         flex-direction: column;
@@ -103,7 +103,7 @@ const GIFs = (() => {
         justify-content: space-between;
         align-items: center;
         padding: 10px 12px;
-        border-bottom: 1px solid #1f3a30;
+        border-bottom: 1px solid #2a5a3a;
       }
       .gif-tabs { display: flex; gap: 4px; background:rgba(0,0,0,.35); padding:3px; border-radius:8px; box-shadow: inset 0 0 0 1px rgba(76,175,80,.10); }
       .gif-tab {
@@ -134,7 +134,7 @@ const GIFs = (() => {
       .gif-search {
         width: 100%;
         background: rgba(0,0,0,.35);
-        border: 1px solid #1f3a30;
+        border: 1px solid #2a5a3a;
         border-radius: 8px;
         padding: 9px 12px;
         color: #d6ecda;
@@ -172,8 +172,8 @@ const GIFs = (() => {
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0,0,0,.35);
-        border: 1px solid #1f3a30;
+        background: rgba(0,0,0,.30);
+        border: 1px solid #2a5a3a;
         color: #cfe8d2;
         font-size: 18px;
         font-weight: 700;
@@ -202,8 +202,8 @@ const GIFs = (() => {
         opacity:0;transition:opacity .15s;
       }
       /* 8px wrap padding + 26px arrow + 2px gap = 36px from the edge */
-      .gif-cat-wrap::after  { right:36px; background:linear-gradient(270deg,#101f1b,transparent); }
-      .gif-cat-wrap::before { left:36px;  background:linear-gradient(90deg,#101f1b,transparent); }
+      .gif-cat-wrap::after  { right:36px; background:linear-gradient(270deg,#15291f,transparent); }
+      .gif-cat-wrap::before { left:36px;  background:linear-gradient(90deg,#15291f,transparent); }
       .gif-cat-wrap.can-scroll-right::after { opacity:1; }
       .gif-cat-wrap.can-scroll-left::before { opacity:1; }
       /* When arrows are hidden (no overflow on that side), the fade would
@@ -218,7 +218,7 @@ const GIFs = (() => {
       }
       .gif-category {
         background: rgba(0,0,0,.30);
-        border: 1px solid #1f3a30;
+        border: 1px solid #2a5a3a;
         color: #9bbf9b;
         cursor: pointer;
         padding: 5px 12px;
@@ -280,7 +280,7 @@ const GIFs = (() => {
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: .5px;
-        border-bottom: 1px solid #1f3a30;
+        border-bottom: 1px solid #2a5a3a;
       }
       .gif-loading {
         grid-column: 1 / -1;
