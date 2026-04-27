@@ -4,6 +4,7 @@
 
 const Messages = (() => {
   let _lastNick = null;
+  let _lastBridge = null;
   let _lastDate = null;
   let _isSending = false;
   let _previewCache = {};
@@ -425,7 +426,13 @@ const Messages = (() => {
   }
 
   function _shouldContinue(msg) {
-    return msg.nickname === _lastNick;
+    // Same author AND same origin (native vs bridged-from-Telegram/Discord/etc).
+    // Without the bridge check, a real account whose nickname matches the
+    // bridge label (or a user posting right after their own bridged message)
+    // gets rendered as a header-less continuation, hiding their avatar /
+    // username / timestamp.
+    const curBridge = msg.bridge_platform || null;
+    return msg.nickname === _lastNick && curBridge === _lastBridge;
   }
 
   function _dateChanged(msg) {
@@ -438,6 +445,7 @@ const Messages = (() => {
     if (room !== State.currentRoom) return;
     const area = document.getElementById('messages-area');
     _lastNick = null;
+    _lastBridge = null;
     _lastDate = null;
     // Reset room cache before rebuilding so repeated loadHistory calls
     // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
@@ -459,10 +467,12 @@ const Messages = (() => {
       if (dateLabel) {
         html += `<div class="msg-date-divider">${UI.escHtml(dateLabel)}</div>`;
         _lastNick = null;
+        _lastBridge = null;
       }
       const isCont = _shouldContinue(msg);
       html += _msgHtml(msg, isCont);
       _lastNick = msg.nickname;
+      _lastBridge = msg.bridge_platform || null;
 
       State.messages[room].push(msg);
       
@@ -635,10 +645,12 @@ const Messages = (() => {
     if (dateLabel) {
       html += `<div class="msg-date-divider">${UI.escHtml(dateLabel)}</div>`;
       _lastNick = null;
+      _lastBridge = null;
     }
     const isCont = _shouldContinue(msg);
     html += _msgHtml(msg, isCont);
     _lastNick = msg.nickname;
+    _lastBridge = msg.bridge_platform || null;
 
     const wrapper = document.createElement('div');
     wrapper.innerHTML = html;
