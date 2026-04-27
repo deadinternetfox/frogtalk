@@ -2258,11 +2258,118 @@ function updateCssCharCount() {
   }
 }
 
-function previewCssLive() {
-  const css = document.getElementById('profile-custom-css')?.value || '';
-  applyProfileCustomCss(css);
-  UI.showToast('Preview applied — save to keep it', 'success');
+// Scope a chunk of user CSS to a chosen container ID. Mirrors scopeProfileCustomCss
+// but lets us point at the live preview card instead of #modal-user-info.
+function scopeCssToContainer(css, containerId) {
+  if (!css || !containerId) return '';
+  return css
+    .split('}')
+    .map(rule => rule.trim())
+    .filter(Boolean)
+    .map(rule => {
+      const braceIdx = rule.indexOf('{');
+      if (braceIdx === -1) return '';
+      const selectors = rule.slice(0, braceIdx).trim();
+      const body = rule.slice(braceIdx + 1).trim();
+      if (!selectors || !body || selectors.includes('@')) return '';
+      const scoped = selectors
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(s => `#${containerId} ${s}`)
+        .join(', ');
+      return scoped ? `${scoped} { ${body} }` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
 }
+
+let _cssPreviewStyleEl = null;
+let _cssPreviewInputBound = false;
+let _cssPreviewKeyHandler = null;
+
+function _renderCssPreviewStyle() {
+  const css = document.getElementById('profile-custom-css')?.value || '';
+  const scoped = scopeCssToContainer(css, 'css-preview-card');
+  if (!_cssPreviewStyleEl) {
+    _cssPreviewStyleEl = document.createElement('style');
+    _cssPreviewStyleEl.id = 'css-preview-style';
+    document.head.appendChild(_cssPreviewStyleEl);
+  }
+  _cssPreviewStyleEl.textContent = scoped;
+}
+
+function _populateCssPreviewIdentity() {
+  try {
+    const u = State.user || {};
+    const nameEl = document.getElementById('css-preview-name');
+    if (nameEl) nameEl.textContent = u.nickname || 'YourNick';
+    const bioEl = document.getElementById('css-preview-bio');
+    if (bioEl && u.bio) bioEl.textContent = u.bio;
+    const statusEl = document.getElementById('css-preview-status');
+    if (statusEl) {
+      const parts = [u.status_msg, u.mood].filter(Boolean);
+      if (parts.length) statusEl.textContent = parts.join(' · ');
+    }
+    const avEl = document.getElementById('css-preview-avatar');
+    if (avEl && typeof UI !== 'undefined' && UI.avatarEl) {
+      avEl.innerHTML = UI.avatarEl(u.avatar, u.nickname, 90);
+    }
+    const headerEl = document.getElementById('css-preview-header');
+    if (headerEl && u.banner) {
+      headerEl.style.setProperty('background-image', `url(${u.banner})`, 'important');
+      headerEl.style.setProperty('background-size', 'cover', 'important');
+      headerEl.style.setProperty('background-position', 'center', 'important');
+    }
+  } catch {}
+}
+
+function previewCssLive() {
+  const overlay = document.getElementById('css-preview-overlay');
+  if (!overlay) return;
+  _populateCssPreviewIdentity();
+  _renderCssPreviewStyle();
+  overlay.classList.remove('hidden');
+  // Live update while typing
+  if (!_cssPreviewInputBound) {
+    const ta = document.getElementById('profile-custom-css');
+    if (ta) {
+      ta.addEventListener('input', () => {
+        if (!document.getElementById('css-preview-overlay')?.classList.contains('hidden')) {
+          _renderCssPreviewStyle();
+        }
+      });
+      _cssPreviewInputBound = true;
+    }
+  }
+  // Backdrop click closes
+  overlay.onclick = (e) => { if (e.target === overlay) closeCssPreview(); };
+  // Escape closes
+  if (!_cssPreviewKeyHandler) {
+    _cssPreviewKeyHandler = (e) => {
+      if (e.key === 'Escape' && !document.getElementById('css-preview-overlay')?.classList.contains('hidden')) {
+        closeCssPreview();
+      }
+    };
+    document.addEventListener('keydown', _cssPreviewKeyHandler);
+  }
+}
+
+function closeCssPreview() {
+  const overlay = document.getElementById('css-preview-overlay');
+  if (overlay) overlay.classList.add('hidden');
+  if (_cssPreviewStyleEl) {
+    _cssPreviewStyleEl.remove();
+    _cssPreviewStyleEl = null;
+  }
+}
+
+try {
+  window.previewCssLive = previewCssLive;
+  window.closeCssPreview = closeCssPreview;
+  window.applyCssPreset = applyCssPreset;
+  window.updateCssCharCount = updateCssCharCount;
+} catch {}
 
 async function loadSocialStats() {
   const nick = State.user?.nickname;
