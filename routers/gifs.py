@@ -136,6 +136,12 @@ class CreateStickerPackRequest(BaseModel):
     description: str = ""
 
 
+class UpdateStickerPackRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    is_public: Optional[bool] = None
+
+
 class AddStickerRequest(BaseModel):
     pack_id: int
     name: str
@@ -363,3 +369,48 @@ async def browse_public_sticker_packs(
             """, (limit,)).fetchall()
     
     return {"packs": [dict(p) for p in packs]}
+
+
+@router.patch("/stickers/packs/{pack_id}")
+async def update_sticker_pack(pack_id: int, body: UpdateStickerPackRequest, current_user: dict = Depends(get_current_user)):
+    """Update a sticker pack (owner only)."""
+    with db._conn() as con:
+        pack = con.execute(
+            "SELECT id FROM sticker_packs WHERE id=? AND owner_id=?",
+            (pack_id, current_user["id"])
+        ).fetchone()
+        if not pack:
+            return JSONResponse(status_code=404, content={"error": "Pack not found or not owned by you"})
+
+        sets, vals = [], []
+        if body.name is not None:
+            n = body.name.strip()
+            if len(n) < 2 or len(n) > 32:
+                return JSONResponse(status_code=400, content={"error": "Pack name must be 2-32 characters"})
+            sets.append("name=?"); vals.append(n)
+        if body.description is not None:
+            sets.append("description=?"); vals.append(body.description[:200])
+        if body.is_public is not None:
+            sets.append("is_public=?"); vals.append(1 if body.is_public else 0)
+        if not sets:
+            return {"ok": True}
+        vals.append(pack_id)
+        con.execute(f"UPDATE sticker_packs SET {', '.join(sets)} WHERE id=?", vals)
+    return {"ok": True}
+
+
+@router.delete("/stickers/packs/{pack_id}")
+async def delete_sticker_pack(pack_id: int, current_user: dict = Depends(get_current_user)):
+    """Delete a sticker pack (owner only). Cascades stickers + installs."""
+    with db._conn() as con:
+        pack = con.execute(
+            "SELECT id FROM sticker_packs WHERE id=? AND owner_id=?",
+            (pack_id, current_user["id"])
+        ).fetchone()
+        if not pack:
+            return JSONResponse(status_code=404, content={"error": "Pack not found or not owned by you"})
+        con.execute("DELETE FROM stickers WHERE pack_id=?", (pack_id,))
+        con.execute("DELETE FROM user_sticker_packs WHERE pack_id=?", (pack_id,))
+        con.execute("DELETE FROM sticker_packs WHERE id=?", (pack_id,))
+    return {"ok": True}
+
