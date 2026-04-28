@@ -172,6 +172,26 @@ body[data-theme="dark"] .modal-input:focus{
     0 4px 14px rgba(76,175,80,.22) !important;
 }
 body[data-theme="dark"] textarea.modal-input{resize:vertical;min-height:64px;line-height:1.45}
+/* Sub-panels inside modals (Shared secret group, Invite Only card, etc.) */
+.modal-card{
+  background:#1a1a1a;
+  border:1px solid #2a2a2a;
+  border-radius:10px;
+  padding:12px;
+  margin-bottom:12px;
+}
+body[data-theme="dark"] .modal-card{
+  background:linear-gradient(180deg,#0f211b 0%,#0c1c17 60%,#091813 100%) !important;
+  border:1px solid #224237 !important;
+  border-radius:12px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.025),
+    inset 0 0 0 1px rgba(127,210,167,.035),
+    0 2px 8px rgba(0,0,0,.32) !important;
+}
+body[data-theme="dark"] .modal-card .modal-label{color:#9bd0ad !important}
+body[data-theme="dark"] .modal-card > label{color:#dff5e8}
+body[data-theme="dark"] .modal-card > div[style*="color:#888"]{color:#7a9c8d !important}
 body[data-theme="dark"] .modal-btn.secondary{
   background:linear-gradient(180deg,#1a3128,#11211c) !important;
   border:1px solid #2f5548 !important;
@@ -4970,7 +4990,7 @@ window.ConnErr = (function(){
         🔒 Private
       </div>
     </div>
-    <div id="new-room-secret-section" style="display:none;background:#1a1a1a;border-radius:8px;padding:12px;margin-bottom:12px">
+    <div id="new-room-secret-section" class="modal-card" style="display:none">
       <label class="modal-label">Shared secret</label>
       <div style="position:relative">
         <input class="modal-input" id="new-room-secret" type="password" placeholder="Required for private channels" style="padding-right:42px">
@@ -4980,7 +5000,7 @@ window.ConnErr = (function(){
       <input class="modal-input" id="new-room-secret-hint" placeholder="Shown to invited members when they join">
       <div style="font-size:11px;color:#888;margin-top:8px">Everyone in this private channel must use the same shared secret.</div>
     </div>
-    <div style="background:#1a1a1a;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+    <div class="modal-card" style="padding:10px 12px">
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
         <input type="checkbox" id="new-room-invite-only" style="width:16px;height:16px;accent-color:#4caf50;cursor:pointer">
         <div>
@@ -4989,7 +5009,7 @@ window.ConnErr = (function(){
         </div>
       </label>
     </div>
-    <div id="new-room-directory-section" style="background:#1a1a1a;border-radius:8px;padding:12px;margin-bottom:12px">
+    <div id="new-room-directory-section" class="modal-card">
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px">
         <input type="checkbox" id="new-room-list-directory" style="width:16px;height:16px;accent-color:#4caf50;cursor:pointer" onchange="toggleNewRoomDirectoryFields()">
         <div>
@@ -5134,7 +5154,7 @@ window.ConnErr = (function(){
       </div>
       
       <label class="modal-label">Channel Access</label>
-      <div style="background:#1a1a1a;border-radius:8px;padding:12px;margin-bottom:16px">
+      <div class="modal-card" style="margin-bottom:16px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
           <input type="checkbox" id="ch-invite-only" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer">
           <div>
@@ -5145,7 +5165,7 @@ window.ConnErr = (function(){
       </div>
       
       <label class="modal-label">Who Can Create Invites</label>
-      <select class="modal-input" id="ch-who-can-invite" style="color:#e0e0e0;background:#0d0d0d">
+      <select class="modal-input" id="ch-who-can-invite">
         <option value="everyone">Everyone</option>
         <option value="mods">Moderators & Owner</option>
         <option value="owner">Owner Only</option>
@@ -5159,7 +5179,7 @@ window.ConnErr = (function(){
         List your channel in the public directory so others can discover and join it.
       </div>
       
-      <div style="background:#1a1a1a;border-radius:8px;padding:12px;margin-bottom:16px">
+      <div class="modal-card" style="margin-bottom:16px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
           <input type="checkbox" id="ch-dir-listed" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer">
           <div>
