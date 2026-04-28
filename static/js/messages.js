@@ -324,6 +324,30 @@ const Messages = (() => {
     return inner;
   }
 
+  // Subtle empty-state banner shown when a channel/DM has no messages yet.
+  // Pure HTML, no event handlers — clicked through to the input. Content
+  // is text-only and runs through UI.escHtml so a maliciously-named room
+  // can't inject markup.
+  function _emptyStateHtml(room) {
+    const isDm = State.currentRoomType === 'dm' || (room && room.startsWith('dm:'));
+    const peer = State.dmPeer || '';
+    let title, subtitle;
+    if (isDm && peer) {
+      title = `This is the start of your conversation with ${peer}`;
+      subtitle = 'Say hi — messages here are end-to-end encrypted.';
+    } else {
+      title = `Welcome to #${room || 'channel'}`;
+      subtitle = 'No messages yet. Be the first to say something!';
+    }
+    return (
+      `<div class="msg-empty-state" id="msg-empty-state" aria-hidden="true">` +
+        `<div class="msg-empty-icon">💬</div>` +
+        `<div class="msg-empty-title">${UI.escHtml(title)}</div>` +
+        `<div class="msg-empty-sub">${UI.escHtml(subtitle)}</div>` +
+      `</div>`
+    );
+  }
+
   function _msgHtml(msg, isCont) {
     const isOwn = msg.nickname === State.user?.nickname;
     const isAdmin = msg.nickname === 'admin' || msg._is_admin;
@@ -481,6 +505,15 @@ const Messages = (() => {
     // Reset room cache before rebuilding so repeated loadHistory calls
     // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
     State.messages[room] = [];
+
+    // Empty channel/DM: render a subtle, non-interactive system note so the
+    // chat doesn't look broken on first open. The note is replaced by real
+    // content as soon as anything arrives (see appendMessage below).
+    if (!msgs || msgs.length === 0) {
+      area.innerHTML = _emptyStateHtml(room);
+      area.scrollTop = area.scrollHeight;
+      return;
+    }
 
     let html = '';
     const urlRe = /https?:\/\/[^\s<>"]+/g;
@@ -670,6 +703,10 @@ const Messages = (() => {
     // Always auto-scroll when it's OUR own message — user clearly wants to
     // see their send land, even if they were a bit scrolled up while composing.
     const isOwn = msg.nickname && State.user && msg.nickname === State.user.nickname;
+
+    // Clear the empty-state placeholder the moment any real message arrives.
+    const emptyEl = area.querySelector('#msg-empty-state');
+    if (emptyEl) emptyEl.remove();
 
     const dateLabel = _dateChanged(msg);
     let html = '';
