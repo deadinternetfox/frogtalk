@@ -690,6 +690,127 @@ async def serve_sw():
     )
 
 
+# ── SEO: robots.txt + sitemap ─────────────────────────────────────────────────
+from datetime import datetime as _sitemap_dt
+from xml.sax.saxutils import escape as _xml_escape
+
+SITE_URL = os.getenv("FROGTALK_SITE_URL", "https://frogtalk.xyz").rstrip("/")
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def serve_robots():
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "Disallow: /app\n"
+        "Disallow: /app/\n"
+        "Disallow: /og/\n"
+        "Disallow: /invite/\n"
+        f"Sitemap: {SITE_URL}/sitemap.xml\n"
+    )
+    from fastapi.responses import Response
+    return Response(content=body, media_type="text/plain; charset=utf-8")
+
+
+def _sitemap_url(loc: str, lastmod: str = "", changefreq: str = "weekly", priority: str = "0.5") -> str:
+    parts = [f"<url><loc>{loc}</loc>"]
+    if lastmod:
+        parts.append(f"<lastmod>{lastmod}</lastmod>")
+    parts.append(f"<changefreq>{changefreq}</changefreq>")
+    parts.append(f"<priority>{priority}</priority></url>")
+    return "".join(parts)
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def serve_sitemap_index():
+    """Sitemap index referencing static + dynamic child sitemaps."""
+    from fastapi.responses import Response
+    today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f'<sitemap><loc>{SITE_URL}/sitemap-static.xml</loc><lastmod>{today}</lastmod></sitemap>'
+        f'<sitemap><loc>{SITE_URL}/sitemap-users.xml</loc><lastmod>{today}</lastmod></sitemap>'
+        f'<sitemap><loc>{SITE_URL}/sitemap-rooms.xml</loc><lastmod>{today}</lastmod></sitemap>'
+        '</sitemapindex>'
+    )
+    return Response(content=body, media_type="application/xml; charset=utf-8")
+
+
+@app.get("/sitemap-static.xml", include_in_schema=False)
+async def serve_sitemap_static():
+    from fastapi.responses import Response
+    today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
+    pages = [
+        ("/",             "daily",   "1.0"),
+        ("/docs/api",     "monthly", "0.6"),
+        ("/docs/node",    "monthly", "0.6"),
+        ("/download/android", "weekly", "0.7"),
+    ]
+    urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + urls + '</urlset>'
+    )
+    return Response(content=body, media_type="application/xml; charset=utf-8")
+
+
+@app.get("/sitemap-users.xml", include_in_schema=False)
+async def serve_sitemap_users():
+    """Public user profiles."""
+    from fastapi.responses import Response
+    import database as db
+    rows = []
+    try:
+        with db._conn() as con:
+            rows = con.execute(
+                "SELECT nickname FROM users WHERE COALESCE(profile_public,1)=1 "
+                "ORDER BY id DESC LIMIT 5000"
+            ).fetchall()
+    except Exception as e:
+        print(f"[sitemap-users] {e}")
+    today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
+    urls = "".join(
+        _sitemap_url(f"{SITE_URL}/u/{_xml_escape(r['nickname'])}", today, "weekly", "0.6")
+        for r in rows if r["nickname"]
+    )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + urls + '</urlset>'
+    )
+    return Response(content=body, media_type="application/xml; charset=utf-8")
+
+
+@app.get("/sitemap-rooms.xml", include_in_schema=False)
+async def serve_sitemap_rooms():
+    """Public chat rooms / channels."""
+    from fastapi.responses import Response
+    import database as db
+    rows = []
+    try:
+        with db._conn() as con:
+            rows = con.execute(
+                "SELECT name FROM rooms WHERE COALESCE(type,'public')='public' "
+                "ORDER BY id DESC LIMIT 5000"
+            ).fetchall()
+    except Exception as e:
+        print(f"[sitemap-rooms] {e}")
+    today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
+    urls = "".join(
+        _sitemap_url(f"{SITE_URL}/c/{_xml_escape(r['name'])}", today, "weekly", "0.6")
+        for r in rows if r["name"]
+    )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + urls + '</urlset>'
+    )
+    return Response(content=body, media_type="application/xml; charset=utf-8")
+
+
 @app.get("/download/android")
 async def download_android():
     """Always serves the latest Android APK with correct MIME + Content-Disposition."""
