@@ -243,7 +243,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 async def _security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "DENY")
+    # SAMEORIGIN (not DENY) so the imageboard mini-widget at /board can iframe
+    # /app on the same origin. Cross-origin framing is still blocked.
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault(
         "Permissions-Policy",
