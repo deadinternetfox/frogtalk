@@ -2087,7 +2087,18 @@ async function showChannelDirectory() {
     modal = overlay;
   }
   modal.classList.remove('hidden');
-  
+
+  // Clear any stale content from a previous open so the user never sees
+  // old cached channels flash before the fresh data arrives.
+  const _res = document.getElementById('dir-results');
+  if (_res) _res.innerHTML = '<div style="text-align:center;padding:20px;color:#666">Loading…</div>';
+  const _sug = document.getElementById('dir-suggested');
+  if (_sug) _sug.innerHTML = '';
+  const _searchEl = document.getElementById('dir-search');
+  if (_searchEl) _searchEl.value = '';
+  const _catEl = document.getElementById('dir-category');
+  if (_catEl) _catEl.value = '';
+
   // Load categories
   try {
     const r = await fetch('/api/directory/categories', { headers: { 'X-Session-Token': State.token } });
