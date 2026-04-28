@@ -2,6 +2,7 @@
 
 import os
 import base64
+import hmac
 import secrets
 import string
 import time
@@ -697,9 +698,13 @@ async def receive_bridge_message(body: BridgeMessageRequest):
 
     all_bridges = db.get_telegram_bridges() + db.get_discord_bridges()
     matched_bridge = None
+    # Use hmac.compare_digest to avoid leaking token bytes via timing.
+    supplied_token = (body.bridge_token or "").encode("utf-8")
     for b in all_bridges:
+        stored = (b.get("bot_token") or "").encode("utf-8")
         if (
-            b.get("bot_token") == body.bridge_token
+            len(stored) == len(supplied_token)
+            and hmac.compare_digest(stored, supplied_token)
             and b.get("room_name") == body.room_name
             and bool(b.get("enabled", 1))
         ):
@@ -708,6 +713,18 @@ async def receive_bridge_message(body: BridgeMessageRequest):
 
     if not matched_bridge:
         raise HTTPException(403, "Invalid bridge token")
+
+    # Scheme allow-list — reject javascript:/file:/etc. that could be
+    # broadcast to clients. media_url may also be a data: URL (we decode
+    # those server-side for Discord uploads); sender_avatar must be remote.
+    if body.media_url:
+        _mu = body.media_url.strip()
+        if not (_mu.startswith("http://") or _mu.startswith("https://") or _mu.startswith("data:")):
+            raise HTTPException(400, "Unsupported media_url scheme")
+    if body.sender_avatar:
+        _av = body.sender_avatar.strip()
+        if not (_av.startswith("http://") or _av.startswith("https://") or _av.startswith("data:")):
+            raise HTTPException(400, "Unsupported sender_avatar scheme")
 
     # Honor direction setting: 'out' means FrogTalk→remote only, so we
     # deliberately drop inbound messages. 'both' / 'in' accept them.
