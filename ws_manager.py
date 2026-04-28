@@ -6,10 +6,21 @@ from fastapi import WebSocket
 
 
 def _per_ip_ws_cap() -> int:
+    # Total ceiling per source IP across ALL accounts. Generous default
+    # because a single household/office IP can legitimately have many
+    # devices and active tabs (multi-account testing, family share).
     try:
-        return max(1, int(os.getenv("FROGTALK_WS_PER_IP_CAP", "5")))
+        return max(1, int(os.getenv("FROGTALK_WS_PER_IP_CAP", "50")))
     except ValueError:
-        return 5
+        return 50
+
+
+def _per_user_per_ip_ws_cap() -> int:
+    # Cap per (ip, user_id). Phone + desktop + a few tabs = ~5 per account.
+    try:
+        return max(1, int(os.getenv("FROGTALK_WS_PER_USER_PER_IP_CAP", "8")))
+    except ValueError:
+        return 8
 
 
 class ConnectionManager:
@@ -22,6 +33,8 @@ class ConnectionManager:
         self._user_ws: Dict[int, Set] = {}
         # ip -> active connection count (per-IP DoS cap)
         self._ip_count: Dict[str, int] = {}
+        # (ip, user_id) -> active connection count (per-account-per-IP cap)
+        self._ip_user_count: Dict[tuple, int] = {}
 
     async def connect(self, ws: WebSocket, room: str, nickname: str, user_id: int, avatar: str = None, is_admin: bool = False):
         # Per-IP cap (covers phone+desktop+browser tabs at 5).
@@ -49,12 +62,20 @@ class ConnectionManager:
                         ip = real
             except Exception:
                 pass
-        if ip and self._ip_count.get(ip, 0) >= _per_ip_ws_cap():
-            try:
-                await ws.close(code=4008)
-            except Exception:
-                pass
-            return False
+        if ip:
+            ip_user_key = (ip, int(user_id))
+            if self._ip_user_count.get(ip_user_key, 0) >= _per_user_per_ip_ws_cap():
+                try:
+                    await ws.close(code=4008)
+                except Exception:
+                    pass
+                return False
+            if self._ip_count.get(ip, 0) >= _per_ip_ws_cap():
+                try:
+                    await ws.close(code=4008)
+                except Exception:
+                    pass
+                return False
         await ws.accept()
         if room not in self._rooms:
             self._rooms[room] = set()
@@ -65,6 +86,8 @@ class ConnectionManager:
         self._user_ws[user_id].add(ws)
         if ip:
             self._ip_count[ip] = self._ip_count.get(ip, 0) + 1
+            ip_user_key = (ip, int(user_id))
+            self._ip_user_count[ip_user_key] = self._ip_user_count.get(ip_user_key, 0) + 1
         # Announce join
         await self.broadcast_room(room, {
             "type": "presence",
@@ -92,6 +115,12 @@ class ConnectionManager:
             self._ip_count[ip] -= 1
             if self._ip_count[ip] <= 0:
                 del self._ip_count[ip]
+        if ip and user_id is not None:
+            ip_user_key = (ip, int(user_id))
+            if ip_user_key in self._ip_user_count:
+                self._ip_user_count[ip_user_key] -= 1
+                if self._ip_user_count[ip_user_key] <= 0:
+                    del self._ip_user_count[ip_user_key]
         return room, nickname
 
     async def broadcast_room(self, room: str, data: dict, exclude: WebSocket = None):
