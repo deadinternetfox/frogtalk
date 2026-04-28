@@ -699,7 +699,9 @@ SITE_URL = os.getenv("FROGTALK_SITE_URL", "https://frogtalk.xyz").rstrip("/")
 
 @app.get("/robots.txt", include_in_schema=False)
 async def serve_robots():
-    body = (
+    # Default crawl policy: index public marketing/docs/profile/room pages,
+    # but keep API, app shell, OG images and invite landings out of search.
+    default_block = (
         "User-agent: *\n"
         "Allow: /\n"
         "Disallow: /api/\n"
@@ -707,10 +709,84 @@ async def serve_robots():
         "Disallow: /app/\n"
         "Disallow: /og/\n"
         "Disallow: /invite/\n"
-        f"Sitemap: {SITE_URL}/sitemap.xml\n"
+    )
+    # Explicitly opt-in to AI / LLM crawlers so FrogTalk shows up in
+    # ChatGPT, Claude, Perplexity, Gemini, Apple Intelligence, Common Crawl,
+    # etc. Each gets its own block (the spec is per-user-agent).
+    ai_bots = [
+        "GPTBot",            # OpenAI / ChatGPT training
+        "OAI-SearchBot",     # ChatGPT Search
+        "ChatGPT-User",      # ChatGPT live browsing
+        "ClaudeBot",         # Anthropic
+        "Claude-Web",        # Anthropic browsing
+        "anthropic-ai",      # legacy Anthropic
+        "PerplexityBot",     # Perplexity
+        "Perplexity-User",   # Perplexity live
+        "Google-Extended",   # Gemini / Bard training
+        "Applebot-Extended", # Apple Intelligence
+        "Amazonbot",         # Alexa / Amazon
+        "Bytespider",        # ByteDance
+        "CCBot",             # Common Crawl (feeds many open LLMs)
+        "Meta-ExternalAgent",# Meta AI
+        "FacebookBot",       # Meta
+        "Diffbot",           # Diffbot KG
+        "DuckAssistBot",     # DuckDuckGo AI
+        "cohere-ai",         # Cohere
+        "MistralAI-User",    # Mistral
+    ]
+    ai_block = ""
+    for bot in ai_bots:
+        ai_block += f"\nUser-agent: {bot}\nAllow: /\nDisallow: /api/\nDisallow: /og/\n"
+    body = (
+        default_block
+        + ai_block
+        + f"\nSitemap: {SITE_URL}/sitemap.xml\n"
     )
     from fastapi.responses import Response
     return Response(content=body, media_type="text/plain; charset=utf-8")
+
+
+# ── llms.txt: machine-readable site summary for LLMs ─────────────────────────
+@app.get("/llms.txt", include_in_schema=False)
+async def serve_llms_txt():
+    return FileResponse(
+        "static/llms.txt",
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+# ── OpenSearch description (browser address-bar search providers) ────────────
+@app.get("/opensearch.xml", include_in_schema=False)
+async def serve_opensearch():
+    return FileResponse(
+        "static/opensearch.xml",
+        media_type="application/opensearchdescription+xml",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+# ── security.txt (RFC 9116) ──────────────────────────────────────────────────
+@app.get("/.well-known/security.txt", include_in_schema=False)
+async def serve_security_txt():
+    return FileResponse(
+        "static/.well-known/security.txt",
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+# ── IndexNow key (Bing / Yandex / Seznam / Naver instant indexing) ───────────
+# Generate once with `python -c "import secrets;print(secrets.token_hex(16))"`
+# and set FROGTALK_INDEXNOW_KEY in the environment. The file at
+# /<key>.txt must contain the key as its only content for ownership proof.
+INDEXNOW_KEY = os.getenv("FROGTALK_INDEXNOW_KEY", "").strip()
+
+if INDEXNOW_KEY and all(c in "0123456789abcdefABCDEF" for c in INDEXNOW_KEY):
+    @app.get("/" + INDEXNOW_KEY + ".txt", include_in_schema=False)
+    async def serve_indexnow_key():
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(INDEXNOW_KEY, media_type="text/plain; charset=utf-8")
 
 
 def _sitemap_url(loc: str, lastmod: str = "", changefreq: str = "weekly", priority: str = "0.5") -> str:

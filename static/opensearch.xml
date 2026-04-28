@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
+  <ShortName>FrogTalk</ShortName>
+  <Description>Search FrogTalk users and public channels.</Description>
+  <InputEncoding>UTF-8</InputEncoding>
+  <Image width="16" height="16" type="image/x-icon">https://frogtalk.xyz/static/favicon.ico</Image>
+  <Image width="192" height="192" type="image/png">https://frogtalk.xyz/static/icons/icon-192.png</Image>
+  <Url type="text/html" method="get" template="https://frogtalk.xyz/app/search?q={searchTerms}"/>
+  <Url type="application/opensearchdescription+xml" rel="self" template="https://frogtalk.xyz/opensearch.xml"/>
+  <moz:SearchForm xmlns:moz="http://www.mozilla.org/2006/browser/search/">https://frogtalk.xyz/app/search</moz:SearchForm>
+</OpenSearchDescription>

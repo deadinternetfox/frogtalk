@@ -117,6 +117,39 @@ else
 fi
 REMOTE_SCRIPT
 
+# ── 4. Notify search engines (sitemap + IndexNow) ─────────────
+SITE_URL="${FROGTALK_SITE_URL:-${PUBLIC_URL:-}}"
+SITE_URL="${SITE_URL%/}"
+if [[ -n "$SITE_URL" ]]; then
+  echo ""
+  echo "📣  [4/4] Pinging search engines for ${SITE_URL}…"
+  # Bing/Yandex deprecated their classic sitemap-ping endpoints in 2023, but
+  # Google still accepts pings, and IndexNow covers Bing+Yandex+Seznam+Naver+Yep.
+  curl -fsS --max-time 10 -o /dev/null \
+    "https://www.google.com/ping?sitemap=${SITE_URL}/sitemap.xml" \
+    && echo "    ✅ Google sitemap ping OK" \
+    || echo "    ⚠️  Google sitemap ping failed (non-fatal)"
+
+  if [[ -n "${FROGTALK_INDEXNOW_KEY:-}" ]]; then
+    INDEXNOW_PAYLOAD=$(cat <<JSON
+{"host":"$(echo "$SITE_URL" | sed -E 's#^https?://##')","key":"${FROGTALK_INDEXNOW_KEY}","keyLocation":"${SITE_URL}/${FROGTALK_INDEXNOW_KEY}.txt","urlList":["${SITE_URL}/","${SITE_URL}/app","${SITE_URL}/docs/api","${SITE_URL}/docs/node","${SITE_URL}/sitemap.xml","${SITE_URL}/llms.txt"]}
+JSON
+)
+    HTTP_CODE=$(curl -sS --max-time 15 -o /tmp/indexnow.out -w '%{http_code}' \
+      -H 'Content-Type: application/json; charset=utf-8' \
+      -X POST 'https://api.indexnow.org/indexnow' \
+      --data "$INDEXNOW_PAYLOAD" || echo 000)
+    if [[ "$HTTP_CODE" =~ ^2 ]]; then
+      echo "    ✅ IndexNow accepted (HTTP $HTTP_CODE) — Bing/Yandex/Seznam/Naver notified"
+    else
+      echo "    ⚠️  IndexNow returned HTTP $HTTP_CODE (non-fatal)"
+      [[ -s /tmp/indexnow.out ]] && sed 's/^/        /' /tmp/indexnow.out
+    fi
+  else
+    echo "    ℹ️  FROGTALK_INDEXNOW_KEY not set — skipping IndexNow ping"
+  fi
+fi
+
 END_TS=$(date +%s)
 DURATION=$(( END_TS - START_TS ))
 echo ""

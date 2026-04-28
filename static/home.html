@@ -36,6 +36,8 @@
 <meta name="application-name" content="FrogTalk">
 <link rel="canonical" href="https://frogtalk.xyz/">
 <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml">
+<link rel="search" type="application/opensearchdescription+xml" title="FrogTalk" href="/opensearch.xml">
+<link rel="alternate" type="text/plain" title="LLM site summary" href="/llms.txt">
 <title>FrogTalk — Secure Encrypted Chat</title>
 <script type="application/ld+json">
 {
@@ -50,7 +52,32 @@
     {
       "@type": "WebSite",
       "name": "FrogTalk",
-      "url": "https://frogtalk.xyz/"
+      "url": "https://frogtalk.xyz/",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://frogtalk.xyz/app/search?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "FrogTalk",
+      "url": "https://frogtalk.xyz/",
+      "applicationCategory": "CommunicationApplication",
+      "operatingSystem": "Web, Android, Linux, Windows, macOS",
+      "description": "Privacy-first end-to-end encrypted chat, voice and video calls, social feed, stories, shared music, and live Discord/Telegram bridges.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "downloadUrl": "https://frogtalk.xyz/download/android",
+      "softwareVersion": "1.4.1",
+      "image": "https://frogtalk.xyz/static/icons/icon-512.png",
+      "publisher": {
+        "@type": "Organization",
+        "name": "FrogTalk"
+      }
     }
   ]
 }
