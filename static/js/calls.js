@@ -360,6 +360,35 @@ function handleCallReject (data) {
   endCall(false);
 }
 
+/* ── Call handled elsewhere (this user accepted/declined on another session) ─ */
+function handleCallHandled (data) {
+  // Only act if we are currently in the ringing-incoming state (or have an
+  // incoming-call UI persisted). This prevents stale events from disrupting
+  // an active call.
+  try { _clearPersistedIncomingCall(); } catch {}
+  try { Notifications.stopRinging(); } catch {}
+  try { window._ringtoneCtx?.stop?.(); } catch {}
+  window._ringtoneCtx = null;
+  try { window.Android?.dismissRing?.(); } catch {}
+  // If we were in the ringing-incoming state on this session, hide the UI
+  // and reset. If we are mid-active-call (e.g. accepted here), do nothing.
+  if (_callState === 'ringing') {
+    try { hideIncomingCall(); } catch {}
+    try { resetCall(); } catch {}
+  } else {
+    // Even if state isn't 'ringing-incoming', forcibly hide any leftover
+    // incoming-call card so a stuck UI clears.
+    try {
+      const el = document.getElementById('incoming-call');
+      if (el && !el.classList.contains('hidden')) {
+        el.classList.add('hidden');
+        try { resetCall(); } catch {}
+      }
+    } catch {}
+  }
+}
+try { window.handleCallHandled = handleCallHandled; } catch {}
+
 /* ── Remote ended ──────────────────────────────────────────────────────────── */
 function handleCallEnd (data) {
   _clearPersistedIncomingCall();

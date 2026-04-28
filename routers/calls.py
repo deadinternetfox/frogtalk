@@ -70,6 +70,12 @@ async def decline_pending_call(call_id: int, current_user: dict = Depends(get_cu
         "from_nickname": current_user.get("nickname") or "Someone",
         "call_id": call_id,
     })
+    # Silence any other device/tab that is still ringing for this callee.
+    await manager.send_to_user(int(current_user["id"]), {
+        "type": "call_handled",
+        "action": "declined",
+        "call_id": call_id,
+    })
     return {"ok": True}
 
 
@@ -117,6 +123,16 @@ async def decline_call(payload: DeclineCallRequest, current_user: dict = Depends
         "type": "call_reject",
         "from_id": current_user["id"],
         "from_nickname": current_user.get("nickname") or "Someone",
+        "call_id": call_id,
+    })
+    # Also broadcast to the callee's OTHER sessions (other browser tab, the
+    # WebView, the desktop app) so any incoming-call UI still ringing there
+    # silences immediately. This handles the case where the user declines via
+    # the Android system notification while the WebView/desktop app is still
+    # showing the incoming-call card with a ringtone playing.
+    await manager.send_to_user(int(current_user["id"]), {
+        "type": "call_handled",
+        "action": "declined",
         "call_id": call_id,
     })
     return {"ok": True, "call_id": call_id}

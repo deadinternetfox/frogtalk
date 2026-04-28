@@ -305,6 +305,14 @@ const WS = (() => {
         if (typeof handleCallReject === 'function') handleCallReject(data);
         break;
       }
+      case 'call_handled': {
+        // Sent to all of this user's sessions when the call was accepted or
+        // declined elsewhere (e.g. via the Android system notification action
+        // while the WebView was still ringing). Silence any incoming-call UI.
+        Notifications.stopRinging();
+        if (typeof handleCallHandled === 'function') handleCallHandled(data);
+        break;
+      }
       case 'call_end': {
         Notifications.stopRinging();
         if (typeof handleCallEnd === 'function') handleCallEnd(data);
