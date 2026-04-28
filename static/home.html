@@ -240,7 +240,7 @@
   /* ── Direct download box (under CTA) ── */
   .hero-downloads {
     margin: 1.5rem auto 0;
-    max-width: min(1600px, calc(100vw - 3rem));
+    max-width: min(1800px, calc(100vw - 2rem));
     padding: 1rem 1.1rem 1.05rem;
     border: 1px solid #1f3a30;
     border-radius: 14px;
@@ -259,10 +259,9 @@
     gap: .55rem;
   }
   .hero-downloads .hd-item {
-    flex: 1 1 calc(16.666% - .55rem);
-    max-width: calc(16.666% - .55rem);
-    display: flex; align-items: center; gap: .4rem;
-    padding: .5rem .55rem;
+    flex: 0 1 auto;
+    display: inline-flex; align-items: center; gap: .5rem;
+    padding: .55rem .85rem;
     border: 1px solid rgba(74,222,128,.12);
     border-radius: 10px;
     background: rgba(13,26,22,.45);
@@ -270,8 +269,7 @@
     text-decoration: none;
     transition: transform .15s ease, border-color .15s ease, background .15s ease;
     min-height: 42px;
-    min-width: 0;
-    overflow: hidden;
+    white-space: nowrap;
   }
   .hero-downloads .hd-item:hover,
   .hero-downloads .hd-item:focus-visible {
@@ -280,20 +278,18 @@
     background: rgba(20,40,30,.7);
     outline: none;
   }
-  .hero-downloads .hd-icon { font-size: .95rem; line-height: 1; flex-shrink: 0; }
+  .hero-downloads .hd-icon { font-size: 1rem; line-height: 1; flex-shrink: 0; }
   .hero-downloads .hd-label {
-    font-size: .72rem; font-weight: 600; flex: 0 1 auto; min-width: 0;
+    font-size: .8rem; font-weight: 600;
     white-space: nowrap;
   }
   .hero-downloads .hd-ext {
-    font-size: .52rem; letter-spacing: .04em; text-transform: uppercase;
+    font-size: .58rem; letter-spacing: .06em; text-transform: uppercase;
     color: #9ad9a8; opacity: .85; font-weight: 700;
-    flex: 0 0 auto; margin-left: auto;
     white-space: nowrap;
-    padding-left: .25rem;
   }
   @media (max-width: 1300px) {
-    .hero-downloads .hd-item { flex: 0 1 calc(33.333% - .55rem); max-width: calc(33.333% - .55rem); }
+    .hero-downloads .hd-item { padding: .55rem .75rem; }
   }
   @media (max-width: 560px) {
     .hero-downloads {
@@ -302,7 +298,7 @@
       border-radius: 12px;
     }
     .hero-downloads .hd-grid { gap: .5rem; }
-    .hero-downloads .hd-item { flex: 0 1 calc(50% - .5rem); max-width: calc(50% - .5rem); padding: .55rem .6rem; }
+    .hero-downloads .hd-item { padding: .55rem .7rem; }
     .hero-downloads .hd-label { font-size: .78rem; }
   }
 
