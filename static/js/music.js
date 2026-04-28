@@ -21,8 +21,55 @@ const Music = (() => {
   let _anchorMs = 0;
   let _anchorTrackKey = '';  // `${provider}:${video_id}` of the anchored track
   let _syncTimer = null;
+  // Phase 1/4: dedupe + debounce metadata pushes so a WS burst (or a
+  // chatty `_render` tick) can't hammer the system tray / Android service.
+  let _lastEmitHash = '';
+  let _emitTimer = null;
+  let _msHandlersBound = false;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => UI.escHtml(String(s || ''));
+
+  // Strict allowlist for artwork URLs. Anything outside the known
+  // CDN hosts (or a small set of inline data: types) is rejected so
+  // hostile track metadata can't smuggle `javascript:` / `file:` /
+  // arbitrary HTTP into either `mediaSession.metadata` or the Android
+  // bitmap loader. Keep the list in sync with MusicService.kt.
+  const _ARTWORK_HOSTS = new Set([
+    'i.ytimg.com',
+    'img.youtube.com',
+    'i1.sndcdn.com',
+    'i.scdn.co',
+  ]);
+  function _safeArtwork(url) {
+    if (!url || typeof url !== 'string') return '';
+    if (url.length > 2048) return '';
+    // Allow short inline images (rare, but harmless and same-origin-ish).
+    if (/^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/.test(url)
+        && url.length < 200000) {
+      return url;
+    }
+    try {
+      const u = new URL(url, location.origin);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return '';
+      if (!_ARTWORK_HOSTS.has(u.hostname)) return '';
+      // Force https on http CDN urls.
+      if (u.protocol === 'http:') u.protocol = 'https:';
+      return u.toString();
+    } catch { return ''; }
+  }
+
+  // Length-cap + control-char strip for any string we hand to the system
+  // tray or to Android. Defends older Android / native clients from
+  // hostile titles. Pure web mediaSession is also more pleasant without
+  // 4kB titles.
+  function _sanitizeText(s, max) {
+    if (s == null) return '';
+    let t = String(s);
+    // Strip C0 + DEL.
+    t = t.replace(/[\x00-\x1f\x7f]+/g, ' ').trim();
+    if (t.length > (max || 200)) t = t.slice(0, max || 200);
+    return t;
+  }
 
   function _expectedPosSec() {
     if (!_anchorMs) return 0;
@@ -33,32 +80,125 @@ const Music = (() => {
   // modules (FrogSocial music cards, wall posts, etc.) can update their UI
   // in sync with play/pause/track-change.
   function _emitState() {
+    let detail;
     try {
       const cur = _state && _state.queue && _state.queue[0];
-      const detail = {
+      const rawArt = cur ? (cur.thumbnail || cur.artwork || '') : '';
+      const artworkUrl = _safeArtwork(rawArt);
+      detail = {
         active: !!cur,
         soloMode: _soloMode,
         room: _room || '',
         paused: _paused,
         muted: _muted,
-        provider: cur ? cur.provider : '',
+        provider: cur ? (cur.provider || '') : '',
         url: cur ? (cur.url || '') : '',
         video_id: cur ? (cur.video_id || '') : '',
         title: cur ? (cur.title || '') : '',
+        sharer: cur ? (cur.sharer || '') : '',
+        artworkUrl,
       };
       document.dispatchEvent(new CustomEvent('music:statechange', { detail }));
-    } catch {}
+    } catch { return; }
+
+    // Dedupe: only push to mediaSession + Android when the user-visible
+    // tuple actually changes. Stops `_render` ticks from churning.
+    const hash = JSON.stringify([
+      detail.active, detail.paused, detail.muted,
+      detail.title, detail.sharer, detail.room, detail.soloMode,
+      detail.provider, detail.artworkUrl
+    ]);
+    if (hash === _lastEmitHash) return;
+    _lastEmitHash = hash;
+
+    // Trailing-edge debounce — coalesce bursts inside ~200ms.
+    if (_emitTimer) clearTimeout(_emitTimer);
+    _emitTimer = setTimeout(() => {
+      _emitTimer = null;
+      _pushMediaSession(detail);
+      _pushAndroidBridge(detail);
+    }, 200);
+  }
+
+  // ── Web Media Session API integration ────────────────────────────────
+  // Universal: powers desktop hardware-key control, Win11/macOS volume
+  // flyout, and the Android system tray when the iframe ever surfaces it.
+  // Only registers action handlers once; updating metadata/playbackState
+  // is cheap on every state change.
+  function _bindMediaSessionHandlers() {
+    if (_msHandlersBound) return;
+    if (!('mediaSession' in navigator)) return;
+    _msHandlersBound = true;
+    const set = (action, fn) => {
+      try { navigator.mediaSession.setActionHandler(action, fn); }
+      catch { /* unsupported action — ignore */ }
+    };
+    set('play',          () => { if (_paused) togglePauseGlobal(); });
+    set('pause',         () => { if (!_paused) togglePauseGlobal(); });
+    set('stop',          () => { try { Music.close(); } catch {} });
+    set('nexttrack',     () => {
+      if (_state && _state.can_control) { try { Music.skip(); } catch {} }
+    });
+    set('previoustrack', () => { try { Music.resyncNow(); } catch {} });
+  }
+
+  function _pushMediaSession(detail) {
+    if (!('mediaSession' in navigator)) return;
     try {
-      if (window.Android && typeof window.Android.updateMusicPlayback === 'function') {
-        const cur = _state && _state.queue && _state.queue[0];
-        const active = !!cur;
-        const title = cur ? (cur.title || 'FrogTalk Music') : 'FrogTalk Music';
-        const subtitle = active
-          ? (_soloMode ? `FrogSocial${cur?.sharer ? ` · @${cur.sharer}` : ''}` : `#${_room || 'music'}`)
-          : 'Playback stopped';
-        window.Android.updateMusicPlayback(title, subtitle, active, !_paused, _muted);
+      _bindMediaSessionHandlers();
+      if (!detail.active) {
+        navigator.mediaSession.metadata = null;
+        navigator.mediaSession.playbackState = 'none';
+        return;
       }
-    } catch {}
+      const title = _sanitizeText(detail.title, 200) || 'FrogTalk Music';
+      const artist = detail.soloMode
+        ? (detail.sharer ? `@${_sanitizeText(detail.sharer, 100)}` : 'FrogSocial')
+        : `#${_sanitizeText(detail.room, 100) || 'music'}`;
+      const fallbackArt = '/static/icons/icon-512.png';
+      const art = detail.artworkUrl || fallbackArt;
+      const artwork = [
+        { src: art,           sizes: '512x512', type: 'image/png' },
+        { src: fallbackArt,   sizes: '192x192', type: 'image/png' },
+        { src: fallbackArt,   sizes: '96x96',   type: 'image/png' },
+      ];
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist,
+        album: 'FrogTalk',
+        artwork,
+      });
+      navigator.mediaSession.playbackState = _paused ? 'paused' : 'playing';
+    } catch { /* MediaSession is best-effort */ }
+  }
+
+  function _pushAndroidBridge(detail) {
+    try {
+      const A = window.Android;
+      if (!A) return;
+      const active = !!detail.active;
+      const title = _sanitizeText(detail.title, 200) || 'FrogTalk Music';
+      const subtitle = _sanitizeText(
+        active
+          ? (detail.soloMode
+              ? `FrogSocial${detail.sharer ? ` · @${detail.sharer}` : ''}`
+              : `#${detail.room || 'music'}`)
+          : 'Playback stopped',
+        200
+      );
+      // Prefer the V2 bridge when present (artwork + provider). Old APKs
+      // fall through to the legacy 5-arg signature.
+      if (typeof A.updateMusicPlaybackV2 === 'function') {
+        A.updateMusicPlaybackV2(
+          title, subtitle,
+          detail.artworkUrl || '',
+          detail.provider || '',
+          active, !_paused, _muted
+        );
+      } else if (typeof A.updateMusicPlayback === 'function') {
+        A.updateMusicPlayback(title, subtitle, active, !_paused, _muted);
+      }
+    } catch { /* native bridge failures are non-fatal */ }
   }
 
   // Public snapshot for other modules.

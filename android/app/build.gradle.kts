@@ -21,8 +21,8 @@ android {
         applicationId = "xyz.frogtalk.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 191
-        versionName = "1.4.7"
+        versionCode = 192
+        versionName = "1.4.8"
     }
 
     buildTypes {
@@ -61,6 +61,7 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.activity:activity-ktx:1.8.2")
     implementation("androidx.webkit:webkit:1.9.0")
+    implementation("androidx.media:media:1.7.0")
     implementation(platform("com.google.firebase:firebase-bom:34.12.0"))
     implementation("com.google.firebase:firebase-messaging")
 }

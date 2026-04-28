@@ -698,16 +698,31 @@ class MainActivity : AppCompatActivity() {
         fun updateMusicPlayback(title: String?, subtitle: String?, active: Boolean,
                                 playing: Boolean, muted: Boolean) {
             try {
-                activity.updateMusicPlayback(title, subtitle, active, playing, muted)
+                activity.updateMusicPlayback(title, subtitle, null, null, active, playing, muted)
             } catch (e: Throwable) {
                 Log.e(TAG, "updateMusicPlayback failed", e)
+            }
+        }
+
+        // V2 adds artwork URL + provider so the foreground service can render
+        // a MediaStyle notification with album art + brand-colored card. Old
+        // APKs without this method gracefully fall back to the V1 path.
+        @android.webkit.JavascriptInterface
+        fun updateMusicPlaybackV2(title: String?, subtitle: String?,
+                                  artworkUrl: String?, provider: String?,
+                                  active: Boolean, playing: Boolean, muted: Boolean) {
+            try {
+                activity.updateMusicPlayback(title, subtitle, artworkUrl, provider,
+                    active, playing, muted)
+            } catch (e: Throwable) {
+                Log.e(TAG, "updateMusicPlaybackV2 failed", e)
             }
         }
 
         @android.webkit.JavascriptInterface
         fun stopMusicPlayback() {
             try {
-                activity.updateMusicPlayback(null, null, false, false, false)
+                activity.updateMusicPlayback(null, null, null, null, false, false, false)
             } catch (e: Throwable) {
                 Log.e(TAG, "stopMusicPlayback failed", e)
             }
@@ -926,6 +941,8 @@ class MainActivity : AppCompatActivity() {
     private fun updateMusicPlayback(
         title: String?,
         subtitle: String?,
+        artworkUrl: String?,
+        provider: String?,
         active: Boolean,
         playing: Boolean,
         muted: Boolean,
@@ -939,6 +956,8 @@ class MainActivity : AppCompatActivity() {
                 putExtra(MusicService.EXTRA_MUTED, muted)
                 putExtra(MusicService.EXTRA_TITLE, title ?: "FrogTalk Music")
                 putExtra(MusicService.EXTRA_SUBTITLE, subtitle ?: "Playing in background")
+                putExtra(MusicService.EXTRA_ARTWORK_URL, artworkUrl ?: "")
+                putExtra(MusicService.EXTRA_PROVIDER, provider ?: "")
             }
             if (active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent)
