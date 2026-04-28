@@ -314,22 +314,30 @@ async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = No
 
                 # Discord usernames must be 1-80 chars and can't contain
                 # "discord" / "clyde" or "@everyone" / "@here" mentions.
-                # Append "· via FrogTalk" so it's clear the message came
-                # from the FrogTalk bridge (mirrors the Telegram bridge).
+                # Build a polished suffix mirroring the Telegram bridge:
+                #   "Nick · via FrogTalk #room"
+                # Falls back to "Nick · via FrogTalk" if the room name
+                # would push us over Discord's 80-char username cap.
                 _raw_nick = (nickname or "FrogTalk").strip() or "FrogTalk"
-                _suffix = " · via FrogTalk"
+                _safe_room = re.sub(r"[^A-Za-z0-9_\-]+", "-", str(room or "").strip()).strip("-")
+                _suffix_full = f" · via FrogTalk #{_safe_room}" if _safe_room else " · via FrogTalk"
+                _suffix_short = " · via FrogTalk"
+                _suffix = _suffix_full
                 _max_nick = 80 - len(_suffix)
+                if _max_nick < 3:
+                    # Room makes the suffix too long — drop the room.
+                    _suffix = _suffix_short
+                    _max_nick = 80 - len(_suffix)
                 if len(_raw_nick) > _max_nick:
-                    _raw_nick = _raw_nick[: _max_nick - 1].rstrip() + "\u2026"
+                    _raw_nick = _raw_nick[: max(1, _max_nick - 1)].rstrip() + "\u2026"
                 wh_name = (_raw_nick + _suffix)[:80]
                 # Discord rejects webhook usernames containing these
                 # substrings (case-insensitive); soften them so the send
                 # doesn't 400 out and fall back to the embed path.
                 _low = wh_name.lower()
                 if "discord" in _low or "clyde" in _low:
-                    import re as _re
-                    wh_name = _re.sub(r"(?i)discord", "disc\u200ford", wh_name)
-                    wh_name = _re.sub(r"(?i)clyde", "cly\u200fde", wh_name)
+                    wh_name = re.sub(r"(?i)discord", "disc\u200ford", wh_name)
+                    wh_name = re.sub(r"(?i)clyde", "cly\u200fde", wh_name)
                     wh_name = wh_name[:80]
 
                 try:
