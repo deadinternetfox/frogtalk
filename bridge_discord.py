@@ -489,15 +489,15 @@ def _run_bot_in_thread(token: str):
                 reply_to_remote_id = None
 
             media_url = None
+            media_exts = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4",
+                          ".webm", ".mov", ".mp3", ".ogg", ".wav", ".apng")
             if message.attachments:
                 att = message.attachments[0]
                 ctype = (att.content_type or "").lower()
                 if ctype.startswith(("image/", "video/", "audio/")):
                     media_url = att.url
-                elif att.url and any(att.url.lower().endswith(ext)
-                                     for ext in (".jpg", ".jpeg", ".png", ".gif",
-                                                 ".webp", ".mp4", ".webm", ".mov",
-                                                 ".mp3", ".ogg", ".wav")):
+                elif att.url and any(att.url.lower().split("?")[0].endswith(ext)
+                                     for ext in media_exts):
                     media_url = att.url
                 elif att.url:
                     content += f"\n📎 {att.url}"
@@ -505,10 +505,68 @@ def _run_bot_in_thread(token: str):
                     if extra.url:
                         content += f"\n📎 {extra.url}"
 
-            if message.embeds and not content:
+            # ── Discord embeds (Tenor / Giphy / image links auto-embedded) ──
+            # When a user posts a Tenor / Giphy GIF link, Discord turns it
+            # into an embed of type "gifv" / "image" / "video" with the
+            # actual media URL on embed.image.url / embed.video.url /
+            # embed.thumbnail.url. The message.content is just the page URL,
+            # which is useless to FrogTalk — extract the real GIF/MP4 here.
+            if not media_url and message.embeds:
+                for embed in message.embeds:
+                    etype = (getattr(embed, "type", "") or "").lower()
+                    cand = None
+                    # Prefer animated video (mp4) for gifv embeds when present.
+                    for src in ("video", "image", "thumbnail"):
+                        obj = getattr(embed, src, None)
+                        url = getattr(obj, "url", None) if obj else None
+                        if url and any(url.lower().split("?")[0].endswith(ext)
+                                       for ext in media_exts):
+                            cand = url
+                            break
+                    if not cand and etype in ("image", "gifv", "video") and getattr(embed, "url", None):
+                        # Some embed shapes only expose the page URL on .url.
+                        if any(embed.url.lower().split("?")[0].endswith(ext)
+                               for ext in media_exts):
+                            cand = embed.url
+                    if cand:
+                        media_url = cand
+                        # Strip the bare embed link from content if that's
+                        # all the user typed — avoids sending a useless
+                        # tenor.com link alongside the actual GIF.
+                        page_url = getattr(embed, "url", None)
+                        stripped = content.strip()
+                        if page_url and (stripped == page_url or stripped == cand):
+                            content = ""
+                        break
+
+            # ── Discord stickers (static PNG/APNG only) ─────────────────
+            if not media_url:
+                stickers = getattr(message, "stickers", None) or []
+                for st in stickers:
+                    try:
+                        st_url = str(getattr(st, "url", "") or "")
+                        # Skip Lottie (.json) — not renderable on FrogTalk.
+                        if st_url and not st_url.lower().split("?")[0].endswith(".json"):
+                            media_url = st_url
+                            break
+                    except Exception:
+                        pass
+
+            # ── Plain media URL pasted in text ──────────────────────────
+            # If the message is just a direct media URL (raw .gif / .mp4),
+            # promote it to media_url so it renders inline on FrogTalk.
+            if not media_url and content:
+                stripped = content.strip()
+                if re.match(r"^https?://\S+$", stripped):
+                    base = stripped.lower().split("?")[0]
+                    if any(base.endswith(ext) for ext in media_exts):
+                        media_url = stripped
+                        content = ""
+
+            if message.embeds and not content and not media_url:
                 embed = message.embeds[0]
-                if embed.title:
-                    content = f"[{embed.title}]({embed.url})" if embed.url else embed.title
+                if getattr(embed, "title", None):
+                    content = f"[{embed.title}]({embed.url})" if getattr(embed, "url", None) else embed.title
 
             if content or media_url:
                 await send_to_frogtalk(
