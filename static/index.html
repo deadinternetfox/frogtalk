@@ -721,6 +721,17 @@ body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[d
   color:#ddf8ea !important;
   box-shadow:0 4px 14px rgba(0,0,0,.26),inset 0 0 0 1px rgba(111,199,150,.22) !important;
 }
+.channel-item.dragging{
+  opacity:.85 !important;
+  background:linear-gradient(180deg,#27513f,#1d3d30) !important;
+  border-color:#7fd2a7 !important;
+  color:#eafaf1 !important;
+  box-shadow:0 8px 22px rgba(0,0,0,.45), inset 0 0 0 1px rgba(127,210,167,.45) !important;
+  transform:scale(1.02);
+  cursor:grabbing !important;
+  z-index:5;
+}
+#public-channels .channel-item:not(.channel-unjoined){ touch-action: pan-y; }
 .channel-item .ch-icon,
 #chat-header .room-title-icon{
   background:#22322d !important;

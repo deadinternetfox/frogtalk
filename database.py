@@ -778,6 +778,11 @@ def _migrate():
         # Privacy: hide which channels the user is active in from profile viewers.
         if "hide_active_channels" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN hide_active_channels INTEGER DEFAULT 0")
+        # Per-user channel ordering (Discord-style drag-to-reorder). Stored as
+        # a JSON array of room names; rooms not in the list fall back to the
+        # default server order at the end.
+        if "room_order" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN room_order TEXT")
         if "global_user_id" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN global_user_id TEXT")
         if "identity_pubkey" not in cols:
@@ -1558,6 +1563,19 @@ def set_ecdh_pub_key(user_id: int, pub_key: str):
 def set_identity_pub_key(user_id: int, pub_key: str):
     with _conn() as con:
         con.execute("UPDATE users SET identity_pubkey=? WHERE id=?", (pub_key, user_id))
+        con.commit()
+
+
+def get_room_order(user_id: int) -> Optional[str]:
+    """Return the user's saved channel ordering as a JSON string, or None."""
+    with _conn() as con:
+        row = con.execute("SELECT room_order FROM users WHERE id=?", (user_id,)).fetchone()
+    return row["room_order"] if row and row["room_order"] else None
+
+
+def set_room_order(user_id: int, order_json: str) -> None:
+    with _conn() as con:
+        con.execute("UPDATE users SET room_order=? WHERE id=?", (order_json, user_id))
         con.commit()
 
 

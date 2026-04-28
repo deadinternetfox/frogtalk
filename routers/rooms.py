@@ -1,5 +1,6 @@
 """Room management routes."""
 import asyncio
+import json
 import re
 import time
 import uuid
@@ -80,7 +81,47 @@ async def list_rooms(current_user: dict = Depends(get_current_user)):
         if r.get("type") == "private" and not r["joined"] and not is_admin:
             continue
         visible.append(r)
+
+    # Apply per-user Discord-style drag-to-reorder. Rooms named in the saved
+    # order list float to the top in that order; everything else preserves
+    # the original server order behind them.
+    order_raw = db.get_room_order(current_user["id"])
+    if order_raw:
+        try:
+            order = json.loads(order_raw)
+            if isinstance(order, list):
+                rank = {n: i for i, n in enumerate(order) if isinstance(n, str)}
+                visible.sort(key=lambda r: rank.get(r.get("name"), 10**9))
+        except (ValueError, TypeError):
+            pass
     return {"rooms": visible}
+
+
+class ReorderRoomsRequest(BaseModel):
+    order: list[str]
+
+
+@router.post("/reorder")
+async def reorder_rooms(body: ReorderRoomsRequest,
+                        current_user: dict = Depends(get_current_user)):
+    """Persist this user's preferred channel ordering. The body's `order` is
+    a list of room names (top-to-bottom). Unknown / duplicate names are
+    silently ignored — we only persist a clean, deduped list."""
+    seen: set = set()
+    cleaned: list = []
+    for name in body.order or []:
+        if not isinstance(name, str):
+            continue
+        if not ROOM_NAME_RE.match(name):
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        cleaned.append(name)
+        if len(cleaned) >= 500:
+            break
+    db.set_room_order(current_user["id"], json.dumps(cleaned))
+    return {"ok": True}
 
 
 @router.post("")

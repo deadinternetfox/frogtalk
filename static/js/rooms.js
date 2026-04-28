@@ -313,11 +313,132 @@ const Rooms = (() => {
     renderRooms();
   }
 
+  // ── Discord-style drag-to-reorder for joined channels ────────────────────
+  // Desktop: small mousemove after pointerdown enters drag mode.
+  // Touch (Android): a ~380ms hold without movement enters drag mode and
+  //   suppresses the long-press "channel options" menu (which fires at 500ms
+  //   via bindLongPress) by dispatching a synthetic touchcancel that clears
+  //   that handler's timer. If the user moves their finger before the hold
+  //   timer fires we treat it as a scroll and bail. Released-without-move
+  //   leaves the long-press menu free to fire normally.
+  // DMs are intentionally excluded — this binder is only attached to rows
+  // inside #public-channels.
+  async function _persistChannelOrder() {
+    const container = document.getElementById('public-channels');
+    if (!container) return;
+    const order = [...container.querySelectorAll('.channel-item:not(.channel-unjoined)')]
+      .map(el => el.dataset.room).filter(Boolean);
+    try {
+      const rank = {};
+      order.forEach((n, i) => { rank[n] = i; });
+      State.rooms.sort((a, b) => {
+        const ra = (a.name in rank) ? rank[a.name] : 1e9;
+        const rb = (b.name in rank) ? rank[b.name] : 1e9;
+        return ra - rb;
+      });
+    } catch {}
+    try {
+      await fetch('/api/rooms/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+        body: JSON.stringify({ order })
+      });
+    } catch {}
+  }
+
+  function _bindChannelDrag(el) {
+    if (el._dragBound) return;
+    el._dragBound = true;
+
+    // Capture-phase click filter — when a drag has just happened, swallow
+    // the synthetic click so we don't accidentally switch channel.
+    el.addEventListener('click', (e) => {
+      if (el._dragSuppressClick) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        el._dragSuppressClick = false;
+      }
+    }, true);
+
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button && e.button !== 0) return;
+      // Don't start a drag from the channel-info icon button.
+      if (e.target.closest && e.target.closest('.ch-icon-btn')) return;
+
+      const isTouch = e.pointerType === 'touch';
+      const startX = e.clientX, startY = e.clientY;
+      const container = el.parentElement;
+      let dragging = false;
+      let holdTimer = null;
+
+      const arm = () => {
+        if (dragging) return;
+        dragging = true;
+        el.classList.add('dragging');
+        // Cancel the long-press context-menu timer that bindLongPress armed.
+        try { el.dispatchEvent(new Event('touchcancel')); } catch {}
+        try { navigator.vibrate && navigator.vibrate(15); } catch {}
+        try { el.setPointerCapture && el.setPointerCapture(e.pointerId); } catch {}
+      };
+
+      if (isTouch) holdTimer = setTimeout(arm, 380);
+
+      const onMove = (ev) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        const dist = Math.hypot(dx, dy);
+        if (!dragging) {
+          if (isTouch) {
+            // Movement before hold timer → user is scrolling, bail.
+            if (dist > 10) {
+              if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+              cleanup();
+            }
+            return;
+          }
+          if (dist > 4) arm();
+          if (!dragging) return;
+        }
+        if (ev.cancelable) ev.preventDefault();
+        const below = document.elementFromPoint(ev.clientX, ev.clientY);
+        const target = below && below.closest && below.closest('.channel-item');
+        if (!target || target === el) return;
+        if (target.parentElement !== container) return;
+        if (target.classList.contains('channel-unjoined')) return;
+        const rect = target.getBoundingClientRect();
+        const after = ev.clientY > rect.top + rect.height / 2;
+        if (after) {
+          if (target.nextSibling !== el) container.insertBefore(el, target.nextSibling);
+        } else {
+          if (target !== el) container.insertBefore(el, target);
+        }
+      };
+
+      const onUp = () => {
+        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+        if (dragging) {
+          el.classList.remove('dragging');
+          el._dragSuppressClick = true;
+          _persistChannelOrder();
+        }
+        cleanup();
+      };
+
+      const cleanup = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+      };
+
+      window.addEventListener('pointermove', onMove, { passive: false });
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  }
+
   function renderRooms() {
     const container = document.getElementById('public-channels');
     container.innerHTML = '';
-
-    // Show joined rooms first, then a "Browse All" button
     const joinedRooms = State.rooms.filter(r => r.joined);
     const unjoinedRooms = State.rooms.filter(r => !r.joined);
 
@@ -387,6 +508,8 @@ const Rooms = (() => {
           showActionSheet('#' + room.name, items);
         });
       }
+      // Drag-to-reorder (joined channels only — DMs and unjoined rows skip).
+      if (room.joined) _bindChannelDrag(el);
       container.appendChild(el);
     });
 
