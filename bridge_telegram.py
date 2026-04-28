@@ -193,10 +193,27 @@ async def send_to_telegram(chat_id: int, text: str, media_url: str = None,
                                     parse_mode="HTML", **extra)
     else:
         if text:
-            resp = await tg_request("sendMessage", chat_id=chat_id, text=text,
-                                    parse_mode="HTML",
-                                    link_preview_options={"is_disabled": True},
-                                    **extra)
+            # Enable Telegram link preview when the text contains a URL so
+            # YouTube / web links get a rich embed. Without a URL we keep
+            # previews disabled to avoid Telegram trying to preview the
+            # bridged "via FrogTalk" footer or other noise.
+            import re as _re
+            _url_in_text = bool(_re.search(r'https?://\S+', text))
+            if _url_in_text:
+                # prefer_large_media gives YouTube/article links a full-size
+                # card instead of a tiny thumbnail.
+                resp = await tg_request("sendMessage", chat_id=chat_id, text=text,
+                                        parse_mode="HTML",
+                                        link_preview_options={
+                                            "is_disabled": False,
+                                            "prefer_large_media": True,
+                                        },
+                                        **extra)
+            else:
+                resp = await tg_request("sendMessage", chat_id=chat_id, text=text,
+                                        parse_mode="HTML",
+                                        link_preview_options={"is_disabled": True},
+                                        **extra)
     try:
         return int((resp.get("result") or {}).get("message_id"))
     except Exception:

@@ -209,8 +209,16 @@ async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = No
                 file_obj = None
 
         if discord and nickname:
+            # Detect URLs in the user's text. Discord auto-resolves URLs
+            # (YouTube, X, articles, etc.) into rich embeds ONLY when they
+            # appear in the message `content` — never inside an embed
+            # description. So when text contains a URL we route the text
+            # to `content` and use the embed as a small author chip,
+            # letting Discord auto-generate the link preview alongside it.
+            import re as _re_url
+            _has_url = bool(text and _re_url.search(r'https?://\S+', text))
             embed = discord.Embed(
-                description=text or None,
+                description=None if _has_url else (text or None),
                 color=0x2E7D32,  # frog green
             )
             # author icon_url must be http(s); skip data: URLs silently.
@@ -226,7 +234,8 @@ async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = No
                 # inside the rich card.
                 if (media_url or "").startswith("data:image/"):
                     embed.set_image(url=f"attachment://{file_obj.filename}")
-                sent = await channel.send(embed=embed, file=file_obj, reference=reference)
+                _content = text if _has_url else None
+                sent = await channel.send(content=_content, embed=embed, file=file_obj, reference=reference)
             elif media_url and media_url.startswith("http"):
                 # Best-effort image preview — Discord ignores non-image URLs.
                 # Wrap the URL in `||` spoiler markdown so the client hides
@@ -237,9 +246,11 @@ async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = No
                     sent = await channel.send(embed=embed, reference=reference)
                 else:
                     embed.set_image(url=media_url)
-                    sent = await channel.send(embed=embed, reference=reference)
+                    _content = text if _has_url else None
+                    sent = await channel.send(content=_content, embed=embed, reference=reference)
             else:
-                sent = await channel.send(embed=embed, reference=reference)
+                _content = text if _has_url else None
+                sent = await channel.send(content=_content, embed=embed, reference=reference)
         else:
             if file_obj:
                 sent = await channel.send(content=text or None, file=file_obj, reference=reference)
