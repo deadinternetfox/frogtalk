@@ -419,13 +419,17 @@ body[data-theme="dark"] .modal-btn.primary:active{
   font-size:13px;color:#9bbfaf;
 }
 #channel-profile-overlay .ch-prof-close{
-  background:transparent;border:1px solid #2f5548;
-  color:#9bbfaf;width:32px;height:32px;border-radius:8px;
+  background:rgba(15,29,24,.85);
+  border:1px solid #2f5548;
+  color:#eaf8f0;width:32px;height:32px;border-radius:8px;
   cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;
-  transition:background .15s ease,color .15s ease,border-color .15s ease;
+  display:inline-flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  box-shadow:0 2px 8px rgba(0,0,0,.4);
+  transition:background .15s ease,color .15s ease,border-color .15s ease,transform .15s ease;
 }
 #channel-profile-overlay .ch-prof-close:hover{
-  background:rgba(74,222,128,.12);color:#eaf8f0;border-color:#4caf50;
+  background:rgba(74,222,128,.22);color:#fff;border-color:#4caf50;transform:scale(1.05);
 }
 #channel-profile-overlay .ch-prof-about-label{
   font-size:11px;font-weight:600;color:#9bbfaf;
