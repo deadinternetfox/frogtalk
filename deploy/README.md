@@ -7,7 +7,7 @@ Full documentation: **https://frogtalk.xyz/docs/node**
 ### 1. Clone & configure
 
 ```bash
-git clone https://github.com/your-org/frogtalk.git
+git clone https://github.com/deadinternetfox/frogtalk.git
 cd frogtalk
 cp deploy/env.example .env
 nano .env            # set ADMIN_PASSWORD, PORT, ALLOWED_ORIGINS, etc.
