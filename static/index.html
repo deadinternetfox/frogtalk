@@ -770,15 +770,18 @@ body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[d
 .channel-item:hover .ch-drag-handle,
 .channel-item.active .ch-drag-handle{ opacity:.85; }
 .channel-item.dragging .ch-drag-handle{ opacity:1; color:#cdeedd; }
-/* Touch / coarse-pointer devices: handle is always visible & a touch larger. */
+/* Touch / coarse-pointer devices: only the active channel reveals the
+   handle, mirroring desktop's "one at a time" feel. Slightly larger tap
+   target than desktop. */
 @media (hover:none), (pointer:coarse){
   .ch-drag-handle{
-    opacity:.7;
     width:28px;height:28px;flex:0 0 28px;
     color:#7fbfa1;
     background:rgba(127,210,167,.06);
+    opacity:0;
   }
-  .channel-item .ch-drag-handle{ opacity:.7; }
+  .channel-item.active .ch-drag-handle,
+  .channel-item.dragging .ch-drag-handle{ opacity:.85; }
 }
 .channel-item .ch-icon,
 #chat-header .room-title-icon{
