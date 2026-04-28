@@ -40,10 +40,17 @@ const UI = (() => {
     if (s) {
       return `<span style="display:inline-flex;width:${size}px;height:${size}px;border-radius:50%;background:#1a2a1a;align-items:center;justify-content:center;font-size:${Math.round(size*0.55)}px;vertical-align:middle">${escHtml(s)}</span>`;
     }
-    const initial = (nickname || '?')[0].toUpperCase();
-    const colors = ['#1a3a1a', '#2a1a3a', '#3a1a1a', '#1a2a3a', '#3a2a1a'];
-    const idx = (nickname || '').charCodeAt(0) % colors.length || 0;
-    return `<span style="display:inline-flex;width:${size}px;height:${size}px;border-radius:50%;background:${colors[idx]};align-items:center;justify-content:center;font-size:${Math.round(size*0.45)}px;font-weight:700;color:#4caf50;vertical-align:middle">${escHtml(initial)}</span>`;
+    // No avatar at all → show the FrogTalk default frog. Per-nickname tinted
+    // gradient keeps users visually distinguishable while staying on-brand.
+    const grads = [
+      'linear-gradient(135deg,#1d4a2e,#0f2018)',
+      'linear-gradient(135deg,#2a4a1d,#15240e)',
+      'linear-gradient(135deg,#1d3a4a,#0e1a24)',
+      'linear-gradient(135deg,#3a1d4a,#1d0e24)',
+      'linear-gradient(135deg,#4a3a1d,#241a0e)',
+    ];
+    const idx = ((nickname || '?').charCodeAt(0) || 0) % grads.length;
+    return `<span aria-label="${escHtml(nickname || 'user')}" style="display:inline-flex;width:${size}px;height:${size}px;border-radius:50%;background:${grads[idx]};align-items:center;justify-content:center;font-size:${Math.round(size*0.6)}px;line-height:1;vertical-align:middle;box-shadow:inset 0 0 0 1px rgba(127,210,167,.18)">🐸</span>`;
   }
 
   function setConnectionStatus(status) {

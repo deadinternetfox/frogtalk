@@ -22,31 +22,68 @@ _DATA_URL_RE = re.compile(
 )
 
 
+# Default frog avatar served when a user has no avatar set so external
+# embeds (Discord webhooks, link previews) display the FrogTalk logo
+# instead of their platform's grey-default identicon.
+_DEFAULT_FROG_AVATAR = "/static/icons/icon-192.png"
+
+
 @router.get("/{user_id}/avatar.png")
 async def get_user_avatar_image(user_id: int):
     """Return the user's avatar bytes as a real image response.
 
     Public on purpose — avatars are already broadcast inside every
-    message payload. Falls back to a 404 when the user has no avatar
-    or the stored value isn't a recognized data: URL.
+    message payload. Falls back to the default frog icon when the user
+    has no avatar (or the stored value isn't a recognized data: URL) so
+    Discord and other embed clients show the FrogTalk logo rather than
+    their own platform default.
     """
+    def _frog_redirect():
+        return Response(
+            status_code=302,
+            headers={
+                "Location": _DEFAULT_FROG_AVATAR,
+                # Short cache: keeps Discord pulling the latest if the
+                # user later sets a real avatar.
+                "Cache-Control": "public, max-age=300",
+            },
+        )
+
     user = db.get_user_by_id(user_id)
     if not user:
-        return Response(status_code=404)
+        return _frog_redirect()
     raw = (user.get("avatar") or "").strip()
     if not raw:
-        return Response(status_code=404)
+        return _frog_redirect()
     m = _DATA_URL_RE.match(raw)
     if not m:
         # Already an http(s) URL — redirect so callers can cache the
         # original CDN-hosted image directly.
         if raw.startswith("http://") or raw.startswith("https://"):
             return Response(status_code=302, headers={"Location": raw})
-        return Response(status_code=404)
+        # Try a tolerant fallback: split on the first ',' and treat the
+        # tail as base64 (some encoders add whitespace/newlines that
+        # break the strict regex above).
+        if raw.startswith("data:") and "," in raw:
+            try:
+                head, tail = raw.split(",", 1)
+                mime = "image/png"
+                if head.startswith("data:") and ";" in head:
+                    mime = head[5:].split(";", 1)[0] or mime
+                cleaned = "".join(tail.split())
+                data = base64.b64decode(cleaned, validate=False)
+                return Response(
+                    content=data,
+                    media_type=mime,
+                    headers={"Cache-Control": "public, max-age=86400, immutable"},
+                )
+            except Exception:
+                pass
+        return _frog_redirect()
     try:
         data = base64.b64decode(m.group("b64"), validate=False)
     except Exception:
-        return Response(status_code=404)
+        return _frog_redirect()
     mime = m.group("mime") or "image/png"
     return Response(
         content=data,
