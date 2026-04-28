@@ -1242,6 +1242,24 @@ def _migrate():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
+        # Polymorphic 👍/👎 votes on comments. `target_type` selects which
+        # comments table the row refers to ('channel_comment' or
+        # 'wall_comment'). SQLite has no polymorphic FK so the parent rows
+        # are cleared explicitly in delete_channel_comment /
+        # delete_wall_comment.
+        con.execute("""CREATE TABLE IF NOT EXISTS comment_votes (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            target_type TEXT NOT NULL CHECK(target_type IN ('channel_comment','wall_comment')),
+            target_id   INTEGER NOT NULL,
+            user_id     INTEGER NOT NULL,
+            value       INTEGER NOT NULL CHECK(value IN (-1, 1)),
+            created_at  TEXT DEFAULT (datetime('now')),
+            UNIQUE(target_type, target_id, user_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        con.execute("""CREATE INDEX IF NOT EXISTS idx_cv_target
+                       ON comment_votes(target_type, target_id)""")
+
         # Social activity notifications (likes, comments, follows on the
         # logged-in user's own posts/profile). Coalesced badge feed for the
         # 🤳🏼 sidebar icon.
@@ -3335,7 +3353,8 @@ def add_channel_comment(room_id: int, user_id: int, content: str) -> Optional[in
         return cur.lastrowid
 
 
-def get_channel_comments(room_id: int, limit: int = 50, offset: int = 0) -> List[Dict]:
+def get_channel_comments(room_id: int, limit: int = 50, offset: int = 0,
+                         viewer_id: Optional[int] = None) -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
             SELECT c.id, c.content, c.created_at, c.user_id,
@@ -3346,7 +3365,9 @@ def get_channel_comments(room_id: int, limit: int = 50, offset: int = 0) -> List
             ORDER BY c.created_at DESC
             LIMIT ? OFFSET ?
         """, (room_id, limit, offset)).fetchall()
-    return [dict(r) for r in rows]
+    out = [dict(r) for r in rows]
+    _attach_comment_votes(out, "channel_comment", viewer_id)
+    return out
 
 
 def delete_channel_comment(comment_id: int, user_id: int, is_admin: bool = False) -> bool:
@@ -3370,8 +3391,117 @@ def delete_channel_comment(comment_id: int, user_id: int, is_admin: bool = False
             ).fetchone() if not is_owner else None
             if not is_owner and not is_mod:
                 return False
+        con.execute(
+            "DELETE FROM comment_votes WHERE target_type='channel_comment' AND target_id=?",
+            (comment_id,)
+        )
         cur = con.execute("DELETE FROM channel_comments WHERE id=?", (comment_id,))
         return cur.rowcount > 0
+
+
+def get_channel_comment(comment_id: int) -> Optional[Dict]:
+    """Return raw channel comment row or None."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT id, room_id, user_id, content, created_at FROM channel_comments WHERE id=?",
+            (comment_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Polymorphic comment votes (👍/👎 on channel comments + wall comments)
+# ---------------------------------------------------------------------------
+
+_VALID_VOTE_TARGETS = ("channel_comment", "wall_comment")
+
+
+def set_comment_vote(target_type: str, target_id: int, user_id: int,
+                     value: int) -> Dict[str, int]:
+    """Set the user's vote on a comment.
+
+    `value` must be -1, 0, or 1. `0` clears any existing vote. Idempotent.
+    Returns the post-update counts {up, down, my_vote}.
+    """
+    if target_type not in _VALID_VOTE_TARGETS:
+        raise ValueError(f"invalid target_type: {target_type}")
+    if value not in (-1, 0, 1):
+        raise ValueError(f"invalid value: {value}")
+    with _conn() as con:
+        if value == 0:
+            con.execute(
+                "DELETE FROM comment_votes WHERE target_type=? AND target_id=? AND user_id=?",
+                (target_type, target_id, user_id)
+            )
+        else:
+            # Upsert against the unique (target_type, target_id, user_id).
+            con.execute("""
+                INSERT INTO comment_votes (target_type, target_id, user_id, value)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(target_type, target_id, user_id)
+                DO UPDATE SET value=excluded.value, created_at=datetime('now')
+            """, (target_type, target_id, user_id, value))
+        agg = con.execute("""
+            SELECT
+                SUM(CASE WHEN value =  1 THEN 1 ELSE 0 END) AS up,
+                SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END) AS down
+            FROM comment_votes WHERE target_type=? AND target_id=?
+        """, (target_type, target_id)).fetchone()
+    return {
+        "up": int(agg["up"] or 0),
+        "down": int(agg["down"] or 0),
+        "my_vote": int(value),
+    }
+
+
+def get_comment_vote_counts_bulk(target_type: str,
+                                 ids: List[int]) -> Dict[int, Dict[str, int]]:
+    """Return {comment_id: {up, down}} for the requested ids."""
+    if target_type not in _VALID_VOTE_TARGETS or not ids:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    with _conn() as con:
+        rows = con.execute(f"""
+            SELECT target_id,
+                   SUM(CASE WHEN value =  1 THEN 1 ELSE 0 END) AS up,
+                   SUM(CASE WHEN value = -1 THEN 1 ELSE 0 END) AS down
+            FROM comment_votes
+            WHERE target_type=? AND target_id IN ({placeholders})
+            GROUP BY target_id
+        """, (target_type, *ids)).fetchall()
+    return {
+        int(r["target_id"]): {"up": int(r["up"] or 0), "down": int(r["down"] or 0)}
+        for r in rows
+    }
+
+
+def get_user_comment_votes_bulk(target_type: str, ids: List[int],
+                                user_id: int) -> Dict[int, int]:
+    """Return {comment_id: value} for rows the user has voted on."""
+    if target_type not in _VALID_VOTE_TARGETS or not ids or not user_id:
+        return {}
+    placeholders = ",".join("?" * len(ids))
+    with _conn() as con:
+        rows = con.execute(f"""
+            SELECT target_id, value FROM comment_votes
+            WHERE target_type=? AND user_id=? AND target_id IN ({placeholders})
+        """, (target_type, user_id, *ids)).fetchall()
+    return {int(r["target_id"]): int(r["value"]) for r in rows}
+
+
+def _attach_comment_votes(rows: List[Dict], target_type: str,
+                          viewer_id: Optional[int]) -> None:
+    """Mutate `rows` in-place to add like_count/dislike_count/my_vote."""
+    if not rows:
+        return
+    ids = [int(r["id"]) for r in rows]
+    counts = get_comment_vote_counts_bulk(target_type, ids)
+    mine = get_user_comment_votes_bulk(target_type, ids, viewer_id) if viewer_id else {}
+    for r in rows:
+        c = counts.get(int(r["id"]), {})
+        r["like_count"] = int(c.get("up", 0))
+        r["dislike_count"] = int(c.get("down", 0))
+        r["my_vote"] = int(mine.get(int(r["id"]), 0))
 
 
 def get_suggested_channels(user_id: int, limit: int = 10) -> List[Dict]:
@@ -3639,7 +3769,19 @@ def get_post_comments(post_id: int, limit: int = 50, viewer_id: Optional[int] = 
                 ORDER BY wc.created_at ASC
                 LIMIT ?
             """, (post_id, limit)).fetchall()
-    return [dict(r) for r in rows]
+    out = [dict(r) for r in rows]
+    _attach_comment_votes(out, "wall_comment", viewer_id)
+    return out
+
+
+def get_wall_comment(comment_id: int) -> Optional[Dict]:
+    """Return raw wall comment row or None."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT id, post_id, user_id, content, created_at FROM wall_comments WHERE id=?",
+            (comment_id,)
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def delete_wall_comment(comment_id: int, user_id: int) -> bool:
@@ -3656,6 +3798,10 @@ def delete_wall_comment(comment_id: int, user_id: int) -> bool:
             return False
         if comment['user_id'] != user_id and comment['post_owner'] != user_id:
             return False
+        con.execute(
+            "DELETE FROM comment_votes WHERE target_type='wall_comment' AND target_id=?",
+            (comment_id,)
+        )
         con.execute("DELETE FROM wall_comments WHERE id=?", (comment_id,))
         return True
 

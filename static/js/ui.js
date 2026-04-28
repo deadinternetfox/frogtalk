@@ -3283,17 +3283,30 @@ async function toggleWallComments(postId) {
     if (!res.ok) throw new Error(data.error);
     const comments = data.comments || [];
     const allowComments = data.allow_comments !== false;
-    let html = comments.map(c => `
-      <div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #1a1a1a" data-comment-id="${c.id}">
+    let html = comments.map(c => {
+      const myVote = Number(c.my_vote || 0);
+      const upCount = Number(c.like_count || 0);
+      const upActive = myVote === 1 ? ' is-up' : '';
+      const downActive = myVote === -1 ? ' is-down' : '';
+      return `
+      <div class="wall-comment-row" style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #1a1a1a" data-comment-id="${c.id}" data-post-id="${postId}">
         <div style="width:24px;height:24px;flex-shrink:0">${UI.avatarEl(c.avatar, c.nickname, 24)}</div>
         <div style="flex:1;min-width:0">
           <span style="font-size:12px;font-weight:600;color:#e0e0e0">${esc(c.nickname)}</span>
           <span style="font-size:12px;color:#aaa;margin-left:4px">${esc(c.content)}</span>
           <div style="font-size:10px;color:#555;margin-top:2px">${UI.formatTime(c.created_at)}</div>
+          <div class="sf-comment-votes" style="margin-top:4px">
+            <button type="button" class="sf-vote-btn${upActive}" data-vote="up" onclick="voteWallComment(event, ${postId}, ${c.id}, 1, this)" aria-label="Like comment">
+              <span class="sf-vote-icon">👍</span><span class="sf-vote-count">${upCount}</span>
+            </button>
+            <button type="button" class="sf-vote-btn${downActive}" data-vote="down" onclick="voteWallComment(event, ${postId}, ${c.id}, -1, this)" aria-label="Dislike comment">
+              <span class="sf-vote-icon">👎</span>
+            </button>
+          </div>
         </div>
         ${c.user_id === State.user?.id ? `<button onclick="deleteWallComment(${c.id},${postId})" style="background:none;border:none;color:#666;cursor:pointer;font-size:11px" title="Delete">✕</button>` : ''}
       </div>
-    `).join('');
+    `;}).join('');
     if (allowComments) {
       html += `
       <div style="display:flex;gap:6px;margin-top:8px;align-items:center">
@@ -3333,6 +3346,47 @@ async function deleteWallComment(commentId, postId) {
       if (el) el.remove();
     }
   } catch {}
+}
+
+// 👍/👎 a wall comment from the legacy ui.js renderer (profile page).
+async function voteWallComment(ev, postId, commentId, value, btn) {
+  try { ev?.preventDefault?.(); ev?.stopPropagation?.(); } catch {}
+  if (!btn || btn.dataset.pending === '1') return;
+  const wrap = btn.closest('.wall-comment-row') || btn.closest('[data-comment-id]');
+  if (!wrap) return;
+  const upBtn = wrap.querySelector('.sf-vote-btn[data-vote="up"]');
+  const downBtn = wrap.querySelector('.sf-vote-btn[data-vote="down"]');
+  const upCountEl = upBtn?.querySelector('.sf-vote-count');
+  const wasUp = upBtn?.classList.contains('is-up');
+  const wasDown = downBtn?.classList.contains('is-down');
+  let newValue = value;
+  if (value === 1 && wasUp) newValue = 0;
+  if (value === -1 && wasDown) newValue = 0;
+  const prevUp = Number(upCountEl?.textContent || '0');
+  let nextUp = prevUp;
+  if (wasUp && newValue !== 1) nextUp -= 1;
+  if (!wasUp && newValue === 1) nextUp += 1;
+  if (upCountEl) upCountEl.textContent = String(Math.max(0, nextUp));
+  upBtn?.classList.toggle('is-up', newValue === 1);
+  downBtn?.classList.toggle('is-down', newValue === -1);
+  if (upBtn) upBtn.dataset.pending = '1';
+  if (downBtn) downBtn.dataset.pending = '1';
+  try {
+    const res = await apiFetch(`/api/wall/posts/${postId}/comments/${commentId}/vote`, 'POST', { value: newValue });
+    if (!res.ok) throw new Error('vote failed');
+    const d = await res.json();
+    if (upCountEl) upCountEl.textContent = String(d.like_count || 0);
+    upBtn?.classList.toggle('is-up', Number(d.my_vote) === 1);
+    downBtn?.classList.toggle('is-down', Number(d.my_vote) === -1);
+  } catch {
+    if (upCountEl) upCountEl.textContent = String(prevUp);
+    upBtn?.classList.toggle('is-up', !!wasUp);
+    downBtn?.classList.toggle('is-down', !!wasDown);
+    if (typeof toast === 'function') toast('Could not vote', 'error');
+  } finally {
+    if (upBtn) delete upBtn.dataset.pending;
+    if (downBtn) delete downBtn.dataset.pending;
+  }
 }
 
 function showWallPostInput() {

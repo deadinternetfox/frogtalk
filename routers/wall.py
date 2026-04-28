@@ -434,6 +434,57 @@ async def delete_comment(comment_id: int, current_user: dict = Depends(get_curre
     return JSONResponse(status_code=404, content={"error": "Comment not found or not authorized"})
 
 
+class CommentVoteRequest(BaseModel):
+    value: int
+
+
+@router.post("/posts/{post_id}/comments/{comment_id}/vote")
+@limiter.limit("60/minute")
+async def vote_wall_comment(
+    request: Request,
+    post_id: int,
+    comment_id: int,
+    body: CommentVoteRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """YouTube-style 👍/👎 on a wall-post comment.
+
+    body.value is -1, 0 (clear), or 1. Idempotent.
+    """
+    if body.value not in (-1, 0, 1):
+        return JSONResponse(status_code=400, content={"error": "Invalid vote value"})
+    post = db.get_wall_post(post_id)
+    if not post:
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+    author_id = post.get("user_id")
+    viewer_id = current_user["id"]
+    if author_id and db.is_blocked_either_way(viewer_id, author_id):
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+    privacy = post.get("privacy") or "public"
+    allowed = (
+        privacy == "public"
+        or viewer_id == author_id
+        or (privacy == "followers" and db.is_following(viewer_id, author_id))
+        or (privacy == "friends" and db.are_friends(viewer_id, author_id))
+    )
+    if not allowed:
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
+    comment = db.get_wall_comment(comment_id)
+    # Cross-check the comment belongs to this post (anti-IDOR).
+    if not comment or int(comment.get("post_id") or 0) != int(post_id):
+        return JSONResponse(status_code=404, content={"error": "Comment not found"})
+    # Block guard: don't let blocked users vote on each other's comments.
+    if comment.get("user_id") and db.is_blocked_either_way(viewer_id, comment["user_id"]):
+        return JSONResponse(status_code=404, content={"error": "Comment not found"})
+    res = db.set_comment_vote("wall_comment", comment_id, viewer_id, body.value)
+    return {
+        "ok": True,
+        "like_count": res["up"],
+        "dislike_count": res["down"],
+        "my_vote": res["my_vote"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # User profile settings for wall
 # ---------------------------------------------------------------------------

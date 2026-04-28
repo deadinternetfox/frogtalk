@@ -1,13 +1,16 @@
 """Public channel directory routes."""
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from typing import Optional, List
 import json
 
 import database as db
 from deps import get_current_user
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/directory", tags=["directory"])
 
 
@@ -143,7 +146,9 @@ async def channel_profile(room_name: str, current_user: dict = Depends(get_curre
         "is_owner": room["owner_id"] == current_user["id"],
         "like_count": db.get_channel_like_count(room["id"]),
         "liked_by_me": db.user_liked_channel(room["id"], current_user["id"]),
-        "recent_comments": db.get_channel_comments(room["id"], limit=10, offset=0),
+        "recent_comments": db.get_channel_comments(
+            room["id"], limit=10, offset=0, viewer_id=current_user["id"]
+        ),
     }
 
 
@@ -183,7 +188,9 @@ async def list_channel_comments(
     room = db.get_room(room_name)
     if not room:
         return JSONResponse(status_code=404, content={"error": "Channel not found"})
-    return {"comments": db.get_channel_comments(room["id"], limit, offset)}
+    return {"comments": db.get_channel_comments(
+        room["id"], limit, offset, viewer_id=current_user["id"]
+    )}
 
 
 @router.post("/channels/{room_name}/comments")
@@ -214,6 +221,49 @@ async def delete_channel_comment_endpoint(
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
     return {"ok": True}
+
+
+class CommentVoteRequest(BaseModel):
+    value: int
+
+
+@router.post("/channels/{room_name}/comments/{comment_id}/vote")
+@limiter.limit("60/minute")
+async def vote_channel_comment(
+    request: Request,
+    room_name: str,
+    comment_id: int,
+    body: CommentVoteRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """YouTube-style 👍/👎 on a channel directory comment.
+
+    body.value is -1, 0 (clear), or 1. Idempotent.
+    Returns updated counts and the caller's vote state.
+    """
+    if body.value not in (-1, 0, 1):
+        return JSONResponse(status_code=400, content={"error": "Invalid vote value"})
+    room = db.get_room(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Channel not found"})
+    # Authoritative read access (covers invite-only channels + bans)
+    if not db.user_can_access_room(
+        current_user["id"], room_name, is_admin=bool(current_user.get("is_admin"))
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
+    comment = db.get_channel_comment(comment_id)
+    # Cross-check the comment belongs to this room (anti-IDOR).
+    if not comment or int(comment.get("room_id") or 0) != int(room["id"]):
+        return JSONResponse(status_code=404, content={"error": "Comment not found"})
+    res = db.set_comment_vote(
+        "channel_comment", comment_id, current_user["id"], body.value
+    )
+    return {
+        "ok": True,
+        "like_count": res["up"],
+        "dislike_count": res["down"],
+        "my_vote": res["my_vote"],
+    }
 
 
 class UpdateChannelListingRequest(BaseModel):

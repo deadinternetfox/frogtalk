@@ -2454,17 +2454,30 @@ const Social = (() => {
       if (comments.length === 0) {
         html += '<div style="color:#666;font-size:12px;padding:8px 0;text-align:center">No comments yet</div>';
       } else {
-        html += comments.map(c => `
-          <div class="sf-comment">
+        html += comments.map(c => {
+          const myVote = Number(c.my_vote || 0);
+          const upCount = Number(c.like_count || 0);
+          const upActive = myVote === 1 ? ' is-up' : '';
+          const downActive = myVote === -1 ? ' is-down' : '';
+          return `
+          <div class="sf-comment" data-comment-id="${c.id}">
             <div class="sf-comment-avatar" onclick="Social.openProfile('${esc(c.nickname)}')">${UI.avatarEl(c.avatar, c.nickname, 24)}</div>
             <div class="sf-comment-body">
               <span class="sf-comment-nick" onclick="Social.openProfile('${esc(c.nickname)}')">${esc(c.nickname)}</span>
               <span class="sf-comment-text">${esc(c.content)}</span>
               <span class="sf-comment-time">${timeAgo(c.created_at)}</span>
+              <div class="sf-comment-votes">
+                <button type="button" class="sf-vote-btn${upActive}" data-vote="up" onclick="Social.voteComment(event, ${postId}, ${c.id}, 1, this)" aria-label="Like comment">
+                  <span class="sf-vote-icon">👍</span><span class="sf-vote-count">${upCount}</span>
+                </button>
+                <button type="button" class="sf-vote-btn${downActive}" data-vote="down" onclick="Social.voteComment(event, ${postId}, ${c.id}, -1, this)" aria-label="Dislike comment">
+                  <span class="sf-vote-icon">👎</span>
+                </button>
+              </div>
             </div>
             ${c.user_id === State.user?.id ? `<button class="sf-comment-del" onclick="Social.deleteComment(${c.id},${postId})">✕</button>` : ''}
           </div>
-        `).join('');
+        `;}).join('');
       }
       html += `
         <div class="sf-comment-input">
@@ -2496,6 +2509,46 @@ const Social = (() => {
       toggleComments(postId);
       toggleComments(postId);
     } catch {}
+  }
+
+  async function voteComment(ev, postId, commentId, value, btn) {
+    try { ev?.preventDefault?.(); ev?.stopPropagation?.(); } catch {}
+    if (!btn || btn.dataset.pending === '1') return;
+    const wrap = btn.closest('.sf-comment');
+    if (!wrap) return;
+    const upBtn = wrap.querySelector('.sf-vote-btn[data-vote="up"]');
+    const downBtn = wrap.querySelector('.sf-vote-btn[data-vote="down"]');
+    const upCountEl = upBtn?.querySelector('.sf-vote-count');
+    const wasUp = upBtn?.classList.contains('is-up');
+    const wasDown = downBtn?.classList.contains('is-down');
+    let newValue = value;
+    if (value === 1 && wasUp) newValue = 0;
+    if (value === -1 && wasDown) newValue = 0;
+    const prevUp = Number(upCountEl?.textContent || '0');
+    let nextUp = prevUp;
+    if (wasUp && newValue !== 1) nextUp -= 1;
+    if (!wasUp && newValue === 1) nextUp += 1;
+    if (upCountEl) upCountEl.textContent = String(Math.max(0, nextUp));
+    upBtn?.classList.toggle('is-up', newValue === 1);
+    downBtn?.classList.toggle('is-down', newValue === -1);
+    if (upBtn) upBtn.dataset.pending = '1';
+    if (downBtn) downBtn.dataset.pending = '1';
+    try {
+      const res = await api(`/api/wall/posts/${postId}/comments/${commentId}/vote`, 'POST', { value: newValue });
+      if (!res.ok) throw new Error('vote failed');
+      const d = await res.json();
+      if (upCountEl) upCountEl.textContent = String(d.like_count || 0);
+      upBtn?.classList.toggle('is-up', Number(d.my_vote) === 1);
+      downBtn?.classList.toggle('is-down', Number(d.my_vote) === -1);
+    } catch {
+      if (upCountEl) upCountEl.textContent = String(prevUp);
+      upBtn?.classList.toggle('is-up', !!wasUp);
+      downBtn?.classList.toggle('is-down', !!wasDown);
+      if (typeof UI !== 'undefined' && UI.showToast) UI.showToast('Could not vote', 'error');
+    } finally {
+      if (upBtn) delete upBtn.dataset.pending;
+      if (downBtn) delete downBtn.dataset.pending;
+    }
   }
 
   async function deletePost(postId) {
@@ -3316,7 +3369,7 @@ const Social = (() => {
     open, close, openProfile, switchTab, switchProfileTab,
     openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
     toggleFollow, reactPost, showReactPicker, toggleComments,
-    submitComment, deleteComment, deletePost, dmUser,
+    submitComment, deleteComment, voteComment, deletePost, dmUser,
     shareProfile, profileShareUrl,
     openPostMenu, blockUserFromSocial,
     addFriendFromProfile, acceptFriendFromProfile,

@@ -2493,6 +2493,8 @@ async function viewChannelProfile(channelName) {
       ? `<img src="${UI.escHtml(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
       : UI.escHtml(ch.icon || '💬');
     const desc = ch.directory_description || ch.description || '';
+    const aboutText = ch.about || desc;
+    const showListingHint = !!ch.is_owner && !!ch.about && !!desc && ch.about.trim() !== desc.trim();
     const alreadyJoined = !!(State.rooms || []).find(r => r.name === ch.name && r.joined);
 
     let overlay = document.getElementById('channel-profile-overlay');
@@ -2526,8 +2528,8 @@ async function viewChannelProfile(channelName) {
           <button class="ch-prof-close" onclick="document.getElementById('channel-profile-overlay').remove()" aria-label="Close">✕</button>
         </div>
 
-        ${ch.about ? `<div class="ch-prof-about">${_renderRichText(ch.about)}</div>` : ''}
-        ${desc ? `<div class="ch-prof-desc">${_renderRichText(desc)}</div>` : ''}
+        ${aboutText ? `<div class="ch-prof-about-label">About</div><div class="ch-prof-about">${_renderRichText(aboutText)}</div>` : ''}
+        ${showListingHint ? `<div class="ch-prof-desc-hint">Directory listing description differs — <a href="#" onclick="editChannelListing(${_jsStr(ch.name)});return false;">Edit listing</a></div>` : ''}
 
         ${tags.length ? `<div class="ch-prof-tags">${tags.map(t => `<span class="dir-tag">${UI.escHtml(t)}</span>`).join('')}</div>` : ''}
 
@@ -2567,7 +2569,11 @@ function _renderChannelComment(c, channelName) {
   const avatar = c.avatar ? `<img src="${UI.escHtml(c.avatar)}" class="ch-prof-cmt-avatar">` : `<div class="ch-prof-cmt-avatar ch-prof-cmt-avatar-fallback">🐸</div>`;
   const canDelete = (c.user_id === State.user.id) || State.user.is_admin;
   const delBtn = canDelete ? `<button class="ch-prof-cmt-del" onclick="deleteChannelComment(${_jsStr(channelName)}, ${c.id})">🗑</button>` : '';
-  return `<div class="ch-prof-cmt">
+  const myVote = Number(c.my_vote || 0);
+  const upCount = Number(c.like_count || 0);
+  const upActive = myVote === 1 ? ' is-up' : '';
+  const downActive = myVote === -1 ? ' is-down' : '';
+  return `<div class="ch-prof-cmt" data-comment-id="${c.id}">
     ${avatar}
     <div class="ch-prof-cmt-main">
       <div class="ch-prof-cmt-head">
@@ -2578,8 +2584,64 @@ function _renderChannelComment(c, channelName) {
         </span>
       </div>
       <div class="ch-prof-cmt-body">${UI.escHtml(c.content)}</div>
+      <div class="ch-prof-cmt-votes">
+        <button type="button" class="ch-prof-vote-btn${upActive}" data-vote="up" onclick="voteChannelComment(event, ${_jsStr(channelName)}, ${c.id}, 1, this)" aria-label="Like comment">
+          <span class="ch-prof-vote-icon">👍</span><span class="ch-prof-vote-count">${upCount}</span>
+        </button>
+        <button type="button" class="ch-prof-vote-btn${downActive}" data-vote="down" onclick="voteChannelComment(event, ${_jsStr(channelName)}, ${c.id}, -1, this)" aria-label="Dislike comment">
+          <span class="ch-prof-vote-icon">👎</span>
+        </button>
+      </div>
     </div>
   </div>`;
+}
+
+async function voteChannelComment(ev, channelName, commentId, value, btn) {
+  try { ev?.preventDefault?.(); ev?.stopPropagation?.(); } catch {}
+  if (!btn || btn.dataset.pending === '1') return;
+  const wrap = btn.closest('.ch-prof-cmt');
+  if (!wrap) return;
+  const upBtn = wrap.querySelector('.ch-prof-vote-btn[data-vote="up"]');
+  const downBtn = wrap.querySelector('.ch-prof-vote-btn[data-vote="down"]');
+  const upCountEl = upBtn?.querySelector('.ch-prof-vote-count');
+  // Determine current state from class flags
+  const wasUp = upBtn?.classList.contains('is-up');
+  const wasDown = downBtn?.classList.contains('is-down');
+  // Toggle: clicking the active direction clears (value -> 0)
+  let newValue = value;
+  if (value === 1 && wasUp) newValue = 0;
+  if (value === -1 && wasDown) newValue = 0;
+  // Optimistic UI
+  const prevUp = Number(upCountEl?.textContent || '0');
+  let nextUp = prevUp;
+  if (wasUp && newValue !== 1) nextUp -= 1;
+  if (!wasUp && newValue === 1) nextUp += 1;
+  if (upCountEl) upCountEl.textContent = String(Math.max(0, nextUp));
+  upBtn?.classList.toggle('is-up', newValue === 1);
+  downBtn?.classList.toggle('is-down', newValue === -1);
+  if (upBtn) upBtn.dataset.pending = '1';
+  if (downBtn) downBtn.dataset.pending = '1';
+  try {
+    const r = await fetch(`/api/directory/channels/${encodeURIComponent(channelName)}/comments/${commentId}/vote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+      body: JSON.stringify({ value: newValue })
+    });
+    if (!r.ok) throw new Error('vote failed');
+    const d = await r.json();
+    if (upCountEl) upCountEl.textContent = String(d.like_count || 0);
+    upBtn?.classList.toggle('is-up', Number(d.my_vote) === 1);
+    downBtn?.classList.toggle('is-down', Number(d.my_vote) === -1);
+  } catch {
+    // Rollback
+    if (upCountEl) upCountEl.textContent = String(prevUp);
+    upBtn?.classList.toggle('is-up', !!wasUp);
+    downBtn?.classList.toggle('is-down', !!wasDown);
+    UI.showToast('Could not vote', 'error');
+  } finally {
+    if (upBtn) delete upBtn.dataset.pending;
+    if (downBtn) delete downBtn.dataset.pending;
+  }
 }
 
 async function toggleChannelLike(ev, channelName) {
