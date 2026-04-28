@@ -255,6 +255,15 @@ const WS = (() => {
         UI.showToast(data.text, 'error');
         break;
       }
+      // ── Social activity (likes / comments / follows on YOUR posts) ──
+      case 'social_notification': {
+        try {
+          if (window.Social && typeof window.Social.handleSocialNotification === 'function') {
+            window.Social.handleSocialNotification(data);
+          }
+        } catch {}
+        break;
+      }
       // ── DM events ────────────────────────────────
       case 'dm_message': {
         if (typeof handleWSDMMessage === 'function') handleWSDMMessage(data);

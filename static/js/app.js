@@ -385,6 +385,11 @@ const App = {
     // Load friends (for badge count)
     if (typeof loadFriends === 'function') loadFriends();
 
+    // Fetch social activity unread count for the 🤳🏼 sidebar badge
+    if (typeof Social !== 'undefined' && Social.refreshActivityBadge) {
+      try { Social.refreshActivityBadge(); } catch {}
+    }
+
     // Refresh blocked-users cache so rooms/DMs/feed filters take effect
     if (typeof refreshBlockedCache === 'function') refreshBlockedCache();
 

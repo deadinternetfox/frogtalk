@@ -88,6 +88,7 @@ const Social = (() => {
     if (tab === 'feed') loadFeed();
     else if (tab === 'explore') loadExplore();
     else if (tab === 'music') loadMusicTab();
+    else if (tab === 'activity') loadActivity();
     else if (tab === 'profile') loadProfile(_profileUser || State.user?.nickname);
     // Persistent "Now playing" strip lives outside the tab content —
     // make sure it's painted/hidden correctly after switching tabs.
@@ -3032,6 +3033,268 @@ const Social = (() => {
     } catch {}
   }
 
+  // ── ACTIVITY (likes / comments / follows on YOUR posts) ──────────────────
+  let _activityUnread = 0;
+  let _activityList = [];
+  let _activityLoading = false;
+  let _activityPolledOnce = false;
+
+  function _setSidebarBadge(n) {
+    const badge = document.getElementById('social-sidebar-badge');
+    if (badge) {
+      if (n > 0) {
+        badge.textContent = n > 99 ? '99+' : String(n);
+        badge.style.display = '';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    const navBadge = document.getElementById('social-activity-nav-badge');
+    if (navBadge) {
+      if (n > 0) {
+        navBadge.textContent = n > 99 ? '99+' : String(n);
+        navBadge.style.display = '';
+      } else {
+        navBadge.style.display = 'none';
+      }
+    }
+    const navBtn = document.querySelector('.social-nav-activity');
+    if (navBtn) navBtn.classList.toggle('has-unread', n > 0);
+  }
+
+  function refreshActivityBadge() {
+    if (!State.user) { _setSidebarBadge(0); return Promise.resolve(0); }
+    return api('/api/social/notifications/unread-count', 'GET')
+      .then(r => r.ok ? r.json() : { unread: 0 })
+      .then(d => {
+        _activityUnread = Number(d?.unread || 0);
+        _setSidebarBadge(_activityUnread);
+        return _activityUnread;
+      })
+      .catch(() => 0);
+  }
+
+  function _activityIcon(kind) {
+    if (kind === 'like')    return `<div class="social-activity-icon like" title="like">❤</div>`;
+    if (kind === 'comment') return `<div class="social-activity-icon comment" title="comment">💬</div>`;
+    if (kind === 'follow')  return `<div class="social-activity-icon follow" title="follow">＋</div>`;
+    return `<div class="social-activity-icon" title="${esc(kind)}">•</div>`;
+  }
+
+  function _activityText(n) {
+    const nick = `<b>${esc(n.actor_nickname || 'Someone')}</b>`;
+    if (n.kind === 'like') {
+      const e = n.emoji ? ` ${esc(n.emoji)}` : '';
+      return `${nick} reacted${e} to your post`;
+    }
+    if (n.kind === 'comment') {
+      const preview = n.preview
+        ? `<span class="preview">“${esc(n.preview)}”</span>`
+        : '';
+      return `${nick} commented on your post${preview}`;
+    }
+    if (n.kind === 'follow') return `${nick} started following you`;
+    return `${nick} did something`;
+  }
+
+  function _renderActivityList() {
+    const wrap = document.getElementById('social-activity-list');
+    if (!wrap) return;
+    if (!_activityList.length) {
+      wrap.innerHTML = `<div class="social-activity-empty">
+        <span class="ico">🔔</span>
+        <div style="font-weight:600;color:#bff0d0;margin-bottom:4px">No activity yet</div>
+        <div style="font-size:13px">Likes, comments and new followers will show up here.</div>
+      </div>`;
+      return;
+    }
+    wrap.innerHTML = `<div class="social-activity-list">${
+      _activityList.map(n => {
+        const isUnread = !n.read_at;
+        const av = UI.avatarEl(n.actor_avatar, n.actor_nickname || '?', 42);
+        return `<div class="social-activity-item ${isUnread ? 'unread' : ''}"
+                     data-id="${n.id}"
+                     onclick="Social.openActivityItem(${n.id})">
+          <div class="social-activity-avatar">${av}</div>
+          <div class="social-activity-body">
+            <div class="social-activity-text">${_activityText(n)}</div>
+            <div class="social-activity-time">${timeAgo(n.created_at)}</div>
+          </div>
+          ${_activityIcon(n.kind)}
+        </div>`;
+      }).join('')
+    }</div>`;
+  }
+
+  async function loadActivity() {
+    const content = document.getElementById('social-content');
+    if (!content) return;
+    if (_activityLoading) return;
+    _activityLoading = true;
+    content.innerHTML = `
+      <div class="social-activity-wrap">
+        <div class="social-activity-head">
+          <div class="social-activity-title">🔔 Activity</div>
+          <button class="social-activity-mark" id="social-activity-mark"
+                  onclick="Social.markAllActivityRead()">Mark all read</button>
+        </div>
+        <div id="social-activity-list">
+          <div style="text-align:center;color:#85a89a;padding:40px">Loading…</div>
+        </div>
+      </div>`;
+    try {
+      const res = await api('/api/social/notifications?limit=60', 'GET');
+      const data = res.ok ? await res.json() : { notifications: [], unread: 0 };
+      _activityList = data.notifications || [];
+      _activityUnread = Number(data.unread || 0);
+      _renderActivityList();
+      const markBtn = document.getElementById('social-activity-mark');
+      if (markBtn) markBtn.disabled = _activityUnread === 0;
+      // Auto-mark all visible as read on view
+      if (_activityUnread > 0) {
+        try {
+          await api('/api/social/notifications/read', 'POST', { ids: null });
+          _activityUnread = 0;
+          _activityList = _activityList.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() }));
+          _setSidebarBadge(0);
+          _renderActivityList();
+          if (markBtn) markBtn.disabled = true;
+        } catch {}
+      }
+    } catch {
+      const list = document.getElementById('social-activity-list');
+      if (list) list.innerHTML = `<div class="social-activity-empty">Could not load activity. Try again later.</div>`;
+    } finally {
+      _activityLoading = false;
+    }
+  }
+
+  async function markAllActivityRead() {
+    try {
+      await api('/api/social/notifications/read', 'POST', { ids: null });
+    } catch {}
+    _activityUnread = 0;
+    _activityList = _activityList.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() }));
+    _setSidebarBadge(0);
+    _renderActivityList();
+    const btn = document.getElementById('social-activity-mark');
+    if (btn) btn.disabled = true;
+  }
+
+  function openActivityItem(id) {
+    const n = _activityList.find(x => x.id === id);
+    if (!n) return;
+    if (n.kind === 'follow') {
+      if (n.actor_nickname) openProfile(n.actor_nickname);
+      return;
+    }
+    if (n.post_id) {
+      try {
+        if (typeof viewPostDetail === 'function') viewPostDetail(n.post_id);
+        else openProfile(State.user?.nickname);
+      } catch {
+        openProfile(State.user?.nickname);
+      }
+    }
+  }
+
+  // In-app toast that pings when a new social_notification arrives.
+  function _activityToast(n) {
+    try {
+      const av = UI.avatarEl(n.actor_avatar, n.actor || '?', 32);
+      let emoji = '🔔', body = '';
+      if (n.event === 'like') {
+        emoji = n.emoji || '❤';
+        body = `<b>${esc(n.actor || 'Someone')}</b> reacted to your post`;
+      } else if (n.event === 'comment') {
+        emoji = '💬';
+        const p = n.preview ? `<span style="color:#9bbeae;display:block;margin-top:2px;font-size:12px;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">“${esc(n.preview)}”</span>` : '';
+        body = `<b>${esc(n.actor || 'Someone')}</b> commented on your post${p}`;
+      } else if (n.event === 'follow') {
+        emoji = '＋';
+        body = `<b>${esc(n.actor || 'Someone')}</b> started following you`;
+      } else {
+        return;
+      }
+      const div = document.createElement('div');
+      div.className = 'social-toast';
+      div.innerHTML = `
+        <div class="st-avatar">${av}</div>
+        <div class="st-text">${body}</div>
+        <div class="st-emoji">${esc(emoji)}</div>`;
+      div.addEventListener('click', () => {
+        try { open('activity'); } catch {}
+        div.classList.remove('show');
+        setTimeout(() => div.remove(), 300);
+      });
+      document.body.appendChild(div);
+      // Stack vertically if multiple
+      const existing = document.querySelectorAll('.social-toast.show');
+      const offset = 12 + existing.length * 64;
+      div.style.top = `calc(max(${offset}px, var(--safe-top, 0px) + ${offset - 12}px))`;
+      requestAnimationFrame(() => div.classList.add('show'));
+      setTimeout(() => {
+        div.classList.remove('show');
+        setTimeout(() => div.remove(), 350);
+      }, 4500);
+    } catch {}
+  }
+
+  function handleSocialNotification(payload) {
+    if (!payload) return;
+    const ev = payload.event;
+    if (ev === 'unlike') {
+      // Server may have decremented unread when the actor un-liked; trust its number.
+      if (typeof payload.unread === 'number') {
+        _activityUnread = payload.unread;
+        _setSidebarBadge(_activityUnread);
+      }
+      // If currently viewing the activity tab, reload to drop the row.
+      if (_currentTab === 'activity' && document.getElementById('social-activity-list')) {
+        loadActivity();
+      }
+      return;
+    }
+    // Update unread count from server-provided value (authoritative)
+    if (typeof payload.unread === 'number') {
+      _activityUnread = payload.unread;
+      _setSidebarBadge(_activityUnread);
+    } else {
+      _activityUnread += 1;
+      _setSidebarBadge(_activityUnread);
+    }
+    // Toast unless we're already on the activity tab in an open social overlay.
+    const overlay = document.getElementById('social-overlay');
+    const overlayOpen = overlay && !overlay.classList.contains('hidden');
+    const onActivityTab = overlayOpen && _currentTab === 'activity';
+    if (!onActivityTab) _activityToast(payload);
+    // If the activity tab is currently visible, prepend a fresh-looking row.
+    if (onActivityTab) {
+      _activityList.unshift({
+        id: payload.id,
+        kind: payload.event,                // 'like' | 'comment' | 'follow'
+        post_id: payload.post_id || null,
+        comment_id: payload.comment_id || null,
+        emoji: payload.emoji || null,
+        preview: payload.preview || null,
+        created_at: new Date().toISOString().replace('T', ' ').slice(0, 19),
+        read_at: null,
+        actor_nickname: payload.actor || '',
+        actor_avatar: payload.actor_avatar || null,
+      });
+      _renderActivityList();
+    }
+  }
+
+  function _onLogin() {
+    try { refreshActivityBadge(); } catch {}
+  }
+  function _onLogout() {
+    _activityUnread = 0;
+    _activityList = [];
+    _setSidebarBadge(0);
+  }
+
   return {
     open, close, openProfile, switchTab, switchProfileTab,
     openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
@@ -3054,6 +3317,9 @@ const Social = (() => {
     switchMusicScope, switchMusicSort,
     openMusicShareModal, closeMusicShareModal,
     _closeMusicShareModal, _submitMusicShare,
+    // Activity / notifications
+    loadActivity, markAllActivityRead, openActivityItem,
+    handleSocialNotification, refreshActivityBadge, _onLogin, _onLogout,
     // Refresh inline avatars/nicknames in the Suggested-for-you bar and
     // any other rendered profile references when a user updates their
     // profile picture or nickname.

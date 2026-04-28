@@ -1236,7 +1236,27 @@ def _migrate():
             FOREIGN KEY (post_id) REFERENCES wall_posts(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
-        
+
+        # Social activity notifications (likes, comments, follows on the
+        # logged-in user's own posts/profile). Coalesced badge feed for the
+        # 🤳🏼 sidebar icon.
+        con.execute("""CREATE TABLE IF NOT EXISTS social_notifications (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,            -- recipient
+            actor_id   INTEGER NOT NULL,            -- who triggered it
+            kind       TEXT NOT NULL,               -- 'like' | 'comment' | 'follow'
+            post_id    INTEGER,                     -- nullable
+            comment_id INTEGER,                     -- nullable
+            emoji      TEXT,                        -- like emoji (nullable)
+            preview    TEXT,                        -- comment preview (nullable, ≤140 chars)
+            created_at TEXT DEFAULT (datetime('now')),
+            read_at    TEXT,                        -- NULL while unread
+            FOREIGN KEY (user_id)  REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        con.execute("""CREATE INDEX IF NOT EXISTS idx_social_notif_user_unread
+                       ON social_notifications(user_id, read_at, created_at DESC)""")
+
         con.execute("""CREATE TABLE IF NOT EXISTS location_shares (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             dm_channel_id INTEGER NOT NULL,
@@ -3620,6 +3640,118 @@ def delete_wall_comment(comment_id: int, user_id: int) -> bool:
             return False
         con.execute("DELETE FROM wall_comments WHERE id=?", (comment_id,))
         return True
+
+
+# ---------------------------------------------------------------------------
+# Social activity notifications (likes / comments / follows)
+# ---------------------------------------------------------------------------
+
+def add_social_notification(user_id: int, actor_id: int, kind: str,
+                            post_id: Optional[int] = None,
+                            comment_id: Optional[int] = None,
+                            emoji: Optional[str] = None,
+                            preview: Optional[str] = None) -> Optional[int]:
+    """Insert a social notification. Returns the new row id, or None if
+    the recipient == actor (self-action) or either side is blocked.
+    Coalesces near-duplicate likes (same user re-liking the same post)
+    by upserting against the previous unread like row."""
+    if user_id == actor_id:
+        return None
+    try:
+        if is_blocked_either_way(user_id, actor_id):
+            return None
+    except Exception:
+        pass
+    if preview and len(preview) > 140:
+        preview = preview[:137] + "…"
+    with _conn() as con:
+        # Coalesce same-user repeating likes on same post (toggle re-add)
+        if kind == "like" and post_id is not None:
+            existing = con.execute("""
+                SELECT id FROM social_notifications
+                WHERE user_id=? AND actor_id=? AND kind='like'
+                  AND post_id=? AND read_at IS NULL
+                ORDER BY id DESC LIMIT 1
+            """, (user_id, actor_id, post_id)).fetchone()
+            if existing:
+                con.execute("""
+                    UPDATE social_notifications
+                       SET emoji=?, created_at=datetime('now')
+                     WHERE id=?
+                """, (emoji, existing["id"]))
+                return existing["id"]
+        cur = con.execute("""
+            INSERT INTO social_notifications
+                (user_id, actor_id, kind, post_id, comment_id, emoji, preview)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, actor_id, kind, post_id, comment_id, emoji, preview))
+        return cur.lastrowid
+
+
+def remove_social_like_notification(user_id: int, actor_id: int, post_id: int) -> int:
+    """Delete an unread like notification when the actor unlikes. Returns
+    rows affected. (We only remove unread rows — once seen, history stays.)"""
+    if user_id == actor_id:
+        return 0
+    with _conn() as con:
+        cur = con.execute("""
+            DELETE FROM social_notifications
+             WHERE user_id=? AND actor_id=? AND kind='like'
+               AND post_id=? AND read_at IS NULL
+        """, (user_id, actor_id, post_id))
+        return cur.rowcount
+
+
+def get_social_notifications(user_id: int, limit: int = 40,
+                             offset: int = 0) -> List[Dict]:
+    """List recent social notifications for a user, newest first.
+    Joins actor nickname/avatar for direct rendering."""
+    limit = max(1, min(int(limit or 40), 100))
+    offset = max(0, int(offset or 0))
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT n.id, n.kind, n.post_id, n.comment_id, n.emoji, n.preview,
+                   n.created_at, n.read_at,
+                   u.nickname AS actor_nickname,
+                   u.avatar   AS actor_avatar
+              FROM social_notifications n
+              JOIN users u ON u.id = n.actor_id
+             WHERE n.user_id=?
+             ORDER BY n.id DESC
+             LIMIT ? OFFSET ?
+        """, (user_id, limit, offset)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_social_notification_unread_count(user_id: int) -> int:
+    with _conn() as con:
+        row = con.execute("""
+            SELECT COUNT(*) AS n FROM social_notifications
+             WHERE user_id=? AND read_at IS NULL
+        """, (user_id,)).fetchone()
+    return int(row["n"]) if row else 0
+
+
+def mark_social_notifications_read(user_id: int,
+                                   ids: Optional[List[int]] = None) -> int:
+    """Mark notifications as read. If ids is None/empty, marks all unread
+    for the user. Returns rows affected."""
+    with _conn() as con:
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            cur = con.execute(f"""
+                UPDATE social_notifications
+                   SET read_at=datetime('now')
+                 WHERE user_id=? AND read_at IS NULL
+                   AND id IN ({placeholders})
+            """, [user_id, *ids])
+        else:
+            cur = con.execute("""
+                UPDATE social_notifications
+                   SET read_at=datetime('now')
+                 WHERE user_id=? AND read_at IS NULL
+            """, (user_id,))
+        return cur.rowcount
 
 
 def update_user_mood(user_id: int, mood: str) -> bool:

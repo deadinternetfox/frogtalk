@@ -13,10 +13,19 @@ from typing import Optional
 
 import database as db
 from deps import get_current_user
+from ws_manager import manager
 
 _log = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/social", tags=["social"])
+
+
+async def _push_social_notif(recipient_id: int, payload: dict) -> None:
+    """Best-effort WS push for a social-activity event. Never raises."""
+    try:
+        await manager.send_to_user(recipient_id, payload)
+    except Exception:
+        _log.debug("social notif WS push failed", exc_info=True)
 
 
 class CreateStoryRequest(BaseModel):
@@ -48,6 +57,25 @@ async def follow_user(request: Request, nickname: str, current_user: dict = Depe
             })
         except Exception:
             pass
+        # Notify the target that they have a new follower.
+        try:
+            notif_id = db.add_social_notification(
+                user_id=target["id"],
+                actor_id=current_user["id"],
+                kind="follow",
+            )
+            if notif_id is not None:
+                unread = db.get_social_notification_unread_count(target["id"])
+                await _push_social_notif(target["id"], {
+                    "type": "social_notification",
+                    "event": "follow",
+                    "id": notif_id,
+                    "actor": current_user["nickname"],
+                    "actor_avatar": current_user.get("avatar"),
+                    "unread": unread,
+                })
+        except Exception:
+            _log.debug("follow notif failed", exc_info=True)
     return {
         "ok": True,
         "following": True,
@@ -470,3 +498,43 @@ async def delete_story(story_id: int, current_user: dict = Depends(get_current_u
 @router.get("/stories/{story_id}/viewers")
 async def story_viewers(story_id: int, current_user: dict = Depends(get_current_user)):
     return {"viewers": db.get_story_viewers(story_id)}
+
+
+# ---------------------------------------------------------------------------
+# Activity notifications (likes / comments / follows)
+# ---------------------------------------------------------------------------
+
+
+class MarkNotifsReadRequest(BaseModel):
+    ids: Optional[list] = None  # None or [] => mark all unread as read
+
+
+@router.get("/notifications")
+async def list_social_notifications(
+    limit: int = Query(40, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    """List recent like/comment/follow notifications for the current user."""
+    items = db.get_social_notifications(current_user["id"], limit=limit, offset=offset)
+    unread = db.get_social_notification_unread_count(current_user["id"])
+    return {"notifications": items, "unread": unread}
+
+
+@router.get("/notifications/unread-count")
+async def social_notifications_unread_count(current_user: dict = Depends(get_current_user)):
+    return {"unread": db.get_social_notification_unread_count(current_user["id"])}
+
+
+@router.post("/notifications/read")
+async def mark_social_notifications_read(
+    body: MarkNotifsReadRequest, current_user: dict = Depends(get_current_user)
+):
+    """Mark a list of notifications as read. Empty list / null => mark all."""
+    ids = body.ids if (body.ids and isinstance(body.ids, list)) else None
+    # Sanitize ids to ints
+    if ids is not None:
+        ids = [int(i) for i in ids if isinstance(i, (int, float, str)) and str(i).lstrip("-").isdigit()]
+    affected = db.mark_social_notifications_read(current_user["id"], ids=ids)
+    unread = db.get_social_notification_unread_count(current_user["id"])
+    return {"ok": True, "marked": affected, "unread": unread}

@@ -12,10 +12,19 @@ from typing import Optional
 
 import database as db
 from deps import get_current_user
+from ws_manager import manager
 
 _log = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/wall", tags=["wall"])
+
+
+async def _push_social_notif(recipient_id: int, payload: dict) -> None:
+    """Best-effort WS push for a social-activity event. Never raises."""
+    try:
+        await manager.send_to_user(recipient_id, payload)
+    except Exception:
+        _log.debug("social notif WS push failed", exc_info=True)
 
 MAX_POST_CONTENT = 5000
 MAX_MEDIA_BYTES = 10 * 1024 * 1024
@@ -298,7 +307,44 @@ async def add_post_reaction(request: Request, post_id: int, body: AddReactionReq
 
     added = db.add_wall_reaction(post_id, current_user["id"], body.emoji)
     reactions = db.get_post_reactions(post_id)
-    
+
+    # Notify the post owner about the like (or remove the unread row on unlike).
+    owner_id = post.get("user_id")
+    if owner_id and owner_id != current_user["id"]:
+        if added:
+            notif_id = db.add_social_notification(
+                user_id=owner_id,
+                actor_id=current_user["id"],
+                kind="like",
+                post_id=post_id,
+                emoji=body.emoji,
+            )
+            if notif_id is not None:
+                unread = db.get_social_notification_unread_count(owner_id)
+                await _push_social_notif(owner_id, {
+                    "type": "social_notification",
+                    "event": "like",
+                    "id": notif_id,
+                    "actor": current_user["nickname"],
+                    "actor_avatar": current_user.get("avatar"),
+                    "post_id": post_id,
+                    "emoji": body.emoji,
+                    "unread": unread,
+                })
+        else:
+            removed = db.remove_social_like_notification(
+                owner_id, current_user["id"], post_id
+            )
+            if removed:
+                unread = db.get_social_notification_unread_count(owner_id)
+                await _push_social_notif(owner_id, {
+                    "type": "social_notification",
+                    "event": "unlike",
+                    "actor": current_user["nickname"],
+                    "post_id": post_id,
+                    "unread": unread,
+                })
+
     return {"added": added, "reactions": reactions}
 
 
@@ -345,7 +391,33 @@ async def add_post_comment(request: Request, post_id: int, body: AddCommentReque
     comment_id = db.add_wall_comment(post_id, current_user["id"], body.content.strip())
     if comment_id is None:
         return JSONResponse(status_code=403, content={"error": "Comments disabled on this post"})
-    
+
+    # Notify the post owner about the new comment.
+    owner_id = post.get("user_id")
+    if owner_id and owner_id != current_user["id"]:
+        preview = body.content.strip()
+        notif_id = db.add_social_notification(
+            user_id=owner_id,
+            actor_id=current_user["id"],
+            kind="comment",
+            post_id=post_id,
+            comment_id=comment_id,
+            preview=preview,
+        )
+        if notif_id is not None:
+            unread = db.get_social_notification_unread_count(owner_id)
+            await _push_social_notif(owner_id, {
+                "type": "social_notification",
+                "event": "comment",
+                "id": notif_id,
+                "actor": current_user["nickname"],
+                "actor_avatar": current_user.get("avatar"),
+                "post_id": post_id,
+                "comment_id": comment_id,
+                "preview": preview[:140],
+                "unread": unread,
+            })
+
     return {
         "id": comment_id,
         "content": body.content,
