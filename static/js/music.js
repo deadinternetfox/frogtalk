@@ -35,8 +35,8 @@ const Music = (() => {
   //   - we update only the badge node, never re-render the whole panel.
   //   - YouTube replies asynchronously; we read those replies in a single
   //     window 'message' listener installed once.
-  const SYNC_TOLERANCE_OK = 2.5;     // <2.5s drift → green
-  const SYNC_TOLERANCE_WARN = 7.0;   // <7s drift → yellow, else red
+  const SYNC_TOLERANCE_OK = 1.2;     // <1.2s drift → green (real-world tight)
+  const SYNC_TOLERANCE_WARN = 4.0;   // <4s drift → yellow, else red
   const SYNC_PROBE_INTERVAL_MS = 4000;
   const SYNC_PROBE_TIMEOUT_MS = 1500;
   let _syncProbeTimer = null;
@@ -45,6 +45,9 @@ const Music = (() => {
   let _syncMsgListenerBound = false;
   let _lastDriftSec = null;          // null = unknown/checking
   let _lastSyncProvider = '';
+  let _lastPlayerState = null;       // YouTube playerState: 1=play 2=pause 3=buffer
+  let _syncProbeStartedAt = 0;       // ms when probing began for current track
+  let _syncFastProbeTimers = [];     // setTimeouts queued by fast re-probe
   const $ = (id) => document.getElementById(id);
   const esc = (s) => UI.escHtml(String(s || ''));
 
@@ -330,10 +333,21 @@ const Music = (() => {
         }
         if (!parsed) return;
         let actualSec = null;
-        // YouTube IFrame API: {event:"infoDelivery", info:{currentTime}}
+        let lastUpdatedAtMs = null;
+        let playerState = null;
+        // YouTube IFrame API: {event:"infoDelivery", info:{currentTime, currentTimeLastUpdated_, playerState}}
         if (parsed.event === 'infoDelivery'
             && parsed.info && typeof parsed.info.currentTime === 'number') {
           actualSec = parsed.info.currentTime;
+          if (typeof parsed.info.currentTimeLastUpdated_ === 'number') {
+            // YouTube ships this as Unix seconds (sometimes ms). Detect:
+            // values > 1e12 are ms, > 1e9 are seconds.
+            const v = parsed.info.currentTimeLastUpdated_;
+            lastUpdatedAtMs = v > 1e12 ? v : v * 1000;
+          }
+          if (typeof parsed.info.playerState === 'number') {
+            playerState = parsed.info.playerState;
+          }
         // SoundCloud Widget API: {method:"getPosition", value:<ms>}
         } else if (parsed.method === 'getPosition'
                    && typeof parsed.value === 'number') {
@@ -341,7 +355,14 @@ const Music = (() => {
         }
         if (actualSec == null) return;
         _syncProbePending = false;
-        _lastDriftSec = Math.abs(actualSec - _expectedPosSec());
+        if (playerState != null) _lastPlayerState = playerState;
+        // If we have a timestamp for when the player generated this reading,
+        // compare against the *expected position at that moment* — not
+        // expected-now — so message latency doesn't get billed as drift.
+        const expectedAtSample = lastUpdatedAtMs
+          ? Math.max(0, (lastUpdatedAtMs - _anchorMs) / 1000)
+          : _expectedPosSec();
+        _lastDriftSec = Math.abs(actualSec - expectedAtSample);
         _renderSyncBadge();
       } catch { /* keep listener resilient */ }
     });
@@ -355,6 +376,14 @@ const Music = (() => {
       state = 'unknown';
       label = '📻 Radio-synced';
       title = 'Spotify embed does not expose a play head — best-effort sync';
+    } else if (_lastPlayerState === 2) {
+      state = 'warn';
+      label = '⏸ Paused locally';
+      title = "Your iframe is paused while the room keeps going — click Resync to catch up";
+    } else if (_lastPlayerState === 3) {
+      state = 'checking';
+      label = '⏳ Buffering…';
+      title = 'Player is buffering';
     } else if (_lastDriftSec == null) {
       state = 'checking';
       label = '📻 Checking…';
@@ -378,10 +407,31 @@ const Music = (() => {
     if (node.title !== title) node.title = title;
   }
 
+  // Schedule a few rapid one-shot probes after a manual action (resync / track
+  // change) so the badge updates within ~1s instead of waiting for the next
+  // periodic tick. Each delay is short and self-contained — no overlap with
+  // the steady probe and capped at three pending timers.
+  function _scheduleFastProbes(delays) {
+    // Clear any prior fast timers — we never want them to stack.
+    for (const t of _syncFastProbeTimers) { try { clearTimeout(t); } catch {} }
+    _syncFastProbeTimers = [];
+    for (const d of delays) {
+      const t = setTimeout(() => {
+        if (!_syncProbeTimer) return;  // probe was stopped meanwhile
+        if (document.hidden || _paused) return;
+        _runSyncProbe();
+      }, d);
+      _syncFastProbeTimers.push(t);
+    }
+  }
+
   function _stopSyncProbe() {
     if (_syncProbeTimer) { clearInterval(_syncProbeTimer); _syncProbeTimer = null; }
+    for (const t of _syncFastProbeTimers) { try { clearTimeout(t); } catch {} }
+    _syncFastProbeTimers = [];
     _syncProbePending = false;
     _lastDriftSec = null;
+    _lastPlayerState = null;
   }
 
   function _startSyncProbeIfNeeded() {
@@ -390,7 +440,11 @@ const Music = (() => {
     _lastSyncProvider = cur.provider || '';
     _bindSyncMessageListener();
     if (_syncProbeTimer) return;  // already running
-    _runSyncProbe();
+    _syncProbeStartedAt = Date.now();
+    // Skip the synchronous first probe — the iframe's API often hasn't
+    // hooked up yet on a fresh embed. Schedule a quick warm-up probe at
+    // ~700ms then steady-state every 4s.
+    _scheduleFastProbes([700, 1800]);
     _syncProbeTimer = setInterval(_runSyncProbe, SYNC_PROBE_INTERVAL_MS);
   }
 
@@ -653,6 +707,11 @@ const Music = (() => {
   // for a while, plugs headphones, or just wants to catch up to the group.
   function resyncNow() {
     if (!_room) return;
+    // Instant visual feedback so the user knows we heard them. Reset the
+    // badge to "checking" while the seek lands and the next probe runs.
+    _lastDriftSec = null;
+    _lastPlayerState = null;
+    _renderSyncBadge();
     // Refresh server state in case someone skipped while we were away, then
     // seek to the expected position.
     _fetchState(_room).then(s => {
@@ -669,6 +728,10 @@ const Music = (() => {
         // Same head track — just seek locally.
         _setAnchor(cur, s.position_sec);
         _resync(true);
+        // Fast follow-up probes: ~900ms (after the seek lands) and ~2.5s
+        // (after the iframe has settled) so the badge updates promptly
+        // instead of waiting for the next 4s tick.
+        _scheduleFastProbes([900, 2500]);
       }
       try { UI.showToast('📻 Re-synced with the room', 'success'); } catch {}
     });
