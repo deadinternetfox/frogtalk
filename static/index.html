@@ -2951,18 +2951,18 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 
-/* Directory modal — matches app chat (#0d0d0d) + header/sidebar (#1e1e1e) */
+/* Directory modal */
 .dir-modal{
   background:var(--bg-color) !important;
-  border:1px solid var(--border-color) !important;
-  box-shadow:0 24px 60px rgba(0,0,0,.55),0 2px 10px rgba(0,0,0,.35) !important
+  border:1px solid rgba(76,175,80,.22) !important;
+  box-shadow:0 24px 60px rgba(0,0,0,.55),0 2px 10px rgba(0,0,0,.35),0 0 0 1px rgba(76,175,80,.08) inset !important
 }
 .dir-header{
   display:flex;align-items:center;justify-content:space-between;
   margin:-4px -4px 14px;padding:12px 14px;
-  background:var(--surface-color);
-  border:1px solid var(--border-color);border-radius:14px;
-  box-shadow:none
+  background:linear-gradient(135deg,rgba(76,175,80,.18),rgba(127,217,127,.08));
+  border:1px solid rgba(76,175,80,.28);border-radius:14px;
+  box-shadow:0 0 0 1px rgba(76,175,80,.06) inset
 }
 .dir-header h2,.dir-header .modal-title{
   background:linear-gradient(135deg,#c9ffd9,#7fd97f);
@@ -2972,14 +2972,14 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .dir-suggest-scroll{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 10px}
 .dir-card-compact{
   min-width:130px;max-width:160px;
-  background:var(--surface-color);
-  border:1px solid var(--border-color);
+  background:linear-gradient(180deg,#162216,#101810);
+  border:1px solid rgba(76,175,80,.18);
   border-radius:14px;padding:14px 10px;text-align:center;cursor:pointer;
   transition:transform .15s ease,background .15s ease,border-color .15s ease,box-shadow .15s ease;
   flex-shrink:0
 }
 .dir-card-compact:hover{
-  background:var(--surface-hover);
+  background:linear-gradient(180deg,#1c2c1c,#152015);
   border-color:rgba(76,175,80,.45);
   transform:translateY(-2px);
   box-shadow:0 6px 18px rgba(76,175,80,.18)
@@ -2998,13 +2998,13 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .dir-card{
   display:flex;align-items:flex-start;gap:14px;padding:14px;
   border-radius:14px;
-  background:var(--surface-color);
-  border:1px solid var(--border-color);
+  background:linear-gradient(180deg,#141c14,#0f150f);
+  border:1px solid rgba(76,175,80,.14);
   margin-bottom:10px;cursor:pointer;
   transition:background .18s ease,border-color .18s ease,transform .15s ease,box-shadow .18s ease
 }
 .dir-card:hover{
-  background:var(--surface-hover);
+  background:linear-gradient(180deg,#1a261a,#13201a);
   border-color:rgba(76,175,80,.4);
   transform:translateY(-1px);
   box-shadow:0 8px 22px rgba(0,0,0,.35),0 0 0 1px rgba(76,175,80,.1) inset
@@ -3042,10 +3042,10 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 /* Directory auto-suggest dropdown */
 .dir-suggestions{
   position:absolute;top:100%;left:0;right:0;
-  background:var(--surface-color);
-  border:1px solid var(--border-color);
+  background:linear-gradient(180deg,#141c14,#0f150f);
+  border:1px solid rgba(76,175,80,.28);
   border-radius:10px;max-height:240px;overflow-y:auto;z-index:100;
-  box-shadow:0 8px 24px rgba(0,0,0,.55)
+  box-shadow:0 8px 24px rgba(0,0,0,.55),0 0 0 1px rgba(76,175,80,.08) inset
 }
 .dir-suggestion-item{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;transition:background .12s;font-size:13px;color:#d0e6d0}
 .dir-suggestion-item:hover{background:rgba(76,175,80,.14);color:#eafde8}
