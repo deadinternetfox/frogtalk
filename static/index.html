@@ -2849,20 +2849,65 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   border-color:#4f8b6c;
 }
 
-/* Moderator/ban list items */
+/* Moderator / ban list items — themed to match the new dark-green palette
+   instead of the legacy flat #1a1a1a panels. */
 .mod-item,.ban-item{
-  display:flex;align-items:center;gap:10px;padding:10px;
-  background:#1a1a1a;border-radius:6px;margin-bottom:6px
+  display:flex;align-items:center;gap:12px;
+  padding:10px 12px;margin-bottom:8px;
+  background:linear-gradient(180deg,#0f211b,#0c1c17 62%,#091813);
+  border:1px solid #224237;border-radius:10px;
+  box-shadow:inset 0 0 0 1px rgba(127,210,167,.05),0 2px 8px rgba(0,0,0,.22);
+  transition:border-color .15s, transform .12s, box-shadow .15s;
 }
-.mod-item:hover,.ban-item:hover{background:#222}
-.mod-avatar,.ban-avatar{width:32px;height:32px;border-radius:50%;background:#2a2a2a;
-  display:flex;align-items:center;justify-content:center;font-size:16px}
+.mod-item:hover,.ban-item:hover{
+  border-color:#3f735f;
+  box-shadow:inset 0 0 0 1px rgba(127,210,167,.12),0 4px 12px rgba(0,0,0,.32);
+  transform:translateY(-1px);
+}
+.mod-avatar,.ban-avatar{
+  width:36px;height:36px;border-radius:50%;
+  background:linear-gradient(135deg,#1c3a30,#15302a);
+  border:1px solid #2f5548;
+  display:flex;align-items:center;justify-content:center;font-size:17px;
+  color:#f3ead4;flex-shrink:0;overflow:hidden;
+}
 .mod-info,.ban-info{flex:1;min-width:0}
-.mod-name,.ban-name{font-size:14px;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mod-role,.ban-reason{font-size:11px;color:#666}
-.mod-remove,.ban-remove{background:#ff4444;color:#fff;border:none;padding:6px 10px;
-  border-radius:4px;font-size:12px;cursor:pointer}
-.mod-remove:hover,.ban-remove:hover{background:#ff6666}
+.mod-name,.ban-name{
+  font-size:14px;font-weight:600;color:#dff5e8;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.mod-role,.ban-reason{font-size:11px;color:#7a9c8d;margin-top:2px}
+.mod-remove,.ban-remove{
+  background:linear-gradient(180deg,#3a1818,#2a1212);
+  color:#ffd2d2;border:1px solid #5a2424;
+  padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;
+  cursor:pointer;flex-shrink:0;letter-spacing:.2px;
+  transition:background .12s, border-color .12s, color .12s, transform .08s;
+}
+.mod-remove:hover,.ban-remove:hover{
+  background:linear-gradient(180deg,#5a1f1f,#3f1515);
+  border-color:#9c3a3a;color:#fff;
+}
+.mod-remove:active,.ban-remove:active{transform:translateY(1px)}
+
+/* Inline add-row used in the Moderators tab — keeps input + button on the
+   same baseline and matches input height precisely. */
+.mod-add-row{
+  display:flex;gap:8px;margin-bottom:14px;align-items:stretch;
+}
+.mod-add-row .modal-input{flex:1;height:40px;margin:0}
+.mod-add-row .modal-btn{
+  margin:0;height:40px;padding:0 18px;white-space:nowrap;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:600;
+}
+
+.mods-empty{
+  color:#7a9c8d;text-align:center;padding:22px 12px;
+  border:1px dashed #2f5548;border-radius:10px;
+  background:linear-gradient(180deg,#0c1c17,#091813);
+  font-size:13px;
+}
 
 /* Danger button */
 .modal-btn.danger{background:#ff4444;color:#fff}
@@ -5363,14 +5408,15 @@ window.ConnErr = (function(){
     
     <!-- Moderators tab -->
     <div id="ch-panel-mods" style="display:none">
-      <div style="font-size:13px;color:#888;margin-bottom:12px">
+      <div style="font-size:13px;color:#9bd0ad;margin-bottom:12px;line-height:1.45">
         Moderators can delete messages and ban users from this channel.
       </div>
-      <div style="display:flex;gap:8px;margin-bottom:12px">
-        <input class="modal-input" id="ch-add-mod-input" placeholder="Enter username" style="flex:1">
-        <button class="modal-btn primary" onclick="addModerator()" style="margin:0;padding:8px 16px">Add</button>
+      <div class="mod-add-row">
+        <input class="modal-input" id="ch-add-mod-input" placeholder="Enter username" autocomplete="off"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();addModerator();}">
+        <button class="modal-btn primary" onclick="addModerator()">Add</button>
       </div>
-      <div id="ch-mods-list" style="max-height:200px;overflow-y:auto"></div>
+      <div id="ch-mods-list" style="max-height:260px;overflow-y:auto"></div>
     </div>
     
     <!-- Bans tab -->

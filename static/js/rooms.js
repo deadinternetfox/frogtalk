@@ -1074,20 +1074,29 @@ const Rooms = (() => {
 
   function renderModerators(mods) {
     const container = document.getElementById('ch-mods-list');
+    if (!container) return;
     if (!mods || mods.length === 0) {
-      container.innerHTML = '<div style="color:#666;text-align:center;padding:20px">No moderators yet</div>';
+      container.innerHTML = '<div class="mods-empty">No moderators yet — add one above.</div>';
       return;
     }
-    container.innerHTML = mods.map(mod => `
-      <div class="mod-item">
-        <div class="mod-avatar">${mod.avatar ? `<img src="${mod.avatar}" style="width:100%;height:100%;border-radius:50%">` : '👤'}</div>
-        <div class="mod-info">
-          <div class="mod-name">${UI.escHtml(mod.nickname)}</div>
-          <div class="mod-role">Added ${new Date(mod.added_at).toLocaleDateString()}</div>
+    container.innerHTML = mods.map(mod => {
+      const name = UI.escHtml(mod.nickname || 'unknown');
+      const initial = (mod.nickname || '?').trim().charAt(0).toUpperCase() || '?';
+      const avatar = mod.avatar
+        ? `<img src="${UI.escHtml(mod.avatar)}" alt="" style="width:100%;height:100%;object-fit:cover">`
+        : UI.escHtml(initial);
+      const added = mod.added_at ? `Added ${new Date(mod.added_at).toLocaleDateString()}` : 'Moderator';
+      return `
+        <div class="mod-item">
+          <div class="mod-avatar">${avatar}</div>
+          <div class="mod-info">
+            <div class="mod-name">${name}</div>
+            <div class="mod-role">${UI.escHtml(added)}</div>
+          </div>
+          <button class="mod-remove" onclick="Rooms.removeModerator(${mod.user_id}, '${name.replace(/'/g, "\\'")}')">Remove</button>
         </div>
-        <button class="mod-remove" onclick="Rooms.removeModerator(${mod.user_id})">Remove</button>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   }
 
   async function addModerator() {
@@ -1137,26 +1146,28 @@ const Rooms = (() => {
     }
   }
 
-  async function removeModerator(userId) {
+  async function removeModerator(userId, nickname) {
+    const label = nickname ? `Remove ${nickname} as moderator?` : 'Remove this moderator?';
+    if (!confirm(label)) return;
     const res = await fetch(`/api/rooms/${encodeURIComponent(_currentSettingsRoom)}/moderators/${userId}`, {
       method: 'DELETE',
       headers: { 'X-Session-Token': State.token }
     });
-    
+
     if (!res.ok) {
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       UI.showToast(data.error || 'Failed to remove moderator', 'error');
       return;
     }
-    
+
     UI.showToast('Moderator removed');
-    
+
     // Refresh moderators list
     const roomRes = await fetch(`/api/rooms/${encodeURIComponent(_currentSettingsRoom)}`, {
       headers: { 'X-Session-Token': State.token }
     });
-    const roomData = await roomRes.json();
-    renderModerators(roomData.moderators);
+    const roomData = await roomRes.json().catch(() => ({}));
+    renderModerators(roomData.moderators || []);
   }
 
   async function fetchBans(roomName) {
