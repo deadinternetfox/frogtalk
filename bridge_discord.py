@@ -30,6 +30,13 @@ _bridges: Dict[int, dict] = {}  # discord_channel_id -> {room, token, bot_name, 
 _client = None  # discord.Client instance
 _message_content_available = True  # False when bot lacks Message Content privileged intent
 
+# Cache of per-channel webhooks used to render bridged messages with the
+# original sender's name + avatar. Populated lazily; entries set to False
+# mean we tried and failed (missing Manage Webhooks permission) so we
+# don't retry on every message.
+_webhook_cache: Dict[int, object] = {}
+_WEBHOOK_NAME = "FrogTalk Bridge"
+
 
 def get_channel_access_snapshot(channel_id: int) -> Optional[dict]:
     """Return live access details for a Discord text channel if cached by the bot."""
@@ -142,6 +149,42 @@ async def _run_on_discord_loop(coro):
     return await asyncio.wrap_future(future)
 
 
+async def _get_or_create_webhook(channel):
+    """Return a cached/managed webhook for ``channel`` or None.
+
+    Webhooks let us render each bridged message with the FrogTalk user's
+    own name + avatar (instead of "BotName · embed"). We reuse a single
+    webhook named ``FrogTalk Bridge`` per channel; if the bot lacks
+    ``Manage Webhooks`` we cache the failure so we silently fall back to
+    the embed path.
+    """
+    if channel is None:
+        return None
+    cid = int(getattr(channel, "id", 0) or 0)
+    if not cid:
+        return None
+    cached = _webhook_cache.get(cid)
+    if cached is False:
+        return None
+    if cached is not None:
+        return cached
+    try:
+        # Look for an existing bridge webhook first to avoid duplicates.
+        for wh in await channel.webhooks():
+            if (getattr(wh, "name", "") or "") == _WEBHOOK_NAME:
+                _webhook_cache[cid] = wh
+                return wh
+        wh = await channel.create_webhook(name=_WEBHOOK_NAME, reason="FrogTalk bridge")
+        _webhook_cache[cid] = wh
+        return wh
+    except Exception as e:
+        # Most commonly: missing Manage Webhooks. Cache the negative so
+        # we don't probe the API for every message.
+        log.debug("webhook setup failed for channel %s: %s", cid, e)
+        _webhook_cache[cid] = False
+        return None
+
+
 async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = None,
                                  *, nickname: str = None, avatar: str = None,
                                  room: str = None, has_spoiler: bool = False,
@@ -207,6 +250,77 @@ async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = No
             except Exception as e:
                 log.debug("discord data-url decode failed: %s", e)
                 file_obj = None
+
+        # ── Webhook path (preferred) ───────────────────────────────────
+        # When we have a nickname, try sending via a per-channel webhook
+        # so the message renders with the FrogTalk user's own name +
+        # avatar instead of being wrapped in a bot embed. Webhooks don't
+        # support native message references, so reply context is
+        # rendered as a quote line at the top of the message.
+        if discord and nickname:
+            webhook = await _get_or_create_webhook(channel)
+            if webhook is not None:
+                # Avatar must be a public http(s) URL; data: URLs are
+                # not supported by Discord webhooks. Fall back to the
+                # bot's default avatar in that case.
+                wh_avatar = None
+                if avatar and (avatar.startswith("http://") or avatar.startswith("https://")):
+                    wh_avatar = avatar
+
+                # Render reply context as a Discord quote block.
+                quote_prefix = ""
+                if reply_to_message_id:
+                    try:
+                        ref_msg = await channel.fetch_message(int(reply_to_message_id))
+                        ref_author = (
+                            getattr(ref_msg, "author", None)
+                            and (getattr(ref_msg.author, "display_name", None)
+                                 or getattr(ref_msg.author, "name", None))
+                        ) or "user"
+                        ref_text = (ref_msg.content or "").splitlines()[0] if ref_msg else ""
+                        if len(ref_text) > 80:
+                            ref_text = ref_text[:80] + "…"
+                        if ref_text:
+                            quote_prefix = f"> **{ref_author}**: {ref_text}\n"
+                        else:
+                            quote_prefix = f"> ↪ replying to **{ref_author}**\n"
+                    except Exception:
+                        quote_prefix = ""
+
+                wh_text = (quote_prefix + (text or "")).strip() or None
+
+                # Discord usernames must be 1-80 chars and can't contain
+                # "discord" or "@everyone" / "@here" mentions in the name.
+                wh_name = (nickname or "FrogTalk")[:80]
+
+                try:
+                    send_kwargs = dict(
+                        username=wh_name,
+                        avatar_url=wh_avatar,
+                        wait=True,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    if file_obj:
+                        sent = await webhook.send(content=wh_text, file=file_obj, **send_kwargs)
+                    elif media_url and media_url.startswith("http"):
+                        if has_spoiler:
+                            body = (wh_text or "")
+                            body = (body + f"\n||{media_url}||").strip()
+                            sent = await webhook.send(content=body, **send_kwargs)
+                        else:
+                            body = (wh_text or "")
+                            body = (body + f"\n{media_url}").strip()
+                            sent = await webhook.send(content=body, **send_kwargs)
+                    else:
+                        sent = await webhook.send(content=wh_text or "\u200b", **send_kwargs)
+                    return int(getattr(sent, "id", 0) or 0) or None
+                except Exception as e:
+                    # Fall through to the embed path on transient failure;
+                    # if it's a permanent permission issue subsequent
+                    # lookups will be cached as False.
+                    log.debug("webhook send failed (falling back to embed): %s", e)
+                    if "Unknown Webhook" in str(e) or "Invalid Webhook" in str(e):
+                        _webhook_cache.pop(int(getattr(channel, "id", 0) or 0), None)
 
         if discord and nickname:
             # Detect URLs in the user's text. Discord auto-resolves URLs
