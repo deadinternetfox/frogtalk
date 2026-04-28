@@ -225,16 +225,23 @@ body[data-theme="dark"] .modal-card select{
 }
 /* Style the dropdown popup itself. Browsers vary in how much of this
    they honour, but Chromium/Firefox on Linux and recent Safari respect
-   background-color/color on <option>. */
+   background-color/color on <option>. Gradients are NOT supported on
+   <option>; must use a solid color. */
 body[data-theme="dark"] select.modal-input option,
-body[data-theme="dark"] .modal-card select option{
+body[data-theme="dark"] .modal-card select option,
+body[data-theme="dark"] select option{
   background-color:#0e1f18 !important;
   color:#e8f4ee !important;
 }
 body[data-theme="dark"] select.modal-input option:checked,
-body[data-theme="dark"] .modal-card select option:checked{
-  background:linear-gradient(180deg,#1a3128,#11211c) !important;
+body[data-theme="dark"] select.modal-input option:hover,
+body[data-theme="dark"] .modal-card select option:checked,
+body[data-theme="dark"] .modal-card select option:hover,
+body[data-theme="dark"] select option:checked,
+body[data-theme="dark"] select option:hover{
+  background-color:#1f4a37 !important;
   color:#dff5e8 !important;
+  box-shadow:0 0 0 9999px #1f4a37 inset !important;
 }
 body[data-theme="dark"] .modal-btn.secondary{
   background:linear-gradient(180deg,#1a3128,#11211c) !important;
