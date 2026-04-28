@@ -20,7 +20,8 @@ def forward_user_message(room: str, nickname: str, content: str,
                          sender_avatar: str | None = None,
                          *, ft_msg_id: int | None = None,
                          reply_to_ft_id: int | None = None,
-                         media_blur: bool = False) -> None:
+                         media_blur: bool = False,
+                         sender_user_id: int | None = None) -> None:
     """Fire-and-forget outbound forward to all bridged platforms.
 
     `ft_msg_id` / `reply_to_ft_id` are FrogTalk message-row ids. When the
@@ -53,6 +54,7 @@ def forward_user_message(room: str, nickname: str, content: str,
         loop.create_task(bdc.forward_to_discord(
             room, nickname, content, media_data,
             sender_avatar=sender_avatar,
+            sender_user_id=sender_user_id,
             ft_msg_id=ft_msg_id, reply_to_ft_id=reply_to_ft_id,
             media_blur=media_blur,
         ))

@@ -330,6 +330,7 @@ async def websocket_endpoint(
                     bridge_outbound.forward_user_message(
                         room_name, user["nickname"], outbound_text, media_data,
                         sender_avatar=user.get("avatar"),
+                        sender_user_id=user.get("id"),
                         ft_msg_id=msg_id,
                         reply_to_ft_id=reply_to or None,
                         media_blur=bool(media_blur),

@@ -1,11 +1,63 @@
 """User profile routes."""
+import base64
+import re
 from fastapi import APIRouter, Depends
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 import database as db
 from deps import get_current_user
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+# ─── Public avatar bytes ──────────────────────────────────────────────
+# Discord webhooks (and any external embed) need a public http(s) URL
+# that resolves to image bytes. FrogTalk stores avatars as base64
+# `data:` URLs in the user row, so we expose a tiny public endpoint
+# that decodes and serves them. Avatars are already broadcast in the
+# users API and inside every message — this just gives them a stable
+# external URL so other platforms can render them.
+_DATA_URL_RE = re.compile(
+    r"^data:(?P<mime>[\w./+-]+)(?:;[\w=-]+)*?;base64,(?P<b64>[A-Za-z0-9+/=]+)$"
+)
+
+
+@router.get("/{user_id}/avatar.png")
+async def get_user_avatar_image(user_id: int):
+    """Return the user's avatar bytes as a real image response.
+
+    Public on purpose — avatars are already broadcast inside every
+    message payload. Falls back to a 404 when the user has no avatar
+    or the stored value isn't a recognized data: URL.
+    """
+    user = db.get_user_by_id(user_id)
+    if not user:
+        return Response(status_code=404)
+    raw = (user.get("avatar") or "").strip()
+    if not raw:
+        return Response(status_code=404)
+    m = _DATA_URL_RE.match(raw)
+    if not m:
+        # Already an http(s) URL — redirect so callers can cache the
+        # original CDN-hosted image directly.
+        if raw.startswith("http://") or raw.startswith("https://"):
+            return Response(status_code=302, headers={"Location": raw})
+        return Response(status_code=404)
+    try:
+        data = base64.b64decode(m.group("b64"), validate=False)
+    except Exception:
+        return Response(status_code=404)
+    mime = m.group("mime") or "image/png"
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={
+            # Long cache so Discord and other clients don't hammer us.
+            # Avatars get a fresh URL when the user changes them via
+            # the cache-bust query param the bridge appends.
+            "Cache-Control": "public, max-age=86400, immutable",
+        },
+    )
 
 
 @router.get("")

@@ -118,6 +118,7 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         bridge_outbound.forward_user_message(
             room_name, current_user["nickname"], outbound_text, body.media_data,
             sender_avatar=current_user.get("avatar"),
+            sender_user_id=current_user.get("id"),
             ft_msg_id=msg_id,
             reply_to_ft_id=body.reply_to,
             media_blur=bool(body.media_blur),

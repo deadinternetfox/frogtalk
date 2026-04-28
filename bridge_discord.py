@@ -771,7 +771,8 @@ async def forward_to_discord(room: str, nickname: str, content: str,
                              sender_avatar: str | None = None,
                              *, ft_msg_id: int | None = None,
                              reply_to_ft_id: int | None = None,
-                             media_blur: bool = False):
+                             media_blur: bool = False,
+                             sender_user_id: int | None = None):
     """Forward a FrogTalk message to all linked Discord channels as a
     rich embed (nickname + avatar + source-channel footer)."""
     if not _bridges:
@@ -779,18 +780,43 @@ async def forward_to_discord(room: str, nickname: str, content: str,
     if not any(b["room"] == room and b["enabled"] for b in _bridges.values()):
         return
 
-    # Cheap users-table lookup for the sender's avatar.
-    resolved_avatar = (sender_avatar or "").strip()
-    if not (resolved_avatar.startswith("http://") or resolved_avatar.startswith("https://")):
+    # Resolve a *publicly-reachable* avatar URL. Discord webhooks fetch
+    # the avatar by URL on send, so data: URLs and 127.0.0.1 hosts won't
+    # work — they need to live behind the site's public origin so the
+    # Discord CDN can reach them.
+    resolved_avatar = (sender_avatar or "").strip() or None
+    public_base = (
+        os.getenv("FROGTALK_PUBLIC_URL")
+        or os.getenv("PUBLIC_URL")
+        or os.getenv("FROGTALK_BASE_URL")
+        or "https://frogtalk.xyz"
+    ).rstrip("/")
+
+    # If we know the FrogTalk user id, always prefer the public avatar
+    # endpoint — it serves whatever bytes are in the user row, which
+    # also covers users whose avatar is a relative path or data: URL.
+    if sender_user_id:
+        # Cache-bust per ft_msg_id so Discord re-fetches when avatar
+        # changes; this is cheap and per-message.
+        bust = f"?v={ft_msg_id}" if ft_msg_id else ""
+        resolved_avatar = f"{public_base}/api/users/{int(sender_user_id)}/avatar.png{bust}"
+    elif resolved_avatar and not (
+        resolved_avatar.startswith("http://") or resolved_avatar.startswith("https://")
+    ):
+        # Fall back to the users-table lookup when the caller didn't
+        # supply an id (e.g. legacy code paths).
         resolved_avatar = None
-    if not resolved_avatar:
         try:
             import database as db
             u = db.get_user_by_nick(nickname)
             if u:
-                av = (u.get("avatar") or "").strip()
-                if av.startswith("http://") or av.startswith("https://"):
-                    resolved_avatar = av
+                uid = u.get("id")
+                if uid:
+                    resolved_avatar = f"{public_base}/api/users/{int(uid)}/avatar.png"
+                else:
+                    av = (u.get("avatar") or "").strip()
+                    if av.startswith("http://") or av.startswith("https://"):
+                        resolved_avatar = av
         except Exception:
             pass
 
