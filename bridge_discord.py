@@ -215,8 +215,7 @@ async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = No
             # description. So when text contains a URL we route the text
             # to `content` and use the embed as a small author chip,
             # letting Discord auto-generate the link preview alongside it.
-            import re as _re_url
-            _has_url = bool(text and _re_url.search(r'https?://\S+', text))
+            _has_url = bool(text and re.search(r'https?://\S+', text))
             embed = discord.Embed(
                 description=None if _has_url else (text or None),
                 color=0x2E7D32,  # frog green
