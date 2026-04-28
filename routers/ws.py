@@ -121,6 +121,15 @@ async def websocket_endpoint(
         await websocket.close(code=4001)
         return
 
+    # Authoritative room access check. DM pseudo-rooms (dm-*) are handled by
+    # the dedicated DM endpoints/manager and don't live in the rooms table.
+    if not room_name.startswith("dm-"):
+        if not db.user_can_access_room(
+            user["id"], room_name, is_admin=bool(user.get("is_admin"))
+        ):
+            await websocket.close(code=4003)
+            return
+
     await manager.connect(
         websocket, room_name, user["nickname"], user["id"],
         avatar=user.get("avatar"), is_admin=user.get("is_admin", False)

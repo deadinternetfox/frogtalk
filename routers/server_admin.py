@@ -416,7 +416,9 @@ async def server_webui_login(body: LoginBody, response: Response):
     if not expected_password:
         return JSONResponse(status_code=500, content={"error": "Server WebUI password not configured"})
 
-    if body.username.strip() != expected_user or body.password != expected_password:
+    if body.username.strip() != expected_user or not secrets.compare_digest(
+        body.password.encode("utf-8"), expected_password.encode("utf-8")
+    ):
         return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
 
     token = secrets.token_urlsafe(32)

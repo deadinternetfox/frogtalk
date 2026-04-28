@@ -453,6 +453,7 @@ async def create_federation_ticket(
 
 
 @router.post("/federation-ticket-login")
+@limiter.limit("30/hour")
 async def login_with_federation_ticket(
     request: Request,
     body: FederationTicketLoginRequest,
@@ -489,7 +490,8 @@ class NicknameChangeRequest(BaseModel):
 
 
 @router.patch("/nickname")
-async def change_nickname(body: NicknameChangeRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit("5/hour")
+async def change_nickname(request: Request, body: NicknameChangeRequest, current_user: dict = Depends(get_current_user)):
     """Change user's nickname. Requires password confirmation."""
     if not NICKNAME_RE.match(body.nickname):
         return JSONResponse(status_code=400, content={
@@ -521,7 +523,8 @@ async def me(current_user: dict = Depends(get_current_user)):
 
 
 @router.patch("/profile")
-async def update_profile(body: ProfileUpdateRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit("30/hour")
+async def update_profile(request: Request, body: ProfileUpdateRequest, current_user: dict = Depends(get_current_user)):
     # Validate avatar size
     if body.avatar and len(body.avatar) > MAX_AVATAR_BYTES:
         return JSONResponse(status_code=413, content={"error": "Avatar too large (max 2MB)"})

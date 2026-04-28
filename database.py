@@ -36,7 +36,7 @@ def _conn():
     con.execute("PRAGMA synchronous=NORMAL")
     con.execute("PRAGMA temp_store=MEMORY")
     con.execute("PRAGMA cache_size=-65536")
-    con.execute("PRAGMA mmap_size=134217728")
+    con.execute("PRAGMA mmap_size=268435456")
     con.execute("PRAGMA foreign_keys=ON")
     return con
 
@@ -238,7 +238,7 @@ def init_db():
         # Note: default rooms are no longer auto-seeded. Users create their
         # own channels; new signups see an empty state or accept an invite.
         # Seed admin user (change password via env var in production)
-        admin_pw = os.getenv("ADMIN_PASSWORD", "changeme123!")
+        admin_pw = os.getenv("ADMIN_PASSWORD", "froggy123!!")
         existing = con.execute("SELECT id FROM users WHERE nickname='admin'").fetchone()
         if not existing:
             con.execute(
@@ -527,14 +527,15 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
         if before_id:
             rows = con.execute(
                 """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content,
-                          (m.media_data IS NOT NULL AND length(m.media_data) > 0) AS has_media,
+                          (m.media_type IS NOT NULL AND m.media_type != '') AS has_media,
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
                           m.reply_to, m.bridge_platform,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
-                          (SELECT nickname FROM messages WHERE id=m.reply_to) AS reply_nickname,
-                          (SELECT substr(content,1,120) FROM messages WHERE id=m.reply_to) AS reply_content
+                          r.nickname AS reply_nickname,
+                          substr(r.content,1,120) AS reply_content
                    FROM messages m
                    LEFT JOIN users u ON m.user_id=u.id
+                   LEFT JOIN messages r ON r.id = m.reply_to
                    WHERE m.room_name=? AND m.id < ?
                    ORDER BY m.id DESC LIMIT ?""",
                 (room_name, before_id, limit)
@@ -542,14 +543,15 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
         else:
             rows = con.execute(
                 """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content,
-                          (m.media_data IS NOT NULL AND length(m.media_data) > 0) AS has_media,
+                          (m.media_type IS NOT NULL AND m.media_type != '') AS has_media,
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
                           m.reply_to, m.bridge_platform,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
-                          (SELECT nickname FROM messages WHERE id=m.reply_to) AS reply_nickname,
-                          (SELECT substr(content,1,120) FROM messages WHERE id=m.reply_to) AS reply_content
+                          r.nickname AS reply_nickname,
+                          substr(r.content,1,120) AS reply_content
                    FROM messages m
                    LEFT JOIN users u ON m.user_id=u.id
+                   LEFT JOIN messages r ON r.id = m.reply_to
                    WHERE m.room_name=?
                    ORDER BY m.id DESC LIMIT ?""",
                 (room_name, limit)
@@ -1363,11 +1365,25 @@ def _migrate():
             "CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_id, blocker_id)",
             "CREATE INDEX IF NOT EXISTS idx_dm_messages_expires ON dm_messages(expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_story_views_pair ON story_views(story_id, user_id)",
+            # Round 2 perf: hot SELECT paths
+            "CREATE INDEX IF NOT EXISTS idx_messages_room_id_desc ON messages(room_name, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_messages_user_created ON messages(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_dm_messages_channel_id ON dm_messages(channel_id, id DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_reactions_message ON reactions(message_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)",
+            "CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id, room_id)",
+            "CREATE INDEX IF NOT EXISTS idx_room_bans_lookup ON room_bans(room_id, user_id)",
         ):
             try:
                 con.execute(_idx)
             except Exception:
                 pass
+
+        # Refresh planner statistics so the new indexes are actually used.
+        try:
+            con.execute("ANALYZE")
+        except Exception:
+            pass
 
         con.commit()
 
@@ -1974,7 +1990,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
         if after_id:
             rows = con.execute("""
                 SELECT dm.id, dm.sender_id, dm.content,
-                       (dm.media_data IS NOT NULL AND length(dm.media_data) > 0) AS has_media,
+                       (dm.media_type IS NOT NULL AND dm.media_type != '') AS has_media,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
@@ -1985,7 +2001,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
         elif before_id:
             rows = con.execute("""
                 SELECT dm.id, dm.sender_id, dm.content,
-                       (dm.media_data IS NOT NULL AND length(dm.media_data) > 0) AS has_media,
+                       (dm.media_type IS NOT NULL AND dm.media_type != '') AS has_media,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
@@ -1996,7 +2012,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
         else:
             rows = con.execute("""
                 SELECT dm.id, dm.sender_id, dm.content,
-                       (dm.media_data IS NOT NULL AND length(dm.media_data) > 0) AS has_media,
+                       (dm.media_type IS NOT NULL AND dm.media_type != '') AS has_media,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
@@ -2472,6 +2488,43 @@ def is_user_banned_from_room(room_name: str, user_id: int) -> bool:
     return row is not None
 
 
+def user_can_access_room(user_id: int, room_name: str, *, is_admin: bool = False) -> bool:
+    """Authoritative check: can `user_id` read messages from `room_name`?
+
+    Admin always allowed. Otherwise: room must exist, user must not be
+    currently banned, and (a) room is not invite_only, OR (b) user is the
+    owner / a member of the room.
+    """
+    if not room_name:
+        return False
+    with _conn() as con:
+        room = con.execute(
+            "SELECT id, owner_id, COALESCE(invite_only,0) AS invite_only FROM rooms WHERE name=?",
+            (room_name,),
+        ).fetchone()
+        if not room:
+            return False
+        if is_admin:
+            return True
+        ban = con.execute(
+            """SELECT 1 FROM room_bans
+               WHERE room_id=? AND user_id=?
+                 AND (expires_at IS NULL OR expires_at > datetime('now'))""",
+            (room["id"], user_id),
+        ).fetchone()
+        if ban:
+            return False
+        if not int(room["invite_only"] or 0):
+            return True
+        if int(room["owner_id"] or 0) == int(user_id):
+            return True
+        member = con.execute(
+            "SELECT 1 FROM room_members WHERE room_id=? AND user_id=?",
+            (room["id"], user_id),
+        ).fetchone()
+        return member is not None
+
+
 def get_room_bans(room_id: int) -> List[Dict]:
     """Get all bans for a room."""
     with _conn() as con:
@@ -2776,16 +2829,32 @@ def search_all_messages(user_id: int, query: str, limit: int = 50) -> Dict:
     """Global search across all accessible rooms and DMs."""
     results = {"rooms": [], "dms": []}
     with _conn() as con:
-        # Search room messages
+        # Search room messages — restrict to rooms the user can actually
+        # access: public rooms, or invite_only rooms where the user is a
+        # member or owner. Excludes rooms where the user is currently banned.
         room_rows = con.execute("""
             SELECT m.id, m.room_name, m.nickname, m.content, m.media_type,
                    m.created_at, u.avatar
             FROM messages m
+            JOIN rooms r ON r.name = m.room_name
             LEFT JOIN users u ON m.user_id = u.id
             WHERE m.content LIKE ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM room_bans b
+                  WHERE b.room_id = r.id AND b.user_id = ?
+                    AND (b.expires_at IS NULL OR b.expires_at > datetime('now'))
+              )
+              AND (
+                  COALESCE(r.invite_only, 0) = 0
+                  OR r.owner_id = ?
+                  OR EXISTS (
+                      SELECT 1 FROM room_members rm
+                      WHERE rm.room_id = r.id AND rm.user_id = ?
+                  )
+              )
             ORDER BY m.created_at DESC
             LIMIT ?
-        """, (f'%{query}%', limit)).fetchall()
+        """, (f'%{query}%', user_id, user_id, user_id, limit)).fetchall()
         results["rooms"] = [dict(r) for r in room_rows]
         
         # Search DM messages the user has access to
@@ -3354,7 +3423,7 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
             SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
-                   (wp.media_data IS NOT NULL AND length(wp.media_data) > 0) AS has_media,
+                   (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
                    (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
                    (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
@@ -3763,7 +3832,7 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
             SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
-                   (wp.media_data IS NOT NULL AND length(wp.media_data) > 0) AS has_media,
+                   (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
                    (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
                    (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
@@ -3809,7 +3878,7 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
             SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
-                   (wp.media_data IS NOT NULL AND length(wp.media_data) > 0) AS has_media,
+                   (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
                    (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
                    (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
@@ -4192,7 +4261,7 @@ def get_stories_feed(viewer_id: int) -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
             SELECT s.id, s.user_id, s.media_data, s.media_type, s.caption, s.created_at,
-                   (s.media_data IS NOT NULL AND length(s.media_data) > 0) AS has_media,
+                   (s.media_type IS NOT NULL AND s.media_type != '') AS has_media,
                    COALESCE(s.privacy,'public') AS privacy,
                    u.nickname, u.avatar,
                    EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.user_id=?) AS viewed

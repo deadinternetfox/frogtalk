@@ -1,4 +1,6 @@
 """Message REST routes (history, edit, delete, reactions)."""
+import asyncio
+import logging
 from datetime import datetime
 import time
 import uuid
@@ -15,6 +17,7 @@ from ws_manager import manager
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 limiter = Limiter(key_func=get_remote_address)
+_log = logging.getLogger(__name__)
 
 MAX_MEDIA_BYTES = 20 * 1024 * 1024  # 20 MB
 ALLOWED_MEDIA = (
@@ -145,8 +148,16 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
 
 
 @router.get("/media/{msg_id}")
-async def get_media(msg_id: int, _: dict = Depends(get_current_user)):
+async def get_media(msg_id: int, current_user: dict = Depends(get_current_user)):
     """Fetch media_data for a single message (lazy load)."""
+    msg = db.get_message(msg_id)
+    if not msg:
+        return JSONResponse(status_code=404, content={"error": "No media"})
+    if not db.user_can_access_room(
+        current_user["id"], msg.get("room_name") or "",
+        is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
     with db._conn() as con:
         row = con.execute("SELECT media_data, media_type FROM messages WHERE id=?", (msg_id,)).fetchone()
     if not row or not row["media_data"]:
@@ -159,9 +170,14 @@ async def get_history(
     room_name: str,
     limit: int = Query(50, le=200),
     before_id: Optional[int] = Query(None),
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
-    msgs = db.get_messages(room_name, limit=limit, before_id=before_id)
+    if not db.user_can_access_room(
+        current_user["id"], room_name,
+        is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
+    msgs = await asyncio.to_thread(db.get_messages, room_name, limit, before_id)
     # has_media is now returned directly from SQL as 0/1; coerce to bool so
     # the client gets a stable shape. media_data is no longer selected for
     # history requests \u2014 clients fetch via /messages/<id>/media on demand.
@@ -207,20 +223,35 @@ async def toggle_reaction(request: Request, msg_id: int, body: ReactionRequest,
                           current_user: dict = Depends(get_current_user)):
     if len(body.emoji) > 10:
         return JSONResponse(status_code=400, content={"error": "Invalid emoji"})
+    msg = db.get_message(msg_id)
+    if not msg:
+        return JSONResponse(status_code=404, content={"error": "Message not found"})
+    if not db.user_can_access_room(
+        current_user["id"], msg.get("room_name") or "",
+        is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
     counts = db.toggle_reaction(msg_id, current_user["id"], body.emoji)
     try:
-        msg = db.get_message(msg_id)
         if msg and msg.get("room_name"):
             import bridge_outbound
             bridge_outbound.forward_user_reaction(msg["room_name"], msg_id, body.emoji, counts)
     except Exception:
-        pass
+        _log.exception("bridge reaction forward failed")
     return {"message_id": msg_id, "reactions": counts}
 
 
 @router.post("/{msg_id}/view")
 async def mark_viewed(msg_id: int, current_user: dict = Depends(get_current_user)):
     """Consume view-once media — nulls out media_data after first reveal."""
+    msg = db.get_message(msg_id)
+    if not msg:
+        return JSONResponse(status_code=404, content={"error": "Message not found"})
+    if not db.user_can_access_room(
+        current_user["id"], msg.get("room_name") or "",
+        is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
     db.consume_view_once_media(msg_id)
     return {"ok": True}
 
@@ -231,8 +262,10 @@ async def search_all(
     limit: int = Query(50, le=100),
     current_user: dict = Depends(get_current_user),
 ):
-    """Global search across all accessible messages."""
-    results = db.search_all_messages(current_user["id"], q, limit)
+    """Global search across messages the user can access."""
+    results = await asyncio.to_thread(
+        db.search_all_messages, current_user["id"], q, limit
+    )
     return {"results": results, "query": q}
 
 
@@ -244,6 +277,11 @@ async def search_messages(
     current_user: dict = Depends(get_current_user),
 ):
     """Search messages in a room."""
+    if not db.user_can_access_room(
+        current_user["id"], room_name,
+        is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
     results = db.search_room_messages(room_name, q, limit)
     return {"results": results, "query": q, "room": room_name}
 
