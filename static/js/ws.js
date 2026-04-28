@@ -374,6 +374,20 @@ const WS = (() => {
         try { window.Music?.handleWsEvent?.(data); } catch {}
         break;
       }
+      // ── Room ban / kick (Discord-style channel close) ────
+      case 'room_ban': {
+        try { if (typeof handleRoomBan === 'function') handleRoomBan(data); } catch {}
+        break;
+      }
+      case 'user_banned': {
+        // A peer was banned; show a small system notice if currently in that room
+        try {
+          if (data.room && data.room === State.currentRoom && data.nickname) {
+            UI.showToast(`@${data.nickname} was banned from #${data.room}`, 'info');
+          }
+        } catch {}
+        break;
+      }
       case 'pong': break;
     }
   }

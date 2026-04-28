@@ -1296,12 +1296,12 @@ async function sendDMMessage () {
     try {
       let mediaData = fileData.dataUrl || fileData.data || null;
       if (!mediaData && fileData.blob) {
-        mediaData = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(fileData.blob);
-        });
+        try {
+          mediaData = await UI.blobToDataURL(fileData.blob);
+        } catch (err) {
+          toast('Could not read attachment: ' + (err?.message || 'unknown error'), 'error');
+          return;
+        }
       }
       if (mediaData && STATE.sharedSecret && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
         mediaData = await Crypto.encryptPayload(mediaData, STATE.sharedSecret);

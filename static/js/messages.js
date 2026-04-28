@@ -1655,15 +1655,14 @@ async function sendMessage() {
     let mediaType = attachment?.type || null;
     if (!mediaData && attachment?.blob) {
       UI.showProgressToast('Preparing media…', 0);
-      mediaData = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onprogress = (e) => {
-          if (e.lengthComputable) UI.showProgressToast('Preparing media…', Math.round((e.loaded / e.total) * 50));
-        };
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(attachment.blob);
-      });
+      try {
+        mediaData = await UI.blobToDataURL(attachment.blob, (pct) => {
+          UI.showProgressToast('Preparing media…', Math.round(pct * 0.5));
+        });
+      } catch (err) {
+        UI.showProgressToast('Failed to prepare media', 100);
+        throw new Error('Could not read attachment: ' + (err && err.message ? err.message : 'unknown error'));
+      }
       mediaType = attachment.type;
       UI.showProgressToast('Sending…', 60);
     }
@@ -1775,19 +1774,19 @@ function handleFileSelect(input) {
   if (!file) return;
   const MAX = 8 * 1024 * 1024;
   if (file.size > MAX) { UI.showToast('File too large (max 8MB)', 'error'); return; }
-  const reader = new FileReader();
-  reader.onload = e => {
-    State.pendingAttachment = { dataUrl: e.target.result, type: file.type };
+  UI.blobToDataURL(file).then(dataUrl => {
+    State.pendingAttachment = { dataUrl, type: file.type };
     const preview = document.getElementById('attachment-preview');
     const thumb = document.getElementById('attachment-thumb');
     preview.style.display = 'flex';
     if (file.type.startsWith('video')) {
-      thumb.innerHTML = `<video src="${e.target.result}" style="max-width:200px;max-height:120px;border-radius:8px"></video>`;
+      thumb.innerHTML = `<video src="${dataUrl}" style="max-width:200px;max-height:120px;border-radius:8px"></video>`;
     } else {
-      thumb.innerHTML = `<img src="${e.target.result}" style="max-width:200px;max-height:120px;border-radius:8px">`;
+      thumb.innerHTML = `<img src="${dataUrl}" style="max-width:200px;max-height:120px;border-radius:8px">`;
     }
-  };
-  reader.readAsDataURL(file);
+  }).catch(err => {
+    UI.showToast('Failed to read file: ' + (err?.message || 'unknown'), 'error');
+  });
   input.value = '';
 }
 
@@ -1979,20 +1978,181 @@ async function roomKick(nickname, userId) {
 async function roomBan(nickname, userId) {
   if (!State.currentRoom) return;
   if (!userId) { toast('User id unavailable', 'error'); return; }
-  const reason = prompt(`Ban @${nickname} from #${State.currentRoom}? Reason (optional):`, '');
-  if (reason === null) return;
-  const hoursStr = prompt('Ban duration in hours (blank = permanent):', '');
-  let duration_minutes = null;
-  if (hoursStr && hoursStr.trim()) {
-    const hours = parseInt(hoursStr, 10);
-    if (!isNaN(hours) && hours > 0) duration_minutes = hours * 60;
-  }
-  try {
-    const r = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/bans`, 'POST', {
-      user_id: userId, reason: reason || '', duration_minutes
-    });
-    const data = await r.json().catch(() => ({}));
-    if (r.ok) toast(`@${nickname} banned`, 'success');
-    else toast(data.error || 'Ban failed', 'error');
-  } catch { toast('Ban failed', 'error'); }
+  showRoomBanModal(nickname, userId, State.currentRoom);
 }
+
+/* ── Polished room-ban modal (owner/mod input) ───────────────────────── */
+function showRoomBanModal(nickname, userId, room) {
+  // Tear down any previous instance
+  document.getElementById('room-ban-modal')?.remove();
+
+  const wrap = document.createElement('div');
+  wrap.id = 'room-ban-modal';
+  wrap.className = 'modal-backdrop';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  const safeNick = UI.escHtml(nickname || 'user');
+  const safeRoom = UI.escHtml(room || '');
+  wrap.innerHTML = `
+    <div role="dialog" aria-modal="true" aria-labelledby="rb-title" style="background:linear-gradient(180deg,#0d2818 0%,#0a1f12 100%);border:1px solid #1f4d2e;border-radius:14px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.5);overflow:hidden;">
+      <div style="padding:18px 20px 14px;border-bottom:1px solid #1f4d2e;display:flex;align-items:center;gap:12px;">
+        <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,85,85,.15);display:flex;align-items:center;justify-content:center;font-size:20px;">🚫</div>
+        <div style="flex:1;min-width:0;">
+          <div id="rb-title" style="font-weight:700;color:#4ade80;font-size:16px;">Ban from #${safeRoom}</div>
+          <div style="color:#9ca3af;font-size:13px;margin-top:2px;">Banning <span style="color:#fff;font-weight:600;">@${safeNick}</span></div>
+        </div>
+      </div>
+      <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <label style="display:block;color:#a7d4b3;font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:600;">Reason <span style="color:#6b7280;text-transform:none;letter-spacing:0;font-weight:400;">(shown to the user)</span></label>
+          <textarea id="rb-reason" rows="3" maxlength="500" placeholder="e.g. Spamming, harassment, off-topic…" style="width:100%;padding:10px 12px;background:#0a1812;border:1px solid #1f4d2e;border-radius:8px;color:#e5e7eb;font-family:inherit;font-size:14px;resize:vertical;min-height:70px;outline:none;"></textarea>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:#6b7280;margin-top:4px;">
+            <span>Be specific — they will see this</span>
+            <span id="rb-count">0 / 500</span>
+          </div>
+        </div>
+        <div>
+          <label style="display:block;color:#a7d4b3;font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:600;">Duration</label>
+          <select id="rb-duration" style="width:100%;padding:10px 12px;background:#0a1812;border:1px solid #1f4d2e;border-radius:8px;color:#e5e7eb;font-size:14px;outline:none;">
+            <option value="60">1 hour</option>
+            <option value="360">6 hours</option>
+            <option value="1440" selected>1 day</option>
+            <option value="10080">1 week</option>
+            <option value="43200">30 days</option>
+            <option value="">Permanent</option>
+          </select>
+        </div>
+      </div>
+      <div style="padding:14px 20px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #1f4d2e;background:rgba(0,0,0,.2);">
+        <button id="rb-cancel" type="button" style="padding:9px 16px;background:transparent;border:1px solid #2d4a35;border-radius:8px;color:#9ca3af;cursor:pointer;font-weight:600;">Cancel</button>
+        <button id="rb-confirm" type="button" style="padding:9px 18px;background:linear-gradient(180deg,#dc2626,#991b1b);border:1px solid #7f1d1d;border-radius:8px;color:#fff;cursor:pointer;font-weight:700;box-shadow:0 2px 8px rgba(220,38,38,.3);">Ban user</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const reasonEl = wrap.querySelector('#rb-reason');
+  const countEl  = wrap.querySelector('#rb-count');
+  const durEl    = wrap.querySelector('#rb-duration');
+  const cancelBtn= wrap.querySelector('#rb-cancel');
+  const okBtn    = wrap.querySelector('#rb-confirm');
+  reasonEl.addEventListener('input', () => { countEl.textContent = `${reasonEl.value.length} / 500`; });
+  setTimeout(() => reasonEl.focus(), 50);
+
+  function close() { wrap.remove(); document.removeEventListener('keydown', onKey); }
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) okBtn.click();
+  }
+  document.addEventListener('keydown', onKey);
+  cancelBtn.addEventListener('click', close);
+  wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+  okBtn.addEventListener('click', async () => {
+    const reason = reasonEl.value.trim();
+    const dur = durEl.value;
+    const duration_minutes = dur ? parseInt(dur, 10) : null;
+    okBtn.disabled = true; okBtn.textContent = 'Banning…';
+    try {
+      const r = await apiFetch(`/api/rooms/${encodeURIComponent(room)}/bans`, 'POST', {
+        user_id: userId, reason, duration_minutes
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        toast(`@${nickname} banned from #${room}`, 'success');
+        close();
+      } else {
+        toast(data.error || 'Ban failed', 'error');
+        okBtn.disabled = false; okBtn.textContent = 'Ban user';
+      }
+    } catch {
+      toast('Ban failed', 'error');
+      okBtn.disabled = false; okBtn.textContent = 'Ban user';
+    }
+  });
+}
+window.showRoomBanModal = showRoomBanModal;
+
+/* ── Banned-user receiver: Discord-style channel close + reason modal ── */
+function handleRoomBan(data) {
+  try {
+    const room = data.room || '';
+    const reason = (data.reason || '').trim();
+    const banner = data.banned_by || 'a moderator';
+    const expires = data.expires_at;
+    let durationLabel = 'Permanent';
+    if (expires) {
+      try {
+        const exp = new Date(expires);
+        const now = new Date();
+        const ms = exp - now;
+        if (ms > 0) {
+          const mins = Math.round(ms / 60000);
+          if (mins < 60) durationLabel = `Until ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} (${mins} min)`;
+          else if (mins < 1440) durationLabel = `Until ${exp.toLocaleString([], {hour:'2-digit', minute:'2-digit'})} (${Math.round(mins/60)} h)`;
+          else durationLabel = `Until ${exp.toLocaleDateString()} ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+        }
+      } catch {}
+    }
+
+    // Close the channel: navigate away if currently inside the banned room.
+    try {
+      if (State.currentRoom === room) {
+        // Strip from sidebar / cached state, then switch to general
+        if (State.rooms && Array.isArray(State.rooms)) {
+          State.rooms = State.rooms.filter(r => (r?.name || r) !== room);
+        }
+        if (typeof Rooms !== 'undefined' && Rooms.renderRoomList) { try { Rooms.renderRoomList(); } catch {} }
+        if (typeof switchRoom === 'function') {
+          try { switchRoom('general'); } catch {}
+        } else if (typeof Rooms !== 'undefined' && Rooms.switchRoom) {
+          try { Rooms.switchRoom('general'); } catch {}
+        }
+      }
+    } catch {}
+
+    // Polished modal in FrogTalk theme
+    document.getElementById('room-ban-notice')?.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'room-ban-notice';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const safeRoom = UI.escHtml(room);
+    const safeBanner = UI.escHtml(banner);
+    const safeReason = reason ? UI.escHtml(reason) : '<em style="color:#6b7280;">No reason provided.</em>';
+    wrap.innerHTML = `
+      <div role="alertdialog" aria-modal="true" style="background:linear-gradient(180deg,#1a0d0d 0%,#0a0505 100%);border:1px solid #7f1d1d;border-radius:14px;width:100%;max-width:480px;box-shadow:0 24px 70px rgba(220,38,38,.25);overflow:hidden;">
+        <div style="padding:22px 24px 16px;border-bottom:1px solid #4d1f1f;text-align:center;">
+          <div style="font-size:42px;line-height:1;margin-bottom:8px;">🚫</div>
+          <div style="font-weight:800;color:#fca5a5;font-size:20px;letter-spacing:.3px;">You have been banned</div>
+          <div style="color:#9ca3af;font-size:14px;margin-top:6px;">from <span style="color:#fff;font-weight:700;">#${safeRoom}</span></div>
+        </div>
+        <div style="padding:16px 24px;display:flex;flex-direction:column;gap:12px;">
+          <div>
+            <div style="color:#a7d4b3;font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:4px;">Reason</div>
+            <div style="color:#e5e7eb;font-size:14px;line-height:1.5;background:#0a1812;border:1px solid #1f4d2e;border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-word;">${safeReason}</div>
+          </div>
+          <div style="display:flex;gap:14px;font-size:12px;">
+            <div style="flex:1;">
+              <div style="color:#a7d4b3;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:2px;">Banned by</div>
+              <div style="color:#e5e7eb;font-weight:600;">@${safeBanner}</div>
+            </div>
+            <div style="flex:1;">
+              <div style="color:#a7d4b3;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:2px;">Duration</div>
+              <div style="color:#e5e7eb;font-weight:600;">${UI.escHtml(durationLabel)}</div>
+            </div>
+          </div>
+        </div>
+        <div style="padding:14px 24px 20px;border-top:1px solid #4d1f1f;background:rgba(0,0,0,.25);text-align:center;">
+          <button id="rbn-ok" type="button" style="padding:10px 28px;background:linear-gradient(180deg,#16a34a,#15803d);border:1px solid #14532d;border-radius:8px;color:#fff;cursor:pointer;font-weight:700;box-shadow:0 2px 8px rgba(22,163,74,.3);">Return to lobby</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    const close = () => wrap.remove();
+    wrap.querySelector('#rbn-ok').addEventListener('click', close);
+    document.addEventListener('keydown', function escClose(e) {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        close(); document.removeEventListener('keydown', escClose);
+      }
+    });
+  } catch (e) {
+    // Worst-case fallback so the user is at least told.
+    try { toast(`Banned from #${data?.room || 'channel'}: ${data?.reason || ''}`, 'error'); } catch {}
+  }
+}
+window.handleRoomBan = handleRoomBan;

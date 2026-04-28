@@ -369,8 +369,53 @@ const UI = (() => {
     }
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy };
+  // Safari-safe Blob → data URL conversion. Some iOS Safari / WKWebView
+  // contexts surface "Can't find variable: FileReader" when FileReader is
+  // referenced from inside a Promise constructor; using the modern
+  // Blob.arrayBuffer() API + manual base64 encode avoids the issue entirely.
+  // Falls back to FileReader if arrayBuffer is unavailable (very old browsers).
+  async function blobToDataURL(blob, onProgress) {
+    if (!blob) return null;
+    try {
+      if (typeof blob.arrayBuffer === 'function') {
+        const buf = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        const CHUNK = 0x8000;
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += CHUNK) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+          if (typeof onProgress === 'function') {
+            try { onProgress(Math.min(100, Math.round((i / bytes.length) * 100))); } catch {}
+          }
+        }
+        const b64 = btoa(binary);
+        const mime = blob.type || 'application/octet-stream';
+        if (typeof onProgress === 'function') { try { onProgress(100); } catch {} }
+        return `data:${mime};base64,${b64}`;
+      }
+    } catch (e) { /* fall through */ }
+    // Last-resort FileReader fallback (guarded against Safari's missing-global error)
+    return await new Promise((resolve, reject) => {
+      try {
+        const FR = (typeof FileReader !== 'undefined') ? FileReader : (window && window.FileReader);
+        if (!FR) { reject(new Error('No FileReader available')); return; }
+        const r = new FR();
+        r.onprogress = (e) => {
+          if (typeof onProgress === 'function' && e && e.lengthComputable) {
+            try { onProgress(Math.round((e.loaded / e.total) * 100)); } catch {}
+          }
+        };
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(r.error || new Error('FileReader failed'));
+        r.readAsDataURL(blob);
+      } catch (err) { reject(err); }
+    });
+  }
+
+  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL };
 })();
+// Global alias so non-module callers can use it without going through UI.
+window.blobToDataURL = (blob, onProgress) => UI.blobToDataURL(blob, onProgress);
 
 // Robust clipboard writer. `navigator.clipboard` often fails in the Electron
 // shell (no focus, non-secure origin, denied permission) and the async

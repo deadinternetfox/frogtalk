@@ -306,6 +306,33 @@ async def ban_user(room_name: str, body: BanRequest,
                                 body.reason, body.duration_minutes)
     if not ok:
         return JSONResponse(status_code=500, content={"error": "Ban failed"})
+
+    # Notify the banned user across all their connections so the channel
+    # closes Discord-style with a polished modal showing the reason.
+    try:
+        from ws_manager import manager
+        bans = db.get_room_bans(room["id"]) or []
+        match = next((b for b in bans if int(b.get("user_id") or 0) == int(body.user_id)), None)
+        expires_at = match.get("expires_at") if match else None
+        await manager.send_to_user(body.user_id, {
+            "type": "room_ban",
+            "room": room_name,
+            "reason": body.reason or "",
+            "banned_by": current_user.get("nickname") or "moderator",
+            "expires_at": expires_at,
+            "duration_minutes": body.duration_minutes,
+        })
+        # Also broadcast a presence-style notice to the room so members see
+        # the ban land (without leaking the reason).
+        await manager.broadcast_room(room_name, {
+            "type": "user_banned",
+            "room": room_name,
+            "user_id": body.user_id,
+            "nickname": target.get("nickname"),
+            "banned_by": current_user.get("nickname"),
+        })
+    except Exception:
+        pass
     return {"ok": True}
 
 
