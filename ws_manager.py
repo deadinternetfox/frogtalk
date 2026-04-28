@@ -25,6 +25,10 @@ class ConnectionManager:
 
     async def connect(self, ws: WebSocket, room: str, nickname: str, user_id: int, avatar: str = None, is_admin: bool = False):
         # Per-IP cap (covers phone+desktop+browser tabs at 5).
+        # When deployed behind nginx/Cloudflare, ws.client.host is the loopback
+        # address (127.0.0.1 / ::1) for every client, so the raw socket peer is
+        # useless as a per-IP key. Trust X-Forwarded-For / X-Real-IP only when
+        # the immediate peer is loopback (we control the reverse proxy there).
         ip = ""
         try:
             client = getattr(ws, "client", None)
@@ -32,6 +36,19 @@ class ConnectionManager:
                 ip = str(client.host)
         except Exception:
             ip = ""
+        if ip in ("127.0.0.1", "::1", "localhost"):
+            try:
+                headers = getattr(ws, "headers", {}) or {}
+                fwd = (headers.get("x-forwarded-for") or "").strip()
+                if fwd:
+                    # First entry = original client.
+                    ip = fwd.split(",", 1)[0].strip() or ip
+                else:
+                    real = (headers.get("x-real-ip") or "").strip()
+                    if real:
+                        ip = real
+            except Exception:
+                pass
         if ip and self._ip_count.get(ip, 0) >= _per_ip_ws_cap():
             try:
                 await ws.close(code=4008)
