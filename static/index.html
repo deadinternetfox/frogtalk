@@ -428,38 +428,104 @@ body{
 }
 
 /* ─── Auth overlay ──────────────────────────────────────────── */
+/* Polished green-glass theme to match the rest of the app
+   (friends panel + settings modal use the same palette). */
 #auth-overlay{
   position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,#0a0a0a 0%,#0d1f0a 100%);
-  z-index:1000;overflow-y:auto
+  background:
+    radial-gradient(1100px 700px at 18% -10%, rgba(76,175,80,.18), transparent 60%),
+    radial-gradient(900px 600px at 92% 110%, rgba(46,138,74,.16), transparent 65%),
+    linear-gradient(160deg,#06120c 0%,#08160f 45%,#04100a 100%);
+  z-index:1000;overflow-y:auto;
+  -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)
+}
+#auth-overlay::before{
+  /* subtle vignette + soft top sheen */
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,0) 18%),
+    radial-gradient(60% 40% at 50% 0%, rgba(127,210,167,.10), transparent 70%);
 }
 #auth-overlay.hidden{display:none}
 .auth-box{
-  background:#141414;border:1px solid #2a4a2a;border-radius:16px;
-  padding:40px 36px;width:100%;max-width:380px;
-  box-shadow:0 20px 60px rgba(0,0,0,.6)
+  position:relative;
+  background:linear-gradient(180deg,#173027 0%,#13271f 56%,#0f1f17 100%);
+  border:1px solid #3b6c59;border-radius:18px;
+  padding:36px 32px 30px;width:100%;max-width:400px;
+  box-shadow:
+    0 24px 64px rgba(0,0,0,.55),
+    0 0 0 1px rgba(127,210,167,.06),
+    inset 0 1px 0 rgba(255,255,255,.04);
+  color:#dff5e8
 }
-.auth-logo{font-size:48px;text-align:center;margin-bottom:8px}
-.auth-title{font-size:24px;font-weight:700;text-align:center;color:#4caf50;margin-bottom:4px}
-.auth-subtitle{font-size:13px;text-align:center;color:#666;margin-bottom:28px}
-.auth-tabs{display:flex;gap:4px;margin-bottom:24px;background:#0d0d0d;border-radius:10px;padding:4px}
+.auth-box::after{
+  /* hairline accent at the top edge */
+  content:"";position:absolute;left:18px;right:18px;top:0;height:1px;
+  background:linear-gradient(90deg, transparent, rgba(127,210,167,.5), transparent);
+  pointer-events:none
+}
+.auth-logo{
+  font-size:54px;text-align:center;margin-bottom:6px;
+  filter:drop-shadow(0 4px 12px rgba(76,175,80,.35));
+  animation:authLogoFloat 5.5s ease-in-out infinite
+}
+@keyframes authLogoFloat{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-4px)}
+}
+.auth-title{
+  font-size:26px;font-weight:800;text-align:center;margin-bottom:4px;
+  background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  letter-spacing:.2px
+}
+.auth-subtitle{font-size:13px;text-align:center;color:#85a89a;margin-bottom:24px}
+.auth-tabs{
+  display:flex;gap:4px;margin-bottom:22px;
+  background:linear-gradient(180deg,#0f1f18,#0b1812);
+  border:1px solid #234639;border-radius:12px;padding:4px
+}
 .auth-tab{
-  flex:1;padding:8px;text-align:center;border-radius:8px;cursor:pointer;
-  font-size:14px;font-weight:500;color:#666;transition:all .2s
+  flex:1;padding:9px 8px;text-align:center;border-radius:9px;cursor:pointer;
+  font-size:14px;font-weight:600;color:#9bbeae;transition:color .18s, background .18s, transform .12s;
+  user-select:none
 }
-.auth-tab.active{background:#1a2e1a;color:#4caf50}
+.auth-tab:hover:not(.active){color:#cdebd9;background:rgba(127,210,167,.06)}
+.auth-tab:active{transform:scale(.98)}
+.auth-tab.active{
+  background:linear-gradient(180deg,#214438,#18362c);
+  color:#7fd2a7;
+  box-shadow:inset 0 0 0 1px rgba(127,210,167,.18), 0 1px 0 rgba(0,0,0,.25)
+}
 .auth-input{
-  width:100%;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:10px;
-  padding:12px 14px;color:#e0e0e0;font-size:15px;margin-bottom:12px;outline:none;
-  transition:border-color .2s
+  width:100%;background:linear-gradient(180deg,#12231e,#0f1d19);
+  border:1px solid #2f5548;border-radius:11px;
+  padding:12px 14px;color:#e8f4ee;font-size:15px;margin-bottom:12px;outline:none;
+  transition:border-color .18s, box-shadow .18s, background .18s;
+  box-sizing:border-box
 }
-.auth-input:focus{border-color:#4caf50}
+.auth-input::placeholder{color:#85a89a}
+.auth-input:hover{border-color:#3e6a5b;background:linear-gradient(180deg,#152922,#11211c)}
+.auth-input:focus{
+  border-color:#6bb698;
+  box-shadow:0 0 0 3px rgba(107,182,152,.18);
+  background:linear-gradient(180deg,#152922,#11211c)
+}
 .auth-btn{
-  width:100%;padding:13px;background:#4caf50;border:none;border-radius:10px;
-  color:#000;font-size:15px;font-weight:700;cursor:pointer;transition:background .2s;margin-top:4px
+  width:100%;padding:13px;border:none;border-radius:11px;
+  background:linear-gradient(180deg,#5bc764 0%,#3f9e48 100%);
+  color:#062612;font-size:15px;font-weight:800;letter-spacing:.2px;
+  cursor:pointer;transition:transform .12s, box-shadow .18s, filter .18s;
+  margin-top:6px;
+  box-shadow:
+    0 6px 18px rgba(63,158,72,.35),
+    inset 0 1px 0 rgba(255,255,255,.25),
+    inset 0 -1px 0 rgba(0,0,0,.2)
 }
-.auth-btn:hover{background:#5bc661}
-.auth-error{color:#ff5555;font-size:13px;text-align:center;min-height:20px;margin-bottom:8px}
+.auth-btn:hover{filter:brightness(1.06);box-shadow:0 8px 22px rgba(63,158,72,.45), inset 0 1px 0 rgba(255,255,255,.3)}
+.auth-btn:active{transform:translateY(1px) scale(.995);filter:brightness(.96)}
+.auth-btn:disabled{opacity:.6;cursor:not-allowed;filter:grayscale(.3)}
+.auth-error{color:#ff8b8b;font-size:13px;text-align:center;min-height:20px;margin-bottom:8px;font-weight:500}
 
 /* ─── App Layout ────────────────────────────────────────────── */
 #app{display:flex;height:100%;height:100dvh;height:100svh;overflow:hidden;flex:1;min-height:0}
@@ -4191,7 +4257,7 @@ window.ConnErr = (function(){
   <div class="auth-box">
     <div class="auth-logo">🐸</div>
     <div class="auth-title">FrogTalk</div>
-    <div class="auth-subtitle">Private encrypted chatrooms</div>
+    <div class="auth-subtitle">Private chat, voice & video — no phone number required</div>
     <div class="auth-tabs">
       <div class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">Sign In</div>
       <div class="auth-tab" id="tab-register" onclick="switchAuthTab('register')">Register</div>
@@ -4205,16 +4271,21 @@ window.ConnErr = (function(){
            style="display:none" maxlength="128" onkeydown="if(event.key==='Enter')doAuth()">
     <div id="auth-captcha-box" style="display:none;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <img id="auth-captcha-img" style="height:50px;border-radius:6px;background:#1a1a1a;border:1px solid #333" alt="CAPTCHA">
-        <button onclick="loadCaptcha()" style="background:none;border:none;color:#4caf50;font-size:18px;cursor:pointer;padding:4px" title="New CAPTCHA">🔄</button>
+        <img id="auth-captcha-img" style="height:50px;border-radius:8px;background:#0f1d19;border:1px solid #2f5548" alt="CAPTCHA">
+        <button onclick="loadCaptcha()" style="background:rgba(127,210,167,.08);border:1px solid #2f5548;border-radius:8px;color:#7fd2a7;font-size:18px;cursor:pointer;padding:6px 10px;line-height:1" title="New CAPTCHA">🔄</button>
       </div>
-      <div id="auth-captcha-text" style="display:none;color:#888;font-size:13px;margin-bottom:4px"></div>
+      <div id="auth-captcha-text" style="display:none;color:#85a89a;font-size:13px;margin-bottom:4px"></div>
       <input id="auth-captcha-answer" class="auth-input" type="text" placeholder="Enter the code above" maxlength="10" autocomplete="off"
              onkeydown="if(event.key==='Enter')doAuth()">
     </div>
     <button class="auth-btn" onclick="doAuth()">Continue</button>
-    <div style="font-size:12px;color:#444;text-align:center;margin-top:16px">
-      🔒 Messages are encrypted end-to-end &nbsp;·&nbsp; No email required
+    <div style="font-size:12px;color:#6a8a7c;text-align:center;margin-top:18px;line-height:1.55">
+      <span style="display:inline-flex;align-items:center;gap:6px">
+        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4caf50;box-shadow:0 0 0 3px rgba(76,175,80,.18)"></span>
+        End-to-end encrypted
+      </span>
+      <span style="margin:0 8px;color:#2f5548">·</span>
+      <span>No email required</span>
     </div>
   </div>
 </div>
