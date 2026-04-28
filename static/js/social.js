@@ -3191,6 +3191,16 @@ const Social = (() => {
   function openActivityItem(id) {
     const n = _activityList.find(x => x.id === id);
     if (!n) return;
+    // Mark this single item as read (best-effort) and update local state
+    if (!n.read_at) {
+      n.read_at = new Date().toISOString();
+      _activityUnread = Math.max(0, _activityUnread - 1);
+      _setSidebarBadge(_activityUnread);
+      try { api('/api/social/notifications/read', 'POST', { ids: [id] }); } catch {}
+      // Soft-update the row visually without re-rendering the whole list
+      const row = document.querySelector(`.social-activity-item[data-id="${id}"]`);
+      if (row) row.classList.remove('unread');
+    }
     if (n.kind === 'follow') {
       if (n.actor_nickname) openProfile(n.actor_nickname);
       return;

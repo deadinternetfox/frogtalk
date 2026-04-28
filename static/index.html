@@ -2508,51 +2508,56 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #social-overlay{position:fixed;inset:0;background:#0a0a0a;z-index:600;display:flex;flex-direction:column;overflow:hidden}
 #social-overlay.hidden{display:none}
 .social-topbar{display:flex;align-items:center;gap:12px;padding:12px 16px;background:linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);border-bottom:1px solid #1f3a30;flex-shrink:0}
-.social-topbar-title-wrap{display:flex;flex-direction:column;justify-content:center;gap:1px;flex:1;min-width:0}
+.social-topbar-title-wrap{display:flex;flex-direction:column;justify-content:center;gap:1px;flex:0 0 auto;min-width:0;max-width:240px}
 .social-topbar-title{font-family:'Pacifico','Brush Script MT','Segoe Script','Lucida Handwriting',cursive;font-size:22px;font-weight:400;color:#fff;letter-spacing:.3px;text-shadow:0 1px 2px rgba(0,0,0,.35);background:linear-gradient(135deg,#ffffff 0%,#b8f0c0 60%,#4caf50 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;line-height:1.02}
 .social-topbar-meta{font-size:10px;color:#6fbf7e;letter-spacing:.7px;text-transform:uppercase;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.social-nav{display:flex;gap:2px;background:#0d0d0d;border-radius:8px;padding:3px}
+.social-nav{display:flex;align-items:center;gap:2px;background:#0d0d0d;border-radius:8px;padding:3px;flex:1;min-width:0}
 .social-nav-btn{padding:7px 16px;border:none;background:transparent;color:#888;font-size:13px;font-weight:600;cursor:pointer;border-radius:6px;transition:all .15s;white-space:nowrap;line-height:1.15}
 .social-nav-btn.active{background:#1a3a1a;color:#4caf50}
 .social-nav-btn:hover:not(.active){color:#e0e0e0}
 
-/* Visual gap between the main tabs and the right-anchored bell */
+/* Visual gap between the main tabs and the right-anchored bell.
+   Kept as an empty span fallback (no longer used in markup but harmless). */
 .social-nav-sep{
   display:inline-block;width:1px;height:20px;
   background:linear-gradient(180deg, transparent, #2a4a2a 30%, #2a4a2a 70%, transparent);
   margin:0 6px 0 10px;align-self:center;flex-shrink:0
 }
-/* Icon-only bell button with three visual states:
-     base       — muted, no animation
-     has-unread — bright + pulsing soft halo
-     .active    — solid filled green when on the Activity tab */
+/* Icon-only bell — anchored to the right end of the nav row.
+   Three states: idle (bright + subtle), has-unread (animated halo + ring),
+   active (filled when on the Activity tab). */
 .social-nav-bell{
-  position:relative;width:36px;height:36px;border:none;border-radius:50%;
-  background:rgba(255,255,255,.04);color:#9bbeae;
+  position:relative;width:30px;height:30px;border:none;border-radius:50%;
+  background:transparent;color:#6f8d7f;
   cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
-  font-size:16px;line-height:1;flex-shrink:0;align-self:center;
-  transition:background .18s, color .18s, transform .12s, box-shadow .18s;
+  font-size:15px;line-height:1;flex-shrink:0;align-self:center;
+  margin-left:auto;opacity:.65;
+  transition:background .18s, color .18s, opacity .18s, transform .12s, box-shadow .18s;
   -webkit-tap-highlight-color:transparent
 }
-.social-nav-bell:hover{background:rgba(127,210,167,.10);color:#cdebd9}
-.social-nav-bell:active{transform:scale(.94)}
+.social-nav-bell .bell-glyph{filter:grayscale(.55)}
+.social-nav-bell:hover{background:rgba(127,210,167,.10);color:#cdebd9;opacity:1}
+.social-nav-bell:hover .bell-glyph{filter:none}
+.social-nav-bell:active{transform:scale(.92)}
 .social-nav-bell.active{
   background:linear-gradient(180deg,#214438,#18362c);
-  color:#7fd2a7;
+  color:#cdebd9;opacity:1;
   box-shadow:inset 0 0 0 1px rgba(127,210,167,.22), 0 1px 0 rgba(0,0,0,.25)
 }
+.social-nav-bell.active .bell-glyph{filter:none}
 .social-nav-bell .bell-glyph{
   display:inline-block;transform-origin:50% 8%;
-  filter:drop-shadow(0 1px 0 rgba(0,0,0,.3))
+  filter:grayscale(.55) drop-shadow(0 1px 0 rgba(0,0,0,.35))
 }
-.social-nav-bell.has-unread{color:#bff0d0}
+.social-nav-bell.has-unread{color:#fff2c2;opacity:1}
 .social-nav-bell.has-unread .bell-glyph{
+  filter:drop-shadow(0 0 6px rgba(255,210,120,.45));
   animation:bellRing 1.6s ease-in-out infinite
 }
 .social-nav-bell.has-unread::before{
-  /* soft pulsing halo around the bell when there's unread activity */
-  content:"";position:absolute;inset:-2px;border-radius:50%;
-  background:radial-gradient(circle, rgba(127,210,167,.32), rgba(127,210,167,0) 70%);
+  /* soft pulsing halo when there's unread activity */
+  content:"";position:absolute;inset:-3px;border-radius:50%;
+  background:radial-gradient(circle, rgba(127,210,167,.34), rgba(127,210,167,0) 70%);
   animation:bellHalo 1.8s ease-out infinite;pointer-events:none
 }
 @keyframes bellRing{
@@ -6069,7 +6074,6 @@ window.ConnErr = (function(){
       <button class="social-nav-btn" onclick="Social.switchTab('explore')" data-tab="explore">Explore</button>
       <button class="social-nav-btn" onclick="Social.switchTab('music')" data-tab="music">Music</button>
       <button class="social-nav-btn" onclick="Social.switchTab('profile')" data-tab="profile">My Profile</button>
-      <span class="social-nav-sep" aria-hidden="true"></span>
       <button class="social-nav-bell social-nav-activity" onclick="Social.switchTab('activity')" data-tab="activity" title="Activity" aria-label="Activity">
         <span class="bell-glyph" aria-hidden="true">🔔</span>
         <span id="social-activity-nav-badge" class="social-nav-badge" style="display:none"></span>
@@ -6299,7 +6303,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/gifs.js?v=200"></script>
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=192"></script>
-<script src="/static/js/social.js?v=212"></script>
+<script src="/static/js/social.js?v=213"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>
