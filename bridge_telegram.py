@@ -143,24 +143,49 @@ async def send_to_telegram(chat_id: int, text: str, media_url: str = None,
         mime, data = _decode_data_url(media_url)
         if mime and data:
             try:
+                # MIME→extension map for the cases where the subtype
+                # alone is wrong (e.g. audio/mpeg → .mp3, not .mpeg).
+                # Telegram's clients pick a player based on extension,
+                # so audio/voice clips with the wrong extension may not
+                # get an inline waveform.
+                _ext_map = {
+                    "audio/mpeg": "mp3",
+                    "audio/mp4": "m4a",
+                    "audio/x-wav": "wav",
+                    "audio/wave": "wav",
+                    "audio/webm": "weba",
+                    "video/quicktime": "mov",
+                    "video/x-matroska": "mkv",
+                    "image/jpeg": "jpg",
+                    "image/svg+xml": "svg",
+                }
+                def _ext(m: str, fallback: str) -> str:
+                    if m in _ext_map:
+                        return _ext_map[m]
+                    sub = m.split("/", 1)[-1].split("+")[0] if "/" in m else ""
+                    return sub or fallback
+
                 if mime == "image/gif":
                     resp = await _tg_upload("sendAnimation", chat_id, "animation",
                                             "clip.gif", mime, data, text or "", extra,
                                             has_spoiler=has_spoiler)
                 elif mime.startswith("image/"):
-                    ext = mime.split("/")[-1].split("+")[0] or "jpg"
                     resp = await _tg_upload("sendPhoto", chat_id, "photo",
-                                            f"photo.{ext}", mime, data, text or "", extra,
+                                            f"photo.{_ext(mime, 'jpg')}", mime, data, text or "", extra,
                                             has_spoiler=has_spoiler)
                 elif mime.startswith("video/"):
-                    ext = mime.split("/")[-1] or "mp4"
                     resp = await _tg_upload("sendVideo", chat_id, "video",
-                                            f"video.{ext}", mime, data, text or "", extra,
+                                            f"video.{_ext(mime, 'mp4')}", mime, data, text or "", extra,
                                             has_spoiler=has_spoiler)
                 elif mime.startswith("audio/"):
-                    ext = mime.split("/")[-1] or "ogg"
-                    resp = await _tg_upload("sendAudio", chat_id, "audio",
-                                            f"audio.{ext}", mime, data, text or "", extra)
+                    # Use sendVoice for OGG/Opus so Telegram renders the
+                    # tap-to-play waveform UI like a real voice note.
+                    if mime in ("audio/ogg", "audio/opus"):
+                        resp = await _tg_upload("sendVoice", chat_id, "voice",
+                                                "voice.ogg", "audio/ogg", data, text or "", extra)
+                    else:
+                        resp = await _tg_upload("sendAudio", chat_id, "audio",
+                                                f"audio.{_ext(mime, 'mp3')}", mime, data, text or "", extra)
                 else:
                     resp = await _tg_upload("sendDocument", chat_id, "document",
                                             "file.bin", mime, data, text or "", extra)
@@ -518,14 +543,33 @@ async def process_update(update: dict):
         vid = msg["video"]
         media_url = await _fetch_tg_file_as_data_url(vid.get("file_id"),
                                                     mime_hint=vid.get("mime_type") or "video/mp4")
+    elif msg.get("video_note"):
+        # Round video clips ("video messages"). Bot API exposes them
+        # as a separate type — treat as a regular video for FrogTalk.
+        vn = msg["video_note"]
+        media_url = await _fetch_tg_file_as_data_url(vn.get("file_id"),
+                                                    mime_hint="video/mp4")
+        if media_url and not content:
+            content = "🎬 video message"
     elif msg.get("voice"):
         v = msg["voice"]
         media_url = await _fetch_tg_file_as_data_url(v.get("file_id"),
                                                     mime_hint=v.get("mime_type") or "audio/ogg")
+        if media_url and not content:
+            content = "🎤 voice message"
     elif msg.get("audio"):
         a = msg["audio"]
         media_url = await _fetch_tg_file_as_data_url(a.get("file_id"),
                                                     mime_hint=a.get("mime_type") or "audio/mpeg")
+        if media_url and not content:
+            title = (a.get("title") or "").strip()
+            performer = (a.get("performer") or "").strip()
+            if title and performer:
+                content = f"🎵 {performer} – {title}"
+            elif title:
+                content = f"🎵 {title}"
+            else:
+                content = "🎵 audio"
     elif msg.get("sticker"):
         s = msg["sticker"]
         # Animated (.tgs) and video (.webm) stickers don't render nicely in
@@ -554,7 +598,7 @@ async def process_update(update: dict):
 
     if content or msg.get("photo") or msg.get("video") or msg.get("document") \
             or msg.get("animation") or msg.get("sticker") or msg.get("voice") \
-            or msg.get("audio") or media_url:
+            or msg.get("audio") or msg.get("video_note") or media_url:
         avatar = await _fetch_user_avatar(sender_id)
         await send_to_frogtalk(
             bridge["room"], bridge["token"], content, sender_name,

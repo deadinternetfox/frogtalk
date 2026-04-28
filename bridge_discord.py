@@ -37,6 +37,32 @@ _message_content_available = True  # False when bot lacks Message Content privil
 _webhook_cache: Dict[int, object] = {}
 _WEBHOOK_NAME = "FrogTalk Bridge"
 
+# MIME → file-extension map. Discord (and most browsers) infer the
+# media player from the extension, not the content-type header, so a
+# voice clip uploaded as `audio.mpeg` won't get an inline player —
+# it has to be `audio.mp3`. This map covers the cases where the MIME
+# subtype differs from the conventional extension.
+_MIME_EXT = {
+    "image/jpeg": "jpg",
+    "image/svg+xml": "svg",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "audio/x-wav": "wav",
+    "audio/wave": "wav",
+    "audio/webm": "weba",
+    "video/quicktime": "mov",
+    "video/x-matroska": "mkv",
+}
+
+
+def _ext_for_mime(mime: str, fallback: str) -> str:
+    """Return a sensible file extension for a given MIME type."""
+    mime = (mime or "").lower().strip()
+    if mime in _MIME_EXT:
+        return _MIME_EXT[mime]
+    sub = mime.split("/", 1)[-1].split("+")[0] if "/" in mime else ""
+    return sub or fallback
+
 
 def get_channel_access_snapshot(channel_id: int) -> Optional[dict]:
     """Return live access details for a Discord text channel if cached by the bot."""
@@ -229,14 +255,11 @@ async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = No
                 # Discord free-tier upload limit is 25 MB — be conservative.
                 if len(data) <= 24 * 1024 * 1024:
                     if mime.startswith("image/"):
-                        ext = mime.split("/")[-1].split("+")[0] or "png"
-                        fname = f"image.{ext}"
+                        fname = f"image.{_ext_for_mime(mime, 'png')}"
                     elif mime.startswith("video/"):
-                        ext = mime.split("/")[-1] or "mp4"
-                        fname = f"video.{ext}"
+                        fname = f"video.{_ext_for_mime(mime, 'mp4')}"
                     elif mime.startswith("audio/"):
-                        ext = mime.split("/")[-1] or "ogg"
-                        fname = f"audio.{ext}"
+                        fname = f"audio.{_ext_for_mime(mime, 'ogg')}"
                     else:
                         fname = "file.bin"
                     # `spoiler=True` asks discord.py to rename the upload
@@ -615,6 +638,14 @@ def _run_bot_in_thread(token: str):
             media_url = None
             media_exts = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4",
                           ".webm", ".mov", ".mp3", ".ogg", ".wav", ".apng")
+            # Discord voice messages set MessageFlags.IS_VOICE_MESSAGE
+            # (bit 13). Detect so we can label them in the bridged message.
+            is_voice_message = False
+            try:
+                flags_val = int(getattr(getattr(message, "flags", None), "value", 0) or 0)
+                is_voice_message = bool(flags_val & (1 << 13))
+            except Exception:
+                is_voice_message = False
             if message.attachments:
                 att = message.attachments[0]
                 ctype = (att.content_type or "").lower()
@@ -628,6 +659,14 @@ def _run_bot_in_thread(token: str):
                 for extra in message.attachments[1:]:
                     if extra.url:
                         content += f"\n📎 {extra.url}"
+                # Label voice / video clips when the user didn't add text
+                # so the receiving side has context (otherwise FrogTalk
+                # just shows a bare audio/video player with no caption).
+                if not content.strip() and media_url:
+                    if is_voice_message or ctype.startswith("audio/"):
+                        content = "🎤 voice message" if is_voice_message else "🎵 audio"
+                    elif ctype.startswith("video/"):
+                        content = "🎬 video"
 
             # ── Discord embeds (Tenor / Giphy / image links auto-embedded) ──
             # When a user posts a Tenor / Giphy GIF link, Discord turns it
