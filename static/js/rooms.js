@@ -366,36 +366,40 @@ const Rooms = (() => {
       if (e.target.closest && e.target.closest('.ch-icon-btn')) return;
 
       const isTouch = e.pointerType === 'touch';
+      const fromHandle = !!(e.target.closest && e.target.closest('.ch-drag-handle'));
+      // Touch must start from the dedicated drag handle so long-press on the
+      // rest of the row keeps opening the channel options menu cleanly.
+      if (isTouch && !fromHandle) return;
+
+      // Stop the press from bubbling so bindLongPress doesn't arm a context
+      // menu while the user is grabbing the handle.
+      if (fromHandle) {
+        e.stopPropagation();
+        try { e.preventDefault(); } catch {}
+      }
+
       const startX = e.clientX, startY = e.clientY;
       const container = el.parentElement;
       let dragging = false;
-      let holdTimer = null;
 
       const arm = () => {
         if (dragging) return;
         dragging = true;
         el.classList.add('dragging');
-        // Cancel the long-press context-menu timer that bindLongPress armed.
-        try { el.dispatchEvent(new Event('touchcancel')); } catch {}
-        try { navigator.vibrate && navigator.vibrate(15); } catch {}
-        try { el.setPointerCapture && el.setPointerCapture(e.pointerId); } catch {}
+        try { navigator.vibrate && navigator.vibrate(12); } catch {}
+        // Note: no setPointerCapture — the row gets pointer-events:none while
+        // dragging so elementFromPoint can see neighbours under the pointer.
       };
 
-      if (isTouch) holdTimer = setTimeout(arm, 380);
+      // Touch from the handle: arm immediately. Mouse: wait for ~4px move so
+      // a plain click on the handle doesn't accidentally enter drag mode.
+      if (isTouch && fromHandle) arm();
 
       const onMove = (ev) => {
         const dx = ev.clientX - startX;
         const dy = ev.clientY - startY;
         const dist = Math.hypot(dx, dy);
         if (!dragging) {
-          if (isTouch) {
-            // Movement before hold timer → user is scrolling, bail.
-            if (dist > 10) {
-              if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-              cleanup();
-            }
-            return;
-          }
           if (dist > 4) arm();
           if (!dragging) return;
         }
@@ -415,7 +419,6 @@ const Rooms = (() => {
       };
 
       const onUp = () => {
-        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
         if (dragging) {
           el.classList.remove('dragging');
           el._dragSuppressClick = true;
@@ -482,6 +485,7 @@ const Rooms = (() => {
         ${isInviteOnly ? '<span class="ch-badge" title="Invite only">🔒</span>' : ''}
         ${(typeof Mute !== 'undefined' && Mute.isRoomMuted(room.name)) ? '<span class="ch-muted-ind" title="Muted">🔕</span>' : ''}
         ${isOwner ? '<span class="ch-owner-badge" title="You own this channel">Owner</span>' : ''}
+        ${room.joined ? '<span class="ch-drag-handle" title="Drag to reorder" aria-label="Drag to reorder"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.7"/><circle cx="15" cy="6" r="1.7"/><circle cx="9" cy="12" r="1.7"/><circle cx="15" cy="12" r="1.7"/><circle cx="9" cy="18" r="1.7"/><circle cx="15" cy="18" r="1.7"/></svg></span>' : ''}
       `;
       el.onclick = () => {
         if (!room.joined) { joinRoom(room.name); return; }

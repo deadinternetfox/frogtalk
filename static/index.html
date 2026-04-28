@@ -722,16 +722,64 @@ body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[d
   box-shadow:0 4px 14px rgba(0,0,0,.26),inset 0 0 0 1px rgba(111,199,150,.22) !important;
 }
 .channel-item.dragging{
-  opacity:.85 !important;
+  opacity:.92 !important;
   background:linear-gradient(180deg,#27513f,#1d3d30) !important;
   border-color:#7fd2a7 !important;
   color:#eafaf1 !important;
-  box-shadow:0 8px 22px rgba(0,0,0,.45), inset 0 0 0 1px rgba(127,210,167,.45) !important;
-  transform:scale(1.02);
+  box-shadow:0 10px 24px rgba(0,0,0,.55), inset 0 0 0 1px rgba(127,210,167,.55) !important;
+  transform:none !important;
   cursor:grabbing !important;
   z-index:5;
+  transition:none !important;
+  pointer-events:none; /* let elementFromPoint hit the row beneath */
+}
+.channel-item.dragging .ch-name{
+  white-space:nowrap !important;
+  overflow:hidden !important;
+  text-overflow:ellipsis !important;
+}
+/* While a drag is in progress, freeze hover-lift on neighbour rows so the
+   list doesn't jiggle as items shift around the moving row. */
+#public-channels:has(.channel-item.dragging) .channel-item:not(.dragging){
+  transform:none !important;
+  transition:transform .12s ease, background .15s, border-color .15s !important;
 }
 #public-channels .channel-item:not(.channel-unjoined){ touch-action: pan-y; }
+/* Drag handle — always rendered but only fades in on hover for desktop, and
+   stays softly visible on touch devices so the affordance is discoverable
+   without looking cluttered. */
+.ch-drag-handle{
+  margin-left:auto;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;flex:0 0 22px;
+  border-radius:6px;
+  color:#5a8472;
+  opacity:0;
+  cursor:grab;
+  transition:opacity .12s ease, background .12s ease, color .12s ease;
+  touch-action:none;            /* let pointermove preventDefault scroll */
+  -webkit-user-select:none; user-select:none;
+}
+.ch-drag-handle:hover,
+.ch-drag-handle:focus-visible{
+  background:rgba(127,210,167,.12);
+  color:#9fdcb8;
+  opacity:1;
+}
+.ch-drag-handle:active{ cursor:grabbing; background:rgba(127,210,167,.22); }
+.channel-item:hover .ch-drag-handle,
+.channel-item.active .ch-drag-handle{ opacity:.85; }
+.channel-item.dragging .ch-drag-handle{ opacity:1; color:#cdeedd; }
+/* Touch / coarse-pointer devices: handle is always visible & a touch larger. */
+@media (hover:none), (pointer:coarse){
+  .ch-drag-handle{
+    opacity:.7;
+    width:28px;height:28px;flex:0 0 28px;
+    color:#7fbfa1;
+    background:rgba(127,210,167,.06);
+  }
+  .channel-item .ch-drag-handle{ opacity:.7; }
+}
 .channel-item .ch-icon,
 #chat-header .room-title-icon{
   background:#22322d !important;
