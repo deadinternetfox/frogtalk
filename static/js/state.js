@@ -53,8 +53,16 @@ function wsSend (obj) {
 }
 
 // toast() → UI.showToast() with optional stack-based toasts div
-function toast (text, type = 'info', ms = 3000) {
-  // Try new stacked toasts first, fall back to legacy single toast
+// Signature: toast(text, type='info', ms=3000)
+//   - or:    toast(text, type, ms, onClickFn)
+//   - or:    toast(text, { type, ms, onClick })
+function toast (text, type = 'info', ms = 3000, onClick) {
+  // Allow options-object form: toast(text, { type, ms, onClick })
+  if (type && typeof type === 'object') {
+    onClick = type.onClick;
+    ms = type.ms || 3000;
+    type = type.type || 'info';
+  }
   const stack = document.getElementById('toasts');
   if (stack) {
     const el = document.createElement('div');
@@ -64,11 +72,14 @@ function toast (text, type = 'info', ms = 3000) {
       box-shadow:0 4px 20px rgba(0,0,0,.5);pointer-events:auto;
       max-width:320px;cursor:pointer;animation:fadeInRight .2s ease`;
     el.textContent = text;
-    el.onclick = () => el.remove();
+    el.onclick = () => {
+      try { if (typeof onClick === 'function') onClick(); } catch {}
+      el.remove();
+    };
     stack.appendChild(el);
     setTimeout(() => el.remove(), ms);
   } else if (typeof UI !== 'undefined') {
-    UI.showToast(text, type);
+    UI.showToast(text, type, ms, onClick);
   }
 }
 

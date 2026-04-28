@@ -236,7 +236,18 @@ function handleFriendNotify (data) {
     const msg = data.action === 'request'
       ? `${data.from} sent you a friend request`
       : `${data.from} accepted your friend request`;
-    toast('👥 ' + msg, 'info', 5000);
+    // Click the toast → open the Friends panel on the right tab so the user
+    // can immediately accept/decline (request) or view their friend (accept).
+    const onClick = () => {
+      try {
+        if (typeof openFriendsPanel === 'function') openFriendsPanel();
+        if (typeof switchFfpTab === 'function' && data.action === 'request') {
+          // Defer until panel is in the DOM
+          setTimeout(() => { try { switchFfpTab('pending'); } catch {} }, 80);
+        }
+      } catch {}
+    };
+    toast('👥 ' + msg, 'info', 6000, onClick);
     loadFriends(); // refresh badge
     updateFrogBadge();
     // Show system notification (browser / Electron / Android)

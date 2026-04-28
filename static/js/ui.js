@@ -270,17 +270,13 @@ const UI = (() => {
   }
 
   function showPresence(event, nickname) {
-    // Incoming call flow should not be interrupted by generic presence noise.
-    try {
-      if (event === 'leave' && typeof window.isIncomingCallActive === 'function' && window.isIncomingCallActive()) {
-        return;
-      }
-    } catch {}
-    if (event === 'join') showToast(`${nickname} joined`, 'info');
-    else if (event === 'leave') showToast(`${nickname} left`, 'info');
+    // Generic presence noise (X joined / X left) is intentionally silenced —
+    // it's distracting and was largely test-grade. Friends/online list still
+    // updates from the WS handler, so visibility is preserved where it matters.
+    return;
   }
 
-  function showToast(text, type = 'info', duration = 3000) {
+  function showToast(text, type = 'info', duration = 3000, onClick = null) {
     // Toast stack: multiple toasts stack upward at bottom-center.
     let stack = document.getElementById('toast-stack');
     if (!stack) {
@@ -308,13 +304,20 @@ const UI = (() => {
       box-shadow:0 8px 28px rgba(0,0,0,.5),0 0 0 1px rgba(126,199,166,.08);
       backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
       transition:transform .22s cubic-bezier(.22,1.02,.36,1),opacity .22s ease;
-      transform:translateY(16px) scale(.96);opacity:0
+      transform:translateY(16px) scale(.96);opacity:0;
+      pointer-events:auto;${typeof onClick === 'function' ? 'cursor:pointer;' : ''}
     `;
     toast.innerHTML = `
       <span style="color:${color};font-size:16px;flex-shrink:0;font-weight:700;width:18px;text-align:center">${icons[type] || icons.info}</span>
       <span style="flex:1;word-break:break-word"></span>
     `;
     toast.lastElementChild.textContent = String(text ?? '');
+    if (typeof onClick === 'function') {
+      toast.addEventListener('click', () => {
+        try { onClick(); } catch {}
+        try { dismiss(); } catch {}
+      });
+    }
     stack.appendChild(toast);
     // Trigger entrance on next frame
     requestAnimationFrame(() => {

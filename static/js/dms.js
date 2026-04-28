@@ -1440,7 +1440,20 @@ function handleWSDMMessage (data) {
             data.sender_nick || ch2?.nickname || '',
           );
           const preview = _dmPreviewText(toastContent, data.has_media, data.media_type);
-          toast(`💬 ${data.sender_nick}: ${preview ? preview.substring(0,60) : 'Media'}`, 'info', 4000);
+          // Click the toast → jump straight into that DM thread.
+          const onClick = () => {
+            try {
+              const ch3 = _dmChannels.find(c => c.id === data.channel_id);
+              if (ch3) openDMChannel(ch3.id, ch3.nickname, ch3.avatar);
+              else if (typeof openDMWithNick === 'function' && data.sender_nick) {
+                openDMWithNick(data.sender_nick);
+              }
+            } catch {}
+          };
+          toast(
+            `💬 ${data.sender_nick}: ${preview ? preview.substring(0,60) : 'Media'}`,
+            'info', 4500, onClick
+          );
         } catch {}
       })();
     }

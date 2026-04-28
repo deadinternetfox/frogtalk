@@ -1168,7 +1168,7 @@ async function handleVoiceJoined(data) {
  * They will send us an offer, so we just wait.
  */
 function handleVoiceUserJoined(data) {
-  toast(`${data.nickname} joined voice`, 'success');
+  // No toast — voice presence bar already reflects the new participant.
   // Server-broadcast includes the room implicitly (we're in it). Use whichever
   // room the broadcast matches: for the voice-presence bar we only need the
   // channel the user is currently VIEWING.
@@ -1184,7 +1184,7 @@ function handleVoiceUserJoined(data) {
  * Handle when another user leaves the voice channel.
  */
 function handleVoiceUserLeft(data) {
-  toast(`${data.nickname} left voice`);
+  // No toast — voice bar updates silently.
 
   const peer = _voicePeers.get(data.user_id);
   if (peer) {
