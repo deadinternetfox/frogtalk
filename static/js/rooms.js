@@ -1235,10 +1235,10 @@ const Rooms = (() => {
       const url = `https://frogtalk.xyz/invite/${inv.code}`;
       const uses = inv.max_uses > 0 ? `${inv.use_count || 0}/${inv.max_uses} uses` : `${inv.use_count || 0} uses`;
       const expires = inv.expires_at ? `Expires ${new Date(inv.expires_at).toLocaleDateString()}` : 'Never expires';
-      return `<div style="display:flex;align-items:center;gap:10px;padding:8px;background:#1a1a1a;border-radius:8px;margin-bottom:6px">
+      return `<div class="modal-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px">
         <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;color:#4caf50;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(url)}</div>
-          <div style="font-size:11px;color:#666">${uses} · ${expires} · by ${UI.escHtml(inv.created_by_name || '?')}</div>
+          <div style="font-size:13px;font-weight:700;color:#7fd2a7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(url)}</div>
+          <div style="font-size:11px;color:#7a9c8d;margin-top:2px">${uses} · ${expires} · by ${UI.escHtml(inv.created_by_name || '?')}</div>
         </div>
         <button class="icon-btn" title="Copy" onclick="UI.copy('${url}').then(ok=>UI.showToast(ok?'Copied!':'Could not copy',ok?'success':'error'))" style="font-size:16px">📋</button>
         <button class="icon-btn" title="Revoke" onclick="Rooms.revokeInvite('${inv.code}')" style="font-size:16px;color:#f85149">🗑</button>
@@ -1553,14 +1553,14 @@ function renderBotDirectory(bots) {
   if (!list) return;
   if (!bots.length) { list.innerHTML = '<div style="color:#666;text-align:center;padding:20px">No bots match</div>'; return; }
   list.innerHTML = bots.map(b => `
-    <div style="display:flex;align-items:center;gap:12px;padding:10px;background:#0d0d0d;border:1px solid #1a1a1a;border-radius:8px">
+    <div class="modal-card" style="display:flex;align-items:center;gap:12px;padding:10px 12px;margin-bottom:8px">
       ${UI.avatarEl(b.avatar, b.name, 40)}
       <div style="flex:1;min-width:0">
-        <div style="color:#e0e0e0;font-weight:600;font-size:14px">🤖 ${UI.escHtml(b.name)}</div>
-        <div style="color:#888;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(b.description || 'No description')}</div>
-        <div style="color:#555;font-size:11px">by ${UI.escHtml(b.owner_name || 'unknown')}</div>
+        <div style="color:#dff5e8;font-weight:700;font-size:14px">🤖 ${UI.escHtml(b.name)}</div>
+        <div style="color:#85a89a;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(b.description || 'No description')}</div>
+        <div style="color:#6a9a86;font-size:11px">by ${UI.escHtml(b.owner_name || 'unknown')}</div>
       </div>
-      <button class="modal-btn primary" style="padding:6px 14px" onclick="_addBotToCurrentChannel(${b.id});document.getElementById('bot-directory-overlay').classList.add('hidden')">+ Add</button>
+      <button class="modal-btn primary" style="padding:6px 14px;flex:0 0 auto" onclick="_addBotToCurrentChannel(${b.id});document.getElementById('bot-directory-overlay').classList.add('hidden')">+ Add</button>
     </div>`).join('');
 }
 
