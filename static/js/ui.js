@@ -2942,7 +2942,89 @@ async function openDM() {
 let _userInfoTarget = null;
 let _userInfoTargetId = null;
 
-function showUserInfo(nickname, userId) {
+// Dedicated profile popup for bridged users (Telegram / Discord mirrors).
+// These users have no FrogTalk account, so DM / call / friend / follow are
+// not possible. We render a small explanatory card themed to the source
+// platform instead of the regular blank-loading profile modal.
+function showBridgedUserInfo(nickname, platform) {
+  const plat = String(platform || '').toLowerCase();
+  const meta = ({
+    telegram: { label: 'Telegram', color: '#4fc3e8', icon: '✈️' },
+    discord:  { label: 'Discord',  color: '#8aa5f5', icon: '🎮' },
+  })[plat] || { label: 'Bridge', color: '#888', icon: '🌉' };
+  const safeNick = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(nickname) : String(nickname).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+  const safePlat = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(meta.label) : meta.label;
+  const avatar = (typeof UI !== 'undefined' && UI.avatarEl) ? UI.avatarEl(null, nickname, 90) : '🐸';
+
+  const host = document.getElementById('modal-bridge-user-info') || (() => {
+    const el = document.createElement('div');
+    el.id = 'modal-bridge-user-info';
+    el.className = 'modal-overlay hidden';
+    document.body.appendChild(el);
+    return el;
+  })();
+
+  host.innerHTML = `
+    <div class="modal user-profile-modal bridge-profile-card" data-platform="${plat}" style="max-width:440px;padding:0;overflow:hidden;border:1px solid ${meta.color}33">
+      <div class="profile-header" style="position:relative;background:linear-gradient(135deg, ${meta.color}26 0%, #0d1f0d 100%);padding:20px;min-height:130px;border-bottom:1px solid ${meta.color}33">
+        <button class="profile-close-btn" onclick="closeModal('modal-bridge-user-info')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5" title="Close">✕</button>
+        <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:16px;padding-top:36px">
+          <div class="profile-avatar-large" style="width:90px;height:90px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4);position:relative">
+            ${avatar}
+            <div class="bp-platform-pip" title="Bridged from ${safePlat}" style="position:absolute;right:-2px;bottom:-2px;width:30px;height:30px;border-radius:50%;background:${meta.color};color:#0a0a0a;display:flex;align-items:center;justify-content:center;font-size:15px;border:3px solid #111">${meta.icon}</div>
+          </div>
+          <div style="flex:1;min-width:0;padding-bottom:4px">
+            <div class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3)">${safeNick}</div>
+            <div style="margin-top:4px"><span class="bridge-origin-badge" data-platform="${plat}" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:10px;background:${meta.color}26;color:${meta.color};border:1px solid ${meta.color}66">${meta.icon} via ${safePlat}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-body" style="padding:18px;background:#111">
+        <div class="profile-section" style="background:#1a1a1a;border-radius:12px;padding:14px;margin-bottom:12px;border-left:3px solid ${meta.color}">
+          <div class="profile-section-title" style="font-size:11px;color:${meta.color};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:700">Bridged Connection</div>
+          <div style="font-size:14px;color:#e0e0e0;line-height:1.55">
+            <strong style="color:#fff">@${safeNick}</strong> is chatting from <strong style="color:${meta.color}">${safePlat}</strong> through a bridged connection &mdash; they're not a FrogTalk account.
+            <div style="margin-top:8px;color:#aaa;font-size:13px">Their messages are mirrored here in real time, but features that need a FrogTalk account aren't available.</div>
+          </div>
+        </div>
+
+        <div class="profile-section" style="background:#1a1a1a;border-radius:12px;padding:12px;margin-bottom:12px">
+          <div class="profile-section-title" style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;font-weight:600">Not Available</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <button class="modal-btn secondary" disabled title="Not available — bridged user" style="padding:10px 6px;font-size:12px;opacity:.45;cursor:not-allowed">💬 Message</button>
+            <button class="modal-btn secondary" disabled title="Not available — bridged user" style="padding:10px 6px;font-size:12px;opacity:.45;cursor:not-allowed">📞 Call</button>
+            <button class="modal-btn secondary" disabled title="Not available — bridged user" style="padding:10px 6px;font-size:12px;opacity:.45;cursor:not-allowed">+ Friend</button>
+          </div>
+          <div style="margin-top:10px;font-size:11px;color:#666;line-height:1.5;text-align:center">
+            Reply to <strong style="color:#aaa">@${safeNick}</strong> in this channel and they'll see it on ${safePlat}.
+          </div>
+        </div>
+
+        <div style="font-size:11px;color:#555;text-align:center;line-height:1.5;padding:4px 8px">
+          Bridged users are identified by their ${safePlat} display name. Anyone on ${safePlat} can use that name &mdash; treat it like a username, not a verified identity.
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (typeof openModal === 'function') {
+    openModal('modal-bridge-user-info');
+  } else {
+    host.classList.remove('hidden');
+  }
+}
+
+function showUserInfo(nickname, userId, bridgePlatform) {
+  // Bridge users (Telegram / Discord mirrors) have no FrogTalk account.
+  // Showing the regular profile modal results in a permanently-blank
+  // "Loading…" state and exposes irrelevant DM / call / friend buttons.
+  // Route them to a dedicated bridged-user popup that explains the
+  // origin and offers no actions that can't possibly work.
+  if (bridgePlatform && typeof showBridgedUserInfo === 'function') {
+    showBridgedUserInfo(nickname, bridgePlatform);
+    return;
+  }
   _userInfoTarget = nickname;
   _userInfoTargetId = userId;
   clearProfileCustomCss();
