@@ -1,14 +1,20 @@
 """Profile wall/posts routes - Facebook-style social features."""
+import logging
+import re
 import time
 import uuid
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
 from deps import get_current_user
 
+_log = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/wall", tags=["wall"])
 
 MAX_POST_CONTENT = 5000
@@ -69,9 +75,10 @@ async def get_user_wall(
     
     posts = db.get_wall_posts(user["id"], current_user["id"], limit, offset)
     
-    # Get reactions for each post
+    # Bulk-fetch reactions to avoid N+1
+    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for post in posts:
-        post["reactions"] = db.get_post_reactions(post["id"])
+        post["reactions"] = _rmap.get(post["id"], [])
     
     return {
         "posts": posts,
@@ -86,7 +93,8 @@ async def get_user_wall(
 
 
 @router.post("/posts")
-async def create_wall_post(body: CreatePostRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit("60/hour")
+async def create_wall_post(request: Request, body: CreatePostRequest, current_user: dict = Depends(get_current_user)):
     """Create a new wall post."""
     if not body.content.strip() and not body.media_data:
         return JSONResponse(status_code=400, content={"error": "Post content or media required"})
@@ -168,6 +176,78 @@ async def get_single_wall_post(post_id: int, current_user: dict = Depends(get_cu
     return post
 
 
+@router.get("/posts/{post_id}/media")
+async def get_wall_post_media(post_id: int, current_user: dict = Depends(get_current_user)):
+    """Lazy-load full media for a single wall post (privacy enforced)."""
+    post = db.get_wall_post(post_id)
+    if not post or not post.get("media_data"):
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+    privacy = post.get("privacy") or "public"
+    author_id = post.get("user_id")
+    viewer_id = current_user["id"]
+    if author_id and db.is_blocked_either_way(viewer_id, author_id):
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+    allowed = (
+        privacy == "public"
+        or viewer_id == author_id
+        or (privacy == "followers" and db.is_following(viewer_id, author_id))
+        or (privacy == "friends" and db.are_friends(viewer_id, author_id))
+    )
+    if not allowed:
+        return JSONResponse(status_code=403, content={"error": "Not allowed"})
+    headers = {"Cache-Control": "private, max-age=86400"}
+    return JSONResponse(
+        content={"media_data": post["media_data"], "media_type": post.get("media_type")},
+        headers=headers,
+    )
+
+
+@router.get("/posts/{post_id}/media-inline")
+async def get_wall_post_media_inline(post_id: int, current_user: dict = Depends(get_current_user)):
+    """Stream raw media bytes (decoded data URI) so <img>/<video> can use a
+    URL src instead of a multi-MB JSON payload in feeds."""
+    post = db.get_wall_post(post_id)
+    if not post or not post.get("media_data"):
+        return Response(status_code=404)
+    privacy = post.get("privacy") or "public"
+    author_id = post.get("user_id")
+    viewer_id = current_user["id"]
+    if author_id and db.is_blocked_either_way(viewer_id, author_id):
+        return Response(status_code=404)
+    allowed = (
+        privacy == "public"
+        or viewer_id == author_id
+        or (privacy == "followers" and db.is_following(viewer_id, author_id))
+        or (privacy == "friends" and db.are_friends(viewer_id, author_id))
+    )
+    if not allowed:
+        return Response(status_code=403)
+    md = post["media_data"]
+    return _decode_data_uri_response(md, post.get("media_type"))
+
+
+def _decode_data_uri_response(data_uri: str, fallback_mime: Optional[str] = None) -> Response:
+    """Convert `data:<mime>;base64,<b64>` to a Response of raw bytes.
+    For non-data values, redirects so the browser fetches the URL directly."""
+    import base64 as _b64
+    s = data_uri or ""
+    if not s.startswith("data:"):
+        # Music URL or other plain URL — redirect
+        return Response(status_code=302, headers={"Location": s})
+    try:
+        header, _, payload = s[5:].partition(",")
+        mime, _, params = header.partition(";")
+        is_b64 = "base64" in params.lower()
+        raw = _b64.b64decode(payload) if is_b64 else payload.encode()
+    except Exception:
+        return Response(status_code=415)
+    headers = {
+        "Cache-Control": "private, max-age=86400, immutable",
+        "Content-Length": str(len(raw)),
+    }
+    return Response(content=raw, media_type=(mime or fallback_mime or "application/octet-stream"), headers=headers)
+
+
 @router.put("/posts/{post_id}")
 async def update_wall_post(post_id: int, body: UpdatePostRequest, current_user: dict = Depends(get_current_user)):
     """Edit a wall post."""
@@ -204,7 +284,8 @@ async def delete_wall_post(post_id: int, current_user: dict = Depends(get_curren
 # ---------------------------------------------------------------------------
 
 @router.post("/posts/{post_id}/reactions")
-async def add_post_reaction(post_id: int, body: AddReactionRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit("300/hour")
+async def add_post_reaction(request: Request, post_id: int, body: AddReactionRequest, current_user: dict = Depends(get_current_user)):
     """Add/toggle a reaction to a post."""
     if not body.emoji or len(body.emoji) > 8:
         return JSONResponse(status_code=400, content={"error": "Invalid emoji"})
@@ -245,7 +326,8 @@ async def get_post_comments(post_id: int, limit: int = Query(50, le=100),
 
 
 @router.post("/posts/{post_id}/comments")
-async def add_post_comment(post_id: int, body: AddCommentRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit("120/hour")
+async def add_post_comment(request: Request, post_id: int, body: AddCommentRequest, current_user: dict = Depends(get_current_user)):
     """Add a comment to a post."""
     if not body.content or len(body.content.strip()) == 0:
         return JSONResponse(status_code=400, content={"error": "Comment cannot be empty"})
@@ -313,12 +395,28 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
             params.append(body.mood)
         
         if body.custom_css is not None:
-            # Limit CSS size and do basic sanitization
+            # Limit CSS size and do strict sanitization
             css = body.custom_css[:10240]  # Max 10KB
-            # Block potentially dangerous CSS
-            dangerous = ["javascript:", "expression(", "url(", "@import"]
+            # Decode CSS hex escapes (\26, \000026 etc.) and HTML entities
+            # before substring matching so attackers can't bypass with \75rl(...
+            normalized = css.lower()
+            # CSS hex escape: \ followed by 1-6 hex digits, optional whitespace
+            normalized = re.sub(r"\\([0-9a-f]{1,6})\s?", lambda m: chr(int(m.group(1), 16)) if int(m.group(1), 16) < 0x110000 else "", normalized)
+            # CSS literal escape: \X => X
+            normalized = re.sub(r"\\(.)", r"\1", normalized)
+            # HTML named/numeric entities
+            try:
+                import html as _html
+                normalized = _html.unescape(normalized)
+            except Exception:
+                pass
+            # Strip CSS comments
+            normalized = re.sub(r"/\*.*?\*/", "", normalized, flags=re.DOTALL)
+            # Collapse whitespace inside parens for "url ( javascript:" tricks
+            normalized = re.sub(r"\s+", "", normalized)
+            dangerous = ["javascript:", "expression(", "url(", "@import", "behavior:", "-moz-binding"]
             for d in dangerous:
-                if d in css.lower():
+                if d in normalized:
                     return JSONResponse(status_code=400, content={"error": f"CSS contains forbidden: {d}"})
             updates.append("custom_css=?")
             params.append(css)

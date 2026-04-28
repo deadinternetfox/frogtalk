@@ -1,15 +1,20 @@
 """Friends, tags, user search routes."""
+import logging
 import time
 import uuid
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
 from deps import get_current_user
 from ws_manager import manager
 
+_log = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/friends", tags=["friends"])
 users_router = APIRouter(prefix="/users", tags=["users_ext"])
 
@@ -140,7 +145,8 @@ async def set_presence(body: PresenceBody, current_user: dict = Depends(get_curr
 # ── Friend requests ───────────────────────────────────────────────────────────
 
 @router.post("/request/{nickname}")
-async def send_request(nickname: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit("60/hour")
+async def send_request(request: Request, nickname: str, current_user: dict = Depends(get_current_user)):
     profile = db.get_user_profile(nickname)
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
@@ -162,7 +168,8 @@ async def send_request(nickname: str, current_user: dict = Depends(get_current_u
 
 
 @router.post("/accept/{nickname}")
-async def accept_request(nickname: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit("120/hour")
+async def accept_request(request: Request, nickname: str, current_user: dict = Depends(get_current_user)):
     profile = db.get_user_profile(nickname)
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})

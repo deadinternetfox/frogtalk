@@ -1,16 +1,21 @@
 """Direct message routes."""
 from datetime import datetime
+import logging
 import time
 import uuid
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
 from deps import get_current_user
 from ws_manager import manager
 
+_log = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/dms", tags=["dms"])
 
 MAX_MEDIA_BYTES = 20 * 1024 * 1024
@@ -180,7 +185,8 @@ async def get_dm_media(channel_id: int, msg_id: int,
 
 
 @router.post("/{channel_id}/messages")
-async def send_message(channel_id: int, body: DMMessageBody,
+@limiter.limit("120/minute")
+async def send_message(request: Request, channel_id: int, body: DMMessageBody,
                        current_user: dict = Depends(get_current_user)):
     if not body.content and not body.media_data:
         return JSONResponse(status_code=400, content={"error": "Empty message"})

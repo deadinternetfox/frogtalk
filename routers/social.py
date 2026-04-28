@@ -1,16 +1,21 @@
 """Social feed, followers, explore — Instagram-style features."""
 import base64
+import logging
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, Query, UploadFile, File, Form
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Query, Request, UploadFile, File, Form
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
 from deps import get_current_user
 
+_log = logging.getLogger(__name__)
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/social", tags=["social"])
 
 
@@ -22,7 +27,8 @@ class CreateStoryRequest(BaseModel):
 
 
 @router.post("/follow/{nickname}")
-async def follow_user(nickname: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit("120/hour")
+async def follow_user(request: Request, nickname: str, current_user: dict = Depends(get_current_user)):
     target = db.get_user_by_nick(nickname)
     if not target:
         return JSONResponse(status_code=404, content={"error": "User not found"})
@@ -156,8 +162,9 @@ async def profile_posts(
     if _private_blocked(user, current_user["id"]):
         return {"posts": [], "private": True}
     posts = db.get_wall_posts(user["id"], current_user["id"], limit, offset)
+    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
-        p["reactions"] = db.get_post_reactions(p["id"])
+        p["reactions"] = _rmap.get(p["id"], [])
     return {"posts": posts}
 
 
@@ -212,8 +219,9 @@ async def get_feed(
 ):
     """Posts from users you follow."""
     posts = db.get_feed_posts(current_user["id"], limit, offset, mood)
+    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
-        p["reactions"] = db.get_post_reactions(p["id"])
+        p["reactions"] = _rmap.get(p["id"], [])
     return {"posts": posts}
 
 
@@ -227,8 +235,9 @@ async def get_explore(
 ):
     """All public posts — discover new people."""
     posts = db.get_explore_posts(current_user["id"], limit, offset, sort, mood)
+    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
-        p["reactions"] = db.get_post_reactions(p["id"])
+        p["reactions"] = _rmap.get(p["id"], [])
     return {"posts": posts}
 
 
@@ -302,7 +311,7 @@ async def media_to_wall(msg_id: int, current_user: dict = Depends(get_current_us
 @router.get("/stories")
 async def get_stories(current_user: dict = Depends(get_current_user)):
     """Get stories feed grouped by user."""
-    db.cleanup_expired_stories()
+    # Note: cleanup is done in background task; do not block requests.
     raw = db.get_stories_feed(current_user["id"])
     # Group by user
     grouped: dict = {}
@@ -318,7 +327,8 @@ async def get_stories(current_user: dict = Depends(get_current_user)):
             }
         grouped[uid]["stories"].append({
             "id": s["id"],
-            "media_data": s["media_data"],
+            "has_media": bool(s.get("has_media")),
+            "media_data": s.get("media_data"),
             "media_type": s["media_type"],
             "caption": s.get("caption", ""),
             "created_at": s["created_at"],
@@ -333,7 +343,8 @@ async def get_stories(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/stories")
-async def create_story(body: CreateStoryRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit("30/hour")
+async def create_story(request: Request, body: CreateStoryRequest, current_user: dict = Depends(get_current_user)):
     """Create a new story (24h expiry)."""
     if not body.media_data:
         return JSONResponse(status_code=400, content={"error": "Media required"})
@@ -359,7 +370,9 @@ async def create_story(body: CreateStoryRequest, current_user: dict = Depends(ge
 
 
 @router.post("/stories/upload")
+@limiter.limit("30/hour")
 async def create_story_upload(
+    request: Request,
     media: UploadFile = File(...),
     caption: str = Form(""),
     privacy: str = Form("public"),
@@ -403,6 +416,36 @@ async def view_story(story_id: int, current_user: dict = Depends(get_current_use
     """Mark a story as viewed."""
     db.mark_story_viewed(story_id, current_user["id"])
     return {"ok": True}
+
+
+@router.get("/stories/{story_id}/media")
+async def get_story_media(story_id: int, current_user: dict = Depends(get_current_user)):
+    """Lazy-load full media payload for a single story (privacy enforced)."""
+    with db._conn() as con:
+        row = con.execute(
+            """SELECT s.user_id, s.media_data, s.media_type,
+                      COALESCE(s.privacy,'public') AS privacy, s.expires_at
+                 FROM stories s WHERE s.id=?""",
+            (story_id,)
+        ).fetchone()
+    if not row or not row["media_data"]:
+        return JSONResponse(status_code=404, content={"error": "Story not found"})
+    owner_id = row["user_id"]
+    if owner_id != current_user["id"]:
+        # Block guard
+        if db.is_blocked_either_way(current_user["id"], owner_id):
+            return JSONResponse(status_code=404, content={"error": "Story not found"})
+        privacy = (row["privacy"] or "public").lower()
+        if privacy == "private":
+            return JSONResponse(status_code=403, content={"error": "Private"})
+        # followers-only requires viewer to follow owner
+        if privacy == "followers" and not db.is_following(current_user["id"], owner_id):
+            return JSONResponse(status_code=403, content={"error": "Followers only"})
+    headers = {"Cache-Control": "private, max-age=86400"}
+    return JSONResponse(
+        content={"media_data": row["media_data"], "media_type": row["media_type"]},
+        headers=headers,
+    )
 
 
 @router.delete("/stories/{story_id}")

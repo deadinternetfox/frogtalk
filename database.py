@@ -1347,6 +1347,28 @@ def _migrate():
         if fed_srv_cols and "transport_preference" not in fed_srv_cols:
             con.execute("ALTER TABLE federation_servers ADD COLUMN transport_preference TEXT DEFAULT 'auto'")
 
+        # ── Performance indexes for social/wall/stories/friends hot paths ──
+        for _idx in (
+            "CREATE INDEX IF NOT EXISTS idx_wall_posts_user_created ON wall_posts(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_wall_posts_created ON wall_posts(created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_wall_post_reactions_post ON wall_post_reactions(post_id)",
+            "CREATE INDEX IF NOT EXISTS idx_wall_comments_post ON wall_comments(post_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_stories_user_expires ON stories(user_id, expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_followers_follower ON followers(follower_id, following_id)",
+            "CREATE INDEX IF NOT EXISTS idx_followers_following ON followers(following_id, follower_id)",
+            "CREATE INDEX IF NOT EXISTS idx_friends_pair ON friends(user_id, friend_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_friends_friend ON friends(friend_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_user_blocks_blocker ON user_blocks(blocker_id, blocked_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked ON user_blocks(blocked_id, blocker_id)",
+            "CREATE INDEX IF NOT EXISTS idx_dm_messages_expires ON dm_messages(expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_story_views_pair ON story_views(story_id, user_id)",
+        ):
+            try:
+                con.execute(_idx)
+            except Exception:
+                pass
+
         con.commit()
 
 
@@ -3329,7 +3351,11 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
             privacy_filter = "wp.privacy = 'public'"
 
         rows = con.execute(f"""
-            SELECT wp.*, u.nickname, u.avatar,
+            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
+                   wp.allow_comments, wp.created_at, wp.edited_at,
+                   wp.track_title, wp.track_room, wp.track_mood,
+                   (wp.media_data IS NOT NULL AND length(wp.media_data) > 0) AS has_media,
+                   u.nickname, u.avatar,
                    (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
                    (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
             FROM wall_posts wp
@@ -3417,6 +3443,32 @@ def get_post_reactions(post_id: int) -> List[Dict]:
             GROUP BY emoji
         """, (post_id,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_post_reactions_bulk(post_ids: List[int]) -> Dict[int, List[Dict]]:
+    """Bulk version of get_post_reactions to avoid N+1 query in feeds.
+    Returns a dict mapping post_id -> list of reaction summaries."""
+    if not post_ids:
+        return {}
+    out: Dict[int, List[Dict]] = {pid: [] for pid in post_ids}
+    placeholders = ",".join("?" for _ in post_ids)
+    with _conn() as con:
+        rows = con.execute(f"""
+            SELECT wpr.post_id AS post_id, wpr.emoji AS emoji,
+                   COUNT(*) AS count,
+                   GROUP_CONCAT(u.nickname) AS users
+            FROM wall_post_reactions wpr
+            JOIN users u ON wpr.user_id = u.id
+            WHERE wpr.post_id IN ({placeholders})
+            GROUP BY wpr.post_id, wpr.emoji
+        """, list(post_ids)).fetchall()
+    for r in rows:
+        out.setdefault(r["post_id"], []).append({
+            "emoji": r["emoji"],
+            "count": r["count"],
+            "users": r["users"],
+        })
+    return out
 
 
 def add_wall_comment(post_id: int, user_id: int, content: str) -> Optional[int]:
@@ -3708,7 +3760,11 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
     mood = (mood or '').strip().lower()
     with _conn() as con:
         rows = con.execute("""
-            SELECT wp.*, u.nickname, u.avatar,
+            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
+                   wp.allow_comments, wp.created_at, wp.edited_at,
+                   wp.track_title, wp.track_room, wp.track_mood,
+                   (wp.media_data IS NOT NULL AND length(wp.media_data) > 0) AS has_media,
+                   u.nickname, u.avatar,
                    (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
                    (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
             FROM wall_posts wp
@@ -3744,13 +3800,17 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
             order = """(
                 (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) * 2 +
                 (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) +
-                CASE WHEN wp.media_data IS NOT NULL THEN 3 ELSE 0 END +
+                CASE WHEN wp.media_type IS NOT NULL AND wp.media_type != '' THEN 3 ELSE 0 END +
                 CASE WHEN julianday('now') - julianday(wp.created_at) < 1 THEN 10
                      WHEN julianday('now') - julianday(wp.created_at) < 7 THEN 5
                      ELSE 0 END
             ) DESC, wp.created_at DESC"""
         rows = con.execute(f"""
-            SELECT wp.*, u.nickname, u.avatar,
+            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
+                   wp.allow_comments, wp.created_at, wp.edited_at,
+                   wp.track_title, wp.track_room, wp.track_mood,
+                   (wp.media_data IS NOT NULL AND length(wp.media_data) > 0) AS has_media,
+                   u.nickname, u.avatar,
                    (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
                    (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
             FROM wall_posts wp
@@ -4124,10 +4184,15 @@ def create_story(user_id: int, media_data: str, media_type: str, caption: str = 
 
 
 def get_stories_feed(viewer_id: int) -> List[Dict]:
-    """Get active stories the viewer is allowed to see (+ own), grouped by user."""
+    """Get active stories the viewer is allowed to see (+ own), grouped by user.
+
+    NOTE: media_data is intentionally omitted to keep the list payload small.
+    Clients lazy-load the full payload via /api/social/stories/{id}/media.
+    """
     with _conn() as con:
         rows = con.execute("""
             SELECT s.id, s.user_id, s.media_data, s.media_type, s.caption, s.created_at,
+                   (s.media_data IS NOT NULL AND length(s.media_data) > 0) AS has_media,
                    COALESCE(s.privacy,'public') AS privacy,
                    u.nickname, u.avatar,
                    EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.user_id=?) AS viewed

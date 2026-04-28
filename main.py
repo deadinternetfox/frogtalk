@@ -32,7 +32,7 @@ from routers import federation as federation_mod
 from routers import server_admin as server_admin_mod
 
 import asyncio
-from database import cleanup_expired_dm_messages, cleanup_expired_captchas
+from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -46,6 +46,10 @@ async def cleanup_task():
             if deleted > 0:
                 print(f"[Cleanup] Deleted {deleted} expired DM messages")
             cleanup_expired_captchas()
+            try:
+                cleanup_expired_stories()
+            except Exception as _e:
+                print(f"[Cleanup] story cleanup error: {_e}")
         except Exception as e:
             print(f"[Cleanup] Error: {e}")
 
@@ -190,20 +194,63 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
+import logging
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse as _JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+_log = logging.getLogger("frogtalk")
+if not _log.handlers:
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Always return JSON even for unhandled exceptions."""
-    from fastapi.responses import JSONResponse
-    return JSONResponse(status_code=500, content={"error": "Internal server error"})
+    """Return JSON for unhandled exceptions; let HTTPException + RateLimit
+    bubble up to their proper handlers so status codes aren't masked."""
+    if isinstance(exc, (HTTPException, StarletteHTTPException, RateLimitExceeded)):
+        raise exc
+    _log.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return _JSONResponse(status_code=500, content={"error": "Internal server error"})
 
-ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+
+# ── CORS ────────────────────────────────────────────────────────────────────
+# `*` + credentials is invalid per the CORS spec and silently breaks
+# credentialed cross-origin in modern browsers. Default to the canonical
+# domain; operators override via ALLOWED_ORIGINS env (comma-separated).
+_default_origins = "https://frogtalk.xyz,https://www.frogtalk.xyz"
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()]
+_cors_credentials = "*" not in ALLOWED_ORIGINS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=_cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Security headers ────────────────────────────────────────────────────────
+# HSTS is conditional: only emitted on HTTPS requests so local http://
+# dev doesn't get pinned. CSP intentionally omitted this round (needs full
+# inline-script audit); track as follow-up.
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "geolocation=(self), microphone=(self), camera=(self), payment=(), usb=()",
+    )
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=63072000; includeSubDomains; preload",
+        )
+    return response
 
 app.include_router(auth.router, prefix="/api")
 app.include_router(rooms.router, prefix="/api")
