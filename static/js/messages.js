@@ -212,6 +212,37 @@ const Messages = (() => {
     }
     
     body.insertAdjacentHTML('beforeend', html);
+
+    // Embeds load asynchronously (iframes, og:image, favicons), so the
+    // message bubble grows in size *after* it has been appended. If the
+    // user was reading the bottom of the chat the embed pushes the text
+    // off-screen — re-snap to bottom whenever a fresh embed lands or one
+    // of its images finishes loading. We treat "near bottom" as ≤120 px
+    // from the floor so casual scroll-up isn't fought by the snap.
+    try {
+      const area = document.getElementById('messages-area');
+      if (area) {
+        const wasNearBottom = (area.scrollHeight - area.scrollTop - area.clientHeight) < 120;
+        if (wasNearBottom) {
+          const snap = () => { area.scrollTop = area.scrollHeight; };
+          requestAnimationFrame(() => { snap(); requestAnimationFrame(snap); });
+          // Re-snap after each <img>/<iframe> in the new embed reports
+          // its final size — those events fire well after insertion.
+          const newEmbed = body.querySelector(':scope > .link-preview:last-child, :scope > .yt-embed:last-child, :scope > .spotify-embed:last-child');
+          if (newEmbed) {
+            newEmbed.querySelectorAll('img,iframe').forEach(el => {
+              const onReady = () => {
+                if ((area.scrollHeight - area.scrollTop - area.clientHeight) < 240) {
+                  area.scrollTop = area.scrollHeight;
+                }
+              };
+              el.addEventListener('load', onReady, { once: true });
+              el.addEventListener('error', onReady, { once: true });
+            });
+          }
+        }
+      }
+    } catch {}
   }
 
   function _reactionHtml(reactions, msgId) {
