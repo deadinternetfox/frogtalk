@@ -1217,9 +1217,39 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
   animation:mmdPulse 1.6s ease-in-out infinite;flex-shrink:0
 }
 .mp-sync-hint{
-  display:inline-flex;align-items:center;gap:3px;
-  color:#c89eff;font-weight:600;opacity:.85;cursor:help;flex-shrink:0
+  display:inline-flex;align-items:center;gap:4px;
+  color:#c89eff;font-weight:600;opacity:.85;cursor:help;flex-shrink:0;
+  padding:2px 7px;border-radius:999px;
+  background:rgba(160,80,216,0.12);border:1px solid rgba(200,130,255,0.25);
+  transition:background .25s ease, border-color .25s ease, color .25s ease
 }
+.mp-sync-hint .mp-sync-dot{
+  width:6px;height:6px;border-radius:50%;background:#c89eff;flex-shrink:0;
+  box-shadow:0 0 6px rgba(200,130,255,.6)
+}
+.mp-sync-hint[data-state="checking"] .mp-sync-dot{
+  background:#c89eff;animation:mpSyncBlink 1s ease-in-out infinite
+}
+.mp-sync-hint[data-state="ok"]{
+  color:#aaffc8;background:rgba(64,200,120,0.14);border-color:rgba(120,230,160,0.45)
+}
+.mp-sync-hint[data-state="ok"] .mp-sync-dot{
+  background:#5fe39a;box-shadow:0 0 8px rgba(95,227,154,.7)
+}
+.mp-sync-hint[data-state="warn"]{
+  color:#ffdd99;background:rgba(220,170,40,0.16);border-color:rgba(240,200,90,0.5)
+}
+.mp-sync-hint[data-state="warn"] .mp-sync-dot{
+  background:#ffc44d;box-shadow:0 0 8px rgba(255,196,77,.7)
+}
+.mp-sync-hint[data-state="bad"]{
+  color:#ffb3b3;background:rgba(220,70,70,0.16);border-color:rgba(255,120,120,0.55)
+}
+.mp-sync-hint[data-state="bad"] .mp-sync-dot{
+  background:#ff7a7a;box-shadow:0 0 8px rgba(255,122,122,.7);
+  animation:mpSyncBlink .8s ease-in-out infinite
+}
+@keyframes mpSyncBlink{0%,100%{opacity:1}50%{opacity:.35}}
 .mp-resync{
   flex-shrink:0;
   background:linear-gradient(135deg,rgba(200,130,255,0.16),rgba(160,80,216,0.22));

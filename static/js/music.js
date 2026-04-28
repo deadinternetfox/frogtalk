@@ -26,6 +26,25 @@ const Music = (() => {
   let _lastEmitHash = '';
   let _emitTimer = null;
   let _msHandlersBound = false;
+
+  // Live radio-sync probe state. We poll the iframe's actual play head
+  // every ~4s while the panel is visible and audio is playing, and update
+  // a small badge in-place (no full re-render). This stays cheap because:
+  //   - probe is iframe postMessage only — no network, no DB, no WS.
+  //   - paused/hidden/no-track halts the timer entirely.
+  //   - we update only the badge node, never re-render the whole panel.
+  //   - YouTube replies asynchronously; we read those replies in a single
+  //     window 'message' listener installed once.
+  const SYNC_TOLERANCE_OK = 2.5;     // <2.5s drift → green
+  const SYNC_TOLERANCE_WARN = 7.0;   // <7s drift → yellow, else red
+  const SYNC_PROBE_INTERVAL_MS = 4000;
+  const SYNC_PROBE_TIMEOUT_MS = 1500;
+  let _syncProbeTimer = null;
+  let _syncProbePending = false;
+  let _syncProbeFiredAt = 0;
+  let _syncMsgListenerBound = false;
+  let _lastDriftSec = null;          // null = unknown/checking
+  let _lastSyncProvider = '';
   const $ = (id) => document.getElementById(id);
   const esc = (s) => UI.escHtml(String(s || ''));
 
@@ -289,6 +308,145 @@ const Music = (() => {
     }
   }
 
+  // ── Live radio-sync probe ────────────────────────────────────────────
+  // Polls the active iframe's actual play head and compares against the
+  // server-anchored expected position. Pure postMessage + setInterval —
+  // no network, no DB, no WS. Halted entirely when paused, hidden, or no
+  // track. Updates only the badge node in place (no full re-render).
+  function _bindSyncMessageListener() {
+    if (_syncMsgListenerBound) return;
+    _syncMsgListenerBound = true;
+    window.addEventListener('message', (ev) => {
+      try {
+        if (!_syncProbePending) return;
+        const data = ev.data;
+        if (!data) return;
+        let parsed = null;
+        if (typeof data === 'string' && data.length < 4096
+            && (data.charCodeAt(0) === 123 /* { */ || data.charCodeAt(0) === 34 /* " */)) {
+          try { parsed = JSON.parse(data); } catch { /* not JSON */ }
+        } else if (typeof data === 'object') {
+          parsed = data;
+        }
+        if (!parsed) return;
+        let actualSec = null;
+        // YouTube IFrame API: {event:"infoDelivery", info:{currentTime}}
+        if (parsed.event === 'infoDelivery'
+            && parsed.info && typeof parsed.info.currentTime === 'number') {
+          actualSec = parsed.info.currentTime;
+        // SoundCloud Widget API: {method:"getPosition", value:<ms>}
+        } else if (parsed.method === 'getPosition'
+                   && typeof parsed.value === 'number') {
+          actualSec = parsed.value / 1000;
+        }
+        if (actualSec == null) return;
+        _syncProbePending = false;
+        _lastDriftSec = Math.abs(actualSec - _expectedPosSec());
+        _renderSyncBadge();
+      } catch { /* keep listener resilient */ }
+    });
+  }
+
+  function _renderSyncBadge() {
+    const node = document.getElementById('mp-sync-status');
+    if (!node) return;
+    let state, label, title;
+    if (_lastSyncProvider === 'spotify') {
+      state = 'unknown';
+      label = '📻 Radio-synced';
+      title = 'Spotify embed does not expose a play head — best-effort sync';
+    } else if (_lastDriftSec == null) {
+      state = 'checking';
+      label = '📻 Checking…';
+      title = "Checking your sync to the room's play head";
+    } else if (_lastDriftSec <= SYNC_TOLERANCE_OK) {
+      state = 'ok';
+      label = `📻 In sync · ${_lastDriftSec.toFixed(1)}s`;
+      title = `Aligned to the room's play head (drift ${_lastDriftSec.toFixed(2)}s)`;
+    } else if (_lastDriftSec <= SYNC_TOLERANCE_WARN) {
+      state = 'warn';
+      label = `⚠ Drifting · ${_lastDriftSec.toFixed(1)}s`;
+      title = `You're ${_lastDriftSec.toFixed(2)}s off the room — click Resync`;
+    } else {
+      state = 'bad';
+      label = `❗ Out of sync · ${_lastDriftSec.toFixed(0)}s`;
+      title = `You're ${_lastDriftSec.toFixed(0)}s off the room — click Resync`;
+    }
+    if (node.dataset.state !== state) node.dataset.state = state;
+    const text = node.querySelector('.mp-sync-text');
+    if (text && text.textContent !== label) text.textContent = label;
+    if (node.title !== title) node.title = title;
+  }
+
+  function _stopSyncProbe() {
+    if (_syncProbeTimer) { clearInterval(_syncProbeTimer); _syncProbeTimer = null; }
+    _syncProbePending = false;
+    _lastDriftSec = null;
+  }
+
+  function _startSyncProbeIfNeeded() {
+    const cur = _state && _state.queue && _state.queue[0];
+    if (!cur || _paused || !_anchorMs) { _stopSyncProbe(); return; }
+    _lastSyncProvider = cur.provider || '';
+    _bindSyncMessageListener();
+    if (_syncProbeTimer) return;  // already running
+    _runSyncProbe();
+    _syncProbeTimer = setInterval(_runSyncProbe, SYNC_PROBE_INTERVAL_MS);
+  }
+
+  function _runSyncProbe() {
+    try {
+      if (document.hidden) return;       // tab hidden — pay nothing
+      if (_paused) { _stopSyncProbe(); return; }
+      const cur = _state && _state.queue && _state.queue[0];
+      if (!cur) { _stopSyncProbe(); return; }
+      const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+      if (!frame || !frame.contentWindow) return;
+
+      if (cur.provider === 'spotify') {
+        _lastSyncProvider = 'spotify';
+        _renderSyncBadge();
+        return;
+      }
+
+      _syncProbeFiredAt = Date.now();
+      _syncProbePending = true;
+      setTimeout(() => {
+        if (_syncProbePending
+            && (Date.now() - _syncProbeFiredAt) >= SYNC_PROBE_TIMEOUT_MS) {
+          _syncProbePending = false;  // leave last known drift in place
+        }
+      }, SYNC_PROBE_TIMEOUT_MS + 50);
+
+      if (cur.provider === 'youtube') {
+        try {
+          // 'listening' handshake registers us with the YouTube embed so
+          // it accepts our 'command' messages. Idempotent.
+          frame.contentWindow.postMessage(
+            JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
+          frame.contentWindow.postMessage(
+            JSON.stringify({ event: 'command', func: 'getCurrentTime', args: [] }), '*');
+        } catch { _syncProbePending = false; }
+      } else if (cur.provider === 'soundcloud') {
+        try {
+          frame.contentWindow.postMessage(
+            JSON.stringify({ method: 'getPosition' }), '*');
+        } catch { _syncProbePending = false; }
+      } else {
+        _syncProbePending = false;
+      }
+    } catch { _syncProbePending = false; }
+  }
+
+  // Pause the probe when the tab is hidden so we don't pay the postMessage
+  // tax for nothing; resume when visible again.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) _stopSyncProbe();
+      else _startSyncProbeIfNeeded();
+    });
+  }
+
   async function _fetchState(room) {
     try {
       const res = await fetch(`/api/rooms/${encodeURIComponent(room)}/queue`, {
@@ -342,7 +500,7 @@ const Music = (() => {
             <div class="mp-header-sub">
               ${cur ? `<span class="mp-live-pulse"></span> Now playing · ${esc(providerLabel)}` : 'Idle · waiting for a track'}
               ${q.length ? ` · ${q.length} track${q.length === 1 ? '' : 's'} in queue` : ''}
-              ${cur ? ` · <span class="mp-sync-hint" title="All listeners are aligned to the same play head, like a radio station">📻 Radio-synced</span>` : ''}
+              ${cur ? ` · <span id="mp-sync-status" class="mp-sync-hint" data-state="checking" title="Checking your sync to the room's play head…"><span class="mp-sync-dot"></span><span class="mp-sync-text">📻 Checking…</span></span>` : ''}
             </div>
           </div>
         </div>
@@ -407,6 +565,9 @@ const Music = (() => {
       // Head unchanged — only refresh the meta + controls + queue sections.
       const meta = document.getElementById('mp-meta-wrap');
       if (meta) meta.innerHTML = `${headerHtml}${nowRow}${submitHtml}${queueHtml}`;
+      // Re-paint badge with the cached drift (the node was just replaced).
+      _renderSyncBadge();
+      _startSyncProbeIfNeeded();
       return;
     }
 
@@ -420,6 +581,10 @@ const Music = (() => {
       </div>
     `;
     _emitState();
+    // Track changed (or first render) — reset drift state and (re)start probe.
+    _lastDriftSec = null;
+    _renderSyncBadge();
+    _startSyncProbeIfNeeded();
   }
 
   async function mount(roomName, channelType) {
@@ -614,6 +779,7 @@ const Music = (() => {
       el.title = btn.title;
     });
     _paused = !nowPlaying;
+    if (_paused) _stopSyncProbe(); else _startSyncProbeIfNeeded();
     _emitState();
   }
 
@@ -660,6 +826,7 @@ const Music = (() => {
   }
 
   function close() {
+    _stopSyncProbe();
     const panel = $('music-panel');
     if (panel) {
       panel.classList.remove('active');
