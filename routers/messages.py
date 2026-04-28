@@ -197,6 +197,26 @@ async def edit_message(msg_id: int, body: EditRequest,
     ok = db.edit_message(msg_id, current_user["id"], body.content, bool(current_user.get("is_admin")))
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot edit this message"})
+    # Broadcast the edit + mirror it onto every linked bridge so the
+    # change shows up everywhere it was originally posted.
+    try:
+        msg = db.get_message(msg_id) if hasattr(db, "get_message") else None
+        room_name = (msg or {}).get("room_name")
+        if room_name:
+            await manager.broadcast_room(room_name, {
+                "type": "edit", "id": msg_id,
+                "content": body.content, "room": room_name,
+            })
+            try:
+                import bridge_outbound
+                bridge_outbound.forward_user_edit(
+                    room_name, msg_id, body.content,
+                    nickname=current_user.get("nickname"),
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -204,9 +224,11 @@ async def edit_message(msg_id: int, body: EditRequest,
 async def delete_message(msg_id: int, current_user: dict = Depends(get_current_user)):
     # Allow room owners and moderators to delete messages in rooms they manage
     is_room_owner = False
+    room_name = None
     try:
         msg = db.get_message(msg_id) if hasattr(db, "get_message") else None
         if msg and msg.get("room_name"):
+            room_name = msg["room_name"]
             is_room_owner = db.can_moderate_room(
                 msg["room_name"], current_user["id"], bool(current_user.get("is_admin"))
             )
@@ -215,6 +237,18 @@ async def delete_message(msg_id: int, current_user: dict = Depends(get_current_u
     ok = db.delete_message(msg_id, current_user["id"], bool(current_user.get("is_admin")), is_room_owner)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot delete this message"})
+    if room_name:
+        try:
+            await manager.broadcast_room(room_name, {
+                "type": "delete", "id": msg_id, "room": room_name,
+            })
+        except Exception:
+            pass
+        try:
+            import bridge_outbound
+            bridge_outbound.forward_user_delete(room_name, msg_id)
+        except Exception:
+            pass
     return {"ok": True}
 
 

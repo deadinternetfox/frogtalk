@@ -357,6 +357,14 @@ async def websocket_endpoint(
                     await manager.broadcast_room(room_name, {
                         "type": "delete", "id": msg_id, "room": room_name,
                     })
+                    # Mirror the deletion onto every linked bridge so a
+                    # delete in FrogTalk also removes the message in
+                    # Telegram / Discord. Best-effort, fire-and-forget.
+                    try:
+                        import bridge_outbound
+                        bridge_outbound.forward_user_delete(room_name, msg_id)
+                    except Exception:
+                        pass
 
             # ── Edit message ──────────────────────────────────────────
             elif msg_type == "edit":
@@ -373,6 +381,19 @@ async def websocket_endpoint(
                         "type": "edit", "id": msg_id,
                         "content": new_content, "room": room_name,
                     })
+                    # For E2EE rooms the client sends the bridge-safe
+                    # plaintext version of the edit alongside the
+                    # ciphertext, mirroring the original-send code path.
+                    try:
+                        import bridge_outbound
+                        plain = str(data.get("bridge_plain") or "").strip()
+                        outbound_text = plain or new_content
+                        bridge_outbound.forward_user_edit(
+                            room_name, msg_id, outbound_text,
+                            nickname=user["nickname"],
+                        )
+                    except Exception:
+                        pass
 
             # ── Reaction ──────────────────────────────────────────────
             elif msg_type == "react":

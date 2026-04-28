@@ -276,6 +276,46 @@ async def send_to_frogtalk(room: str, token: str, content: str,
             log.error("FrogTalk bridge send failed: %s", r.text)
 
 
+async def send_edit_to_frogtalk(room: str, token: str, content: str,
+                                remote_chat_id: int, remote_msg_id: int) -> None:
+    """Notify FrogTalk that a previously-bridged Telegram message was edited."""
+    payload = {
+        "room_name": room, "bridge_token": token, "platform": "telegram",
+        "remote_chat_id": str(remote_chat_id),
+        "remote_msg_id": str(remote_msg_id),
+        "content": content or "",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{FROGTALK_API}/api/bridge/edit", json=payload)
+            if r.status_code != 200:
+                log.debug("FrogTalk bridge edit failed: %s", r.text)
+    except Exception as e:
+        log.debug("FrogTalk bridge edit request failed: %s", e)
+
+
+async def send_delete_to_frogtalk(room: str, token: str,
+                                  remote_chat_id: int, remote_msg_id: int) -> None:
+    """Notify FrogTalk that a previously-bridged Telegram message was deleted.
+
+    NOTE: Telegram's Bot API does NOT push delete notifications for normal
+    user messages — this helper is kept for symmetry / future use. It is
+    safe to call but will currently never be triggered by the polling loop.
+    """
+    payload = {
+        "room_name": room, "bridge_token": token, "platform": "telegram",
+        "remote_chat_id": str(remote_chat_id),
+        "remote_msg_id": str(remote_msg_id),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{FROGTALK_API}/api/bridge/delete", json=payload)
+            if r.status_code != 200:
+                log.debug("FrogTalk bridge delete failed: %s", r.text)
+    except Exception as e:
+        log.debug("FrogTalk bridge delete request failed: %s", e)
+
+
 async def _fetch_user_avatar(user_id: int) -> Optional[str]:
     """Fetch a Telegram user's profile photo and return it as a data: URL.
 
@@ -420,6 +460,20 @@ async def process_update(update: dict):
     mcm = update.get("my_chat_member")
     if mcm:
         await _handle_my_chat_member(mcm)
+        return
+
+    # Telegram delivers edited messages on a separate key. Mirror the new
+    # text onto FrogTalk so the bridged copy stays in sync.
+    edited = update.get("edited_message") or update.get("edited_channel_post")
+    if edited:
+        chat_id = edited["chat"]["id"]
+        bridge = _bridges.get(chat_id)
+        if bridge and bridge.get("enabled") and (bridge.get("direction") or "both").lower() != "out":
+            new_text = edited.get("text") or edited.get("caption") or ""
+            await send_edit_to_frogtalk(
+                bridge["room"], bridge["token"], new_text,
+                chat_id, edited.get("message_id"),
+            )
         return
 
     msg = update.get("message") or update.get("channel_post")
@@ -754,8 +808,14 @@ async def forward_to_telegram(room: str, nickname: str, content: str,
     header = f"<b>{nick_html}</b> <i>· via FrogTalk #{safe_room}</i>"
 
     safe_body = _html.escape(content) if content else ""
+    has_media = bool(media_data)
     if safe_body:
         text = f"{header}\n{safe_body}"
+    elif has_media:
+        # Real media is attached — Telegram renders the photo/video on its own,
+        # an extra "[media]" placeholder caption just adds noise. Caption is
+        # the FrogTalk header alone so the reader still sees who posted it.
+        text = header
     else:
         text = f"{header}\n<i>[media]</i>"
 
@@ -835,6 +895,78 @@ async def forward_reaction_to_telegram(room: str, ft_msg_id: int,
         if direction == "in":
             continue
         await apply_reaction_to_telegram(chat_id, ft_msg_id, emoji, counts)
+
+
+async def forward_delete_to_telegram(room: str, ft_msg_id: int) -> None:
+    """Delete the Telegram-side mirror of a FrogTalk message that was just
+    deleted on FrogTalk. Best-effort: bots can only delete messages they
+    sent (which is exactly the FT→TG mirror) so this is the common case."""
+    if not _bridges or not ft_msg_id:
+        return
+    import database as db
+    for chat_id, bridge in _bridges.items():
+        if bridge["room"] != room or not bridge["enabled"]:
+            continue
+        if (bridge.get("direction") or "both").lower() == "in":
+            continue
+        try:
+            remote_id = db.lookup_bridge_remote_id("telegram", chat_id, ft_msg_id)
+            if not remote_id:
+                continue
+            await tg_request("deleteMessage", chat_id=chat_id, message_id=int(remote_id))
+        except Exception as e:
+            log.debug("telegram delete mirror failed for chat %s: %s", chat_id, e)
+
+
+async def forward_edit_to_telegram(room: str, ft_msg_id: int, new_content: str,
+                                   *, nickname: str | None = None) -> None:
+    """Edit the Telegram-side mirror of a FrogTalk message. Tries
+    editMessageCaption first (works for media-bearing messages) and falls
+    back to editMessageText for plain-text messages."""
+    if not _bridges or not ft_msg_id:
+        return
+    import html as _html
+    import database as db
+
+    nick = nickname
+    if not nick:
+        try:
+            with db._conn() as con:
+                row = con.execute(
+                    "SELECT nickname FROM messages WHERE id=?", (ft_msg_id,)
+                ).fetchone()
+            nick = (row["nickname"] if row else "") or ""
+        except Exception:
+            nick = ""
+
+    safe_nick = _html.escape(nick or "")
+    safe_room = _html.escape(room)
+    safe_body = _html.escape(new_content or "")
+    header = f"<b>{safe_nick}</b> <i>· via FrogTalk #{safe_room}</i>"
+    text = f"{header}\n{safe_body} <i>(edited)</i>" if safe_body else f"{header} <i>(edited)</i>"
+
+    for chat_id, bridge in _bridges.items():
+        if bridge["room"] != room or not bridge["enabled"]:
+            continue
+        if (bridge.get("direction") or "both").lower() == "in":
+            continue
+        try:
+            remote_id = db.lookup_bridge_remote_id("telegram", chat_id, ft_msg_id)
+            if not remote_id:
+                continue
+            # Try caption edit first (media messages); on "no caption" /
+            # "message can't be edited" errors fall through to text edit.
+            resp = await tg_request(
+                "editMessageCaption", chat_id=chat_id,
+                message_id=int(remote_id), caption=text, parse_mode="HTML",
+            )
+            if not resp.get("ok"):
+                await tg_request(
+                    "editMessageText", chat_id=chat_id,
+                    message_id=int(remote_id), text=text, parse_mode="HTML",
+                )
+        except Exception as e:
+            log.debug("telegram edit mirror failed for chat %s: %s", chat_id, e)
 
 
 if __name__ == "__main__":

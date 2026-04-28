@@ -161,6 +161,41 @@ async def send_to_frogtalk(room: str, token: str, content: str,
             log.error("FrogTalk bridge send failed: %s", r.text)
 
 
+async def send_edit_to_frogtalk(room: str, token: str, content: str,
+                                remote_chat_id: int, remote_msg_id: int) -> None:
+    """Notify FrogTalk that a previously-bridged Discord message was edited."""
+    payload = {
+        "room_name": room, "bridge_token": token, "platform": "discord",
+        "remote_chat_id": str(remote_chat_id),
+        "remote_msg_id": str(remote_msg_id),
+        "content": content or "",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{FROGTALK_API}/api/bridge/edit", json=payload)
+            if r.status_code != 200:
+                log.debug("FrogTalk bridge edit failed: %s", r.text)
+    except Exception as e:
+        log.debug("FrogTalk bridge edit request failed: %s", e)
+
+
+async def send_delete_to_frogtalk(room: str, token: str,
+                                  remote_chat_id: int, remote_msg_id: int) -> None:
+    """Notify FrogTalk that a previously-bridged Discord message was deleted."""
+    payload = {
+        "room_name": room, "bridge_token": token, "platform": "discord",
+        "remote_chat_id": str(remote_chat_id),
+        "remote_msg_id": str(remote_msg_id),
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{FROGTALK_API}/api/bridge/delete", json=payload)
+            if r.status_code != 200:
+                log.debug("FrogTalk bridge delete failed: %s", r.text)
+    except Exception as e:
+        log.debug("FrogTalk bridge delete request failed: %s", e)
+
+
 async def _run_on_discord_loop(coro):
     if not _client or not getattr(_client, "loop", None):
         return None
@@ -764,6 +799,79 @@ def _run_bot_in_thread(token: str):
                     reply_to_remote_id=reply_to_remote_id,
                 )
 
+        # ── Mirror inbound edits ──────────────────────────────────────────
+        @c.event
+        async def on_message_edit(before, after):
+            try:
+                # Skip our own bot's messages and webhook-relay messages we
+                # ourselves posted (those are FT→DC mirrors; their "edit"
+                # came from FrogTalk via forward_edit_to_discord, not from
+                # a Discord user — re-mirroring would loop).
+                if after.author == c.user or getattr(after, "webhook_id", None):
+                    return
+                if getattr(after.author, "bot", False):
+                    return
+                # Discord fires this even when only embeds change (link
+                # unfurls). Skip when content didn't actually change.
+                if (before.content or "") == (after.content or ""):
+                    return
+                channel_id = after.channel.id
+                bridge = _bridges.get(channel_id)
+                if not bridge or not bridge.get("enabled"):
+                    return
+                if (bridge.get("direction") or "both").lower() == "out":
+                    return
+                await send_edit_to_frogtalk(
+                    bridge["room"], bridge["token"],
+                    after.content or "", channel_id, after.id,
+                )
+            except Exception as e:
+                log.debug("on_message_edit failed: %s", e)
+
+        # ── Mirror inbound deletions ──────────────────────────────────────
+        @c.event
+        async def on_message_delete(message):
+            try:
+                # Same loop-protection as edits: skip our own bridge posts.
+                if message.author == c.user or getattr(message, "webhook_id", None):
+                    return
+                if getattr(message.author, "bot", False):
+                    return
+                channel_id = message.channel.id
+                bridge = _bridges.get(channel_id)
+                if not bridge or not bridge.get("enabled"):
+                    return
+                if (bridge.get("direction") or "both").lower() == "out":
+                    return
+                await send_delete_to_frogtalk(
+                    bridge["room"], bridge["token"],
+                    channel_id, message.id,
+                )
+            except Exception as e:
+                log.debug("on_message_delete failed: %s", e)
+
+        # Raw delete fires even for messages not in the cache (e.g. older
+        # than the bot's session memory). Use it as a fallback.
+        @c.event
+        async def on_raw_message_delete(payload):
+            try:
+                channel_id = payload.channel_id
+                msg_id = payload.message_id
+                # If the cached message is present, on_message_delete
+                # already handled it — avoid double-fire.
+                if getattr(payload, "cached_message", None):
+                    return
+                bridge = _bridges.get(channel_id)
+                if not bridge or not bridge.get("enabled"):
+                    return
+                if (bridge.get("direction") or "both").lower() == "out":
+                    return
+                await send_delete_to_frogtalk(
+                    bridge["room"], bridge["token"], channel_id, msg_id,
+                )
+            except Exception as e:
+                log.debug("on_raw_message_delete failed: %s", e)
+
     # ── Start the bot ─────────────────────────────────────────────────────
     client = _make_client(with_message_content=True)
     _client = client
@@ -927,6 +1035,123 @@ async def forward_reaction_to_discord(room: str, ft_msg_id: int,
         if direction == "in":
             continue
         await apply_reaction_to_discord(channel_id, ft_msg_id, emoji, counts)
+
+
+async def _delete_discord_message_inner(channel_id: int, remote_id: int) -> None:
+    """Delete a previously-bridged Discord message. Tries the per-channel
+    webhook first (since that's how FT→Discord messages are normally sent),
+    then falls back to a direct channel.fetch_message().delete()."""
+    if not _client or not _client.is_ready():
+        return
+    try:
+        channel = _client.get_channel(channel_id) or await _client.fetch_channel(channel_id)
+        if not channel:
+            return
+        # Webhook delete path: messages we send via the bridge webhook can
+        # only be deleted through the same webhook handle.
+        webhook = await _get_or_create_webhook(channel)
+        if webhook is not None:
+            try:
+                await webhook.delete_message(int(remote_id))
+                return
+            except Exception as e:
+                # Not a webhook-owned message → fall through to bot path.
+                log.debug("discord webhook delete failed (falling back): %s", e)
+        try:
+            msg = await channel.fetch_message(int(remote_id))
+            await msg.delete()
+        except Exception as e:
+            log.debug("discord channel delete failed: %s", e)
+    except Exception as e:
+        log.debug("discord delete inner failed: %s", e)
+
+
+async def _edit_discord_message_inner(channel_id: int, remote_id: int,
+                                      new_content: str, nickname: str | None,
+                                      room: str | None) -> None:
+    if not _client or not _client.is_ready():
+        return
+    try:
+        channel = _client.get_channel(channel_id) or await _client.fetch_channel(channel_id)
+        if not channel:
+            return
+        body = (new_content or "")
+        edited_marker = "  *(edited)*"
+        new_text = (body + edited_marker) if body else edited_marker.strip()
+        webhook = await _get_or_create_webhook(channel)
+        if webhook is not None:
+            try:
+                await webhook.edit_message(int(remote_id), content=new_text)
+                return
+            except Exception as e:
+                log.debug("discord webhook edit failed (falling back): %s", e)
+        try:
+            msg = await channel.fetch_message(int(remote_id))
+            # If message was sent as an embed (not webhook), update the
+            # embed description to match the new body.
+            if getattr(msg, "embeds", None):
+                discord = _import_discord()
+                if discord:
+                    embed = msg.embeds[0]
+                    new_embed = discord.Embed(
+                        description=new_text or None,
+                        color=getattr(embed, "color", None) or 0x2E7D32,
+                    )
+                    if getattr(embed, "author", None) and getattr(embed.author, "name", None):
+                        new_embed.set_author(
+                            name=embed.author.name,
+                            icon_url=getattr(embed.author, "icon_url", None),
+                        )
+                    if getattr(embed, "footer", None) and getattr(embed.footer, "text", None):
+                        new_embed.set_footer(text=embed.footer.text)
+                    if getattr(embed, "image", None) and getattr(embed.image, "url", None):
+                        new_embed.set_image(url=embed.image.url)
+                    await msg.edit(embed=new_embed)
+                    return
+            await msg.edit(content=new_text)
+        except Exception as e:
+            log.debug("discord channel edit failed: %s", e)
+    except Exception as e:
+        log.debug("discord edit inner failed: %s", e)
+
+
+async def forward_delete_to_discord(room: str, ft_msg_id: int) -> None:
+    if not _bridges or not ft_msg_id:
+        return
+    import database as db
+    for channel_id, bridge in _bridges.items():
+        if bridge["room"] != room or not bridge["enabled"]:
+            continue
+        if (bridge.get("direction") or "both").lower() == "in":
+            continue
+        try:
+            remote_id = db.lookup_bridge_remote_id("discord", channel_id, ft_msg_id)
+            if not remote_id:
+                continue
+            await _run_on_discord_loop(_delete_discord_message_inner(channel_id, int(remote_id)))
+        except Exception as e:
+            log.debug("discord delete mirror failed for channel %s: %s", channel_id, e)
+
+
+async def forward_edit_to_discord(room: str, ft_msg_id: int, new_content: str,
+                                  *, nickname: str | None = None) -> None:
+    if not _bridges or not ft_msg_id:
+        return
+    import database as db
+    for channel_id, bridge in _bridges.items():
+        if bridge["room"] != room or not bridge["enabled"]:
+            continue
+        if (bridge.get("direction") or "both").lower() == "in":
+            continue
+        try:
+            remote_id = db.lookup_bridge_remote_id("discord", channel_id, ft_msg_id)
+            if not remote_id:
+                continue
+            await _run_on_discord_loop(_edit_discord_message_inner(
+                channel_id, int(remote_id), new_content, nickname, room,
+            ))
+        except Exception as e:
+            log.debug("discord edit mirror failed for channel %s: %s", channel_id, e)
 
 
 if __name__ == "__main__":

@@ -83,3 +83,51 @@ def forward_user_reaction(room: str, ft_msg_id: int, emoji: str,
         loop.create_task(bdc.forward_reaction_to_discord(room, ft_msg_id, emoji, counts))
     except Exception as e:
         log.debug("discord reaction forward skipped: %s", e)
+
+
+def forward_user_delete(room: str, ft_msg_id: int) -> None:
+    """Fire-and-forget mirroring for FrogTalk message deletions onto every
+    linked bridge. Each bridge looks up its own remote-id mapping; if no
+    mapping exists for a bridge (e.g. the message predates the mirror)
+    that bridge silently no-ops."""
+    if not room or not ft_msg_id:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    try:
+        import bridge_telegram as btg
+        loop.create_task(btg.forward_delete_to_telegram(room, ft_msg_id))
+    except Exception as e:
+        log.debug("telegram delete forward skipped: %s", e)
+
+    try:
+        import bridge_discord as bdc
+        loop.create_task(bdc.forward_delete_to_discord(room, ft_msg_id))
+    except Exception as e:
+        log.debug("discord delete forward skipped: %s", e)
+
+
+def forward_user_edit(room: str, ft_msg_id: int, new_content: str,
+                      *, nickname: str | None = None) -> None:
+    """Fire-and-forget mirroring for FrogTalk message edits."""
+    if not room or not ft_msg_id:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    try:
+        import bridge_telegram as btg
+        loop.create_task(btg.forward_edit_to_telegram(room, ft_msg_id, new_content, nickname=nickname))
+    except Exception as e:
+        log.debug("telegram edit forward skipped: %s", e)
+
+    try:
+        import bridge_discord as bdc
+        loop.create_task(bdc.forward_edit_to_discord(room, ft_msg_id, new_content, nickname=nickname))
+    except Exception as e:
+        log.debug("discord edit forward skipped: %s", e)

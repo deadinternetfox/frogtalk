@@ -187,6 +187,21 @@ class BridgeMessageRequest(BaseModel):
     reply_to_remote_id: Optional[str] = None
 
 
+class BridgeMutateRequest(BaseModel):
+    """Inbound edit / delete signal from a bridge bot.
+
+    `remote_chat_id` + `remote_msg_id` identify the message on the remote
+    side; the server resolves it back to the FrogTalk message via
+    `bridge_msg_map`. Edits supply `content`; deletes leave it empty.
+    """
+    room_name: str
+    bridge_token: str
+    platform: str = "telegram"
+    remote_chat_id: str
+    remote_msg_id: str
+    content: Optional[str] = None
+
+
 class DirectionRequest(BaseModel):
     direction: str  # 'both' | 'in' | 'out'
 
@@ -818,3 +833,171 @@ async def receive_bridge_message(body: BridgeMessageRequest):
     await manager.broadcast_room(body.room_name, msg_data)
 
     return {"ok": True, "id": msg_id}
+
+
+# Hard cap on inbound bridge content length. Telegram caps text at 4096
+# and captions at 1024; Discord caps at 4000 (premium) / 2000. Pick a
+# generous ceiling that still prevents abuse / DB bloat from a compromised
+# bot token.
+_BRIDGE_CONTENT_MAX = 8000
+_ALLOWED_PLATFORMS = ("telegram", "discord")
+
+
+def _match_bridge_token(body, platform: str) -> Optional[dict]:
+    """Return the bridge row that matches `(bridge_token, room_name, platform)`.
+
+    Constant-time token comparison, scoped to the supplied platform so a
+    Telegram token can never authorise a Discord-platform mutation (or
+    vice versa). Shared by the edit/delete bridge endpoints.
+    """
+    if platform == "telegram":
+        candidates = db.get_telegram_bridges_for_room(body.room_name)
+    elif platform == "discord":
+        candidates = db.get_discord_bridges_for_room(body.room_name)
+    else:
+        return None
+    supplied = (body.bridge_token or "").encode("utf-8")
+    for b in candidates:
+        stored = (b.get("bot_token") or "").encode("utf-8")
+        if (
+            len(stored) == len(supplied)
+            and hmac.compare_digest(stored, supplied)
+            and bool(b.get("enabled", 1))
+        ):
+            return b
+    return None
+
+
+@router.post("/bridge/delete")
+async def bridge_delete_message(body: BridgeMutateRequest):
+    """Mirror a remote-platform deletion onto the FrogTalk side.
+
+    Resolves the (platform, remote_chat_id, remote_msg_id) → FT msg_id via
+    the bridge map and deletes the row. Authenticated solely by the
+    bridge_token; only the matched bridge can affect its own room. We
+    deliberately don't fan out to OTHER bridges — the inbound delete
+    only needs to clear the FrogTalk-side mirror, not loop back to the
+    platform that originated the deletion.
+    """
+    platform = (body.platform or "telegram").lower()
+    if platform not in _ALLOWED_PLATFORMS:
+        raise HTTPException(400, "Unsupported platform")
+    matched = _match_bridge_token(body, platform)
+    if not matched:
+        raise HTTPException(403, "Invalid bridge token")
+    if (matched.get("direction") or "both").lower() == "out":
+        return {"ok": True, "dropped": "direction=out"}
+
+    ft_msg_id = db.lookup_bridge_msg_map(platform, body.remote_chat_id, body.remote_msg_id)
+    if not ft_msg_id:
+        return {"ok": True, "skipped": "no_mapping"}
+
+    # Ensure the mapped message actually belongs to this bridge's room.
+    # Otherwise a compromised bot for room A could submit (chat_id, msg_id)
+    # values that resolve to a message in room B.
+    msg_row = db.get_message(int(ft_msg_id))
+    if not msg_row or msg_row.get("room_name") != body.room_name:
+        return {"ok": True, "skipped": "room_mismatch"}
+
+    with db._conn() as con:
+        con.execute("DELETE FROM messages WHERE id=?", (int(ft_msg_id),))
+        # Drop the now-stale bridge map row so the slot can be reused.
+        con.execute("DELETE FROM bridge_msg_map WHERE ft_msg_id=?", (int(ft_msg_id),))
+        con.commit()
+
+    from ws_manager import manager
+    await manager.broadcast_room(body.room_name, {
+        "type": "delete", "id": int(ft_msg_id), "room": body.room_name,
+    })
+
+    # Mirror the deletion to OTHER bridges linked to the same room (e.g.
+    # Discord delete should also remove the Telegram mirror) but NOT
+    # back to the originating platform — that would re-trigger the same
+    # event. We achieve this by skipping any bridge whose chat_id matches
+    # the inbound source.
+    try:
+        import bridge_outbound, asyncio as _asyncio
+        loop = _asyncio.get_running_loop()
+        if platform != "telegram":
+            try:
+                import bridge_telegram as btg
+                loop.create_task(btg.forward_delete_to_telegram(body.room_name, int(ft_msg_id)))
+            except Exception:
+                pass
+        if platform != "discord":
+            try:
+                import bridge_discord as bdc
+                loop.create_task(bdc.forward_delete_to_discord(body.room_name, int(ft_msg_id)))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return {"ok": True, "id": int(ft_msg_id)}
+
+
+@router.post("/bridge/edit")
+async def bridge_edit_message(body: BridgeMutateRequest):
+    """Mirror a remote-platform edit onto the FrogTalk side."""
+    platform = (body.platform or "telegram").lower()
+    if platform not in _ALLOWED_PLATFORMS:
+        raise HTTPException(400, "Unsupported platform")
+    matched = _match_bridge_token(body, platform)
+    if not matched:
+        raise HTTPException(403, "Invalid bridge token")
+    if (matched.get("direction") or "both").lower() == "out":
+        return {"ok": True, "dropped": "direction=out"}
+
+    new_content = (body.content or "").strip()
+    if not new_content:
+        # Treat empty edits as no-op rather than blanking the message.
+        return {"ok": True, "skipped": "empty"}
+    if len(new_content) > _BRIDGE_CONTENT_MAX:
+        new_content = new_content[:_BRIDGE_CONTENT_MAX]
+
+    ft_msg_id = db.lookup_bridge_msg_map(platform, body.remote_chat_id, body.remote_msg_id)
+    if not ft_msg_id:
+        return {"ok": True, "skipped": "no_mapping"}
+
+    msg_row = db.get_message(int(ft_msg_id))
+    if not msg_row or msg_row.get("room_name") != body.room_name:
+        return {"ok": True, "skipped": "room_mismatch"}
+
+    with db._conn() as con:
+        con.execute(
+            "UPDATE messages SET content=?, edited=1 WHERE id=?",
+            (new_content, int(ft_msg_id)),
+        )
+        con.commit()
+
+    from ws_manager import manager
+    await manager.broadcast_room(body.room_name, {
+        "type": "edit", "id": int(ft_msg_id),
+        "content": new_content, "room": body.room_name,
+    })
+
+    # Cross-platform mirror: an edit on one bridge should also update the
+    # mirror on the other bridge for the same room (skipping the source).
+    try:
+        import asyncio as _asyncio
+        loop = _asyncio.get_running_loop()
+        if platform != "telegram":
+            try:
+                import bridge_telegram as btg
+                loop.create_task(btg.forward_edit_to_telegram(
+                    body.room_name, int(ft_msg_id), new_content,
+                ))
+            except Exception:
+                pass
+        if platform != "discord":
+            try:
+                import bridge_discord as bdc
+                loop.create_task(bdc.forward_edit_to_discord(
+                    body.room_name, int(ft_msg_id), new_content,
+                ))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return {"ok": True, "id": int(ft_msg_id)}
