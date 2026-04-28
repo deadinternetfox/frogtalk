@@ -131,38 +131,54 @@
 /* Default (frog-green) theme: replace flat surface with the polished
    green gradient used by Friends/Settings/Channel popups so every modal
    matches the app theme.  Other themes keep their flat surface color. */
-body:not([data-theme]) .modal{
+body[data-theme="dark"] .modal{
   background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%) !important;
   border:1px solid #3b6c59 !important;
   color:#dff5e8 !important;
 }
-body:not([data-theme]) .modal-title{color:#dff5e8 !important}
-body:not([data-theme]) .modal-label{color:#9bbf9b !important}
-body:not([data-theme]) .modal-input{
+body[data-theme="dark"] .modal-title{color:#dff5e8 !important}
+body[data-theme="dark"] .modal-label{color:#9bbf9b !important}
+body[data-theme="dark"] .modal-input{
   background:linear-gradient(180deg,#12231e,#0f1d19) !important;
   border:1px solid #2f5548 !important;
   color:#e8f4ee !important;
 }
-body:not([data-theme]) .modal-input::placeholder{color:#85a89a !important}
-body:not([data-theme]) .modal-input:hover{border-color:#3e6a5b !important;background:linear-gradient(180deg,#152922,#11211c) !important}
-body:not([data-theme]) .modal-input:focus{border-color:#6bb698 !important;box-shadow:0 0 0 2px rgba(107,182,152,.18) !important}
-body:not([data-theme]) .modal-btn.secondary{
+body[data-theme="dark"] .modal-input::placeholder{color:#85a89a !important}
+body[data-theme="dark"] .modal-input:hover{border-color:#3e6a5b !important;background:linear-gradient(180deg,#152922,#11211c) !important}
+body[data-theme="dark"] .modal-input:focus{border-color:#6bb698 !important;box-shadow:0 0 0 2px rgba(107,182,152,.18) !important}
+body[data-theme="dark"] .modal-btn.secondary{
   background:linear-gradient(180deg,#1a3128,#11211c) !important;
   border:1px solid #2f5548 !important;
   color:#dff5e8 !important;
 }
-body:not([data-theme]) .modal-btn.secondary:hover{
+body[data-theme="dark"] .modal-btn.secondary:hover{
   background:linear-gradient(180deg,#214438,#163027) !important;
   border-color:#3e6a5b !important;
 }
-body:not([data-theme]) .modal-btn.danger{
+body[data-theme="dark"] .modal-btn.danger{
   background:linear-gradient(180deg,#3a1a1a,#2a1414) !important;
   border:1px solid #5a2a2a !important;
   color:#ff8a8a !important;
 }
-body:not([data-theme]) .modal-btn.danger:hover{
+body[data-theme="dark"] .modal-btn.danger:hover{
   background:linear-gradient(180deg,#4a2020,#3a1818) !important;
   border-color:#7a3a3a !important;
+}
+body[data-theme="dark"] .modal-btn.primary{
+  background:linear-gradient(180deg,#5fc862 0%,#4caf50 55%,#3e9444 100%) !important;
+  border:1px solid #6fd373 !important;
+  color:#082611 !important;
+  text-shadow:0 1px 0 rgba(255,255,255,.18);
+  box-shadow:0 2px 10px rgba(76,175,80,.30),inset 0 1px 0 rgba(255,255,255,.18) !important;
+}
+body[data-theme="dark"] .modal-btn.primary:hover{
+  background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%) !important;
+  border-color:#7fdf83 !important;
+  box-shadow:0 6px 18px rgba(76,175,80,.45),inset 0 1px 0 rgba(255,255,255,.22) !important;
+}
+body[data-theme="dark"] .modal-btn.primary:active{
+  background:linear-gradient(180deg,#479e4d,#3e8c43) !important;
+  box-shadow:inset 0 2px 6px rgba(0,0,0,.25) !important;
 }
 .modal-input{background:var(--bg-color) !important;border-color:var(--border-color) !important;color:var(--text-color) !important}
 .modal-label{color:var(--text-color) !important}
