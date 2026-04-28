@@ -1209,7 +1209,7 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
 .mp-header-sub{
   font-size:11.5px;color:#b090d0;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  display:flex;align-items:center;gap:6px
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;row-gap:4px;min-width:0
 }
 .mp-live-pulse{
   display:inline-block;width:7px;height:7px;border-radius:50%;
@@ -1250,6 +1250,24 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
   animation:mpSyncBlink .8s ease-in-out infinite
 }
 @keyframes mpSyncBlink{0%,100%{opacity:1}50%{opacity:.35}}
+/* Narrow screens: collapse sync badge to icon-only so it never overlaps the
+   Resync button on the right. The full label is still in the tooltip. */
+@media (max-width:560px){
+  .mp-sync-hint{padding:2px 6px;gap:3px;max-width:46%}
+  .mp-sync-hint .mp-sync-text{
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%
+  }
+}
+@media (max-width:420px){
+  .mp-header{gap:8px}
+  .mp-header-icon{width:32px;height:32px;font-size:16px;border-radius:9px}
+  .mp-header-room{font-size:14px}
+  .mp-header-badge{display:none}
+  .mp-sync-hint .mp-sync-text{display:none}
+  .mp-resync{width:42px;height:42px}
+  .mp-resync-ico{font-size:13px}
+  .mp-resync-lbl{font-size:6.5px}
+}
 .mp-resync{
   flex-shrink:0;
   background:linear-gradient(135deg,rgba(200,130,255,0.16),rgba(160,80,216,0.22));

@@ -182,6 +182,31 @@ class MusicService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Called when the user swipes our task away from the recents list. The
+     * media notification should not survive that — kill the foreground
+     * notification, broadcast a stop so the WebView side clears its UI on
+     * next launch, and stop the service.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        try {
+            currentActive = false
+            currentPlaying = false
+            if (currentMuted) {
+                try { applyMute(false) } catch (_: Throwable) {}
+                currentMuted = false
+            }
+            try {
+                sendBroadcast(Intent(ACTION_BROADCAST).putExtra("action", "stop"))
+            } catch (_: Throwable) {}
+            stopForegroundCompat()
+        } catch (e: Throwable) {
+            Log.w(TAG, "onTaskRemoved cleanup failed", e)
+        }
+        try { stopSelf() } catch (_: Throwable) {}
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         try {
             if (currentMuted) applyMute(false)
