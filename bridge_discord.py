@@ -313,8 +313,24 @@ async def _send_to_discord_inner(channel_id: int, text: str, media_url: str = No
                 wh_text = (quote_prefix + (text or "")).strip() or None
 
                 # Discord usernames must be 1-80 chars and can't contain
-                # "discord" or "@everyone" / "@here" mentions in the name.
-                wh_name = (nickname or "FrogTalk")[:80]
+                # "discord" / "clyde" or "@everyone" / "@here" mentions.
+                # Append "· via FrogTalk" so it's clear the message came
+                # from the FrogTalk bridge (mirrors the Telegram bridge).
+                _raw_nick = (nickname or "FrogTalk").strip() or "FrogTalk"
+                _suffix = " · via FrogTalk"
+                _max_nick = 80 - len(_suffix)
+                if len(_raw_nick) > _max_nick:
+                    _raw_nick = _raw_nick[: _max_nick - 1].rstrip() + "\u2026"
+                wh_name = (_raw_nick + _suffix)[:80]
+                # Discord rejects webhook usernames containing these
+                # substrings (case-insensitive); soften them so the send
+                # doesn't 400 out and fall back to the embed path.
+                _low = wh_name.lower()
+                if "discord" in _low or "clyde" in _low:
+                    import re as _re
+                    wh_name = _re.sub(r"(?i)discord", "disc\u200ford", wh_name)
+                    wh_name = _re.sub(r"(?i)clyde", "cly\u200fde", wh_name)
+                    wh_name = wh_name[:80]
 
                 try:
                     send_kwargs = dict(
