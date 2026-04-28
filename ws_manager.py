@@ -1,27 +1,53 @@
 """WebSocket connection manager for real-time messaging."""
 import json
+import os
 from typing import Dict, Set, Optional
 from fastapi import WebSocket
+
+
+def _per_ip_ws_cap() -> int:
+    try:
+        return max(1, int(os.getenv("FROGTALK_WS_PER_IP_CAP", "5")))
+    except ValueError:
+        return 5
 
 
 class ConnectionManager:
     def __init__(self):
         # room -> set of websockets
         self._rooms: Dict[str, Set] = {}
-        # websocket -> (room, nickname, user_id, avatar, is_admin)
+        # websocket -> (room, nickname, user_id, avatar, is_admin, ip)
         self._ws_meta: Dict[WebSocket, tuple] = {}
         # user_id -> set of websockets (for DM / call signaling)
         self._user_ws: Dict[int, Set] = {}
+        # ip -> active connection count (per-IP DoS cap)
+        self._ip_count: Dict[str, int] = {}
 
     async def connect(self, ws: WebSocket, room: str, nickname: str, user_id: int, avatar: str = None, is_admin: bool = False):
+        # Per-IP cap (covers phone+desktop+browser tabs at 5).
+        ip = ""
+        try:
+            client = getattr(ws, "client", None)
+            if client and getattr(client, "host", None):
+                ip = str(client.host)
+        except Exception:
+            ip = ""
+        if ip and self._ip_count.get(ip, 0) >= _per_ip_ws_cap():
+            try:
+                await ws.close(code=4008)
+            except Exception:
+                pass
+            return False
         await ws.accept()
         if room not in self._rooms:
             self._rooms[room] = set()
         self._rooms[room].add(ws)
-        self._ws_meta[ws] = (room, nickname, user_id, avatar, is_admin)
+        self._ws_meta[ws] = (room, nickname, user_id, avatar, is_admin, ip)
         if user_id not in self._user_ws:
             self._user_ws[user_id] = set()
         self._user_ws[user_id].add(ws)
+        if ip:
+            self._ip_count[ip] = self._ip_count.get(ip, 0) + 1
         # Announce join
         await self.broadcast_room(room, {
             "type": "presence",
@@ -29,12 +55,14 @@ class ConnectionManager:
             "nickname": nickname,
             "room": room,
         }, exclude=ws)
+        return True
 
     def disconnect(self, ws: WebSocket):
         meta = self._ws_meta.pop(ws, None)
         if not meta:
             return
         room, nickname, user_id = meta[:3]
+        ip = meta[5] if len(meta) >= 6 else ""
         if room in self._rooms:
             self._rooms[room].discard(ws)
             if not self._rooms[room]:
@@ -43,6 +71,10 @@ class ConnectionManager:
             self._user_ws[user_id].discard(ws)
             if not self._user_ws[user_id]:
                 del self._user_ws[user_id]
+        if ip and ip in self._ip_count:
+            self._ip_count[ip] -= 1
+            if self._ip_count[ip] <= 0:
+                del self._ip_count[ip]
         return room, nickname
 
     async def broadcast_room(self, room: str, data: dict, exclude: WebSocket = None):

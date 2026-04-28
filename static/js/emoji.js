@@ -70,7 +70,11 @@ function renderCategory(cat) {
     _customEmojis.forEach(emoji => {
       const span = document.createElement('span');
       span.className = 'ep-emoji custom-emoji';
-      span.innerHTML = `<img src="${emoji.image_data}" alt=":${emoji.name}:" title=":${emoji.name}:" style="width:24px;height:24px">`;
+      const _esc = (window.UI && UI.escHtml) ? UI.escHtml : (s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
+      const safeName = _esc(emoji.name || '');
+      const rawSrc = String(emoji.image_data || '');
+      const safeSrc = /^data:image\/(png|jpe?g|gif|webp);base64,/.test(rawSrc) ? _esc(rawSrc) : '';
+      span.innerHTML = `<img src="${safeSrc}" alt=":${safeName}:" title=":${safeName}:" style="width:24px;height:24px">`;
       span.onclick = () => insertEmoji(`:${emoji.name}:`);
       grid.appendChild(span);
     });

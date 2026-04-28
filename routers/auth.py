@@ -111,6 +111,17 @@ def _federated_register_enabled() -> bool:
     return (os.getenv("FROGTALK_FEDERATED_REGISTER_ENABLED", "1") or "1").strip().lower() in ("1", "true", "yes")
 
 
+def _signups_mode() -> str:
+    """open = legacy /register enabled; secure = require captcha (default); invite = require valid invite code."""
+    return (os.getenv("SIGNUPS_OPEN", "secure") or "secure").strip().lower()
+
+
+def _federation_legacy_plaintext_enabled() -> bool:
+    """Rollback flag: when 0 (default), federated-login-bootstrap is disabled
+    so plaintext passwords never leave this node during /auth/login."""
+    return (os.getenv("FEDERATION_LEGACY_PLAINTEXT", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
+
+
 def _tor_mode_enabled() -> bool:
     return (os.getenv("FROGTALK_TOR_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
 
@@ -140,8 +151,70 @@ def _local_known_urls(request: Request) -> set[str]:
     return {u for u in urls if u}
 
 
-async def _fanout_registration_to_peers(request: Request, nickname: str, password: str):
-    """Best-effort registration replication so account exists across nodes."""
+def _build_provision_ticket(user_id: int, nickname: str, password_hash: str, ttl_seconds: int = 120) -> str | None:
+    """Build an HMAC-signed federation provisioning ticket carrying the bcrypt
+    hash so we never transmit a plaintext password between peers."""
+    secret = _fed_session_secret()
+    if not secret:
+        return None
+    ident = db.get_user_by_id(user_id) or {}
+    now = int(time.time())
+    payload = {
+        "v": 1,
+        "kind": "provision",
+        "iat": now,
+        "exp": now + max(30, min(int(ttl_seconds or 120), 600)),
+        "nickname": str(nickname or "").strip(),
+        "password_hash": str(password_hash or ""),
+        "global_user_id": str(ident.get("global_user_id") or "").strip(),
+        "identity_pubkey": str(ident.get("identity_pubkey") or "").strip(),
+        "avatar": ident.get("avatar") or "",
+        "bio": ident.get("bio") or "",
+    }
+    payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+    return f"{_b64url_encode(payload_bytes)}.{_b64url_encode(sig)}"
+
+
+def _verify_provision_ticket(ticket: str) -> dict | None:
+    secret = _fed_session_secret()
+    if not secret:
+        return None
+    raw = str(ticket or "").strip()
+    if "." not in raw:
+        return None
+    p_b64, s_b64 = raw.split(".", 1)
+    try:
+        payload_bytes = _b64url_decode(p_b64)
+        sig = _b64url_decode(s_b64)
+    except Exception:
+        return None
+    if not payload_bytes or not sig:
+        return None
+    expect = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+    if not hmac.compare_digest(expect, sig):
+        return None
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except Exception:
+        return None
+    if str(payload.get("kind") or "") != "provision":
+        return None
+    if int(payload.get("exp") or 0) < int(time.time()):
+        return None
+    if not str(payload.get("nickname") or "").strip():
+        return None
+    if not str(payload.get("password_hash") or "").strip():
+        return None
+    return payload
+
+
+async def _fanout_registration_to_peers(request: Request, user_id: int, nickname: str, password: str):
+    """Best-effort registration replication so account exists across nodes.
+
+    Default path: HMAC-signed provisioning ticket carrying the bcrypt hash so
+    plaintext passwords never leave this node. Legacy plaintext path is gated
+    on FEDERATION_LEGACY_PLAINTEXT for emergency rollback only."""
     if not _federated_register_enabled():
         return
 
@@ -155,15 +228,29 @@ async def _fanout_registration_to_peers(request: Request, nickname: str, passwor
         peers.append((base.endswith(".onion") or ".onion/" in base, base.startswith("https://"), int(row.get("official") or 0), base))
     peers.sort(reverse=True)
 
+    pw_hash = db.get_user_password_hash(user_id) or ""
+    ticket = _build_provision_ticket(user_id, nickname, pw_hash) if pw_hash else None
+    legacy = _federation_legacy_plaintext_enabled()
+
     for _, __, ___, base in peers[:12]:
         try:
-            await asyncio.to_thread(
-                _post_json,
-                f"{base}/api/auth/register",
-                {"nickname": nickname, "password": password},
-                {"X-Federation-Relay": "1"},
-                4.5,
-            )
+            if ticket:
+                await asyncio.to_thread(
+                    _post_json,
+                    f"{base}/api/auth/federation-provision",
+                    {"ticket": ticket},
+                    {"X-Federation-Relay": "1"},
+                    4.5,
+                )
+                continue
+            if legacy:
+                await asyncio.to_thread(
+                    _post_json,
+                    f"{base}/api/auth/register",
+                    {"nickname": nickname, "password": password},
+                    {"X-Federation-Relay": "1"},
+                    4.5,
+                )
         except urllib.error.HTTPError as e:
             # 409 means account already exists there; keep going.
             if int(getattr(e, "code", 0) or 0) in (400, 401, 403, 404, 409):
@@ -378,6 +465,13 @@ async def register(
     body: RegisterRequest,
     x_federation_relay: str | None = Header(default=None),
 ):
+    # Gate the legacy plaintext-password registration route. Default mode
+    # "secure" forces clients to use /register-secure (CAPTCHA-protected) and
+    # blocks bot account farming. Federation relays bypass this gate because
+    # they replicate accounts that were already validated on the issuing node.
+    is_relay = (x_federation_relay or "").strip() == "1"
+    if not is_relay and _signups_mode() != "open":
+        return JSONResponse(status_code=403, content={"error": "Registration is closed; use /api/auth/register-secure"})
     if not NICKNAME_RE.match(body.nickname):
         return JSONResponse(status_code=400, content={
             "error": "Nickname must be 2-32 characters: letters, numbers, _ or -"
@@ -386,7 +480,7 @@ async def register(
         return JSONResponse(status_code=400, content={"error": "Password must be at least 6 characters"})
     user_id = db.create_user(body.nickname, body.password)
     if user_id is None:
-        return JSONResponse(status_code=409, content={"error": "Nickname already taken"})
+        return JSONResponse(status_code=409, content={"error": "Could not register"})
     db.auto_join_defaults(user_id)
     try:
         ident = db.get_user_by_id(user_id) or {}
@@ -405,7 +499,7 @@ async def register(
         pass
     if (x_federation_relay or "").strip() != "1":
         try:
-            await _fanout_registration_to_peers(request, body.nickname, body.password)
+            await _fanout_registration_to_peers(request, user_id, body.nickname, body.password)
         except Exception:
             pass
     token = db.create_session(user_id)
@@ -420,7 +514,11 @@ async def login(request: Request, body: LoginRequest):
         # Optional federated bootstrap: if credentials are valid on a known
         # peer server, create the local account/profile so server switches feel
         # seamless while each node keeps independent encrypted storage.
-        boot = await _try_federated_login_bootstrap(request, body.nickname, body.password)
+        # Disabled by default (FEDERATION_LEGACY_PLAINTEXT=0) to avoid
+        # forwarding plaintext passwords across the federation network.
+        boot = None
+        if _federation_legacy_plaintext_enabled():
+            boot = await _try_federated_login_bootstrap(request, body.nickname, body.password)
         if not boot:
             return JSONResponse(status_code=401, content={"error": "Invalid nickname or password"})
         user = boot["user"]
@@ -477,6 +575,53 @@ async def login_with_federation_ticket(
     }
 
 
+class FederationProvisionRequest(BaseModel):
+    ticket: str
+
+
+@router.post("/federation-provision")
+@limiter.limit("60/hour")
+async def federation_provision(request: Request, body: FederationProvisionRequest):
+    """Receive an HMAC-signed provisioning ticket from a peer node and create
+    the local account using the bcrypt hash directly. No plaintext password
+    crosses the wire."""
+    payload = _verify_provision_ticket(body.ticket)
+    if not payload:
+        return JSONResponse(status_code=401, content={"error": "Invalid or expired ticket"})
+    nickname = str(payload.get("nickname") or "").strip()
+    if not NICKNAME_RE.match(nickname):
+        return JSONResponse(status_code=400, content={"error": "Invalid nickname"})
+    pw_hash = str(payload.get("password_hash") or "").strip()
+    if not pw_hash.startswith("$2"):
+        return JSONResponse(status_code=400, content={"error": "Invalid hash"})
+    existing = db.get_user_by_nick(nickname)
+    if existing:
+        return JSONResponse(status_code=200, content={"ok": True, "existing": True})
+    gid = str(payload.get("global_user_id") or "").strip() or None
+    user_id = db.create_user_with_hash(nickname, pw_hash, gid)
+    if user_id is None:
+        return JSONResponse(status_code=409, content={"error": "Could not provision"})
+    try:
+        avatar = payload.get("avatar")
+        bio = payload.get("bio")
+        ipk = str(payload.get("identity_pubkey") or "").strip()
+        with db._conn() as con:
+            if avatar is not None:
+                con.execute("UPDATE users SET avatar=? WHERE id=?", (avatar, user_id))
+            if bio is not None:
+                con.execute("UPDATE users SET bio=? WHERE id=?", (bio, user_id))
+            if ipk:
+                con.execute("UPDATE users SET identity_pubkey=? WHERE id=?", (ipk, user_id))
+            con.commit()
+    except Exception:
+        pass
+    try:
+        db.auto_join_defaults(user_id)
+    except Exception:
+        pass
+    return {"ok": True, "user_id": user_id}
+
+
 @router.post("/logout")
 async def logout(x_session_token: str = None, current_user: dict = Depends(get_current_user)):
     from fastapi import Header
@@ -503,7 +648,7 @@ async def change_nickname(request: Request, body: NicknameChangeRequest, current
         return JSONResponse(status_code=401, content={"error": "Incorrect password"})
     existing = db.get_user_by_nick(body.nickname)
     if existing and existing["id"] != current_user["id"]:
-        return JSONResponse(status_code=409, content={"error": "Nickname already taken"})
+        return JSONResponse(status_code=409, content={"error": "Could not change nickname"})
     try:
         with db._conn() as con:
             # Log old nickname to history
@@ -513,7 +658,7 @@ async def change_nickname(request: Request, body: NicknameChangeRequest, current
             con.execute("UPDATE users SET nickname=? WHERE id=?", (body.nickname, current_user["id"]))
             con.commit()
     except Exception:
-        return JSONResponse(status_code=409, content={"error": "Nickname already taken"})
+        return JSONResponse(status_code=409, content={"error": "Could not change nickname"})
     return {"ok": True, "nickname": body.nickname}
 
 
@@ -794,7 +939,7 @@ async def register_with_captcha(
     
     user_id = db.create_user(body.nickname, body.password)
     if user_id is None:
-        return JSONResponse(status_code=409, content={"error": "Nickname already taken"})
+        return JSONResponse(status_code=409, content={"error": "Could not register"})
     db.auto_join_defaults(user_id)
     try:
         ident = db.get_user_by_id(user_id) or {}
@@ -813,7 +958,7 @@ async def register_with_captcha(
         pass
     if (x_federation_relay or "").strip() != "1":
         try:
-            await _fanout_registration_to_peers(request, body.nickname, body.password)
+            await _fanout_registration_to_peers(request, user_id, body.nickname, body.password)
         except Exception:
             pass
     token = db.create_session(user_id)
@@ -829,7 +974,8 @@ class GenerateRecoveryKeyRequest(BaseModel):
 
 
 @router.post("/recovery-key")
-async def generate_recovery_key(body: GenerateRecoveryKeyRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit("5/hour")
+async def generate_recovery_key(request: Request, body: GenerateRecoveryKeyRequest, current_user: dict = Depends(get_current_user)):
     """Generate a recovery key file for account recovery."""
     # Verify password
     if not db.verify_user(current_user["nickname"], body.password):
@@ -906,7 +1052,8 @@ class VerifyRecoveryKeyRequest(BaseModel):
 
 
 @router.post("/verify-recovery-key")
-async def verify_recovery_key(body: VerifyRecoveryKeyRequest):
+@limiter.limit("20/hour")
+async def verify_recovery_key(request: Request, body: VerifyRecoveryKeyRequest):
     """Check if a recovery key is valid (without using it)."""
     key_hash = hashlib.sha256(body.recovery_key.encode()).hexdigest()
     

@@ -277,6 +277,27 @@ def create_user(nickname: str, password: str) -> Optional[int]:
         return None
 
 
+def create_user_with_hash(nickname: str, password_hash: str, global_user_id: Optional[str] = None) -> Optional[int]:
+    """Insert a user with a pre-computed bcrypt hash (used by federation
+    provisioning so plaintext passwords never leave the issuing node)."""
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                "INSERT INTO users (nickname, password_hash, global_user_id) VALUES (?, ?, ?)",
+                (nickname, password_hash, (global_user_id or str(uuid.uuid4()))),
+            )
+            con.commit()
+            return cur.lastrowid
+    except sqlite3.IntegrityError:
+        return None
+
+
+def get_user_password_hash(user_id: int) -> Optional[str]:
+    with _conn() as con:
+        row = con.execute("SELECT password_hash FROM users WHERE id=?", (user_id,)).fetchone()
+    return row["password_hash"] if row else None
+
+
 def verify_user(nickname: str, password: str) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(

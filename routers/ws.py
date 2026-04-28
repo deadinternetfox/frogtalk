@@ -130,10 +130,13 @@ async def websocket_endpoint(
             await websocket.close(code=4003)
             return
 
-    await manager.connect(
+    accepted = await manager.connect(
         websocket, room_name, user["nickname"], user["id"],
         avatar=user.get("avatar"), is_admin=user.get("is_admin", False)
     )
+    if accepted is False:
+        # Per-IP cap reached; manager.connect already closed with 4008.
+        return
     db.update_last_seen(user["id"])
 
     # Auto-add to room_members on connect so they appear in the offline list

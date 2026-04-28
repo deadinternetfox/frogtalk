@@ -47,7 +47,8 @@ class EditDMBody(BaseModel):
 
 
 @router.post("/open/{nickname}")
-async def open_dm(nickname: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit("60/hour")
+async def open_dm(request: Request, nickname: str, current_user: dict = Depends(get_current_user)):
     """Get or create DM channel with another user."""
     profile = db.get_user_profile(nickname)
     if not profile:
