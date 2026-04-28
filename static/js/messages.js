@@ -92,12 +92,25 @@ const Messages = (() => {
         placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Invite invalid or expired</span>`;
         return;
       }
-      // room_icon may be a single emoji, but legacy/edited rooms can have
-      // multi-character strings stored. Take only the first grapheme so the
-      // 48x48 avatar circle never overflows.
-      let rawIcon = (data.room_icon || '💬');
-      try { rawIcon = Array.from(String(rawIcon).trim())[0] || '💬'; } catch { rawIcon = String(rawIcon).charAt(0) || '💬'; }
-      const icon = UI.escHtml(rawIcon);
+      // room_icon can be a single emoji, an uploaded image (data: URL,
+      // absolute path, or http(s) URL), or a legacy multi-char text string.
+      // Render <img> for images, otherwise take just the first grapheme so
+      // the 48x48 avatar circle never overflows with stray letters.
+      const rawIconStr = String(data.room_icon || '').trim();
+      const isImg = rawIconStr && (
+        rawIconStr.startsWith('data:image') ||
+        rawIconStr.startsWith('http://') ||
+        rawIconStr.startsWith('https://') ||
+        rawIconStr.startsWith('/')
+      );
+      let iconHtml;
+      if (isImg) {
+        iconHtml = `<img src="${UI.escHtml(rawIconStr)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block">`;
+      } else {
+        let glyph = rawIconStr || '💬';
+        try { glyph = Array.from(glyph)[0] || '💬'; } catch { glyph = glyph.charAt(0) || '💬'; }
+        iconHtml = UI.escHtml(glyph);
+      }
       const name = UI.escHtml(data.room_name || '');
       const desc = data.room_desc ? `<div class="invite-card-desc">${UI.escHtml(data.room_desc.substring(0, 100))}</div>` : '';
       const by = data.created_by ? `<span class="invite-card-by">Invited by <strong>${UI.escHtml(data.created_by)}</strong></span>` : '';
@@ -109,7 +122,7 @@ const Messages = (() => {
         <div class="invite-card">
           <div class="invite-card-header">You've been invited to join a channel</div>
           <div class="invite-card-body">
-            <div class="invite-card-icon">${icon}</div>
+            <div class="invite-card-icon">${iconHtml}</div>
             <div class="invite-card-info">
               <div class="invite-card-name">#${name}</div>
               ${desc}
