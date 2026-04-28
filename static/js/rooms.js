@@ -2064,7 +2064,7 @@ async function showChannelDirectory() {
             <span style="font-size:28px">🌐</span>
             <div>
               <div class="modal-title" style="margin:0;font-size:18px">Channel Directory</div>
-              <div style="color:#888;font-size:12px">Discover and join communities</div>
+              <div style="color:#9bbf9b;font-size:12px">Discover and join communities</div>
             </div>
           </div>
           <button class="social-close-btn" onclick="document.getElementById('modal-directory').classList.add('hidden')" style="position:static;font-size:20px">✕</button>
