@@ -433,18 +433,20 @@ body{
 #auth-overlay{
   position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
   background:
-    radial-gradient(1100px 700px at 18% -10%, rgba(76,175,80,.18), transparent 60%),
-    radial-gradient(900px 600px at 92% 110%, rgba(46,138,74,.16), transparent 65%),
-    linear-gradient(160deg,#06120c 0%,#08160f 45%,#04100a 100%);
+    radial-gradient(1200px 760px at 18% -10%, rgba(76,175,80,.32), transparent 62%),
+    radial-gradient(1000px 700px at 92% 110%, rgba(46,138,74,.28), transparent 66%),
+    radial-gradient(700px 500px at 50% 50%, rgba(127,210,167,.06), transparent 70%),
+    linear-gradient(160deg,#0c2018 0%,#0f2a20 45%,#091c14 100%);
   z-index:1000;overflow-y:auto;
   -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)
 }
 #auth-overlay::before{
-  /* subtle vignette + soft top sheen */
+  /* subtle vignette + soft top sheen, slightly greener */
   content:"";position:absolute;inset:0;pointer-events:none;
   background:
-    linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,0) 18%),
-    radial-gradient(60% 40% at 50% 0%, rgba(127,210,167,.10), transparent 70%);
+    linear-gradient(180deg, rgba(127,210,167,.05), rgba(255,255,255,0) 22%),
+    radial-gradient(70% 45% at 50% 0%, rgba(127,210,167,.16), transparent 72%),
+    radial-gradient(60% 40% at 50% 100%, rgba(46,138,74,.14), transparent 75%);
 }
 #auth-overlay.hidden{display:none}
 .auth-box{
