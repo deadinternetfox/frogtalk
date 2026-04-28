@@ -192,6 +192,50 @@ body[data-theme="dark"] .modal-card{
 body[data-theme="dark"] .modal-card .modal-label{color:#9bd0ad !important}
 body[data-theme="dark"] .modal-card > label{color:#dff5e8}
 body[data-theme="dark"] .modal-card > div[style*="color:#888"]{color:#7a9c8d !important}
+/* Native <select> elements: kill the OS-default white chrome and style
+   them like .modal-input with a custom chevron. The dark theme inherits
+   the gradient + focus glow from the .modal-input rules above. */
+select.modal-input,
+.modal-card select,
+#friends-panel select,
+#modal-profile select,
+#channel-profile-overlay select{
+  -webkit-appearance:none !important;
+  -moz-appearance:none !important;
+  appearance:none !important;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%237fd2a7'><path d='M3.5 6l4.5 4.5L12.5 6z'/></svg>") !important;
+  background-repeat:no-repeat !important;
+  background-position:right 10px center !important;
+  background-size:14px 14px !important;
+  padding-right:34px !important;
+  cursor:pointer;
+}
+body[data-theme="dark"] select.modal-input,
+body[data-theme="dark"] .modal-card select{
+  background-color:#0e1f18 !important;
+  background-image:
+    linear-gradient(180deg,#10241c 0%,#0c1d16 60%,#0a1813 100%),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%237fd2a7'><path d='M3.5 6l4.5 4.5L12.5 6z'/></svg>") !important;
+  background-repeat:no-repeat,no-repeat !important;
+  background-position:0 0,right 10px center !important;
+  background-size:auto,14px 14px !important;
+  background-blend-mode:normal !important;
+  color:#e8f4ee !important;
+  border:1px solid #2f5548 !important;
+}
+/* Style the dropdown popup itself. Browsers vary in how much of this
+   they honour, but Chromium/Firefox on Linux and recent Safari respect
+   background-color/color on <option>. */
+body[data-theme="dark"] select.modal-input option,
+body[data-theme="dark"] .modal-card select option{
+  background-color:#0e1f18 !important;
+  color:#e8f4ee !important;
+}
+body[data-theme="dark"] select.modal-input option:checked,
+body[data-theme="dark"] .modal-card select option:checked{
+  background:linear-gradient(180deg,#1a3128,#11211c) !important;
+  color:#dff5e8 !important;
+}
 body[data-theme="dark"] .modal-btn.secondary{
   background:linear-gradient(180deg,#1a3128,#11211c) !important;
   border:1px solid #2f5548 !important;
