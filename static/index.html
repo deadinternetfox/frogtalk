@@ -1224,11 +1224,11 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
   flex-shrink:0;
   background:linear-gradient(135deg,rgba(200,130,255,0.16),rgba(160,80,216,0.22));
   border:1px solid rgba(200,130,255,0.42);color:#e8b5ff;
-  font-weight:700;padding:6px 14px;border-radius:999px;
+  font-weight:700;padding:0;border-radius:50%;
   cursor:pointer;
   transition:background .18s ease, transform .12s ease, border-color .18s ease, box-shadow .2s ease;
-  display:inline-flex;align-items:center;gap:6px;line-height:1;
-  white-space:nowrap;min-height:28px;
+  display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;line-height:1;
+  white-space:nowrap;width:52px;height:52px;
   box-shadow:0 1px 3px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.05)
 }
 .mp-resync:hover{
@@ -1238,8 +1238,8 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
   transform:translateY(-1px)
 }
 .mp-resync:active{transform:scale(.95)}
-.mp-resync-ico{font-size:11px;line-height:1;opacity:.95}
-.mp-resync-lbl{font-size:9.5px;line-height:1;text-transform:uppercase;letter-spacing:.5px;font-weight:800}
+.mp-resync-ico{font-size:16px;line-height:1;opacity:.95}
+.mp-resync-lbl{font-size:8px;line-height:1;text-transform:uppercase;letter-spacing:.4px;font-weight:800;margin-top:2px}
 .mp-now{display:flex;gap:12px;align-items:center}
 .mp-art{width:72px;height:72px;border-radius:6px;background:#2a1a3a center/cover no-repeat;flex-shrink:0;
   box-shadow:0 2px 10px rgba(200,130,255,0.25)}
