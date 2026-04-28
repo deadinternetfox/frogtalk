@@ -2088,10 +2088,20 @@ async function showChannelDirectory() {
   }
   modal.classList.remove('hidden');
 
-  // Clear any stale content from a previous open so the user never sees
-  // old cached channels flash before the fresh data arrives.
+  // Always start with a clean loading state — never flash stale cached
+  // channels from a previous open.  Skeleton cards keep the layout stable
+  // so the modal doesn't visibly collapse and re-expand when results land.
+  const _skeletonCard = `
+    <div class="dir-card dir-skel" aria-hidden="true">
+      <div class="dir-card-left"><div class="dir-card-icon-lg dir-skel-shimmer" style="border-radius:50%"></div></div>
+      <div class="dir-card-body" style="flex:1">
+        <div class="dir-skel-shimmer" style="height:16px;width:38%;border-radius:6px;margin-bottom:10px"></div>
+        <div class="dir-skel-shimmer" style="height:12px;width:80%;border-radius:6px;margin-bottom:8px"></div>
+        <div class="dir-skel-shimmer" style="height:12px;width:55%;border-radius:6px"></div>
+      </div>
+    </div>`;
   const _res = document.getElementById('dir-results');
-  if (_res) _res.innerHTML = '<div style="text-align:center;padding:20px;color:#666">Loading…</div>';
+  if (_res) _res.innerHTML = _skeletonCard + _skeletonCard + _skeletonCard;
   const _sug = document.getElementById('dir-suggested');
   if (_sug) _sug.innerHTML = '';
   const _searchEl = document.getElementById('dir-search');
@@ -2181,18 +2191,27 @@ async function searchDirectory() {
   const cat = document.getElementById('dir-category')?.value || '';
   const el = document.getElementById('dir-results');
   if (!el) return;
-  el.innerHTML = '<div style="text-align:center;padding:20px;color:#666">Loading...</div>';
+  // Keep existing skeletons / results visible while refetching — only dim
+  // them.  Fall back to a plain text placeholder if the area is empty.
+  const _hadContent = el.children.length > 0;
+  if (!_hadContent) {
+    el.innerHTML = '<div style="text-align:center;padding:20px;color:#666">Loading...</div>';
+  } else {
+    el.style.opacity = '0.55';
+    el.style.transition = 'opacity .15s ease';
+  }
   
   try {
     const params = new URLSearchParams();
     if (q) params.set('search', q);
     if (cat) params.set('category', cat);
     const r = await fetch(`/api/directory/channels?${params}`, { headers: { 'X-Session-Token': State.token } });
-    if (!r.ok) { el.innerHTML = '<div style="color:#f44336;padding:20px">Failed to load</div>'; return; }
+    if (!r.ok) { el.style.opacity=''; el.innerHTML = '<div style="color:#f44336;padding:20px">Failed to load</div>'; return; }
     const data = await r.json();
     const channels = data.channels || [];
-    
+
     if (!channels.length) {
+      el.style.opacity = '';
       el.innerHTML = `<div style="text-align:center;padding:40px">
         <div style="font-size:48px;margin-bottom:12px">🔍</div>
         <div style="color:#888;font-size:15px">No channels found</div>
@@ -2200,9 +2219,11 @@ async function searchDirectory() {
       </div>`;
       return;
     }
-    
+
     el.innerHTML = channels.map(ch => renderDirectoryCard(ch, false)).join('');
+    el.style.opacity = '';
   } catch (e) {
+    el.style.opacity = '';
     el.innerHTML = '<div style="color:#f44336;padding:20px">Error loading directory</div>';
   }
 }

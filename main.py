@@ -308,6 +308,12 @@ _UI_JS_PATH = "static/js/ui.js"
 _FRIENDS_JS_PATH = "static/js/friends.js"
 _DMS_JS_PATH = "static/js/dms.js"
 _MEDIA_JS_PATH = "static/js/media.js"
+_ROOMS_JS_PATH = "static/js/rooms.js"
+_STATE_JS_PATH = "static/js/state.js"
+_WS_JS_PATH = "static/js/ws.js"
+_CALLS_JS_PATH = "static/js/calls.js"
+_SOCIAL_JS_PATH = "static/js/social.js"
+_NOTIFICATIONS_JS_PATH = "static/js/notifications.js"
 
 # Cached app shell. The shell is ~300 KB and was previously read from disk
 # on every page load. Caching it in memory cuts the cold-path overhead and
@@ -319,6 +325,8 @@ def _shell_asset_paths() -> tuple:
     return (
         _APP_JS_PATH, _MESSAGES_JS_PATH, _UI_JS_PATH,
         _FRIENDS_JS_PATH, _DMS_JS_PATH, _MEDIA_JS_PATH,
+        _ROOMS_JS_PATH, _STATE_JS_PATH, _WS_JS_PATH,
+        _CALLS_JS_PATH, _SOCIAL_JS_PATH, _NOTIFICATIONS_JS_PATH,
     )
 
 
