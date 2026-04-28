@@ -875,6 +875,7 @@ async def serve_sitemap_static():
         ("/",             "daily",   "1.0"),
         ("/docs/api",     "monthly", "0.6"),
         ("/docs/node",    "monthly", "0.6"),
+        ("/privacy",      "yearly",  "0.4"),
         ("/download/android", "weekly", "0.7"),
     ]
     urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
@@ -1114,6 +1115,14 @@ async def docs_api_page():
 @app.get("/docs/node")
 async def docs_node_page():
     page = "static/docs-node.html"
+    if os.path.exists(page):
+        return FileResponse(page)
+    return FileResponse("static/home.html")
+
+
+@app.get("/privacy")
+async def privacy_page():
+    page = "static/privacy.html"
     if os.path.exists(page):
         return FileResponse(page)
     return FileResponse("static/home.html")

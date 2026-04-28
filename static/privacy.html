@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="FrogTalk Privacy Policy — what we collect, what we don't, how end-to-end encryption protects you, and your rights as a user.">
+<meta name="theme-color" content="#4caf50">
+<meta name="robots" content="index, follow">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://frogtalk.xyz/privacy">
+<meta property="og:title" content="FrogTalk — Privacy Policy">
+<meta property="og:description" content="Privacy-first by design. End-to-end encrypted DMs and calls, no analytics, no third-party trackers.">
+<meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta property="og:site_name" content="FrogTalk">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="FrogTalk — Privacy Policy">
+<meta name="twitter:description" content="What we collect, what we don't, and how E2E encryption protects you.">
+<meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+
+<link rel="icon" href="/static/favicon.ico" sizes="any">
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" sizes="192x192" href="/static/icons/icon-192.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://frogtalk.xyz/privacy">
+<title>Privacy Policy — FrogTalk</title>
+
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #21262d;
+    --border: #30363d;
+    --green: #4ade80;
+    --green-dim: #22c55e;
+    --green-dark: #16a34a;
+    --text: #e6edf3;
+    --text-muted: #7d8590;
+    --accent: #4ade80;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    overflow-x: hidden;
+  }
+  a { color: var(--green); }
+  a:hover { color: var(--green-dim); }
+
+  /* ── NAV ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem;
+    height: 60px;
+    background: rgba(13,17,23,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo {
+    display: flex; align-items: center; gap: .5rem;
+    font-weight: 700; font-size: 1.1rem; color: var(--text);
+    text-decoration: none;
+  }
+  .nav-logo .frog { font-size: 1.5rem; }
+  .nav-links { display: flex; align-items: center; gap: 1.25rem; }
+  .nav-links a { color: var(--text-muted); text-decoration: none; font-size: .92rem; transition: color .15s; }
+  .nav-links a:hover { color: var(--text); }
+  .btn {
+    padding: .55rem 1.1rem; border-radius: 8px; font-weight: 600; font-size: .9rem;
+    text-decoration: none; display: inline-flex; align-items: center; gap: .35rem;
+    transition: transform .15s, box-shadow .15s, background .15s;
+    border: 1px solid transparent;
+  }
+  .btn-ghost { color: var(--text); border-color: var(--border); }
+  .btn-ghost:hover { background: var(--bg2); }
+  .btn-primary { background: var(--green); color: #062b14; }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 18px rgba(74,222,128,.35); }
+
+  /* ── HERO ── */
+  .privacy-hero {
+    position: relative;
+    padding: 8rem 1.5rem 3.5rem;
+    text-align: center;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(900px 320px at 50% -10%, rgba(74,222,128,.13), transparent 65%),
+      var(--bg);
+  }
+  .privacy-hero h1 {
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-weight: 800;
+    letter-spacing: -.5px;
+    margin-bottom: .75rem;
+    background: linear-gradient(180deg, #c8ffd9 0%, #4ade80 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .privacy-hero p { color: var(--text-muted); max-width: 640px; margin: 0 auto; font-size: 1.05rem; }
+  .updated {
+    display: inline-block; margin-top: 1.25rem; padding: .35rem .85rem;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 999px; font-size: .82rem; color: var(--text-muted);
+  }
+
+  /* ── LAYOUT ── */
+  .wrap { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+  .toc {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.25rem 1.4rem;
+    margin-bottom: 2.5rem;
+  }
+  .toc h2 { font-size: .85rem; text-transform: uppercase; letter-spacing: .12em; color: var(--text-muted); margin-bottom: .85rem; font-weight: 600; }
+  .toc ol { list-style: none; counter-reset: toc; display: grid; gap: .35rem; grid-template-columns: 1fr 1fr; }
+  .toc ol li { counter-increment: toc; }
+  .toc ol li::before { content: counter(toc, decimal-leading-zero) " · "; color: var(--green); font-variant-numeric: tabular-nums; font-size: .82rem; }
+  .toc ol li a { color: var(--text); text-decoration: none; font-size: .92rem; }
+  .toc ol li a:hover { color: var(--green); }
+  @media (max-width: 600px) { .toc ol { grid-template-columns: 1fr; } }
+
+  section.policy {
+    margin-bottom: 2.5rem;
+    padding-top: 1rem;
+    scroll-margin-top: 80px;
+  }
+  section.policy h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    display: flex; align-items: center; gap: .65rem;
+  }
+  section.policy h2::before {
+    content: "";
+    width: 6px; height: 22px;
+    background: var(--green);
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  section.policy h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 1.4rem 0 .5rem;
+    color: var(--text);
+  }
+  section.policy p { color: var(--text-muted); margin-bottom: 1rem; }
+  section.policy p strong { color: var(--text); font-weight: 600; }
+  section.policy ul { list-style: none; display: flex; flex-direction: column; gap: .55rem; margin: .5rem 0 1rem; }
+  section.policy ul li {
+    padding: .5rem .85rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: .94rem;
+  }
+  section.policy ul li strong { color: var(--text); }
+  section.policy ul.checks li { border-left: 3px solid var(--green); }
+  section.policy ul.crosses li { border-left: 3px solid #f85149; }
+  section.policy ul.checks li::before { content: "✓ "; color: var(--green); font-weight: 700; }
+  section.policy ul.crosses li::before { content: "✗ "; color: #f85149; font-weight: 700; }
+
+  .callout {
+    background: linear-gradient(135deg, rgba(74,222,128,.08), rgba(74,222,128,.02));
+    border: 1px solid rgba(74,222,128,.28);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    margin: 1.25rem 0;
+  }
+  .callout strong { color: var(--green); }
+
+  .contact-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.5rem;
+    margin-top: 1rem;
+  }
+  .contact-card a { color: var(--green); text-decoration: none; font-weight: 600; }
+  .contact-card a:hover { text-decoration: underline; }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 1rem;
+    color: var(--text-muted); font-size: .87rem;
+    background: var(--bg2);
+  }
+  footer a { color: var(--text-muted); text-decoration: none; }
+  footer a:hover { color: var(--green); }
+  .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+
+  @media (max-width: 720px) {
+    nav { padding: 0 1rem; }
+    .nav-links a:not(.btn) { display: none; }
+    .privacy-hero { padding-top: 7rem; }
+    footer { flex-direction: column; text-align: center; gap: 1rem; }
+    .footer-links { justify-content: center; gap: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="/" class="nav-logo">
+    <span class="frog">🐸</span>
+    FrogTalk
+  </a>
+  <div class="nav-links">
+    <a href="/#features">Features</a>
+    <a href="/#how">How it works</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/docs/api">API</a>
+    <a href="/app" class="btn btn-ghost">Log In</a>
+    <a href="/app" class="btn btn-primary">Sign Up Free</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="privacy-hero">
+  <h1>Privacy Policy</h1>
+  <p>FrogTalk is built privacy-first. Your messages are encrypted before they leave your device, we run no analytics, and we sell nothing to anyone. This page explains exactly what that means in plain English.</p>
+  <div class="updated">Last updated: 28 April 2026</div>
+</section>
+
+<!-- BODY -->
+<div class="wrap">
+
+  <!-- TOC -->
+  <nav class="toc" aria-label="Table of contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#summary">Plain-English summary</a></li>
+      <li><a href="#who">Who we are</a></li>
+      <li><a href="#collect">What we collect</a></li>
+      <li><a href="#dont">What we don't collect</a></li>
+      <li><a href="#encryption">End-to-end encryption</a></li>
+      <li><a href="#bridges">Discord & Telegram bridges</a></li>
+      <li><a href="#cookies">Cookies & local storage</a></li>
+      <li><a href="#thirdparty">Third-party services</a></li>
+      <li><a href="#retention">Data retention</a></li>
+      <li><a href="#rights">Your rights</a></li>
+      <li><a href="#children">Children</a></li>
+      <li><a href="#changes">Changes to this policy</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ol>
+  </nav>
+
+  <section class="policy" id="summary">
+    <h2>Plain-English summary</h2>
+    <p>If you only read one section, read this:</p>
+    <ul class="checks">
+      <li><strong>Direct messages</strong> are end-to-end encrypted with ECDH + AES-256-GCM. We can't read them, and neither can anyone with access to our servers.</li>
+      <li><strong>Voice and video calls</strong> are peer-to-peer over WebRTC. Audio and video never touch our server.</li>
+      <li>We <strong>do not run analytics</strong>, do not embed third-party trackers, and do not sell or share your data with advertisers.</li>
+      <li>The only personal information required to sign up is a <strong>nickname and password</strong>. No email, no phone number.</li>
+      <li>You can <strong>self-host</strong> FrogTalk — the source is open and the data is a single SQLite file you fully control.</li>
+    </ul>
+  </section>
+
+  <section class="policy" id="who">
+    <h2>Who we are</h2>
+    <p><strong>FrogTalk</strong> ("we", "us") is the operator of the chat service available at <a href="https://frogtalk.xyz">frogtalk.xyz</a> and the official Android, iOS, Linux, Windows, and desktop applications. The service is also available as open-source software you can run on your own infrastructure; this policy describes the version we operate at <strong>frogtalk.xyz</strong>. Self-hosted instances are governed by the policies of their respective operators.</p>
+  </section>
+
+  <section class="policy" id="collect">
+    <h2>What we collect</h2>
+    <p>To provide the service we collect the minimum information necessary:</p>
+
+    <h3>Account information</h3>
+    <ul>
+      <li><strong>Nickname</strong> — your display handle, chosen by you.</li>
+      <li><strong>Password hash</strong> — stored salted and hashed; we never see your plaintext password.</li>
+      <li><strong>Public encryption key</strong> — needed by other users to send you encrypted DMs. Your private key never leaves your device.</li>
+      <li><strong>Optional profile data</strong> — avatar, status, bio, pronouns. Whatever you fill in is shown to other users; what you leave blank is never collected.</li>
+    </ul>
+
+    <h3>Message metadata (server-visible)</h3>
+    <ul>
+      <li><strong>Sender, recipient, room ID, and timestamp</strong> for every message. The <em>contents</em> of DMs are encrypted; the routing envelope is not.</li>
+      <li><strong>Room/channel messages</strong> are stored server-side as plaintext so that history loads on new devices and servers can search content for moderation. If you need encryption inside a group, use a DM.</li>
+    </ul>
+
+    <h3>Device & connection data</h3>
+    <ul>
+      <li><strong>IP address</strong> — temporarily logged for abuse prevention (rate limiting, brute-force defence). Not retained beyond <strong>30 days</strong> in connection logs.</li>
+      <li><strong>Device push tokens</strong> (FCM on Android, APNs on iOS) when you opt into push notifications. Used only to deliver notifications.</li>
+      <li><strong>WebRTC ICE candidates</strong> are exchanged through our signalling channel during call setup, then call media flows directly between peers.</li>
+    </ul>
+
+    <h3>Content you upload</h3>
+    <ul>
+      <li><strong>Avatars, room media, story uploads, and shared files</strong> are stored on our server so other users can view them. They are scoped to the audience you choose at upload time.</li>
+    </ul>
+  </section>
+
+  <section class="policy" id="dont">
+    <h2>What we don't collect</h2>
+    <ul class="crosses">
+      <li>No email addresses (registration is nickname-only).</li>
+      <li>No phone numbers.</li>
+      <li>No real names or government IDs.</li>
+      <li>No advertising identifiers, IDFA, or AAID.</li>
+      <li>No location data — we never request GPS, and IP is not converted to a coarse location for profiling.</li>
+      <li>No third-party analytics SDKs (no Google Analytics, no Mixpanel, no Sentry, no Firebase Analytics).</li>
+      <li>No browser fingerprinting.</li>
+      <li>No contact-list scraping. We will never ask to upload your address book.</li>
+    </ul>
+  </section>
+
+  <section class="policy" id="encryption">
+    <h2>End-to-end encryption</h2>
+    <p>Direct messages between two FrogTalk users are end-to-end encrypted in the browser/native client before transmission:</p>
+    <ul>
+      <li><strong>Key exchange:</strong> ECDH on the P-256 curve via the WebCrypto API.</li>
+      <li><strong>Key derivation:</strong> HKDF-SHA-256 from the shared secret.</li>
+      <li><strong>Symmetric cipher:</strong> AES-256-GCM with a per-message random IV.</li>
+      <li><strong>Private keys</strong> are generated on your device and never leave it. They are stored in IndexedDB / Keychain / Keystore depending on platform.</li>
+    </ul>
+    <div class="callout">
+      <strong>What this means in practice:</strong> a court order, a server breach, or a rogue admin can reveal who messaged whom and when, but cannot reveal the contents of those direct messages. We have no key to give.
+    </div>
+    <p>Public rooms, channels, and the social feed are <strong>not</strong> end-to-end encrypted, by design — they are public spaces. Treat anything you post in a public room the same way you'd treat a public tweet.</p>
+  </section>
+
+  <section class="policy" id="bridges">
+    <h2>Discord & Telegram bridges</h2>
+    <p>FrogTalk channels can optionally be linked to a Discord channel or Telegram chat. When a bridge is enabled by a room operator:</p>
+    <ul>
+      <li>Messages posted in the FrogTalk room are <strong>forwarded as plaintext</strong> to Discord / Telegram, and vice versa.</li>
+      <li>Your nickname and avatar URL are sent to the bridged platform so the message renders with your identity.</li>
+      <li>Messages crossing the bridge are also subject to <strong>Discord's</strong> or <strong>Telegram's</strong> own privacy policies once they leave our infrastructure.</li>
+    </ul>
+    <p>Bridges are only ever activated by room operators and are clearly indicated in the channel header. DMs are <strong>never</strong> bridged.</p>
+  </section>
+
+  <section class="policy" id="cookies">
+    <h2>Cookies & local storage</h2>
+    <p>We use a small number of strictly-necessary client-side storage items:</p>
+    <ul>
+      <li><strong>Session token</strong> (HTTP cookie or localStorage) — keeps you logged in.</li>
+      <li><strong>Encryption keys & cached messages</strong> (IndexedDB) — required for E2E encryption to work offline.</li>
+      <li><strong>UI preferences</strong> (localStorage) — your theme, mute settings, last-opened room.</li>
+    </ul>
+    <p>We do not use any tracking cookies, advertising cookies, or shared third-party cookies.</p>
+  </section>
+
+  <section class="policy" id="thirdparty">
+    <h2>Third-party services</h2>
+    <p>We rely on a deliberately small set of third parties to run the service. Each is used only for the purpose listed.</p>
+    <ul>
+      <li><strong>Push notification gateways</strong> — Google Firebase Cloud Messaging (Android) and Apple Push Notification service (iOS). Receive only the notification metadata required to wake your device. Push payloads do not include DM contents.</li>
+      <li><strong>STUN/TURN</strong> — public Google STUN servers are used for WebRTC NAT traversal. They see network endpoints, never call media.</li>
+      <li><strong>CDN & DDoS protection</strong> — Cloudflare fronts the public website; standard infrastructure logs apply per Cloudflare's own privacy policy.</li>
+    </ul>
+    <p>We do not embed Facebook pixels, Google Analytics, advertising networks, or social-share trackers anywhere on the site or in the apps.</p>
+  </section>
+
+  <section class="policy" id="retention">
+    <h2>Data retention</h2>
+    <ul>
+      <li><strong>Account data</strong> is kept until you delete your account.</li>
+      <li><strong>DMs</strong> are kept on the server in encrypted form until you delete them or your account.</li>
+      <li><strong>Public room messages</strong> are kept indefinitely so that history persists for new members; channel admins can purge messages.</li>
+      <li><strong>Connection logs</strong> (IP, user-agent) are retained for at most <strong>30 days</strong>, then discarded.</li>
+      <li><strong>Backups</strong> roll over within 30 days; deleted content is unrecoverable thereafter.</li>
+    </ul>
+    <p>You can delete your account at any time from <em>Settings → Account → Delete account</em>. This permanently removes your profile, messages, uploads, friend list, and keys from our servers.</p>
+  </section>
+
+  <section class="policy" id="rights">
+    <h2>Your rights</h2>
+    <p>Regardless of where you live, you can:</p>
+    <ul class="checks">
+      <li><strong>Access</strong> the data we hold about you — request an export from settings.</li>
+      <li><strong>Correct</strong> inaccurate data — edit your profile at any time.</li>
+      <li><strong>Delete</strong> your account and associated data.</li>
+      <li><strong>Object</strong> to processing — most processing is essential to providing the service; if you object, deleting your account is the appropriate remedy.</li>
+      <li><strong>Port</strong> your data — exports are provided in a machine-readable format.</li>
+    </ul>
+    <p>If you are in the EU/EEA, UK, California, or another jurisdiction with a data-protection authority, you also have the right to lodge a complaint with that authority.</p>
+  </section>
+
+  <section class="policy" id="children">
+    <h2>Children</h2>
+    <p>FrogTalk is not directed at children under 13 (or under 16 in the EU/EEA). We do not knowingly collect personal information from children below those ages. If you believe a child has created an account, please contact us and we will delete it.</p>
+  </section>
+
+  <section class="policy" id="changes">
+    <h2>Changes to this policy</h2>
+    <p>If we make material changes to this policy, we will post a banner in the app and update the "last updated" date at the top of this page at least 14 days before the changes take effect. Minor clarifications may be made without notice.</p>
+  </section>
+
+  <section class="policy" id="contact">
+    <h2>Contact</h2>
+    <p>Questions, data requests, or privacy concerns? We answer all of them.</p>
+    <div class="contact-card">
+      <p style="margin-bottom:.5rem"><strong>Privacy contact:</strong> <a href="mailto:privacy@frogtalk.xyz">privacy@frogtalk.xyz</a></p>
+      <p style="margin-bottom:.5rem"><strong>General support:</strong> <a href="mailto:hello@frogtalk.xyz">hello@frogtalk.xyz</a></p>
+      <p style="color:var(--text-muted);font-size:.9rem">For account deletion, the in-app option in <em>Settings → Account</em> is the fastest path; emailing us achieves the same outcome.</p>
+    </div>
+  </section>
+
+</div>
+
+<!-- FOOTER -->
+<footer>
+  <div style="display:flex;align-items:center;gap:.5rem;">
+    <span style="font-size:1.2rem;">🐸</span>
+    <span style="font-weight:600;color:var(--text);">FrogTalk</span>
+    <span>— Secure Chat</span>
+  </div>
+  <div class="footer-links">
+    <a href="/">Home</a>
+    <a href="/app">App</a>
+    <a href="/#features">Features</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/docs/api">API Docs</a>
+    <a href="/docs/node">Run Your Node</a>
+  </div>
+  <div>© 2026 FrogTalk. Your chat, your privacy.</div>
+</footer>
+
+</body>
+</html>
