@@ -3102,9 +3102,13 @@ const Social = (() => {
     if (!wrap) return;
     if (!_activityList.length) {
       wrap.innerHTML = `<div class="social-activity-empty">
-        <span class="ico">🔔</span>
-        <div style="font-weight:600;color:#bff0d0;margin-bottom:4px">No activity yet</div>
-        <div style="font-size:13px">Likes, comments and new followers will show up here.</div>
+        <div class="ring">🔔</div>
+        <div class="ttl">No activity yet</div>
+        <div class="sub">When someone likes or comments on your posts, or starts following you, it'll show up here.</div>
+        <div class="actions">
+          <button class="btn primary" onclick="Social.switchTab('explore')">Find people to follow</button>
+          <button class="btn ghost" onclick="Social.openNewPost()">Create a post</button>
+        </div>
       </div>`;
       return;
     }
@@ -3134,12 +3138,15 @@ const Social = (() => {
     content.innerHTML = `
       <div class="social-activity-wrap">
         <div class="social-activity-head">
-          <div class="social-activity-title">🔔 Activity</div>
+          <div class="social-activity-title"><span class="ico">🔔</span>Activity</div>
           <button class="social-activity-mark" id="social-activity-mark"
-                  onclick="Social.markAllActivityRead()">Mark all read</button>
+                  onclick="Social.markAllActivityRead()" disabled>Mark all read</button>
         </div>
         <div id="social-activity-list">
-          <div style="text-align:center;color:#85a89a;padding:40px">Loading…</div>
+          <div class="social-activity-skel" aria-hidden="true">
+            <div class="row"></div><div class="row"></div>
+            <div class="row"></div><div class="row"></div>
+          </div>
         </div>
       </div>`;
     try {
@@ -3163,7 +3170,7 @@ const Social = (() => {
       }
     } catch {
       const list = document.getElementById('social-activity-list');
-      if (list) list.innerHTML = `<div class="social-activity-empty">Could not load activity. Try again later.</div>`;
+      if (list) list.innerHTML = `<div class="social-activity-empty"><div class="ring">⚠️</div><div class="ttl">Could not load activity</div><div class="sub">Check your connection and try again.</div><div class="actions"><button class="btn primary" onclick="Social.switchTab('activity')">Retry</button></div></div>`;
     } finally {
       _activityLoading = false;
     }

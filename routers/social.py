@@ -510,7 +510,9 @@ class MarkNotifsReadRequest(BaseModel):
 
 
 @router.get("/notifications")
+@limiter.limit("600/hour")
 async def list_social_notifications(
+    request: Request,
     limit: int = Query(40, le=100),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(get_current_user),
@@ -522,19 +524,28 @@ async def list_social_notifications(
 
 
 @router.get("/notifications/unread-count")
-async def social_notifications_unread_count(current_user: dict = Depends(get_current_user)):
+@limiter.limit("1200/hour")
+async def social_notifications_unread_count(
+    request: Request, current_user: dict = Depends(get_current_user)
+):
     return {"unread": db.get_social_notification_unread_count(current_user["id"])}
 
 
 @router.post("/notifications/read")
-async def mark_social_notifications_read(
-    body: MarkNotifsReadRequest, current_user: dict = Depends(get_current_user)
+@limiter.limit("600/hour")
+async def mark_social_notifications_read_endpoint(
+    request: Request,
+    body: MarkNotifsReadRequest,
+    current_user: dict = Depends(get_current_user),
 ):
     """Mark a list of notifications as read. Empty list / null => mark all."""
     ids = body.ids if (body.ids and isinstance(body.ids, list)) else None
-    # Sanitize ids to ints
+    # Cap batch size to prevent oversized IN-clauses
     if ids is not None:
-        ids = [int(i) for i in ids if isinstance(i, (int, float, str)) and str(i).lstrip("-").isdigit()]
+        ids = [
+            int(i) for i in ids[:200]
+            if isinstance(i, (int, float, str)) and str(i).lstrip("-").isdigit()
+        ]
     affected = db.mark_social_notifications_read(current_user["id"], ids=ids)
     unread = db.get_social_notification_unread_count(current_user["id"])
     return {"ok": True, "marked": affected, "unread": unread}

@@ -2513,22 +2513,79 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .social-nav-btn{padding:7px 16px;border:none;background:transparent;color:#888;font-size:13px;font-weight:600;cursor:pointer;border-radius:6px;transition:all .15s;white-space:nowrap;line-height:1.15}
 .social-nav-btn.active{background:#1a3a1a;color:#4caf50}
 .social-nav-btn:hover:not(.active){color:#e0e0e0}
-.social-nav-activity .social-nav-label{margin-left:4px}
-.social-nav-activity.has-unread{color:#7fd2a7}
-.social-nav-activity.has-unread span[aria-hidden="true"]{animation:bellRing 1.6s ease-out 1}
+
+/* Visual gap between the main tabs and the right-anchored bell */
+.social-nav-sep{
+  display:inline-block;width:1px;height:20px;
+  background:linear-gradient(180deg, transparent, #2a4a2a 30%, #2a4a2a 70%, transparent);
+  margin:0 6px 0 10px;align-self:center;flex-shrink:0
+}
+/* Icon-only bell button with three visual states:
+     base       — muted, no animation
+     has-unread — bright + pulsing soft halo
+     .active    — solid filled green when on the Activity tab */
+.social-nav-bell{
+  position:relative;width:36px;height:36px;border:none;border-radius:50%;
+  background:rgba(255,255,255,.04);color:#9bbeae;
+  cursor:pointer;display:inline-flex;align-items:center;justify-content:center;
+  font-size:16px;line-height:1;flex-shrink:0;align-self:center;
+  transition:background .18s, color .18s, transform .12s, box-shadow .18s;
+  -webkit-tap-highlight-color:transparent
+}
+.social-nav-bell:hover{background:rgba(127,210,167,.10);color:#cdebd9}
+.social-nav-bell:active{transform:scale(.94)}
+.social-nav-bell.active{
+  background:linear-gradient(180deg,#214438,#18362c);
+  color:#7fd2a7;
+  box-shadow:inset 0 0 0 1px rgba(127,210,167,.22), 0 1px 0 rgba(0,0,0,.25)
+}
+.social-nav-bell .bell-glyph{
+  display:inline-block;transform-origin:50% 8%;
+  filter:drop-shadow(0 1px 0 rgba(0,0,0,.3))
+}
+.social-nav-bell.has-unread{color:#bff0d0}
+.social-nav-bell.has-unread .bell-glyph{
+  animation:bellRing 1.6s ease-in-out infinite
+}
+.social-nav-bell.has-unread::before{
+  /* soft pulsing halo around the bell when there's unread activity */
+  content:"";position:absolute;inset:-2px;border-radius:50%;
+  background:radial-gradient(circle, rgba(127,210,167,.32), rgba(127,210,167,0) 70%);
+  animation:bellHalo 1.8s ease-out infinite;pointer-events:none
+}
 @keyframes bellRing{
-  0%{transform:rotate(0)}
-  15%{transform:rotate(-14deg)}
-  30%{transform:rotate(12deg)}
-  45%{transform:rotate(-8deg)}
-  60%{transform:rotate(6deg)}
-  100%{transform:rotate(0)}
+  0%,55%,100%{transform:rotate(0)}
+  60%{transform:rotate(-14deg)}
+  68%{transform:rotate(12deg)}
+  76%{transform:rotate(-8deg)}
+  84%{transform:rotate(6deg)}
+  92%{transform:rotate(-2deg)}
+}
+@keyframes bellHalo{
+  0%{transform:scale(.85);opacity:.55}
+  70%{transform:scale(1.35);opacity:0}
+  100%{transform:scale(1.35);opacity:0}
+}
+.social-nav-badge{
+  position:absolute;top:-3px;right:-3px;
+  background:linear-gradient(180deg,#ff6b6b,#d33a3a);
+  color:#fff;font-size:10px;font-weight:800;
+  padding:1px 5px;border-radius:9px;min-width:16px;text-align:center;line-height:1.4;
+  box-shadow:0 0 0 2px #0e0e0e, 0 2px 6px rgba(211,58,58,.45)
 }
 
 /* Activity feed */
-.social-activity-wrap{max-width:680px;margin:0 auto;padding:12px 16px 80px}
-.social-activity-head{display:flex;align-items:center;justify-content:space-between;margin:8px 0 16px;gap:10px}
-.social-activity-title{font-size:20px;font-weight:800;color:#e8f4ee;letter-spacing:.2px}
+.social-activity-wrap{max-width:680px;margin:0 auto;padding:18px 16px 100px}
+.social-activity-head{display:flex;align-items:center;justify-content:space-between;margin:0 0 18px;gap:10px}
+.social-activity-title{
+  font-size:22px;font-weight:800;letter-spacing:.2px;
+  background:linear-gradient(180deg,#dff5e8,#7fd2a7 80%);
+  -webkit-background-clip:text;background-clip:text;color:transparent
+}
+.social-activity-title .ico{
+  -webkit-text-fill-color:initial;color:initial;margin-right:8px;
+  display:inline-block;filter:drop-shadow(0 2px 6px rgba(76,175,80,.3))
+}
 .social-activity-mark{
   background:linear-gradient(180deg,#1a3a2a,#13291f);
   border:1px solid #2f5548;color:#9bd5b4;
@@ -2538,11 +2595,51 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .social-activity-mark:hover{background:linear-gradient(180deg,#214438,#18362c);color:#cdebd9}
 .social-activity-mark:active{transform:scale(.97)}
 .social-activity-mark:disabled{opacity:.5;cursor:default}
+
+/* Empty state — polished even with zero activity */
 .social-activity-empty{
-  text-align:center;color:#85a89a;padding:60px 20px;
-  background:linear-gradient(180deg,#0f1f17,#0b1812);border:1px dashed #234639;border-radius:14px
+  display:flex;flex-direction:column;align-items:center;text-align:center;
+  padding:56px 24px 48px;
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(76,175,80,.10), transparent 60%),
+    linear-gradient(180deg,#0f1f17,#0b1812);
+  border:1px solid #234639;border-radius:18px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.03)
 }
-.social-activity-empty .ico{font-size:42px;display:block;margin-bottom:10px;opacity:.7}
+.social-activity-empty .ring{
+  width:96px;height:96px;border-radius:50%;
+  background:radial-gradient(circle at 30% 25%, #214438, #0f1f17 70%);
+  border:1px solid #2f5548;display:flex;align-items:center;justify-content:center;
+  margin-bottom:18px;font-size:42px;
+  box-shadow:0 12px 36px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
+  animation:emptyFloat 4s ease-in-out infinite
+}
+@keyframes emptyFloat{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-3px)}
+}
+.social-activity-empty .ttl{
+  font-size:18px;font-weight:700;color:#dff5e8;margin-bottom:6px
+}
+.social-activity-empty .sub{
+  color:#9bbeae;font-size:13.5px;line-height:1.55;max-width:380px;margin-bottom:18px
+}
+.social-activity-empty .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.social-activity-empty .btn{
+  font-size:13px;font-weight:700;padding:9px 14px;border-radius:10px;border:none;cursor:pointer;
+  transition:transform .12s, filter .18s, box-shadow .18s
+}
+.social-activity-empty .btn.primary{
+  background:linear-gradient(180deg,#5bc764,#3f9e48);color:#062612;
+  box-shadow:0 6px 16px rgba(63,158,72,.3), inset 0 1px 0 rgba(255,255,255,.25)
+}
+.social-activity-empty .btn.primary:hover{filter:brightness(1.07)}
+.social-activity-empty .btn.ghost{
+  background:rgba(127,210,167,.06);color:#cdebd9;border:1px solid #2f5548
+}
+.social-activity-empty .btn.ghost:hover{background:rgba(127,210,167,.12)}
+.social-activity-empty .btn:active{transform:scale(.97)}
+
 .social-activity-list{display:flex;flex-direction:column;gap:8px}
 .social-activity-item{
   display:flex;align-items:center;gap:12px;
@@ -2575,6 +2672,19 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .social-activity-icon.like{background:#3a1414;border-color:#6a2a2a;color:#ff8b8b}
 .social-activity-icon.comment{background:#14223a;border-color:#2a3f6a;color:#8bb8ff}
 .social-activity-icon.follow{background:#1e3a1e;border-color:#3f9e48;color:#7fd2a7}
+
+/* Skeleton placeholders while loading */
+.social-activity-skel{display:flex;flex-direction:column;gap:8px}
+.social-activity-skel .row{
+  height:66px;border-radius:12px;
+  background:linear-gradient(90deg,#0e1c16 0%,#142922 50%,#0e1c16 100%);
+  background-size:200% 100%;animation:shimmer 1.4s linear infinite;
+  border:1px solid #1c3128
+}
+@keyframes shimmer{
+  0%{background-position:200% 0}
+  100%{background-position:-200% 0}
+}
 
 /* Toast for in-app activity pings (lives outside social overlay) */
 .social-toast{
@@ -5956,12 +6066,12 @@ window.ConnErr = (function(){
       <button class="social-nav-btn active" onclick="Social.switchTab('feed')" data-tab="feed">Feed</button>
       <button class="social-nav-btn" onclick="Social.switchTab('explore')" data-tab="explore">Explore</button>
       <button class="social-nav-btn" onclick="Social.switchTab('music')" data-tab="music">Music</button>
-      <button class="social-nav-btn social-nav-activity" onclick="Social.switchTab('activity')" data-tab="activity" title="Activity" style="position:relative">
-        <span aria-hidden="true">🔔</span>
-        <span class="social-nav-label">Activity</span>
-        <span id="social-activity-nav-badge" class="social-nav-badge" style="display:none;position:absolute;top:-4px;right:-4px;background:#f85149;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:14px;text-align:center;line-height:1.4"></span>
-      </button>
       <button class="social-nav-btn" onclick="Social.switchTab('profile')" data-tab="profile">My Profile</button>
+      <span class="social-nav-sep" aria-hidden="true"></span>
+      <button class="social-nav-bell social-nav-activity" onclick="Social.switchTab('activity')" data-tab="activity" title="Activity" aria-label="Activity">
+        <span class="bell-glyph" aria-hidden="true">🔔</span>
+        <span id="social-activity-nav-badge" class="social-nav-badge" style="display:none"></span>
+      </button>
     </nav>
     <button class="social-close-btn" onclick="Social.close()" title="Close">✕</button>
   </div>
@@ -6173,7 +6283,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/state.js?v=191"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=195"></script>
-<script src="/static/js/ws.js?v=212"></script>
+<script src="/static/js/ws.js?v=213"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>
@@ -6187,7 +6297,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/gifs.js?v=200"></script>
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=192"></script>
-<script src="/static/js/social.js?v=211"></script>
+<script src="/static/js/social.js?v=212"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>
