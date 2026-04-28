@@ -56,3 +56,11 @@ android/app/google-services.json
 !github-build-mirror/*.deb
 !github-build-mirror/*.exe
 !github-build-mirror/*.zip
+
+# Release binaries — too large for GitHub's 100 MB limit; mirror via Releases.
+github-build-mirror/*.AppImage
+github-build-mirror/*.exe
+github-build-mirror/*.zip
+github-build-mirror/*.deb
+static/*.AppImage
+static/*.exe
