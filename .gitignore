@@ -38,8 +38,28 @@ static/FrogTalk-*.AppImage
 # ── IDE & OS ───────────────────────────────────────────────────
 .DS_Store
 .vscode/
+.idea/
 *.swp
+*.swo
 *~
+Thumbs.db
+desktop.ini
+
+# ── Imageboard runtime data ────────────────────────────────────
+imageboard/board_uploads/
+imageboard/board_data/
+imageboard/board_previews/
+static/imageboard-standalone/board_uploads/
+static/imageboard-standalone/board_data/
+static/imageboard-standalone/board_previews/
+
+# ── Frogtalk runtime ───────────────────────────────────────────
+static/uploads/
+uvicorn.log
+frogtalk.log
+/logs/
+*.tmp
+/tmp_*
 
 # ── Android ────────────────────────────────────────────────────
 android/app/build/

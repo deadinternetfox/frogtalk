@@ -37,9 +37,10 @@
 | Platform | Latest | Notes |
 |----------|--------|-------|
 | 🌐 **Web** | [Open in browser](https://frogtalk.xyz) | No install needed |
-| 🤖 **Android** | [frogtalk-v186.apk](https://frogtalk.xyz/static/frogtalk-v186.apk) | Sideload — enable "Unknown Sources" |
-| 🐧 **Linux AppImage** | [FrogTalk-1.3.9.AppImage](https://frogtalk.xyz/static/FrogTalk-1.3.9.AppImage) | `chmod +x` then run |
-| 📦 **Linux .deb** | [frogtalk_1.3.9_amd64.deb](https://frogtalk.xyz/static/frogtalk_1.3.9_amd64.deb) | `sudo dpkg -i frogtalk_1.3.9_amd64.deb` |
+| 🤖 **Android** | [frogtalk-v189.apk](https://frogtalk.xyz/static/frogtalk-v189.apk) | Sideload — enable "Unknown Sources" |
+| 🐧 **Linux AppImage** | [FrogTalk-1.4.1.AppImage](https://frogtalk.xyz/static/FrogTalk-1.4.1.AppImage) | `chmod +x` then run |
+| 📦 **Linux .deb** | [frogtalk_1.4.1_amd64.deb](https://frogtalk.xyz/static/frogtalk_1.4.1_amd64.deb) | `sudo dpkg -i frogtalk_1.4.1_amd64.deb` |
+| 🪟 **Windows** | [FrogTalk-1.4.1-win-x64-portable.exe](https://frogtalk.xyz/download/windows) | Portable single-file — just run |
 | 🖥️ **Desktop (Electron)** | [frogtalk.xyz](https://frogtalk.xyz) | Windows / macOS build via the site |
 
 ---
