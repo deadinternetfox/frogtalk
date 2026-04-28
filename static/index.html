@@ -228,6 +228,136 @@
 #modal-profile .profile-avatar-hint{color:#9bbfaf !important}
 #modal-profile hr,
 #modal-profile .modal-divider{border-color:#25463a !important;background:#25463a !important}
+
+/* ── Channel profile / directory popup — theme-aware ── */
+#channel-profile-overlay .ch-prof-modal{
+  max-width:560px;width:100%;max-height:90vh;overflow-y:auto;
+  padding:0 !important;
+  background:var(--surface-color) !important;
+  border:1px solid var(--border-color) !important;
+  border-radius:14px !important;
+  animation:slideUp .3s ease;
+}
+#channel-profile-overlay .ch-prof-banner{
+  width:100%;height:140px;background-position:center;background-size:cover;
+  border-radius:14px 14px 0 0;
+}
+#channel-profile-overlay .ch-prof-body{padding:20px}
+#channel-profile-overlay .ch-prof-head{
+  display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px;
+}
+#channel-profile-overlay .ch-prof-head.has-banner{margin-top:-48px}
+#channel-profile-overlay .ch-prof-head-left{display:flex;gap:16px;align-items:center;min-width:0;flex:1}
+#channel-profile-overlay .ch-prof-avatar{
+  width:72px;height:72px;border-radius:50%;
+  background:var(--bg-color);
+  display:flex;align-items:center;justify-content:center;
+  font-size:32px;overflow:hidden;flex-shrink:0;
+  border:3px solid var(--surface-color);
+  box-shadow:0 0 0 1px var(--border-color);
+}
+#channel-profile-overlay .ch-prof-titlewrap{min-width:0}
+#channel-profile-overlay .ch-prof-head.has-banner .ch-prof-titlewrap{margin-top:48px}
+#channel-profile-overlay .ch-prof-name{
+  font-size:22px;font-weight:700;color:var(--text-color);
+  word-break:break-word;
+}
+#channel-profile-overlay .ch-prof-meta{
+  display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;
+  font-size:13px;color:var(--text-muted);
+}
+#channel-profile-overlay .ch-prof-close{
+  background:transparent;border:1px solid var(--border-color);
+  color:var(--text-muted);width:32px;height:32px;border-radius:8px;
+  cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;
+  transition:background .15s ease,color .15s ease,border-color .15s ease;
+}
+#channel-profile-overlay .ch-prof-close:hover{
+  background:var(--surface-hover);color:var(--text-color);border-color:var(--accent-color);
+}
+#channel-profile-overlay .ch-prof-about{
+  background:var(--bg-color);
+  border:1px solid var(--border-color);
+  border-radius:10px;padding:14px;margin-bottom:14px;
+  font-size:14px;color:var(--text-color);line-height:1.6;white-space:pre-wrap;
+}
+#channel-profile-overlay .ch-prof-desc{
+  background:var(--bg-deeper);
+  border:1px solid var(--border-color);
+  border-radius:10px;padding:12px;margin-bottom:14px;
+  font-size:13px;color:var(--text-color);opacity:.85;line-height:1.6;
+}
+#channel-profile-overlay .ch-prof-tags{
+  display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;
+}
+#channel-profile-overlay .ch-prof-owner{
+  font-size:13px;color:var(--text-muted);margin-bottom:16px;
+  display:flex;align-items:center;gap:6px;
+}
+#channel-profile-overlay .ch-prof-owner-avatar{
+  width:18px;height:18px;border-radius:50%;
+}
+#channel-profile-overlay .ch-prof-owner-name{
+  color:var(--accent-color);cursor:pointer;font-weight:600;
+}
+#channel-profile-overlay .ch-prof-owner-name:hover{text-decoration:underline}
+#channel-profile-overlay .ch-prof-actions{
+  display:flex;gap:8px;justify-content:center;margin-bottom:16px;flex-wrap:wrap;
+}
+#channel-profile-overlay .modal-btn.ch-prof-secondary{
+  background:var(--bg-color) !important;
+  border:1px solid var(--border-color) !important;
+  color:var(--text-color) !important;
+}
+#channel-profile-overlay .modal-btn.ch-prof-secondary:hover{
+  background:var(--surface-hover) !important;
+  border-color:var(--accent-color) !important;
+}
+#channel-profile-overlay .ch-prof-comments{
+  border-top:1px solid var(--border-color);padding-top:16px;
+}
+#channel-profile-overlay .ch-prof-comments-title{
+  font-size:14px;font-weight:600;color:var(--text-muted);margin-bottom:10px;
+}
+#channel-profile-overlay .ch-prof-comments-row{
+  display:flex;gap:8px;margin-bottom:12px;
+}
+#channel-profile-overlay .ch-prof-comments-row .modal-input{flex:1}
+#channel-profile-overlay .ch-prof-comments-row .modal-btn{padding:0 16px}
+#channel-profile-overlay .ch-prof-empty{
+  color:var(--text-muted);font-size:13px;text-align:center;padding:20px;opacity:.7;
+}
+#channel-profile-overlay .ch-prof-cmt{
+  display:flex;gap:10px;padding:10px;
+  background:var(--bg-color);
+  border:1px solid var(--border-color);
+  border-radius:10px;margin-bottom:8px;
+}
+#channel-profile-overlay .ch-prof-cmt-avatar{
+  width:28px;height:28px;border-radius:50%;flex-shrink:0;object-fit:cover;
+}
+#channel-profile-overlay .ch-prof-cmt-avatar-fallback{
+  background:var(--bg-deeper);
+  display:flex;align-items:center;justify-content:center;font-size:14px;
+}
+#channel-profile-overlay .ch-prof-cmt-main{flex:1;min-width:0}
+#channel-profile-overlay .ch-prof-cmt-head{
+  display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;
+}
+#channel-profile-overlay .ch-prof-cmt-name{
+  color:var(--accent-color);font-weight:600;font-size:13px;cursor:pointer;
+}
+#channel-profile-overlay .ch-prof-cmt-name:hover{text-decoration:underline}
+#channel-profile-overlay .ch-prof-cmt-time{
+  display:flex;gap:6px;align-items:center;color:var(--text-muted);font-size:11px;
+}
+#channel-profile-overlay .ch-prof-cmt-del{
+  background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:12px;padding:0;
+}
+#channel-profile-overlay .ch-prof-cmt-del:hover{color:#ff6b6b}
+#channel-profile-overlay .ch-prof-cmt-body{
+  color:var(--text-color);font-size:13px;line-height:1.5;word-wrap:break-word;opacity:.9;
+}
 .theme-color-row{display:flex;align-items:center;gap:8px;background:linear-gradient(180deg,#12231e,#0f1d19);border:1px solid #2f5548;border-radius:8px;padding:8px 10px;cursor:pointer}
 .theme-color-row span{flex:1;font-size:12px;color:#dff5e8}
 .theme-color-row input[type=color]{width:36px;height:28px;border:1px solid #2f5548;border-radius:6px;background:transparent;cursor:pointer;padding:0}

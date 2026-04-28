@@ -2337,15 +2337,15 @@ async function viewChannelProfile(channelName) {
     }
 
     overlay.innerHTML = `
-      <div class="modal" style="max-width:560px;width:100%;max-height:90vh;overflow-y:auto;animation:slideUp .3s ease;padding:0">
-        ${ch.banner ? `<div style="width:100%;height:140px;background:url(${UI.escHtml(ch.banner)}) center/cover;border-radius:12px 12px 0 0;margin:-0 0 0 0"></div>` : ''}
-        <div style="padding:20px">
-        <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:16px;${ch.banner?'margin-top:-48px;':''}">
-          <div style="display:flex;gap:16px;align-items:center">
-            <div style="width:72px;height:72px;border-radius:50%;background:#1a2a1a;display:flex;align-items:center;justify-content:center;font-size:32px;overflow:hidden;flex-shrink:0;border:3px solid #0d0d0d">${iconHtml}</div>
-            <div style="${ch.banner?'margin-top:48px':''}">
-              <div style="font-size:22px;font-weight:700;color:#e0e0e0">${UI.escHtml(ch.name)}</div>
-              <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px;font-size:13px;color:#888">
+      <div class="modal ch-prof-modal">
+        ${ch.banner ? `<div class="ch-prof-banner" style="background-image:url(${UI.escHtml(ch.banner)})"></div>` : ''}
+        <div class="ch-prof-body">
+        <div class="ch-prof-head${ch.banner?' has-banner':''}">
+          <div class="ch-prof-head-left">
+            <div class="ch-prof-avatar">${iconHtml}</div>
+            <div class="ch-prof-titlewrap">
+              <div class="ch-prof-name">${UI.escHtml(ch.name)}</div>
+              <div class="ch-prof-meta">
                 ${ch.category ? `<span>${catIcons[ch.category]||''} ${UI.escHtml(ch.category)}</span>` : ''}
                 <span>👥 ${ch.member_count || 0}</span>
                 <span>❤️ <span id="ch-likes-count">${ch.like_count || 0}</span></span>
@@ -2353,35 +2353,36 @@ async function viewChannelProfile(channelName) {
               </div>
             </div>
           </div>
-          <button class="social-close-btn" onclick="document.getElementById('channel-profile-overlay').remove()" style="position:static;font-size:18px">✕</button>
+          <button class="ch-prof-close" onclick="document.getElementById('channel-profile-overlay').remove()" aria-label="Close">✕</button>
         </div>
 
-        ${ch.about ? `<div style="background:#111;border-radius:8px;padding:14px;margin-bottom:16px;font-size:14px;color:#ddd;line-height:1.6;white-space:pre-wrap">${_renderRichText(ch.about)}</div>` : ''}
-        ${desc ? `<div style="background:#0d0d0d;border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;color:#bbb;line-height:1.6">${_renderRichText(desc)}</div>` : ''}
+        ${ch.about ? `<div class="ch-prof-about">${_renderRichText(ch.about)}</div>` : ''}
+        ${desc ? `<div class="ch-prof-desc">${_renderRichText(desc)}</div>` : ''}
 
-        ${tags.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">${tags.map(t => `<span class="dir-tag">${UI.escHtml(t)}</span>`).join('')}</div>` : ''}
+        ${tags.length ? `<div class="ch-prof-tags">${tags.map(t => `<span class="dir-tag">${UI.escHtml(t)}</span>`).join('')}</div>` : ''}
 
-        ${ch.owner_name ? `<div style="font-size:13px;color:#888;margin-bottom:16px;display:flex;align-items:center;gap:6px">
-          Created by ${ch.owner_avatar ? `<img src="${UI.escHtml(ch.owner_avatar)}" style="width:18px;height:18px;border-radius:50%">` : ''}
-          <span style="color:#4caf50;cursor:pointer" onclick="showUserInfo('${UI.escHtml(ch.owner_name)}')">${UI.escHtml(ch.owner_name)}</span>
+        ${ch.owner_name ? `<div class="ch-prof-owner">
+          <span>Created by</span>
+          ${ch.owner_avatar ? `<img src="${UI.escHtml(ch.owner_avatar)}" class="ch-prof-owner-avatar">` : ''}
+          <span class="ch-prof-owner-name" onclick="showUserInfo('${UI.escHtml(ch.owner_name)}')">${UI.escHtml(ch.owner_name)}</span>
         </div>` : ''}
 
-        <div style="display:flex;gap:8px;justify-content:center;margin-bottom:16px;flex-wrap:wrap">
+        <div class="ch-prof-actions">
           ${alreadyJoined
             ? `<button type="button" class="modal-btn primary" onclick="openChannelFromDiscovery(${_jsStr(ch.name)}, this)">🚀 Open channel</button>`
             : `<button type="button" class="modal-btn primary" onclick="openChannelFromDiscovery(${_jsStr(ch.name)}, this)">Join</button>`}
-          <button type="button" class="modal-btn" id="ch-like-btn" onclick="toggleChannelLike(event, ${_jsStr(ch.name)})">${ch.liked_by_me ? '💔 Unlike' : '❤️ Like'}</button>
-          ${ch.is_owner ? `<button type="button" class="modal-btn" onclick="editChannelListing(${_jsStr(ch.name)})">✏️ Edit</button>` : ''}
+          <button type="button" class="modal-btn ch-prof-secondary" id="ch-like-btn" onclick="toggleChannelLike(event, ${_jsStr(ch.name)})">${ch.liked_by_me ? '💔 Unlike' : '❤️ Like'}</button>
+          ${ch.is_owner ? `<button type="button" class="modal-btn ch-prof-secondary" onclick="editChannelListing(${_jsStr(ch.name)})">✏️ Edit</button>` : ''}
         </div>
 
-        <div style="border-top:1px solid #222;padding-top:16px">
-          <div style="font-size:14px;font-weight:600;color:#aaa;margin-bottom:10px">💬 Comments</div>
-          <div style="display:flex;gap:8px;margin-bottom:12px">
-            <input class="modal-input" id="ch-comment-input" placeholder="Share your thoughts..." maxlength="2000" style="flex:1">
-            <button class="modal-btn primary" style="padding:0 16px" onclick="postChannelComment(${_jsStr(ch.name)})">Post</button>
+        <div class="ch-prof-comments">
+          <div class="ch-prof-comments-title">💬 Comments</div>
+          <div class="ch-prof-comments-row">
+            <input class="modal-input" id="ch-comment-input" placeholder="Share your thoughts..." maxlength="2000">
+            <button class="modal-btn primary" onclick="postChannelComment(${_jsStr(ch.name)})">Post</button>
           </div>
           <div id="ch-comments-list">
-            ${(ch.recent_comments || []).map(c => _renderChannelComment(c, ch.name)).join('') || '<div style="color:#666;font-size:13px;text-align:center;padding:20px">No comments yet — be the first!</div>'}
+            ${(ch.recent_comments || []).map(c => _renderChannelComment(c, ch.name)).join('') || '<div class="ch-prof-empty">No comments yet — be the first!</div>'}
           </div>
         </div>
         </div>
@@ -2393,20 +2394,20 @@ async function viewChannelProfile(channelName) {
 }
 
 function _renderChannelComment(c, channelName) {
-  const avatar = c.avatar ? `<img src="${UI.escHtml(c.avatar)}" style="width:28px;height:28px;border-radius:50%;flex-shrink:0">` : `<div style="width:28px;height:28px;border-radius:50%;background:#1a2a1a;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">🐸</div>`;
+  const avatar = c.avatar ? `<img src="${UI.escHtml(c.avatar)}" class="ch-prof-cmt-avatar">` : `<div class="ch-prof-cmt-avatar ch-prof-cmt-avatar-fallback">🐸</div>`;
   const canDelete = (c.user_id === State.user.id) || State.user.is_admin;
-  const delBtn = canDelete ? `<button onclick="deleteChannelComment(${_jsStr(channelName)}, ${c.id})" style="background:none;border:none;color:#666;cursor:pointer;font-size:12px">🗑</button>` : '';
-  return `<div style="display:flex;gap:10px;padding:10px;background:#0d0d0d;border-radius:8px;margin-bottom:8px">
+  const delBtn = canDelete ? `<button class="ch-prof-cmt-del" onclick="deleteChannelComment(${_jsStr(channelName)}, ${c.id})">🗑</button>` : '';
+  return `<div class="ch-prof-cmt">
     ${avatar}
-    <div style="flex:1;min-width:0">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <span style="color:#4caf50;font-weight:600;font-size:13px;cursor:pointer" onclick="showUserInfo('${UI.escHtml(c.nickname)}')">${UI.escHtml(c.nickname)}</span>
-        <span style="display:flex;gap:6px;align-items:center;color:#555;font-size:11px">
+    <div class="ch-prof-cmt-main">
+      <div class="ch-prof-cmt-head">
+        <span class="ch-prof-cmt-name" onclick="showUserInfo('${UI.escHtml(c.nickname)}')">${UI.escHtml(c.nickname)}</span>
+        <span class="ch-prof-cmt-time">
           <span>${UI.formatDate ? UI.formatDate(c.created_at) : ''}</span>
           ${delBtn}
         </span>
       </div>
-      <div style="color:#ccc;font-size:13px;line-height:1.5;word-wrap:break-word">${UI.escHtml(c.content)}</div>
+      <div class="ch-prof-cmt-body">${UI.escHtml(c.content)}</div>
     </div>
   </div>`;
 }
