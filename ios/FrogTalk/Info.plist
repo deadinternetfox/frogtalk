@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>FrogTalk</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.4.7</string>
+    <key>CFBundleVersion</key>
+    <string>191</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+
+    <!-- Privacy usage descriptions (App Store rejects without these) -->
+    <key>NSCameraUsageDescription</key>
+    <string>FrogTalk needs the camera to make video calls and post stories.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>FrogTalk needs the microphone for voice and video calls.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>FrogTalk needs photo access so you can send images and post stories.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>FrogTalk saves photos and videos you receive to your library when you choose to.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>FrogTalk does not upload your contacts; this is only used if you opt in to find friends already on FrogTalk.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>FrogTalk uses Face ID to unlock the app.</string>
+
+    <!-- Background modes for audio playback + VoIP + push -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+        <string>voip</string>
+        <string>remote-notification</string>
+        <string>fetch</string>
+    </array>
+
+    <!-- App Transport Security: HTTPS only, matches Android cleartextTrafficPermitted=false -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+    </dict>
+
+    <!-- Universal Links / app deep linking -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>xyz.frogtalk.app</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>frogtalk</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- Supported orientations (phone: portrait + upside down disallowed; iPad: all) -->
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+
+    <!-- Status bar -->
+    <key>UIStatusBarStyle</key>
+    <string>UIStatusBarStyleLightContent</string>
+    <key>UIViewControllerBasedStatusBarAppearance</key>
+    <true/>
+
+    <!-- Launch screen -->
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+
+    <!-- App category -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.social-networking</string>
+
+    <!-- Communication notifications (iOS 15+ for proper call/DM presentation) -->
+    <key>NSUserActivityTypes</key>
+    <array>
+        <string>INSendMessageIntent</string>
+        <string>INStartCallIntent</string>
+    </array>
+
+    <!-- Encryption export compliance: app uses standard HTTPS + WebRTC encryption.
+         Set to true to claim the standard exemption (must remain true if your
+         crypto goes beyond standard TLS — review with legal counsel). -->
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
+
+    <!-- Scene support -->
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+        <key>UISceneConfigurations</key>
+        <dict>
+            <key>UIWindowSceneSessionRoleApplication</key>
+            <array>
+                <dict>
+                    <key>UISceneConfigurationName</key>
+                    <string>Default Configuration</string>
+                    <key>UISceneDelegateClassName</key>
+                    <string>$(PRODUCT_MODULE_NAME).SceneDelegate</string>
+                </dict>
+            </array>
+        </dict>
+    </dict>
+</dict>
+</plist>

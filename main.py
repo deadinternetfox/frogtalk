@@ -961,6 +961,64 @@ async def download_android():
     )
 
 
+@app.get("/download/ios")
+async def download_ios():
+    """Redirect to TestFlight (or App Store, post-launch).
+
+    iOS has no APK-style sideload for unmodified phones. The closest analogue
+    to the Android `/download/android` flow is a TestFlight public link, which
+    serves up to 10k testers and stays valid for 90 days per build. Once the
+    app is approved on the App Store, point IOS_DOWNLOAD_URL at the App Store
+    URL instead.
+    """
+    target = os.getenv(
+        "IOS_DOWNLOAD_URL",
+        "https://frogtalk.xyz/ios",  # placeholder landing page until enrolled
+    )
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=target, status_code=302)
+
+
+@app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+async def apple_app_site_association():
+    """Universal Links manifest for iOS.
+
+    Apple fetches this over HTTPS (no redirect, application/json). Replace
+    `TEAMID` with the real 10-char Apple Developer team prefix once enrolled —
+    it can also be supplied via APPLE_TEAM_ID without redeploying code.
+    """
+    team_id = os.getenv("APPLE_TEAM_ID", "TEAMID").strip() or "TEAMID"
+    bundle  = os.getenv("APNS_BUNDLE_ID", "xyz.frogtalk.app").strip()
+    payload = {
+        "applinks": {
+            "apps": [],
+            "details": [
+                {
+                    "appID": f"{team_id}.{bundle}",
+                    "paths": [
+                        "/app",
+                        "/app/*",
+                        "/dm/*",
+                        "/room/*",
+                        "/u/*",
+                        "/c/*",
+                        "/invite/*",
+                    ],
+                }
+            ],
+        },
+        "webcredentials": {
+            "apps": [f"{team_id}.{bundle}"],
+        },
+    }
+    import json as _json_mod
+    from fastapi.responses import Response as _Response
+    return _Response(
+        content=_json_mod.dumps(payload),
+        media_type="application/json",
+    )
+
+
 @app.get("/download/linux")
 async def download_linux():
     """Always serves the latest Linux AppImage."""

@@ -205,6 +205,122 @@ def _send_fcm(user_id: int, title: str, body: str, url: str = "/app", *,
             else:
                 logger.debug("fcm send failed: %s", e)
 
+    # ── iOS (FCM-delivered APNs alerts) ───────────────────────────────────────
+    # Calls go via _send_apns_voip() instead so the device wakes from suspended
+    # state and rings via PushKit/CallKit. Regular alerts use FCM with an
+    # APNSConfig payload so we get a banner/sound just like Android.
+    if kind != "call":
+        ios_tokens = db.get_fcm_tokens(user_id, platform="ios")
+        for row in ios_tokens:
+            token = row.get("token")
+            if not token:
+                continue
+            try:
+                ios_msg = messaging.Message(
+                    token=token,
+                    data=data,
+                    notification=messaging.Notification(
+                        title=str(title or "FrogTalk"),
+                        body=str(body or ""),
+                    ),
+                    apns=messaging.APNSConfig(
+                        headers={"apns-priority": "10"},
+                        payload=messaging.APNSPayload(
+                            aps=messaging.Aps(
+                                alert=messaging.ApsAlert(
+                                    title=str(title or "FrogTalk"),
+                                    body=str(body or ""),
+                                ),
+                                sound="default",
+                                category=str(tag or f"ft-{kind}"),
+                                mutable_content=True,
+                                thread_id=str(tag or kind),
+                            ),
+                        ),
+                    ),
+                )
+                messaging.send(ios_msg, app=app)
+            except Exception as e:
+                txt = str(e).lower()
+                if "registration-token-not-registered" in txt or "invalid-registration-token" in txt:
+                    db.delete_fcm_token(token)
+                else:
+                    logger.debug("fcm(ios) send failed: %s", e)
+    else:
+        # Cold-launch incoming-call ring on iOS goes through PushKit, not FCM.
+        try:
+            _send_apns_voip(user_id, data)
+        except Exception:
+            logger.exception("apns voip send failed")
+
+
+def _send_apns_voip(user_id: int, payload: dict):
+    """Send a VoIP push (PushKit) for cold-launch ringing on iOS.
+
+    Requires APNS_KEY_PATH (.p8), APNS_KEY_ID, APNS_TEAM_ID, APNS_BUNDLE_ID env
+    vars. Topic must be `<bundle-id>.voip` per Apple's PushKit contract. Uses
+    httpx for HTTP/2 — silent no-op if any prerequisite is missing.
+    """
+    key_path = os.getenv("APNS_KEY_PATH", "").strip()
+    key_id   = os.getenv("APNS_KEY_ID", "").strip()
+    team_id  = os.getenv("APNS_TEAM_ID", "").strip()
+    bundle   = os.getenv("APNS_BUNDLE_ID", "xyz.frogtalk.app").strip()
+    if not (key_path and key_id and team_id and os.path.exists(key_path)):
+        return
+
+    voip_tokens = db.get_fcm_tokens(user_id, platform="ios_voip")
+    if not voip_tokens:
+        return
+
+    try:
+        import time, jwt, httpx  # PyJWT + httpx (httpx supports HTTP/2 with `h2` extra)
+    except Exception:
+        logger.debug("apns voip deps missing (pyjwt/httpx)")
+        return
+
+    try:
+        with open(key_path, "r") as f:
+            private_key = f.read()
+    except Exception:
+        logger.debug("apns key unreadable: %s", key_path)
+        return
+
+    now = int(time.time())
+    token = jwt.encode(
+        {"iss": team_id, "iat": now},
+        private_key,
+        algorithm="ES256",
+        headers={"kid": key_id, "alg": "ES256"},
+    )
+
+    use_sandbox = os.getenv("APNS_USE_SANDBOX", "0").strip() in ("1", "true", "yes")
+    host = "https://api.sandbox.push.apple.com" if use_sandbox else "https://api.push.apple.com"
+
+    headers = {
+        "authorization": f"bearer {token}",
+        "apns-topic": f"{bundle}.voip",
+        "apns-push-type": "voip",
+        "apns-priority": "10",
+        "apns-expiration": "0",
+    }
+    body = json.dumps(payload).encode("utf-8")
+
+    try:
+        with httpx.Client(http2=True, timeout=10.0) as client:
+            for row in voip_tokens:
+                tok = row.get("token")
+                if not tok:
+                    continue
+                try:
+                    resp = client.post(f"{host}/3/device/{tok}", headers=headers, content=body)
+                    if resp.status_code in (400, 410):
+                        # 410 Gone = unregistered; 400 BadDeviceToken = malformed.
+                        db.delete_fcm_token(tok)
+                except Exception as e:
+                    logger.debug("apns voip post failed: %s", e)
+    except Exception:
+        logger.exception("apns voip http2 client failed")
+
 
 # ── Utility: send push to a user ──────────────────────────────────────────────
 

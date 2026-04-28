@@ -1,0 +1,13 @@
+build/
+DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+FrogTalk.xcodeproj/
+Pods/
+*.ipa
+*.dSYM.zip
+*.dSYM
+.swiftpm/
+GoogleService-Info.plist

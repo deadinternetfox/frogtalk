@@ -1,0 +1,51 @@
+# XcodeGen spec — run `xcodegen generate` (brew install xcodegen) on macOS to
+# materialise FrogTalk.xcodeproj. This avoids committing the noisy auto-generated
+# project.pbxproj while still letting any Mac dev open the app cleanly in Xcode.
+
+name: FrogTalk
+options:
+  bundleIdPrefix: xyz.frogtalk
+  deploymentTarget:
+    iOS: "16.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    MARKETING_VERSION: "1.4.7"
+    CURRENT_PROJECT_VERSION: "191"
+    PRODUCT_BUNDLE_IDENTIFIER: "xyz.frogtalk.app"
+    DEVELOPMENT_TEAM: "" # fill in after Apple Developer enrollment
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_BITCODE: NO
+    TARGETED_DEVICE_FAMILY: "1,2"
+
+targets:
+  FrogTalk:
+    type: application
+    platform: iOS
+    sources:
+      - path: FrogTalk
+        excludes:
+          - "**/.DS_Store"
+    resources:
+      - path: FrogTalk/Assets.xcassets
+        optional: true
+    info:
+      path: FrogTalk/Info.plist
+    entitlements:
+      path: FrogTalk/FrogTalk.entitlements
+    settings:
+      base:
+        INFOPLIST_FILE: FrogTalk/Info.plist
+        CODE_SIGN_ENTITLEMENTS: FrogTalk/FrogTalk.entitlements
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+        OTHER_LDFLAGS: -ObjC
+    dependencies:
+      # Add Firebase via Swift Package Manager once the project is generated:
+      #   File → Add Packages…
+      #   https://github.com/firebase/firebase-ios-sdk  (FirebaseMessaging)
+      # The `#if canImport(FirebaseCore)` guard in PushHandler.swift keeps the
+      # build green even before Firebase is added.
