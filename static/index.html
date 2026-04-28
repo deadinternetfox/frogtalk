@@ -128,6 +128,24 @@
 }
 .modal-overlay{background:rgba(0,0,0,.7) !important}
 .modal{background:var(--surface-color) !important;border-color:var(--border-color) !important;color:var(--text-color) !important}
+/* Default (frog-green) theme: replace flat surface with the polished
+   green gradient used by Friends/Settings/Channel popups so every modal
+   matches the app theme.  Other themes keep their flat surface color. */
+body:not([data-theme]) .modal{
+  background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%) !important;
+  border:1px solid #3b6c59 !important;
+  color:#dff5e8 !important;
+}
+body:not([data-theme]) .modal-title{color:#dff5e8 !important}
+body:not([data-theme]) .modal-label{color:#9bbf9b !important}
+body:not([data-theme]) .modal-input{
+  background:linear-gradient(180deg,#12231e,#0f1d19) !important;
+  border:1px solid #2f5548 !important;
+  color:#e8f4ee !important;
+}
+body:not([data-theme]) .modal-input::placeholder{color:#85a89a !important}
+body:not([data-theme]) .modal-input:hover{border-color:#3e6a5b !important;background:linear-gradient(180deg,#152922,#11211c) !important}
+body:not([data-theme]) .modal-input:focus{border-color:#6bb698 !important;box-shadow:0 0 0 2px rgba(107,182,152,.18) !important}
 .modal-input{background:var(--bg-color) !important;border-color:var(--border-color) !important;color:var(--text-color) !important}
 .modal-label{color:var(--text-color) !important}
 .modal-btn.primary{background:var(--accent-color) !important}
@@ -4288,18 +4306,30 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .css-preset-btn:hover{border-color:#4caf50 !important;transform:translateY(-1px);box-shadow:0 4px 12px rgba(76,175,80,.15)}
 
 /* Channel about modal */
+#modal-channel-about .modal{
+  background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%) !important;
+  border:1px solid #3b6c59 !important;
+  color:#dff5e8 !important;
+}
+#modal-channel-about .modal-title{color:#dff5e8 !important}
+#modal-channel-about #channel-about-description{color:#b8d5c8 !important}
 .channel-about-media{
   display:flex;align-items:center;justify-content:center;
   width:100%;min-height:180px;border-radius:12px;
-  background:linear-gradient(135deg,#101010,#1a1a1a);
-  border:1px solid #2a2a2a;overflow:hidden;margin-bottom:14px
+  background:linear-gradient(135deg,#0f1f1a,#152922);
+  border:1px solid #2f5548;overflow:hidden;margin-bottom:14px
 }
 .channel-about-media img{max-width:100%;max-height:280px;object-fit:contain;display:block}
-.channel-about-fallback{font-size:52px;line-height:1}
+.channel-about-fallback{font-size:52px;line-height:1;color:#9bbf9b}
 .channel-about-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
-.channel-about-card{background:#141414;border:1px solid #2a2a2a;border-radius:10px;padding:10px}
-.channel-about-label{font-size:11px;color:#777;margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px}
-.channel-about-value{font-size:13px;color:#ddd;word-break:break-word}
+.channel-about-card{
+  background:linear-gradient(180deg,#15291f,#11221b);
+  border:1px solid #2f5548;border-radius:10px;padding:10px;
+  transition:border-color .15s ease,background .15s ease
+}
+.channel-about-card:hover{border-color:#3e6a5b;background:linear-gradient(180deg,#183328,#132822)}
+.channel-about-label{font-size:11px;color:#85a89a;margin-bottom:4px;text-transform:uppercase;letter-spacing:.4px;font-weight:600}
+.channel-about-value{font-size:13px;color:#e8f4ee;word-break:break-word}
 
 /* ─────────────────────────── Production polish layer ─────────────────────
    Subtle micro-interactions & motion. Honors prefers-reduced-motion.     */
