@@ -92,7 +92,12 @@ const Messages = (() => {
         placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Invite invalid or expired</span>`;
         return;
       }
-      const icon = UI.escHtml(data.room_icon || '💬');
+      // room_icon may be a single emoji, but legacy/edited rooms can have
+      // multi-character strings stored. Take only the first grapheme so the
+      // 48x48 avatar circle never overflows.
+      let rawIcon = (data.room_icon || '💬');
+      try { rawIcon = Array.from(String(rawIcon).trim())[0] || '💬'; } catch { rawIcon = String(rawIcon).charAt(0) || '💬'; }
+      const icon = UI.escHtml(rawIcon);
       const name = UI.escHtml(data.room_name || '');
       const desc = data.room_desc ? `<div class="invite-card-desc">${UI.escHtml(data.room_desc.substring(0, 100))}</div>` : '';
       const by = data.created_by ? `<span class="invite-card-by">Invited by <strong>${UI.escHtml(data.created_by)}</strong></span>` : '';
