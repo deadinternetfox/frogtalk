@@ -91,18 +91,30 @@ class CallService : Service() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                     )
 
-                    val ringNotif = NotificationCompat.Builder(this, CHANNEL_RING_ID)
-                        .setSmallIcon(android.R.drawable.ic_menu_call)
+                    val declineIntent = Intent(this, CallDeclineReceiver::class.java).apply {
+                        putExtra(EXTRA_CALL_ID, callId)
+                        putExtra(EXTRA_PEER_NICK, peer)
+                    }
+                    val declinePending = PendingIntent.getBroadcast(
+                        this, 11, declineIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+
+                    val ringBuilder = NotificationCompat.Builder(this, CHANNEL_RING_ID)
+                        .setSmallIcon(R.drawable.ic_notification)
                         .setContentTitle("Incoming FrogTalk call")
-                        .setContentText("$peer is calling…")
+                        .setContentText("$peer is calling\u2026")
                         .setPriority(NotificationCompat.PRIORITY_MAX)
                         .setCategory(NotificationCompat.CATEGORY_CALL)
+                        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                         .setDefaults(Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE)
                         .setOngoing(true)
                         .setAutoCancel(true)
                         .setFullScreenIntent(fullScreenPending, true)
                         .setContentIntent(fullScreenPending)
-                        .build()
+                        .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePending)
+                        .addAction(android.R.drawable.ic_menu_call, "Answer", fullScreenPending)
+                    val ringNotif = ringBuilder.build()
 
                     try {
                         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
@@ -137,7 +149,7 @@ class CallService : Service() {
             )
 
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_menu_call)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle("In call with $peerNick")
                 .setContentText("FrogTalk call in progress")
                 .setContentIntent(openPending)

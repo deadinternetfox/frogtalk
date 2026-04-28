@@ -5,9 +5,13 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
+import androidx.core.graphics.drawable.IconCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
@@ -36,90 +40,140 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
         val kind = (data["kind"] ?: "message").lowercase()
 
         if (kind == "call") {
+            val peer = data["from_nickname"].orEmpty()
+            val callId = data["call_id"].orEmpty()
             try {
-                val peer = data["from_nickname"].orEmpty()
-                val callId = data["call_id"].orEmpty()
                 val intent = Intent(this, CallService::class.java).apply {
                     action = CallService.ACTION_RING
                     putExtra(CallService.EXTRA_PEER_NICK, peer)
                     putExtra(CallService.EXTRA_CALL_ID, callId)
                 }
                 startService(intent)
-                return
             } catch (e: Throwable) {
                 Log.w(TAG, "Failed to trigger CallService ring", e)
-                try {
-                    val peer = data["from_nickname"].orEmpty()
-                    val callId = data["call_id"].orEmpty()
-                    showIncomingCallFallback(peer, callId)
-                    return
-                } catch (inner: Throwable) {
-                    Log.w(TAG, "Fallback incoming-call notification failed", inner)
-                }
             }
+            // Always show a CallStyle heads-up ourselves too. CallService's ring
+            // notification only fires while the process is alive — when the app
+            // is force-stopped, the service start above can be dropped, so this
+            // is the safety net that guarantees the user sees the call.
+            try {
+                showIncomingCallNotification(peer, callId)
+            } catch (e: Throwable) {
+                Log.w(TAG, "Incoming-call notification failed", e)
+            }
+            return
         }
 
         val title = data["title"] ?: message.notification?.title ?: "FrogTalk"
         val body = data["body"] ?: message.notification?.body ?: "New activity"
-        showGeneralNotification(title, body)
+        val convId = data["conversation_id"].orEmpty()
+        val convName = data["conversation_name"].orEmpty()
+        val senderName = data["sender_name"] ?: data["from_nickname"] ?: title
+        showMessageNotification(title, body, senderName, convId, convName)
     }
 
-    private fun showGeneralNotification(title: String, body: String) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (nm.getNotificationChannel(CHANNEL_GENERAL) == null) {
-                val channel = NotificationChannel(
-                    CHANNEL_GENERAL,
-                    "FrogTalk",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "FrogTalk message and call notifications"
-                    enableVibration(true)
-                }
-                nm.createNotificationChannel(channel)
-            }
+    private fun ensureGeneralChannel(nm: NotificationManager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (nm.getNotificationChannel(CHANNEL_GENERAL) != null) return
+        val channel = NotificationChannel(
+            CHANNEL_GENERAL,
+            "Messages",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "FrogTalk message notifications"
+            enableVibration(true)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
         }
+        nm.createNotificationChannel(channel)
+    }
+
+    private fun ensureCallChannel(nm: NotificationManager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (nm.getNotificationChannel(CHANNEL_CALL) != null) return
+        val ringUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        val ring = NotificationChannel(
+            CHANNEL_CALL,
+            "Incoming Calls",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Full-screen incoming call alerts"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 800, 600, 800)
+            setBypassDnd(true)
+            lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            setSound(ringUri, attrs)
+        }
+        nm.createNotificationChannel(ring)
+    }
+
+    private fun showMessageNotification(
+        title: String,
+        body: String,
+        senderName: String,
+        conversationId: String,
+        conversationName: String,
+    ) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        ensureGeneralChannel(nm)
 
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            if (conversationId.isNotBlank()) putExtra("conversation_id", conversationId)
+        }
+        val requestCode = if (conversationId.isNotBlank()) {
+            conversationId.hashCode() and 0x7fffffff
+        } else {
+            (System.currentTimeMillis() % 100000).toInt()
         }
         val pending = PendingIntent.getActivity(
             this,
-            (System.currentTimeMillis() % 100000).toInt(),
+            requestCode,
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val person = Person.Builder().setName(senderName).setKey(senderName).build()
+        val style = NotificationCompat.MessagingStyle(person)
+            .addMessage(body, System.currentTimeMillis(), person)
+        if (conversationName.isNotBlank() && conversationName != senderName) {
+            style.conversationTitle = conversationName
+            style.isGroupConversation = true
+        }
+
+        val tag = if (conversationId.isNotBlank()) "ft-conv-$conversationId" else "ft-msg"
+
         val n = NotificationCompat.Builder(this, CHANNEL_GENERAL)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
+            .setStyle(style)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(pending)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
 
-        nm.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), n)
+        // Stable per-conversation id so successive messages from the same chat
+        // update one heads-up instead of stacking.
+        val notifId = if (conversationId.isNotBlank()) {
+            (conversationId.hashCode() and 0x7fffffff).coerceAtLeast(2000)
+        } else {
+            (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
+        }
+        nm.notify(tag, notifId, n)
     }
 
-    private fun showIncomingCallFallback(peerNick: String, callId: String) {
+    private fun showIncomingCallNotification(peerNick: String, callId: String) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (nm.getNotificationChannel(CHANNEL_CALL) == null) {
-                val ring = NotificationChannel(
-                    CHANNEL_CALL,
-                    "Incoming Calls",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "Full-screen incoming call alerts"
-                    enableVibration(true)
-                    lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
-                }
-                nm.createNotificationChannel(ring)
-            }
-        }
+        ensureCallChannel(nm)
+
+        val displayName = if (peerNick.isBlank()) "Someone" else peerNick
 
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -127,26 +181,57 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             putExtra(CallService.EXTRA_PEER_NICK, peerNick)
             putExtra(CallService.EXTRA_CALL_ID, callId)
         }
-        val openPending = PendingIntent.getActivity(
+        val baseRequest = (callId.hashCode() and 0x7fffffff)
+        val answerPending = PendingIntent.getActivity(
             this,
-            (callId.hashCode() and 0x7fffffff),
+            baseRequest,
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val n = NotificationCompat.Builder(this, CHANNEL_CALL)
-            .setSmallIcon(android.R.drawable.ic_menu_call)
+        val declineIntent = Intent(this, CallDeclineReceiver::class.java).apply {
+            putExtra(CallService.EXTRA_CALL_ID, callId)
+            putExtra(CallService.EXTRA_PEER_NICK, peerNick)
+        }
+        val declinePending = PendingIntent.getBroadcast(
+            this,
+            baseRequest xor 0x55,
+            declineIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val person = Person.Builder()
+            .setName(displayName)
+            .setKey(displayName)
+            .setIcon(IconCompat.createWithResource(this, R.drawable.ic_notification))
+            .setImportant(true)
+            .build()
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_CALL)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Incoming FrogTalk call")
-            .setContentText("${if (peerNick.isBlank()) "Someone" else peerNick} is calling…")
+            .setContentText("$displayName is calling…")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setFullScreenIntent(openPending, true)
-            .setContentIntent(openPending)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setFullScreenIntent(answerPending, true)
+            .setContentIntent(answerPending)
             .setOngoing(true)
             .setAutoCancel(true)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .build()
 
-        nm.notify(RING_NOTIFICATION_ID, n)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // CallStyle gives the proper green Answer / red Decline buttons and
+            // matches the system Phone app's look.
+            builder.setStyle(
+                NotificationCompat.CallStyle.forIncomingCall(person, declinePending, answerPending)
+            )
+        } else {
+            builder
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePending)
+                .addAction(android.R.drawable.ic_menu_call, "Answer", answerPending)
+        }
+
+        nm.notify(RING_NOTIFICATION_ID, builder.build())
     }
 }

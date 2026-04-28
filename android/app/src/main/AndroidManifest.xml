@@ -19,6 +19,13 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Full-screen ringer over the lockscreen for incoming calls.
+         Without this declared, NotificationCompat.setFullScreenIntent() is
+         silently downgraded to a regular heads-up on Android 10+ and outright
+         denied on Android 14+. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Re-register FCM token / restore call channel on device boot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- File uploads -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
@@ -86,6 +93,10 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <receiver
+            android:name=".CallDeclineReceiver"
+            android:exported="false" />
 
     </application>
 

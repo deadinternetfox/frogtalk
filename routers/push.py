@@ -161,14 +161,40 @@ def _send_fcm(user_id: int, title: str, body: str, url: str = "/app", *,
         token = row.get("token")
         if not token:
             continue
-        msg = messaging.Message(
-            token=token,
-            data=data,
-            android=messaging.AndroidConfig(
-                priority="high",
-                ttl=120,
-            ),
-        )
+        # Calls stay data-only so the on-device CallService can drive the
+        # ring/full-screen flow. Everything else gets a hybrid payload —
+        # data + notification + AndroidNotification — so the FCM SDK draws
+        # a heads-up itself when the app is force-stopped or in deep Doze
+        # and the data handler can't be woken to render its own.
+        if kind == "call":
+            msg = messaging.Message(
+                token=token,
+                data=data,
+                android=messaging.AndroidConfig(
+                    priority="high",
+                    ttl=30,
+                ),
+            )
+        else:
+            msg = messaging.Message(
+                token=token,
+                data=data,
+                notification=messaging.Notification(
+                    title=str(title or "FrogTalk"),
+                    body=str(body or ""),
+                ),
+                android=messaging.AndroidConfig(
+                    priority="high",
+                    ttl=120,
+                    notification=messaging.AndroidNotification(
+                        channel_id="frogtalk_general",
+                        sound="default",
+                        default_vibrate_timings=True,
+                        visibility="public",
+                        tag=str(tag or f"ft-{kind}"),
+                    ),
+                ),
+            )
         try:
             messaging.send(msg, app=app)
         except Exception as e:
