@@ -281,11 +281,13 @@
   }
   .hero-downloads .hd-icon { font-size: 1.05rem; line-height: 1; flex-shrink: 0; }
   .hero-downloads .hd-label {
-    font-size: .8rem; font-weight: 600; flex: 1; min-width: 0;
+    font-size: .8rem; font-weight: 600; flex: 1 1 auto; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   .hero-downloads .hd-ext {
-    font-size: .62rem; letter-spacing: .08em; text-transform: uppercase;
+    font-size: .58rem; letter-spacing: .06em; text-transform: uppercase;
     color: #9ad9a8; opacity: .8; font-weight: 700; flex-shrink: 0;
+    white-space: nowrap;
   }
   @media (max-width: 1100px) {
     .hero-downloads .hd-item { flex: 0 1 calc(33.333% - .55rem); max-width: calc(33.333% - .55rem); }
@@ -838,7 +840,7 @@
       <a href="/download/ios" class="hd-item" title="iPhone via TestFlight"><span class="hd-icon">🍎</span><span class="hd-label">iPhone</span><span class="hd-ext">Beta</span></a>
       <a href="/download/linux" download class="hd-item"><span class="hd-icon">🐧</span><span class="hd-label">Linux</span><span class="hd-ext">AppImage</span></a>
       <a href="/download/deb" download class="hd-item"><span class="hd-icon">📦</span><span class="hd-label">Debian</span><span class="hd-ext">.deb</span></a>
-      <a href="/download/windows" download class="hd-item" title="Windows portable .exe"><span class="hd-icon">🪟</span><span class="hd-label">Windows</span><span class="hd-ext">.exe</span></a>
+      <a href="/download/windows" download class="hd-item" title="Windows portable .exe"><span class="hd-icon">🪟</span><span class="hd-label">Windows</span><span class="hd-ext">Portable</span></a>
       <a href="/download/windows-zip" download class="hd-item" title="Windows .zip archive"><span class="hd-icon">🪟</span><span class="hd-label">Windows</span><span class="hd-ext">.zip</span></a>
     </div>
   </div>
