@@ -1458,7 +1458,12 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 }
 .mp-add-actions .mp-btn{padding:8px 16px;font-size:13px;font-weight:600;border-radius:8px}
 @media (max-width:480px){
-  .mp-add-modal{align-items:flex-start;padding:48px 12px 12px}
+  /* Push the Add Track card lower so it lands within thumb reach
+     on tall phones — paddings the modal opens centered/lower-third
+     instead of slammed to the top of the viewport. */
+  .mp-add-modal{align-items:flex-start;padding:34vh 12px 12px}
+  /* Playlist modal stays closer to the top since it's bigger. */
+  #mp-playlist-modal.mp-add-modal{padding:48px 12px 12px}
   .mp-add-card{max-width:none}
 }
 /* DJ-only toggle switch — Discord-like */
