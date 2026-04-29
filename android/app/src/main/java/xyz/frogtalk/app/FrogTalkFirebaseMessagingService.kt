@@ -160,7 +160,16 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setContentIntent(pending)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            // No setDefaults(DEFAULT_ALL): the channel (CHANNEL_GENERAL) is
+            // already IMPORTANCE_HIGH with vibration and the system default
+            // ringtone. On several OEM ROMs (Xiaomi MIUI, Samsung One UI when
+            // app is backgrounded), pairing channel-driven sound with
+            // setDefaults caused the alert tone to play while the heads-up /
+            // tray entry was silently suppressed — the foreground
+            // "beep but no notification" symptom.
+            .setOnlyAlertOnce(false)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
             .build()
 
         // Stable per-conversation id so successive messages from the same chat

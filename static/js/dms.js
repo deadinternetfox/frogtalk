@@ -483,6 +483,34 @@ async function openDMChannel (id, nickname, avatar) {
           _enc.style.display = STATE.sharedSecret ? '' : 'none';
         }
       } catch {}
+      // Cold-start race: loadDMMessages ran in parallel and may have decrypted
+      // *before* the ECDH key was ready, leaving cipher-blobs in m.content
+      // (which renderDMMessage now shows as "🔒 Encrypted message"). Now
+      // that the shared key is derived, retry decryption on every still-
+      // encrypted message and re-render so the chat shows real plaintext.
+      if (_activeDM && _activeDM.id === _openId && Array.isArray(_dmMessages) && _dmMessages.length) {
+        const _peerNk2 = _activeDM?.nickname || '';
+        let _changed = false;
+        for (const m of _dmMessages) {
+          if (!m || typeof m.content !== 'string') continue;
+          if (_looksEncryptedBlob(m.content)) {
+            try {
+              const dec = await _decryptDMPreviewContent(m.content, peerUserId, _peerNk2);
+              if (dec && dec !== m.content) { m.content = dec; _changed = true; }
+            } catch {}
+          }
+          if (m.reply_content && typeof m.reply_content === 'string' && _looksEncryptedBlob(m.reply_content)) {
+            try {
+              const dec = await _decryptDMPreviewContent(m.reply_content, peerUserId, _peerNk2);
+              if (dec && dec !== m.reply_content) { m.reply_content = dec; _changed = true; }
+            } catch {}
+          }
+        }
+        if (_changed && _activeDM && _activeDM.id === _openId) {
+          if (_activeDM.id) _dmHistoryCache.set(_activeDM.id, _dmMessages.map(x => ({ ...x })));
+          renderDMChat();
+        }
+      }
     } catch (e) { /* silent — encryption is best-effort */ }
   })();
 
@@ -975,9 +1003,18 @@ function renderDMMessage (m) {
 
   // Content with formatting (links, mentions, custom emoji)
   let contentHtml = '';
+  // Distinguish three empty-content cases so we don't mislabel a normal
+  // text message as "Media":
+  //   1. view-once / consumed       → ''
+  //   2. content was an encrypted blob that failed to decrypt (key not
+  //      ready yet, e.g. cold-start from a notification tap) → keep raw
+  //      ciphertext out of the UI but show a clear lock placeholder
+  //   3. legitimately blank (media-only message) → fall through to media
+  const _rawContent = (typeof m.content === 'string') ? m.content : '';
+  const _isCipherBlob = _looksEncryptedBlob(_rawContent);
   const safeContent = (m.view_once || isViewOnceConsumed)
     ? ''
-    : ((typeof m.content === 'string' && _looksEncryptedBlob(m.content)) ? '' : m.content);
+    : (_isCipherBlob ? '' : _rawContent);
   if (safeContent) {
     contentHtml = esc(safeContent);
     const urlRe = /https?:\/\/[^\s<>"]+/g;
@@ -990,7 +1027,17 @@ function renderDMMessage (m) {
       contentHtml = renderCustomEmojisInText(contentHtml);
     }
   }
-  if (!contentHtml && !mediaHtml) contentHtml = '<em style="color:#444">Media</em>';
+  if (!contentHtml && !mediaHtml) {
+    if (_isCipherBlob || m._decryptPending) {
+      // Decryption hasn't succeeded yet — show a lock placeholder instead
+      // of the misleading "Media" string. A re-decrypt happens on the next
+      // render pass once the ECDH key derives (loadDMMessages / openDM
+      // attach the peer pubkey → _dmSharedKeyCache populates).
+      contentHtml = '<em style="color:#888">\uD83D\uDD12 Encrypted message</em>';
+    } else if (m.has_media) {
+      contentHtml = '<em style="color:#444">Media</em>';
+    }
+  }
 
   // Reply quote
   const replyPreviewRaw = String(m.reply_content || '…');

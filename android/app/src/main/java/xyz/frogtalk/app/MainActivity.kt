@@ -940,11 +940,19 @@ class MainActivity : AppCompatActivity() {
             .setSmallIcon(android.R.drawable.ic_popup_reminder)
             .setContentTitle(title)
             .setContentText(body)
+            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pending)
             .setAutoCancel(true)
             .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
             .setCategory(androidx.core.app.NotificationCompat.CATEGORY_SOCIAL)
-            .setDefaults(androidx.core.app.NotificationCompat.DEFAULT_ALL)
+            .setVisibility(androidx.core.app.NotificationCompat.VISIBILITY_PUBLIC)
+            // No setDefaults: the frogtalk_general channel already supplies
+            // sound + vibration. Stacking DEFAULT_ALL on top caused some OEMs
+            // to play the alert tone while suppressing the heads-up/tray
+            // entry (the foreground "beep but no notification" bug).
+            .setOnlyAlertOnce(false)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
             .build()
 
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
