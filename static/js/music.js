@@ -22,6 +22,12 @@ const Music = (() => {
   // the user's back.
   let _userPaused = false;
   let _muted = false;     // native Android notification mute state (best-effort)
+  // User collapsed the player (button in the header) — channel stays open
+  // but the iframe + meta shrink to a slim bar so the chat takes the rest
+  // of the screen. Persisted in localStorage so it survives reloads.
+  let _collapsed = (() => {
+    try { return localStorage.getItem('mp.collapsed') === '1'; } catch { return false; }
+  })();
   // Radio-sync anchor: the wall-clock moment (ms) at which the current head
   // track would have started if played from 0. `position_sec` is derived
   // from this on every check — all clients that share a server-supplied
@@ -1047,8 +1053,15 @@ const Music = (() => {
             </div>
           </div>
         </div>
-        ${cur ? `<button class="mp-btn mp-resync" title="Catch up to the room: refreshes the queue from the server and seeks your iframe to the live play-head position"
-                         onclick="Music.resyncNow()"><span class="mp-resync-ico">📻</span><span class="mp-resync-lbl">Resync</span></button>` : ''}
+        <div class="mp-header-actions">
+          ${cur ? `<button class="mp-btn mp-resync" title="Catch up to the room: refreshes the queue from the server and seeks your iframe to the live play-head position"
+                           onclick="Music.resyncNow()"><span class="mp-resync-ico">📻</span><span class="mp-resync-lbl">Resync</span></button>` : ''}
+          <button class="mp-btn mp-collapse" title="Collapse the player to make the chat bigger. Tap again to bring the player back."
+                  onclick="Music.toggleCollapse()" aria-label="Toggle player size">
+            <span class="mp-collapse-ico">${_collapsed ? '▢' : '▭'}</span>
+            <span class="mp-collapse-lbl">${_collapsed ? 'Expand' : 'Collapse'}</span>
+          </button>
+        </div>
       </div>`;
 
     const nowRow = cur ? `
@@ -1073,10 +1086,9 @@ const Music = (() => {
 
     const submitHtml = _state.can_submit ? `
       <div class="mp-submit">
-        <input id="mp-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-               placeholder="Paste YouTube, Spotify, or SoundCloud link…"
-               onkeydown="if(event.key==='Enter')Music.submit()">
-        <button class="mp-btn primary" onclick="Music.submit()">Add</button>
+        <button class="mp-btn primary mp-add-btn" onclick="Music.openAddModal()" title="Add a track to the queue">
+          <span class="mp-add-ico">➕</span><span class="mp-add-lbl">Add Track</span>
+        </button>
         ${_state.can_control ? `
           <label class="mp-dj-toggle" title="${_state.dj_only ? 'DJ-only mode is ON — only DJs can queue' : 'Open mode — anyone can queue'}">
             <input type="checkbox" ${_state.dj_only ? 'checked' : ''} onchange="Music.toggleDJOnly()">
@@ -1112,7 +1124,6 @@ const Music = (() => {
       // Re-paint badge with the cached drift (the node was just replaced).
       _renderSyncBadge();
       _startSyncProbeIfNeeded();
-      _wireMpInput();
       return;
     }
 
@@ -1130,99 +1141,6 @@ const Music = (() => {
     _lastDriftSec = null;
     _renderSyncBadge();
     _startSyncProbeIfNeeded();
-    _wireMpInput();
-  }
-
-  // ─── Android keyboard scroll-restore ───────────────────────────────────
-  // On Android Chrome / WebView, focusing #mp-input pops the soft keyboard
-  // which shrinks the visual viewport; the browser then auto-scrolls the
-  // input into view, which can push the music iframe completely off-screen.
-  // When the keyboard dismisses, the parent containers don't always restore
-  // their scroll, leaving the player invisible. We snapshot scrollTop on
-  // every scrollable ancestor at focus time and restore it on blur (and
-  // again once the visualViewport returns to its pre-keyboard height).
-  function _wireMpInput() {
-    const inp = document.getElementById('mp-input');
-    if (!inp || inp.dataset.kbWired === '1') return;
-    inp.dataset.kbWired = '1';
-
-    const scrollables = () => {
-      const list = [window, document.scrollingElement, document.documentElement, document.body];
-      // Walk ancestors of the input and capture anything that actually scrolls.
-      let n = inp.parentElement;
-      while (n && n !== document.body) {
-        const cs = getComputedStyle(n);
-        if (/(auto|scroll)/.test(cs.overflowY) || /(auto|scroll)/.test(cs.overflow)) {
-          list.push(n);
-        }
-        n = n.parentElement;
-      }
-      // Also include known top-level scroll hosts.
-      ['main', 'messages-area', 'music-panel'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el && !list.includes(el)) list.push(el);
-      });
-      return list;
-    };
-
-    let snap = null;
-    let vvBaseline = 0;
-    let vvHandler = null;
-
-    const capture = () => {
-      snap = scrollables().map(el => {
-        if (el === window) return { el, top: window.scrollY, left: window.scrollX };
-        return { el, top: el.scrollTop || 0, left: el.scrollLeft || 0 };
-      });
-      vvBaseline = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    };
-
-    const restore = () => {
-      if (!snap) return;
-      snap.forEach(({ el, top, left }) => {
-        try {
-          if (el === window) window.scrollTo(left, top);
-          else { el.scrollTop = top; el.scrollLeft = left; }
-        } catch {}
-      });
-      // Belt and braces: zero the document/body scroll which Android sometimes
-      // pins to the input's location even after we restore ancestors.
-      try { window.scrollTo(0, 0); } catch {}
-      try { document.documentElement.scrollTop = 0; } catch {}
-      try { document.body.scrollTop = 0; } catch {}
-    };
-
-    inp.addEventListener('focus', () => {
-      capture();
-      // If visualViewport is supported, watch for the keyboard going away —
-      // some Android WebViews fire blur before the layout has finished
-      // reflowing, so a one-shot resize listener catches the late case.
-      if (window.visualViewport && !vvHandler) {
-        vvHandler = () => {
-          const h = window.visualViewport.height;
-          // Treat "keyboard closed" as visual viewport recovering ≥ 90% of baseline.
-          if (h >= vvBaseline * 0.9) {
-            restore();
-          }
-        };
-        window.visualViewport.addEventListener('resize', vvHandler);
-      }
-    });
-
-    inp.addEventListener('blur', () => {
-      // Restore immediately, then again after the keyboard animation finishes
-      // (Android takes ~200–400ms to fully retract the keyboard).
-      restore();
-      setTimeout(restore, 80);
-      setTimeout(restore, 250);
-      setTimeout(() => {
-        restore();
-        if (vvHandler && window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', vvHandler);
-          vvHandler = null;
-        }
-      }, 600);
-    });
   }
 
   async function mount(roomName, channelType) {
@@ -1264,8 +1182,10 @@ const Music = (() => {
     _room = roomName;
     panel.classList.remove('mini');
     panel.classList.add('active');
+    panel.classList.toggle('collapsed', _collapsed);
     panel.style.display = 'flex';
     document.body.setAttribute('data-music', '1');
+    document.body.toggleAttribute('data-music-collapsed', _collapsed);
     document.body.removeAttribute('data-music-mini');
     _clearDock();
     // Strip any leftover mini bar from a previous navigate-away.
@@ -1289,6 +1209,20 @@ const Music = (() => {
       _emitState();
       return;
     }
+    _render();
+  }
+
+  // Toggle the collapsed state of the music panel. When collapsed, the
+  // panel shrinks to a slim bar so the chat takes most of the screen;
+  // tap the same button again to bring the player back. Persisted across
+  // reloads via localStorage so the user's preference sticks.
+  function toggleCollapse() {
+    _collapsed = !_collapsed;
+    try { localStorage.setItem('mp.collapsed', _collapsed ? '1' : '0'); } catch {}
+    const panel = $('music-panel');
+    if (panel) panel.classList.toggle('collapsed', _collapsed);
+    document.body.toggleAttribute('data-music-collapsed', _collapsed);
+    // Re-render the header so the button label/icon flip immediately.
     _render();
   }
 
@@ -1598,12 +1532,20 @@ const Music = (() => {
     return true;
   }
 
-  async function submit() {
+  async function submit(urlOverride) {
     if (!_room) return;
-    const inp = $('mp-input');
-    const url = (inp?.value || '').trim();
-    if (!url) return;
-    inp.disabled = true;
+    let url;
+    if (typeof urlOverride === 'string') {
+      url = urlOverride.trim();
+    } else {
+      const inp = $('mp-input');
+      url = (inp?.value || '').trim();
+      if (inp) inp.disabled = true;
+    }
+    if (!url) {
+      const inp = $('mp-input'); if (inp) inp.disabled = false;
+      return;
+    }
     try {
       const res = await fetch(`/api/rooms/${encodeURIComponent(_room)}/queue`, {
         method: 'POST',
@@ -1611,14 +1553,85 @@ const Music = (() => {
         body: JSON.stringify({ url })
       });
       const data = await res.json();
-      if (!res.ok) { UI.showToast(data.error || 'Failed to add track', 'error'); return; }
-      if (inp) inp.value = '';
+      if (!res.ok) { UI.showToast(data.error || 'Failed to add track', 'error'); return false; }
+      const inp = $('mp-input'); if (inp) inp.value = '';
       // Optimistic refresh — WS will also push
       _state = await _fetchState(_room);
       _render();
+      return true;
     } finally {
-      if (inp) inp.disabled = false;
+      const inp = $('mp-input'); if (inp) inp.disabled = false;
     }
+  }
+
+  // Modal-based URL entry. Inline inputs on Android are unreliable because
+  // the soft keyboard reflows the page and can push embedded iframes
+  // behind other panels. A position:fixed overlay sidesteps that entirely.
+  function openAddModal() {
+    if (!_state || !_state.can_submit) return;
+    closeAddModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'mp-add-modal';
+    overlay.className = 'mp-add-modal';
+    overlay.innerHTML = `
+      <div class="mp-add-card" role="dialog" aria-modal="true" aria-label="Add track">
+        <div class="mp-add-head">
+          <span class="mp-add-head-ico">🎵</span>
+          <span class="mp-add-head-title">Add a track</span>
+          <button class="mp-add-close" aria-label="Close" onclick="Music.closeAddModal()">✕</button>
+        </div>
+        <div class="mp-add-body">
+          <label class="mp-add-label" for="mp-input">Paste a YouTube, Spotify, or SoundCloud link</label>
+          <input id="mp-input" class="mp-add-input" type="url" inputmode="url"
+                 autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                 placeholder="https://www.youtube.com/watch?v=…">
+          <div class="mp-add-hint">Press Enter or tap Add to queue it.</div>
+        </div>
+        <div class="mp-add-actions">
+          <button class="mp-btn" onclick="Music.closeAddModal()">Cancel</button>
+          <button class="mp-btn primary" onclick="Music.submitFromModal()">Add</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    // Close on backdrop click (but not card click)
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeAddModal();
+    });
+    const inp = overlay.querySelector('#mp-input');
+    if (inp) {
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); submitFromModal(); }
+        else if (e.key === 'Escape') { e.preventDefault(); closeAddModal(); }
+      });
+      // Try to pre-fill from clipboard if it looks like a URL.
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          navigator.clipboard.readText().then(t => {
+            const v = (t || '').trim();
+            if (/^https?:\/\//i.test(v) && /youtu|spotify|soundcloud/i.test(v) && !inp.value) {
+              inp.value = v;
+            }
+          }).catch(() => {});
+        }
+      } catch {}
+      // Focus on next tick so the modal animation completes first.
+      setTimeout(() => { try { inp.focus(); inp.select(); } catch {} }, 60);
+    }
+  }
+
+  function closeAddModal() {
+    const o = document.getElementById('mp-add-modal');
+    if (o) o.remove();
+  }
+
+  async function submitFromModal() {
+    const inp = document.getElementById('mp-input');
+    const url = (inp?.value || '').trim();
+    if (!url) return;
+    if (inp) inp.disabled = true;
+    const ok = await submit(url);
+    if (inp) inp.disabled = false;
+    if (ok) closeAddModal();
   }
 
   async function skip() {
@@ -1742,6 +1755,8 @@ const Music = (() => {
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
+           openAddModal, closeAddModal, submitFromModal,
+           toggleCollapse,
            // Native-callable hooks: MainActivity invokes these from
            // Activity.onPause() / onResume() because we deliberately keep
            // the WebView running in the background (so YT audio survives),
