@@ -321,7 +321,6 @@ const Music = (() => {
     _syncMsgListenerBound = true;
     window.addEventListener('message', (ev) => {
       try {
-        if (!_syncProbePending) return;
         const data = ev.data;
         if (!data) return;
         let parsed = null;
@@ -332,6 +331,18 @@ const Music = (() => {
           parsed = data;
         }
         if (!parsed) return;
+
+        // YouTube fires onStateChange unsolicited. Capture state regardless
+        // of whether we're awaiting a probe — the resume verifier relies
+        // on this to know when the player actually entered playing state.
+        if (parsed.event === 'onStateChange' && typeof parsed.info === 'number') {
+          _lastPlayerState = parsed.info;
+        }
+
+        // Drift updates only happen when we asked for them, to avoid the
+        // listener doing arithmetic on every spontaneous YT message.
+        if (!_syncProbePending) return;
+
         let actualSec = null;
         let lastUpdatedAtMs = null;
         let playerState = null;
@@ -496,11 +507,20 @@ const Music = (() => {
   // browsers + YouTube's autoplay policy will silently pause an embed when
   // the page is backgrounded, so by the time the user returns the UI says
   // "playing" but no audio is coming out. Send play+seek to recover.
+  //
+  // Real-world quirks this guards against:
+  // - YouTube returning state=2 (paused) or even state=-1/3 (unstarted/buffering)
+  //   right after foreground. A single playVideo can be ignored if the
+  //   embed is mid-transition; we verify and retry up to 3 times.
+  // - The seek-then-pause race: sending seekTo while the player is still
+  //   in paused state can briefly play then re-pause. So we play FIRST,
+  //   then seek only if the room has drifted meaningfully (>3s) to avoid
+  //   that race for the common small-drift case.
+  // - Multiple foreground events firing in <1.5s — debounced.
   let _lastResumeAt = 0;
+  let _resumeRetryToken = 0;
   function _resumeOnVisible() {
     try {
-      // Debounce — visibilitychange + focus + pageshow can all fire on tab
-      // return. We only want one play+seek round per re-entry.
       const now = Date.now();
       if (now - _lastResumeAt < 1500) return;
       _lastResumeAt = now;
@@ -508,27 +528,81 @@ const Music = (() => {
       const cur = _state && _state.queue && _state.queue[0];
       if (!cur) return;
       if (cur.provider === 'spotify') return;       // no postMessage play API
+
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       if (!frame || !frame.contentWindow) return;
+      const win = frame.contentWindow;
+      // Make sure we're listening for the iframe's onStateChange replies
+      // even if the steady probe hasn't started yet.
+      _bindSyncMessageListener();
+
+      // Helper that survives any cross-origin oddity.
+      const send = (msg) => {
+        try { win.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg), '*'); }
+        catch { /* nothing we can do */ }
+      };
+
       const targetSec = _expectedPosSec();
+      // Cancel any in-flight retry chain from a prior return.
+      const myToken = ++_resumeRetryToken;
+
       if (cur.provider === 'youtube') {
-        // 'listening' handshake is idempotent and required for fresh embeds.
-        try { frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*'); } catch {}
-        try { frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*'); } catch {}
-        // Seek slightly after the play command so the player is ready.
-        setTimeout(() => { try { _seekIframe(targetSec); } catch {} }, 220);
+        // Idempotent handshake — required for fresh embeds, no-op otherwise.
+        send({ event: 'listening', id: 'frogtalk-music' });
+        // Force a fresh state read by clearing cache; verifier waits for it.
+        _lastPlayerState = null;
+        // Play first. Seeking before play lands can trigger a paused-seek
+        // that re-pauses immediately on some YT iframe builds.
+        send({ event: 'command', func: 'playVideo', args: [] });
+
+        // Verify-and-retry. Up to 3 play attempts, 700ms apart. If after
+        // that the player still isn't reporting state=1, give up — the
+        // user can hit Resync and we won't keep hammering postMessage.
+        let attempts = 1;
+        const verify = () => {
+          if (myToken !== _resumeRetryToken) return;   // superseded by a newer call
+          if (document.hidden || _paused) return;
+          // Ask the embed for its current state — reply lands in our
+          // global message listener and updates _lastPlayerState.
+          send({ event: 'command', func: 'getPlayerState', args: [] });
+          setTimeout(() => {
+            if (myToken !== _resumeRetryToken) return;
+            if (document.hidden || _paused) return;
+            if (_lastPlayerState === 1) {
+              // Playing — only seek now if we actually drifted enough to
+              // matter. Avoids the seek-pause race for small drifts and
+              // keeps audio continuous for users who briefly tabbed away.
+              const drift = Math.abs(_expectedPosSec() - targetSec);
+              if (drift > 3) {
+                try { _seekIframe(_expectedPosSec()); } catch {}
+              }
+              return;
+            }
+            if (attempts++ < 3) {
+              send({ event: 'command', func: 'playVideo', args: [] });
+              setTimeout(verify, 700);
+            }
+          }, 350);
+        };
+        setTimeout(verify, 600);
+
       } else if (cur.provider === 'soundcloud') {
-        try { frame.contentWindow.postMessage(
-          JSON.stringify({ method: 'play' }), '*'); } catch {}
-        setTimeout(() => { try { _seekIframe(targetSec); } catch {} }, 220);
+        send({ method: 'play' });
+        // SoundCloud is more deterministic — single play is enough; only
+        // seek if drift is meaningful.
+        setTimeout(() => {
+          if (myToken !== _resumeRetryToken) return;
+          if (document.hidden || _paused) return;
+          const drift = Math.abs(_expectedPosSec() - targetSec);
+          if (drift > 3) { try { _seekIframe(_expectedPosSec()); } catch {} }
+        }, 400);
       }
+
       // Reset the badge to "checking" — fast probes will repaint within ~1s.
       _lastDriftSec = null;
       _lastPlayerState = null;
       _renderSyncBadge();
-      _scheduleFastProbes([700, 2000]);
+      _scheduleFastProbes([800, 2200]);
     } catch { /* never throw from a visibility handler */ }
   }
 
