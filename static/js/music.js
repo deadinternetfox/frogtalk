@@ -492,12 +492,65 @@ const Music = (() => {
     } catch { _syncProbePending = false; }
   }
 
+  // Resume the iframe if it got auto-paused while the tab was hidden. Mobile
+  // browsers + YouTube's autoplay policy will silently pause an embed when
+  // the page is backgrounded, so by the time the user returns the UI says
+  // "playing" but no audio is coming out. Send play+seek to recover.
+  let _lastResumeAt = 0;
+  function _resumeOnVisible() {
+    try {
+      // Debounce — visibilitychange + focus + pageshow can all fire on tab
+      // return. We only want one play+seek round per re-entry.
+      const now = Date.now();
+      if (now - _lastResumeAt < 1500) return;
+      _lastResumeAt = now;
+      if (_paused) return;                          // user actually paused — leave alone
+      const cur = _state && _state.queue && _state.queue[0];
+      if (!cur) return;
+      if (cur.provider === 'spotify') return;       // no postMessage play API
+      const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+      if (!frame || !frame.contentWindow) return;
+      const targetSec = _expectedPosSec();
+      if (cur.provider === 'youtube') {
+        // 'listening' handshake is idempotent and required for fresh embeds.
+        try { frame.contentWindow.postMessage(
+          JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*'); } catch {}
+        try { frame.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*'); } catch {}
+        // Seek slightly after the play command so the player is ready.
+        setTimeout(() => { try { _seekIframe(targetSec); } catch {} }, 220);
+      } else if (cur.provider === 'soundcloud') {
+        try { frame.contentWindow.postMessage(
+          JSON.stringify({ method: 'play' }), '*'); } catch {}
+        setTimeout(() => { try { _seekIframe(targetSec); } catch {} }, 220);
+      }
+      // Reset the badge to "checking" — fast probes will repaint within ~1s.
+      _lastDriftSec = null;
+      _lastPlayerState = null;
+      _renderSyncBadge();
+      _scheduleFastProbes([700, 2000]);
+    } catch { /* never throw from a visibility handler */ }
+  }
+
   // Pause the probe when the tab is hidden so we don't pay the postMessage
-  // tax for nothing; resume when visible again.
+  // tax for nothing; resume + recover playback when visible again.
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) _stopSyncProbe();
-      else _startSyncProbeIfNeeded();
+      if (document.hidden) {
+        _stopSyncProbe();
+      } else {
+        _startSyncProbeIfNeeded();
+        _resumeOnVisible();
+      }
+    });
+    // Some mobile browsers fire pageshow (bfcache restore) without
+    // visibilitychange. Cover that path too.
+    window.addEventListener('pageshow', (e) => {
+      if (!document.hidden) _resumeOnVisible();
+    });
+    // Window focus catches desktop alt-tab back.
+    window.addEventListener('focus', () => {
+      if (!document.hidden) _resumeOnVisible();
     });
   }
 
