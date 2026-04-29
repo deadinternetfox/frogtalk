@@ -1384,7 +1384,7 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
   box-shadow:0 2px 10px rgba(255,100,140,0.3), inset 0 1px 0 rgba(255,255,255,.06)
 }
 .mp-act-clear .mp-act-ico{background:rgba(255,100,140,0.22)}
-.mp-submit{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.mp-submit{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;margin-top:4px;padding-bottom:6px}
 .mp-submit input{
   flex:1;background:#1a0f2e;border:1px solid #3a2a5a;color:#fff;border-radius:6px;
   padding:7px 10px;font-size:13px
@@ -1394,8 +1394,8 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
    Uses .mp-btn.mp-add-btn (specificity 0,2,0) so it overrides the
    generic .mp-btn.primary tiny-pill styling. */
 .mp-btn.mp-add-btn{
-  display:inline-flex;align-items:center;gap:7px;
-  padding:8px 16px;font-size:12.5px;font-weight:700;letter-spacing:.3px;
+  display:inline-flex;align-items:center;gap:6px;
+  padding:6px 12px;font-size:11px;font-weight:700;letter-spacing:.4px;
   white-space:nowrap;line-height:1;text-transform:uppercase;
   background:linear-gradient(135deg,#8a3aba,#5a2a8a);color:#fff;border:0;border-radius:999px;cursor:pointer;
   box-shadow:0 2px 8px rgba(160,80,216,.32),inset 0 1px 0 rgba(255,255,255,.08);
@@ -1406,7 +1406,7 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 .mp-btn.mp-add-btn:active{transform:scale(.97)}
 .mp-btn.mp-add-btn .mp-add-ico{
   display:inline-flex;align-items:center;justify-content:center;
-  width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.22);font-size:11px;line-height:1;font-weight:800
+  width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.22);font-size:9px;line-height:1;font-weight:800
 }
 .mp-btn.mp-add-btn .mp-add-lbl{line-height:1;white-space:nowrap}
 
@@ -1474,8 +1474,8 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 .mp-dj-toggle input:checked ~ .mp-dj-track .mp-dj-knob{transform:translateX(14px);background:#fff}
 .mp-dj-label{white-space:nowrap}
 .mp-queue{
-  max-height:240px;overflow-y:auto;overflow-x:hidden;
-  border-top:1px dashed #3a2a5a;padding-top:8px;
+  max-height:220px;overflow-y:auto;overflow-x:hidden;
+  border-top:1px dashed #3a2a5a;padding-top:8px;margin-top:2px;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
   touch-action:pan-y;
   scrollbar-width:thin;scrollbar-color:#3a2a5a transparent
@@ -1484,7 +1484,7 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 .mp-queue::-webkit-scrollbar-thumb{background:#3a2a5a;border-radius:3px}
 .mp-queue::-webkit-scrollbar-track{background:transparent}
 @media (max-width:600px){
-  .mp-queue{max-height:46vh;scrollbar-width:none}
+  .mp-queue{max-height:36vh;scrollbar-width:none}
   .mp-queue::-webkit-scrollbar{display:none;width:0;height:0}
 }
 .mp-queue-item{
