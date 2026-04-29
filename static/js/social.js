@@ -1069,7 +1069,7 @@ const Social = (() => {
     content.innerHTML = '<div class="social-loading">Loading feed…</div>';
     try {
       const [feedRes, sugRes, storiesHtml] = await Promise.all([
-        api('/api/social/feed'), api('/api/social/suggested'), loadStoriesBar()
+        api('/api/social/feed?lite=1'), api('/api/social/suggested'), loadStoriesBar()
       ]);
       const feedData = await feedRes.json();
       const sugData = await sugRes.json();
@@ -1138,7 +1138,7 @@ const Social = (() => {
     content.innerHTML = '<div class="social-loading">Discovering…</div>';
     try {
       const [postsRes, channelsRes] = await Promise.all([
-        api(`/api/social/explore?sort=${_exploreSort}`),
+        api(`/api/social/explore?lite=1&sort=${_exploreSort}`),
         api('/api/directory/new')
       ]);
       const postsData = await postsRes.json();
@@ -1822,9 +1822,9 @@ const Social = (() => {
       const moodQuery = _musicTabMood ? `&mood=${encodeURIComponent(_musicTabMood)}` : '';
       let fetchRes;
       if (_musicTabScope === 'explore') {
-        fetchRes = await api(`/api/social/explore?limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`).catch(() => null);
+        fetchRes = await api(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`).catch(() => null);
       } else {
-        fetchRes = await api(`/api/social/feed?limit=100${moodQuery}`).catch(() => null);
+        fetchRes = await api(`/api/social/feed?lite=1&limit=100${moodQuery}`).catch(() => null);
       }
       const feedData = fetchRes && fetchRes.ok ? await fetchRes.json() : { posts: [] };
       const seen = new Set();
@@ -2377,9 +2377,9 @@ const Social = (() => {
     let isMusicPost = false;
     if (p.media_data && p.media_type) {
       if (p.media_type.startsWith('image/')) {
-        mediaHtml = `<div class="sf-media"><img src="${esc(p.media_data)}" alt="" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" onerror="this.closest('.sf-media')?.remove()"></div>`;
+        mediaHtml = `<div class="sf-media"><img src="${esc(p.media_data)}" alt="" loading="lazy" decoding="async" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" onerror="this.closest('.sf-media')?.remove()"></div>`;
       } else if (p.media_type.startsWith('video/')) {
-        mediaHtml = `<div class="sf-media"><video src="${esc(p.media_data)}" controls onerror="this.closest('.sf-media')?.remove()"></video></div>`;
+        mediaHtml = `<div class="sf-media"><video src="${esc(p.media_data)}" controls preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
       } else if (p.media_type.startsWith('music/')) {
         mediaHtml = _renderMusicCard(p);
         isMusicPost = true;

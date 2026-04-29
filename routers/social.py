@@ -243,13 +243,25 @@ async def get_feed(
     limit: int = Query(30, le=100),
     offset: int = Query(0),
     mood: str = Query(""),
+    lite: int = Query(0),
     current_user: dict = Depends(get_current_user),
 ):
-    """Posts from users you follow."""
-    posts = db.get_feed_posts(current_user["id"], limit, offset, mood)
+    """Posts from users you follow.
+
+    `lite=1` skips inlining base64 media in the row — instead the client
+    receives `media_data = '/api/social/posts/{id}/media'` per post and the
+    browser fetches each image/video lazily. Drops feed payloads from MBs
+    to KBs and lets `loading="lazy"` only request what scrolls into view.
+    """
+    use_lite = bool(lite)
+    posts = db.get_feed_posts(current_user["id"], limit, offset, mood, lite=use_lite)
     _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
         p["reactions"] = _rmap.get(p["id"], [])
+        if use_lite and p.get("has_media"):
+            mt = (p.get("media_type") or "").lower()
+            if mt.startswith("image/") or mt.startswith("video/"):
+                p["media_data"] = f"/api/social/posts/{p['id']}/media"
     return {"posts": posts}
 
 
@@ -259,13 +271,22 @@ async def get_explore(
     offset: int = Query(0),
     sort: str = Query("trending"),
     mood: str = Query(""),
+    lite: int = Query(0),
     current_user: dict = Depends(get_current_user),
 ):
-    """All public posts — discover new people."""
-    posts = db.get_explore_posts(current_user["id"], limit, offset, sort, mood)
+    """All public posts — discover new people.
+
+    See `get_feed` for the `lite` flag.
+    """
+    use_lite = bool(lite)
+    posts = db.get_explore_posts(current_user["id"], limit, offset, sort, mood, lite=use_lite)
     _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
         p["reactions"] = _rmap.get(p["id"], [])
+        if use_lite and p.get("has_media"):
+            mt = (p.get("media_type") or "").lower()
+            if mt.startswith("image/") or mt.startswith("video/"):
+                p["media_data"] = f"/api/social/posts/{p['id']}/media"
     return {"posts": posts}
 
 
@@ -273,6 +294,68 @@ async def get_explore(
 async def suggested_users(current_user: dict = Depends(get_current_user)):
     """Users you might want to follow."""
     return {"users": db.get_suggested_users(current_user["id"])}
+
+
+@router.get("/posts/{post_id}/media")
+async def get_post_media(post_id: int, current_user: dict = Depends(get_current_user)):
+    """Lazy-load endpoint for wall-post media. Used by feed/explore in
+    `lite=1` mode so each post body only carries this URL instead of the
+    multi-MB inlined base64 payload. Decodes the stored data URI and
+    streams raw bytes with the proper Content-Type, plus an immutable
+    private cache header so the browser only re-fetches on scroll-back
+    once before caching it locally.
+
+    Privacy mirrors `get_wall_posts`: owner sees own; friends see
+    `friends/followers/public`; followers see `followers/public`; everyone
+    else only `public`. Either-side block hides the media entirely.
+    """
+    row = db.get_wall_post_media(post_id)
+    if not row or not row.get("media_data"):
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    owner_id = int(row["user_id"])
+    viewer_id = int(current_user["id"])
+    privacy = (row.get("privacy") or "public").lower()
+    if owner_id != viewer_id:
+        if db.is_blocked_either_way(viewer_id, owner_id):
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        if privacy == "friends":
+            if not db.are_friends(viewer_id, owner_id):
+                return JSONResponse(status_code=403, content={"error": "Forbidden"})
+        elif privacy == "followers":
+            if not (db.are_friends(viewer_id, owner_id) or db.is_following(viewer_id, owner_id)):
+                return JSONResponse(status_code=403, content={"error": "Forbidden"})
+        elif privacy != "public":
+            return JSONResponse(status_code=403, content={"error": "Forbidden"})
+
+    media_data = row["media_data"]
+    media_type = row.get("media_type") or "application/octet-stream"
+
+    # If stored as a data URI, decode to raw bytes so the browser can
+    # cache + range-request properly. Anything else (e.g. a /api/... URL
+    # stored on the row) is returned as a redirect to that location.
+    if isinstance(media_data, str) and media_data.startswith("data:"):
+        try:
+            header, _, b64 = media_data.partition(",")
+            # header looks like "data:image/jpeg;base64"
+            if ";base64" in header:
+                raw = base64.b64decode(b64, validate=False)
+                ct = header[5:].split(";", 1)[0] or media_type
+                return Response(
+                    content=raw,
+                    media_type=ct,
+                    headers={
+                        "Cache-Control": "private, max-age=86400, immutable",
+                        "Content-Length": str(len(raw)),
+                    },
+                )
+        except Exception:
+            _log.debug("post media decode failed pid=%s", post_id, exc_info=True)
+            return JSONResponse(status_code=500, content={"error": "Decode failed"})
+
+    # Fallback: media_data isn't a base64 data URI \u2014 just return JSON
+    # with the URL for the client to follow. Existing renderers already
+    # handle URL-style values directly.
+    return JSONResponse(content={"url": media_data, "media_type": media_type})
 
 
 @router.get("/profile/{nickname}/media")

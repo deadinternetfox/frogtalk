@@ -3625,6 +3625,18 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
     return [dict(r) for r in rows]
 
 
+def get_wall_post_media(post_id: int) -> Optional[Dict]:
+    """Lean fetch for the lazy media endpoint: only the fields needed for
+    privacy gating + the raw media payload. Avoids pulling content/track_*."""
+    with _conn() as con:
+        row = con.execute("""
+            SELECT wp.id, wp.user_id, wp.privacy, wp.media_data, wp.media_type
+            FROM wall_posts wp
+            WHERE wp.id=?
+        """, (post_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def get_wall_post(post_id: int) -> Optional[Dict]:
     """Get a single wall post."""
     with _conn() as con:
@@ -4138,15 +4150,23 @@ def get_following_list(user_id: int, limit: int = 50) -> List[Dict]:
 
 
 def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
-                   mood: str = '') -> List[Dict]:
+                   mood: str = '', lite: bool = False) -> List[Dict]:
     """Posts from users the current user follows + own posts, newest first.
 
     Optional `mood` narrows to music-tagged posts with matching `track_mood`.
+    When `lite` is True, `media_data` is omitted from the SELECT — callers
+    are expected to construct an on-demand URL using `has_media`/`media_type`,
+    avoiding multi-MB base64 inlining of every post in the response.
     """
     mood = (mood or '').strip().lower()
+    media_col = (
+        "CASE WHEN wp.media_type LIKE 'image/%' OR wp.media_type LIKE 'video/%' "
+        "THEN NULL ELSE wp.media_data END AS media_data"
+        if lite else "wp.media_data"
+    )
     with _conn() as con:
-        rows = con.execute("""
-            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
+        rows = con.execute(f"""
+            SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
@@ -4171,12 +4191,19 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
 
 
 def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
-                      sort: str = 'trending', mood: str = '') -> List[Dict]:
+                      sort: str = 'trending', mood: str = '',
+                      lite: bool = False) -> List[Dict]:
     """All public posts — discover new people. Supports trending/new/top sort.
 
     Optional `mood` narrows to music-tagged posts with matching `track_mood`.
+    When `lite` is True, `media_data` is omitted (see `get_feed_posts`).
     """
     mood = (mood or '').strip().lower()
+    media_col = (
+        "CASE WHEN wp.media_type LIKE 'image/%' OR wp.media_type LIKE 'video/%' "
+        "THEN NULL ELSE wp.media_data END AS media_data"
+        if lite else "wp.media_data"
+    )
     with _conn() as con:
         if sort == 'top':
             order = "(SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) DESC, wp.created_at DESC"
@@ -4192,7 +4219,7 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
                      ELSE 0 END
             ) DESC, wp.created_at DESC"""
         rows = con.execute(f"""
-            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
+            SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
