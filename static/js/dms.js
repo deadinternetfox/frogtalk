@@ -126,6 +126,84 @@ function _dmPreviewText(content, hasMedia, mediaType) {
   return (hasMedia || mediaType) ? 'Media' : '';
 }
 
+/* ── Foreground DM banner ───────────────────────────────────────────────────
+ * On Samsung One UI (and a few other OEMs), the system silently suppresses
+ * notification heads-up when the source app is in the foreground — even when
+ * the channel is IMPORTANCE_HIGH. The notification still posts in the tray
+ * but provides no visible feedback. To make sure the user actually sees a
+ * new DM that lands while they're on a *different* channel, we draw a
+ * prominent in-app banner at the top of the WebView that mimics a system
+ * heads-up notification. Tapping the banner jumps straight into the DM. */
+function _showDMBanner({ avatar, sender, preview, onClick }) {
+  try {
+    let host = document.getElementById('ft-dm-banner-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'ft-dm-banner-host';
+      host.style.cssText = `
+        position:fixed;top:max(env(safe-area-inset-top,0px),12px);left:50%;
+        transform:translateX(-50%);z-index:10000;display:flex;flex-direction:column;
+        gap:8px;width:min(94vw,420px);pointer-events:none
+      `;
+      document.body.appendChild(host);
+    }
+    const card = document.createElement('div');
+    card.style.cssText = `
+      background:linear-gradient(180deg,#1a2620,#121a17);
+      border:1px solid #4caf5066;border-left:3px solid #4caf50;
+      border-radius:14px;padding:10px 14px;
+      box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 0 1px rgba(76,175,80,.12);
+      backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+      display:flex;align-items:center;gap:10px;color:#e8e8e8;
+      font-family:inherit;font-size:14px;line-height:1.3;cursor:pointer;
+      pointer-events:auto;transform:translateY(-110%);opacity:0;
+      transition:transform .28s cubic-bezier(.2,.9,.3,1),opacity .22s ease;
+    `;
+    const av = document.createElement('div');
+    av.style.cssText = `
+      flex:0 0 auto;width:36px;height:36px;border-radius:50%;
+      background:#0d1411;border:1px solid #2a3a32;
+      display:flex;align-items:center;justify-content:center;
+      font-size:20px;overflow:hidden
+    `;
+    const avStr = String(avatar || '🐸');
+    if (avStr.startsWith('http') || avStr.startsWith('/')) {
+      const img = document.createElement('img');
+      img.src = avStr; img.style.cssText = 'width:100%;height:100%;object-fit:cover';
+      av.appendChild(img);
+    } else {
+      av.textContent = avStr;
+    }
+    const text = document.createElement('div');
+    text.style.cssText = 'flex:1;min-width:0;overflow:hidden';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;color:#7fd8a5;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    title.textContent = String(sender || 'Someone') + ' • new message';
+    const body = document.createElement('div');
+    body.style.cssText = 'color:#cfd6d2;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    body.textContent = String(preview || '').slice(0, 90) || 'New DM';
+    text.appendChild(title); text.appendChild(body);
+    card.appendChild(av); card.appendChild(text);
+    let dismissed = false;
+    const dismiss = () => {
+      if (dismissed) return; dismissed = true;
+      card.style.transform = 'translateY(-110%)';
+      card.style.opacity = '0';
+      setTimeout(() => card.remove(), 320);
+    };
+    card.addEventListener('click', () => {
+      try { if (typeof onClick === 'function') onClick(); } catch {}
+      dismiss();
+    });
+    host.appendChild(card);
+    requestAnimationFrame(() => {
+      card.style.transform = 'translateY(0)';
+      card.style.opacity = '1';
+    });
+    setTimeout(dismiss, 5500);
+  } catch {}
+}
+
 async function _getDMSharedKey(peerId) {
   const id = Number(peerId || 0);
   if (!id) return null;
@@ -1497,10 +1575,29 @@ function handleWSDMMessage (data) {
               }
             } catch {}
           };
-          toast(
-            `💬 ${data.sender_nick}: ${preview ? preview.substring(0,60) : 'Media'}`,
-            'info', 4500, onClick
-          );
+          // When the app is in the foreground, Samsung One UI silently
+          // suppresses the system heads-up — so we draw an in-app banner
+          // ourselves so the user still sees a new DM land while on a
+          // different conversation. When backgrounded, the system tray
+          // notification (posted by notifyDM → window.Android.showNotification)
+          // is what the user sees, and we skip the in-app banner.
+          const previewText = preview ? preview.substring(0, 90) : (data.has_media ? 'Media' : 'New message');
+          if (!document.hidden) {
+            _showDMBanner({
+              avatar: ch2?.avatar || '🐸',
+              sender: data.sender_nick || ch2?.nickname || 'Someone',
+              preview: previewText,
+              onClick,
+            });
+          } else {
+            // Backgrounded: keep the small top-right toast as a fallback for
+            // the rare case where the WebView is foregrounded but the system
+            // tray notification was missed.
+            toast(
+              `💬 ${data.sender_nick}: ${previewText.substring(0, 60)}`,
+              'info', 4500, onClick
+            );
+          }
         } catch {}
       })();
     }
