@@ -347,16 +347,19 @@ const Social = (() => {
           };
           requestAnimationFrame(tick);
         }
-        // Belt-and-braces fallback: if the video metadata never loads, cap at 15s.
+        // Belt-and-braces fallback ONLY for the case where metadata never
+        // loads (otherwise we use loadedmetadata + ended). Generous so we
+        // never cut off a real video; if `ended` fires first this is moot.
         clearTimeout(viewer._timer);
-        viewer._timer = setTimeout(() => nextStory(), 15000);
+        viewer._timer = setTimeout(() => nextStory(), 60000);
         videoEl.addEventListener('loadedmetadata', () => {
           const d = videoEl.duration;
           if (d && isFinite(d) && d > 0) {
+            // Set a per-video safety net at duration + 1s so a glitched
+            // `ended` event still advances the viewer, but we never cut
+            // a video short.
             clearTimeout(viewer._timer);
-            // Hard cap at 15s for safety; otherwise wait for `ended`.
-            const ms = Math.min(15000, Math.max(800, d * 1000)) + 250;
-            viewer._timer = setTimeout(() => nextStory(), ms);
+            viewer._timer = setTimeout(() => nextStory(), Math.max(1500, d * 1000 + 1000));
           }
         }, { once: true });
         videoEl.addEventListener('ended', () => {
