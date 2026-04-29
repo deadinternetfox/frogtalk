@@ -278,6 +278,11 @@ const Social = (() => {
     // the story they just opened. Mirror this in any callback paths.
     clearTimeout(viewer._timer);
     viewer._timer = null;
+    // Stop any currently-playing media before we replace innerHTML so a
+    // half-loaded video doesn't keep emitting audio mid-transition.
+    viewer.querySelectorAll('video, audio').forEach(el => {
+      try { el.pause(); } catch {}
+    });
 
     const isLoading = !story.media_data && story.has_media;
     const progress = user.stories.map((s, i) => {
@@ -427,7 +432,18 @@ const Social = (() => {
 
   function closeStoryViewer() {
     const v = document.getElementById('story-viewer');
-    if (v) { clearTimeout(v._timer); v.style.display = 'none'; }
+    if (v) {
+      clearTimeout(v._timer);
+      v._timer = null;
+      // Stop any playing media so audio doesn't keep going in the background.
+      v.querySelectorAll('video, audio').forEach(el => {
+        try { el.pause(); } catch {}
+        try { el.removeAttribute('src'); el.load(); } catch {}
+      });
+      v.style.display = 'none';
+      // Clear the inner so the next open starts fresh (no stale video element).
+      v.innerHTML = '';
+    }
     _rerenderStoriesBarInDom();
   }
 
