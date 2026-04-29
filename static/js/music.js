@@ -725,6 +725,20 @@ const Music = (() => {
         // Play first. Seeking before play lands can trigger a paused-seek
         // that re-pauses immediately on some YT iframe builds.
         send({ event: 'command', func: 'playVideo', args: [] });
+        // For app-foreground / notification-tray resumes, also send an
+        // early seek to the room's expected play head. Android WebView
+        // routinely restarts the YT embed at position=0 after a long
+        // background; without this nudge the user hears the track
+        // restart from the beginning until the verify ladder confirms
+        // state=1 (~900ms+) and reseeks. The seek-pause race that we
+        // normally guard against is acceptable here because the verify
+        // ladder will retry play+seek if it re-pauses us.
+        if (ignorePaused) {
+          setTimeout(() => {
+            if (myToken !== _resumeRetryToken) return;
+            try { _seekIframe(_expectedPosSec()); } catch {}
+          }, 250);
+        }
 
         // Verify-and-retry. Up to 5 play attempts on a back-off ladder.
         // Real Android WebView return-from-background can keep the YT
@@ -753,12 +767,29 @@ const Music = (() => {
             if (document.hidden) return;
             if (_paused && !ignorePaused) return;
             if (_lastPlayerState === 1) {
-              // Playing — only seek now if we actually drifted enough to
-              // matter. Avoids the seek-pause race for small drifts and
-              // keeps audio continuous for users who briefly tabbed away.
-              const drift = Math.abs(_expectedPosSec() - targetSec);
-              if (drift > 3) {
+              // Playing — seek to the room's expected play head.
+              //
+              // Important: when this resume was triggered by an app
+              // foreground / notification-tray play (`ignorePaused`),
+              // we MUST seek unconditionally. Android WebView routinely
+              // restarts the YT embed at position=0 after a long
+              // background, but the iframe still reports state=1 once
+              // it begins playing the silent intro again. The drift
+              // check below compares timeline values, not iframe
+              // position, so a "playing-from-zero" scenario passes the
+              // check and the user hears the track restart from 0 —
+              // exactly the bug being fixed here.
+              //
+              // For the non-foreground path (steady-state resume after
+              // user pause), keep the drift threshold so we don't
+              // trigger the seek-pause race for tiny drifts.
+              if (ignorePaused) {
                 try { _seekIframe(_expectedPosSec()); } catch {}
+              } else {
+                const drift = Math.abs(_expectedPosSec() - targetSec);
+                if (drift > 3) {
+                  try { _seekIframe(_expectedPosSec()); } catch {}
+                }
               }
               // Reconcile _paused to YT truth: audio is playing, so
               // user-intent paused must be false. Without this, the
