@@ -117,6 +117,12 @@ const Music = (() => {
   // looking like a plain double-chevron (">>"). SVG renders identically
   // everywhere; sized to match the surrounding emoji buttons.
   const _SKIP_SVG = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/></svg>';
+  // Plain white play / pause glyphs. Same visual weight so the dock
+  // button doesn't shift when toggling state. Using SVG (not emoji)
+  // because Android WebView renders ⏸ in colour on some skins which
+  // looks out of place next to the SVG skip icon.
+  const _PLAY_SVG  = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M8 5v14l11-7z"/></svg>';
+  const _PAUSE_SVG = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
 
   // Single source of truth for "is the player effectively paused right
   // now?". Combines user intent (_paused) with YouTube's reported state
@@ -149,7 +155,7 @@ const Music = (() => {
       document.querySelectorAll('.mmd-play, .mp-mini-playpause').forEach(el => {
         if (!el || el.classList.contains('unsupported')) return;
         el.dataset.playing = playing ? '1' : '0';
-        el.textContent = playing ? '⏸' : '▶';
+        el.innerHTML = playing ? _PAUSE_SVG : _PLAY_SVG;
         el.title = playing ? 'Pause' : 'Play';
         el.setAttribute('aria-label', el.title);
       });
@@ -1329,7 +1335,7 @@ const Music = (() => {
       <div class="mmd-ctrls">
         <button class="mmd-btn mmd-play ${canPause ? '' : 'unsupported'}" data-playing="1"
                 title="Pause" aria-label="Pause"
-                onclick="event.stopPropagation();Music.togglePause(this)">⏸</button>
+                onclick="event.stopPropagation();Music.togglePause(this)">${_PAUSE_SVG}</button>
         ${canSkip ? `<button class="mmd-btn" title="Skip" aria-label="Skip"
                        onclick="event.stopPropagation();Music.skip()">${_SKIP_SVG}</button>` : ''}
         <button class="mmd-btn mmd-close" title="Stop" aria-label="Stop"
@@ -1347,7 +1353,7 @@ const Music = (() => {
     const canPause = (provider === 'youtube' || provider === 'soundcloud');
     return `
       <span class="mp-mini-title" title="${titleEsc}">🎵 ${titleEsc}</span>
-      ${canPause ? `<button class="mp-mini-btn mp-mini-playpause" data-playing="1" title="Pause" onclick="Music.togglePause(this)">⏸</button>` : ''}
+      ${canPause ? `<button class="mp-mini-btn mp-mini-playpause" data-playing="1" title="Pause" onclick="Music.togglePause(this)">${_PAUSE_SVG}</button>` : ''}
       <button class="mp-mini-btn" title="Back to channel" onclick="Music.expand()">⤢</button>
       <button class="mp-mini-btn" title="Stop" onclick="Music.close()">✕</button>`;
   }
@@ -1381,12 +1387,18 @@ const Music = (() => {
     // the user paused it — that's the expected behaviour. Resync is
     // a separate explicit action.
     btn.dataset.playing = nowPlaying ? '1' : '0';
-    btn.textContent = nowPlaying ? '⏸' : '▶';
+    btn.innerHTML = nowPlaying ? _PAUSE_SVG : _PLAY_SVG;
     btn.title = nowPlaying ? 'Pause' : 'Play';
     btn.setAttribute('aria-label', btn.title);
+    // Optimistically prime YT's reported state so the next _emitState()
+    // doesn't fall back to the stale value. Without this, after pressing
+    // Play the dock button would flicker right back to ▶ because
+    // _currentEffectivePaused() consults _lastPlayerState (still 2)
+    // until YT's onStateChange catches up a moment later.
+    _lastPlayerState = nowPlaying ? 1 : 2;
+    _paused = !nowPlaying;
     // Keep every play/pause button in the UI in sync (drawer + mini bar).
     _syncPlayPauseButtons(nowPlaying);
-    _paused = !nowPlaying;
     if (_paused) _stopSyncProbe(); else _startSyncProbeIfNeeded();
     _emitState();
   }
