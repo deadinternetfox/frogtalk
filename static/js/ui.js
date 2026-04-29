@@ -3880,16 +3880,32 @@ async function unpinMessage(msgId) {
 let _mentionUsers = [];
 let _mentionOpen = false;
 let _mentionIndex = 0;
+let _mentionLoadedAt = 0;
+let _mentionLoading = null;
 
-async function loadMentionUsers() {
-  try {
-    const res = await apiFetch('/api/messages/users/mentionable');
-    if (res.ok) {
-      const data = await res.json();
-      _mentionUsers = data.users || [];
-    }
-  } catch (e) {}
+async function loadMentionUsers(force = false) {
+  // Throttle: at most one refresh every 10s unless forced.
+  const now = Date.now();
+  if (!force && _mentionLoadedAt && now - _mentionLoadedAt < 10000) return;
+  if (_mentionLoading) return _mentionLoading;
+  _mentionLoading = (async () => {
+    try {
+      const res = await apiFetch('/api/messages/users/mentionable');
+      if (res.ok) {
+        const data = await res.json();
+        _mentionUsers = data.users || [];
+        _mentionLoadedAt = Date.now();
+      }
+    } catch (e) {}
+    finally { _mentionLoading = null; }
+  })();
+  return _mentionLoading;
 }
+
+// Hook so other modules (ws, rooms, presence) can request a refresh when a
+// new member shows up. Exposed via window for cross-file access.
+function refreshMentionUsers(force = false) { return loadMentionUsers(force); }
+window.refreshMentionUsers = refreshMentionUsers;
 
 function handleMentionInput(input) {
   const text = input.value;
@@ -3907,6 +3923,11 @@ function handleMentionInput(input) {
     _mentionOpen = false;
     return;
   }
+
+  // Refresh mentionable users in the background each time an @ trigger
+  // appears so newly-joined channel members show up without an app reload.
+  // Throttled inside loadMentionUsers (10s) so this is cheap.
+  loadMentionUsers();
   
   const query = atMatch[1].toLowerCase();
   const filtered = _mentionUsers.filter(u => 

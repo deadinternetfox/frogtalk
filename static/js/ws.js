@@ -181,10 +181,19 @@ const WS = (() => {
       }
       case 'presence': {
         UI.showPresence(data.event, data.nickname);
+        // A user just came online — they may be a brand-new channel member
+        // who isn't in our cached @mention list yet. Trigger a throttled
+        // refresh so the autocomplete includes them next time.
+        if (data.event === 'join' || data.event === 'online') {
+          try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
+        }
         break;
       }
       case 'online_users': {
         if (data.room === room) Users.updateList(data.users || []);
+        // Refresh mentionable list when room roster updates so new members
+        // appear in the @ autocomplete.
+        try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
         break;
       }
       case 'profile_update': {
