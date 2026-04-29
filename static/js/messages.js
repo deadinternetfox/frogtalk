@@ -1389,6 +1389,14 @@ const Messages = (() => {
   function getReplyToId() {
     return _replyTo ? _replyTo.id : null;
   }
+  // Full reply context for the optimistic/pending bubble. Without this the
+  // pending render has no reply_* fields, so the quote doesn't appear until
+  // the channel re-loads from cache. Returns a shallow copy so callers can
+  // freely store it on a temp msg.
+  function getReplyTo() {
+    if (!_replyTo) return null;
+    return { id: _replyTo.id, nickname: _replyTo.nickname, content: _replyTo.content };
+  }
 
   // Open an action sheet for a message — pulls buttons from the hidden .msg-actions
   // of that message and shows them as a mobile-friendly overlay.
@@ -1576,7 +1584,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
@@ -1705,6 +1713,13 @@ async function sendMessage() {
   if (text) {
     _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     _tempId = -Math.floor(Date.now() + Math.random() * 10000);
+    // Snapshot the reply target NOW — Messages.clearReply() runs after this
+    // function returns and would otherwise wipe the context before the
+    // server echo lands. Putting these on the temp msg means the optimistic
+    // bubble renders the quote immediately, and the reconciliation step
+    // below preserves the bubble's existing reply DOM.
+    const _replySnap = (typeof Messages !== 'undefined' && typeof Messages.getReplyTo === 'function')
+      ? Messages.getReplyTo() : null;
     const _tempMsg = {
       id: _tempId,
       _pending: true,
@@ -1716,6 +1731,9 @@ async function sendMessage() {
       content: text,
       media_data: null,
       media_type: null,
+      reply_to: _replySnap ? _replySnap.id : null,
+      reply_nickname: _replySnap ? _replySnap.nickname : null,
+      reply_content: _replySnap ? _replySnap.content : null,
       edited: false,
       reactions: {},
       created_at: new Date().toISOString(),
