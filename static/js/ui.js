@@ -511,6 +511,58 @@ const ChatVideo = (() => {
     try { v.setAttribute('playsinline', ''); } catch {}
 
     let posterDrawn = false;
+    let candidates = [];     // fractional positions to try (0..1)
+    let candidateIdx = 0;
+    let lastSnapshot = null; // {url, score} — best frame so far if all candidates dim
+
+    // Returns "interest score" for a frame: higher == more visual variety.
+    // We sample sparse pixels and compute mean brightness + variance; pure
+    // black / pure white / single-colour frames score near zero.
+    const scoreFrame = (ctx, w, h) => {
+      try {
+        const step = Math.max(1, Math.floor(Math.min(w, h) / 24));
+        const data = ctx.getImageData(0, 0, w, h).data;
+        let n = 0, sum = 0, sumSq = 0;
+        for (let y = 0; y < h; y += step) {
+          for (let x = 0; x < w; x += step) {
+            const i = (y * w + x) * 4;
+            // Rec.601 luma
+            const lum = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+            sum += lum; sumSq += lum * lum; n++;
+          }
+        }
+        if (!n) return 0;
+        const mean = sum / n;
+        const variance = Math.max(0, sumSq / n - mean * mean);
+        // Penalise frames that are nearly pure black or pure white.
+        const edge = Math.min(mean, 255 - mean); // 0 at extremes, 127 mid
+        return variance * (edge / 127);
+      } catch { return 1; } // getImageData can throw on tainted canvas — accept frame.
+    };
+
+    const applyPoster = (url) => {
+      if (poster) {
+        poster.style.backgroundImage = `url(${url})`;
+        poster.classList.add('ready');
+      }
+      try { v.setAttribute('poster', url); } catch {}
+      if (loading) loading.style.display = 'none';
+    };
+
+    const tryNextCandidate = () => {
+      if (posterDrawn) return;
+      if (candidateIdx >= candidates.length) {
+        // Out of candidates — use best snapshot we got, or just hide loader.
+        if (lastSnapshot) { applyPoster(lastSnapshot.url); posterDrawn = true; }
+        else if (loading) loading.style.display = 'none';
+        return;
+      }
+      const frac = candidates[candidateIdx++];
+      const dur = isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+      const target = dur > 0 ? Math.min(dur - 0.05, Math.max(0.01, dur * frac)) : 0.08;
+      try { v.currentTime = target; } catch { drawPoster(); }
+    };
+
     const drawPoster = () => {
       if (posterDrawn) return;
       try {
@@ -522,14 +574,17 @@ const ChatVideo = (() => {
         c.height = Math.max(2, Math.round(h * scale));
         const ctx = c.getContext('2d');
         ctx.drawImage(v, 0, 0, c.width, c.height);
+        const score = scoreFrame(ctx, c.width, c.height);
         const url = c.toDataURL('image/jpeg', 0.72);
-        if (poster) {
-          poster.style.backgroundImage = `url(${url})`;
-          poster.classList.add('ready');
+        // Threshold tuned empirically: a near-black frame scores well under 50.
+        const GOOD = 120;
+        if (score >= GOOD || candidateIdx >= candidates.length) {
+          applyPoster(url);
+          posterDrawn = true;
+        } else {
+          if (!lastSnapshot || score > lastSnapshot.score) lastSnapshot = { url, score };
+          tryNextCandidate();
         }
-        try { v.setAttribute('poster', url); } catch {}
-        posterDrawn = true;
-        if (loading) loading.style.display = 'none';
       } catch {
         // CORS or canvas-tainted (shouldn't happen for data: URLs / same origin).
         if (loading) loading.style.display = 'none';
@@ -541,21 +596,23 @@ const ChatVideo = (() => {
       if (durEl && isFinite(v.duration) && v.duration > 0) {
         durEl.textContent = fmtDuration(v.duration);
       }
-      // Seek a hair into the file — frame 0 is often pure black on H.264 keyframes.
-      try {
-        const target = Math.min(POSTER_SEEK, Math.max(0.01, (v.duration || 1) * 0.04));
-        v.currentTime = target;
-      } catch { drawPoster(); }
+      // Try a few positions and keep the most visually interesting frame.
+      // Middle-first because intros / outros are commonly fades from black.
+      candidates = [0.5, 0.35, 0.65, 0.2, 0.8, 0.05];
+      candidateIdx = 0;
+      tryNextCandidate();
     };
 
     if (v.readyState >= 1) onMeta();
     else v.addEventListener('loadedmetadata', onMeta, { once: true });
 
-    v.addEventListener('seeked', drawPoster, { once: true });
-    v.addEventListener('loadeddata', drawPoster);
+    // Each successful seek triggers another draw attempt; drawPoster decides
+    // whether the frame is good enough or to advance to the next candidate.
+    v.addEventListener('seeked', drawPoster);
+    v.addEventListener('loadeddata', () => { if (!candidates.length) drawPoster(); });
     // Safety: if the browser never fires seeked (some Android WebViews on
     // data: URLs), fall back to a timer.
-    setTimeout(() => { if (!posterDrawn) drawPoster(); }, 1500);
+    setTimeout(() => { if (!posterDrawn) drawPoster(); }, 2500);
 
     if (overlay) {
       overlay.addEventListener('click', (e) => {
