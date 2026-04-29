@@ -1082,7 +1082,7 @@ const Music = (() => {
     const submitHtml = _state.can_submit ? `
       <div class="mp-submit">
         <button class="mp-btn primary mp-add-btn" onclick="Music.openAddModal()" title="Add a track to the queue">
-          <span class="mp-add-ico">➕</span><span class="mp-add-lbl">Add Track</span>
+          <span class="mp-add-lbl">Add Track</span>
         </button>
         ${_state.can_control ? `
           <label class="mp-dj-toggle" title="${_state.dj_only ? 'DJ-only mode is ON — only DJs can queue' : 'Open mode — anyone can queue'}">
@@ -1708,6 +1708,8 @@ const Music = (() => {
         <div class="mp-add-head">
           <span class="mp-add-head-ico">🎶</span>
           <span class="mp-add-head-title">Playlist${upcoming.length ? ` · ${upcoming.length} up next` : ''}</span>
+          ${(_state && _state.can_control && upcoming.length)
+            ? `<button class="mp-pl-clear" type="button" onclick="Music.clearQueue()" title="Clear all queued tracks">Clear all</button>` : ''}
           <button class="mp-add-close" type="button" onclick="Music.closePlaylistModal()" aria-label="Close">✕</button>
         </div>
         <div class="mp-pl-body">
@@ -1715,9 +1717,7 @@ const Music = (() => {
           <div class="mp-pl-list">${items}${emptyHtml}</div>
         </div>
         <div class="mp-add-actions">
-          ${canAdd ? `<button class="mp-btn primary" type="button" onclick="Music.closePlaylistModal();Music.openAddModal()">+ Add Track</button>` : ''}
-          ${(_state && _state.can_control && upcoming.length)
-            ? `<button class="mp-btn danger" type="button" onclick="Music.clearQueue()">Clear all</button>` : ''}
+          ${canAdd ? `<button class="mp-btn primary" type="button" onclick="Music.closePlaylistModal();Music.openAddModal()">Add Track</button>` : ''}
           <button class="mp-btn" type="button" onclick="Music.closePlaylistModal()">Close</button>
         </div>
       </div>`;

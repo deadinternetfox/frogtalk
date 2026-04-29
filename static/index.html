@@ -1396,7 +1396,7 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
    generic .mp-btn.primary tiny-pill styling. */
 .mp-btn.mp-add-btn{
   display:inline-flex;align-items:center;gap:6px;
-  padding:6px 12px;font-size:11px;font-weight:700;letter-spacing:.4px;
+  padding:5px 12px;font-size:10.5px;font-weight:700;letter-spacing:.5px;
   white-space:nowrap;line-height:1;text-transform:uppercase;
   background:linear-gradient(135deg,#8a3aba,#5a2a8a);color:#fff;border:0;border-radius:999px;cursor:pointer;
   box-shadow:0 2px 8px rgba(160,80,216,.32),inset 0 1px 0 rgba(255,255,255,.08);
@@ -1405,10 +1405,6 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 }
 .mp-btn.mp-add-btn:hover{filter:brightness(1.08);box-shadow:0 4px 14px rgba(160,80,216,.45);transform:translateY(-1px)}
 .mp-btn.mp-add-btn:active{transform:scale(.97)}
-.mp-btn.mp-add-btn .mp-add-ico{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.22);font-size:9px;line-height:1;font-weight:800
-}
 .mp-btn.mp-add-btn .mp-add-lbl{line-height:1;white-space:nowrap}
 
 /* ─── Add-track modal ─────────────────────────────────────────────────── */
@@ -1523,6 +1519,22 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 
 /* Playlist modal — uses the .mp-add-modal overlay shell, but its own
    wider card and scroll body. */
+/* Small red Clear-all pill in the playlist modal header. */
+.mp-pl-clear{
+  display:inline-flex;align-items:center;gap:5px;flex-shrink:0;
+  padding:4px 10px;font-size:10px;font-weight:800;letter-spacing:.4px;
+  text-transform:uppercase;line-height:1;white-space:nowrap;cursor:pointer;
+  background:linear-gradient(135deg,rgba(248,81,73,.18),rgba(180,40,60,.28));
+  color:#ff8a8a;border:1px solid rgba(248,81,73,.42);border-radius:999px;
+  transition:background .15s,color .15s,border-color .15s,transform .12s,box-shadow .15s
+}
+.mp-pl-clear:hover{
+  background:linear-gradient(135deg,rgba(248,81,73,.32),rgba(180,40,60,.42));
+  color:#fff;border-color:rgba(248,81,73,.7);
+  box-shadow:0 2px 10px rgba(248,81,73,.32);transform:translateY(-1px)
+}
+.mp-pl-clear:active{transform:scale(.95)}
+
 .mp-pl-card{max-width:520px;display:flex;flex-direction:column;max-height:min(78vh,640px)}
 .mp-pl-body{
   padding:12px 14px;overflow-y:auto;flex:1;min-height:0;
