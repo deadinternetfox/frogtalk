@@ -272,8 +272,9 @@ const Social = (() => {
       document.body.appendChild(viewer);
     }
 
+    const isLoading = !story.media_data && story.has_media;
     const progress = user.stories.map((s, i) =>
-      `<div class="story-prog-seg ${i < _storyViewIdx ? 'done' : i === _storyViewIdx ? 'active' : ''}"></div>`
+      `<div class="story-prog-seg ${i < _storyViewIdx ? 'done' : i === _storyViewIdx ? (isLoading ? 'loading' : 'active') : ''}"></div>`
     ).join('');
 
     viewer.innerHTML = `
@@ -302,12 +303,27 @@ const Social = (() => {
     viewer.style.display = 'flex';
 
     // Lazy-load full media if the feed payload only had `has_media`.
-    let advanceDelay = 5000;
+    // While loading, the auto-advance timer and the active progress-bar
+    // animation are both held back so the user gets a full view window
+    // once the media actually arrives.
+    const startProgressAndTimer = () => {
+      const segs = viewer.querySelectorAll('.story-prog-seg');
+      const seg = segs[_storyViewIdx];
+      if (seg) { seg.classList.remove('loading'); seg.classList.add('active'); }
+      clearTimeout(viewer._timer);
+      viewer._timer = setTimeout(() => nextStory(), 5000);
+    };
     if (!story.media_data && story.has_media) {
-      advanceDelay = 8000; // give it a moment longer if we had to fetch
       const myIdx = _storyViewIdx, myUserIdx = _storyUserIdx;
       _fetchStoryMedia(story.id).then(m => {
-        if (!m || !m.media_data) return;
+        if (!m || !m.media_data) {
+          // Couldn't load — don't strand the viewer; advance after a short beat.
+          if (myIdx === _storyViewIdx && myUserIdx === _storyUserIdx) {
+            clearTimeout(viewer._timer);
+            viewer._timer = setTimeout(() => nextStory(), 1500);
+          }
+          return;
+        }
         // Cache on the story object so re-opens are instant.
         story.media_data = m.media_data;
         story.media_type = m.media_type || story.media_type;
@@ -318,13 +334,12 @@ const Social = (() => {
         slot.innerHTML = (story.media_type || '').startsWith('video')
           ? `<video src="${esc(story.media_data)}" autoplay playsinline></video>`
           : `<img src="${esc(story.media_data)}" alt="">`;
+        startProgressAndTimer();
       });
+    } else {
+      startProgressAndTimer();
     }
     _prefetchAdjacentStoryMedia();
-
-    // Auto-advance
-    clearTimeout(viewer._timer);
-    viewer._timer = setTimeout(() => nextStory(), advanceDelay);
     _hydrateStoryViewers(story, user);
   }
 

@@ -3767,6 +3767,8 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .story-prog-seg{flex:1;height:3px;background:rgba(255,255,255,.3);border-radius:2px}
 .story-prog-seg.done{background:#fff}
 .story-prog-seg.active{background:#4caf50;animation:storyProg 5s linear forwards}
+.story-prog-seg.loading{background:linear-gradient(90deg,rgba(255,255,255,.3) 25%,rgba(255,255,255,.55) 50%,rgba(255,255,255,.3) 75%);background-size:200% 100%;animation:storyProgLoad 1.2s linear infinite}
+@keyframes storyProgLoad{0%{background-position:200% 0}100%{background-position:-200% 0}}
 @keyframes storyProg{from{background:linear-gradient(90deg,#4caf50 0%,rgba(255,255,255,.3) 0%)}to{background:linear-gradient(90deg,#4caf50 100%,rgba(255,255,255,.3) 100%)}}
 .story-header{display:flex;align-items:center;gap:8px;padding:20px 12px 8px;position:absolute;top:0;left:0;right:0;z-index:2}
 .story-header-avatar{width:32px;height:32px;border-radius:50%;overflow:hidden}
