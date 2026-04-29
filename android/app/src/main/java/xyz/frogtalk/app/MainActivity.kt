@@ -1010,19 +1010,21 @@ class MainActivity : AppCompatActivity() {
                     "toggle_play" -> {
                         // YouTube's iframe in an offscreen WebView is blocked
                         // from resuming playback by Chromium's autoplay
-                        // policy — flipping _paused via togglePauseGlobal()
-                        // makes the icon say ⏸ but no audio comes out.
-                        // For YouTube going paused→playing, bring the
-                        // activity to the foreground instead. onResume()
-                        // calls Music.notifyAppForeground(), which kicks
-                        // the existing auto-resume reconciler. No JS state
-                        // mutation, no risk of teardown — the notification
-                        // (driven by MusicService) stays up the whole time.
-                        // SoundCloud + Spotify embeds genuinely play from
-                        // background; they keep the cheap direct toggle.
+                        // policy. For YouTube going paused→playing we
+                        // bring the activity to the foreground (so the
+                        // WebView is on-screen) and then call the JS
+                        // resumeFromNotification() helper, which clears
+                        // the paused flag and kicks the bounded retry
+                        // ladder. MusicService skipped the optimistic
+                        // currentPlaying flip for this case, so the
+                        // notification stays on ▶ until JS pushes the
+                        // truth (ACTION_UPDATE) once playback actually
+                        // starts. SoundCloud + Spotify embeds genuinely
+                        // play from background; they keep the cheap
+                        // direct toggle path.
                         val provider = intent.getStringExtra(MusicService.EXTRA_PROVIDER) ?: ""
-                        val intendedPlaying = intent.getBooleanExtra(MusicService.EXTRA_PLAYING, true)
-                        if (provider == "youtube" && intendedPlaying) {
+                        val targetPlaying = intent.getBooleanExtra(MusicService.EXTRA_PLAYING, true)
+                        if (provider == "youtube" && targetPlaying) {
                             try {
                                 val launch = Intent(this@MainActivity, MainActivity::class.java).apply {
                                     action = Intent.ACTION_MAIN
@@ -1036,6 +1038,17 @@ class MainActivity : AppCompatActivity() {
                             } catch (e: Throwable) {
                                 Log.w(TAG, "bring-to-front for YT resume failed", e)
                             }
+                            // Kick the JS resume helper after onResume
+                            // has had a chance to run. 250ms is plenty
+                            // for the WebView to be on-screen and for
+                            // the YT iframe to be ready to honor a
+                            // playVideo command.
+                            webView?.postDelayed({
+                                webView?.evaluateJavascript(
+                                    "try{window.Music&&window.Music.resumeFromNotification&&window.Music.resumeFromNotification();}catch(e){}",
+                                    null
+                                )
+                            }, 250)
                         } else {
                             webView?.post {
                                 webView?.evaluateJavascript(

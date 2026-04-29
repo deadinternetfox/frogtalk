@@ -114,19 +114,32 @@ class MusicService : Service() {
         try {
             when (intent?.action) {
                 ACTION_TOGGLE_PLAY -> {
-                    currentPlaying = !currentPlaying
-                    // Include provider + the new intended play state so
-                    // MainActivity can branch on YouTube (offscreen
-                    // WebView can't actually resume playback) without
-                    // having to round-trip through JS.
+                    // Compute the user's target state (what they want
+                    // after the tap) and ship it on the broadcast so
+                    // MainActivity can branch without re-reading any
+                    // service state. For YouTube going paused→playing
+                    // we DO NOT optimistically flip currentPlaying or
+                    // refresh the notification: the activity has to
+                    // come to the foreground for YT's iframe to honor
+                    // playVideo, and during that bring-up the icon
+                    // should stay on ▶ so the user sees no lie. JS
+                    // pushes the truth (ACTION_UPDATE) once playback
+                    // actually starts, which then refreshes the icon.
+                    // SoundCloud + Spotify play from background fine —
+                    // they keep the optimistic flip for snappy UI.
+                    val target = !currentPlaying
+                    val ytResume = currentProvider == "youtube" && target
                     sendBroadcast(
                         Intent(ACTION_BROADCAST)
                             .setPackage(packageName)
                             .putExtra("action", "toggle_play")
                             .putExtra(EXTRA_PROVIDER, currentProvider)
-                            .putExtra(EXTRA_PLAYING, currentPlaying)
+                            .putExtra(EXTRA_PLAYING, target)
                     )
-                    refreshNotification()
+                    if (!ytResume) {
+                        currentPlaying = target
+                        refreshNotification()
+                    }
                     return START_STICKY
                 }
                 ACTION_TOGGLE_MUTE -> {

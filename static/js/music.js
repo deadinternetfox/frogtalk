@@ -307,6 +307,26 @@ const Music = (() => {
     return false;
   }
 
+  // Notification-tray play action for YouTube. The Android side already
+  // brought the Activity to the foreground (so the WebView is on-screen
+  // and Chromium will honor playVideo). We just need to (a) clear the
+  // user-paused flag set by _onAppHidden, (b) mirror that to every UI
+  // surface, and (c) kick the bounded retry ladder. No DOM button click
+  // is involved, so there is zero risk of churning _room/_state and
+  // pushing active=false to the foreground service — the notification
+  // stays up the whole time. Returns true on success, false if there is
+  // nothing playable.
+  function resumeFromNotification() {
+    const cur = _state && _state.queue && _state.queue[0];
+    if (!cur) return false;
+    _paused = false;
+    _lastEmitHash = '';
+    try { _syncPlayPauseButtons(); } catch {}
+    try { _emitState(); } catch {}
+    try { _resumeOnVisible({ force: true }); } catch {}
+    return true;
+  }
+
   function setNativeMuted(muted) {
     _muted = !!muted;
     _emitState();
@@ -1422,7 +1442,7 @@ const Music = (() => {
 
   return { mount, submit, skip, clearQueue, removeTrack, toggleDJOnly,
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
-           togglePauseGlobal, setNativeMuted, getCurrent,
+           togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
            // Native-callable hooks: MainActivity invokes these from
            // Activity.onPause() / onResume() because we deliberately keep
