@@ -98,6 +98,22 @@ const Music = (() => {
     return Math.max(0, Math.floor((Date.now() - _anchorMs) / 1000));
   }
 
+  // Sync the on-screen play/pause buttons (drawer + mini player) to the
+  // given playing flag. Used by togglePauseGlobal AND by _emitState so a
+  // state flip from any source (Android tray, visibility change, YT
+  // auto-pause) reaches the in-app UI without a re-render.
+  function _syncPlayPauseButtons(playing) {
+    try {
+      document.querySelectorAll('.mmd-play, .mp-mini-playpause').forEach(el => {
+        if (!el || el.classList.contains('unsupported')) return;
+        el.dataset.playing = playing ? '1' : '0';
+        el.textContent = playing ? '⏸' : '▶';
+        el.title = playing ? 'Pause' : 'Play';
+        el.setAttribute('aria-label', el.title);
+      });
+    } catch { /* DOM may not be ready */ }
+  }
+
   // Broadcasts a lightweight snapshot of the current player state so other
   // modules (FrogSocial music cards, wall posts, etc.) can update their UI
   // in sync with play/pause/track-change.
@@ -117,6 +133,10 @@ const Music = (() => {
         && _lastPlayerState !== 1   // 1 = playing
         && _lastPlayerState !== 3;  // 3 = buffering (treat as playing-ish)
       const effectivePaused = _paused || ytKnowsPaused;
+      // Reflect the truth in the in-app buttons too — a YT auto-pause or a
+      // background-forced pause needs to flip the side UI play/pause icon
+      // immediately, not just the system tray.
+      try { _syncPlayPauseButtons(!!cur && !effectivePaused); } catch {}
       detail = {
         active: !!cur,
         soloMode: _soloMode,
@@ -343,29 +363,24 @@ const Music = (() => {
         if (!parsed) return;
 
         // YouTube fires onStateChange unsolicited. Capture state regardless
-        // of whether we're awaiting a probe — the resume verifier relies
-        // on this to know when the player actually entered playing state.
-        // We also re-emit state to Android so the notification's play/pause
-        // button reflects what the iframe is actually doing (avoids the
-        // "shows pause but it's paused" bug when YT auto-pauses in bg).
+        // of whether we're awaiting a probe. We DO NOT try to auto-resume
+        // on a background-induced pause anymore — YouTube's iframe in
+        // Android WebView has proven too unreliable about accepting a
+        // playVideo from background return, often playing for a beat
+        // then re-pausing. Instead we just reflect the truth: flip the
+        // tray icon, the side UI button, and the badge to paused so the
+        // user can tap play once and have it work the first time.
         if (parsed.event === 'onStateChange' && typeof parsed.info === 'number') {
           const prev = _lastPlayerState;
           _lastPlayerState = parsed.info;
-          // Only signal on transitions between playing(1) and not-playing.
-          // Buffering(3) → playing(1) shouldn't churn the notification.
           const wasPlaying = (prev === 1);
           const nowPlaying = (parsed.info === 1);
           if (wasPlaying !== nowPlaying) {
-            // Force the next _emitState() through the dedupe.
+            // Force the next _emitState() through the dedupe so the
+            // notification + side button update right now.
             _lastEmitHash = '';
             try { _emitState(); } catch {}
-            // If the user wants playback (not _paused) but the iframe
-            // dropped out of playing while we're foregrounded, kick a
-            // resume. Most common cause: returning to the app and YT
-            // hasn't re-issued a play yet.
-            if (!nowPlaying && !_paused && !document.hidden) {
-              setTimeout(() => { try { _resumeOnVisible(); } catch {} }, 250);
-            }
+            try { _renderSyncBadge(); } catch {}
           }
         }
 
@@ -666,26 +681,59 @@ const Music = (() => {
     } catch { /* never throw from a visibility handler */ }
   }
 
-  // Pause the probe when the tab is hidden so we don't pay the postMessage
-  // tax for nothing; resume + recover playback when visible again.
+  // App background / foreground policy:
+  //  - On hide: stop the sync probe to save postMessage/setInterval cost,
+  //    AND flip our user-intent flag to paused. Reason: YouTube's iframe
+  //    pauses itself in background reliably but resists being driven back
+  //    into play on return (especially in Android WebView), causing the
+  //    "plays for a second then stops" bug. So we acknowledge reality and
+  //    require one tap to resume; the tap path is well-tested.
+  //  - On show: do NOT auto-issue play. Just probe the iframe for its
+  //    current state and re-emit so every UI surface (system tray, side
+  //    play button, sync badge) shows the correct play icon. The user
+  //    presses play once and we know exactly which path that takes.
   if (typeof document !== 'undefined') {
+    const _onAppHidden = () => {
+      try { _stopSyncProbe(); } catch {}
+      _paused = true;
+      _lastDriftSec = null;
+      _lastPlayerState = null;
+      try { _renderSyncBadge(); } catch {}
+      try { _syncPlayPauseButtons(false); } catch {}
+      // Force the system tray + bridge update through dedupe.
+      _lastEmitHash = '';
+      try { _emitState(); } catch {}
+    };
+    const _onAppVisible = () => {
+      // Re-bind listener defensively (some embeds drop registration during
+      // background suspension). Then probe the iframe so _lastPlayerState
+      // is fresh, and reconcile every UI surface.
+      try { _bindSyncMessageListener(); } catch {}
+      try {
+        const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+        const cur = _state && _state.queue && _state.queue[0];
+        if (frame && frame.contentWindow && cur && cur.provider === 'youtube') {
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
+        }
+      } catch {}
+      // Probe steady-state again only after the user explicitly resumes;
+      // until then keep _paused=true so the badge says paused honestly.
+      _lastEmitHash = '';
+      try { _syncPlayPauseButtons(false); } catch {}
+      try { _emitState(); } catch {}
+    };
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        _stopSyncProbe();
-      } else {
-        _startSyncProbeIfNeeded();
-        _resumeOnVisible();
-      }
+      if (document.hidden) _onAppHidden();
+      else _onAppVisible();
     });
     // Some mobile browsers fire pageshow (bfcache restore) without
     // visibilitychange. Cover that path too.
-    window.addEventListener('pageshow', (e) => {
-      if (!document.hidden) _resumeOnVisible();
-    });
+    window.addEventListener('pageshow', () => { if (!document.hidden) _onAppVisible(); });
     // Window focus catches desktop alt-tab back.
-    window.addEventListener('focus', () => {
-      if (!document.hidden) _resumeOnVisible();
-    });
+    window.addEventListener('focus', () => { if (!document.hidden) _onAppVisible(); });
+    // Mobile UAs fire pagehide on swipe-away/lockscreen.
+    window.addEventListener('pagehide', () => { _onAppHidden(); });
   }
 
   async function _fetchState(room) {
@@ -1021,13 +1069,8 @@ const Music = (() => {
     btn.textContent = nowPlaying ? '⏸' : '▶';
     btn.title = nowPlaying ? 'Pause' : 'Play';
     btn.setAttribute('aria-label', btn.title);
-    // Keep any sibling play button (legacy inner bar) in sync, if present.
-    document.querySelectorAll('.mmd-play, .mp-mini-playpause').forEach(el => {
-      if (el === btn) return;
-      el.dataset.playing = btn.dataset.playing;
-      el.textContent = btn.textContent;
-      el.title = btn.title;
-    });
+    // Keep every play/pause button in the UI in sync (drawer + mini bar).
+    _syncPlayPauseButtons(nowPlaying);
     _paused = !nowPlaying;
     if (_paused) _stopSyncProbe(); else _startSyncProbeIfNeeded();
     _emitState();
