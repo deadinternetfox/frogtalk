@@ -2426,7 +2426,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .modal-btn:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.35)}
 .modal-btn:active{transform:translateY(0) scale(.96);transition-duration:.06s;filter:brightness(.92)}
 .modal-btn:focus-visible{outline:2px solid #4caf50;outline-offset:2px}
-/* Settings > Notifications: Preview buttons (white text, light gray background) */
+/* Settings > Notifications: Preview buttons (theme green, matches .modal-btn.primary) */
 .notif-preview-btn{
   margin-top:8px;
   padding:7px 14px;
@@ -2437,14 +2437,17 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   align-items:center;
   gap:6px;
   cursor:pointer;
-  background:linear-gradient(180deg,#4a4f57,#3a3f47) !important;
+  background:linear-gradient(180deg,#5bc661,#3e9a45) !important;
   color:#fff !important;
-  border:1px solid #5a606a !important;
-  transition:background .15s ease,border-color .15s ease,transform .08s ease;
+  border:1px solid #3e9a45 !important;
+  box-shadow:0 2px 8px rgba(76,175,80,.28) !important;
+  transition:background .15s ease,border-color .15s ease,transform .08s ease,box-shadow .15s ease;
 }
 .notif-preview-btn:hover{
-  background:linear-gradient(180deg,#565c66,#454b54) !important;
-  border-color:#6b7280 !important;
+  background:linear-gradient(180deg,#69d36f,#48ad50) !important;
+  border-color:#48ad50 !important;
+  box-shadow:0 4px 14px rgba(76,175,80,.4) !important;
+  transform:translateY(-1px);
 }
 .notif-preview-btn:active{transform:translateY(1px) scale(.98);filter:brightness(.94)}
 .notif-preview-btn:focus-visible{outline:2px solid #4caf50;outline-offset:2px}
