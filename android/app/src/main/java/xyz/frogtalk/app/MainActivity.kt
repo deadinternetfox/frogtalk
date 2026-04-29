@@ -593,6 +593,22 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         try { webView?.onResume() } catch (_: Throwable) {}
+        // Belt-and-suspenders for the music auto-resume: the JS side
+        // already listens for visibilitychange / pageshow / focus, but
+        // on some Android builds the WebView swallows or delays those
+        // when returning from a long background. Trigger the resume
+        // path explicitly so YouTube embeds get a play kick within a
+        // tick of the activity coming back. `force:true` bypasses the
+        // 1.5s debounce so this stacks safely with the JS visibility
+        // hook firing right after.
+        try {
+            webView?.post {
+                webView?.evaluateJavascript(
+                    "(function(){try{if(window.Music&&typeof window.Music.resumeOnVisible==='function')window.Music.resumeOnVisible({force:true});}catch(e){}})();",
+                    null
+                )
+            }
+        } catch (_: Throwable) {}
     }
 
     override fun onPause() {

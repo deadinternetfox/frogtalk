@@ -107,11 +107,21 @@ const Music = (() => {
       const cur = _state && _state.queue && _state.queue[0];
       const rawArt = cur ? (cur.thumbnail || cur.artwork || '') : '';
       const artworkUrl = _safeArtwork(rawArt);
+      // Real-playback flag. _paused is user intent; _lastPlayerState is
+      // ground truth from the YT iframe. If YT is reporting paused (state
+      // 2) or unstarted (-1) but the user hasn't paused, the notification
+      // should still show "play" — anything else lies to the user.
+      const isYouTube = !!(cur && cur.provider === 'youtube');
+      const ytKnowsPaused = isYouTube
+        && _lastPlayerState !== null
+        && _lastPlayerState !== 1   // 1 = playing
+        && _lastPlayerState !== 3;  // 3 = buffering (treat as playing-ish)
+      const effectivePaused = _paused || ytKnowsPaused;
       detail = {
         active: !!cur,
         soloMode: _soloMode,
         room: _room || '',
-        paused: _paused,
+        paused: effectivePaused,
         muted: _muted,
         provider: cur ? (cur.provider || '') : '',
         url: cur ? (cur.url || '') : '',
@@ -335,8 +345,28 @@ const Music = (() => {
         // YouTube fires onStateChange unsolicited. Capture state regardless
         // of whether we're awaiting a probe — the resume verifier relies
         // on this to know when the player actually entered playing state.
+        // We also re-emit state to Android so the notification's play/pause
+        // button reflects what the iframe is actually doing (avoids the
+        // "shows pause but it's paused" bug when YT auto-pauses in bg).
         if (parsed.event === 'onStateChange' && typeof parsed.info === 'number') {
+          const prev = _lastPlayerState;
           _lastPlayerState = parsed.info;
+          // Only signal on transitions between playing(1) and not-playing.
+          // Buffering(3) → playing(1) shouldn't churn the notification.
+          const wasPlaying = (prev === 1);
+          const nowPlaying = (parsed.info === 1);
+          if (wasPlaying !== nowPlaying) {
+            // Force the next _emitState() through the dedupe.
+            _lastEmitHash = '';
+            try { _emitState(); } catch {}
+            // If the user wants playback (not _paused) but the iframe
+            // dropped out of playing while we're foregrounded, kick a
+            // resume. Most common cause: returning to the app and YT
+            // hasn't re-issued a play yet.
+            if (!nowPlaying && !_paused && !document.hidden) {
+              setTimeout(() => { try { _resumeOnVisible(); } catch {} }, 250);
+            }
+          }
         }
 
         // Drift updates only happen when we asked for them, to avoid the
@@ -519,10 +549,14 @@ const Music = (() => {
   // - Multiple foreground events firing in <1.5s — debounced.
   let _lastResumeAt = 0;
   let _resumeRetryToken = 0;
-  function _resumeOnVisible() {
+  function _resumeOnVisible(opts) {
     try {
+      const force = !!(opts && opts.force);
       const now = Date.now();
-      if (now - _lastResumeAt < 1500) return;
+      // Debounce duplicate triggers (visibilitychange + focus + pageshow
+      // can all fire within ~50ms). `force` is used by the Android
+      // bridge's onResume hook so a native-side trigger can bypass.
+      if (!force && now - _lastResumeAt < 1500) return;
       _lastResumeAt = now;
       if (_paused) return;                          // user actually paused — leave alone
       const cur = _state && _state.queue && _state.queue[0];
@@ -555,9 +589,15 @@ const Music = (() => {
         // that re-pauses immediately on some YT iframe builds.
         send({ event: 'command', func: 'playVideo', args: [] });
 
-        // Verify-and-retry. Up to 3 play attempts, 700ms apart. If after
-        // that the player still isn't reporting state=1, give up — the
-        // user can hit Resync and we won't keep hammering postMessage.
+        // Verify-and-retry. Up to 5 play attempts on a back-off ladder.
+        // Real Android WebView return-from-background can keep the YT
+        // embed in state 2 (paused) or -1 (unstarted) for several
+        // seconds before it accepts a play, so we spread retries across
+        // ~5s instead of giving up at 2s. Re-issue the listening
+        // handshake on later attempts in case the embed lost its
+        // listener registration during background suspension.
+        const MAX_ATTEMPTS = 5;
+        const RETRY_GAP_MS = 900;
         let attempts = 1;
         const verify = () => {
           if (myToken !== _resumeRetryToken) return;   // superseded by a newer call
@@ -576,13 +616,33 @@ const Music = (() => {
               if (drift > 3) {
                 try { _seekIframe(_expectedPosSec()); } catch {}
               }
+              // Tell Android the truth right now too (notification
+              // play/pause icon should flip back to "pause" immediately).
+              try { _emitState(); } catch {}
               return;
             }
-            if (attempts++ < 3) {
+            if (attempts++ < MAX_ATTEMPTS) {
+              // Re-handshake on attempt 3+ in case the embed forgot us.
+              if (attempts >= 3) {
+                send({ event: 'listening', id: 'frogtalk-music' });
+              }
               send({ event: 'command', func: 'playVideo', args: [] });
-              setTimeout(verify, 700);
+              // On the last couple attempts, also nudge the position —
+              // a seekTo can wake a stuck embed that ignored playVideo.
+              if (attempts >= 4) {
+                setTimeout(() => {
+                  if (myToken !== _resumeRetryToken) return;
+                  try { _seekIframe(_expectedPosSec()); } catch {}
+                }, 200);
+              }
+              setTimeout(verify, RETRY_GAP_MS);
+            } else {
+              // Final state is whatever the iframe says — let the badge
+              // and Android notification reflect reality so the user can
+              // tap play themselves.
+              try { _emitState(); } catch {}
             }
-          }, 350);
+          }, 400);
         };
         setTimeout(verify, 600);
 
@@ -1259,7 +1319,8 @@ const Music = (() => {
   return { mount, submit, skip, clearQueue, removeTrack, toggleDJOnly,
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, setNativeMuted, getCurrent,
-           resyncNow, shareToWall, playSolo };
+           resyncNow, shareToWall, playSolo,
+           resumeOnVisible: _resumeOnVisible };
 })();
 
 window.Music = Music;
