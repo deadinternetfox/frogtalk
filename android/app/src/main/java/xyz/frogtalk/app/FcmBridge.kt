@@ -11,6 +11,7 @@ object FcmBridge {
     private const val TAG = "FrogTalkFCM"
     private const val PREFS = "frogtalk_prefs"
     private const val PREF_SESSION_TOKEN = "session_token"
+    private const val PREF_LAST_TOKEN_SYNC = "last_fcm_token_sync_at"
     private const val BASE_API = "https://frogtalk.xyz"
 
     fun rememberSessionToken(context: Context, sessionToken: String?) {
@@ -40,6 +41,46 @@ object FcmBridge {
                 }
         } catch (e: Throwable) {
             Log.w(TAG, "syncCurrentToken failed", e)
+        }
+    }
+
+    /**
+     * Re-sync the FCM token only if [maxAgeMs] has elapsed since the last
+     * successful sync. Cheap to call from onResume; avoids a network roundtrip
+     * on every foreground transition.
+     */
+    fun syncCurrentTokenIfStale(
+        context: Context,
+        sessionToken: String? = null,
+        maxAgeMs: Long = 6L * 60 * 60 * 1000, // 6 hours
+    ) {
+        if (!sessionToken.isNullOrBlank()) {
+            rememberSessionToken(context, sessionToken)
+        }
+        val prefs = try {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        } catch (_: Throwable) {
+            return
+        }
+        val now = System.currentTimeMillis()
+        val last = prefs.getLong(PREF_LAST_TOKEN_SYNC, 0L)
+        if (last != 0L && now - last < maxAgeMs) return
+
+        try {
+            FirebaseMessaging.getInstance().token
+                .addOnSuccessListener { fcmToken ->
+                    if (!fcmToken.isNullOrBlank()) {
+                        postToken(context, fcmToken)
+                        try {
+                            prefs.edit().putLong(PREF_LAST_TOKEN_SYNC, System.currentTimeMillis()).apply()
+                        } catch (_: Throwable) { /* ignore */ }
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.w(TAG, "Stale-refresh FCM token fetch failed", e)
+                }
+        } catch (e: Throwable) {
+            Log.w(TAG, "syncCurrentTokenIfStale failed", e)
         }
     }
 

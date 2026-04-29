@@ -13,6 +13,10 @@ router = APIRouter(prefix="/push", tags=["push"])
 
 VAPID_CLAIMS = {"sub": "mailto:admin@frogtalk.xyz"}
 
+# Tracks whether we've already logged the "Firebase not configured" warning
+# so we don't spam the journal on every push attempt.
+_firebase_init_warned = False
+
 
 # ── VAPID key management ──────────────────────────────────────────────────────
 
@@ -103,10 +107,14 @@ async def fcm_unsubscribe(data: dict, current_user: dict = Depends(get_current_u
 
 def _get_firebase_app():
     """Return initialized firebase_admin app, or None if not configured."""
+    global _firebase_init_warned
     try:
         import firebase_admin
         from firebase_admin import credentials
     except Exception:
+        if not _firebase_init_warned:
+            logger.warning("firebase-admin package not installed; Android FCM disabled")
+            _firebase_init_warned = True
         return None
 
     if firebase_admin._apps:
@@ -114,15 +122,25 @@ def _get_firebase_app():
 
     cred_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
     if not cred_path or not os.path.exists(cred_path):
+        if not _firebase_init_warned:
+            logger.warning(
+                "FIREBASE_SERVICE_ACCOUNT_JSON not set or file missing (path=%r); "
+                "Android FCM push disabled. Calls/DMs will NOT ring on Android.",
+                cred_path or "<unset>",
+            )
+            _firebase_init_warned = True
         return None
     try:
         project_id = os.getenv("FIREBASE_PROJECT_ID", "").strip() or None
         if project_id:
-            return firebase_admin.initialize_app(
+            app = firebase_admin.initialize_app(
                 credentials.Certificate(cred_path),
                 {"projectId": project_id},
             )
-        return firebase_admin.initialize_app(credentials.Certificate(cred_path))
+        else:
+            app = firebase_admin.initialize_app(credentials.Certificate(cred_path))
+        logger.info("firebase-admin initialized: project=%s", project_id or "<from-cred>")
+        return app
     except Exception:
         logger.exception("Failed to initialize Firebase Admin SDK")
         return None
@@ -142,6 +160,11 @@ def _send_fcm(user_id: int, title: str, body: str, url: str = "/app", *,
 
     tokens = db.get_fcm_tokens(user_id, platform="android")
     if not tokens:
+        if kind == "call":
+            logger.info(
+                "fcm call: user=%d kind=call SKIP no_android_tokens (caller will hit voicemail-equivalent)",
+                user_id,
+            )
         return
 
     data = {
@@ -157,6 +180,8 @@ def _send_fcm(user_id: int, title: str, body: str, url: str = "/app", *,
             if v is not None:
                 data[str(k)] = str(v)
 
+    ok_count = 0
+    fail_count = 0
     for row in tokens:
         token = row.get("token")
         if not token:
@@ -197,13 +222,23 @@ def _send_fcm(user_id: int, title: str, body: str, url: str = "/app", *,
             )
         try:
             messaging.send(msg, app=app)
+            ok_count += 1
         except Exception as e:
+            fail_count += 1
             # Unregister dead tokens so retries don't keep failing forever.
             txt = str(e).lower()
             if "registration-token-not-registered" in txt or "invalid-registration-token" in txt:
                 db.delete_fcm_token(token)
+                logger.info("fcm token invalid, removed: user=%d ...%s", user_id, token[-8:] if len(token) >= 8 else token)
             else:
-                logger.debug("fcm send failed: %s", e)
+                logger.warning("fcm send failed: user=%d kind=%s err=%s", user_id, kind, e)
+
+    # Single structured log line per call — makes "did the call push leave
+    # the server?" answerable from journalctl.
+    logger.info(
+        "fcm send: user=%d kind=%s tokens=%d ok=%d failed=%d",
+        user_id, kind, len(tokens), ok_count, fail_count,
+    )
 
     # ── iOS (FCM-delivered APNs alerts) ───────────────────────────────────────
     # Calls go via _send_apns_voip() instead so the device wakes from suspended
@@ -387,4 +422,29 @@ def send_push(user_id: int, title: str, body: str, url: str = "/app",
             extra=extra,
         )
     except Exception:
+        logger.exception("send_push: _send_fcm crashed for user=%d kind=%s", user_id, kind)
+
+
+def has_any_push_target(user_id: int) -> bool:
+    """Return True if the user has at least one push transport registered.
+
+    Used by call signaling to short-circuit a hopeless ring (callee offline AND
+    no FCM/APNs/web-push subscription) so the caller's UI can show
+    \"unavailable\" instead of ringing forever.
+    """
+    try:
+        if db.get_fcm_tokens(user_id, platform="android"):
+            return True
+    except Exception:
         pass
+    try:
+        if db.get_fcm_tokens(user_id, platform="ios"):
+            return True
+    except Exception:
+        pass
+    try:
+        if db.get_push_subscriptions(user_id):
+            return True
+    except Exception:
+        pass
+    return False

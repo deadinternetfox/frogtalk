@@ -39,6 +39,11 @@ class MainActivity : AppCompatActivity() {
         private const val WEB_CACHE_REV = "20260424-music-background-v1"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_BATTERY_PROMPTED = "battery_prompted"
+        private const val PREF_BATTERY_PROMPTED_AT = "battery_prompted_at"
+        // Re-nag for battery-optimization exemption every 7 days. WhatsApp-grade
+        // call delivery on aggressive OEM ROMs (Xiaomi/Oppo/Samsung) collapses
+        // without it; one decline shouldn't lock the user out of reliable rings.
+        private const val BATTERY_REPROMPT_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
         private const val STORY_UPLOAD_NOTIFICATION_ID = 42002
         private const val STORY_UPLOAD_CHANNEL_ID = "frogtalk_upload"
     }
@@ -183,7 +188,12 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
             try {
                 val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                prefs.edit().putBoolean(PREF_BATTERY_PROMPTED, true).apply()
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                val granted = pm.isIgnoringBatteryOptimizations(packageName)
+                prefs.edit()
+                    .putBoolean(PREF_BATTERY_PROMPTED, granted)
+                    .putLong(PREF_BATTERY_PROMPTED_AT, System.currentTimeMillis())
+                    .apply()
             } catch (_: Throwable) {}
         }
 
@@ -253,10 +263,17 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         try {
             val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            if (prefs.getBoolean(PREF_BATTERY_PROMPTED, false)) return
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             if (pm.isIgnoringBatteryOptimizations(packageName)) {
+                // Already exempt — record state and bail.
                 prefs.edit().putBoolean(PREF_BATTERY_PROMPTED, true).apply()
+                return
+            }
+            // Not exempt. Re-prompt only if it's been >= 7 days since the
+            // last prompt (or this is the first time).
+            val lastPromptedAt = prefs.getLong(PREF_BATTERY_PROMPTED_AT, 0L)
+            val now = System.currentTimeMillis()
+            if (lastPromptedAt != 0L && now - lastPromptedAt < BATTERY_REPROMPT_INTERVAL_MS) {
                 return
             }
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
@@ -609,6 +626,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         try { webView?.onResume() } catch (_: Throwable) {}
+        // Refresh the FCM token if it's been more than 6h since the last
+        // server-side sync. Catches silent token rotations (Play Services
+        // updates, GCM rotations, app data restored to a new device) that
+        // would otherwise leave the server pushing to a dead token and
+        // make calls miss for days until the user re-logged in.
+        try { FcmBridge.syncCurrentTokenIfStale(this) } catch (_: Throwable) {}
         // Tell the JS side the app came back to the foreground. We can't
         // rely on visibilitychange here: when music is active we skip
         // webView.onPause() in onPause() to keep audio running, so the

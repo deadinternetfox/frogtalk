@@ -1,5 +1,6 @@
 """WebSocket route - real-time messaging, DM delivery, WebRTC signaling."""
 import json
+import logging
 import time
 import uuid
 from datetime import datetime
@@ -8,6 +9,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 import database as db
 from ws_manager import manager, voice_manager
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
 MAX_MSG_LEN = 10_000
@@ -629,6 +631,11 @@ async def websocket_endpoint(
                 # Always fire a *high-priority* call push, even if the user appears
                 # online via WS — locked phones and backgrounded browsers need this
                 # to actually ring.
+                logger.info(
+                    "call push: caller=%s(%d) callee=%d call_id=%s type=%s online=%s",
+                    user["nickname"], user["id"], to_id, call_id_db, call_type,
+                    manager.is_user_online(to_id),
+                )
                 _push_always(
                     to_id,
                     f"{call_label} call",
@@ -644,6 +651,26 @@ async def websocket_endpoint(
                         "call_type":     call_type,
                     },
                 )
+
+                # If callee is fully unreachable (not on WS AND no FCM/APNs/web-push
+                # subscriptions registered), tell the caller immediately so the UI
+                # can stop spinning instead of ringing into the void.
+                if not manager.is_user_online(to_id):
+                    try:
+                        from routers.push import has_any_push_target
+                        reachable = has_any_push_target(to_id)
+                    except Exception:
+                        reachable = True  # fail open
+                    if not reachable:
+                        logger.info(
+                            "call unreachable: callee=%d call_id=%s no push targets",
+                            to_id, call_id_db,
+                        )
+                        await manager.send_personal(websocket, {
+                            "type": "call_unreachable",
+                            "call_id": call_id_db,
+                            "reason": "offline",
+                        })
                 # No hard "peer_offline" error here: push ringing + pending-offer
                 # recovery allows the callee to answer after cold-start.
 

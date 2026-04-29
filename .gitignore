@@ -88,3 +88,4 @@ github-build-mirror/*.zip
 github-build-mirror/*.deb
 static/*.AppImage
 static/*.exe
+secrets/

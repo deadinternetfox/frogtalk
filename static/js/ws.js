@@ -305,6 +305,16 @@ const WS = (() => {
         if (typeof handleCallReject === 'function') handleCallReject(data);
         break;
       }
+      case 'call_unreachable': {
+        // Server confirmed the callee is fully offline (no WS, no FCM/APNs/web-push).
+        // Stop ringing immediately instead of timing out after 30s.
+        Notifications.stopRinging();
+        const nick = (typeof _callPeerNick !== 'undefined' && _callPeerNick) || 'User';
+        if (typeof toast === 'function') toast(`${nick} is unavailable`, 'info');
+        if (typeof resetCall === 'function') resetCall();
+        if (typeof closeCallOverlay === 'function') closeCallOverlay();
+        break;
+      }
       case 'call_handled': {
         // Sent to all of this user's sessions when the call was accepted or
         // declined elsewhere (e.g. via the Android system notification action
