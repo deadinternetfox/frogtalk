@@ -249,7 +249,7 @@ function _attPreviewPlayVoice (btn, ev) {
   _attPreviewAudio.currentTime = 0;
   _attPreviewAudio.play().then(() => {
     wrap.classList.add('playing');
-    btn.textContent = '⏸';
+    btn.textContent = '■';
   }).catch(() => {});
   _attPreviewAudio.onended = () => {
     wrap.classList.remove('playing');

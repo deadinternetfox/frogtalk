@@ -1310,7 +1310,7 @@ const Messages = (() => {
     if (_currentAudioId === msgId && _currentAudio) {
       if (_currentAudio.paused) {
         _currentAudio.play();
-        btn.textContent = '⏸';
+        btn.textContent = '■';
         container.classList.add('playing');
       } else {
         _currentAudio.pause();
@@ -1363,7 +1363,7 @@ const Messages = (() => {
     });
 
     audio.play();
-    btn.textContent = '⏸';
+    btn.textContent = '■';
     container.classList.add('playing');
   }
 
