@@ -693,8 +693,8 @@ async function _camOpenLiveCamera () {
     live.id = 'cam-live-view';
     live.style.cssText = 'display:none;flex-direction:column;gap:10px;align-items:center;width:100%';
     live.innerHTML = `
-      <div id="cam-live-stage" style="position:relative;width:100%;max-width:420px;max-height:60vh;background:#000;border-radius:10px;overflow:hidden;touch-action:none;user-select:none;display:flex;align-items:center;justify-content:center;min-height:240px">
-        <video id="cam-live-video" autoplay playsinline muted style="width:100%;height:100%;max-height:60vh;object-fit:contain;background:#000;transform-origin:center center"></video>
+      <div id="cam-live-stage" style="position:relative;width:100%;max-width:420px;aspect-ratio:3/4;background:#000;border-radius:10px;overflow:hidden;touch-action:none;user-select:none">
+        <video id="cam-live-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center"></video>
         <button id="cam-live-flip" title="Flip camera" style="position:absolute;top:8px;right:8px;background:rgba(12,28,22,.7);color:#dff5e8;border:1px solid #2f5548;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:3;transition:background .15s">🔄</button>
         <button id="cam-live-flash" title="Flash" style="position:absolute;top:8px;right:52px;background:rgba(12,28,22,.7);color:#dff5e8;border:1px solid #2f5548;border-radius:18px;min-width:36px;height:36px;padding:0 10px;font-size:13px;font-weight:700;cursor:pointer;z-index:3;display:none;gap:4px;align-items:center;justify-content:center;white-space:nowrap;transition:background .15s">⚡ Off</button>
         <div id="cam-zoom-badge" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.55);color:#fff;border:1px solid #333;border-radius:14px;padding:4px 10px;font-size:12px;font-weight:600;display:none;z-index:3">1.0×</div>
@@ -1371,16 +1371,25 @@ async function _camFinishSnapFromBlob (blob) {
 function _camFinishSnap (v) {
   const vw = v.videoWidth, vh = v.videoHeight;
 
-  // Preview uses object-fit:contain — the user sees the entire sensor
-  // frame, so we save the entire sensor frame (no aspect-ratio crop).
-  // Hardware zoom already alters the sensor stream so vw/vh already
-  // reflect that. Only the CSS-transform zoom fallback needs a centre
-  // crop here, since that path scales the <video> visually without
-  // changing the sensor output.
-  let srcW = vw, srcH = vh;
+  // Preview uses object-fit:cover, so the user only sees the centre
+  // slice that matches the displayed element's aspect ratio. Crop the
+  // saved frame to that same AR so the photo matches what they saw.
+  const dispW = v.clientWidth  || vw;
+  const dispH = v.clientHeight || vh;
+  const dispAR = dispW / dispH;
+  const videoAR = vw / vh;
+  let srcW, srcH;
+  if (videoAR > dispAR) {
+    srcH = vh;
+    srcW = vh * dispAR;
+  } else {
+    srcW = vw;
+    srcH = vw / dispAR;
+  }
+  // CSS-fallback zoom additionally centre-crops by the zoom factor.
   if (!_camZoomTrack && _camZoomVal > 1.01) {
-    srcW = vw / _camZoomVal;
-    srcH = vh / _camZoomVal;
+    srcW /= _camZoomVal;
+    srcH /= _camZoomVal;
   }
   const sx = Math.max(0, (vw - srcW) / 2);
   const sy = Math.max(0, (vh - srcH) / 2);
@@ -1615,7 +1624,7 @@ async function openStoryCapture (onReady) {
         <button id="story-cap-flip" style="background:rgba(0,0,0,.55);color:#fff;border:1px solid #333;border-radius:50%;width:38px;height:38px;font-size:18px;cursor:pointer" title="Flip camera">🔄</button>
       </div>
       <div id="story-cap-zoom-badge" style="position:absolute;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;border:1px solid #333;border-radius:14px;padding:4px 12px;font-size:12px;font-weight:700;display:none;z-index:2">1.0×</div>
-      <video id="story-cap-video" autoplay playsinline muted style="max-width:100%;max-height:100vh;background:#000;object-fit:contain;width:100%;height:100%;transform-origin:center center;touch-action:none"></video>
+      <video id="story-cap-video" autoplay playsinline muted style="max-width:100%;max-height:100vh;background:#000;object-fit:cover;width:100%;height:100%;transform-origin:center center;touch-action:none"></video>
       <video id="story-cap-playback" playsinline controls style="display:none;max-width:100%;max-height:100vh;background:#000;object-fit:contain;width:100%;height:100%"></video>
       <img id="story-cap-photo" style="display:none;max-width:100%;max-height:100vh;background:#000;object-fit:contain;width:100%;height:100%">
       <div id="story-cap-filters" style="position:absolute;bottom:140px;left:0;right:0;display:none;flex-wrap:wrap;gap:6px;justify-content:center;padding:0 10px;z-index:2"></div>
@@ -1766,13 +1775,24 @@ function _storyTakePhoto () {
   const v = document.getElementById('story-cap-video');
   if (!v || !v.videoWidth) { toast('Camera not ready', 'error'); return; }
   const vw = v.videoWidth, vh = v.videoHeight;
-  // Hardware zoom alters the sensor stream so vw/vh already reflect it.
-  // For the CSS-transform fallback, centre-crop by the current zoom so
-  // the saved photo matches what the user sees.
-  let srcW = vw, srcH = vh;
+  // Preview uses object-fit:cover — crop to the displayed AR so the
+  // saved photo matches exactly what the user saw on screen.
+  const dispW = v.clientWidth  || vw;
+  const dispH = v.clientHeight || vh;
+  const dispAR = dispW / dispH;
+  const videoAR = vw / vh;
+  let srcW, srcH;
+  if (videoAR > dispAR) {
+    srcH = vh;
+    srcW = vh * dispAR;
+  } else {
+    srcW = vw;
+    srcH = vw / dispAR;
+  }
+  // CSS-fallback zoom additionally centre-crops by the zoom factor.
   if (!_storyZoomTrack && _storyZoomVal > 1.01) {
-    srcW = vw / _storyZoomVal;
-    srcH = vh / _storyZoomVal;
+    srcW /= _storyZoomVal;
+    srcH /= _storyZoomVal;
   }
   const sx = Math.max(0, (vw - srcW) / 2);
   const sy = Math.max(0, (vh - srcH) / 2);
