@@ -110,7 +110,11 @@ class CallService : Service() {
                         .setPriority(NotificationCompat.PRIORITY_MAX)
                         .setCategory(NotificationCompat.CATEGORY_CALL)
                         .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                        .setDefaults(Notification.DEFAULT_SOUND or Notification.DEFAULT_VIBRATE)
+                        // Channel supplies sound + vibration. Adding setDefaults
+                        // here causes some OEMs to play the default notification
+                        // ding alongside the ringtone. OnlyAlertOnce suppresses
+                        // re-alert when the same id 1002 is updated.
+                        .setOnlyAlertOnce(true)
                         .setOngoing(true)
                         .setAutoCancel(true)
                         .setFullScreenIntent(fullScreenPending, true)
@@ -230,8 +234,12 @@ class CallService : Service() {
 
     private fun createRingChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(NotificationManager::class.java)
-            try { nm?.deleteNotificationChannel(CHANNEL_RING_ID) } catch (_: Throwable) {}
+            val nm = getSystemService(NotificationManager::class.java) ?: return
+            // Don't delete-and-recreate the channel on every ring — doing so
+            // makes the next notify() count as a fresh alert and the system
+            // restarts the ringtone, which compounded with duplicate posts
+            // produced the looping-ringtone bug.
+            if (nm.getNotificationChannel(CHANNEL_RING_ID) != null) return
             val ringUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             val attrs = AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
@@ -249,7 +257,7 @@ class CallService : Service() {
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
                 setSound(ringUri, attrs)
             }
-            nm?.createNotificationChannel(channel)
+            nm.createNotificationChannel(channel)
         }
     }
 }

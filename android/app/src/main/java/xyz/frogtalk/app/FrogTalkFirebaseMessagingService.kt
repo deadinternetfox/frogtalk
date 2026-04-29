@@ -44,20 +44,11 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
         if (kind == "call") {
             val peer = data["from_nickname"].orEmpty()
             val callId = data["call_id"].orEmpty()
-            try {
-                val intent = Intent(this, CallService::class.java).apply {
-                    action = CallService.ACTION_RING
-                    putExtra(CallService.EXTRA_PEER_NICK, peer)
-                    putExtra(CallService.EXTRA_CALL_ID, callId)
-                }
-                startService(intent)
-            } catch (e: Throwable) {
-                Log.w(TAG, "Failed to trigger CallService ring", e)
-            }
-            // Always show a CallStyle heads-up ourselves too. CallService's ring
-            // notification only fires while the process is alive — when the app
-            // is force-stopped, the service start above can be dropped, so this
-            // is the safety net that guarantees the user sees the call.
+            // Single source of truth for the incoming-call UI: the CallStyle
+            // heads-up below. We deliberately do NOT also fire CallService's
+            // ACTION_RING here — that posts another notification on the same
+            // id/channel and the system retriggers the ringtone, producing the
+            // "ringtone + notification ding looping" effect users reported.
             try {
                 showIncomingCallNotification(peer, callId)
             } catch (e: Throwable) {
@@ -233,7 +224,12 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             .setContentIntent(answerPending)
             .setOngoing(true)
             .setAutoCancel(true)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            // Channel already supplies ringtone + vibration. setDefaults()
+            // would stack the system notification ding on top of the ringtone
+            // on some OEM ROMs (Samsung/Xiaomi/OnePlus). OnlyAlertOnce makes
+            // any duplicate notify(1002,…) a silent update instead of
+            // restarting the ringtone.
+            .setOnlyAlertOnce(true)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // CallStyle gives the proper green Answer / red Decline buttons and
