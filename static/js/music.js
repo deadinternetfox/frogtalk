@@ -403,16 +403,36 @@ const Music = (() => {
         // then re-pausing. Instead we just reflect the truth: flip the
         // tray icon, the side UI button, and the badge to paused so the
         // user can tap play once and have it work the first time.
+        // ALWAYS reconcile from YT's authoritative state messages —
+        // not gated behind any probe flag. Both onStateChange (unsolicited)
+        // and infoDelivery (reply to getPlayerState/getCurrentTime) carry
+        // the truth; if we drop them, the dock + tray UI lies.
+        let ytState = null;
         if (parsed.event === 'onStateChange' && typeof parsed.info === 'number') {
+          ytState = parsed.info;
+        } else if (parsed.event === 'infoDelivery' && parsed.info
+                   && typeof parsed.info.playerState === 'number') {
+          ytState = parsed.info.playerState;
+        }
+        if (ytState != null) {
           const prev = _lastPlayerState;
-          _lastPlayerState = parsed.info;
-          const wasPlaying = (prev === 1);
-          const nowPlaying = (parsed.info === 1);
-          if (wasPlaying !== nowPlaying) {
-            // Force the next _emitState() through the dedupe so the
-            // notification + side button update right now.
+          _lastPlayerState = ytState;
+          // Reconcile _paused with YT truth. State 1=playing, 3=buffering;
+          // anything else (paused/ended/unstarted/cued) is effectively
+          // not-playing and the UI should reflect that.
+          const ytPlaying = (ytState === 1 || ytState === 3);
+          const desiredPaused = !ytPlaying;
+          if (_paused !== desiredPaused) {
+            _paused = desiredPaused;
             _lastEmitHash = '';
+            try { _syncPlayPauseButtons(); } catch {}
             try { _emitState(); } catch {}
+            try { _renderSyncBadge(); } catch {}
+            if (_paused) { try { _stopSyncProbe(); } catch {} }
+            else { try { _startSyncProbeIfNeeded(); } catch {} }
+          } else if (prev !== ytState) {
+            // No _paused flip but state changed (e.g. 1→3 buffer) — keep
+            // the badge fresh.
             try { _renderSyncBadge(); } catch {}
           }
         }
@@ -423,7 +443,6 @@ const Music = (() => {
 
         let actualSec = null;
         let lastUpdatedAtMs = null;
-        let playerState = null;
         // YouTube IFrame API: {event:"infoDelivery", info:{currentTime, currentTimeLastUpdated_, playerState}}
         if (parsed.event === 'infoDelivery'
             && parsed.info && typeof parsed.info.currentTime === 'number') {
@@ -434,9 +453,6 @@ const Music = (() => {
             const v = parsed.info.currentTimeLastUpdated_;
             lastUpdatedAtMs = v > 1e12 ? v : v * 1000;
           }
-          if (typeof parsed.info.playerState === 'number') {
-            playerState = parsed.info.playerState;
-          }
         // SoundCloud Widget API: {method:"getPosition", value:<ms>}
         } else if (parsed.method === 'getPosition'
                    && typeof parsed.value === 'number') {
@@ -444,7 +460,6 @@ const Music = (() => {
         }
         if (actualSec == null) return;
         _syncProbePending = false;
-        if (playerState != null) _lastPlayerState = playerState;
         // If we have a timestamp for when the player generated this reading,
         // compare against the *expected position at that moment* — not
         // expected-now — so message latency doesn't get billed as drift.
@@ -714,17 +729,26 @@ const Music = (() => {
     } catch { /* never throw from a visibility handler */ }
   }
 
-  // ─── Reliable foreground auto-resume ──────────────────────────────────
+  // ─── Reliable foreground auto-resume + state reconciler ─────────────
   // Background → foreground transitions in Android WebView routinely leave
-  // YouTube's iframe in state 2 (paused) without firing onStateChange to
-  // our listener, so the dock/tray/strip can't react. The fix: when we
-  // come back, run a bounded "nudge" loop that re-handshakes, issues
-  // playVideo, and probes getPlayerState. As soon as state==1 lands we
-  // declare victory (and flip _paused=false so the UI shows ⏸ correctly).
-  // If the budget elapses without success we fall back to honest UI:
-  // _paused=true so the side button + tray show ▶ for the user to tap.
-  // Cost: at most 6 postMessages over ~2s, only on foreground return —
-  // negligible vs. user-perceived "music just stops" frustration.
+  // YouTube's iframe in state 2 (paused) without firing onStateChange,
+  // and (worse) the iframe sometimes briefly enters state 1 then silently
+  // re-pauses without notifying us. The classic fix of "spam playVideo
+  // and declare victory on first state==1" loses to that race — the dock
+  // and tray then lie about playback for up to 10s.
+  //
+  // Our approach: a single bounded RECONCILER. On foreground:
+  //   1. Send playVideo a few times early on (to nudge a paused embed).
+  //   2. Continuously poll getPlayerState at a tight cadence for ~10s,
+  //      then loose cadence for ~12s (total ~22s of close monitoring).
+  //   3. Each reply lands in our message listener which already
+  //      reconciles _paused with YT truth — so dock/tray/strip stay
+  //      honest at all times. The reconciler itself only owns the
+  //      polling cadence and the limited play-nudging budget; it does
+  //      NOT flip _paused. That's done by the listener as messages
+  //      arrive — single source of truth.
+  // Cost: one postMessage per ~1s for ~22s on foreground return only.
+  // Aborts on user pause, new track, or re-background.
   let _resumeTimer = null;
   let _resumeToken = 0;
   function _abortYtResume() {
@@ -736,87 +760,64 @@ const Music = (() => {
     const cur = _state && _state.queue && _state.queue[0];
     if (!cur) return;
     // Non-YouTube providers (SoundCloud, Spotify) don't suffer the
-    // WebView refusal pattern — _resync() handles them. Bail early.
+    // WebView refusal pattern — _resumeOnVisible() handles them.
     if (cur.provider !== 'youtube') return;
     const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
     if (!frame || !frame.contentWindow) return;
     const cw = frame.contentWindow;
     const myToken = ++_resumeToken;
-    let attempts = 0;
-    const MAX_ATTEMPTS = 6;
-    const STEP_MS = 350;
-
-    function send(msg) {
+    const send = (msg) => {
       try { cw.postMessage(JSON.stringify(msg), '*'); } catch {}
-    }
+    };
 
-    // After we declare victory, schedule verification probes. WebView
-    // can silently re-pause within a few hundred ms without firing
-    // onStateChange, so we re-fire getPlayerState a few times to catch
-    // it. If state flips back to !=1 && !=3 we mark _paused=true so
-    // the UI shows ▶ honestly.
-    function scheduleVerification() {
-      const delays = [800, 1800, 3500];
-      for (const d of delays) {
-        setTimeout(() => {
-          if (myToken !== _resumeToken) return;
-          // Re-handshake + ask for current state.
-          send({ event: 'listening', id: 'frogtalk-music' });
-          send({ event: 'command', func: 'getPlayerState', args: [] });
-          // Give YT ~150ms to reply, then read _lastPlayerState.
-          setTimeout(() => {
-            if (myToken !== _resumeToken) return;
-            const ls = _lastPlayerState;
-            const playing = (ls === 1 || ls === 3);
-            const next = !playing;  // _paused desired state
-            if (_paused !== next) {
-              _paused = next;
-              _lastEmitHash = '';
-              try { _syncPlayPauseButtons(); } catch {}
-              try { _emitState(); } catch {}
-              if (_paused) { try { _stopSyncProbe(); } catch {} }
-              else { try { _startSyncProbeIfNeeded(); } catch {} }
-            }
-          }, 180);
-        }, d);
-      }
-    }
+    const startedAt = Date.now();
+    // Cadence schedule: first 10s every 1000ms (10 polls + 4 nudges),
+    // next 12s every 2000ms (6 polls). After ~22s the regular sync
+    // probe (every 4s) takes over and keeps reconciling.
+    const TIGHT_UNTIL = 10000;
+    const TOTAL_BUDGET = 22000;
+    const TIGHT_STEP = 1000;
+    const LOOSE_STEP = 2000;
+    // Number of leading playVideo nudges. After this we ONLY poll —
+    // we don't keep stomping on the user (or YT) with play commands
+    // if they've made the deliberate choice to pause via headphones,
+    // ad break, etc.
+    const NUDGES = 3;
+    let tickIdx = 0;
+
+    // Initial handshake — required after backgrounding so the iframe
+    // re-accepts our messages.
+    send({ event: 'listening', id: 'frogtalk-music' });
 
     function tick() {
       _resumeTimer = null;
-      // Cancelled (user paused, app backgrounded again, or new track)?
-      if (myToken !== _resumeToken) return;
-      // Victory: YT is reporting playing or buffering-toward-play.
-      if (_lastPlayerState === 1 || _lastPlayerState === 3) {
-        _paused = false;
-        _lastEmitHash = '';
-        try { _syncPlayPauseButtons(); } catch {}
-        try { _emitState(); } catch {}
-        try { _startSyncProbeIfNeeded(); } catch {}
-        scheduleVerification();
-        return;
+      if (myToken !== _resumeToken) return;        // superseded
+      if (document.hidden) return;                  // re-backgrounded
+      // If user explicitly paused mid-reconcile, give up on nudging
+      // but keep polling so the listener stays accurate. Actually
+      // simpler: just stop. The next foreground will re-arm.
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > TOTAL_BUDGET) return;
+      // Nudge: only the first N ticks send playVideo. After that we
+      // trust YT's state and just poll.
+      if (tickIdx < NUDGES && !_userInitiatedPause) {
+        send({ event: 'command', func: 'playVideo', args: [] });
       }
-      if (attempts >= MAX_ATTEMPTS) {
-        // Surrender. Reflect reality so the user can tap play once.
-        _paused = true;
-        _lastEmitHash = '';
-        try { _syncPlayPauseButtons(); } catch {}
-        try { _emitState(); } catch {}
-        return;
-      }
-      attempts++;
-      // Re-handshake every iteration: WebView returns sometimes drop the
-      // postMessage subscription so the listener never gets onStateChange.
-      send({ event: 'listening', id: 'frogtalk-music' });
-      send({ event: 'command', func: 'playVideo', args: [] });
+      // Always poll state. Reply hits the global listener which
+      // reconciles _paused with truth.
       send({ event: 'command', func: 'getPlayerState', args: [] });
-      _resumeTimer = setTimeout(tick, STEP_MS);
+      tickIdx++;
+      const step = elapsed < TIGHT_UNTIL ? TIGHT_STEP : LOOSE_STEP;
+      _resumeTimer = setTimeout(tick, step);
     }
     // Slight initial delay so the iframe's own foreground bookkeeping
     // settles before we start poking. Without it the first playVideo
     // is the most likely to be ignored.
-    _resumeTimer = setTimeout(tick, 120);
+    _resumeTimer = setTimeout(tick, 250);
   }
+  // Sentinel set by togglePause() user-initiated pause path so the
+  // reconciler stops nudging playVideo. Reset on foreground.
+  let _userInitiatedPause = false;
 
   // App background / foreground policy:
   //  - On hide: stop the sync probe + cancel any in-flight resume loop.
@@ -848,6 +849,14 @@ const Music = (() => {
     // Re-bind listener defensively (some embeds drop registration during
     // background suspension).
     try { _bindSyncMessageListener(); } catch {}
+    // User-initiated pause flag is per-foreground-session; clear so the
+    // reconciler is allowed to nudge playVideo on this return.
+    _userInitiatedPause = false;
+    // Clear stale state so the reconciler's first poll establishes truth
+    // rather than us asserting a guess. We do NOT pre-emit here — the
+    // listener will emit honestly as soon as YT replies (~250ms),
+    // avoiding a brief tray/dock UI lie.
+    _lastPlayerState = null;
     try {
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       const cur = _state && _state.queue && _state.queue[0];
@@ -856,12 +865,13 @@ const Music = (() => {
         frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
       }
     } catch {}
-    _lastEmitHash = '';
+    // Make sure the dock/tray reflect whatever _paused currently is —
+    // they might have been re-rendered to the playing template by a
+    // queued _render() during background. Listener will correct shortly.
     try { _syncPlayPauseButtons(); } catch {}
-    try { _emitState(); } catch {}
-    // Kick the bounded resume loop. It's a no-op for non-YouTube and
-    // self-aborts as soon as YT confirms playing — or surrenders to
-    // honest UI after ~2s if the iframe refuses.
+    // Kick the bounded reconciler. It polls getPlayerState every ~1s
+    // for 10s then every 2s for 12s; the message listener flips _paused
+    // to YT truth on every reply, so dock + tray + strip stay honest.
     try { _attemptYtResume(); } catch {}
     // Belt-and-suspenders: re-sync on the next two animation frames in
     // case a queued _render() runs after us and clobbers the button
@@ -1236,6 +1246,9 @@ const Music = (() => {
     // Keep every play/pause button in the UI in sync (drawer + mini bar).
     _syncPlayPauseButtons(nowPlaying);
     _paused = !nowPlaying;
+    // Track user intent so the reconciler doesn't keep nudging playVideo
+    // after a deliberate pause tap. Cleared on next foreground.
+    _userInitiatedPause = !nowPlaying;
     if (_paused) _stopSyncProbe(); else _startSyncProbeIfNeeded();
     _emitState();
   }
