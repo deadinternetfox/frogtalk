@@ -365,6 +365,12 @@ const Music = (() => {
       if (Math.abs(localElapsed - incoming) < 3) return;
     }
 
+    // Cross-track edge case: server reports incoming=0 for a track we
+    // haven't anchored yet (different head, or first observation after
+    // a restart). The iframe — if one exists for this same track —
+    // probably has the real position. Seed a *tentative* anchor from
+    // server now; the next sync probe will replace it with iframe truth
+    // via the asymmetric reconciliation in _bindSyncMessageListener.
     _anchorTrackKey = key;
     _anchorMs = Date.now() - (incoming * 1000);
   }
@@ -538,20 +544,38 @@ const Music = (() => {
         _lastDriftSec = Math.abs(actualSec - expectedAtSample);
         _renderSyncBadge();
 
-        // Auto-correct: Android WebView occasionally resumes a backgrounded
-        // YT iframe at currentTime=0 (or some other stale offset) even
-        // though the embed reports state=1. The verify ladder's seek may
-        // have been dropped if it landed during the iframe's restoration
-        // window. If we're playing but a probe shows we're WAY behind
-        // (>10s) the room's expected position, force a seek. Throttled
-        // to once every 6s so we don't fight a real user-initiated
-        // backwards seek.
-        if (!_paused
-            && _lastPlayerState === 1
-            && _lastDriftSec > 10
-            && (Date.now() - _lastAutoCorrectAt) > 6000) {
-          _lastAutoCorrectAt = Date.now();
-          try { _seekIframe(_expectedPosSec()); } catch {}
+        // Asymmetric reconciliation. Two distinct failure modes coexist:
+        //
+        //   A) Iframe restarted at 0 after Android background while our
+        //      local anchor is correct — actualSec << expectedAtSample.
+        //      Recovery: seek the iframe forward to the room's expected.
+        //
+        //   B) Server lost its in-memory anchor and returned a fresh
+        //      position_sec=0 (process restart, race), so OUR local
+        //      anchor is the stale one — actualSec >> expectedAtSample,
+        //      because the iframe is the only thing that kept playing
+        //      across the disruption. Recovery: adopt the iframe's
+        //      clock as the new anchor; do NOT seek backwards.
+        //
+        // Doing the wrong recovery in case B is what the user reported:
+        // the sync probe was forcing the iframe back to 0 because we
+        // kept reseeding the anchor with stale server zeros and then
+        // seeking the iframe to that bad anchor.
+        const cur2 = _state && _state.queue && _state.queue[0];
+        if (cur2 && !_paused && _lastPlayerState === 1) {
+          if (actualSec > expectedAtSample + 10) {
+            // Iframe is ahead — anchor is stale, trust the iframe.
+            _anchorMs = Date.now() - (Math.floor(actualSec) * 1000);
+            _anchorTrackKey = `${cur2.provider}:${cur2.video_id}`;
+            _lastDriftSec = 0;
+            _renderSyncBadge();
+          } else if (actualSec + 10 < expectedAtSample
+                     && (Date.now() - _lastAutoCorrectAt) > 6000) {
+            // Iframe is behind — most likely Android restart-at-0 case.
+            // Seek forward to the room's expected position.
+            _lastAutoCorrectAt = Date.now();
+            try { _seekIframe(_expectedPosSec()); } catch {}
+          }
         }
       } catch { /* keep listener resilient */ }
     });
@@ -753,7 +777,16 @@ const Music = (() => {
         if (ignorePaused) {
           setTimeout(() => {
             if (myToken !== _resumeRetryToken) return;
-            try { _seekIframe(_expectedPosSec()); } catch {}
+            // Only seek if we have a meaningful expected position. If our
+            // anchor is fresh (server just stamped position_sec=0 because
+            // it lost its in-memory record), expected~0 — seeking the
+            // iframe to 0 would actively clobber any real playback
+            // position the iframe still has. Let the sync probe's
+            // asymmetric reconciliation adopt iframe truth instead.
+            const exp = _expectedPosSec();
+            if (exp >= 3) {
+              try { _seekIframe(exp); } catch {}
+            }
           }, 250);
         }
 
@@ -801,7 +834,11 @@ const Music = (() => {
               // user pause), keep the drift threshold so we don't
               // trigger the seek-pause race for tiny drifts.
               if (ignorePaused) {
-                try { _seekIframe(_expectedPosSec()); } catch {}
+                // Same anchor-confidence guard as the early seek above.
+                const exp = _expectedPosSec();
+                if (exp >= 3) {
+                  try { _seekIframe(exp); } catch {}
+                }
               } else {
                 const drift = Math.abs(_expectedPosSec() - targetSec);
                 if (drift > 3) {
@@ -1322,8 +1359,13 @@ const Music = (() => {
       // Same track — keep the iframe intact so playback doesn't restart.
       return;
     }
-    // Fresh iframe needed (first mini render or track change).
-    const posSec = Math.max(0, Math.min(21600, parseInt(_state.position_sec || 0, 10) || 0));
+    // Fresh iframe needed (first mini render or track change). Prefer
+    // the local clock (_expectedPosSec) over raw _state.position_sec so
+    // the mini player picks up where the main one left off, even if the
+    // server's anchor is currently stale (e.g. just restamped to 0).
+    const localPos = _expectedPosSec();
+    const serverPos = Math.max(0, Math.min(21600, parseInt(_state.position_sec || 0, 10) || 0));
+    const posSec = Math.max(localPos, serverPos);
     const playerHtml = cur.provider === 'youtube'
       ? `<iframe class="mp-frame" src="https://www.youtube.com/embed/${esc(cur.video_id)}?autoplay=1&enablejsapi=1&start=${posSec}" allow="autoplay; encrypted-media"></iframe>`
       : cur.provider === 'spotify'
