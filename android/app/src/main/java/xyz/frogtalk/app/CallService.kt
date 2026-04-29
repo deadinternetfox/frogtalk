@@ -9,6 +9,9 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.Person
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.IconCompat
 
 class CallService : Service() {
 
@@ -148,8 +151,12 @@ class CallService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
+            val accentOngoing = try { ContextCompat.getColor(this, R.color.frog_green) } catch (_: Throwable) { 0xFF4CAF50.toInt() }
             val notification = NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
+                .setColor(accentOngoing)
+                .setColorized(true)
+                .setSubText("FrogTalk")
                 .setContentTitle("In call with $peerNick")
                 .setContentText("FrogTalk call in progress")
                 .setContentIntent(openPending)

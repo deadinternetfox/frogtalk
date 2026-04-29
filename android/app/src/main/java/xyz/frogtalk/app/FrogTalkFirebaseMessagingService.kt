@@ -5,12 +5,14 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -146,8 +148,16 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
 
         val tag = if (conversationId.isNotBlank()) "ft-conv-$conversationId" else "ft-msg"
 
+        val largeIcon = try {
+            BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
+        } catch (_: Throwable) { null }
+        val accent = try { ContextCompat.getColor(this, R.color.frog_green) } catch (_: Throwable) { 0x4CAF50.or(0xFF000000.toInt()) }
+
         val n = NotificationCompat.Builder(this, CHANNEL_GENERAL)
             .setSmallIcon(R.drawable.ic_notification)
+            .setColor(accent)
+            .setLargeIcon(largeIcon)
+            .setSubText("FrogTalk")
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(style)
@@ -203,12 +213,17 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
         val person = Person.Builder()
             .setName(displayName)
             .setKey(displayName)
-            .setIcon(IconCompat.createWithResource(this, R.drawable.ic_notification))
+            .setIcon(IconCompat.createWithResource(this, R.mipmap.ic_launcher))
             .setImportant(true)
             .build()
 
+        val accent = try { ContextCompat.getColor(this, R.color.frog_green) } catch (_: Throwable) { 0x4CAF50.or(0xFF000000.toInt()) }
+
         val builder = NotificationCompat.Builder(this, CHANNEL_CALL)
             .setSmallIcon(R.drawable.ic_notification)
+            .setColor(accent)
+            .setColorized(true)
+            .setSubText("FrogTalk")
             .setContentTitle("Incoming FrogTalk call")
             .setContentText("$displayName is calling…")
             .setPriority(NotificationCompat.PRIORITY_MAX)
