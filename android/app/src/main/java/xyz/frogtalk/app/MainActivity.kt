@@ -46,6 +46,18 @@ class MainActivity : AppCompatActivity() {
         private const val BATTERY_REPROMPT_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
         private const val STORY_UPLOAD_NOTIFICATION_ID = 42002
         private const val STORY_UPLOAD_CHANNEL_ID = "frogtalk_upload"
+
+        /**
+         * Tracks whether the activity is currently visible (between onResume
+         * and onPause). FrogTalkFirebaseMessagingService consults this flag
+         * so that when the server sends a DM push while the user is actively
+         * looking at the app, we suppress the duplicate tray notification —
+         * the in-app toast handles that case. When the app is backgrounded
+         * or screen-off, the FCM service posts the heads-up as usual.
+         */
+        @Volatile
+        @JvmStatic
+        var isAppVisible: Boolean = false
     }
 
     private fun buildAppUrl(baseUrl: String? = null, intentOverride: Intent? = null): String {
@@ -645,6 +657,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        isAppVisible = true
         try { webView?.onResume() } catch (_: Throwable) {}
         // Refresh the FCM token if it's been more than 6h since the last
         // server-side sync. Catches silent token rotations (Play Services
@@ -669,6 +682,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        isAppVisible = false
         if (!musicPlaybackActive) {
             try { webView?.onPause() } catch (_: Throwable) {}
         } else {
@@ -913,6 +927,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showNativeNotification(title: String, body: String) {
+        // FCM is the single source of truth for tray notifications when
+        // the app is backgrounded — see FrogTalkFirebaseMessagingService.
+        // The JS bridge calls into here for the foreground path so the
+        // user still gets a system notification while the WebView is
+        // visible (on a different DM, etc). When the activity is paused
+        // we skip — the FCM service has already posted (or will post)
+        // the canonical heads-up, and posting from here too would
+        // duplicate the alert when the message also arrived over the
+        // open WS connection.
+        if (!isAppVisible) return
         val channelId = "frogtalk_general"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager

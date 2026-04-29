@@ -110,6 +110,15 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
         conversationId: String,
         conversationName: String,
     ) {
+        // The server now sends FCM for every DM (it used to short-circuit
+        // when the user was online via WS). When the activity is currently
+        // visible to the user, suppress the duplicate tray entry — the
+        // in-app toast in dms.js handles that case. When the app is
+        // backgrounded or the screen is off, MainActivity.isAppVisible is
+        // false and we post the heads-up + tray notification as usual.
+        if (MainActivity.isAppVisible) {
+            return
+        }
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         ensureGeneralChannel(nm)
 

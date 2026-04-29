@@ -486,14 +486,22 @@ async def websocket_endpoint(
                     # Don't double-send if DMing yourself
                     if other_id != user["id"]:
                         await manager.send_to_user(other_id, dm_broadcast)
-                    # Push notification if recipient is offline. Pass
-                    # sender_name in extras so the on-device service can
-                    # plumb the raw nickname into the tap PendingIntent as
-                    # dm_nick — otherwise FrogTalkFirebaseMessagingService
-                    # falls back to title ("💬 <nick>") and the WebView
-                    # opens /api/dms/open/💬%20<nick> → 404 "User not found".
+                    # ALWAYS push, even if the recipient is online via WS:
+                    # otherwise the only path to a tray notification is the
+                    # JS bridge (window.Android.showNotification) and on
+                    # Samsung One UI / MIUI that bridge call sometimes
+                    # produces no visible heads-up when the WebView is
+                    # paused — user heard the in-app "tink" but nothing
+                    # appeared in the tray. With _push_always the FCM
+                    # service is the single source of truth for tray
+                    # notifications; it skips itself when the activity is
+                    # currently visible (MainActivity.isAppVisible == true)
+                    # so we don't double-alert the user when they're
+                    # actively using the app. sender_name plumbs the raw
+                    # nickname into dm_nick so the tap PendingIntent opens
+                    # the correct DM thread.
                     preview = (content or "📎 Media")[:80]
-                    _push(
+                    _push_always(
                         other_id,
                         f"💬 {user['nickname']}",
                         preview,
