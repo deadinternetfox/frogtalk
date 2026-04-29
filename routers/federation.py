@@ -1429,7 +1429,10 @@ async def _handle_dm_event(event: dict) -> None:
     try:
         from routers.push import send_push
         preview = (str(payload.get("content") or "") or "📎 Media")[:80]
-        send_push(peer["id"], f"💬 {sender['nickname']}", preview, "/app")
+        send_push(
+            peer["id"], f"💬 {sender['nickname']}", preview, "/app",
+            extra={"from_nickname": sender["nickname"]},
+        )
     except Exception:
         pass
 
@@ -1461,7 +1464,12 @@ async def _handle_friend_event(event: dict) -> None:
             pass
         try:
             from routers.push import send_push
-            send_push(to_user["id"], "👥 Friend Request", f"{from_nick} wants to be friends", "/app")
+            send_push(
+                to_user["id"], "👥 Friend Request",
+                f"{from_nick} wants to be friends", "/app",
+                kind="friend_request",
+                extra={"from_nickname": ""},
+            )
         except Exception:
             pass
         return
@@ -1480,7 +1488,12 @@ async def _handle_friend_event(event: dict) -> None:
             pass
         try:
             from routers.push import send_push
-            send_push(from_user["id"], "👥 Friend Accepted", f"{to_nick} accepted your friend request", "/app")
+            send_push(
+                from_user["id"], "👥 Friend Accepted",
+                f"{to_nick} accepted your friend request", "/app",
+                kind="friend_accepted",
+                extra={"from_nickname": ""},
+            )
         except Exception:
             pass
 

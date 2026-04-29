@@ -967,7 +967,9 @@ async def websocket_endpoint(
                 }
                 await manager.send_to_user(to_id, payload_fn)
                 _push(to_id, "👥 Friend Request",
-                      f"{user['nickname']} wants to be friends", "/app")
+                      f"{user['nickname']} wants to be friends", "/app",
+                      kind="friend_request",
+                      extra={"from_nickname": ""})
 
 
     except (WebSocketDisconnect, Exception) as exc:

@@ -19,11 +19,22 @@ router = APIRouter(prefix="/friends", tags=["friends"])
 users_router = APIRouter(prefix="/users", tags=["users_ext"])
 
 
-def _friend_push(user_id: int, title: str, body: str):
-    """Send push notification for friend events (silent fail)."""
+def _friend_push(user_id: int, title: str, body: str,
+                 kind: str = "friend_request", from_nickname: str = ""):
+    """Send push notification for friend events (silent fail).
+
+    Passes an explicit (possibly empty) ``from_nickname`` so the on-device
+    FCM service does not fall back to the notification *title* as a DM
+    target — that fallback is what produced the "user not found" toast
+    when tapping a friend-request heads-up (it tried to open a DM with
+    "👥 Friend Request")."""
     try:
         from routers.push import send_push
-        send_push(user_id, title, body, "/app")
+        send_push(
+            user_id, title, body, "/app",
+            kind=kind,
+            extra={"from_nickname": from_nickname or ""},
+        )
     except Exception:
         pass
 
@@ -157,9 +168,13 @@ async def send_request(request: Request, nickname: str, current_user: dict = Dep
         return JSONResponse(status_code=403, content={"error": "Cannot send request"})
     if result == "already":
         return JSONResponse(status_code=409, content={"error": "Already sent or friends"})
-    # Push notification to recipient as backup
+    # Push notification to recipient as backup. Pass from_nickname="" so the
+    # Android FCM service does not synthesize a "?dm=..." tap target from the
+    # title (which would otherwise produce a "User not found" toast).
     _friend_push(profile["id"], "\ud83d\udc65 Friend Request",
-                 f"{current_user['nickname']} wants to be friends")
+                 f"{current_user['nickname']} wants to be friends",
+                 kind="friend_request",
+                 from_nickname="")
     _emit_friend_event("friend.requested", {
         "from_nickname": current_user["nickname"],
         "to_nickname": profile["nickname"],
@@ -176,9 +191,12 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
     ok = db.accept_friend_request(profile["id"], current_user["id"])
     if not ok:
         return JSONResponse(status_code=404, content={"error": "No pending request from that user"})
-    # Push notification to requester as backup
+    # Push notification to requester as backup. from_nickname="" prevents the
+    # heads-up tap from being mis-routed to a non-existent DM thread.
     _friend_push(profile["id"], "\ud83d\udc65 Friend Accepted",
-                 f"{current_user['nickname']} accepted your friend request")
+                 f"{current_user['nickname']} accepted your friend request",
+                 kind="friend_accepted",
+                 from_nickname="")
     _emit_friend_event("friend.accepted", {
         "from_nickname": profile["nickname"],
         "to_nickname": current_user["nickname"],
