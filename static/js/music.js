@@ -13,6 +13,14 @@ const Music = (() => {
   let _state = null;      // { queue, djs, dj_only, can_submit, can_control, is_dj }
   let _soloMode = false;  // true when playing a track via Music.playSolo (no room)
   let _paused = false;    // mirrors current play/pause state (best-effort; iframe APIs don't always notify)
+  // Sticky flag: set ONLY when the user explicitly pauses via togglePause
+  // (dock / mini bar / drawer button). Cleared on user-initiated play and
+  // when the head track changes. Used to suppress the auto-resume ladder
+  // when the user genuinely wants playback paused — without this, any
+  // focus/visibility flicker (opening the channel-list drawer on mobile,
+  // alt-tabbing back, the WebView regaining focus) restarts audio behind
+  // the user's back.
+  let _userPaused = false;
   let _muted = false;     // native Android notification mute state (best-effort)
   // Radio-sync anchor: the wall-clock moment (ms) at which the current head
   // track would have started if played from 0. `position_sec` is derived
@@ -335,9 +343,12 @@ const Music = (() => {
   }
 
   function _setAnchor(track, serverPosSec) {
-    if (!track) { _anchorMs = 0; _anchorTrackKey = ''; return; }
+    if (!track) { _anchorMs = 0; _anchorTrackKey = ''; _userPaused = false; return; }
     const key = `${track.provider}:${track.video_id}`;
     const incoming = Math.max(0, parseInt(serverPosSec || 0, 10) || 0);
+    // Track change clears the sticky user-pause flag — pausing song A and
+    // then having the queue advance to song B should default to "playing".
+    if (key !== _anchorTrackKey) _userPaused = false;
 
     // Defensive: protect a healthy local clock from a stale/just-stamped
     // server reading. The server's _music_head_started is in-memory, and
@@ -964,6 +975,14 @@ const Music = (() => {
     // Auto-resume: kick the bounded ladder. No-op for non-YouTube
     // (SoundCloud and Spotify play from background fine). Ignored if
     // there's no current track.
+    // CRITICAL: respect user-initiated pause. If the user explicitly
+    // tapped the pause button before backgrounding / opening the
+    // sidebar / switching channels, we MUST NOT force-resume on the
+    // next visibility flicker. Just probe state and bail.
+    if (_userPaused) {
+      try { _syncPlayPauseButtons(); } catch {}
+      return;
+    }
     try { _resumeOnVisible({ force: true, ignorePaused: true }); } catch {}
     // Schedule fast drift probes after the resume ladder lands. The
     // sync probe's auto-correct branch will catch + reseek any case
@@ -1334,6 +1353,10 @@ const Music = (() => {
       }
     } catch {}
     const nowPlaying = !playing;
+    // Track user-intent pause separately from _paused. _paused gets
+    // flipped by lots of paths (visibility, infoDelivery, surrender);
+    // _userPaused is sticky and only the user toggles it.
+    _userPaused = !nowPlaying;
     // Radio behavior: if the user is un-pausing, catch them up to where the
     // room's play head is right now. Otherwise they'd hear a stale section.
     if (nowPlaying) {
