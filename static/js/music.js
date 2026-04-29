@@ -312,6 +312,38 @@ const Music = (() => {
     return false;
   }
 
+  // Notification-tray play button entry point. YouTube's iframe in Android
+  // WebView refuses to PLAY while the WebView is offscreen (system policy
+  // blocks autoplay/play resumption with no foreground surface). So when
+  // the user taps "play" on the notification while the app is backgrounded,
+  // a plain togglePause() flips _paused=false and the icon to ⏸, but no
+  // audio comes out — we lied. Fix: for YouTube specifically, when going
+  // from paused → playing, ALSO bring the music channel surface forward
+  // so the iframe gets a visible host and the play actually lands. The
+  // foreground reconciler then takes over and keeps state honest.
+  // SoundCloud + Spotify embeds genuinely can play from background, so
+  // they keep the cheap direct toggle path.
+  function togglePauseFromNotification() {
+    const cur = _state && _state.queue && _state.queue[0];
+    const goingToPlay = !!_paused;
+    const isYT = cur && cur.provider === 'youtube';
+    if (isYT && goingToPlay) {
+      // Surface the music panel first. expand() routes to the right place
+      // (Social Music tab in solo mode, otherwise the room's music tab).
+      // Then toggle on the next tick so the iframe is visible when
+      // playVideo lands. The visibility handler also kicks the
+      // reconciler, but we still toggle explicitly to satisfy the
+      // user-gesture chain for autoplay policy.
+      try { expand(); } catch {}
+      setTimeout(() => {
+        try { togglePauseGlobal(); } catch {}
+      }, 50);
+      return true;
+    }
+    // Non-YT or pause action: direct toggle (cheap and reliable).
+    return togglePauseGlobal();
+  }
+
   function setNativeMuted(muted) {
     _muted = !!muted;
     _emitState();
@@ -1539,7 +1571,7 @@ const Music = (() => {
 
   return { mount, submit, skip, clearQueue, removeTrack, toggleDJOnly,
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
-           togglePauseGlobal, setNativeMuted, getCurrent,
+           togglePauseGlobal, togglePauseFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
            // Native-callable hooks: MainActivity invokes these from
            // Activity.onPause() / onResume() because we deliberately keep
