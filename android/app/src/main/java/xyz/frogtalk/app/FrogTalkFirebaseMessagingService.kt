@@ -116,6 +116,9 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             if (conversationId.isNotBlank()) putExtra("conversation_id", conversationId)
+            // Tapping a message heads-up should jump straight to the DM thread
+            // with the sender. The web app consumes ?dm=<nick> on launch.
+            if (senderName.isNotBlank()) putExtra("dm_nick", senderName)
         }
         val requestCode = if (conversationId.isNotBlank()) {
             conversationId.hashCode() and 0x7fffffff
@@ -181,6 +184,9 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             putExtra("incoming_call", true)
             putExtra(CallService.EXTRA_PEER_NICK, peerNick)
             putExtra(CallService.EXTRA_CALL_ID, callId)
+            // After the call overlay resolves, land in the DM with this peer
+            // so the user can keep typing without an extra tap.
+            if (peerNick.isNotBlank()) putExtra("dm_nick", peerNick)
         }
         val baseRequest = (callId.hashCode() and 0x7fffffff)
         val answerPending = PendingIntent.getActivity(

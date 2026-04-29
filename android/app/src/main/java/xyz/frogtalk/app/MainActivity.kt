@@ -65,6 +65,12 @@ class MainActivity : AppCompatActivity() {
                     ?.takeIf { it.isNotBlank() }
                     ?.let { builder.appendQueryParameter("peer_nick", it) }
             }
+            // Generic deep-link: open a DM with this nick on launch. Used by
+            // both message-notification taps and incoming-call taps so the
+            // user always lands in the right thread.
+            sourceIntent?.getStringExtra("dm_nick")
+                ?.takeIf { it.isNotBlank() }
+                ?.let { builder.appendQueryParameter("dm", it) }
         } catch (e: Throwable) {
             Log.w(TAG, "Could not build incoming-call URL params", e)
         }
@@ -506,6 +512,20 @@ class MainActivity : AppCompatActivity() {
         try {
             if (intent.getBooleanExtra("incoming_call", false) == true) {
                 webView?.loadUrl(buildAppUrl(APP_URL, intent))
+            } else {
+                // Warm tap on a message notification: don't reload the whole
+                // page, just route the WebView to the right DM thread via JS.
+                val dmNick = intent.getStringExtra("dm_nick").orEmpty()
+                if (dmNick.isNotBlank()) {
+                    val escaped = dmNick.replace("\\", "\\\\").replace("'", "\\'")
+                    webView?.postDelayed({
+                        webView?.evaluateJavascript(
+                            "try{(window.openDMWithNick||(window.Rooms&&window.Rooms.openDM))" +
+                            "&&(window.openDMWithNick?openDMWithNick('$escaped'):window.Rooms.openDM('$escaped'));}catch(e){}",
+                            null
+                        )
+                    }, 150)
+                }
             }
         } catch (e: Throwable) {
             Log.w(TAG, "onNewIntent incoming-call reload failed", e)

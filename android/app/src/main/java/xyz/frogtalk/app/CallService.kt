@@ -88,6 +88,7 @@ class CallService : Service() {
                         putExtra("incoming_call", true)
                         putExtra(EXTRA_PEER_NICK, peer)
                         putExtra(EXTRA_CALL_ID, callId)
+                        if (peer.isNotBlank() && peer != "Someone") putExtra("dm_nick", peer)
                     }
                     val fullScreenPending = PendingIntent.getActivity(
                         this, 10, fullScreen,
