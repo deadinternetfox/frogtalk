@@ -345,6 +345,7 @@ class MusicService : Service() {
     private fun buildNotification(): Notification {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("open_music", true)
         }
         val openPending = PendingIntent.getActivity(
             this, 30, openIntent,

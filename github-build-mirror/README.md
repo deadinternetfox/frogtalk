@@ -7,7 +7,7 @@ This folder is a GitHub-hosted mirror source for desktop & android downloads.
 - `FrogTalk-1.4.1.AppImage` (Linux AppImage, desktop)
 - `FrogTalk-1.4.1-win-x64-portable.exe` (Windows portable, x64 — single-file, just run it)
 - `FrogTalk-1.4.1-win-x64.zip` (Windows portable archive, x64 — unzip & run FrogTalk.exe)
-- `frogtalk-v203.apk` (Android, versionCode 203 / versionName 1.5.9)
+- `frogtalk-v204.apk` (Android, versionCode 204 / versionName 1.6.0)
 
 ## Integrity
 

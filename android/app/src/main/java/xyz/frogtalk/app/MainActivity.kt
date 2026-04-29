@@ -493,6 +493,22 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Throwable) {
             Log.w(TAG, "onNewIntent incoming-call reload failed", e)
         }
+        try {
+            if (intent.getBooleanExtra("open_music", false) == true) {
+                // Notification body tap: route to the channel/source
+                // currently playing. Music.expand() handles both rooms
+                // and FrogSocial Music tab. Slight delay so we run
+                // after onResume's notifyAppForeground.
+                webView?.postDelayed({
+                    webView?.evaluateJavascript(
+                        "try{window.Music&&window.Music.expand&&window.Music.expand();}catch(e){}",
+                        null
+                    )
+                }, 250)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "onNewIntent open_music failed", e)
+        }
     }
 
         private fun injectStoryShareTapFix(view: WebView) {
