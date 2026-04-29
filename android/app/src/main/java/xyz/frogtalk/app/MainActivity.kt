@@ -593,17 +593,38 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         try { webView?.onResume() } catch (_: Throwable) {}
-        // No native auto-resume: YouTube's iframe in WebView refuses to
-        // reliably take a play() back from background, often playing for
-        // a beat then re-pausing. The JS layer's visibilitychange handler
-        // now reconciles every UI surface (system tray, side play
-        // button, sync badge) to a clean paused state and waits for the
-        // user to tap play once \u2014 a path that always works.
+        // Tell the JS side the app came back to the foreground. We can't
+        // rely on visibilitychange here: when music is active we skip
+        // webView.onPause() in onPause() to keep audio running, so the
+        // WebView never thinks it was hidden and never fires the event.
+        // Music.notifyAppForeground() reconciles _paused state, the side
+        // play/pause button, the sync badge, and the system tray icon.
+        try {
+            webView?.post {
+                webView?.evaluateJavascript(
+                    "(function(){try{if(window.Music&&typeof window.Music.notifyAppForeground==='function')window.Music.notifyAppForeground();}catch(e){}})();",
+                    null
+                )
+            }
+        } catch (_: Throwable) {}
     }
 
     override fun onPause() {
         if (!musicPlaybackActive) {
             try { webView?.onPause() } catch (_: Throwable) {}
+        } else {
+            // WebView keeps running so audio survives, but the JS layer
+            // still needs to know we went bg, otherwise the side
+            // play/pause button stays stuck on Pause forever
+            // (visibilitychange never fires while webView.onPause is
+            // skipped). notifyAppBackground() flips _paused=true and
+            // forces every UI surface (button, badge, tray) to Play.
+            try {
+                webView?.evaluateJavascript(
+                    "(function(){try{if(window.Music&&typeof window.Music.notifyAppBackground==='function')window.Music.notifyAppBackground();}catch(e){}})();",
+                    null
+                )
+            } catch (_: Throwable) {}
         }
         super.onPause()
     }

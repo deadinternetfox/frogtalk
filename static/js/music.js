@@ -98,12 +98,40 @@ const Music = (() => {
     return Math.max(0, Math.floor((Date.now() - _anchorMs) / 1000));
   }
 
+  // Inline SVG for the "skip to next track" icon. Some Android WebView
+  // emoji fonts render U+23ED without the trailing bar — it ends up
+  // looking like a plain double-chevron (">>"). SVG renders identically
+  // everywhere; sized to match the surrounding emoji buttons.
+  const _SKIP_SVG = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/></svg>';
+
+  // Single source of truth for "is the player effectively paused right
+  // now?". Combines user intent (_paused) with YouTube's reported state
+  // (_lastPlayerState) so a YT auto-pause in background or after the
+  // app returns is reflected without us having to call _emitState first.
+  function _currentEffectivePaused() {
+    try {
+      const cur = _state && _state.queue && _state.queue[0];
+      const isYouTube = !!(cur && cur.provider === 'youtube');
+      const ytKnowsPaused = isYouTube
+        && _lastPlayerState !== null
+        && _lastPlayerState !== 1
+        && _lastPlayerState !== 3;
+      return _paused || ytKnowsPaused;
+    } catch { return _paused; }
+  }
+
   // Sync the on-screen play/pause buttons (drawer + mini player) to the
   // given playing flag. Used by togglePauseGlobal AND by _emitState so a
   // state flip from any source (Android tray, visibility change, YT
-  // auto-pause) reaches the in-app UI without a re-render.
+  // auto-pause) reaches the in-app UI without a re-render. When called
+  // with no argument, derives from _currentEffectivePaused() so every
+  // render hook can just call _syncPlayPauseButtons() and trust the
+  // helper to consult the single source of truth.
   function _syncPlayPauseButtons(playing) {
     try {
+      if (typeof playing !== 'boolean') {
+        playing = !_currentEffectivePaused();
+      }
       document.querySelectorAll('.mmd-play, .mp-mini-playpause').forEach(el => {
         if (!el || el.classList.contains('unsupported')) return;
         el.dataset.playing = playing ? '1' : '0';
@@ -692,37 +720,59 @@ const Music = (() => {
   //    current state and re-emit so every UI surface (system tray, side
   //    play button, sync badge) shows the correct play icon. The user
   //    presses play once and we know exactly which path that takes.
-  if (typeof document !== 'undefined') {
-    const _onAppHidden = () => {
-      try { _stopSyncProbe(); } catch {}
+  // NOTE: in the Android WebView these handlers are NOT enough on their
+  // own. MainActivity skips webView.onPause() while music is active so
+  // the WebView keeps running; that means visibilitychange/pagehide
+  // never fire. The native side calls Music.notifyAppBackground() /
+  // Music.notifyAppForeground() directly to drive these paths instead.
+  function _onAppHidden() {
+    try { _stopSyncProbe(); } catch {}
+    // Manual-resume policy: only force _paused=true inside the FrogTalk
+    // Android app, where YouTube's WebView routinely refuses playVideo
+    // after a background return. On desktop, alt-tabbing fires
+    // visibilitychange but audio keeps playing, so we leave _paused
+    // alone and let the helper consult _lastPlayerState for truth.
+    if (typeof window !== 'undefined' && window.Android) {
       _paused = true;
-      _lastDriftSec = null;
-      _lastPlayerState = null;
-      try { _renderSyncBadge(); } catch {}
-      try { _syncPlayPauseButtons(false); } catch {}
-      // Force the system tray + bridge update through dedupe.
-      _lastEmitHash = '';
-      try { _emitState(); } catch {}
-    };
-    const _onAppVisible = () => {
-      // Re-bind listener defensively (some embeds drop registration during
-      // background suspension). Then probe the iframe so _lastPlayerState
-      // is fresh, and reconcile every UI surface.
-      try { _bindSyncMessageListener(); } catch {}
-      try {
-        const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
-        const cur = _state && _state.queue && _state.queue[0];
-        if (frame && frame.contentWindow && cur && cur.provider === 'youtube') {
-          frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
-          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
-        }
-      } catch {}
-      // Probe steady-state again only after the user explicitly resumes;
-      // until then keep _paused=true so the badge says paused honestly.
-      _lastEmitHash = '';
-      try { _syncPlayPauseButtons(false); } catch {}
-      try { _emitState(); } catch {}
-    };
+    }
+    _lastDriftSec = null;
+    _lastPlayerState = null;
+    try { _renderSyncBadge(); } catch {}
+    try { _syncPlayPauseButtons(); } catch {}
+    // Force the system tray + bridge update through dedupe.
+    _lastEmitHash = '';
+    try { _emitState(); } catch {}
+  }
+  function _onAppVisible() {
+    // Re-bind listener defensively (some embeds drop registration during
+    // background suspension). Then probe the iframe so _lastPlayerState
+    // is fresh, and reconcile every UI surface.
+    try { _bindSyncMessageListener(); } catch {}
+    try {
+      const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+      const cur = _state && _state.queue && _state.queue[0];
+      if (frame && frame.contentWindow && cur && cur.provider === 'youtube') {
+        frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
+        frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
+      }
+    } catch {}
+    // Keep _paused as-is (Android: still true from _onAppHidden;
+    // desktop: whatever the user chose). The helper derives the icon
+    // honestly from _paused + YT's state.
+    _lastEmitHash = '';
+    try { _syncPlayPauseButtons(); } catch {}
+    try { _emitState(); } catch {}
+    // Belt-and-suspenders: re-sync on the next two animation frames in
+    // case a queued _render() runs after us and clobbers the button
+    // HTML back to the "⏸" template default.
+    try {
+      requestAnimationFrame(() => {
+        try { _syncPlayPauseButtons(); } catch {}
+        requestAnimationFrame(() => { try { _syncPlayPauseButtons(); } catch {} });
+      });
+    } catch {}
+  }
+  if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) _onAppHidden();
       else _onAppVisible();
@@ -809,7 +859,7 @@ const Music = (() => {
             <span class="mp-act-ico">🐸</span><span class="mp-act-lbl">Share</span>
           </button>
           ${_state.can_control ? `<button class="mp-act mp-act-skip" onclick="Music.skip()" title="Skip to next track">
-            <span class="mp-act-ico">⏭</span><span class="mp-act-lbl">Skip</span>
+            <span class="mp-act-ico">${_SKIP_SVG}</span><span class="mp-act-lbl">Skip</span>
           </button>` : ''}
           ${_state.can_control ? `<button class="mp-act mp-act-clear" onclick="Music.clearQueue()" title="Clear the entire queue">
             <span class="mp-act-ico">🗑</span><span class="mp-act-lbl">Clear</span>
@@ -892,6 +942,11 @@ const Music = (() => {
         panel.style.display = 'flex';
         _renderMini(cur);
         _renderDock(cur);
+        // Defensive: any path that pushes fresh HTML for the dock or
+        // mini bar resets data-playing="1" / textContent="⏸". Re-sync
+        // from effective state so the button reflects YT's actual
+        // playback, not the template default.
+        try { _syncPlayPauseButtons(); } catch {}
         return;
       }
       panel.classList.remove('active');
@@ -1023,16 +1078,16 @@ const Music = (() => {
                 title="Pause" aria-label="Pause"
                 onclick="event.stopPropagation();Music.togglePause(this)">⏸</button>
         ${canSkip ? `<button class="mmd-btn" title="Skip" aria-label="Skip"
-                       onclick="event.stopPropagation();Music.skip()">⏭</button>` : ''}
+                       onclick="event.stopPropagation();Music.skip()">${_SKIP_SVG}</button>` : ''}
         <button class="mmd-btn mmd-close" title="Stop" aria-label="Stop"
                 onclick="event.stopPropagation();Music.close()">✕</button>
       </div>`;
     document.body.setAttribute('data-music-mini', '1');
-    // Reflect current paused state on the freshly-rendered button. The
-    // template hardcodes ⏸ for layout simplicity; without this the
-    // dock would always show "playing" on re-render even if YT has
-    // auto-paused or the user backgrounded the app.
-    try { _syncPlayPauseButtons(!_paused); } catch {}
+    // Reflect current effective paused state on the freshly-rendered
+    // button. The template hardcodes ⏸ for layout simplicity; without
+    // this the dock would always show "playing" on re-render even if YT
+    // has auto-paused or the user backgrounded the app.
+    try { _syncPlayPauseButtons(); } catch {}
   }
 
   function _miniBarHtml(titleEsc, provider) {
@@ -1320,6 +1375,7 @@ const Music = (() => {
       if (cur) {
         _renderMini(cur);
         _renderDock(cur);
+        try { _syncPlayPauseButtons(); } catch {}
       } else {
         // Queue emptied while minimized — clean up everything.
         close();
@@ -1368,6 +1424,13 @@ const Music = (() => {
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
+           // Native-callable hooks: MainActivity invokes these from
+           // Activity.onPause() / onResume() because we deliberately keep
+           // the WebView running in the background (so YT audio survives),
+           // which means visibilitychange does not fire \u2014 these are
+           // the only reliable signal that the app went bg/fg.
+           notifyAppBackground: _onAppHidden,
+           notifyAppForeground: _onAppVisible,
            resumeOnVisible: _resumeOnVisible };
 })();
 
