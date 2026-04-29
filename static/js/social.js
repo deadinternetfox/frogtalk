@@ -315,6 +315,7 @@ const Social = (() => {
   let _storyUploadMinimized = false;  // Track if bar is minimized
   let _storySyntheticTimer = null;     // Fallback progress when real events don't fire
   let _storyRealProgressSeen = false;  // Real upload.onprogress event observed
+  let _storyUploadCancelled = false;   // User clicked the X on the upload bar
 
   // _startSyntheticProgress drives a slow, time-based fake progress curve so
   // the user sees motion when xhr.upload.onprogress doesn't fire (Android
@@ -401,12 +402,18 @@ const Social = (() => {
     
     if (cancelBtn) {
       cancelBtn.addEventListener('click', () => {
+        // Mark cancelled BEFORE aborting so the retry loop doesn't kick in
+        // when the in-flight xhr rejects with 'Upload cancelled'.
+        _storyUploadCancelled = true;
         if (_storyUploadXhr) {
-          _storyUploadXhr.abort();
+          try { _storyUploadXhr.abort(); } catch {}
           _storyUploadXhr = null;
         }
+        _stopSyntheticProgress();
         _storyUploadSession = null;
         try { localStorage.removeItem('_storyUploadState'); } catch {}
+        // Tell Android to clear / replace the ongoing upload notification.
+        try { _notifyAndroidStoryUpload(0, 'cancelled'); } catch {}
         _hideStoryUploadOverlay(0);
         _storyNotify('Upload cancelled', 'info');
       });
@@ -490,6 +497,18 @@ const Social = (() => {
         } else if (typeof window.Android.showNotification === 'function') {
           window.Android.showNotification('Story upload failed', 'Tap back into FrogTalk to retry');
         }
+        _lastAndroidStoryNotifAt = Date.now();
+        return;
+      }
+      if (stage === 'cancelled') {
+        if (typeof window.Android.finishStoryUploadNotification === 'function') {
+          // Pass success=false so the bridge replaces the ongoing
+          // progress notification with a final, dismissable one.
+          window.Android.finishStoryUploadNotification(false, 'Upload cancelled');
+        } else if (typeof window.Android.showNotification === 'function') {
+          window.Android.showNotification('Upload cancelled', '');
+        }
+        _lastAndroidStoryNotif = -1;
         _lastAndroidStoryNotifAt = Date.now();
         return;
       }
@@ -881,6 +900,9 @@ const Social = (() => {
     _notifyAndroidStoryUpload(2);
     
     // Create upload session for tracking and recovery
+    // Reset cancellation flag for this attempt; closure of _storyUploadCancelled
+    // is set true by the cancel button click handler.
+    _storyUploadCancelled = false;
     _storyUploadSession = {
       fileSize: _addStoryFile?.size || 0,
       startTime: Date.now(),
@@ -922,6 +944,8 @@ const Social = (() => {
     let lastError = null;
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // Bail out cleanly if the user hit the cancel X at any point.
+      if (_storyUploadCancelled) return;
       try {
         const res = _addStoryFile
           ? await _uploadStoryFileWithProgress({ file: _addStoryFile, caption: _storyUploadSession?.caption || '', privacy: _storyUploadSession?.privacy || 'public' }, (p) => {
@@ -936,6 +960,7 @@ const Social = (() => {
               _notifyAndroidStoryUpload(p);
             });
         
+        if (_storyUploadCancelled) return;
         if (res.ok) {
           _handleStoryUploadSuccess();
           return;
@@ -947,6 +972,8 @@ const Social = (() => {
           throw new Error('Server error, retrying...');
         }
       } catch (err) {
+        // User cancellation must short-circuit immediately — do NOT retry.
+        if (_storyUploadCancelled) return;
         lastError = err;
         if (attempt < maxRetries) {
           // Exponential backoff: 1s, 2s, 4s
@@ -955,11 +982,13 @@ const Social = (() => {
           _showStoryUploadRetry(attempt + 1, maxRetries);
           _updateStoryUploadOverlay(Math.max(10, Math.min(90, attempt * 20)), `Retrying (${attempt + 1}/${maxRetries})…`);
           await new Promise(r => setTimeout(r, delayMs));
+          if (_storyUploadCancelled) return;
         }
       }
     }
     
     // All retries failed
+    if (_storyUploadCancelled) return;
     _handleStoryUploadFailure(lastError?.message || 'Upload failed after retries');
   }
 
