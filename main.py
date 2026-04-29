@@ -965,10 +965,24 @@ async def download_android():
     path = max(candidates, key=_apk_version) if candidates else "static/frogtalk.apk"
     if not os.path.exists(path):
         return FileResponse("static/index.html")
+    size = os.path.getsize(path)
+    # APKs are already zip-compressed; running them through GZipMiddleware
+    # wastes CPU AND switches the response to chunked transfer, which
+    # strips Content-Length so Android's Download Manager / browsers can't
+    # show real progress (they just display the bytes received so far as
+    # the "total"). Setting Content-Encoding: identity makes Starlette's
+    # gzip layer pass the body through unchanged, preserving Content-Length.
+    # Cache-Control: no-transform asks Cloudflare / proxies to do the same.
     return FileResponse(
         path,
         media_type="application/vnd.android.package-archive",
         filename=os.path.basename(path),
+        headers={
+            "Content-Encoding": "identity",
+            "Content-Length": str(size),
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=300, no-transform",
+        },
     )
 
 
