@@ -1092,19 +1092,23 @@ const Music = (() => {
           </label>` : ''}
       </div>` : `<div class="mp-empty" style="padding:8px">Only DJs may add tracks in this channel.</div>`;
 
-    const queueHtml = upcoming.length ? `
-      <div class="mp-queue">
-        ${upcoming.map((t, i) => `
-          <div class="mp-queue-item" data-tid="${t.id}">
-            <span class="mp-queue-idx">${i + 1}.</span>
-            <div class="mp-queue-art" style="background-image:url('${esc(t.thumbnail || '')}')"></div>
-            <div class="mp-queue-title">${esc(t.title || t.url)}</div>
-            <span class="mp-queue-sub">${esc(t.submitter_nick || '')}</span>
-            ${(_state.can_control || t.submitter_id === State.user?.id)
-              ? `<button class="mp-queue-del" title="Remove" onclick="Music.removeTrack(${t.id})">✕</button>`
-              : ''}
-          </div>
-        `).join('')}
+    // "Up next" preview: show only the immediate next track plus a
+    // pill button that opens the full playlist modal. Keeps the inline
+    // panel short on mobile where vertical real-estate is precious.
+    const nextTrack = upcoming[0];
+    const remaining = Math.max(0, upcoming.length - 1);
+    const queueHtml = nextTrack ? `
+      <div class="mp-upnext">
+        <div class="mp-upnext-row">
+          <span class="mp-upnext-label">Up next</span>
+          <div class="mp-upnext-art" style="background-image:url('${esc(nextTrack.thumbnail || '')}')"></div>
+          <div class="mp-upnext-title" title="${esc(nextTrack.title || nextTrack.url)}">${esc(nextTrack.title || nextTrack.url)}</div>
+          <span class="mp-upnext-sub">${esc(nextTrack.submitter_nick || '')}</span>
+        </div>
+        <button class="mp-playlist-btn" type="button" onclick="Music.openPlaylistModal()" title="View the full playlist">
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M2 4h9v1.5H2zm0 3h9v1.5H2zm0 3h6v1.5H2zm9 .5l4 2.5-4 2.5z"/></svg>
+          <span class="mp-playlist-lbl">Playlist${upcoming.length > 1 ? ` · ${upcoming.length}` : ''}</span>
+        </button>
       </div>` : '';
 
     // Only rewrite the iframe when the head track actually changes —
@@ -1119,6 +1123,7 @@ const Music = (() => {
       // Re-paint badge with the cached drift (the node was just replaced).
       _renderSyncBadge();
       _startSyncProbeIfNeeded();
+      if (document.getElementById('mp-playlist-modal')) _renderPlaylistModal();
       return;
     }
 
@@ -1148,6 +1153,9 @@ const Music = (() => {
     _lastDriftSec = null;
     _renderSyncBadge();
     _startSyncProbeIfNeeded();
+    // If the playlist modal is open, refresh it so it always reflects
+    // the live queue (skips, removes, new submissions, etc.).
+    if (document.getElementById('mp-playlist-modal')) _renderPlaylistModal();
   }
 
   async function mount(roomName, channelType) {
@@ -1641,6 +1649,80 @@ const Music = (() => {
     if (ok) closeAddModal();
   }
 
+  // Full-playlist modal. Opens a fixed overlay listing every track in
+  // the queue with thumbnails, submitter, and (for DJs / track owners)
+  // a remove button. Re-renders itself on every state change so it
+  // stays live while open.
+  function openPlaylistModal() {
+    closePlaylistModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'mp-playlist-modal';
+    overlay.className = 'mp-add-modal';
+    overlay.addEventListener('click', e => { if (e.target === overlay) closePlaylistModal(); });
+    document.body.appendChild(overlay);
+    _renderPlaylistModal();
+    const onKey = e => { if (e.key === 'Escape') { closePlaylistModal(); document.removeEventListener('keydown', onKey); } };
+    document.addEventListener('keydown', onKey);
+  }
+
+  function closePlaylistModal() {
+    const o = document.getElementById('mp-playlist-modal');
+    if (o) o.remove();
+  }
+
+  function _renderPlaylistModal() {
+    const overlay = document.getElementById('mp-playlist-modal');
+    if (!overlay) return;
+    const q = (_state && _state.queue) || [];
+    const cur = q[0];
+    const upcoming = q.slice(1);
+    const meId = State.user?.id;
+    const items = upcoming.map((t, i) => `
+      <div class="mp-pl-item" data-tid="${t.id}">
+        <span class="mp-pl-idx">${i + 1}</span>
+        <div class="mp-pl-art" style="background-image:url('${esc(t.thumbnail || '')}')"></div>
+        <div class="mp-pl-info">
+          <div class="mp-pl-title" title="${esc(t.title || t.url)}">${esc(t.title || t.url)}</div>
+          <div class="mp-pl-sub">${esc(t.submitter_nick || '?')} · ${esc(t.provider || '')}</div>
+        </div>
+        ${(_state.can_control || t.submitter_id === meId)
+          ? `<button class="mp-pl-del" title="Remove from playlist" onclick="Music.removeTrack(${t.id})" aria-label="Remove">✕</button>`
+          : ''}
+      </div>
+    `).join('');
+    const nowHtml = cur ? `
+      <div class="mp-pl-now">
+        <span class="mp-pl-now-pulse"></span>
+        <div class="mp-pl-now-art" style="background-image:url('${esc(cur.thumbnail || '')}')"></div>
+        <div class="mp-pl-info">
+          <div class="mp-pl-now-label">Now playing</div>
+          <div class="mp-pl-title" title="${esc(cur.title || cur.url)}">${esc(cur.title || cur.url)}</div>
+          <div class="mp-pl-sub">${esc(cur.submitter_nick || '?')} · ${esc(cur.provider || '')}</div>
+        </div>
+      </div>` : '';
+    const emptyHtml = upcoming.length ? '' :
+      `<div class="mp-pl-empty">Nothing queued yet — tap <b>Add Track</b> to drop the first one.</div>`;
+    const canAdd = _state && _state.can_submit;
+    overlay.innerHTML = `
+      <div class="mp-add-card mp-pl-card" role="dialog" aria-modal="true" aria-label="Playlist">
+        <div class="mp-add-head">
+          <span class="mp-add-head-ico">🎶</span>
+          <span class="mp-add-head-title">Playlist${upcoming.length ? ` · ${upcoming.length} up next` : ''}</span>
+          <button class="mp-add-close" type="button" onclick="Music.closePlaylistModal()" aria-label="Close">✕</button>
+        </div>
+        <div class="mp-pl-body">
+          ${nowHtml}
+          <div class="mp-pl-list">${items}${emptyHtml}</div>
+        </div>
+        <div class="mp-add-actions">
+          ${canAdd ? `<button class="mp-btn primary" type="button" onclick="Music.closePlaylistModal();Music.openAddModal()">+ Add Track</button>` : ''}
+          ${(_state && _state.can_control && upcoming.length)
+            ? `<button class="mp-btn danger" type="button" onclick="Music.clearQueue()">Clear all</button>` : ''}
+          <button class="mp-btn" type="button" onclick="Music.closePlaylistModal()">Close</button>
+        </div>
+      </div>`;
+  }
+
   async function skip() {
     if (!_room) return;
     const res = await fetch(`/api/rooms/${encodeURIComponent(_room)}/queue/skip`, {
@@ -1763,6 +1845,7 @@ const Music = (() => {
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
            openAddModal, closeAddModal, submitFromModal,
+           openPlaylistModal, closePlaylistModal,
            toggleCollapse,
            // Native-callable hooks: MainActivity invokes these from
            // Activity.onPause() / onResume() because we deliberately keep

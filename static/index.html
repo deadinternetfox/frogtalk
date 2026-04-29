@@ -1326,6 +1326,7 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
 #music-panel.collapsed .mp-size-toggle:hover{transform:translateY(-50%) scale(1.05)}
 #music-panel.collapsed .mp-now,
 #music-panel.collapsed .mp-queue,
+#music-panel.collapsed .mp-upnext,
 #music-panel.collapsed .mp-submit{display:none}
 #music-panel.collapsed .mp-header{padding-bottom:0}
 #music-panel.collapsed .mp-header-sub{display:none}
@@ -1473,19 +1474,119 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 .mp-dj-toggle input:checked ~ .mp-dj-track{background:#8a3aba;border-color:#a050d8}
 .mp-dj-toggle input:checked ~ .mp-dj-track .mp-dj-knob{transform:translateX(14px);background:#fff}
 .mp-dj-label{white-space:nowrap}
-.mp-queue{
-  max-height:220px;overflow-y:auto;overflow-x:hidden;
-  border-top:1px dashed #3a2a5a;padding-top:8px;margin-top:2px;
-  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
-  touch-action:pan-y;
+/* "Up next" preview row + Playlist button. Replaces the old inline
+   .mp-queue scroll panel — the full queue now lives in a modal so
+   the music channel stays compact on mobile. */
+.mp-upnext{
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px;
+  margin-top:6px;padding:8px 10px;border-radius:10px;
+  background:linear-gradient(135deg,rgba(160,80,216,.10),rgba(74,47,110,.18));
+  border:1px solid rgba(160,80,216,.22)
+}
+.mp-upnext-row{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.mp-upnext-label{
+  font-size:9.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+  color:#c8a0e8;background:rgba(160,80,216,.22);
+  padding:3px 7px;border-radius:6px;flex-shrink:0;line-height:1
+}
+.mp-upnext-art{
+  width:28px;height:28px;border-radius:5px;flex-shrink:0;
+  background:#2a1a3a center/cover no-repeat;
+  box-shadow:0 1px 4px rgba(0,0,0,.35)
+}
+.mp-upnext-title{
+  flex:1;min-width:0;font-size:12.5px;font-weight:600;color:#f0e4ff;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.mp-upnext-sub{
+  font-size:11px;color:#9a7ab8;flex-shrink:0;max-width:90px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.mp-playlist-btn{
+  display:inline-flex;align-items:center;gap:6px;flex-shrink:0;
+  padding:6px 11px;font-size:11px;font-weight:700;letter-spacing:.3px;
+  text-transform:uppercase;line-height:1;white-space:nowrap;
+  background:linear-gradient(135deg,#3a2a5a,#2a1a4a);color:#e8d0ff;
+  border:1px solid rgba(200,130,255,.3);border-radius:999px;cursor:pointer;
+  transition:background .15s,border-color .15s,transform .12s,box-shadow .15s
+}
+.mp-playlist-btn:hover{
+  background:linear-gradient(135deg,#4a2f6e,#3a2a5a);border-color:rgba(200,130,255,.6);
+  box-shadow:0 2px 10px rgba(160,80,216,.28);transform:translateY(-1px)
+}
+.mp-playlist-btn:active{transform:scale(.96)}
+.mp-playlist-btn svg{flex-shrink:0;opacity:.95}
+@media (max-width:480px){
+  .mp-upnext{padding:7px 8px;gap:6px}
+  .mp-upnext-sub{display:none}
+}
+
+/* Playlist modal — uses the .mp-add-modal overlay shell, but its own
+   wider card and scroll body. */
+.mp-pl-card{max-width:520px;display:flex;flex-direction:column;max-height:min(78vh,640px)}
+.mp-pl-body{
+  padding:12px 14px;overflow-y:auto;flex:1;min-height:0;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;
   scrollbar-width:thin;scrollbar-color:#3a2a5a transparent
 }
-.mp-queue::-webkit-scrollbar{width:6px}
-.mp-queue::-webkit-scrollbar-thumb{background:#3a2a5a;border-radius:3px}
-.mp-queue::-webkit-scrollbar-track{background:transparent}
-@media (max-width:600px){
-  .mp-queue{max-height:36vh;scrollbar-width:none}
-  .mp-queue::-webkit-scrollbar{display:none;width:0;height:0}
+.mp-pl-body::-webkit-scrollbar{width:6px}
+.mp-pl-body::-webkit-scrollbar-thumb{background:#3a2a5a;border-radius:3px}
+.mp-pl-now{
+  display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;
+  background:linear-gradient(135deg,rgba(160,80,216,.18),rgba(74,47,110,.22));
+  border:1px solid rgba(200,130,255,.3);margin-bottom:10px;position:relative
+}
+.mp-pl-now-pulse{
+  position:absolute;top:8px;right:10px;width:8px;height:8px;border-radius:50%;
+  background:#7fd2a7;box-shadow:0 0 0 0 rgba(127,210,167,.6);
+  animation:mpPulse 1.6s ease-out infinite
+}
+@keyframes mpPulse{0%{box-shadow:0 0 0 0 rgba(127,210,167,.55)}70%{box-shadow:0 0 0 8px rgba(127,210,167,0)}100%{box-shadow:0 0 0 0 rgba(127,210,167,0)}}
+.mp-pl-now-art{
+  width:46px;height:46px;border-radius:6px;flex-shrink:0;
+  background:#2a1a3a center/cover no-repeat;
+  box-shadow:0 2px 8px rgba(0,0,0,.4)
+}
+.mp-pl-now-label{
+  font-size:9.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;
+  color:#7fd2a7;margin-bottom:2px
+}
+.mp-pl-info{flex:1;min-width:0}
+.mp-pl-list{display:flex;flex-direction:column;gap:4px}
+.mp-pl-item{
+  display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px;
+  background:rgba(255,255,255,.02);border:1px solid transparent;
+  transition:background .12s,border-color .12s
+}
+.mp-pl-item:hover{background:rgba(160,80,216,.08);border-color:rgba(160,80,216,.18)}
+.mp-pl-idx{
+  width:22px;flex-shrink:0;text-align:right;color:#8a6aa8;font-size:11px;font-weight:700
+}
+.mp-pl-art{
+  width:38px;height:38px;border-radius:5px;flex-shrink:0;
+  background:#2a1a3a center/cover no-repeat
+}
+.mp-pl-title{
+  font-size:13px;font-weight:600;color:#f0e4ff;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.mp-pl-sub{
+  font-size:10.5px;color:#9a7ab8;margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.mp-pl-del{
+  background:transparent;border:0;color:#9a7ab8;font-size:14px;cursor:pointer;
+  width:28px;height:28px;border-radius:6px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .12s,color .12s
+}
+.mp-pl-del:hover{background:rgba(248,81,73,.18);color:#ff8a8a}
+.mp-pl-empty{
+  text-align:center;padding:24px 12px;color:#8a6aa8;font-size:13px;line-height:1.5
+}
+.mp-pl-empty b{color:#c8a0e8;font-weight:700}
+@media (max-width:480px){
+  .mp-pl-card{max-height:calc(100vh - 60px)}
 }
 .mp-queue-item{
   display:flex;gap:8px;align-items:center;padding:4px 0;font-size:12px;color:#d0b0e8
