@@ -750,6 +750,38 @@ const Music = (() => {
       try { cw.postMessage(JSON.stringify(msg), '*'); } catch {}
     }
 
+    // After we declare victory, schedule verification probes. WebView
+    // can silently re-pause within a few hundred ms without firing
+    // onStateChange, so we re-fire getPlayerState a few times to catch
+    // it. If state flips back to !=1 && !=3 we mark _paused=true so
+    // the UI shows ▶ honestly.
+    function scheduleVerification() {
+      const delays = [800, 1800, 3500];
+      for (const d of delays) {
+        setTimeout(() => {
+          if (myToken !== _resumeToken) return;
+          // Re-handshake + ask for current state.
+          send({ event: 'listening', id: 'frogtalk-music' });
+          send({ event: 'command', func: 'getPlayerState', args: [] });
+          // Give YT ~150ms to reply, then read _lastPlayerState.
+          setTimeout(() => {
+            if (myToken !== _resumeToken) return;
+            const ls = _lastPlayerState;
+            const playing = (ls === 1 || ls === 3);
+            const next = !playing;  // _paused desired state
+            if (_paused !== next) {
+              _paused = next;
+              _lastEmitHash = '';
+              try { _syncPlayPauseButtons(); } catch {}
+              try { _emitState(); } catch {}
+              if (_paused) { try { _stopSyncProbe(); } catch {} }
+              else { try { _startSyncProbeIfNeeded(); } catch {} }
+            }
+          }, 180);
+        }, d);
+      }
+    }
+
     function tick() {
       _resumeTimer = null;
       // Cancelled (user paused, app backgrounded again, or new track)?
@@ -761,6 +793,7 @@ const Music = (() => {
         try { _syncPlayPauseButtons(); } catch {}
         try { _emitState(); } catch {}
         try { _startSyncProbeIfNeeded(); } catch {}
+        scheduleVerification();
         return;
       }
       if (attempts >= MAX_ATTEMPTS) {
