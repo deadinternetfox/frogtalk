@@ -366,8 +366,12 @@ const Music = (() => {
     // server-side anchor reset, not a real seek-backwards.
     if (key === _anchorTrackKey && _anchorMs) {
       const localElapsed = Math.max(0, Math.floor((Date.now() - _anchorMs) / 1000));
-      // Server lost its anchor and is reporting ~0 while we're well past it.
-      if (incoming < 3 && localElapsed > 5) return;
+      // Server lost its anchor and is reporting ~0 — ALWAYS reject for
+      // an already-anchored track, regardless of how recent ours is.
+      // (The previous threshold of localElapsed>5 created a 5-second
+      // window where a stale server zero would obliterate a fresh
+      // anchor and yank playback to the start of the track.)
+      if (incoming < 3) return;
       // Server reading is behind ours by more than 10s on the same track.
       // Trust the local clock; the server just (re)stamped.
       if (localElapsed - incoming > 10) return;
@@ -579,15 +583,23 @@ const Music = (() => {
             _anchorMs = Date.now() - (Math.floor(actualSec) * 1000);
             _anchorTrackKey = `${cur2.provider}:${cur2.video_id}`;
             _lastDriftSec = 0;
+            _restartAtZeroHits = 0;
             _renderSyncBadge();
+          } else if (actualSec < 1.0 && expectedAtSample >= 20) {
+            // Strong evidence the iframe restarted at 0 (Android long
+            // background). Require TWO consecutive probes to confirm
+            // — single hits trigger spuriously during track-change
+            // buffering or seek-pause races.
+            _restartAtZeroHits += 1;
+            if (_restartAtZeroHits >= 2
+                && (Date.now() - _lastAutoCorrectAt) > 6000) {
+              _lastAutoCorrectAt = Date.now();
+              _restartAtZeroHits = 0;
+              try { _seekIframe(_expectedPosSec()); } catch {}
+            }
+          } else {
+            _restartAtZeroHits = 0;
           }
-          // Note: we deliberately do NOT auto-seek-forward when the
-          // iframe is behind. That branch was perpetually firing on
-          // some Android WebView builds (where YT's currentTime can
-          // briefly stall behind the local clock) and yanked playback
-          // backwards every 4s. The verify ladder in _resumeOnVisible
-          // already covers the legitimate Android restart-at-0 case;
-          // the user can also tap Resync if they truly drift behind.
         }
       } catch { /* keep listener resilient */ }
     });
@@ -734,6 +746,12 @@ const Music = (() => {
   let _lastResumeAt = 0;
   let _resumeRetryToken = 0;
   let _lastAutoCorrectAt = 0;
+  // Android-restart-at-0 detection. We only seek the iframe forward
+  // automatically when we have HIGH confidence it actually restarted at
+  // zero \u2014 require two consecutive probes reading currentTime\u22480 while
+  // our anchor says >=20s have elapsed. One reading is not enough; YT's
+  // currentTime can briefly read 0 during track-change buffering.
+  let _restartAtZeroHits = 0;
   function _resumeOnVisible(opts) {
     try {
       const force = !!(opts && opts.force);
@@ -778,29 +796,14 @@ const Music = (() => {
         // Play first. Seeking before play lands can trigger a paused-seek
         // that re-pauses immediately on some YT iframe builds.
         send({ event: 'command', func: 'playVideo', args: [] });
-        // For app-foreground / notification-tray resumes, also send an
-        // early seek to the room's expected play head. Android WebView
-        // routinely restarts the YT embed at position=0 after a long
-        // background; without this nudge the user hears the track
-        // restart from the beginning until the verify ladder confirms
-        // state=1 (~900ms+) and reseeks. The seek-pause race that we
-        // normally guard against is acceptable here because the verify
-        // ladder will retry play+seek if it re-pauses us.
-        if (ignorePaused) {
-          setTimeout(() => {
-            if (myToken !== _resumeRetryToken) return;
-            // Only seek if we have a meaningful expected position. If our
-            // anchor is fresh (server just stamped position_sec=0 because
-            // it lost its in-memory record), expected~0 — seeking the
-            // iframe to 0 would actively clobber any real playback
-            // position the iframe still has. Let the sync probe's
-            // asymmetric reconciliation adopt iframe truth instead.
-            const exp = _expectedPosSec();
-            if (exp >= 3) {
-              try { _seekIframe(exp); } catch {}
-            }
-          }, 250);
-        }
+        // INTENTIONALLY no early seek. The iframe retains its playback
+        // position naturally across visibility changes inside the
+        // WebView; seeking to _expectedPosSec() here is a net negative
+        // because (a) on a healthy resume it introduces unwanted jitter
+        // and (b) on a stale anchor it actively yanks playback to the
+        // start of the track. The sync probe's asymmetric reconciliation
+        // will detect a genuine Android restart-at-0 (currentTime≈0
+        // while expected≫0) and recover. Anything else stays put.
 
         // Verify-and-retry. Up to 5 play attempts on a back-off ladder.
         // Real Android WebView return-from-background can keep the YT
@@ -829,34 +832,13 @@ const Music = (() => {
             if (document.hidden) return;
             if (_paused && !ignorePaused) return;
             if (_lastPlayerState === 1) {
-              // Playing — seek to the room's expected play head.
+              // Playing — do NOT seek. The iframe's currentTime is
+              // ground truth here; if it's playing, it's at a real
+              // position from before background, and we trust it. If
+              // Android genuinely restarted it at 0, the sync probe's
+              // asymmetric reconciliation will catch and seek forward
+              // (currentTime≈0 while expected≫0).
               //
-              // Important: when this resume was triggered by an app
-              // foreground / notification-tray play (`ignorePaused`),
-              // we MUST seek unconditionally. Android WebView routinely
-              // restarts the YT embed at position=0 after a long
-              // background, but the iframe still reports state=1 once
-              // it begins playing the silent intro again. The drift
-              // check below compares timeline values, not iframe
-              // position, so a "playing-from-zero" scenario passes the
-              // check and the user hears the track restart from 0 —
-              // exactly the bug being fixed here.
-              //
-              // For the non-foreground path (steady-state resume after
-              // user pause), keep the drift threshold so we don't
-              // trigger the seek-pause race for tiny drifts.
-              if (ignorePaused) {
-                // Same anchor-confidence guard as the early seek above.
-                const exp = _expectedPosSec();
-                if (exp >= 3) {
-                  try { _seekIframe(exp); } catch {}
-                }
-              } else {
-                const drift = Math.abs(_expectedPosSec() - targetSec);
-                if (drift > 3) {
-                  try { _seekIframe(_expectedPosSec()); } catch {}
-                }
-              }
               // Reconcile _paused to YT truth: audio is playing, so
               // user-intent paused must be false. Without this, the
               // notification icon stays on ▶ even though audio is
@@ -876,14 +858,9 @@ const Music = (() => {
                 send({ event: 'listening', id: 'frogtalk-music' });
               }
               send({ event: 'command', func: 'playVideo', args: [] });
-              // On the last couple attempts, also nudge the position —
-              // a seekTo can wake a stuck embed that ignored playVideo.
-              if (attempts >= 4) {
-                setTimeout(() => {
-                  if (myToken !== _resumeRetryToken) return;
-                  try { _seekIframe(_expectedPosSec()); } catch {}
-                }, 200);
-              }
+              // No position-nudge seek here either — we're trying to
+              // wake an embed stuck in state -1/2; seeking to expected
+              // can land on a stale anchor and start the track over.
               setTimeout(verify, RETRY_GAP_MS);
             } else {
               // Surrender. Reflect reality so the user can tap play
@@ -902,14 +879,8 @@ const Music = (() => {
 
       } else if (cur.provider === 'soundcloud') {
         send({ method: 'play' });
-        // SoundCloud is more deterministic — single play is enough; only
-        // seek if drift is meaningful.
-        setTimeout(() => {
-          if (myToken !== _resumeRetryToken) return;
-          if (document.hidden || _paused) return;
-          const drift = Math.abs(_expectedPosSec() - targetSec);
-          if (drift > 3) { try { _seekIframe(_expectedPosSec()); } catch {} }
-        }, 400);
+        // No automatic seek — SoundCloud retains its position across
+        // visibility changes too; users can hit Resync to catch up.
       }
 
       // Reset the badge to "checking" — fast probes will repaint within ~1s.
@@ -1362,11 +1333,9 @@ const Music = (() => {
     // flipped by lots of paths (visibility, infoDelivery, surrender);
     // _userPaused is sticky and only the user toggles it.
     _userPaused = !nowPlaying;
-    // Radio behavior: if the user is un-pausing, catch them up to where the
-    // room's play head is right now. Otherwise they'd hear a stale section.
-    if (nowPlaying) {
-      setTimeout(() => _seekIframe(_expectedPosSec()), 180);
-    }
+    // Don't auto-catch-up on un-pause. The iframe resumes from where
+    // the user paused it — that's the expected behaviour. Resync is
+    // a separate explicit action.
     btn.dataset.playing = nowPlaying ? '1' : '0';
     btn.textContent = nowPlaying ? '⏸' : '▶';
     btn.title = nowPlaying ? 'Pause' : 'Play';
@@ -1426,8 +1395,9 @@ const Music = (() => {
     }
     if (_room && typeof Rooms !== 'undefined' && Rooms.switchToRoom) {
       Rooms.switchToRoom(_room, 'music');
-      // After the panel re-expands, nudge the iframe back to the live radio position.
-      setTimeout(() => { try { _resync(false); } catch(_) {} }, 500);
+      // No auto-resync. The iframe was kept alive while the user was on
+      // another channel; it's still where they left it. If they want
+      // to catch back up to the room they can hit Resync explicitly.
     }
   }
 
