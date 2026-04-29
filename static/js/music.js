@@ -714,17 +714,85 @@ const Music = (() => {
     } catch { /* never throw from a visibility handler */ }
   }
 
+  // ─── Reliable foreground auto-resume ──────────────────────────────────
+  // Background → foreground transitions in Android WebView routinely leave
+  // YouTube's iframe in state 2 (paused) without firing onStateChange to
+  // our listener, so the dock/tray/strip can't react. The fix: when we
+  // come back, run a bounded "nudge" loop that re-handshakes, issues
+  // playVideo, and probes getPlayerState. As soon as state==1 lands we
+  // declare victory (and flip _paused=false so the UI shows ⏸ correctly).
+  // If the budget elapses without success we fall back to honest UI:
+  // _paused=true so the side button + tray show ▶ for the user to tap.
+  // Cost: at most 6 postMessages over ~2s, only on foreground return —
+  // negligible vs. user-perceived "music just stops" frustration.
+  let _resumeTimer = null;
+  let _resumeToken = 0;
+  function _abortYtResume() {
+    if (_resumeTimer) { clearTimeout(_resumeTimer); _resumeTimer = null; }
+    _resumeToken++;
+  }
+  function _attemptYtResume() {
+    _abortYtResume();
+    const cur = _state && _state.queue && _state.queue[0];
+    if (!cur) return;
+    // Non-YouTube providers (SoundCloud, Spotify) don't suffer the
+    // WebView refusal pattern — _resync() handles them. Bail early.
+    if (cur.provider !== 'youtube') return;
+    const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+    if (!frame || !frame.contentWindow) return;
+    const cw = frame.contentWindow;
+    const myToken = ++_resumeToken;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 6;
+    const STEP_MS = 350;
+
+    function send(msg) {
+      try { cw.postMessage(JSON.stringify(msg), '*'); } catch {}
+    }
+
+    function tick() {
+      _resumeTimer = null;
+      // Cancelled (user paused, app backgrounded again, or new track)?
+      if (myToken !== _resumeToken) return;
+      // Victory: YT is reporting playing or buffering-toward-play.
+      if (_lastPlayerState === 1 || _lastPlayerState === 3) {
+        _paused = false;
+        _lastEmitHash = '';
+        try { _syncPlayPauseButtons(); } catch {}
+        try { _emitState(); } catch {}
+        try { _startSyncProbeIfNeeded(); } catch {}
+        return;
+      }
+      if (attempts >= MAX_ATTEMPTS) {
+        // Surrender. Reflect reality so the user can tap play once.
+        _paused = true;
+        _lastEmitHash = '';
+        try { _syncPlayPauseButtons(); } catch {}
+        try { _emitState(); } catch {}
+        return;
+      }
+      attempts++;
+      // Re-handshake every iteration: WebView returns sometimes drop the
+      // postMessage subscription so the listener never gets onStateChange.
+      send({ event: 'listening', id: 'frogtalk-music' });
+      send({ event: 'command', func: 'playVideo', args: [] });
+      send({ event: 'command', func: 'getPlayerState', args: [] });
+      _resumeTimer = setTimeout(tick, STEP_MS);
+    }
+    // Slight initial delay so the iframe's own foreground bookkeeping
+    // settles before we start poking. Without it the first playVideo
+    // is the most likely to be ignored.
+    _resumeTimer = setTimeout(tick, 120);
+  }
+
   // App background / foreground policy:
-  //  - On hide: stop the sync probe to save postMessage/setInterval cost,
-  //    AND flip our user-intent flag to paused. Reason: YouTube's iframe
-  //    pauses itself in background reliably but resists being driven back
-  //    into play on return (especially in Android WebView), causing the
-  //    "plays for a second then stops" bug. So we acknowledge reality and
-  //    require one tap to resume; the tap path is well-tested.
-  //  - On show: do NOT auto-issue play. Just probe the iframe for its
-  //    current state and re-emit so every UI surface (system tray, side
-  //    play button, sync badge) shows the correct play icon. The user
-  //    presses play once and we know exactly which path that takes.
+  //  - On hide: stop the sync probe + cancel any in-flight resume loop.
+  //    Inside the FrogTalk Android shell we also flip _paused=true as a
+  //    safety net so if foreground auto-resume fails the UI doesn't lie.
+  //    On desktop alt-tab, audio keeps playing so we leave _paused alone.
+  //  - On show: probe iframe state, then kick off _attemptYtResume()
+  //    which reliably brings YouTube back to playing or surrenders to
+  //    honest UI.
   // NOTE: in the Android WebView these handlers are NOT enough on their
   // own. MainActivity skips webView.onPause() while music is active so
   // the WebView keeps running; that means visibilitychange/pagehide
@@ -732,11 +800,7 @@ const Music = (() => {
   // Music.notifyAppForeground() directly to drive these paths instead.
   function _onAppHidden() {
     try { _stopSyncProbe(); } catch {}
-    // Manual-resume policy: only force _paused=true inside the FrogTalk
-    // Android app, where YouTube's WebView routinely refuses playVideo
-    // after a background return. On desktop, alt-tabbing fires
-    // visibilitychange but audio keeps playing, so we leave _paused
-    // alone and let the helper consult _lastPlayerState for truth.
+    _abortYtResume();
     if (typeof window !== 'undefined' && window.Android) {
       _paused = true;
     }
@@ -744,14 +808,12 @@ const Music = (() => {
     _lastPlayerState = null;
     try { _renderSyncBadge(); } catch {}
     try { _syncPlayPauseButtons(); } catch {}
-    // Force the system tray + bridge update through dedupe.
     _lastEmitHash = '';
     try { _emitState(); } catch {}
   }
   function _onAppVisible() {
     // Re-bind listener defensively (some embeds drop registration during
-    // background suspension). Then probe the iframe so _lastPlayerState
-    // is fresh, and reconcile every UI surface.
+    // background suspension).
     try { _bindSyncMessageListener(); } catch {}
     try {
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
@@ -761,12 +823,13 @@ const Music = (() => {
         frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
       }
     } catch {}
-    // Keep _paused as-is (Android: still true from _onAppHidden;
-    // desktop: whatever the user chose). The helper derives the icon
-    // honestly from _paused + YT's state.
     _lastEmitHash = '';
     try { _syncPlayPauseButtons(); } catch {}
     try { _emitState(); } catch {}
+    // Kick the bounded resume loop. It's a no-op for non-YouTube and
+    // self-aborts as soon as YT confirms playing — or surrenders to
+    // honest UI after ~2s if the iframe refuses.
+    try { _attemptYtResume(); } catch {}
     // Belt-and-suspenders: re-sync on the next two animation frames in
     // case a queued _render() runs after us and clobbers the button
     // HTML back to the "⏸" template default.
@@ -1107,6 +1170,9 @@ const Music = (() => {
   function togglePause(btn) {
     const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
     if (!frame || !frame.contentWindow) return;
+    // User asserted intent — kill any in-flight foreground-resume loop
+    // so we don't fight a deliberate pause tap (or override their play).
+    try { _abortYtResume(); } catch {}
     const playing = btn.dataset.playing !== '0';
     const src = frame.src || '';
     try {
