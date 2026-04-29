@@ -1073,7 +1073,8 @@ const Music = (() => {
 
     const submitHtml = _state.can_submit ? `
       <div class="mp-submit">
-        <input id="mp-input" type="text" placeholder="Paste YouTube, Spotify, or SoundCloud link…"
+        <input id="mp-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+               placeholder="Paste YouTube, Spotify, or SoundCloud link…"
                onkeydown="if(event.key==='Enter')Music.submit()">
         <button class="mp-btn primary" onclick="Music.submit()">Add</button>
         ${_state.can_control ? `
@@ -1111,6 +1112,7 @@ const Music = (() => {
       // Re-paint badge with the cached drift (the node was just replaced).
       _renderSyncBadge();
       _startSyncProbeIfNeeded();
+      _wireMpInput();
       return;
     }
 
@@ -1128,6 +1130,99 @@ const Music = (() => {
     _lastDriftSec = null;
     _renderSyncBadge();
     _startSyncProbeIfNeeded();
+    _wireMpInput();
+  }
+
+  // ─── Android keyboard scroll-restore ───────────────────────────────────
+  // On Android Chrome / WebView, focusing #mp-input pops the soft keyboard
+  // which shrinks the visual viewport; the browser then auto-scrolls the
+  // input into view, which can push the music iframe completely off-screen.
+  // When the keyboard dismisses, the parent containers don't always restore
+  // their scroll, leaving the player invisible. We snapshot scrollTop on
+  // every scrollable ancestor at focus time and restore it on blur (and
+  // again once the visualViewport returns to its pre-keyboard height).
+  function _wireMpInput() {
+    const inp = document.getElementById('mp-input');
+    if (!inp || inp.dataset.kbWired === '1') return;
+    inp.dataset.kbWired = '1';
+
+    const scrollables = () => {
+      const list = [window, document.scrollingElement, document.documentElement, document.body];
+      // Walk ancestors of the input and capture anything that actually scrolls.
+      let n = inp.parentElement;
+      while (n && n !== document.body) {
+        const cs = getComputedStyle(n);
+        if (/(auto|scroll)/.test(cs.overflowY) || /(auto|scroll)/.test(cs.overflow)) {
+          list.push(n);
+        }
+        n = n.parentElement;
+      }
+      // Also include known top-level scroll hosts.
+      ['main', 'messages-area', 'music-panel'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !list.includes(el)) list.push(el);
+      });
+      return list;
+    };
+
+    let snap = null;
+    let vvBaseline = 0;
+    let vvHandler = null;
+
+    const capture = () => {
+      snap = scrollables().map(el => {
+        if (el === window) return { el, top: window.scrollY, left: window.scrollX };
+        return { el, top: el.scrollTop || 0, left: el.scrollLeft || 0 };
+      });
+      vvBaseline = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    };
+
+    const restore = () => {
+      if (!snap) return;
+      snap.forEach(({ el, top, left }) => {
+        try {
+          if (el === window) window.scrollTo(left, top);
+          else { el.scrollTop = top; el.scrollLeft = left; }
+        } catch {}
+      });
+      // Belt and braces: zero the document/body scroll which Android sometimes
+      // pins to the input's location even after we restore ancestors.
+      try { window.scrollTo(0, 0); } catch {}
+      try { document.documentElement.scrollTop = 0; } catch {}
+      try { document.body.scrollTop = 0; } catch {}
+    };
+
+    inp.addEventListener('focus', () => {
+      capture();
+      // If visualViewport is supported, watch for the keyboard going away —
+      // some Android WebViews fire blur before the layout has finished
+      // reflowing, so a one-shot resize listener catches the late case.
+      if (window.visualViewport && !vvHandler) {
+        vvHandler = () => {
+          const h = window.visualViewport.height;
+          // Treat "keyboard closed" as visual viewport recovering ≥ 90% of baseline.
+          if (h >= vvBaseline * 0.9) {
+            restore();
+          }
+        };
+        window.visualViewport.addEventListener('resize', vvHandler);
+      }
+    });
+
+    inp.addEventListener('blur', () => {
+      // Restore immediately, then again after the keyboard animation finishes
+      // (Android takes ~200–400ms to fully retract the keyboard).
+      restore();
+      setTimeout(restore, 80);
+      setTimeout(restore, 250);
+      setTimeout(() => {
+        restore();
+        if (vvHandler && window.visualViewport) {
+          window.visualViewport.removeEventListener('resize', vvHandler);
+          vvHandler = null;
+        }
+      }, 600);
+    });
   }
 
   async function mount(roomName, channelType) {
