@@ -486,9 +486,24 @@ async def websocket_endpoint(
                     # Don't double-send if DMing yourself
                     if other_id != user["id"]:
                         await manager.send_to_user(other_id, dm_broadcast)
-                    # Push notification if recipient is offline
+                    # Push notification if recipient is offline. Pass
+                    # sender_name in extras so the on-device service can
+                    # plumb the raw nickname into the tap PendingIntent as
+                    # dm_nick — otherwise FrogTalkFirebaseMessagingService
+                    # falls back to title ("💬 <nick>") and the WebView
+                    # opens /api/dms/open/💬%20<nick> → 404 "User not found".
                     preview = (content or "📎 Media")[:80]
-                    _push(other_id, f"💬 {user['nickname']}", preview, "/app")
+                    _push(
+                        other_id,
+                        f"💬 {user['nickname']}",
+                        preview,
+                        "/app",
+                        extra={
+                            "sender_name": user["nickname"],
+                            "conversation_id": str(channel_id),
+                            "conversation_name": user["nickname"],
+                        },
+                    )
 
                     # Federation phase-2: mirror DM message to peer nodes.
                     try:

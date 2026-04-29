@@ -456,8 +456,14 @@ const Notifications = (() => {
         } catch {}
       }
 
-      // Desktop notification
-      if (State.settings?.notify_desktop !== false && Notification.permission === 'granted') {
+      // Desktop notification — guarded with typeof because the Notification
+      // global is undefined in some Android WebViews. An unguarded reference
+      // throws ReferenceError and kills the rest of this handler before the
+      // window.Android.showNotification bridge call below can fire — which is
+      // why foreground-app users heard the JS "tink" but got no tray entry.
+      if (State.settings?.notify_desktop !== false &&
+          typeof Notification !== 'undefined' &&
+          Notification.permission === 'granted') {
         try {
           const title = isMention
             ? `${msg.nickname} mentioned you in #${msg.room_name || 'chat'}`
@@ -529,8 +535,14 @@ const Notifications = (() => {
           } catch {}
         }
       }
-      // Desktop notification for DM
-      if (State.settings?.notify_desktop !== false && Notification.permission === 'granted') {
+      // Desktop notification for DM — guarded with typeof because the
+      // Notification global is undefined in some Android WebViews. An
+      // unguarded reference throws ReferenceError and kills the rest of
+      // notifyDM before the window.Android.showNotification bridge call
+      // below can fire — that was the foreground-tink-no-tray bug.
+      if (State.settings?.notify_desktop !== false &&
+          typeof Notification !== 'undefined' &&
+          Notification.permission === 'granted') {
         try {
           new Notification(`${msg.sender_nickname || msg.nickname || 'Someone'} sent you a message`, {
             body: (msg.content || '').replace(/<[^>]+>/g, '').slice(0, 100),
