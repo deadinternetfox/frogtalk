@@ -285,16 +285,11 @@ const Music = (() => {
   function getCurrent() {
     const cur = _state && _state.queue && _state.queue[0];
     if (!cur) return { active: false };
-    // Use _currentEffectivePaused() instead of raw _paused so consumers
-    // (FrogSocial Now Playing strip, music cards, wall posts, anyone
-    // listening for music:statechange) see YT auto-pauses too — not
-    // just the user-tap pauses _paused tracks. Without this the strip
-    // shows "Playing now" + ⏸ even after YT has visibly stopped.
     return {
       active: true,
       soloMode: _soloMode,
       room: _room || '',
-      paused: _currentEffectivePaused(),
+      paused: _paused,
       provider: cur.provider,
       url: cur.url || '',
       video_id: cur.video_id || '',
@@ -310,38 +305,6 @@ const Music = (() => {
     const btn = document.querySelector('.mmd-play, .mp-mini-playpause');
     if (btn) { togglePause(btn); return true; }
     return false;
-  }
-
-  // Notification-tray play button entry point. YouTube's iframe in Android
-  // WebView refuses to PLAY while the WebView is offscreen (system policy
-  // blocks autoplay/play resumption with no foreground surface). So when
-  // the user taps "play" on the notification while the app is backgrounded,
-  // a plain togglePause() flips _paused=false and the icon to ⏸, but no
-  // audio comes out — we lied. Fix: for YouTube specifically, when going
-  // from paused → playing, ALSO bring the music channel surface forward
-  // so the iframe gets a visible host and the play actually lands. The
-  // foreground reconciler then takes over and keeps state honest.
-  // SoundCloud + Spotify embeds genuinely can play from background, so
-  // they keep the cheap direct toggle path.
-  function togglePauseFromNotification() {
-    const cur = _state && _state.queue && _state.queue[0];
-    const goingToPlay = !!_paused;
-    const isYT = cur && cur.provider === 'youtube';
-    if (isYT && goingToPlay) {
-      // Surface the music panel first. expand() routes to the right place
-      // (Social Music tab in solo mode, otherwise the room's music tab).
-      // Then toggle on the next tick so the iframe is visible when
-      // playVideo lands. The visibility handler also kicks the
-      // reconciler, but we still toggle explicitly to satisfy the
-      // user-gesture chain for autoplay policy.
-      try { expand(); } catch {}
-      setTimeout(() => {
-        try { togglePauseGlobal(); } catch {}
-      }, 50);
-      return true;
-    }
-    // Non-YT or pause action: direct toggle (cheap and reliable).
-    return togglePauseGlobal();
   }
 
   function setNativeMuted(muted) {
@@ -435,36 +398,16 @@ const Music = (() => {
         // then re-pausing. Instead we just reflect the truth: flip the
         // tray icon, the side UI button, and the badge to paused so the
         // user can tap play once and have it work the first time.
-        // ALWAYS reconcile from YT's authoritative state messages —
-        // not gated behind any probe flag. Both onStateChange (unsolicited)
-        // and infoDelivery (reply to getPlayerState/getCurrentTime) carry
-        // the truth; if we drop them, the dock + tray UI lies.
-        let ytState = null;
         if (parsed.event === 'onStateChange' && typeof parsed.info === 'number') {
-          ytState = parsed.info;
-        } else if (parsed.event === 'infoDelivery' && parsed.info
-                   && typeof parsed.info.playerState === 'number') {
-          ytState = parsed.info.playerState;
-        }
-        if (ytState != null) {
           const prev = _lastPlayerState;
-          _lastPlayerState = ytState;
-          // Reconcile _paused with YT truth. State 1=playing, 3=buffering;
-          // anything else (paused/ended/unstarted/cued) is effectively
-          // not-playing and the UI should reflect that.
-          const ytPlaying = (ytState === 1 || ytState === 3);
-          const desiredPaused = !ytPlaying;
-          if (_paused !== desiredPaused) {
-            _paused = desiredPaused;
+          _lastPlayerState = parsed.info;
+          const wasPlaying = (prev === 1);
+          const nowPlaying = (parsed.info === 1);
+          if (wasPlaying !== nowPlaying) {
+            // Force the next _emitState() through the dedupe so the
+            // notification + side button update right now.
             _lastEmitHash = '';
-            try { _syncPlayPauseButtons(); } catch {}
             try { _emitState(); } catch {}
-            try { _renderSyncBadge(); } catch {}
-            if (_paused) { try { _stopSyncProbe(); } catch {} }
-            else { try { _startSyncProbeIfNeeded(); } catch {} }
-          } else if (prev !== ytState) {
-            // No _paused flip but state changed (e.g. 1→3 buffer) — keep
-            // the badge fresh.
             try { _renderSyncBadge(); } catch {}
           }
         }
@@ -475,6 +418,7 @@ const Music = (() => {
 
         let actualSec = null;
         let lastUpdatedAtMs = null;
+        let playerState = null;
         // YouTube IFrame API: {event:"infoDelivery", info:{currentTime, currentTimeLastUpdated_, playerState}}
         if (parsed.event === 'infoDelivery'
             && parsed.info && typeof parsed.info.currentTime === 'number') {
@@ -485,6 +429,9 @@ const Music = (() => {
             const v = parsed.info.currentTimeLastUpdated_;
             lastUpdatedAtMs = v > 1e12 ? v : v * 1000;
           }
+          if (typeof parsed.info.playerState === 'number') {
+            playerState = parsed.info.playerState;
+          }
         // SoundCloud Widget API: {method:"getPosition", value:<ms>}
         } else if (parsed.method === 'getPosition'
                    && typeof parsed.value === 'number') {
@@ -492,6 +439,7 @@ const Music = (() => {
         }
         if (actualSec == null) return;
         _syncProbePending = false;
+        if (playerState != null) _lastPlayerState = playerState;
         // If we have a timestamp for when the player generated this reading,
         // compare against the *expected position at that moment* — not
         // expected-now — so message latency doesn't get billed as drift.
@@ -761,104 +709,17 @@ const Music = (() => {
     } catch { /* never throw from a visibility handler */ }
   }
 
-  // ─── Reliable foreground auto-resume + state reconciler ─────────────
-  // Background → foreground transitions in Android WebView routinely leave
-  // YouTube's iframe in state 2 (paused) without firing onStateChange,
-  // and (worse) the iframe sometimes briefly enters state 1 then silently
-  // re-pauses without notifying us. The classic fix of "spam playVideo
-  // and declare victory on first state==1" loses to that race — the dock
-  // and tray then lie about playback for up to 10s.
-  //
-  // Our approach: a single bounded RECONCILER. On foreground:
-  //   1. Send playVideo a few times early on (to nudge a paused embed).
-  //   2. Continuously poll getPlayerState at a tight cadence for ~10s,
-  //      then loose cadence for ~12s (total ~22s of close monitoring).
-  //   3. Each reply lands in our message listener which already
-  //      reconciles _paused with YT truth — so dock/tray/strip stay
-  //      honest at all times. The reconciler itself only owns the
-  //      polling cadence and the limited play-nudging budget; it does
-  //      NOT flip _paused. That's done by the listener as messages
-  //      arrive — single source of truth.
-  // Cost: one postMessage per ~1s for ~22s on foreground return only.
-  // Aborts on user pause, new track, or re-background.
-  let _resumeTimer = null;
-  let _resumeToken = 0;
-  function _abortYtResume() {
-    if (_resumeTimer) { clearTimeout(_resumeTimer); _resumeTimer = null; }
-    _resumeToken++;
-  }
-  function _attemptYtResume() {
-    _abortYtResume();
-    const cur = _state && _state.queue && _state.queue[0];
-    if (!cur) return;
-    // Non-YouTube providers (SoundCloud, Spotify) don't suffer the
-    // WebView refusal pattern — _resumeOnVisible() handles them.
-    if (cur.provider !== 'youtube') return;
-    const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
-    if (!frame || !frame.contentWindow) return;
-    const cw = frame.contentWindow;
-    const myToken = ++_resumeToken;
-    const send = (msg) => {
-      try { cw.postMessage(JSON.stringify(msg), '*'); } catch {}
-    };
-
-    const startedAt = Date.now();
-    // Cadence schedule: first 10s every 1000ms (10 polls + 4 nudges),
-    // next 12s every 2000ms (6 polls). After ~22s the regular sync
-    // probe (every 4s) takes over and keeps reconciling.
-    const TIGHT_UNTIL = 10000;
-    const TOTAL_BUDGET = 22000;
-    const TIGHT_STEP = 1000;
-    const LOOSE_STEP = 2000;
-    // Number of leading playVideo nudges. After this we ONLY poll —
-    // we don't keep stomping on the user (or YT) with play commands
-    // if they've made the deliberate choice to pause via headphones,
-    // ad break, etc.
-    const NUDGES = 3;
-    let tickIdx = 0;
-
-    // Initial handshake — required after backgrounding so the iframe
-    // re-accepts our messages.
-    send({ event: 'listening', id: 'frogtalk-music' });
-
-    function tick() {
-      _resumeTimer = null;
-      if (myToken !== _resumeToken) return;        // superseded
-      if (document.hidden) return;                  // re-backgrounded
-      // If user explicitly paused mid-reconcile, give up on nudging
-      // but keep polling so the listener stays accurate. Actually
-      // simpler: just stop. The next foreground will re-arm.
-      const elapsed = Date.now() - startedAt;
-      if (elapsed > TOTAL_BUDGET) return;
-      // Nudge: only the first N ticks send playVideo. After that we
-      // trust YT's state and just poll.
-      if (tickIdx < NUDGES && !_userInitiatedPause) {
-        send({ event: 'command', func: 'playVideo', args: [] });
-      }
-      // Always poll state. Reply hits the global listener which
-      // reconciles _paused with truth.
-      send({ event: 'command', func: 'getPlayerState', args: [] });
-      tickIdx++;
-      const step = elapsed < TIGHT_UNTIL ? TIGHT_STEP : LOOSE_STEP;
-      _resumeTimer = setTimeout(tick, step);
-    }
-    // Slight initial delay so the iframe's own foreground bookkeeping
-    // settles before we start poking. Without it the first playVideo
-    // is the most likely to be ignored.
-    _resumeTimer = setTimeout(tick, 250);
-  }
-  // Sentinel set by togglePause() user-initiated pause path so the
-  // reconciler stops nudging playVideo. Reset on foreground.
-  let _userInitiatedPause = false;
-
   // App background / foreground policy:
-  //  - On hide: stop the sync probe + cancel any in-flight resume loop.
-  //    Inside the FrogTalk Android shell we also flip _paused=true as a
-  //    safety net so if foreground auto-resume fails the UI doesn't lie.
-  //    On desktop alt-tab, audio keeps playing so we leave _paused alone.
-  //  - On show: probe iframe state, then kick off _attemptYtResume()
-  //    which reliably brings YouTube back to playing or surrenders to
-  //    honest UI.
+  //  - On hide: stop the sync probe to save postMessage/setInterval cost,
+  //    AND flip our user-intent flag to paused. Reason: YouTube's iframe
+  //    pauses itself in background reliably but resists being driven back
+  //    into play on return (especially in Android WebView), causing the
+  //    "plays for a second then stops" bug. So we acknowledge reality and
+  //    require one tap to resume; the tap path is well-tested.
+  //  - On show: do NOT auto-issue play. Just probe the iframe for its
+  //    current state and re-emit so every UI surface (system tray, side
+  //    play button, sync badge) shows the correct play icon. The user
+  //    presses play once and we know exactly which path that takes.
   // NOTE: in the Android WebView these handlers are NOT enough on their
   // own. MainActivity skips webView.onPause() while music is active so
   // the WebView keeps running; that means visibilitychange/pagehide
@@ -866,7 +727,11 @@ const Music = (() => {
   // Music.notifyAppForeground() directly to drive these paths instead.
   function _onAppHidden() {
     try { _stopSyncProbe(); } catch {}
-    _abortYtResume();
+    // Manual-resume policy: only force _paused=true inside the FrogTalk
+    // Android app, where YouTube's WebView routinely refuses playVideo
+    // after a background return. On desktop, alt-tabbing fires
+    // visibilitychange but audio keeps playing, so we leave _paused
+    // alone and let the helper consult _lastPlayerState for truth.
     if (typeof window !== 'undefined' && window.Android) {
       _paused = true;
     }
@@ -874,21 +739,15 @@ const Music = (() => {
     _lastPlayerState = null;
     try { _renderSyncBadge(); } catch {}
     try { _syncPlayPauseButtons(); } catch {}
+    // Force the system tray + bridge update through dedupe.
     _lastEmitHash = '';
     try { _emitState(); } catch {}
   }
   function _onAppVisible() {
     // Re-bind listener defensively (some embeds drop registration during
-    // background suspension).
+    // background suspension). Then probe the iframe so _lastPlayerState
+    // is fresh, and reconcile every UI surface.
     try { _bindSyncMessageListener(); } catch {}
-    // User-initiated pause flag is per-foreground-session; clear so the
-    // reconciler is allowed to nudge playVideo on this return.
-    _userInitiatedPause = false;
-    // Clear stale state so the reconciler's first poll establishes truth
-    // rather than us asserting a guess. We do NOT pre-emit here — the
-    // listener will emit honestly as soon as YT replies (~250ms),
-    // avoiding a brief tray/dock UI lie.
-    _lastPlayerState = null;
     try {
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       const cur = _state && _state.queue && _state.queue[0];
@@ -897,14 +756,12 @@ const Music = (() => {
         frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
       }
     } catch {}
-    // Make sure the dock/tray reflect whatever _paused currently is —
-    // they might have been re-rendered to the playing template by a
-    // queued _render() during background. Listener will correct shortly.
+    // Keep _paused as-is (Android: still true from _onAppHidden;
+    // desktop: whatever the user chose). The helper derives the icon
+    // honestly from _paused + YT's state.
+    _lastEmitHash = '';
     try { _syncPlayPauseButtons(); } catch {}
-    // Kick the bounded reconciler. It polls getPlayerState every ~1s
-    // for 10s then every 2s for 12s; the message listener flips _paused
-    // to YT truth on every reply, so dock + tray + strip stay honest.
-    try { _attemptYtResume(); } catch {}
+    try { _emitState(); } catch {}
     // Belt-and-suspenders: re-sync on the next two animation frames in
     // case a queued _render() runs after us and clobbers the button
     // HTML back to the "⏸" template default.
@@ -1245,9 +1102,6 @@ const Music = (() => {
   function togglePause(btn) {
     const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
     if (!frame || !frame.contentWindow) return;
-    // User asserted intent — kill any in-flight foreground-resume loop
-    // so we don't fight a deliberate pause tap (or override their play).
-    try { _abortYtResume(); } catch {}
     const playing = btn.dataset.playing !== '0';
     const src = frame.src || '';
     try {
@@ -1278,9 +1132,6 @@ const Music = (() => {
     // Keep every play/pause button in the UI in sync (drawer + mini bar).
     _syncPlayPauseButtons(nowPlaying);
     _paused = !nowPlaying;
-    // Track user intent so the reconciler doesn't keep nudging playVideo
-    // after a deliberate pause tap. Cleared on next foreground.
-    _userInitiatedPause = !nowPlaying;
     if (_paused) _stopSyncProbe(); else _startSyncProbeIfNeeded();
     _emitState();
   }
@@ -1571,7 +1422,7 @@ const Music = (() => {
 
   return { mount, submit, skip, clearQueue, removeTrack, toggleDJOnly,
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
-           togglePauseGlobal, togglePauseFromNotification, setNativeMuted, getCurrent,
+           togglePauseGlobal, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
            // Native-callable hooks: MainActivity invokes these from
            // Activity.onPause() / onResume() because we deliberately keep

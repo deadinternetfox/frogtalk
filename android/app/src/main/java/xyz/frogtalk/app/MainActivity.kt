@@ -1007,11 +1007,43 @@ class MainActivity : AppCompatActivity() {
                     "mute" -> webView?.post { webView?.evaluateJavascript("if(typeof toggleMuteAudio==='function')toggleMuteAudio()", null) }
                 }
                 MusicService.ACTION_BROADCAST -> when (command) {
-                    "toggle_play" -> webView?.post {
-                        webView?.evaluateJavascript(
-                            "try{window.Music&&Music.togglePauseFromNotification&&Music.togglePauseFromNotification();}catch(e){}",
-                            null
-                        )
+                    "toggle_play" -> {
+                        // YouTube's iframe in an offscreen WebView is blocked
+                        // from resuming playback by Chromium's autoplay
+                        // policy — flipping _paused via togglePauseGlobal()
+                        // makes the icon say ⏸ but no audio comes out.
+                        // For YouTube going paused→playing, bring the
+                        // activity to the foreground instead. onResume()
+                        // calls Music.notifyAppForeground(), which kicks
+                        // the existing auto-resume reconciler. No JS state
+                        // mutation, no risk of teardown — the notification
+                        // (driven by MusicService) stays up the whole time.
+                        // SoundCloud + Spotify embeds genuinely play from
+                        // background; they keep the cheap direct toggle.
+                        val provider = intent.getStringExtra(MusicService.EXTRA_PROVIDER) ?: ""
+                        val intendedPlaying = intent.getBooleanExtra(MusicService.EXTRA_PLAYING, true)
+                        if (provider == "youtube" && intendedPlaying) {
+                            try {
+                                val launch = Intent(this@MainActivity, MainActivity::class.java).apply {
+                                    action = Intent.ACTION_MAIN
+                                    addCategory(Intent.CATEGORY_LAUNCHER)
+                                    addFlags(
+                                        Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                    )
+                                }
+                                startActivity(launch)
+                            } catch (e: Throwable) {
+                                Log.w(TAG, "bring-to-front for YT resume failed", e)
+                            }
+                        } else {
+                            webView?.post {
+                                webView?.evaluateJavascript(
+                                    "try{window.Music&&window.Music.togglePauseGlobal&&window.Music.togglePauseGlobal();}catch(e){}",
+                                    null
+                                )
+                            }
+                        }
                     }
                     "set_muted" -> {
                         val muted = intent.getBooleanExtra(MusicService.EXTRA_MUTED, false)

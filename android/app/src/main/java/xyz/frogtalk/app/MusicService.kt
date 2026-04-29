@@ -115,7 +115,17 @@ class MusicService : Service() {
             when (intent?.action) {
                 ACTION_TOGGLE_PLAY -> {
                     currentPlaying = !currentPlaying
-                    sendBroadcast(Intent(ACTION_BROADCAST).putExtra("action", "toggle_play"))
+                    // Include provider + the new intended play state so
+                    // MainActivity can branch on YouTube (offscreen
+                    // WebView can't actually resume playback) without
+                    // having to round-trip through JS.
+                    sendBroadcast(
+                        Intent(ACTION_BROADCAST)
+                            .setPackage(packageName)
+                            .putExtra("action", "toggle_play")
+                            .putExtra(EXTRA_PROVIDER, currentProvider)
+                            .putExtra(EXTRA_PLAYING, currentPlaying)
+                    )
                     refreshNotification()
                     return START_STICKY
                 }
