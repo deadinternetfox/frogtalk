@@ -271,6 +271,13 @@ const Social = (() => {
       viewer.id = 'story-viewer';
       document.body.appendChild(viewer);
     }
+    // CRITICAL: cancel any pending auto-advance from a previous story
+    // before we rebuild. Without this, a manually-triggered nextStory()
+    // can leave the previous story's setTimeout pending; if it fires
+    // while the new story is still loading, the user gets jumped past
+    // the story they just opened. Mirror this in any callback paths.
+    clearTimeout(viewer._timer);
+    viewer._timer = null;
 
     const isLoading = !story.media_data && story.has_media;
     const progress = user.stories.map((s, i) =>
@@ -309,7 +316,15 @@ const Social = (() => {
     const startProgressAndTimer = () => {
       const segs = viewer.querySelectorAll('.story-prog-seg');
       const seg = segs[_storyViewIdx];
-      if (seg) { seg.classList.remove('loading'); seg.classList.add('active'); }
+      if (seg) {
+        // Force a fresh animation cycle when swapping loading -> active.
+        // Replacing the node guarantees the CSS animation restarts from 0
+        // even if the segment was previously running the loading shimmer.
+        const fresh = seg.cloneNode(false);
+        fresh.classList.remove('loading');
+        fresh.classList.add('active');
+        seg.parentNode.replaceChild(fresh, seg);
+      }
       clearTimeout(viewer._timer);
       viewer._timer = setTimeout(() => nextStory(), 5000);
     };
