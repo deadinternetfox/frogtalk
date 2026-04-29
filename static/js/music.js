@@ -245,10 +245,10 @@ const Music = (() => {
           title, subtitle,
           detail.artworkUrl || '',
           detail.provider || '',
-          active, !_paused, _muted
+          active, !detail.paused, _muted
         );
       } else if (typeof A.updateMusicPlayback === 'function') {
-        A.updateMusicPlayback(title, subtitle, active, !_paused, _muted);
+        A.updateMusicPlayback(title, subtitle, active, !detail.paused, _muted);
       }
     } catch { /* native bridge failures are non-fatal */ }
   }
@@ -1028,6 +1028,11 @@ const Music = (() => {
                 onclick="event.stopPropagation();Music.close()">✕</button>
       </div>`;
     document.body.setAttribute('data-music-mini', '1');
+    // Reflect current paused state on the freshly-rendered button. The
+    // template hardcodes ⏸ for layout simplicity; without this the
+    // dock would always show "playing" on re-render even if YT has
+    // auto-paused or the user backgrounded the app.
+    try { _syncPlayPauseButtons(!_paused); } catch {}
   }
 
   function _miniBarHtml(titleEsc, provider) {
