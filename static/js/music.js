@@ -537,6 +537,22 @@ const Music = (() => {
           : _expectedPosSec();
         _lastDriftSec = Math.abs(actualSec - expectedAtSample);
         _renderSyncBadge();
+
+        // Auto-correct: Android WebView occasionally resumes a backgrounded
+        // YT iframe at currentTime=0 (or some other stale offset) even
+        // though the embed reports state=1. The verify ladder's seek may
+        // have been dropped if it landed during the iframe's restoration
+        // window. If we're playing but a probe shows we're WAY behind
+        // (>10s) the room's expected position, force a seek. Throttled
+        // to once every 6s so we don't fight a real user-initiated
+        // backwards seek.
+        if (!_paused
+            && _lastPlayerState === 1
+            && _lastDriftSec > 10
+            && (Date.now() - _lastAutoCorrectAt) > 6000) {
+          _lastAutoCorrectAt = Date.now();
+          try { _seekIframe(_expectedPosSec()); } catch {}
+        }
       } catch { /* keep listener resilient */ }
     });
   }
@@ -681,6 +697,7 @@ const Music = (() => {
   // - Multiple foreground events firing in <1.5s — debounced.
   let _lastResumeAt = 0;
   let _resumeRetryToken = 0;
+  let _lastAutoCorrectAt = 0;
   function _resumeOnVisible(opts) {
     try {
       const force = !!(opts && opts.force);
@@ -911,6 +928,12 @@ const Music = (() => {
     // (SoundCloud and Spotify play from background fine). Ignored if
     // there's no current track.
     try { _resumeOnVisible({ force: true, ignorePaused: true }); } catch {}
+    // Schedule fast drift probes after the resume ladder lands. The
+    // sync probe's auto-correct branch will catch + reseek any case
+    // where YT resumed the iframe at currentTime=0 despite our verify
+    // ladder seeking — which happens occasionally when the seek
+    // postMessage races the iframe's restoration window.
+    try { _scheduleFastProbes([1500, 3000, 5000]); } catch {}
     // Belt-and-suspenders: re-sync on the next two animation frames in
     // case a queued _render() runs after us and clobbers the button
     // HTML back to the "⏸" template default.
