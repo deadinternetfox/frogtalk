@@ -448,6 +448,31 @@ const Music = (() => {
           }
         }
 
+        // YouTube also fires infoDelivery with a playerState field on
+        // virtually every state transition (often more reliably than
+        // onStateChange after an Android WebView background return).
+        // Reconcile _paused from that BEFORE the _syncProbePending gate
+        // so the dock + sidebar button track audio truth even when no
+        // sync probe is currently in flight.
+        if (parsed.event === 'infoDelivery'
+            && parsed.info
+            && typeof parsed.info.playerState === 'number') {
+          const ps = parsed.info.playerState;
+          _lastPlayerState = ps;
+          if (ps === 1 && _paused) {
+            _paused = false;
+            _lastEmitHash = '';
+            try { _syncPlayPauseButtons(); } catch {}
+            try { _emitState(); } catch {}
+            try { _startSyncProbeIfNeeded(); } catch {}
+          } else if (ps === 2 && !_paused) {
+            _paused = true;
+            _lastEmitHash = '';
+            try { _syncPlayPauseButtons(); } catch {}
+            try { _emitState(); } catch {}
+          }
+        }
+
         // Drift updates only happen when we asked for them, to avoid the
         // listener doing arithmetic on every spontaneous YT message.
         if (!_syncProbePending) return;
@@ -467,22 +492,6 @@ const Music = (() => {
           }
           if (typeof parsed.info.playerState === 'number') {
             playerState = parsed.info.playerState;
-            // Reconcile _paused to YT ground truth on every state-bearing
-            // infoDelivery too (not just onStateChange). The sync probe
-            // path is what fires reliably during steady-state playback,
-            // so without this the dock + sidebar button stay on ▶ after
-            // an auto-resume even though YT is in state=1.
-            if (playerState === 1 && _paused) {
-              _paused = false;
-              _lastEmitHash = '';
-              try { _syncPlayPauseButtons(); } catch {}
-              try { _emitState(); } catch {}
-            } else if (playerState === 2 && !_paused) {
-              _paused = true;
-              _lastEmitHash = '';
-              try { _syncPlayPauseButtons(); } catch {}
-              try { _emitState(); } catch {}
-            }
           }
         // SoundCloud Widget API: {method:"getPosition", value:<ms>}
         } else if (parsed.method === 'getPosition'
