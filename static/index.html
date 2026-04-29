@@ -2426,6 +2426,28 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .modal-btn:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.35)}
 .modal-btn:active{transform:translateY(0) scale(.96);transition-duration:.06s;filter:brightness(.92)}
 .modal-btn:focus-visible{outline:2px solid #4caf50;outline-offset:2px}
+/* Settings > Notifications: Preview buttons (white text, neutral background) */
+.notif-preview-btn{
+  margin-top:8px;
+  padding:7px 14px;
+  font-size:12px;
+  font-weight:600;
+  border-radius:6px;
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  cursor:pointer;
+  background:linear-gradient(180deg,#1f242b,#171c22);
+  color:#fff;
+  border:1px solid #2e3640;
+  transition:background .15s ease,border-color .15s ease,transform .08s ease;
+}
+.notif-preview-btn:hover{
+  background:linear-gradient(180deg,#272d36,#1c222a);
+  border-color:#3d4651;
+}
+.notif-preview-btn:active{transform:translateY(1px) scale(.98);filter:brightness(.94)}
+.notif-preview-btn:focus-visible{outline:2px solid #4caf50;outline-offset:2px}
 .modal-btn[disabled],.modal-btn:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none;filter:none}
 .modal-btn.primary{background:#4caf50;color:#000;box-shadow:0 2px 8px rgba(76,175,80,.25)}
 .modal-btn.primary:hover{background:#5bc661;box-shadow:0 6px 18px rgba(76,175,80,.45)}
@@ -5975,7 +5997,7 @@ window.ConnErr = (function(){
           <option value="knock">Knock</option>
           <option value="silent">Silent</option>
         </select>
-        <button type="button" onclick="Notifications.previewTone && Notifications.previewTone(document.getElementById('profile-notify-tone').value)" style="margin-top:8px;padding:6px 12px;background:#1a1a1a;border:1px solid #2a2a2a;color:#4caf50;border-radius:6px;cursor:pointer;font-size:12px">🔊 Preview</button>
+        <button type="button" class="notif-preview-btn" onclick="Notifications.previewTone && Notifications.previewTone(document.getElementById('profile-notify-tone').value)">🔊 Preview</button>
       </div>
       <div style="padding:12px 0;border-bottom:1px solid #1e1e1e">
         <div style="font-size:14px;color:#e0e0e0;margin-bottom:6px">Incoming Call Ringtone</div>
@@ -5989,7 +6011,7 @@ window.ConnErr = (function(){
           <option value="sonar">Sonar</option>
           <option value="silent">Silent</option>
         </select>
-        <button type="button" onclick="Notifications.previewRingtone && Notifications.previewRingtone(document.getElementById('profile-notify-ring').value)" style="margin-top:8px;padding:6px 12px;background:#1a1a1a;border:1px solid #2a2a2a;color:#4caf50;border-radius:6px;cursor:pointer;font-size:12px">🔊 Preview</button>
+        <button type="button" class="notif-preview-btn" onclick="Notifications.previewRingtone && Notifications.previewRingtone(document.getElementById('profile-notify-ring').value)">🔊 Preview</button>
       </div>
     </div>
     <!-- Appearance Tab -->

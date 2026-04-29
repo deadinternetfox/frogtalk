@@ -182,6 +182,20 @@ const Notifications = (() => {
   }
 
   // ── Vibration + tone helpers ───────────────────────────────────────────────
+  // _pref reads a notification preference from State.user (where ui.js stores
+  // it after a profile save) with a sensible default. The values are stored as
+  // 0 / 1 by the backend (SQLite ints) and as true / false in-memory after a
+  // PATCH /api/auth/profile, so any falsy non-undefined value disables it.
+  // (Earlier versions of this file read State.settings?.notify_* which never
+  // existed — the toggles silently had no runtime effect.)
+  function _pref(key, def = true) {
+    const u = (typeof State !== 'undefined' && State && State.user) || null;
+    if (!u) return def;
+    const v = u[key];
+    if (v === undefined || v === null) return def;
+    if (v === 0 || v === false || v === '0') return false;
+    return true;
+  }
   function _vibEnabled() {
     return localStorage.getItem('ft_notify_vibrate') !== '0';
   }
@@ -326,7 +340,7 @@ const Notifications = (() => {
   }
 
   function _playTone(name) {
-    if (State.settings?.notify_sounds === false) return;
+    if (!_pref('notify_sounds', true)) return;
     try {
       const tone = name || _currentTone();
       if (tone === 'silent') return;
@@ -348,7 +362,7 @@ const Notifications = (() => {
   }
 
   function _playRing(name) {
-    if (State.settings?.notify_sounds === false) return;
+    if (!_pref('notify_sounds', true)) return;
     try {
       const tone = name || 'default';
       if (tone === 'silent') return;
@@ -419,11 +433,14 @@ const Notifications = (() => {
     notify(msg) {
       const myNick = State.user?.nickname || '';
       const contentText = (msg.content || '').replace(/<[^>]+>/g, '');
-      const isMention = myNick && contentText.toLowerCase().includes('@' + myNick.toLowerCase());
+      let isMention = myNick && contentText.toLowerCase().includes('@' + myNick.toLowerCase());
+      // notify_mentions toggle: when off, demote a mention to a regular message
+      // notification (no mention-boost sound, no "@you" title).
+      if (isMention && !_pref('notify_mentions', true)) isMention = false;
       _vibrate(isMention ? [30, 40, 30, 40, 60] : 40);
 
       // Play sound (only if sound is not disabled in settings)
-      if (State.settings?.notify_sounds !== false) {
+      if (_pref('notify_sounds', true)) {
         try {
           const ctx = new (window.AudioContext || window.webkitAudioContext)();
           if (isMention) {
@@ -461,7 +478,7 @@ const Notifications = (() => {
       // throws ReferenceError and kills the rest of this handler before the
       // window.Android.showNotification bridge call below can fire — which is
       // why foreground-app users heard the JS "tink" but got no tray entry.
-      if (State.settings?.notify_desktop !== false &&
+      if (_pref('notify_desktop', true) &&
           typeof Notification !== 'undefined' &&
           Notification.permission === 'granted') {
         try {
@@ -501,13 +518,13 @@ const Notifications = (() => {
         }
       } catch {}
       // Check DM notification setting — if disabled, skip tray/sound/vibration
-      const dmNotifsOn = State.settings?.notify_dms !== false;
+      const dmNotifsOn = _pref('notify_dms', true);
       if (!dmNotifsOn) return;
       _vibrate([40, 60, 40]);
       // Per-friend custom alert tone takes precedence over the built-in double-pop.
       const senderNick = msg.sender_nickname || msg.nickname;
       const custom = _toneForFriend(senderNick);
-      if (State.settings?.notify_sounds !== false) {
+      if (_pref('notify_sounds', true)) {
         if (custom === 'custom') {
           // User uploaded a file for this specific friend
           const data = _getCustomSound(senderNick, 'msg');
@@ -540,7 +557,7 @@ const Notifications = (() => {
       // unguarded reference throws ReferenceError and kills the rest of
       // notifyDM before the window.Android.showNotification bridge call
       // below can fire — that was the foreground-tink-no-tray bug.
-      if (State.settings?.notify_desktop !== false &&
+      if (_pref('notify_desktop', true) &&
           typeof Notification !== 'undefined' &&
           Notification.permission === 'granted') {
         try {
@@ -663,7 +680,7 @@ const Notifications = (() => {
     // Friend request notification
     notifyFriend(data) {
       _vibrate([50, 80, 50]);
-      if (State.settings?.notify_sounds !== false) {
+      if (_pref('notify_sounds', true)) {
         try {
           const ctx = new (window.AudioContext || window.webkitAudioContext)();
           // Cheerful three-note chime
@@ -683,7 +700,7 @@ const Notifications = (() => {
         } catch {}
       }
       // Desktop notification for friend events
-      if (State.settings?.notify_desktop !== false && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      if (_pref('notify_desktop', true) && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         try {
           const kind = data.kind || data.type || 'friend';
           const who = data.from_nickname || data.nickname || 'Someone';
