@@ -1056,11 +1056,6 @@ const Music = (() => {
         <div class="mp-header-actions">
           ${cur ? `<button class="mp-btn mp-resync" title="Catch up to the room: refreshes the queue from the server and seeks your iframe to the live play-head position"
                            onclick="Music.resyncNow()"><span class="mp-resync-ico">📻</span><span class="mp-resync-lbl">Resync</span></button>` : ''}
-          <button class="mp-btn mp-collapse" title="Collapse the player to make the chat bigger. Tap again to bring the player back."
-                  onclick="Music.toggleCollapse()" aria-label="Toggle player size">
-            <span class="mp-collapse-ico">${_collapsed ? '▢' : '▭'}</span>
-            <span class="mp-collapse-lbl">${_collapsed ? 'Expand' : 'Collapse'}</span>
-          </button>
         </div>
       </div>`;
 
@@ -1127,8 +1122,20 @@ const Music = (() => {
       return;
     }
 
+    // Tiny overlay button — sits in the top-right of the iframe so the
+    // user can collapse the player to give the chat more room. SVG icons
+    // (minimize line ↔ maximize square) flip based on _collapsed state.
+    const sizeToggleHtml = cur ? `
+      <button class="mp-size-toggle" type="button" onclick="Music.toggleCollapse()"
+              aria-label="${_collapsed ? 'Expand player' : 'Minimize player'}"
+              title="${_collapsed ? 'Expand player' : 'Minimize player to make chat bigger'}">
+        ${_collapsed
+          ? '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 3h4M3 3v4M13 3h-4M13 3v4M3 13h4M3 13v-4M13 13h-4M13 13v-4"/></svg>'
+          : '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 8h10"/></svg>'}
+      </button>` : '';
+
     panel.innerHTML = `
-      <div id="mp-player-wrap" data-cur-key="${curKey}">${playerHtml}</div>
+      <div id="mp-player-wrap" data-cur-key="${curKey}">${playerHtml}${sizeToggleHtml}</div>
       <div id="mp-meta-wrap">
         ${headerHtml}
         ${nowRow}

@@ -1293,36 +1293,37 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
 .mp-resync:active{transform:scale(.95)}
 .mp-resync-ico{font-size:14px;line-height:1;opacity:.95}
 .mp-resync-lbl{font-size:7px;line-height:1;text-transform:uppercase;letter-spacing:.3px;font-weight:800;margin-top:2px}
-/* Header actions cluster (resync + collapse) */
+/* Header actions cluster (resync + future buttons) */
 .mp-header-actions{display:flex;gap:8px;align-items:center;flex-shrink:0}
-/* Collapse / expand the music panel so chat can take more vertical space.
-   Same pill shape as .mp-resync but a different colour to read as a
-   separate action. */
-.mp-collapse{
-  flex-shrink:0;background:linear-gradient(135deg,rgba(127,210,167,.16),rgba(76,175,80,.22));
-  border:1px solid rgba(127,210,167,.42);color:#cfeedd;
-  font-weight:700;padding:0;border-radius:50%;cursor:pointer;
-  transition:background .18s,transform .12s,border-color .18s,box-shadow .2s;
-  display:inline-flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:1px;line-height:1;white-space:nowrap;width:46px;height:46px;
-  box-shadow:0 1px 3px rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.05)
+
+/* Tiny size-toggle overlay button. Sits absolutely in the top-right
+   corner of the player iframe so it doesn't bloat the header. Icon
+   flips between a single minimize line and a frame/expand glyph. */
+#mp-player-wrap{position:relative}
+.mp-size-toggle{
+  position:absolute;top:8px;right:8px;z-index:5;
+  width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(15,8,32,.72);color:#e8d0ff;
+  border:1px solid rgba(200,130,255,.32);border-radius:8px;
+  cursor:pointer;padding:0;line-height:0;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  box-shadow:0 2px 8px rgba(0,0,0,.4);
+  transition:background .15s,border-color .15s,transform .12s,color .15s
 }
-.mp-collapse:hover{
-  background:linear-gradient(135deg,rgba(127,210,167,.28),rgba(76,175,80,.35));
-  border-color:rgba(127,210,167,.7);
-  box-shadow:0 3px 12px rgba(127,210,167,.28),inset 0 1px 0 rgba(255,255,255,.08);
+.mp-size-toggle:hover{
+  background:rgba(160,80,216,.32);border-color:rgba(200,130,255,.7);color:#fff;
   transform:translateY(-1px)
 }
-.mp-collapse:active{transform:scale(.95)}
-.mp-collapse-ico{font-size:15px;line-height:1;opacity:.95;font-family:'Segoe UI Symbol','Apple Color Emoji',sans-serif}
-.mp-collapse-lbl{font-size:7px;line-height:1;text-transform:uppercase;letter-spacing:.3px;font-weight:800;margin-top:2px}
-@media (max-width:420px){.mp-collapse{width:42px;height:42px}.mp-collapse-ico{font-size:13px}.mp-collapse-lbl{font-size:6.5px}}
+.mp-size-toggle:active{transform:scale(.92)}
+.mp-size-toggle svg{display:block}
 
 /* Collapsed: keep the iframe alive (so audio doesn't drop) but shrink
    it to a slim strip; hide queue/submit/now-row, leaving just the
    header so the user can re-expand. */
 #music-panel.collapsed{padding:8px 12px;gap:6px}
 #music-panel.collapsed .mp-frame{max-height:54px;aspect-ratio:auto;height:54px;border-radius:8px}
+#music-panel.collapsed .mp-size-toggle{top:50%;transform:translateY(-50%);right:6px}
+#music-panel.collapsed .mp-size-toggle:hover{transform:translateY(-50%) scale(1.05)}
 #music-panel.collapsed .mp-now,
 #music-panel.collapsed .mp-queue,
 #music-panel.collapsed .mp-submit{display:none}
@@ -1389,19 +1390,19 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
   padding:7px 10px;font-size:13px
 }
 .mp-submit input:focus{outline:none;border-color:#a050d8}
-/* Add Track button (modal trigger) */
+/* Add Track button (modal trigger) — compact pill, never stretches. */
 .mp-add-btn{
-  display:inline-flex;align-items:center;gap:7px;flex:1;min-width:140px;justify-content:center;
-  padding:9px 14px;font-size:13px;font-weight:600;letter-spacing:.2px;
-  background:linear-gradient(135deg,#8a3aba,#5a2a8a);color:#fff;border:0;border-radius:8px;cursor:pointer;
-  box-shadow:0 2px 10px rgba(160,80,216,.32),inset 0 1px 0 rgba(255,255,255,.08);
+  display:inline-flex;align-items:center;gap:7px;
+  padding:7px 14px;font-size:12.5px;font-weight:700;letter-spacing:.2px;
+  background:linear-gradient(135deg,#8a3aba,#5a2a8a);color:#fff;border:0;border-radius:999px;cursor:pointer;
+  box-shadow:0 2px 8px rgba(160,80,216,.32),inset 0 1px 0 rgba(255,255,255,.08);
   transition:transform .12s,box-shadow .15s,filter .15s
 }
-.mp-add-btn:hover{filter:brightness(1.08);box-shadow:0 4px 16px rgba(160,80,216,.48)}
+.mp-add-btn:hover{filter:brightness(1.08);box-shadow:0 4px 14px rgba(160,80,216,.45)}
 .mp-add-btn:active{transform:scale(.97)}
 .mp-add-btn .mp-add-ico{
   display:inline-flex;align-items:center;justify-content:center;
-  width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.18);font-size:11px;line-height:1
+  width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.2);font-size:10px;line-height:1;font-weight:800
 }
 
 /* ─── Add-track modal ─────────────────────────────────────────────────── */
@@ -1468,18 +1469,17 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 .mp-dj-toggle input:checked ~ .mp-dj-track .mp-dj-knob{transform:translateX(14px);background:#fff}
 .mp-dj-label{white-space:nowrap}
 .mp-queue{
-  max-height:200px;overflow-y:auto;overflow-x:hidden;
+  max-height:240px;overflow-y:auto;overflow-x:hidden;
   border-top:1px dashed #3a2a5a;padding-top:8px;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
-  /* Hide scrollbars on mobile (chrome on Android & iOS Safari) but keep
-     wheel/touch scrolling. Desktop still gets a slim track. */
+  touch-action:pan-y;
   scrollbar-width:thin;scrollbar-color:#3a2a5a transparent
 }
 .mp-queue::-webkit-scrollbar{width:6px}
 .mp-queue::-webkit-scrollbar-thumb{background:#3a2a5a;border-radius:3px}
 .mp-queue::-webkit-scrollbar-track{background:transparent}
 @media (max-width:600px){
-  .mp-queue{max-height:38vh;scrollbar-width:none}
+  .mp-queue{max-height:46vh;scrollbar-width:none}
   .mp-queue::-webkit-scrollbar{display:none;width:0;height:0}
 }
 .mp-queue-item{
