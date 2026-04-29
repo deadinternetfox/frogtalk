@@ -693,8 +693,8 @@ async function _camOpenLiveCamera () {
     live.id = 'cam-live-view';
     live.style.cssText = 'display:none;flex-direction:column;gap:10px;align-items:center;width:100%';
     live.innerHTML = `
-      <div id="cam-live-stage" style="position:relative;width:100%;max-width:420px;aspect-ratio:3/4;background:#000;border-radius:10px;overflow:hidden;touch-action:none;user-select:none">
-        <video id="cam-live-video" autoplay playsinline muted style="width:100%;height:100%;object-fit:cover;background:#000;transform-origin:center center"></video>
+      <div id="cam-live-stage" style="position:relative;width:100%;max-width:420px;max-height:60vh;background:#000;border-radius:10px;overflow:hidden;touch-action:none;user-select:none;display:flex;align-items:center;justify-content:center;min-height:240px">
+        <video id="cam-live-video" autoplay playsinline muted style="width:100%;height:100%;max-height:60vh;object-fit:contain;background:#000;transform-origin:center center"></video>
         <button id="cam-live-flip" title="Flip camera" style="position:absolute;top:8px;right:8px;background:rgba(12,28,22,.7);color:#dff5e8;border:1px solid #2f5548;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;z-index:3;transition:background .15s">🔄</button>
         <button id="cam-live-flash" title="Flash" style="position:absolute;top:8px;right:52px;background:rgba(12,28,22,.7);color:#dff5e8;border:1px solid #2f5548;border-radius:18px;min-width:36px;height:36px;padding:0 10px;font-size:13px;font-weight:700;cursor:pointer;z-index:3;display:none;gap:4px;align-items:center;justify-content:center;white-space:nowrap;transition:background .15s">⚡ Off</button>
         <div id="cam-zoom-badge" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,.55);color:#fff;border:1px solid #333;border-radius:14px;padding:4px 10px;font-size:12px;font-weight:600;display:none;z-index:3">1.0×</div>
@@ -763,8 +763,12 @@ async function _camOpenLiveCamera () {
 async function _camStartLiveStream () {
   _camStopLiveCamera();
   try {
+    // Don't force a square (1280x1280) — most cameras can't deliver square
+    // and silently return 1280x720, which then looks zoomed-in under any
+    // crop preview. Asking for a sensible long-edge ideal lets the camera
+    // pick its native aspect; we letterbox in the preview via object-fit.
     _camLiveStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: _camLiveFacing, width: { ideal: 1280 }, height: { ideal: 1280 } },
+      video: { facingMode: _camLiveFacing, width: { ideal: 1920 } },
       audio: true,   // enable for hold-to-record video with sound
     });
   } catch (e) {
@@ -1008,7 +1012,7 @@ function _camApplyZoom (target) {
       _camZoomVal = z;
     } catch {}
     const ratio = _camZoomCap.min ? (z / _camZoomCap.min) : z;
-    if (badge) { badge.textContent = ratio.toFixed(1) + '\u00d7'; badge.style.display = 'block'; }
+    if (badge) { badge.textContent = ratio.toFixed(1) + '\u00d7'; badge.style.display = ratio > 1.01 ? 'block' : 'none'; }
   } else if (v) {
     // CSS fallback
     const z = Math.max(1, Math.min(4, target));
@@ -1367,29 +1371,16 @@ async function _camFinishSnapFromBlob (blob) {
 function _camFinishSnap (v) {
   const vw = v.videoWidth, vh = v.videoHeight;
 
-  // Crop the sensor frame to match what the user actually sees.
-  //  (a) The live preview uses `object-fit:cover` inside a 3:4 container,
-  //      so anything outside that aspect is off-screen.
-  //  (b) When we're using the CSS-transform zoom fallback, the preview is
-  //      scaled up around its centre — without cropping here the saved
-  //      photo was the full un-zoomed sensor frame, which is why users
-  //      reported "zoomed in preview but full picture was sent".
-  //  Hardware zoom already alters the sensor stream so vw/vh already
-  //  reflect that — we only need to apply the centre-crop by `_camZoomVal`
-  //  when we're on the CSS fallback path.
-  const stageAR = 3 / 4; // width / height, matches aspect-ratio:3/4 CSS
-  const videoAR = vw / vh;
-  let srcW, srcH;
-  if (videoAR > stageAR) {
-    srcH = vh;
-    srcW = vh * stageAR;
-  } else {
-    srcW = vw;
-    srcH = vw / stageAR;
-  }
+  // Preview uses object-fit:contain — the user sees the entire sensor
+  // frame, so we save the entire sensor frame (no aspect-ratio crop).
+  // Hardware zoom already alters the sensor stream so vw/vh already
+  // reflect that. Only the CSS-transform zoom fallback needs a centre
+  // crop here, since that path scales the <video> visually without
+  // changing the sensor output.
+  let srcW = vw, srcH = vh;
   if (!_camZoomTrack && _camZoomVal > 1.01) {
-    srcW /= _camZoomVal;
-    srcH /= _camZoomVal;
+    srcW = vw / _camZoomVal;
+    srcH = vh / _camZoomVal;
   }
   const sx = Math.max(0, (vw - srcW) / 2);
   const sy = Math.max(0, (vh - srcH) / 2);
@@ -1541,7 +1532,73 @@ let _storyFacing = 'user';
 let _storyRecStart = 0;
 let _storyRecTimer = null;
 let _storyCaptured = null; // { dataUrl, mime, blob, filename }
+// Pinch-to-zoom state for the story camera (mirrors the post composer).
+let _storyZoomTrack  = null;
+let _storyZoomCap    = null;
+let _storyZoomVal    = 1;
+let _storyPinchStart = 0;
+let _storyZoomStart  = 1;
+let _storyZoomBound  = false;
 const STORY_MAX_RECORD_MS = 15000;
+
+function _storyTouchDist (t) {
+  const dx = t[0].clientX - t[1].clientX;
+  const dy = t[0].clientY - t[1].clientY;
+  return Math.hypot(dx, dy);
+}
+function _storyTouchStart (e) {
+  if (e.touches && e.touches.length === 2) {
+    e.preventDefault();
+    _storyPinchStart = _storyTouchDist(e.touches);
+    _storyZoomStart  = _storyZoomVal || 1;
+  }
+}
+function _storyTouchMove (e) {
+  if (e.touches && e.touches.length === 2 && _storyPinchStart > 0) {
+    e.preventDefault();
+    const d = _storyTouchDist(e.touches);
+    const factor = d / _storyPinchStart;
+    _storyApplyZoom(_storyZoomStart * factor);
+  }
+}
+function _storyTouchEnd (e) {
+  if (!e.touches || e.touches.length < 2) _storyPinchStart = 0;
+}
+function _storyApplyZoom (target) {
+  const v = document.getElementById('story-cap-video');
+  const badge = document.getElementById('story-cap-zoom-badge');
+  if (_storyZoomTrack && _storyZoomCap) {
+    const z = Math.max(_storyZoomCap.min, Math.min(_storyZoomCap.max, target));
+    try {
+      _storyZoomTrack.applyConstraints({ advanced: [{ zoom: z }] });
+      _storyZoomVal = z;
+    } catch {}
+    const ratio = _storyZoomCap.min ? (z / _storyZoomCap.min) : z;
+    if (badge) { badge.textContent = ratio.toFixed(1) + '\u00d7'; badge.style.display = ratio > 1.01 ? 'block' : 'none'; }
+  } else if (v) {
+    // CSS fallback — the live preview isn't mirrored (existing behaviour;
+    // mirroring is applied at capture time), so we only scale here.
+    const z = Math.max(1, Math.min(4, target));
+    _storyZoomVal = z;
+    v.style.transform = 'scale(' + z.toFixed(3) + ')';
+    if (badge) { badge.textContent = z.toFixed(1) + '\u00d7'; badge.style.display = z > 1.01 ? 'block' : 'none'; }
+  }
+}
+function _storyAttachZoomHandlers () {
+  if (_storyZoomBound) return;
+  const v = document.getElementById('story-cap-video');
+  if (!v) return;
+  v.addEventListener('touchstart', _storyTouchStart, { passive: false });
+  v.addEventListener('touchmove',  _storyTouchMove,  { passive: false });
+  v.addEventListener('touchend',   _storyTouchEnd);
+  v.addEventListener('touchcancel',_storyTouchEnd);
+  v.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const delta = -Math.sign(e.deltaY) * 0.1;
+    _storyApplyZoom(_storyZoomVal + delta);
+  }, { passive: false });
+  _storyZoomBound = true;
+}
 
 async function openStoryCapture (onReady) {
   window._storyCamOnReady = typeof onReady === 'function' ? onReady : null;
@@ -1557,7 +1614,8 @@ async function openStoryCapture (onReady) {
         <div id="story-cap-timer" style="background:rgba(0,0,0,.55);color:#f44;font-size:13px;font-weight:700;padding:6px 12px;border-radius:14px;display:none">● REC 0.0s</div>
         <button id="story-cap-flip" style="background:rgba(0,0,0,.55);color:#fff;border:1px solid #333;border-radius:50%;width:38px;height:38px;font-size:18px;cursor:pointer" title="Flip camera">🔄</button>
       </div>
-      <video id="story-cap-video" autoplay playsinline muted style="max-width:100%;max-height:100vh;background:#000;object-fit:cover;width:100%;height:100%"></video>
+      <div id="story-cap-zoom-badge" style="position:absolute;top:60px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;border:1px solid #333;border-radius:14px;padding:4px 12px;font-size:12px;font-weight:700;display:none;z-index:2">1.0×</div>
+      <video id="story-cap-video" autoplay playsinline muted style="max-width:100%;max-height:100vh;background:#000;object-fit:contain;width:100%;height:100%;transform-origin:center center;touch-action:none"></video>
       <video id="story-cap-playback" playsinline controls style="display:none;max-width:100%;max-height:100vh;background:#000;object-fit:contain;width:100%;height:100%"></video>
       <img id="story-cap-photo" style="display:none;max-width:100%;max-height:100vh;background:#000;object-fit:contain;width:100%;height:100%">
       <div id="story-cap-filters" style="position:absolute;bottom:140px;left:0;right:0;display:none;flex-wrap:wrap;gap:6px;justify-content:center;padding:0 10px;z-index:2"></div>
@@ -1629,8 +1687,12 @@ function closeStoryCapture () {
 async function _storyStartStream () {
   _storyStopStream();
   try {
+    // Don't lock to a specific portrait resolution — most cameras are
+    // landscape-native and silently down-crop to portrait, which makes
+    // the preview look heavily zoomed-in. Ask for high res on the long
+    // edge and let object-fit:contain show the full sensor frame.
     _storyStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: _storyFacing, width: { ideal: 1080 }, height: { ideal: 1920 } },
+      video: { facingMode: _storyFacing, width: { ideal: 1920 } },
       audio: true
     });
   } catch (e) {
@@ -1650,7 +1712,22 @@ async function _storyStartStream () {
     }
   }
   const v = document.getElementById('story-cap-video');
-  if (v) { v.srcObject = _storyStream; v.style.filter = _camFilterStr(); }
+  if (v) { v.srcObject = _storyStream; v.style.filter = _camFilterStr(); v.style.transform = ''; }
+  // Reset zoom state and probe hardware zoom capability.
+  _storyZoomVal = 1; _storyZoomTrack = null; _storyZoomCap = null;
+  const badge = document.getElementById('story-cap-zoom-badge');
+  if (badge) badge.style.display = 'none';
+  try {
+    const track = _storyStream.getVideoTracks()[0];
+    if (track && typeof track.getCapabilities === 'function') {
+      const caps = track.getCapabilities();
+      if (caps && caps.zoom) {
+        _storyZoomTrack = track;
+        _storyZoomCap = { min: caps.zoom.min || 1, max: caps.zoom.max || 3, step: caps.zoom.step || 0.1 };
+      }
+    }
+  } catch {}
+  _storyAttachZoomHandlers();
 }
 
 function _storyStopStream () {
@@ -1659,7 +1736,10 @@ function _storyStopStream () {
     _storyStream = null;
   }
   const v = document.getElementById('story-cap-video');
-  if (v) v.srcObject = null;
+  if (v) { v.srcObject = null; v.style.transform = ''; }
+  _storyZoomTrack = null; _storyZoomCap = null; _storyZoomVal = 1;
+  const badge = document.getElementById('story-cap-zoom-badge');
+  if (badge) badge.style.display = 'none';
 }
 
 async function _storyFlip () {
@@ -1685,14 +1765,24 @@ function _storyApplyFilter (key) {
 function _storyTakePhoto () {
   const v = document.getElementById('story-cap-video');
   if (!v || !v.videoWidth) { toast('Camera not ready', 'error'); return; }
-  const w = v.videoWidth, h = v.videoHeight;
+  const vw = v.videoWidth, vh = v.videoHeight;
+  // Hardware zoom alters the sensor stream so vw/vh already reflect it.
+  // For the CSS-transform fallback, centre-crop by the current zoom so
+  // the saved photo matches what the user sees.
+  let srcW = vw, srcH = vh;
+  if (!_storyZoomTrack && _storyZoomVal > 1.01) {
+    srcW = vw / _storyZoomVal;
+    srcH = vh / _storyZoomVal;
+  }
+  const sx = Math.max(0, (vw - srcW) / 2);
+  const sy = Math.max(0, (vh - srcH) / 2);
   const c = document.createElement('canvas');
-  c.width = w; c.height = h;
+  c.width = Math.round(srcW); c.height = Math.round(srcH);
   const ctx = c.getContext('2d');
   // mirror front camera
-  if (_storyFacing === 'user') { ctx.translate(w, 0); ctx.scale(-1, 1); }
+  if (_storyFacing === 'user') { ctx.translate(c.width, 0); ctx.scale(-1, 1); }
   ctx.filter = _camFilterStr();
-  ctx.drawImage(v, 0, 0, w, h);
+  ctx.drawImage(v, sx, sy, srcW, srcH, 0, 0, c.width, c.height);
   c.toBlob(blob => {
     if (!blob) { toast('Capture failed', 'error'); return; }
     const fr = new FileReader();
