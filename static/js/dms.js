@@ -1341,30 +1341,61 @@ async function sendDMMessage () {
     _dmSending = true;
     const sendBtn = document.getElementById('send-btn');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '⏳'; }
-    // Convert blob to base64 data URL and send as JSON (API only accepts JSON body)
+    // Convert blob to base64 data URL and send as JSON (API only accepts JSON body).
+    // Progress phases (matches the channel-message uploader so the toast
+    // climbs honestly with bytes-on-the-wire instead of pausing at 70%):
+    //   0–20%  Preparing media   (blob → base64)
+    //  20–25%  Encrypting        (E2EE DMs only)
+    //  25–95%  Uploading         (real XHR upload progress)
+    //  95–99%  Server processing
+    //    100%  Sent
     try {
       let mediaData = fileData.dataUrl || fileData.data || null;
       if (!mediaData && fileData.blob) {
+        UI.showProgressToast('Preparing media…', 0);
         try {
-          mediaData = await UI.blobToDataURL(fileData.blob);
+          mediaData = await UI.blobToDataURL(fileData.blob, (pct) => {
+            UI.showProgressToast('Preparing media…', Math.max(1, Math.round(pct * 0.20)));
+          });
         } catch (err) {
+          UI.showProgressToast('Failed to prepare media', 100);
           toast('Could not read attachment: ' + (err?.message || 'unknown error'), 'error');
           return;
         }
+        UI.showProgressToast('Preparing media…', 20);
       }
       if (mediaData && STATE.sharedSecret && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
+        UI.showProgressToast('Encrypting…', 22);
         mediaData = await Crypto.encryptPayload(mediaData, STATE.sharedSecret);
+        UI.showProgressToast('Encrypting…', 25);
       }
-      const r = await apiFetch(`/api/dms/${_activeDM.id}/messages`, 'POST', {
-        content: encryptedContent || content || '',
-        media_data: mediaData,
-        media_type: fileData.type || '',
-        media_name: fileData.name || 'file',
-        media_blur: window._pendingMediaBlur ? 1 : 0,
-        view_once: window._pendingViewOnce ? 1 : 0,
-        reply_to: _dmReplyTo?.id || null,
-      });
-      if (!r.ok) { toast('Upload failed', 'error'); return; }
+      UI.showProgressToast('Uploading…', 25);
+      const r = await UI.uploadJSONWithProgress(
+        `/api/dms/${_activeDM.id}/messages`,
+        {
+          content: encryptedContent || content || '',
+          media_data: mediaData,
+          media_type: fileData.type || '',
+          media_name: fileData.name || 'file',
+          media_blur: window._pendingMediaBlur ? 1 : 0,
+          view_once: window._pendingViewOnce ? 1 : 0,
+          reply_to: _dmReplyTo?.id || null,
+        },
+        {
+          onProgress: (loaded, total, phase) => {
+            if (phase === 'uploaded') {
+              UI.showProgressToast('Sending…', 97);
+              return;
+            }
+            if (!total) return;
+            const frac = Math.max(0, Math.min(1, loaded / total));
+            const pct = 25 + Math.round(frac * 70);
+            UI.showProgressToast('Uploading…', Math.min(95, pct));
+          },
+        }
+      );
+      if (!r.ok) { UI.showProgressToast('Upload failed', 100); toast('Upload failed', 'error'); return; }
+      UI.showProgressToast('Sent!', 100);
       clearReplyToDM();
       clearAttachment();
       input.value = '';
@@ -1373,6 +1404,7 @@ async function sendDMMessage () {
       appendDMMessage(msg);
     } catch (e) {
       console.error('DM file send error', e);
+      UI.showProgressToast('Upload failed', 100);
       toast('Failed to send file', 'error');
     } finally {
       _dmSending = false;

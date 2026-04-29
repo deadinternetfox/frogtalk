@@ -1754,21 +1754,28 @@ async function sendMessage() {
   try {
     const key = State.roomKeys[State.currentRoom];
 
-    // Convert blob attachment to base64 dataUrl if needed
+    // Convert blob attachment to base64 dataUrl if needed.
+    // Progress phases for the upload toast (so users see honest motion
+    // instead of the old "stick at 70% then jump to 100%" pattern):
+    //   0–20%  Preparing media (blob → base64)
+    //  20–25%  Encrypting payload (E2EE rooms only)
+    //  25–95%  Uploading (real XHR upload-progress bytes)
+    //  95–99%  Server processing
+    //    100%  Sent
     let mediaData = attachment?.dataUrl || attachment?.data || null;
     let mediaType = attachment?.type || null;
     if (!mediaData && attachment?.blob) {
       UI.showProgressToast('Preparing media…', 0);
       try {
         mediaData = await UI.blobToDataURL(attachment.blob, (pct) => {
-          UI.showProgressToast('Preparing media…', Math.round(pct * 0.5));
+          UI.showProgressToast('Preparing media…', Math.max(1, Math.round(pct * 0.20)));
         });
       } catch (err) {
         UI.showProgressToast('Failed to prepare media', 100);
         throw new Error('Could not read attachment: ' + (err && err.message ? err.message : 'unknown error'));
       }
       mediaType = attachment.type;
-      UI.showProgressToast('Sending…', 60);
+      UI.showProgressToast('Preparing media…', 20);
     }
 
     // Use REST API for media (reliable) or WS for text-only (fast)
@@ -1804,19 +1811,38 @@ async function sendMessage() {
     }
     const encrypted = (key && text && !hasOutbound) ? await Crypto.encrypt(text, key) : text;
     if (mediaData && key && !hasOutbound && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
+      UI.showProgressToast('Encrypting…', 22);
       mediaData = await Crypto.encryptPayload(mediaData, key);
+      UI.showProgressToast('Encrypting…', 25);
     }
     if (mediaData) {
-      UI.showProgressToast('Uploading…', 70);
-      const res = await apiFetch(`/api/messages/${encodeURIComponent(State.currentRoom)}/send`, 'POST', {
-        content: encrypted,
-        media_data: mediaData,
-        media_type: mediaType,
-        media_blur: window._pendingMediaBlur ? 1 : 0,
-        view_once: window._pendingViewOnce ? 1 : 0,
-        reply_to: Messages.getReplyToId(),
-        bridge_plain: hasOutbound ? text : null,
-      });
+      UI.showProgressToast('Uploading…', 25);
+      const res = await UI.uploadJSONWithProgress(
+        `/api/messages/${encodeURIComponent(State.currentRoom)}/send`,
+        {
+          content: encrypted,
+          media_data: mediaData,
+          media_type: mediaType,
+          media_blur: window._pendingMediaBlur ? 1 : 0,
+          view_once: window._pendingViewOnce ? 1 : 0,
+          reply_to: Messages.getReplyToId(),
+          bridge_plain: hasOutbound ? text : null,
+        },
+        {
+          onProgress: (loaded, total, phase) => {
+            if (phase === 'uploaded') {
+              UI.showProgressToast('Sending…', 97);
+              return;
+            }
+            if (!total) return;
+            // Map real upload bytes onto 25 → 95 so the bar climbs smoothly
+            // with the network instead of pausing at 70%.
+            const frac = Math.max(0, Math.min(1, loaded / total));
+            const pct = 25 + Math.round(frac * 70);
+            UI.showProgressToast('Uploading…', Math.min(95, pct));
+          },
+        }
+      );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Upload failed');

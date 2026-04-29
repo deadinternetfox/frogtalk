@@ -422,7 +422,52 @@ const UI = (() => {
     });
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL };
+  // Authenticated JSON POST/PUT with real upload progress via XHR. Returns
+  // a Response-like object: { ok, status, json(), text() }. Used for chat
+  // attachments where users want to see actual bytes-on-the-wire instead of
+  // the fake "70% then jump to 100%" feedback that fetch() can't expose.
+  function uploadJSONWithProgress(url, payload, opts = {}) {
+    const method = (opts.method || 'POST').toUpperCase();
+    const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : null;
+    const token = (typeof State !== 'undefined' && State && State.token) ? State.token : '';
+    return new Promise((resolve, reject) => {
+      let body;
+      try { body = JSON.stringify(payload); }
+      catch (e) { reject(e); return; }
+      const xhr = new XMLHttpRequest();
+      xhr.open(method, url, true);
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      if (token) xhr.setRequestHeader('X-Session-Token', token);
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e && e.lengthComputable) {
+            try { onProgress(e.loaded, e.total); } catch {}
+          }
+        };
+        // upload.onload fires when the request body has finished going up
+        // but before the server has responded — useful to flip the label
+        // from "Uploading…" to "Sending…".
+        xhr.upload.onload = () => {
+          try { onProgress(1, 1, 'uploaded'); } catch {}
+        };
+      }
+      xhr.onload = () => {
+        const status = xhr.status || 0;
+        const text = xhr.responseText || '';
+        resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          text: () => Promise.resolve(text),
+          json: () => { try { return Promise.resolve(JSON.parse(text)); } catch (e) { return Promise.reject(e); } },
+        });
+      };
+      xhr.onerror = () => reject(new TypeError('Network request failed'));
+      xhr.onabort = () => reject(new Error('aborted'));
+      try { xhr.send(body); } catch (e) { reject(e); }
+    });
+  }
+
+  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress };
 })();
 // Global alias so non-module callers can use it without going through UI.
 window.blobToDataURL = (blob, onProgress) => UI.blobToDataURL(blob, onProgress);
