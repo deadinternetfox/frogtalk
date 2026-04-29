@@ -337,8 +337,36 @@ const Music = (() => {
   function _setAnchor(track, serverPosSec) {
     if (!track) { _anchorMs = 0; _anchorTrackKey = ''; return; }
     const key = `${track.provider}:${track.video_id}`;
+    const incoming = Math.max(0, parseInt(serverPosSec || 0, 10) || 0);
+
+    // Defensive: protect a healthy local clock from a stale/just-stamped
+    // server reading. The server's _music_head_started is in-memory, and
+    // any miss (process restart, track changed in DB without going through
+    // skip/delete, race with a clear) makes /queue return position_sec=0
+    // and re-stamp with `now`. If we blindly accept that, the iframe gets
+    // seeked back to the start of the track every time a WS event fires
+    // or the user clicks Resync.
+    //
+    // Heuristic: if we already have an anchor for THIS same track, only
+    // accept the incoming value when it's plausible. "Plausible" means
+    // either close to our local clock (<5s drift, normal jitter) or it
+    // moved forward (someone seeked the room ahead). A backwards jump of
+    // more than a few seconds on the same head track is almost always a
+    // server-side anchor reset, not a real seek-backwards.
+    if (key === _anchorTrackKey && _anchorMs) {
+      const localElapsed = Math.max(0, Math.floor((Date.now() - _anchorMs) / 1000));
+      // Server lost its anchor and is reporting ~0 while we're well past it.
+      if (incoming < 3 && localElapsed > 5) return;
+      // Server reading is behind ours by more than 10s on the same track.
+      // Trust the local clock; the server just (re)stamped.
+      if (localElapsed - incoming > 10) return;
+      // Within tolerance — leave the existing anchor alone to avoid
+      // imperceptible jitter on every refetch.
+      if (Math.abs(localElapsed - incoming) < 3) return;
+    }
+
     _anchorTrackKey = key;
-    _anchorMs = Date.now() - (Math.max(0, parseInt(serverPosSec || 0, 10) || 0) * 1000);
+    _anchorMs = Date.now() - (incoming * 1000);
   }
 
   // Send a seek command to the current iframe. Works for YouTube + SoundCloud
@@ -1105,8 +1133,13 @@ const Music = (() => {
           _render();
           return;
         }
-        // Same head track — just seek locally.
-        _setAnchor(cur, s.position_sec);
+        // Same head track — local anchor IS the room's clock once seeded.
+        // Do NOT re-anchor from server here: server's position_sec can
+        // return a stale ~0 after an in-memory anchor miss, which would
+        // yank our seek target to the start of the track. _setAnchor
+        // already filters bad readings, but skipping the call entirely
+        // for the steady-state Resync path is the cheapest correct
+        // option.
         _resync(true);
         // Fast follow-up probes: ~900ms (after the seek lands) and ~2.5s
         // (after the iframe has settled) so the badge updates promptly
