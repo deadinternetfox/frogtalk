@@ -3766,7 +3766,8 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .story-progress{display:flex;gap:3px;padding:8px 12px;position:absolute;top:0;left:0;right:0;z-index:2}
 .story-prog-seg{flex:1;height:3px;background:rgba(255,255,255,.3);border-radius:2px;overflow:hidden;position:relative}
 .story-prog-seg.done{background:#4caf50}
-.story-prog-seg.active::after{content:"";position:absolute;inset:0;background:#4caf50;border-radius:2px;transform-origin:left center;transform:scaleX(0);animation:storyProg 5s linear forwards}
+.story-prog-seg .story-prog-fill{position:absolute;inset:0;background:#4caf50;border-radius:2px;transform-origin:left center;transform:scaleX(0)}
+.story-prog-seg.active.timed .story-prog-fill{animation:storyProg 5s linear forwards}
 .story-prog-seg.loading{background:rgba(255,255,255,.35)}
 @keyframes storyProg{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 .story-header{display:flex;align-items:center;gap:8px;padding:20px 12px 8px;position:absolute;top:0;left:0;right:0;z-index:2}

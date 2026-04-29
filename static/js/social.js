@@ -280,9 +280,10 @@ const Social = (() => {
     viewer._timer = null;
 
     const isLoading = !story.media_data && story.has_media;
-    const progress = user.stories.map((s, i) =>
-      `<div class="story-prog-seg ${i < _storyViewIdx ? 'done' : i === _storyViewIdx ? (isLoading ? 'loading' : 'active') : ''}"></div>`
-    ).join('');
+    const progress = user.stories.map((s, i) => {
+      const cls = i < _storyViewIdx ? 'done' : i === _storyViewIdx ? (isLoading ? 'loading' : 'active') : '';
+      return `<div class="story-prog-seg ${cls}"><div class="story-prog-fill"></div></div>`;
+    }).join('');
 
     viewer.innerHTML = `
       <div class="story-viewer-inner" onclick="Social.nextStory()">
@@ -316,17 +317,59 @@ const Social = (() => {
     const startProgressAndTimer = () => {
       const segs = viewer.querySelectorAll('.story-prog-seg');
       const seg = segs[_storyViewIdx];
-      if (seg) {
-        // Force a fresh animation cycle when swapping loading -> active.
-        // Replacing the node guarantees the CSS animation restarts from 0
-        // even if the segment was previously running the loading shimmer.
-        const fresh = seg.cloneNode(false);
-        fresh.classList.remove('loading');
-        fresh.classList.add('active');
-        seg.parentNode.replaceChild(fresh, seg);
+      const isVideo = (story.media_type || '').startsWith('video');
+      const videoEl = viewer.querySelector('#story-media-slot video');
+
+      if (isVideo && videoEl) {
+        // Drive the segment from the actual video. No fixed timer — advance
+        // when the video ends. The fill is updated each rAF to track currentTime.
+        if (seg) {
+          const fresh = seg.cloneNode(true);
+          fresh.classList.remove('loading', 'timed');
+          fresh.classList.add('active');
+          seg.parentNode.replaceChild(fresh, seg);
+          const fill = fresh.querySelector('.story-prog-fill');
+          const myIdx = _storyViewIdx, myUserIdx = _storyUserIdx;
+          const tick = () => {
+            if (myIdx !== _storyViewIdx || myUserIdx !== _storyUserIdx) return;
+            if (!videoEl.isConnected) return;
+            const dur = videoEl.duration;
+            if (dur && isFinite(dur) && dur > 0) {
+              const pct = Math.min(1, Math.max(0, videoEl.currentTime / dur));
+              if (fill) fill.style.transform = 'scaleX(' + pct.toFixed(4) + ')';
+            }
+            if (!videoEl.paused && !videoEl.ended) requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        }
+        // Belt-and-braces fallback: if the video metadata never loads, cap at 15s.
+        clearTimeout(viewer._timer);
+        viewer._timer = setTimeout(() => nextStory(), 15000);
+        videoEl.addEventListener('loadedmetadata', () => {
+          const d = videoEl.duration;
+          if (d && isFinite(d) && d > 0) {
+            clearTimeout(viewer._timer);
+            // Hard cap at 15s for safety; otherwise wait for `ended`.
+            const ms = Math.min(15000, Math.max(800, d * 1000)) + 250;
+            viewer._timer = setTimeout(() => nextStory(), ms);
+          }
+        }, { once: true });
+        videoEl.addEventListener('ended', () => {
+          clearTimeout(viewer._timer);
+          nextStory();
+        }, { once: true });
+        try { videoEl.play().catch(() => {}); } catch {}
+      } else {
+        // Photo: 5s fixed timer with the CSS keyframe fill.
+        if (seg) {
+          const fresh = seg.cloneNode(true);
+          fresh.classList.remove('loading');
+          fresh.classList.add('active', 'timed');
+          seg.parentNode.replaceChild(fresh, seg);
+        }
+        clearTimeout(viewer._timer);
+        viewer._timer = setTimeout(() => nextStory(), 5000);
       }
-      clearTimeout(viewer._timer);
-      viewer._timer = setTimeout(() => nextStory(), 5000);
     };
     if (!story.media_data && story.has_media) {
       const myIdx = _storyViewIdx, myUserIdx = _storyUserIdx;
