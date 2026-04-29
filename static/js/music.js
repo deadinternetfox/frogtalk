@@ -321,6 +321,9 @@ const Music = (() => {
   function resumeFromNotification() {
     const cur = _state && _state.queue && _state.queue[0];
     if (!cur) return false;
+    // Bring the user back to the music source (channel or FrogSocial
+    // music tab) so they actually see the player they tapped on.
+    try { expand(); } catch {}
     try { _resumeOnVisible({ force: true, ignorePaused: true }); } catch {}
     return true;
   }
@@ -682,13 +685,20 @@ const Music = (() => {
         let attempts = 1;
         const verify = () => {
           if (myToken !== _resumeRetryToken) return;   // superseded by a newer call
-          if (document.hidden || _paused) return;
+          if (document.hidden) return;
+          // Only honor _paused as a stop signal when we did NOT enter via
+          // ignorePaused. Without this exception, the notification-tray
+          // resume + app-return resume bail immediately because
+          // _onAppHidden left _paused=true — verify never runs, the
+          // sidebar button stays on ▶ even though YT resumed audio.
+          if (_paused && !ignorePaused) return;
           // Ask the embed for its current state — reply lands in our
           // global message listener and updates _lastPlayerState.
           send({ event: 'command', func: 'getPlayerState', args: [] });
           setTimeout(() => {
             if (myToken !== _resumeRetryToken) return;
-            if (document.hidden || _paused) return;
+            if (document.hidden) return;
+            if (_paused && !ignorePaused) return;
             if (_lastPlayerState === 1) {
               // Playing — only seek now if we actually drifted enough to
               // matter. Avoids the seek-pause race for small drifts and
