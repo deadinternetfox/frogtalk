@@ -1040,13 +1040,17 @@ const Music = (() => {
       _setAnchor(cur, _state.position_sec);
     }
     const posSec = _expectedPosSec();
+    // Honour user-pause across full re-renders too (room switch, head
+    // track unchanged path is handled separately above).
+    const ap = _userPaused ? '0' : '1';
+    const scAuto = _userPaused ? 'false' : 'true';
     const playerHtml = cur
       ? (cur.provider === 'youtube'
-          ? `<iframe class="mp-frame" src="https://www.youtube.com/embed/${esc(cur.video_id)}?autoplay=1&enablejsapi=1&start=${posSec}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`
+          ? `<iframe class="mp-frame" src="https://www.youtube.com/embed/${esc(cur.video_id)}?autoplay=${ap}&enablejsapi=1&start=${posSec}" allow="autoplay; encrypted-media" allowfullscreen></iframe>`
           : cur.provider === 'spotify'
             ? `<iframe class="mp-frame" src="https://open.spotify.com/embed/${esc(cur.video_id)}?t=${posSec}" allow="autoplay; clipboard-write; encrypted-media" allowfullscreen></iframe>`
             : cur.provider === 'soundcloud'
-              ? `<iframe class="mp-frame" scrolling="no" frameborder="no" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(cur.video_id)}&auto_play=true&show_artwork=true&visual=false&hide_related=true&color=%234caf50"></iframe>`
+              ? `<iframe class="mp-frame" scrolling="no" frameborder="no" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(cur.video_id)}&auto_play=${scAuto}&show_artwork=true&visual=false&hide_related=true&color=%234caf50"></iframe>`
               : `<div class="mp-empty">Unsupported provider</div>`
         )
       : `<div class="mp-empty">🎵 Queue is empty — paste a YouTube, Spotify, or SoundCloud link below to start the party</div>`;
@@ -1389,12 +1393,18 @@ const Music = (() => {
     const localPos = _expectedPosSec();
     const serverPos = Math.max(0, Math.min(21600, parseInt(_state.position_sec || 0, 10) || 0));
     const posSec = Math.max(localPos, serverPos);
+    // Honour user-pause intent. If the user explicitly paused before
+    // navigating to another channel (which is what triggers this fresh
+    // mini render), an autoplay=1 iframe would override that and start
+    // playing from the embed's start offset. Build the iframe paused.
+    const ap = _userPaused ? '0' : '1';
+    const scAuto = _userPaused ? 'false' : 'true';
     const playerHtml = cur.provider === 'youtube'
-      ? `<iframe class="mp-frame" src="https://www.youtube.com/embed/${esc(cur.video_id)}?autoplay=1&enablejsapi=1&start=${posSec}" allow="autoplay; encrypted-media"></iframe>`
+      ? `<iframe class="mp-frame" src="https://www.youtube.com/embed/${esc(cur.video_id)}?autoplay=${ap}&enablejsapi=1&start=${posSec}" allow="autoplay; encrypted-media"></iframe>`
       : cur.provider === 'spotify'
         ? `<iframe class="mp-frame" src="https://open.spotify.com/embed/${esc(cur.video_id)}?t=${posSec}" allow="autoplay; clipboard-write; encrypted-media"></iframe>`
         : cur.provider === 'soundcloud'
-          ? `<iframe class="mp-frame" scrolling="no" frameborder="no" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(cur.video_id)}&auto_play=true&show_artwork=true&visual=false&hide_related=true&color=%234caf50"></iframe>`
+          ? `<iframe class="mp-frame" scrolling="no" frameborder="no" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(cur.video_id)}&auto_play=${scAuto}&show_artwork=true&visual=false&hide_related=true&color=%234caf50"></iframe>`
           : `<div class="mp-empty">Unsupported</div>`;
     panel.innerHTML = `
       <div id="mp-player-wrap" data-cur-key="${curKey}">${playerHtml}</div>
