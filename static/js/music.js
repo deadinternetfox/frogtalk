@@ -580,13 +580,14 @@ const Music = (() => {
             _anchorTrackKey = `${cur2.provider}:${cur2.video_id}`;
             _lastDriftSec = 0;
             _renderSyncBadge();
-          } else if (actualSec + 10 < expectedAtSample
-                     && (Date.now() - _lastAutoCorrectAt) > 6000) {
-            // Iframe is behind — most likely Android restart-at-0 case.
-            // Seek forward to the room's expected position.
-            _lastAutoCorrectAt = Date.now();
-            try { _seekIframe(_expectedPosSec()); } catch {}
           }
+          // Note: we deliberately do NOT auto-seek-forward when the
+          // iframe is behind. That branch was perpetually firing on
+          // some Android WebView builds (where YT's currentTime can
+          // briefly stall behind the local clock) and yanked playback
+          // backwards every 4s. The verify ladder in _resumeOnVisible
+          // already covers the legitimate Android restart-at-0 case;
+          // the user can also tap Resync if they truly drift behind.
         }
       } catch { /* keep listener resilient */ }
     });
