@@ -469,6 +469,154 @@ const UI = (() => {
 
   return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress };
 })();
+
+// ─── ChatVideo: themed inline video player for chat ──────────────────────────
+// Wraps <video class="msg-media"> elements that live inside <div class="chat-video">
+// with a polished themed UI:
+//   - Real first-frame poster (captured to a canvas once metadata loads —
+//     fixes the "black rectangle, no thumbnail" symptom on Android WebView /
+//     Safari / data: URL videos where browsers refuse to paint a poster).
+//   - Big centered play button in the brand green.
+//   - Duration badge in the corner.
+//   - Tap to play inline; native controls appear after the user starts playback
+//     so scrub/fullscreen/volume all still work natively. Long-press still
+//     opens the lightbox via the existing onclick on the <video>.
+const ChatVideo = (() => {
+  const POSTER_SEEK = 0.08;
+
+  function fmtDuration(s) {
+    if (!isFinite(s) || s <= 0) return '';
+    const m = Math.floor(s / 60);
+    const ss = Math.floor(s % 60).toString().padStart(2, '0');
+    return m + ':' + ss;
+  }
+
+  function init(wrap) {
+    if (!wrap || wrap.dataset.cvInit === '1') return;
+    const v = wrap.querySelector('video');
+    if (!v) return;
+    wrap.dataset.cvInit = '1';
+
+    const overlay = wrap.querySelector('.cv-overlay');
+    const poster = wrap.querySelector('.cv-poster');
+    const durEl = wrap.querySelector('.cv-dur');
+    const loading = wrap.querySelector('.cv-loading');
+
+    // Strip native controls until the user starts playback so the themed
+    // overlay isn't fighting browser UI for the same pixels.
+    try { v.removeAttribute('controls'); } catch {}
+    v.preload = 'metadata';
+    v.muted = true;
+    v.playsInline = true;
+    try { v.setAttribute('playsinline', ''); } catch {}
+
+    let posterDrawn = false;
+    const drawPoster = () => {
+      if (posterDrawn) return;
+      try {
+        const w = v.videoWidth, h = v.videoHeight;
+        if (!w || !h) return;
+        const c = document.createElement('canvas');
+        const scale = Math.min(1, 720 / w);
+        c.width = Math.max(2, Math.round(w * scale));
+        c.height = Math.max(2, Math.round(h * scale));
+        const ctx = c.getContext('2d');
+        ctx.drawImage(v, 0, 0, c.width, c.height);
+        const url = c.toDataURL('image/jpeg', 0.72);
+        if (poster) {
+          poster.style.backgroundImage = `url(${url})`;
+          poster.classList.add('ready');
+        }
+        try { v.setAttribute('poster', url); } catch {}
+        posterDrawn = true;
+        if (loading) loading.style.display = 'none';
+      } catch {
+        // CORS or canvas-tainted (shouldn't happen for data: URLs / same origin).
+        if (loading) loading.style.display = 'none';
+      }
+    };
+
+    const onMeta = () => {
+      if (loading) loading.style.display = 'none';
+      if (durEl && isFinite(v.duration) && v.duration > 0) {
+        durEl.textContent = fmtDuration(v.duration);
+      }
+      // Seek a hair into the file — frame 0 is often pure black on H.264 keyframes.
+      try {
+        const target = Math.min(POSTER_SEEK, Math.max(0.01, (v.duration || 1) * 0.04));
+        v.currentTime = target;
+      } catch { drawPoster(); }
+    };
+
+    if (v.readyState >= 1) onMeta();
+    else v.addEventListener('loadedmetadata', onMeta, { once: true });
+
+    v.addEventListener('seeked', drawPoster, { once: true });
+    v.addEventListener('loadeddata', drawPoster);
+    // Safety: if the browser never fires seeked (some Android WebViews on
+    // data: URLs), fall back to a timer.
+    setTimeout(() => { if (!posterDrawn) drawPoster(); }, 1500);
+
+    if (overlay) {
+      overlay.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Capture poster before play so a flash-of-black is impossible.
+        drawPoster();
+        wrap.classList.add('cv-playing');
+        try { v.controls = true; } catch {}
+        try { v.muted = false; } catch {}
+        try { v.currentTime = 0; } catch {}
+        const p = v.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {
+            // Browser blocked unmuted autoplay — retry muted (user can unmute via controls).
+            try { v.muted = true; v.play().catch(() => {}); } catch {}
+          });
+        }
+      });
+    }
+
+    v.addEventListener('ended', () => {
+      wrap.classList.remove('cv-playing');
+      try { v.controls = false; } catch {}
+    });
+  }
+
+  function scan(scope) {
+    const root = scope || document;
+    root.querySelectorAll('.chat-video:not([data-cv-init="1"])').forEach(init);
+  }
+
+  // MutationObserver auto-attaches to every chat-video added to the DOM, so
+  // renderers in messages.js / dms.js / lazy-load paths don't need to remember
+  // to call scan() themselves.
+  function _startObserver() {
+    if (typeof MutationObserver === 'undefined' || !document.body) return;
+    try {
+      scan(document);
+      const mo = new MutationObserver((muts) => {
+        for (const m of muts) {
+          for (const node of m.addedNodes) {
+            if (node && node.nodeType === 1) {
+              if (node.matches && node.matches('.chat-video')) init(node);
+              else if (node.querySelectorAll) scan(node);
+            }
+          }
+        }
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
+    } catch {}
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _startObserver, { once: true });
+  } else {
+    _startObserver();
+  }
+
+  return { init, scan };
+})();
+window.ChatVideo = ChatVideo;
+
 // Global alias so non-module callers can use it without going through UI.
 window.blobToDataURL = (blob, onProgress) => UI.blobToDataURL(blob, onProgress);
 

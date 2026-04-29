@@ -314,10 +314,22 @@ const Messages = (() => {
     // Base media element
     let inner;
     if (msg.media_type?.startsWith('video')) {
-      // preload="metadata" makes browsers render the first frame as the
-      // displayed thumbnail instead of a black rectangle. Showing native
-      // controls lets users scrub/play without launching the lightbox.
-      inner = `<video class="msg-media clickable-media" src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" onclick="Messages.openMedia(this)" preload="metadata" controls muted playsinline></video>`;
+      if (msg.media_blur) {
+        // Spoiler videos: skip the themed wrapper so the poster background
+        // can't leak the thumbnail through the spoiler overlay.
+        inner = `<video class="msg-media clickable-media" src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" onclick="Messages.openMedia(this)" preload="metadata" controls muted playsinline></video>`;
+      } else {
+        // Themed inline player (ChatVideo in ui.js wires interaction).
+        // The wrapper draws a real first-frame thumbnail and a brand-coloured
+        // play button; native controls appear once the user starts playback.
+        inner = `<div class="chat-video" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}">`+
+          `<div class="cv-poster"></div>`+
+          `<video class="msg-media clickable-media" src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" preload="metadata" muted playsinline></video>`+
+          `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
+          `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
+          `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
+        `</div>`;
+      }
     } else if (msg.media_type?.startsWith('audio')) {
       const waveBars = Array.from({length:20}, () => `<div class="wave-bar" style="height:${4 + Math.random()*20}px"></div>`).join('');
       inner = `<div class="audio-msg" id="audio-${msg.id}" data-src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}">
@@ -1238,7 +1250,17 @@ const Messages = (() => {
       const mediaType = data.media_type || container.getAttribute('data-media-type') || '';
       let html;
       if (mediaType.startsWith('video')) {
-        html = `<video class="msg-media clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" onclick="Messages.openMedia(this)" preload="metadata" controls muted playsinline></video>`;
+        if (isBlur) {
+          html = `<video class="msg-media clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" onclick="Messages.openMedia(this)" preload="metadata" controls muted playsinline></video>`;
+        } else {
+          html = `<div class="chat-video" data-sender="${UI.escHtml(sender)}" data-time="${time}">`+
+            `<div class="cv-poster"></div>`+
+            `<video class="msg-media clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" preload="metadata" muted playsinline></video>`+
+            `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
+            `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
+            `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
+          `</div>`;
+        }
       } else if (mediaType.startsWith('audio')) {
         const waveBars = Array.from({length:20}, () => `<div class="wave-bar" style="height:${4 + Math.random()*20}px"></div>`).join('');
         html = `<div class="audio-msg" id="audio-${msgId}" data-src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}">

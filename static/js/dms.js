@@ -971,7 +971,13 @@ function renderDMMessage (m) {
     if (mimeType.startsWith('image/') || (!mimeType && mediaUrl.startsWith('data:image'))) {
       inner = `<img src="${mediaUrl}" class="msg-media" onclick="openLightbox('${mediaUrl}')" loading="lazy">`;
     } else if (mimeType.startsWith('video/') || (!mimeType && mediaUrl.startsWith('data:video'))) {
-      inner = `<video src="${mediaUrl}" controls preload="metadata" playsinline muted class="msg-media"></video>`;
+      inner = `<div class="chat-video">`+
+        `<div class="cv-poster"></div>`+
+        `<video src="${mediaUrl}" class="msg-media" preload="metadata" muted playsinline></video>`+
+        `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
+        `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
+        `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
+      `</div>`;
     } else if (mimeType.startsWith('audio/') || (!mimeType && mediaUrl.startsWith('data:audio'))) {
       inner = `<audio src="${mediaUrl}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
     } else {
@@ -1264,7 +1270,13 @@ async function loadDMMedia (msgId, channelId) {
     const mediaType = data.media_type || '';
     let html;
     if (mediaType.startsWith('video')) {
-      html = `<video src="${data.media_data}" controls preload="metadata" playsinline muted class="msg-media"></video>`;
+      html = `<div class="chat-video">`+
+        `<div class="cv-poster"></div>`+
+        `<video src="${data.media_data}" class="msg-media" preload="metadata" muted playsinline></video>`+
+        `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
+        `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
+        `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
+      `</div>`;
     } else if (mediaType.startsWith('audio')) {
       html = `<audio src="${data.media_data}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
     } else {

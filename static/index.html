@@ -1615,6 +1615,31 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .msg-pending .msg-time{color:#9a9a9a !important}
 .msg-content.encrypted{color:#555;font-style:italic;font-size:13px}
 .msg-media{max-width:min(360px,100%);max-height:300px;width:auto;height:auto;border-radius:8px;margin-top:6px;cursor:pointer;display:block;object-fit:contain}
+/* ─── Themed inline chat-video player ────────────────────────────────────
+   Wraps a <video> with a polished, brand-coloured shell so chat videos
+   show a real first-frame thumbnail + central play button instead of a
+   black rectangle. ChatVideo (ui.js) wires interaction. */
+.chat-video{position:relative;display:inline-block;max-width:min(360px,100%);margin-top:6px;border-radius:12px;overflow:hidden;background:#000;border:1px solid #1f3b32;box-shadow:0 8px 24px rgba(0,0,0,.45),0 0 0 1px rgba(76,175,80,.04) inset;line-height:0}
+.chat-video video{display:block;width:100%;max-width:100%;max-height:300px;height:auto;background:#000;border-radius:11px;object-fit:contain}
+.chat-video .cv-poster{position:absolute;inset:0;background-color:#0c1612;background-position:center;background-size:cover;background-repeat:no-repeat;border-radius:11px;z-index:1;opacity:0;transition:opacity .25s ease}
+.chat-video .cv-poster.ready{opacity:1}
+.chat-video.cv-playing .cv-poster{display:none}
+.chat-video .cv-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:2;pointer-events:none}
+.chat-video .cv-loading .cv-spinner{width:30px;height:30px;border:3px solid rgba(76,175,80,.18);border-top-color:#6bb698;border-radius:50%;animation:spin .9s linear infinite}
+.chat-video .cv-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,rgba(0,0,0,.05) 0%,rgba(0,0,0,.0) 35%,rgba(0,0,0,.45) 100%);cursor:pointer;z-index:3;transition:opacity .2s ease,background .2s ease}
+.chat-video .cv-overlay:hover{background:linear-gradient(180deg,rgba(0,0,0,.0) 0%,rgba(0,0,0,.0) 35%,rgba(0,0,0,.55) 100%)}
+.chat-video.cv-playing .cv-overlay{opacity:0;pointer-events:none}
+.chat-video .cv-play{display:flex;align-items:center;justify-content:center;width:62px;height:62px;border-radius:50%;background:rgba(76,175,80,.94);color:#06170c;border:2px solid rgba(255,255,255,.88);box-shadow:0 8px 22px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.14);transition:transform .18s var(--fc-ease,ease),background .18s ease,box-shadow .18s ease;backdrop-filter:blur(2px)}
+.chat-video:hover .cv-play{transform:scale(1.07);background:#7dd49b;box-shadow:0 10px 26px rgba(0,0,0,.6),0 0 0 10px rgba(76,175,80,.18)}
+.chat-video .cv-play::before{content:"";display:block;width:0;height:0;margin-left:5px;border-top:11px solid transparent;border-bottom:11px solid transparent;border-left:18px solid #06170c}
+.chat-video .cv-badge{position:absolute;left:8px;bottom:8px;display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;background:rgba(6,23,12,.72);color:#cfeedb;font-size:11px;font-weight:600;letter-spacing:.2px;border:1px solid rgba(255,255,255,.06);z-index:4;pointer-events:none;backdrop-filter:blur(6px);transition:opacity .25s ease}
+.chat-video .cv-badge .cv-icon{font-size:11px;line-height:1}
+.chat-video .cv-badge .cv-dur{color:#fff;font-variant-numeric:tabular-nums}
+.chat-video.cv-playing .cv-badge{opacity:0}
+@media (max-width:480px){
+  .chat-video .cv-play{width:54px;height:54px}
+  .chat-video .cv-play::before{border-left-width:15px;border-top-width:9px;border-bottom-width:9px;margin-left:4px}
+}
 .media-lazy-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:200px;height:100px;border-radius:8px;margin-top:6px;background:linear-gradient(180deg,#12231d,#0f1d18);border:1px dashed #2f5548;cursor:pointer;transition:background .2s,border-color .2s}
 .media-lazy-placeholder:hover{background:linear-gradient(180deg,#152922,#11211c);border-color:#3e6a5b}
 .media-lazy-placeholder.media-lazy-auto{cursor:default}
