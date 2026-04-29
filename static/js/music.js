@@ -37,7 +37,7 @@ const Music = (() => {
   //     window 'message' listener installed once.
   const SYNC_TOLERANCE_OK = 1.2;     // <1.2s drift → green (real-world tight)
   const SYNC_TOLERANCE_WARN = 4.0;   // <4s drift → yellow, else red
-  const SYNC_PROBE_INTERVAL_MS = 4000;
+  const SYNC_PROBE_INTERVAL_MS = 10000;  // steady-state — gentle on the iframe
   const SYNC_PROBE_TIMEOUT_MS = 1500;
   let _syncProbeTimer = null;
   let _syncProbePending = false;
@@ -558,7 +558,7 @@ const Music = (() => {
             </div>
           </div>
         </div>
-        ${cur ? `<button class="mp-btn mp-resync" title="Re-align to the room's play head"
+        ${cur ? `<button class="mp-btn mp-resync" title="Catch up to the room: refreshes the queue from the server and seeks your iframe to the live play-head position"
                          onclick="Music.resyncNow()"><span class="mp-resync-ico">📻</span><span class="mp-resync-lbl">Resync</span></button>` : ''}
       </div>`;
 
