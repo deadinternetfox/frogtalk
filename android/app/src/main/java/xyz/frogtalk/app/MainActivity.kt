@@ -1008,12 +1008,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 MusicService.ACTION_BROADCAST -> when (command) {
                     "toggle_play" -> webView?.post {
-                        // Prefer the notification-aware path: it surfaces the
-                        // music channel for YouTube (which can't resume from
-                        // background), and stays cheap for SoundCloud/Spotify.
-                        // Fallback to togglePauseGlobal for older bundles.
                         webView?.evaluateJavascript(
-                            "try{var M=window.Music;if(M){(M.togglePauseFromNotification||M.togglePauseGlobal).call(M);}}catch(e){}",
+                            "try{window.Music&&Music.togglePauseFromNotification&&Music.togglePauseFromNotification();}catch(e){}",
                             null
                         )
                     }
