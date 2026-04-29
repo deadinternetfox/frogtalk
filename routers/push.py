@@ -177,8 +177,18 @@ def _send_fcm(user_id: int, title: str, body: str, url: str = "/app", *,
     }
     if extra:
         for k, v in extra.items():
-            if v is not None:
-                data[str(k)] = str(v)
+            if v is None:
+                continue
+            sv = str(v)
+            # FCM enforces a 4 KB total data-payload cap. Long fields (avatar
+            # data: URLs especially) trip "Android message is too big" and
+            # silently kill incoming-call ringing for everyone. Drop any field
+            # over 1 KB \u2014 the on-device call/notification UI doesn't render
+            # avatars from FCM data anyway.
+            if len(sv) > 1024:
+                logger.info("fcm: dropping oversized field %r (%d bytes) from kind=%s payload", k, len(sv), kind)
+                continue
+            data[str(k)] = sv
 
     ok_count = 0
     fail_count = 0
@@ -227,7 +237,13 @@ def _send_fcm(user_id: int, title: str, body: str, url: str = "/app", *,
             fail_count += 1
             # Unregister dead tokens so retries don't keep failing forever.
             txt = str(e).lower()
-            if "registration-token-not-registered" in txt or "invalid-registration-token" in txt:
+            dead_token = (
+                "registration-token-not-registered" in txt
+                or "invalid-registration-token" in txt
+                or "requested entity was not found" in txt
+                or "not a valid fcm registration token" in txt
+            )
+            if dead_token:
                 db.delete_fcm_token(token)
                 logger.info("fcm token invalid, removed: user=%d ...%s", user_id, token[-8:] if len(token) >= 8 else token)
             else:
