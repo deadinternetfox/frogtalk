@@ -100,6 +100,37 @@ const Social = (() => {
   let _storyViewIdx = 0; // index in current user's stories array
   let _storyUserIdx = 0; // index in _storyData
   const _storyViewerCache = new Map();
+  const _storyMediaCache = new Map(); // story_id -> { media_data, media_type }
+  const _storyMediaInflight = new Map(); // story_id -> Promise
+
+  function _fetchStoryMedia(storyId) {
+    if (!storyId) return Promise.resolve(null);
+    if (_storyMediaCache.has(storyId)) return Promise.resolve(_storyMediaCache.get(storyId));
+    if (_storyMediaInflight.has(storyId)) return _storyMediaInflight.get(storyId);
+    const p = (async () => {
+      try {
+        const res = await api(`/api/social/stories/${storyId}/media`);
+        if (!res.ok) return null;
+        const data = await res.json();
+        const v = { media_data: data.media_data, media_type: data.media_type };
+        _storyMediaCache.set(storyId, v);
+        return v;
+      } catch { return null; }
+      finally { _storyMediaInflight.delete(storyId); }
+    })();
+    _storyMediaInflight.set(storyId, p);
+    return p;
+  }
+  function _prefetchAdjacentStoryMedia() {
+    const user = _storyData[_storyUserIdx]; if (!user) return;
+    const next = user.stories[_storyViewIdx + 1];
+    if (next && next.has_media && !next.media_data) _fetchStoryMedia(next.id);
+    // also peek the first story of the next user
+    const nu = _storyData[_storyUserIdx + 1];
+    if (nu && nu.stories && nu.stories[0] && nu.stories[0].has_media && !nu.stories[0].media_data) {
+      _fetchStoryMedia(nu.stories[0].id);
+    }
+  }
 
   async function loadStoriesBar() {
     try {
@@ -254,10 +285,12 @@ const Social = (() => {
           <span class="story-header-time">${timeAgo(story.created_at)}</span>
           <button class="story-close" onclick="event.stopPropagation();Social.closeStoryViewer()">✕</button>
         </div>
-        <div class="story-media">
-          ${story.media_type.startsWith('video')
-            ? `<video src="${esc(story.media_data)}" autoplay playsinline></video>`
-            : `<img src="${esc(story.media_data)}" alt="">`}
+        <div class="story-media" id="story-media-slot">
+          ${story.media_data
+            ? (story.media_type.startsWith('video')
+                ? `<video src="${esc(story.media_data)}" autoplay playsinline></video>`
+                : `<img src="${esc(story.media_data)}" alt="">`)
+            : '<div class="story-media-loading" style="color:#888;font-size:13px">Loading…</div>'}
         </div>
         ${story.caption ? `<div class="story-caption">${esc(story.caption)}</div>` : ''}
         ${_renderStoryViewerMeta(story, user)}
@@ -268,9 +301,30 @@ const Social = (() => {
       </div>`;
     viewer.style.display = 'flex';
 
-    // Auto-advance after 5s
+    // Lazy-load full media if the feed payload only had `has_media`.
+    let advanceDelay = 5000;
+    if (!story.media_data && story.has_media) {
+      advanceDelay = 8000; // give it a moment longer if we had to fetch
+      const myIdx = _storyViewIdx, myUserIdx = _storyUserIdx;
+      _fetchStoryMedia(story.id).then(m => {
+        if (!m || !m.media_data) return;
+        // Cache on the story object so re-opens are instant.
+        story.media_data = m.media_data;
+        story.media_type = m.media_type || story.media_type;
+        // Only update DOM if the user is still on this exact story.
+        if (myIdx !== _storyViewIdx || myUserIdx !== _storyUserIdx) return;
+        const slot = document.getElementById('story-media-slot');
+        if (!slot) return;
+        slot.innerHTML = (story.media_type || '').startsWith('video')
+          ? `<video src="${esc(story.media_data)}" autoplay playsinline></video>`
+          : `<img src="${esc(story.media_data)}" alt="">`;
+      });
+    }
+    _prefetchAdjacentStoryMedia();
+
+    // Auto-advance
     clearTimeout(viewer._timer);
-    viewer._timer = setTimeout(() => nextStory(), 5000);
+    viewer._timer = setTimeout(() => nextStory(), advanceDelay);
     _hydrateStoryViewers(story, user);
   }
 

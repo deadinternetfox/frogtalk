@@ -4604,7 +4604,7 @@ def get_stories_feed(viewer_id: int) -> List[Dict]:
     """
     with _conn() as con:
         rows = con.execute("""
-            SELECT s.id, s.user_id, s.media_data, s.media_type, s.caption, s.created_at,
+            SELECT s.id, s.user_id, s.media_type, s.caption, s.created_at,
                    (s.media_type IS NOT NULL AND s.media_type != '') AS has_media,
                    COALESCE(s.privacy,'public') AS privacy,
                    u.nickname, u.avatar,
