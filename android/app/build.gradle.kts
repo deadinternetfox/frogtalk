@@ -21,8 +21,8 @@ android {
         applicationId = "xyz.frogtalk.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 193
-        versionName = "1.4.9"
+        versionCode = 194
+        versionName = "1.5.0"
     }
 
     buildTypes {
