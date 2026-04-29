@@ -309,21 +309,19 @@ const Music = (() => {
 
   // Notification-tray play action for YouTube. The Android side already
   // brought the Activity to the foreground (so the WebView is on-screen
-  // and Chromium will honor playVideo). We just need to (a) clear the
-  // user-paused flag set by _onAppHidden, (b) mirror that to every UI
-  // surface, and (c) kick the bounded retry ladder. No DOM button click
-  // is involved, so there is zero risk of churning _room/_state and
-  // pushing active=false to the foreground service — the notification
-  // stays up the whole time. Returns true on success, false if there is
-  // nothing playable.
+  // and Chromium will honor playVideo). We DO NOT optimistically flip
+  // _paused here — the icon would flip to ⏸ before audio actually
+  // started, and if YT refuses we'd be lying to the user. Instead we
+  // kick the bounded retry ladder with ignorePaused; the verify loop
+  // sets _paused=false ONLY when YT confirms state=1 (playing), and
+  // back to _paused=true if all attempts fail. The notification icon
+  // tracks reality the whole way. No DOM button click is involved, so
+  // there is zero risk of churning _room/_state and pushing
+  // active=false to the foreground service — the notification stays up.
   function resumeFromNotification() {
     const cur = _state && _state.queue && _state.queue[0];
     if (!cur) return false;
-    _paused = false;
-    _lastEmitHash = '';
-    try { _syncPlayPauseButtons(); } catch {}
-    try { _emitState(); } catch {}
-    try { _resumeOnVisible({ force: true }); } catch {}
+    try { _resumeOnVisible({ force: true, ignorePaused: true }); } catch {}
     return true;
   }
 
@@ -423,6 +421,21 @@ const Music = (() => {
           _lastPlayerState = parsed.info;
           const wasPlaying = (prev === 1);
           const nowPlaying = (parsed.info === 1);
+          // Reconcile _paused to YT ground truth on every state change.
+          // YT autonomously fires onStateChange when it pauses (state 2)
+          // or resumes (state 1) itself — e.g. user taps the iframe's
+          // own play button, the embed self-resumes after a buffer, or
+          // the resume ladder lands. Without this, _paused gets stuck
+          // at whatever _onAppHidden / togglePause set it to.
+          if (nowPlaying && _paused) {
+            _paused = false;
+            try { _syncPlayPauseButtons(); } catch {}
+          } else if (parsed.info === 2 && !_paused) {
+            // YT paused itself (background, user-clicked iframe, etc.).
+            // Mirror to _paused so the dock + tray + badge are honest.
+            _paused = true;
+            try { _syncPlayPauseButtons(); } catch {}
+          }
           if (wasPlaying !== nowPlaying) {
             // Force the next _emitState() through the dedupe so the
             // notification + side button update right now.
@@ -615,13 +628,18 @@ const Music = (() => {
   function _resumeOnVisible(opts) {
     try {
       const force = !!(opts && opts.force);
+      const ignorePaused = !!(opts && opts.ignorePaused);
       const now = Date.now();
       // Debounce duplicate triggers (visibilitychange + focus + pageshow
       // can all fire within ~50ms). `force` is used by the Android
       // bridge's onResume hook so a native-side trigger can bypass.
       if (!force && now - _lastResumeAt < 1500) return;
       _lastResumeAt = now;
-      if (_paused) return;                          // user actually paused — leave alone
+      // ignorePaused: notification-tray play + foreground bring-up. We
+      // want to ATTEMPT a resume even though _paused=true was asserted
+      // by _onAppHidden — the verify loop will reconcile _paused to YT
+      // truth on confirmation or surrender.
+      if (_paused && !ignorePaused) return;
       const cur = _state && _state.queue && _state.queue[0];
       if (!cur) return;
       if (cur.provider === 'spotify') return;       // no postMessage play API
@@ -679,9 +697,17 @@ const Music = (() => {
               if (drift > 3) {
                 try { _seekIframe(_expectedPosSec()); } catch {}
               }
-              // Tell Android the truth right now too (notification
-              // play/pause icon should flip back to "pause" immediately).
+              // Reconcile _paused to YT truth: audio is playing, so
+              // user-intent paused must be false. Without this, the
+              // notification icon stays on ▶ even though audio is
+              // running (effectivePaused = _paused || ytKnowsPaused).
+              if (_paused) {
+                _paused = false;
+                try { _syncPlayPauseButtons(); } catch {}
+              }
+              _lastEmitHash = '';
               try { _emitState(); } catch {}
+              try { _startSyncProbeIfNeeded(); } catch {}
               return;
             }
             if (attempts++ < MAX_ATTEMPTS) {
@@ -700,9 +726,14 @@ const Music = (() => {
               }
               setTimeout(verify, RETRY_GAP_MS);
             } else {
-              // Final state is whatever the iframe says — let the badge
-              // and Android notification reflect reality so the user can
-              // tap play themselves.
+              // Surrender. Reflect reality so the user can tap play
+              // themselves: force _paused=true so every UI surface
+              // (notification, side button, badge) shows ▶ honestly.
+              if (!_paused) {
+                _paused = true;
+                try { _syncPlayPauseButtons(); } catch {}
+              }
+              _lastEmitHash = '';
               try { _emitState(); } catch {}
             }
           }, 400);
@@ -776,12 +807,16 @@ const Music = (() => {
         frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
       }
     } catch {}
-    // Keep _paused as-is (Android: still true from _onAppHidden;
-    // desktop: whatever the user chose). The helper derives the icon
-    // honestly from _paused + YT's state.
+    // Keep _paused as-is for now. The bounded retry ladder below will
+    // attempt a resume regardless (ignorePaused) and reconcile _paused
+    // to YT ground truth: state=1 → _paused=false; surrender → _paused=true.
     _lastEmitHash = '';
     try { _syncPlayPauseButtons(); } catch {}
     try { _emitState(); } catch {}
+    // Auto-resume: kick the bounded ladder. No-op for non-YouTube
+    // (SoundCloud and Spotify play from background fine). Ignored if
+    // there's no current track.
+    try { _resumeOnVisible({ force: true, ignorePaused: true }); } catch {}
     // Belt-and-suspenders: re-sync on the next two animation frames in
     // case a queued _render() runs after us and clobbers the button
     // HTML back to the "⏸" template default.
