@@ -1453,10 +1453,30 @@ body[data-music-collapsed] #messages-area{flex:1 1 auto}
 }
 .mp-add-hint{margin-top:8px;font-size:11.5px;color:#8a6aa8}
 .mp-add-actions{
-  display:flex;gap:8px;justify-content:flex-end;
+  display:flex;gap:10px;justify-content:stretch;
   padding:12px 16px 14px;border-top:1px solid #2a1a4a;background:rgba(0,0,0,.18)
 }
-.mp-add-actions .mp-btn{padding:8px 16px;font-size:13px;font-weight:600;border-radius:8px}
+/* Footer pills — long & thin, matched widths, single line guaranteed.
+   flex:1 makes Add Track / Cancel / Close share row evenly; nowrap +
+   line-height:1 keep the label on one line. */
+.mp-add-actions .mp-btn{
+  flex:1 1 0;min-width:0;
+  padding:9px 18px;font-size:12.5px;font-weight:700;letter-spacing:.4px;
+  border-radius:999px;line-height:1;white-space:nowrap;text-transform:uppercase;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px
+}
+.mp-add-actions .mp-btn.primary{
+  background:linear-gradient(135deg,#8a3aba,#5a2a8a);color:#fff;border:0;
+  box-shadow:0 2px 8px rgba(160,80,216,.32),inset 0 1px 0 rgba(255,255,255,.08);
+  transition:transform .12s,box-shadow .15s,filter .15s
+}
+.mp-add-actions .mp-btn.primary:hover{filter:brightness(1.08);box-shadow:0 4px 14px rgba(160,80,216,.45);transform:translateY(-1px)}
+.mp-add-actions .mp-btn.primary:active{transform:scale(.98)}
+.mp-add-actions .mp-btn:not(.primary){
+  background:#1f1334;color:#cfb9ee;border:1px solid #3a2a5a;
+  transition:background .15s,border-color .15s,color .15s
+}
+.mp-add-actions .mp-btn:not(.primary):hover{background:#2a1a4a;border-color:#5a3a8a;color:#fff}
 @media (max-width:480px){
   /* Push the Add Track card lower so it lands within thumb reach
      on tall phones — paddings the modal opens centered/lower-third
