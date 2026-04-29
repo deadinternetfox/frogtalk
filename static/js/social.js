@@ -313,6 +313,34 @@ const Social = (() => {
   let _storyUploadXhr = null;  // For cancellation support
   let _storyUploadSession = null;  // Current upload session
   let _storyUploadMinimized = false;  // Track if bar is minimized
+  let _storySyntheticTimer = null;     // Fallback progress when real events don't fire
+  let _storyRealProgressSeen = false;  // Real upload.onprogress event observed
+
+  // _startSyntheticProgress drives a slow, time-based fake progress curve so
+  // the user sees motion when xhr.upload.onprogress doesn't fire (Android
+  // WebView + SW interception is unreliable for multipart upload events).
+  // Real progress events take over via _markRealProgress and supersede this.
+  function _startSyntheticProgress(fileSize, onTick) {
+    _stopSyntheticProgress();
+    _storyRealProgressSeen = false;
+    const startedAt = Date.now();
+    // Estimate upload time from file size on a conservative 1.5 Mbps link
+    // (~190 KB/s). Cap at 60s so a small file moves visibly fast and a big
+    // file still shows steady progress without hitting 100% prematurely.
+    const estMs = Math.max(8000, Math.min(60000, ((fileSize || 1_500_000) / 190_000) * 1000));
+    _storySyntheticTimer = setInterval(() => {
+      if (_storyRealProgressSeen) { _stopSyntheticProgress(); return; }
+      const elapsed = Date.now() - startedAt;
+      // Asymptotic curve: approaches 90% but never reaches it.
+      const ratio = 1 - Math.exp(-elapsed / estMs);
+      const fake = Math.min(90, Math.max(5, Math.round(ratio * 90)));
+      try { onTick(fake); } catch {}
+    }, 400);
+  }
+  function _stopSyntheticProgress() {
+    if (_storySyntheticTimer) { clearInterval(_storySyntheticTimer); _storySyntheticTimer = null; }
+  }
+  function _markRealProgress() { _storyRealProgressSeen = true; }
 
   function _ensureStoryUploadOverlay() {
     let ov = document.getElementById('story-upload-overlay');
@@ -402,8 +430,10 @@ const Social = (() => {
     }
     if (pct) pct.textContent = `${Math.round(p)}%`;
     if (sub) {
-      if (p <= 5) sub.textContent = 'Connecting...';
-      else if (text) sub.textContent = text;
+      // Caller-provided text always wins so we don't get stuck at
+      // "Connecting..." when a large video uploads without progress events.
+      if (text) sub.textContent = text;
+      else if (p <= 1) sub.textContent = 'Connecting…';
       else if (p < 100) sub.textContent = `${Math.round(p)}% uploading…`;
       else sub.textContent = 'Finalizing…';
     }
@@ -538,10 +568,28 @@ const Social = (() => {
         
         xhr.open('POST', '/api/social/stories/upload', true);
         if (State.token) xhr.setRequestHeader('X-Session-Token', State.token);
-        xhr.upload.onloadstart = () => onProgress(0);
+
+        // Synthetic progress drives motion when real upload events don't fire
+        // (Android WebView + SW intercept multipart uploads silently). Each
+        // synthetic tick reports through onProgress just like a real event.
+        _startSyntheticProgress(file?.size || 0, (fakePct) => {
+          if (fakePct > lastReportedProgress) {
+            lastReportedProgress = fakePct;
+            try { onProgress(fakePct); } catch {}
+          }
+        });
+
+        xhr.upload.onloadstart = () => {
+          // Show 5% immediately so bar leaves "Connecting…" right away.
+          if (lastReportedProgress < 5) {
+            lastReportedProgress = 5;
+            try { onProgress(5); } catch {}
+          }
+        };
         
         xhr.upload.onprogress = (e) => {
           if (!e.lengthComputable) return;
+          _markRealProgress();
           const progress = Math.round((e.loaded / e.total) * 100);
           if (progress > lastReportedProgress) {
             lastReportedProgress = progress;
@@ -550,18 +598,21 @@ const Social = (() => {
         };
         
         xhr.onerror = () => {
+          _stopSyntheticProgress();
           _storyUploadXhr = null;
           clearTimeout(uploadTimeout);
           reject(new Error('Network error'));
         };
         
         xhr.onabort = () => {
+          _stopSyntheticProgress();
           _storyUploadXhr = null;
           clearTimeout(uploadTimeout);
           reject(new Error('Upload cancelled'));
         };
         
         xhr.onload = () => {
+          _stopSyntheticProgress();
           _storyUploadXhr = null;
           clearTimeout(uploadTimeout);
           onProgress(100);
@@ -579,6 +630,7 @@ const Social = (() => {
 
         xhr.send(form);
       } catch (e) {
+        _stopSyntheticProgress();
         _storyUploadXhr = null;
         reject(e);
       }

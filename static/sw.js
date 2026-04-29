@@ -1,5 +1,5 @@
 /* FrogTalk Service Worker — caching + web push */
-const CACHE_NAME = 'frogtalk-v210';
+const CACHE_NAME = 'frogtalk-v215';
 const STATIC_ASSETS = [
   '/app',
   '/static/js/app.js',
@@ -42,6 +42,22 @@ self.addEventListener('fetch', event => {
   // Skip non-same-origin and WebSocket requests
   if (url.origin !== location.origin) return;
   if (event.request.url.includes('/ws/')) return;
+
+  // Skip uploads and POSTs entirely so the browser can fire real
+  // xhr.upload.onprogress events and stream large bodies natively.
+  // Story / media uploads, login, send-message, etc — none of these
+  // benefit from SW caching and SW interception breaks XHR progress
+  // events on Android WebView.
+  if (event.request.method && event.request.method !== 'GET' && event.request.method !== 'HEAD') {
+    return;
+  }
+  if (
+    url.pathname.startsWith('/api/social/stories') ||
+    url.pathname.startsWith('/api/upload') ||
+    url.pathname.includes('/upload')
+  ) {
+    return;
+  }
 
   // Always fetch fresh app shell and JS to avoid stale UI after deployments.
   if (
