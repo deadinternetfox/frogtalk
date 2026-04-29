@@ -3943,14 +3943,16 @@ function handleMentionInput(input) {
   _mentionOpen = true;
   _mentionIndex = 0;
   
-  dropdown.innerHTML = filtered.map((u, i) => `
-    <div class="mention-item${i === 0 ? ' selected' : ''}" data-nick="${UI.escHtml(u.nickname)}" onclick="insertMention('${UI.escHtml(u.nickname)}')"
-         style="padding:8px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;${i === 0 ? 'background:#2a2a2a' : ''}">
-      ${UI.avatarEl(u.avatar, u.nickname, 24)}
-      <span style="color:#e0e0e0">${UI.escHtml(u.nickname)}</span>
-      <span style="color:#666;font-size:11px;margin-left:auto">${u.presence === 'online' ? '🟢' : '⚪'}</span>
-    </div>
-  `).join('');
+  dropdown.innerHTML = filtered.map((u, i) => {
+    const online = u.presence === 'online';
+    return `
+      <div class="mention-item${i === 0 ? ' selected' : ''}" data-nick="${UI.escHtml(u.nickname)}" onclick="insertMention('${UI.escHtml(u.nickname)}')">
+        ${UI.avatarEl(u.avatar, u.nickname, 24)}
+        <span class="mention-nick">${UI.escHtml(u.nickname)}</span>
+        <span class="mention-presence ${online ? 'online' : 'offline'}" title="${online ? 'Online' : 'Offline'}"></span>
+      </div>
+    `;
+  }).join('');
   
   dropdown.style.display = 'block';
   
@@ -3971,20 +3973,16 @@ function handleMentionKeydown(e) {
   if (e.key === 'ArrowDown') {
     e.preventDefault();
     items[_mentionIndex].classList.remove('selected');
-    items[_mentionIndex].style.background = '';
     _mentionIndex = (_mentionIndex + 1) % items.length;
     items[_mentionIndex].classList.add('selected');
-    items[_mentionIndex].style.background = '#2a2a2a';
     return true;
   }
   
   if (e.key === 'ArrowUp') {
     e.preventDefault();
     items[_mentionIndex].classList.remove('selected');
-    items[_mentionIndex].style.background = '';
     _mentionIndex = (_mentionIndex - 1 + items.length) % items.length;
     items[_mentionIndex].classList.add('selected');
-    items[_mentionIndex].style.background = '#2a2a2a';
     return true;
   }
   

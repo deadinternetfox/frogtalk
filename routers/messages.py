@@ -323,6 +323,21 @@ async def search_messages(
 
 @router.get("/users/mentionable")
 async def get_mentionable_users(current_user: dict = Depends(get_current_user)):
-    """Get all users for @mention autocomplete."""
+    """Get all users for @mention autocomplete.
+
+    The DB `presence` column is best-effort and frequently stale (e.g. when
+    a client disconnects without cleanly setting offline). For the @mention
+    dropdown we want a live answer, so we override each user's presence with
+    the current websocket connection state. A user is considered online iff
+    they currently have at least one active websocket.
+    """
     users = db.get_room_members()
+    for u in users:
+        try:
+            uid = u.get("id")
+            if uid is not None:
+                u["presence"] = "online" if manager.is_user_online(int(uid)) else "offline"
+        except Exception:
+            # Fall back to whatever the DB reported on any error.
+            pass
     return {"users": users}
