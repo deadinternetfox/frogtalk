@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<!-- interactive-widget=resizes-visual stops Android Chrome from resizing the
+     layout viewport when the soft keyboard opens. Without this, the layout
+     reflows mid-edit and embedded iframes (e.g. the music player) get
+     pushed behind other panels and don't always return to their original
+     position when the keyboard closes. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-visual">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta name="description" content="FrogTalk — Secure encrypted chat with E2E messaging, voice & video calls, group channels and stories. Open-source, privacy-first.">
 <meta name="theme-color" content="#4caf50">
