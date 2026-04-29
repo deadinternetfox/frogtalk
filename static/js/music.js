@@ -285,11 +285,16 @@ const Music = (() => {
   function getCurrent() {
     const cur = _state && _state.queue && _state.queue[0];
     if (!cur) return { active: false };
+    // Use _currentEffectivePaused() instead of raw _paused so consumers
+    // (FrogSocial Now Playing strip, music cards, wall posts, anyone
+    // listening for music:statechange) see YT auto-pauses too — not
+    // just the user-tap pauses _paused tracks. Without this the strip
+    // shows "Playing now" + ⏸ even after YT has visibly stopped.
     return {
       active: true,
       soloMode: _soloMode,
       room: _room || '',
-      paused: _paused,
+      paused: _currentEffectivePaused(),
       provider: cur.provider,
       url: cur.url || '',
       video_id: cur.video_id || '',
