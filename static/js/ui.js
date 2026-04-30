@@ -467,7 +467,72 @@ const UI = (() => {
     });
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress };
+  // ── Themed confirm dialog ────────────────────────────────────────────
+  // Drop-in async replacement for window.confirm() that uses the app's
+  // .modal-overlay/.modal-box/.modal-btn styles instead of the browser's
+  // chrome dialog ("frogtalk.xyz says…"). Resolves true on confirm,
+  // false on cancel / overlay click / Esc.
+  //   await UI.confirm('Delete this message?')
+  //   await UI.confirm({ title:'Delete', message:'…', confirmLabel:'Delete', danger:true })
+  function confirm(opts) {
+    if (typeof opts === 'string') opts = { message: opts };
+    opts = opts || {};
+    const message      = String(opts.message || 'Are you sure?');
+    const title        = opts.title != null ? String(opts.title) : '';
+    const confirmLabel = String(opts.confirmLabel || 'Confirm');
+    const cancelLabel  = String(opts.cancelLabel  || 'Cancel');
+    const danger       = !!opts.danger;
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.style.cssText =
+        'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;' +
+        'justify-content:center;padding:16px;';
+      const titleHtml = title
+        ? `<div style="font-weight:600;font-size:15px;margin-bottom:8px;color:var(--accent-color,#e8e8e8)">${escHtml(title)}</div>`
+        : '';
+      overlay.innerHTML =
+        '<div class="modal-box" role="dialog" aria-modal="true" ' +
+        'style="max-width:min(420px,94vw);padding:18px 18px 14px;background:#0f0f0f;' +
+        'border:1px solid #2a2a2a;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.55)">' +
+          titleHtml +
+          `<div style="font-size:14px;line-height:1.45;color:#d6d6d6;white-space:pre-wrap">${escHtml(message)}</div>` +
+          '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">' +
+            `<button type="button" class="modal-btn secondary" data-act="cancel">${escHtml(cancelLabel)}</button>` +
+            `<button type="button" class="modal-btn ${danger ? 'danger' : 'primary'}" data-act="ok">${escHtml(confirmLabel)}</button>` +
+          '</div>' +
+        '</div>';
+      let done = false;
+      const cleanup = (val) => {
+        if (done) return; done = true;
+        document.removeEventListener('keydown', onKey, true);
+        try { overlay.remove(); } catch {}
+        resolve(val);
+      };
+      const onKey = (ev) => {
+        if (ev.key === 'Escape')      { ev.preventDefault(); cleanup(false); }
+        else if (ev.key === 'Enter')  { ev.preventDefault(); cleanup(true); }
+      };
+      overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) cleanup(false);
+        const act = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-act');
+        if (act === 'cancel') cleanup(false);
+        else if (act === 'ok') cleanup(true);
+      });
+      document.addEventListener('keydown', onKey, true);
+      document.body.appendChild(overlay);
+      // Focus the confirm button so Enter works immediately, but place
+      // it on the safer cancel button when this is a destructive prompt.
+      try {
+        const focusBtn = overlay.querySelector(
+          danger ? '[data-act="cancel"]' : '[data-act="ok"]'
+        );
+        focusBtn && focusBtn.focus();
+      } catch {}
+    });
+  }
+
+  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm };
 })();
 
 // ─── ChatVideo: themed inline video player for chat ──────────────────────────

@@ -1081,8 +1081,14 @@ const Messages = (() => {
     contentEl.innerHTML = _formatContent(original);
   }
 
-  function deleteMsg(id) {
-    if (!confirm('Delete this message?')) return;
+  async function deleteMsg(id) {
+    const ok = await UI.confirm({
+      title: 'Delete message',
+      message: 'Delete this message? This cannot be undone.',
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (!ok) return;
     WS.send({ type: 'delete', id });
   }
 

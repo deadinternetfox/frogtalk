@@ -235,7 +235,13 @@ async function hideDMChannel (channelId) {
 
 async function wipeDMMessages () {
   if (!_activeDM) return;
-  if (!confirm('Delete ALL messages in this conversation? This cannot be undone.')) return;
+  const ok = await UI.confirm({
+    title: 'Wipe conversation',
+    message: 'Delete ALL messages in this conversation? This cannot be undone.',
+    confirmLabel: 'Delete all',
+    danger: true,
+  });
+  if (!ok) return;
   try {
     const r = await apiFetch(`/api/dms/${_activeDM.id}/messages`, 'DELETE');
     if (r.ok) {
@@ -1778,7 +1784,13 @@ async function editDMMsg (id) {
 }
 
 async function deleteDMMsg (id) {
-  if (!confirm('Delete this message?')) return;
+  const ok = await UI.confirm({
+    title: 'Delete message',
+    message: 'Delete this message? This cannot be undone.',
+    confirmLabel: 'Delete',
+    danger: true,
+  });
+  if (!ok) return;
   const r = await apiFetch(`/api/dms/${_activeDM.id}/messages/${id}`, 'DELETE');
   if (r.ok) {
     _dmMessages = _dmMessages.filter(x => x.id !== id);
