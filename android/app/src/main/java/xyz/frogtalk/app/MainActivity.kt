@@ -516,6 +516,22 @@ class MainActivity : AppCompatActivity() {
         val withRev = buildAppUrl(rawUrl)
         wv.loadUrl(withRev)
 
+        // Cold-start from a call notification: dismiss the system tray ring
+        // now that the in-app ringing/connecting overlay will take over.
+        if (intent?.getBooleanExtra("incoming_call", false) == true) {
+            try {
+                val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+                nm.cancel(CallService.RING_NOTIFICATION_ID)
+                nm.cancel(CallService.NOTIFICATION_ID)
+            } catch (_: Throwable) {}
+            try {
+                val stop = Intent(this, CallService::class.java).apply {
+                    action = CallService.ACTION_DISMISS_RING
+                }
+                startService(stop)
+            } catch (_: Throwable) {}
+        }
+
         // Deep-link handling
         intent?.data?.let { uri ->
             if (uri.host == "frogtalk.xyz") {
@@ -565,6 +581,22 @@ class MainActivity : AppCompatActivity() {
                     // that's all we need to do.
                     Log.i(TAG, "incoming-call body tap: bring-to-front only, no reload")
                 }
+                // In both auto-accept and body-tap cases, the user has now
+                // landed inside the app where the in-app ringing overlay (or
+                // the connecting/active call overlay) takes over. The system
+                // tray ringing notification is redundant from this point on
+                // and just noisy — clear it.
+                try {
+                    val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+                    nm.cancel(CallService.RING_NOTIFICATION_ID)
+                    nm.cancel(CallService.NOTIFICATION_ID)
+                } catch (_: Throwable) {}
+                try {
+                    val stop = Intent(this, CallService::class.java).apply {
+                        action = CallService.ACTION_DISMISS_RING
+                    }
+                    startService(stop)
+                } catch (_: Throwable) {}
             } else {
                 // Warm tap on a message notification: don't reload the whole
                 // page, just route the WebView to the right DM thread via JS.
