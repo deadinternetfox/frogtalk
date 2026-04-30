@@ -281,16 +281,117 @@ function finaliseVideoNote () {
     isVideoNote: true,
   };
 
-  // Show preview with video thumbnail
+  // Show preview with circular video bubble — tap to play/pause, with a
+  // first-frame poster captured to canvas so the user sees what they
+  // recorded *before* sending (instead of a grey play button on a black
+  // circle, which was the previous behaviour because the WebView never
+  // paints a poster on a freshly loaded MediaRecorder blob).
   const url   = URL.createObjectURL(blob);
   const thumb = document.getElementById('attachment-thumb');
   const prev  = document.getElementById('attachment-preview');
+  const durTxt = formatRecDuration(_recSeconds).replace('● REC ', '');
   thumb.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px">
-      <video src="${url}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid #4caf50"></video>
-      <span style="font-size:12px;color:#85a89a">Video note · ${formatRecDuration(_recSeconds).replace('● REC ', '')}</span>
+    <div class="att-preview-item att-preview-vidnote" style="display:flex;align-items:center;gap:12px">
+      <div class="att-vn-wrap" style="position:relative;width:72px;height:72px;flex:0 0 72px;cursor:pointer;border-radius:50%;overflow:hidden;border:2px solid #4caf50;background:#0c1612"
+           onclick="_attPreviewPlayVidNote(this, event)">
+        <video class="att-vn-video" src="${url}" preload="auto" muted playsinline
+               style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50%;background:#000"></video>
+        <div class="att-vn-poster" style="position:absolute;inset:0;background-size:cover;background-position:center;border-radius:50%;opacity:0;transition:opacity .2s ease"></div>
+        <div class="att-vn-play" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);color:#fff;font-size:22px;border-radius:50%;pointer-events:none">▶</div>
+      </div>
+      <span style="font-size:12px;color:#85a89a;display:flex;flex-direction:column;gap:2px">
+        <span style="color:#cfeedb;font-weight:600">🎥 Video note</span>
+        <span>${durTxt}</span>
+      </span>
     </div>`;
   prev.style.display = 'flex';
+  // Capture a first-frame poster off the canvas (works around Android
+  // WebView never painting native posters for MediaRecorder blobs).
+  _attVidNoteCapturePoster(thumb.querySelector('.att-vn-video'),
+                           thumb.querySelector('.att-vn-poster'));
+}
+
+// Capture a first-frame thumbnail of an attachment-preview video note.
+// MediaRecorder webm/mp4 blobs from Chromium report duration=Infinity
+// until forced past the end with a giant seek, so we do the same dance
+// the chat ChatVideo player does to materialise duration → seek → draw.
+function _attVidNoteCapturePoster (v, posterEl) {
+  if (!v || !posterEl) return;
+  let drawn = false;
+  const draw = () => {
+    if (drawn) return;
+    try {
+      const w = v.videoWidth, h = v.videoHeight;
+      if (!w || !h) return;
+      const c = document.createElement('canvas');
+      const s = Math.min(1, 256 / Math.max(w, h));
+      c.width  = Math.max(2, Math.round(w * s));
+      c.height = Math.max(2, Math.round(h * s));
+      c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+      const url = c.toDataURL('image/jpeg', 0.72);
+      posterEl.style.backgroundImage = `url(${url})`;
+      posterEl.style.opacity = '1';
+      drawn = true;
+    } catch {}
+  };
+  const startSeek = () => {
+    try { v.currentTime = 0.05; } catch { draw(); }
+  };
+  v.addEventListener('seeked',     draw);
+  v.addEventListener('loadeddata', draw);
+  v.addEventListener('loadedmetadata', () => {
+    if (!isFinite(v.duration) || v.duration <= 0) {
+      // Force duration to materialise first.
+      const onDur = () => { v.removeEventListener('durationchange', onDur); startSeek(); };
+      v.addEventListener('durationchange', onDur, { once: true });
+      try { v.currentTime = 1e9; } catch { startSeek(); }
+      setTimeout(startSeek, 600);
+    } else {
+      startSeek();
+    }
+  });
+  // Last-resort safety in case nothing fires (happens occasionally on
+  // older WebView builds): try to draw whatever's loaded after a beat.
+  setTimeout(draw, 1500);
+  try { v.load(); } catch {}
+}
+
+// Tap-to-play / tap-to-pause on the attachment-preview video-note bubble.
+function _attPreviewPlayVidNote (wrap, ev) {
+  if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+  const v   = wrap.querySelector('video');
+  const btn = wrap.querySelector('.att-vn-play');
+  if (!v) return;
+  if (v.paused) {
+    // Same Infinity-duration recovery the chat player uses, so the
+    // first tap actually starts decoding instead of resolving play()
+    // against a stuck currentFrame.
+    const finish = () => {
+      try { v.muted = false; } catch {}
+      const p = v.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => { try { v.muted = true; v.play().catch(()=>{}); } catch {} });
+      }
+      if (btn) btn.style.display = 'none';
+    };
+    if (!isFinite(v.duration) || v.duration <= 0) {
+      let settled = false;
+      const recover = () => { if (settled) return; settled = true; try { v.currentTime = 0; } catch {} finish(); };
+      const onDur    = () => { v.removeEventListener('durationchange', onDur); recover(); };
+      const onSeeked = () => { v.removeEventListener('seeked', onSeeked); recover(); };
+      v.addEventListener('durationchange', onDur,    { once: true });
+      v.addEventListener('seeked',         onSeeked, { once: true });
+      try { v.currentTime = 1e9; } catch { recover(); }
+      setTimeout(recover, 600);
+    } else {
+      try { v.currentTime = 0; } catch {}
+      finish();
+    }
+    v.onended = () => { v.pause(); if (btn) btn.style.display = ''; };
+  } else {
+    try { v.pause(); } catch {}
+    if (btn) btn.style.display = '';
+  }
 }
 
 /* ── Waveform visualiser during recording ────────────────────────────────────── */

@@ -503,47 +503,63 @@ const ChatVideo = (() => {
     const loading = wrap.querySelector('.cv-loading');
 
     // Big data: URLs are pathologically slow / non-seekable on Android
-    // Chromium WebView (it decodes the base64 inline on every read).
-    // For chat videos that come straight off the API as data: URLs we
-    // swap to a blob: URL up front — the WebView treats blob URLs as
-    // real seekable handles, which fixes BOTH the missing first-frame
-    // thumbnail and the "tap play but nothing happens" symptom for
-    // video notes (and regular videos > a few hundred KB).
-    //
-    // The swap is async (fetch → .blob() → URL.createObjectURL), so we
-    // gate the entire metadata/poster/play wiring behind the swap to
-    // avoid racing the loadedmetadata `{once:true}` listener: if the
-    // data: URL fires loadedmetadata first, that one-shot listener is
-    // burned and the subsequent blob:-URL load runs unobserved.
+    // Chromium WebView (it decodes the base64 inline on every read), and
+    // for video notes the WebView frequently can't even decode them at
+    // all — fetch(dataUrl) silently hangs, never resolves, and we end up
+    // with an empty <video> element (grey play button, no poster, no
+    // playback). So we decode the base64 *synchronously* via atob() and
+    // hand the WebView a real blob: URL up front. This fixes BOTH the
+    // missing thumbnail and the "tap play but nothing happens" symptom
+    // for video notes (and regular videos > a few hundred KB).
     const setup = () => _wireVideo(wrap, v, overlay, poster, durEl, loading);
     const _origSrc = v.getAttribute('src') || '';
     if (_origSrc.startsWith('data:')) {
-      // Stop the in-flight data: URL load so we don't waste the
-      // `loadedmetadata` event on it.
-      try { v.removeAttribute('src'); v.load(); } catch {}
-      fetch(_origSrc).then(r => r.blob()).then(b => {
-        const url = URL.createObjectURL(b);
-        v.src = url;
+      const blobUrl = _dataUrlToBlobUrl(_origSrc);
+      if (blobUrl) {
+        try { v.src = blobUrl; v.load(); } catch {}
         // Revoke when the wrapper leaves the DOM.
         try {
           const mo = new MutationObserver(() => {
             if (!document.contains(wrap)) {
-              try { URL.revokeObjectURL(url); } catch {}
+              try { URL.revokeObjectURL(blobUrl); } catch {}
               mo.disconnect();
             }
           });
           mo.observe(document.body, { childList: true, subtree: true });
         } catch {}
+      } else {
+        // atob failed (non-base64 data URL?) — leave the original src.
         try { v.load(); } catch {}
-        setup();
-      }).catch(() => {
-        // Conversion failed — fall back to the original data: URL.
-        try { v.src = _origSrc; v.load(); } catch {}
-        setup();
-      });
-    } else {
-      setup();
+      }
     }
+    setup();
+  }
+
+  // Convert a data: URL to a blob: URL synchronously. Returns null on failure.
+  function _dataUrlToBlobUrl(dataUrl) {
+    try {
+      const comma = dataUrl.indexOf(',');
+      if (comma < 0) return null;
+      const header = dataUrl.slice(5, comma); // strip 'data:'
+      const payload = dataUrl.slice(comma + 1);
+      const parts = header.split(';');
+      const mime = parts[0] || 'application/octet-stream';
+      const isB64 = parts.some(p => p.toLowerCase() === 'base64');
+      let bytes;
+      if (isB64) {
+        const bin = atob(payload);
+        bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      } else {
+        const txt = decodeURIComponent(payload);
+        bytes = new Uint8Array(txt.length);
+        for (let i = 0; i < txt.length; i++) bytes[i] = txt.charCodeAt(i);
+      }
+      // Strip codec parameters and our internal `;videonote=1` hint from
+      // the blob mime — some Android WebView builds reject unknown mime
+      // params on createObjectURL playback.
+      return URL.createObjectURL(new Blob([bytes], { type: mime }));
+    } catch { return null; }
   }
 
   // Wire up metadata/poster/play interaction on a chat-video wrapper whose
