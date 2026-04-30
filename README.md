@@ -40,8 +40,9 @@
 | 🤖 **Android** | [frogtalk-v223.apk](https://frogtalk.xyz/static/frogtalk-v223.apk) | Sideload — enable "Unknown Sources" |
 | 🐧 **Linux AppImage** | [FrogTalk-1.4.1.AppImage](https://frogtalk.xyz/static/FrogTalk-1.4.1.AppImage) | `chmod +x` then run |
 | 📦 **Linux .deb** | [frogtalk_1.4.1_amd64.deb](https://frogtalk.xyz/static/frogtalk_1.4.1_amd64.deb) | `sudo dpkg -i frogtalk_1.4.1_amd64.deb` |
-| 🪟 **Windows** | [FrogTalk-1.4.1-win-x64-portable.exe](https://frogtalk.xyz/download/windows) | Portable single-file — just run |
-| 🖥️ **Desktop (Electron)** | [frogtalk.xyz](https://frogtalk.xyz) | Windows / macOS build via the site |
+| 🪟 **Windows (Portable .exe)** | [FrogTalk-1.4.1-win-x64-portable.exe](https://frogtalk.xyz/download/windows) | Portable single-file — just run |
+| 🪟 **Windows (.zip)** | [FrogTalk-1.4.1-win-x64.zip](https://frogtalk.xyz/download/windows-zip) | Unzip, then run `FrogTalk.exe` |
+| 🍎 **macOS** | [Open in browser](https://frogtalk.xyz) | Native macOS build not published yet |
 
 ---
 
