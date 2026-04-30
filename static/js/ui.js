@@ -502,6 +502,55 @@ const ChatVideo = (() => {
     const durEl = wrap.querySelector('.cv-dur');
     const loading = wrap.querySelector('.cv-loading');
 
+    // Big data: URLs are pathologically slow / non-seekable on Android
+    // Chromium WebView (it decodes the base64 inline on every read).
+    // For chat videos that come straight off the API as data: URLs we
+    // swap to a blob: URL up front — the WebView treats blob URLs as
+    // real seekable handles, which fixes BOTH the missing first-frame
+    // thumbnail and the "tap play but nothing happens" symptom for
+    // video notes (and regular videos > a few hundred KB).
+    //
+    // The swap is async (fetch → .blob() → URL.createObjectURL), so we
+    // gate the entire metadata/poster/play wiring behind the swap to
+    // avoid racing the loadedmetadata `{once:true}` listener: if the
+    // data: URL fires loadedmetadata first, that one-shot listener is
+    // burned and the subsequent blob:-URL load runs unobserved.
+    const setup = () => _wireVideo(wrap, v, overlay, poster, durEl, loading);
+    const _origSrc = v.getAttribute('src') || '';
+    if (_origSrc.startsWith('data:')) {
+      // Stop the in-flight data: URL load so we don't waste the
+      // `loadedmetadata` event on it.
+      try { v.removeAttribute('src'); v.load(); } catch {}
+      fetch(_origSrc).then(r => r.blob()).then(b => {
+        const url = URL.createObjectURL(b);
+        v.src = url;
+        // Revoke when the wrapper leaves the DOM.
+        try {
+          const mo = new MutationObserver(() => {
+            if (!document.contains(wrap)) {
+              try { URL.revokeObjectURL(url); } catch {}
+              mo.disconnect();
+            }
+          });
+          mo.observe(document.body, { childList: true, subtree: true });
+        } catch {}
+        try { v.load(); } catch {}
+        setup();
+      }).catch(() => {
+        // Conversion failed — fall back to the original data: URL.
+        try { v.src = _origSrc; v.load(); } catch {}
+        setup();
+      });
+    } else {
+      setup();
+    }
+  }
+
+  // Wire up metadata/poster/play interaction on a chat-video wrapper whose
+  // <video> already has its final src (blob: or http(s):). Split out of
+  // init() so the data:→blob: swap can defer this past the async fetch.
+  function _wireVideo(wrap, v, overlay, poster, durEl, loading) {
+
     // Telegram-style "video note": flagged at render time via the
     // `data-video-note="1"` attribute (driven by the `;videonote=1` mime
     // hint set when finaliseVideoNote produced the blob). Apply the
