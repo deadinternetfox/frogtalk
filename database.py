@@ -4464,6 +4464,8 @@ def get_suggested_users(user_id: int, limit: int = 10) -> List[Dict]:
                    )) as mutual_sample
             FROM users u
             WHERE u.id != ?
+              AND LOWER(u.nickname) != LOWER(COALESCE(
+                    (SELECT nickname FROM users WHERE id=?), ''))
               AND u.id NOT IN (SELECT following_id FROM followers WHERE follower_id=?)
               AND u.id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND u.id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
@@ -4478,7 +4480,7 @@ def get_suggested_users(user_id: int, limit: int = 10) -> List[Dict]:
             GROUP BY LOWER(u.nickname)
             ORDER BY mutual_count DESC, follower_count DESC, post_count DESC, u.id DESC
             LIMIT ?
-        """, (user_id, user_id, user_id, user_id, user_id, user_id, limit)).fetchall()
+        """, (user_id, user_id, user_id, user_id, user_id, user_id, user_id, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
