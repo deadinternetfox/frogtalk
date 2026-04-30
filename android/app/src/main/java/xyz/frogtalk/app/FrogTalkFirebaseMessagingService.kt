@@ -207,10 +207,21 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             if (peerNick.isNotBlank()) putExtra("dm_nick", peerNick)
         }
         val baseRequest = (callId.hashCode() and 0x7fffffff)
-        val answerPending = PendingIntent.getActivity(
+        val openPending = PendingIntent.getActivity(
             this,
             baseRequest,
             openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Distinct intent for the "Answer" action: same as openIntent but with
+        // auto_accept=true so MainActivity tells the WebView to skip the
+        // ringing UI and accept immediately.
+        val answerIntent = Intent(openIntent).apply { putExtra("auto_accept", true) }
+        val answerPending = PendingIntent.getActivity(
+            this,
+            baseRequest xor 0xA1,
+            answerIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -244,8 +255,8 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setFullScreenIntent(answerPending, true)
-            .setContentIntent(answerPending)
+            .setFullScreenIntent(openPending, true)
+            .setContentIntent(openPending)
             .setOngoing(true)
             .setAutoCancel(true)
             // Channel already supplies ringtone + vibration. setDefaults()

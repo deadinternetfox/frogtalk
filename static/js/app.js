@@ -161,16 +161,40 @@ const App = {
     const incomingCall = params.get('incoming_call');
     const pendingCallId = params.get('call_id');
     const pendingPeerNick = params.get('peer_nick');
+    const autoAccept = params.get('auto_accept') === '1';
     if (incomingCall === '1' && pendingCallId) {
       this.pendingIncomingCall = {
         callId: pendingCallId,
         peerNick: pendingPeerNick || '',
+        autoAccept,
       };
       this.setPendingIncomingCall(this.pendingIncomingCall);
       window.history.replaceState({}, '', window.location.pathname);
     } else {
       this.pendingIncomingCall = this.getPendingIncomingCall();
     }
+    // Cold-start: service worker opened the page with a URL fragment carrying
+    // the user's notification button choice. Honour it as soon as calls.js
+    // is ready (handleCallOffer will auto-accept; rejectCall fires standalone).
+    try {
+      const hash = String(window.location.hash || '');
+      const m = hash.match(/(ftCallAccept|ftCallReject)=([^&]+)/);
+      if (m) {
+        const action = m[1] === 'ftCallReject' ? 'reject' : 'accept';
+        // Defer until calls.js has loaded.
+        const apply = () => {
+          if (action === 'reject') {
+            try { if (typeof rejectCall === 'function') rejectCall(); } catch {}
+          } else {
+            try { if (typeof acceptCall === 'function') acceptCall(); } catch {}
+          }
+        };
+        if (document.readyState === 'complete') setTimeout(apply, 50);
+        else window.addEventListener('load', () => setTimeout(apply, 50), { once: true });
+        // Strip the fragment so a refresh doesn't re-trigger.
+        window.history.replaceState({}, '', window.location.pathname + window.location.search);
+      }
+    } catch {}
 
     if (!State.token || !State.user) {
       const switched = params.get('switched') === '1';
@@ -527,6 +551,11 @@ const App = {
       }
       if (typeof handleCallOffer === 'function') {
         await handleCallOffer(offer);
+        // If the user came in via the notification's "Answer" button, skip
+        // the ringing UI and accept immediately.
+        if (pending?.autoAccept && typeof acceptCall === 'function') {
+          setTimeout(() => { try { acceptCall(); } catch {} }, 0);
+        }
         return true;
       }
       return false;

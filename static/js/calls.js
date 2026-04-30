@@ -59,6 +59,10 @@ let _didRelayRetry = false;
 // Buffered call_answer SDP for callees on flaky WS — replayed on reconnect.
 let _pendingAnswerSend = null;
 let _pendingAnswerRetryTimer = null;
+// When the user taps the OS notification's "Accept" button BEFORE the WS
+// call_offer has arrived, acceptCall() can't run yet (no _pendingOffer). We
+// remember the intent and auto-accept the moment the offer lands.
+let _autoAcceptPending = false;
 
 function _isResolvedAvatar(avatar) {
   const value = String(avatar || '').trim();
@@ -222,6 +226,13 @@ async function handleCallOffer (data) {
   if (data.renegotiate && _callState === 'active' && _pc &&
       data.from_nickname === _callPeerNick) {
     try {
+      // If the caller is forcing relay (TURN-only ICE restart), mirror that
+      // on this side too — otherwise the answerer keeps offering host/srflx
+      // candidates that can't pair with the caller's relay-only set, and
+      // the restart never converges.
+      if (data.force_relay) {
+        try { _pc.setConfiguration({ iceServers: ICE_SERVERS, iceTransportPolicy: 'relay' }); } catch {}
+      }
       await _pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
       const ans = await _pc.createAnswer();
       await _pc.setLocalDescription(ans);
@@ -261,6 +272,12 @@ async function handleCallOffer (data) {
       window.Android.ringForCall(String(data.from_nickname || ''), String(data.call_id || ''));
     }
   } catch {}
+  // Auto-accept if the user already tapped the notification's Accept button
+  // before this WS offer arrived. Skip the incoming-call UI entirely.
+  if (_autoAcceptPending) {
+    _autoAcceptPending = false;
+    setTimeout(() => { try { acceptCall(); } catch {} }, 0);
+  }
 }
 
 let _pendingOffer = null;
@@ -270,7 +287,12 @@ async function acceptCall () {
   hideIncomingCall();
   try { Notifications.stopRinging(); } catch {}
   try { window.Android?.dismissRing?.(); } catch {}
-  if (!_pendingOffer?.sdp) return;
+  if (!_pendingOffer?.sdp) {
+    // Offer hasn't landed yet (notification tap raced ahead of the WS
+    // call_offer push). Queue the intent so it auto-accepts on arrival.
+    _autoAcceptPending = true;
+    return;
+  }
   // If user answered from outside the DM view (Android tray / Electron),
   // bring the DM thread into view in the background.
   try {
@@ -435,6 +457,7 @@ function _armConnectingHardCap () {
           call_type: _callType,
           sdp: offer.sdp,
           renegotiate: true,
+          force_relay: true,
         });
         // Give the relay attempt another 20 s before giving up entirely.
         setTimeout(() => {
@@ -574,6 +597,7 @@ function resetCall () {
     _pendingIceQueue.length = 0;
     _remoteDescApplied = false;
     _didRelayRetry = false;
+    _autoAcceptPending = false;
     _callState = 'idle'; _callPeerNick = null; _callPeerUID = null; _callId = null;
     _callPeerAvatar = null;
     _mutedAudio = false; _mutedVideo = false; _speakerMuted = false;
@@ -623,6 +647,26 @@ function createPC () {
         const ra = document.getElementById('call-remote-avatar');
         if (ra) ra.style.display = 'none';
       }
+      // Force a play() — Android Chrome / iOS Safari sometimes don't start
+      // playback automatically when srcObject mutates after element is in
+      // the DOM, leaving a "connected" call with no audio output.
+      try {
+        const p = rv.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(err => {
+            // Autoplay rejected (rare since accept-tap is a user gesture).
+            // Try once more on next user interaction as a safety net.
+            console.warn('remote rv.play() rejected, will retry on interaction', err?.name || err);
+            const retry = () => {
+              rv.play().catch(() => {});
+              document.removeEventListener('click', retry);
+              document.removeEventListener('touchend', retry);
+            };
+            document.addEventListener('click', retry, { once: true });
+            document.addEventListener('touchend', retry, { once: true });
+          });
+        }
+      } catch {}
       // Start remote voice activity detection
       if (e.track.kind === 'audio' && rv.srcObject) {
         _startRemoteVAD(rv.srcObject);

@@ -76,6 +76,12 @@ class MainActivity : AppCompatActivity() {
                 sourceIntent.getStringExtra(CallService.EXTRA_PEER_NICK)
                     ?.takeIf { it.isNotBlank() }
                     ?.let { builder.appendQueryParameter("peer_nick", it) }
+                // The notification's "Answer" button sets auto_accept=true;
+                // forward that to the WebView so we skip the ringing UI and
+                // jump straight into the connected-call screen.
+                if (sourceIntent.getBooleanExtra("auto_accept", false)) {
+                    builder.appendQueryParameter("auto_accept", "1")
+                }
             }
             // Generic deep-link: open a DM with this nick on launch. Used by
             // both message-notification taps and incoming-call taps so the
