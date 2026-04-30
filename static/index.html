@@ -41,8 +41,12 @@
 <meta name="twitter:image:alt" content="FrogTalk — secure encrypted chat">
 <meta name="application-name" content="FrogTalk">
 
-<!-- Telegram / Signal prefer a plain canonical + article:published_time for richer cards -->
-<link rel="canonical" href="https://frogtalk.xyz/app">
+<!-- The app shell (/app) is a private SPA that requires login — tell
+     search engines not to index it and not to follow its links.
+     The canonical points to the public home page so any crawler that
+     lands here is pointed at the indexable landing page instead. -->
+<meta name="robots" content="noindex, nofollow">
+<link rel="canonical" href="https://frogtalk.xyz/">
 <title>FrogTalk</title>
 <script type="application/ld+json">
 {

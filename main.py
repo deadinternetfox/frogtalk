@@ -191,6 +191,53 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="FrogTalk", lifespan=lifespan)
+
+# ── ASGI-level HEAD→GET shim ──────────────────────────────────────────────────
+# Starlette/FastAPI only auto-promotes HEAD for a narrow set of response
+# types and the behaviour varies by version.  Wrapping at the raw ASGI
+# level (before Starlette routing) is the only version-agnostic fix.
+# Google Search Console, Bing, and other crawlers probe sitemaps /
+# robots.txt via HEAD; a 405 there means 0 discovered pages in GSC.
+from starlette.types import ASGIApp as _ASGIApp, Scope as _Scope, Receive as _Receive, Send as _Send
+
+class _HeadAsGetMiddleware:
+    """Convert HEAD requests to GET at ASGI scope level, suppress body."""
+    __slots__ = ("app",)
+    def __init__(self, _app: _ASGIApp) -> None:
+        self.app = _app
+
+    async def __call__(self, scope: _Scope, receive: _Receive, send: _Send) -> None:
+        if scope.get("type") == "http" and scope.get("method") == "HEAD":
+            scope = {**scope, "method": "GET"}
+            _body_sent = False
+
+            async def _suppress_body(message: dict) -> None:
+                nonlocal _body_sent
+                if message.get("type") == "http.response.body":
+                    if not _body_sent:
+                        _body_sent = True
+                        await send({**message, "body": b"", "more_body": False})
+                    return
+                await send(message)
+
+            await self.app(scope, receive, _suppress_body)
+        else:
+            await self.app(scope, receive, send)
+
+# Wrap the FastAPI app so the shim sits outside all other middlewares and
+# intercepts HEAD before Starlette routing returns 405.
+app.router.on_startup   # touch to trigger any deferred setup
+_raw_app = app
+app.middleware_stack = None  # force rebuild with new outermost wrapper
+# We store the raw asgi app reference so we can wrap it after build.
+_head_shim_installed = False
+
+_original_build = app.build_middleware_stack
+def _patched_build():
+    stack = _original_build()
+    return _HeadAsGetMiddleware(stack)
+app.build_middleware_stack = _patched_build
+
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
