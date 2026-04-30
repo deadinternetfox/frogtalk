@@ -557,12 +557,28 @@ const Notifications = (() => {
       // unguarded reference throws ReferenceError and kills the rest of
       // notifyDM before the window.Android.showNotification bridge call
       // below can fire — that was the foreground-tink-no-tray bug.
+      // Call-log system messages embed JSON as their content
+      // ([[CALLLOG]]{...}) — render a friendly one-liner instead of the
+      // raw payload that would otherwise leak into the notification.
+      const _bodyForPush = (() => {
+        const raw = String(msg.content || '');
+        if (raw.startsWith('[[CALLLOG]]')) {
+          try {
+            const meta = JSON.parse(raw.slice('[[CALLLOG]]'.length));
+            const icon = meta.icon || '📞';
+            const t = meta.title ? String(meta.title) : 'Call';
+            const sub = meta.subtitle ? ` · ${meta.subtitle}` : '';
+            return `${icon} ${t}${sub}`;
+          } catch { return '📞 Call'; }
+        }
+        return raw.replace(/<[^>]+>/g, '').slice(0, 140) || 'Media';
+      })();
       if (_pref('notify_desktop', true) &&
           typeof Notification !== 'undefined' &&
           Notification.permission === 'granted') {
         try {
           new Notification(`${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'} sent you a message`, {
-            body: (msg.content || '').replace(/<[^>]+>/g, '').slice(0, 100),
+            body: _bodyForPush.slice(0, 100),
             icon: '/static/icons/icon-192.png',
             tag: 'frogtalk-dm-' + (msg.sender_nickname || 'dm'),
           });
@@ -573,8 +589,7 @@ const Notifications = (() => {
       try {
         if (window.Android && typeof window.Android.showNotification === 'function') {
           const title = `${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'} sent you a message`;
-          const body  = (msg.content || 'Media').replace(/<[^>]+>/g, '').slice(0, 140);
-          window.Android.showNotification(title, body);
+          window.Android.showNotification(title, _bodyForPush);
         }
       } catch {}
       // Electron desktop app bridge
@@ -582,7 +597,7 @@ const Notifications = (() => {
         if (window.desktopApp && typeof window.desktopApp.showNotification === 'function') {
           window.desktopApp.showNotification(
             `${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'}`,
-            (msg.content || 'Media').replace(/<[^>]+>/g, '').slice(0, 140)
+            _bodyForPush
           );
         }
       } catch {}
