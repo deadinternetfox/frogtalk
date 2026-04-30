@@ -52,6 +52,12 @@ class SendMessageRequest(BaseModel):
     # ONLY for rooms that have an active outbound bridge — the server never
     # stores it, only forwards it to Telegram / Discord.
     bridge_plain: Optional[str] = None
+    # Forwarded-message metadata: JSON string
+    # {nick, source_label, kind:'room'|'dm', original_id?}.
+    # When set the server (a) refuses if the SOURCE conversation has
+    # forwarding_disabled=1, and (b) persists it so future renders show
+    # the "↪ Forwarded from" badge.
+    forwarded_from: Optional[str] = None
 
 
 @router.post("/{room_name}/send")
@@ -70,10 +76,43 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         if not _is_allowed_media_payload(body.media_data):
             return JSONResponse(status_code=400, content={"error": "Unsupported file type"})
 
+    # Forwarding source-side check: if the message is being forwarded, make
+    # sure the SOURCE conversation hasn't disabled forwarding. Defence in
+    # depth — the client also hides the button, but a tampered request
+    # would still be rejected here.
+    fwd_meta = None
+    if body.forwarded_from:
+        try:
+            import json as _json
+            fwd_meta = _json.loads(body.forwarded_from)
+            if not isinstance(fwd_meta, dict):
+                fwd_meta = None
+        except Exception:
+            fwd_meta = None
+        if fwd_meta:
+            kind = fwd_meta.get("kind")
+            if kind == "room":
+                src = db.get_room_by_name(str(fwd_meta.get("source_name") or ""))
+                if src and int(src.get("forwarding_disabled") or 0):
+                    return JSONResponse(status_code=403, content={"error": "Forwarding disabled in source channel"})
+            elif kind == "dm":
+                try:
+                    src_cid = int(fwd_meta.get("source_id") or 0)
+                except Exception:
+                    src_cid = 0
+                if src_cid:
+                    with db._conn() as _c:
+                        _r = _c.execute(
+                            "SELECT COALESCE(forwarding_disabled,0) AS f FROM dm_channels WHERE id=?",
+                            (src_cid,)).fetchone()
+                    if _r and int(_r["f"]):
+                        return JSONResponse(status_code=403, content={"error": "Forwarding disabled in source DM"})
+
     msg_id = db.save_message(
         room_name, current_user["id"], current_user["nickname"],
         content, body.media_data, body.media_type,
-        body.media_blur, body.view_once
+        body.media_blur, body.view_once,
+        forwarded_from=(body.forwarded_from if fwd_meta else None),
     )
 
     reply_nickname = None
@@ -103,6 +142,7 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         "reply_to": body.reply_to,
         "reply_nickname": reply_nickname,
         "reply_content": reply_content,
+        "forwarded_from": (body.forwarded_from if fwd_meta else None),
         "edited": False,
         "reactions": {},
         "created_at": datetime.utcnow().isoformat(),

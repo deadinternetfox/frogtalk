@@ -378,6 +378,7 @@ async function openDMChannel (id, nickname, avatar) {
     last_msg_id:    existing.last_msg_id    || 0,
     other_last_seen: existing.other_last_seen || null,
     other_show_read_receipts: existing.other_show_read_receipts !== false,
+    forwarding_disabled: !!existing.forwarding_disabled,
   };
   _dmPage      = 0;
   const _cached = _dmHistoryCache.get(id);
@@ -1066,10 +1067,13 @@ function renderDMMessage (m) {
   const reactionsHtml = _dmReactionHtml(m.reactions, m.id);
 
   // Actions (same style as channel messages)
+  const fwdDisabled = !!(_activeDM && _activeDM.forwarding_disabled);
+  const fwdBadge = (typeof Messages !== 'undefined' && Messages.forwardedBadgeHtml) ? Messages.forwardedBadgeHtml(m) : '';
   const actions = `
     <div class="msg-actions">
       <button class="msg-act-btn" title="Reply" onclick="replyToDM(${m.id},'${esc(senderNick)}','${esc((safeContent||'').substring(0,80))}')">↩️</button>
       <button class="msg-act-btn dm-react-btn" data-dmid="${m.id}" data-emoji="👍" title="React">👍</button>
+      ${fwdDisabled ? '' : `<button class="msg-act-btn" title="Forward" onclick="forwardDMMessage(${m.id})">📤</button>`}
       ${mine ? `<button class="msg-act-btn" title="Edit" onclick="editDMMsg(${m.id})">✏️</button>` : ''}
       <button class="msg-act-btn danger" title="Delete" onclick="deleteDMMsg(${m.id})">🗑️</button>
     </div>
@@ -1086,6 +1090,7 @@ function renderDMMessage (m) {
         ${editedTag}
       </div>
       ${replyQuote}
+      ${fwdBadge}
       ${contentHtml ? `<div class="msg-content">${contentHtml}</div>` : ''}
       ${mediaHtml}
       ${reactionsHtml}
@@ -1258,6 +1263,56 @@ function handleWSDMViewOnceViewedByPeer (data) {
   if (el) el.outerHTML = '<div class="view-once-viewed">🔥 ✓ <em>Seen</em></div>';
 }
 window.handleWSDMViewOnceViewedByPeer = handleWSDMViewOnceViewedByPeer;
+
+/* ── Forwarding ─────────────────────────────────────────────────────────────── */
+async function forwardDMMessage (msgId) {
+  const m = _dmMessages.find(x => +x.id === +msgId);
+  if (!m) { toast('Message not found'); return; }
+  if (!_activeDM) return;
+  if (typeof Messages === 'undefined' || !Messages.openForwardPicker) {
+    toast('Forwarding unavailable'); return;
+  }
+  // Prepare a content payload that's plaintext-safe for forwarding.
+  // DM messages may be E2EE-encrypted in `m.content`; use what's already
+  // displayed to the user instead of the cipher blob.
+  let plain = m.content || '';
+  if (m._decrypted) plain = m._decrypted;
+  await Messages.openForwardPicker({
+    sourceKind: 'dm',
+    sourceId: _activeDM.id,
+    sourceLabel: '@' + (_activeDM.nickname || '?'),
+    msg: { ...m, content: plain, nickname: m.sender_nick || m.nickname || '?' },
+  });
+}
+window.forwardDMMessage = forwardDMMessage;
+
+async function toggleDMForwarding (disabled) {
+  if (!_activeDM) return;
+  try {
+    const r = await apiFetch(`/api/dms/${_activeDM.id}/forwarding`, 'POST', { disabled: disabled ? 1 : 0 });
+    if (r.ok) {
+      _activeDM.forwarding_disabled = !!disabled;
+      const ch = _dmChannels.find(c => c.id === _activeDM.id);
+      if (ch) ch.forwarding_disabled = disabled ? 1 : 0;
+      toast(disabled ? 'Forwarding disabled' : 'Forwarding enabled', 'success');
+      try { renderDMChat(); } catch {}
+    } else {
+      toast('Failed to update setting', 'error');
+    }
+  } catch { toast('Failed to update setting', 'error'); }
+}
+window.toggleDMForwarding = toggleDMForwarding;
+
+function handleWSDMForwarding (data) {
+  if (!data || !data.channel_id) return;
+  const ch = _dmChannels.find(c => c.id === +data.channel_id);
+  if (ch) ch.forwarding_disabled = data.disabled ? 1 : 0;
+  if (_activeDM && _activeDM.id === +data.channel_id) {
+    _activeDM.forwarding_disabled = !!data.disabled;
+    try { renderDMChat(); } catch {}
+  }
+}
+window.handleWSDMForwarding = handleWSDMForwarding;
 
 /* ── Lazy-load DM media ──────────────────────────────────────────────────────── */
 async function loadDMMedia (msgId, channelId) {
@@ -1840,6 +1895,15 @@ function showDisappearSettings() {
           <option value="604800">7 days</option>
           <option value="2592000">30 days</option>
         </select>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid #2a2a2a">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+            <input type="checkbox" id="dm-forwarding-disabled" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer" onchange="toggleDMForwarding(this.checked)">
+            <div>
+              <div style="font-weight:600;font-size:14px">📤 Disable Forwarding</div>
+              <div style="font-size:12px;color:#888">Messages in this DM cannot be forwarded elsewhere</div>
+            </div>
+          </label>
+        </div>
         <div class="modal-actions">
           <button class="modal-btn secondary" onclick="closeModal('modal-disappear')">Cancel</button>
           <button class="modal-btn danger" onclick="wipeDMMessages();closeModal('modal-disappear')">🗑️ Wipe All</button>
@@ -1852,6 +1916,8 @@ function showDisappearSettings() {
   
   // Set current value
   document.getElementById('disappear-select').value = _dmDisappearTimer.toString();
+  const fwdCb = document.getElementById('dm-forwarding-disabled');
+  if (fwdCb) fwdCb.checked = !!(_activeDM && _activeDM.forwarding_disabled);
   openModal('modal-disappear');
 }
 

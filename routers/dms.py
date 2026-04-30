@@ -40,6 +40,9 @@ class DMMessageBody(BaseModel):
     reply_to: Optional[int] = None
     media_blur: int = 0
     view_once: int = 0
+    # Forwarded-message metadata (JSON string). Same shape as room version:
+    # {nick, source_label, kind:'room'|'dm', source_name?, source_id?, original_id?}.
+    forwarded_from: Optional[str] = None
 
 
 class EditDMBody(BaseModel):
@@ -213,11 +216,40 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
         if peer_id and peer_id != current_user["id"] \
                 and db.is_blocked_either_way(current_user["id"], peer_id):
             return JSONResponse(status_code=403, content={"error": "You can no longer message this user"})
+    # Source-side forwarding-disabled enforcement.
+    fwd_meta = None
+    if body.forwarded_from:
+        try:
+            import json as _json
+            fwd_meta = _json.loads(body.forwarded_from)
+            if not isinstance(fwd_meta, dict):
+                fwd_meta = None
+        except Exception:
+            fwd_meta = None
+        if fwd_meta:
+            kind = fwd_meta.get("kind")
+            if kind == "room":
+                src = db.get_room_by_name(str(fwd_meta.get("source_name") or ""))
+                if src and int(src.get("forwarding_disabled") or 0):
+                    return JSONResponse(status_code=403, content={"error": "Forwarding disabled in source channel"})
+            elif kind == "dm":
+                try:
+                    src_cid = int(fwd_meta.get("source_id") or 0)
+                except Exception:
+                    src_cid = 0
+                if src_cid:
+                    with db._conn() as _c:
+                        _r = _c.execute(
+                            "SELECT COALESCE(forwarding_disabled,0) AS f FROM dm_channels WHERE id=?",
+                            (src_cid,)).fetchone()
+                    if _r and int(_r["f"]):
+                        return JSONResponse(status_code=403, content={"error": "Forwarding disabled in source DM"})
     msg_id = db.send_dm_message(
         channel_id, current_user["id"],
         body.content, body.media_data, body.media_type, body.media_name, body.reply_to,
         media_blur=1 if body.media_blur else 0,
         view_once=1 if body.view_once else 0,
+        forwarded_from=(body.forwarded_from if fwd_meta else None),
     )
 
     # Build broadcast payload (strip heavy media_data)
@@ -236,6 +268,7 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
         "view_once": 1 if body.view_once else 0,
         "viewed_by_me": 0,
         "reply_to": body.reply_to,
+        "forwarded_from": (body.forwarded_from if fwd_meta else None),
         "edited": False,
         "deleted": False,
         "reactions": {},
@@ -380,6 +413,45 @@ async def set_disappear_timer(channel_id: int, body: DisappearTimerBody,
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot set timer for this channel"})
     return {"ok": True, "seconds": body.seconds}
+
+
+# ─── Forwarding controls ──────────────────────────────────────────────────────
+
+class ForwardingBody(BaseModel):
+    disabled: int  # 0 or 1
+
+
+@router.post("/{channel_id}/forwarding")
+async def set_dm_forwarding(channel_id: int, body: ForwardingBody,
+                            current_user: dict = Depends(get_current_user)):
+    """Toggle whether messages in this DM may be forwarded."""
+    if body.disabled not in (0, 1):
+        return JSONResponse(status_code=400, content={"error": "disabled must be 0 or 1"})
+    if not db.is_dm_member(channel_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
+    with db._conn() as con:
+        con.execute(
+            "UPDATE dm_channels SET forwarding_disabled=? WHERE id=?",
+            (body.disabled, channel_id),
+        )
+        con.commit()
+    # Notify the peer so their UI updates live.
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?", (channel_id,)
+            ).fetchone()
+        if ch:
+            peer_id = ch["user_b"] if ch["user_a"] == current_user["id"] else ch["user_a"]
+            if peer_id:
+                await manager.send_to_user(peer_id, {
+                    "type": "dm_forwarding",
+                    "channel_id": channel_id,
+                    "disabled": int(body.disabled),
+                })
+    except Exception:
+        pass
+    return {"ok": True, "disabled": int(body.disabled)}
 
 
 # ─── Hide DM channel ───────────────────────────────────────────────────────────

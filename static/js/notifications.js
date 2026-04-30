@@ -522,7 +522,7 @@ const Notifications = (() => {
       if (!dmNotifsOn) return;
       _vibrate([40, 60, 40]);
       // Per-friend custom alert tone takes precedence over the built-in double-pop.
-      const senderNick = msg.sender_nickname || msg.nickname;
+      const senderNick = msg.sender_nickname || msg.sender_nick || msg.nickname;
       const custom = _toneForFriend(senderNick);
       if (_pref('notify_sounds', true)) {
         if (custom === 'custom') {
@@ -561,7 +561,7 @@ const Notifications = (() => {
           typeof Notification !== 'undefined' &&
           Notification.permission === 'granted') {
         try {
-          new Notification(`${msg.sender_nickname || msg.nickname || 'Someone'} sent you a message`, {
+          new Notification(`${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'} sent you a message`, {
             body: (msg.content || '').replace(/<[^>]+>/g, '').slice(0, 100),
             icon: '/static/icons/icon-192.png',
             tag: 'frogtalk-dm-' + (msg.sender_nickname || 'dm'),
@@ -572,7 +572,7 @@ const Notifications = (() => {
       // usually a no-op inside a WebView, so we push through Android directly.
       try {
         if (window.Android && typeof window.Android.showNotification === 'function') {
-          const title = `${msg.sender_nickname || msg.nickname || 'Someone'} sent you a message`;
+          const title = `${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'} sent you a message`;
           const body  = (msg.content || 'Media').replace(/<[^>]+>/g, '').slice(0, 140);
           window.Android.showNotification(title, body);
         }
@@ -581,7 +581,7 @@ const Notifications = (() => {
       try {
         if (window.desktopApp && typeof window.desktopApp.showNotification === 'function') {
           window.desktopApp.showNotification(
-            `${msg.sender_nickname || msg.nickname || 'Someone'}`,
+            `${msg.sender_nickname || msg.sender_nick || msg.nickname || 'Someone'}`,
             (msg.content || 'Media').replace(/<[^>]+>/g, '').slice(0, 140)
           );
         }

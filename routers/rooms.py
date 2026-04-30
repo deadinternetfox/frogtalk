@@ -196,6 +196,7 @@ class UpdateRoomRequest(BaseModel):
     who_can_invite: Optional[str] = None  # everyone, mods, owner
     banner: Optional[str] = None  # data URL or image URL
     about: Optional[str] = None  # rich channel about text
+    forwarding_disabled: Optional[int] = None  # 0 or 1
 
 
 @router.get("/{room_name}")
@@ -242,6 +243,8 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     # Validate invite_only
     if body.invite_only is not None and body.invite_only not in (0, 1):
         return JSONResponse(status_code=400, content={"error": "invite_only must be 0 or 1"})
+    if body.forwarding_disabled is not None and body.forwarding_disabled not in (0, 1):
+        return JSONResponse(status_code=400, content={"error": "forwarding_disabled must be 0 or 1"})
     
     # Validate who_can_invite
     if body.who_can_invite is not None and body.who_can_invite not in ("everyone", "mods", "owner"):
@@ -265,7 +268,8 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
         invite_only=body.invite_only,
         who_can_invite=body.who_can_invite,
         banner=body.banner,
-        about=body.about[:4000] if body.about is not None else None
+        about=body.about[:4000] if body.about is not None else None,
+        forwarding_disabled=body.forwarding_disabled,
     )
     if not ok:
         return JSONResponse(status_code=409, content={"error": "Update failed (name conflict?)"})

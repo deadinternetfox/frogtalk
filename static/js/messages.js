@@ -378,6 +378,142 @@ const Messages = (() => {
     );
   }
 
+  function _forwardedBadgeHtml(msg) {
+    if (!msg || !msg.forwarded_from) return '';
+    let meta;
+    try { meta = (typeof msg.forwarded_from === 'string') ? JSON.parse(msg.forwarded_from) : msg.forwarded_from; }
+    catch { return ''; }
+    if (!meta || typeof meta !== 'object') return '';
+    const nick = UI.escHtml(String(meta.nick || '?'));
+    const src  = UI.escHtml(String(meta.source_label || ''));
+    return `<div class="msg-forwarded" style="font-size:11px;color:#9aa0a6;margin:2px 0 4px;padding:3px 6px;border-left:2px solid #5b8def;background:rgba(91,141,239,0.08);border-radius:3px">↪ Forwarded from <b>${nick}</b>${src ? ` in ${src}` : ''}</div>`;
+  }
+
+  async function forwardMessage(msgId) {
+    const list = State.messages[State.currentRoom] || [];
+    const msg = list.find(m => +m.id === +msgId);
+    if (!msg) { UI.toast?.('Message not found'); return; }
+    await _openForwardPicker({
+      sourceKind: 'room',
+      sourceName: State.currentRoom,
+      sourceLabel: '#' + State.currentRoom,
+      msg,
+    });
+  }
+
+  // Shared picker: opens modal listing rooms + DMs, multi-select, then sends.
+  async function _openForwardPicker({ sourceKind, sourceName, sourceId, sourceLabel, msg }) {
+    let rooms = [], dms = [];
+    try {
+      const r1 = await apiFetch('/api/rooms');
+      const j1 = await r1.json();
+      rooms = (j1.rooms || j1 || []).filter(r => r && r.name);
+    } catch {}
+    try {
+      const r2 = await apiFetch('/api/dms');
+      const j2 = await r2.json();
+      dms = j2.channels || [];
+    } catch {}
+    // Build modal
+    const old = document.getElementById('forward-picker-modal');
+    if (old) old.remove();
+    const modal = document.createElement('div');
+    modal.id = 'forward-picker-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+    const preview = (msg.content || '').slice(0, 120) || (msg.has_media || msg.media_type ? '[media]' : '');
+    modal.innerHTML = `
+      <div style="background:#1e1e1e;border:1px solid #333;border-radius:8px;width:min(440px,92vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
+        <div style="padding:12px 16px;border-bottom:1px solid #333;font-weight:600">Forward message</div>
+        <div style="padding:8px 12px;border-bottom:1px solid #2a2a2a;font-size:12px;color:#9aa0a6">
+          From <b>${UI.escHtml(msg.nickname || '?')}</b>: ${UI.escHtml(preview)}
+        </div>
+        <input id="fwd-search" type="text" placeholder="Search rooms and DMs…" style="margin:8px 12px;padding:8px;background:#111;border:1px solid #333;color:#eee;border-radius:4px"/>
+        <div id="fwd-list" style="overflow-y:auto;flex:1;padding:4px 8px"></div>
+        <div style="padding:10px 12px;border-top:1px solid #333;display:flex;gap:8px;justify-content:flex-end">
+          <button id="fwd-cancel" style="background:#333;border:none;color:#eee;padding:8px 14px;border-radius:4px;cursor:pointer">Cancel</button>
+          <button id="fwd-send" style="background:#5b8def;border:none;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer" disabled>Send</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+    const list = modal.querySelector('#fwd-list');
+    const search = modal.querySelector('#fwd-search');
+    const sendBtn = modal.querySelector('#fwd-send');
+    const selected = new Map(); // key -> {kind,name?,id?,label}
+
+    const items = [];
+    rooms.forEach(r => {
+      if (r.forwarding_disabled) return;
+      items.push({ key: 'r:' + r.name, kind: 'room', name: r.name, label: '#' + r.name, hint: r.description || '' });
+    });
+    dms.forEach(d => {
+      if (d.forwarding_disabled) return;
+      const peer = d.other_nickname || d.nickname || '?';
+      items.push({ key: 'd:' + d.id, kind: 'dm', id: d.id, label: '@' + peer, hint: '' });
+    });
+
+    function render() {
+      const q = search.value.trim().toLowerCase();
+      const visible = items.filter(it => !q || it.label.toLowerCase().includes(q));
+      if (!visible.length) { list.innerHTML = '<div style="padding:20px;color:#888;text-align:center">No matches</div>'; return; }
+      list.innerHTML = visible.map(it => {
+        const checked = selected.has(it.key) ? 'checked' : '';
+        return `<label style="display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:4px;cursor:pointer" onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background=''">
+          <input type="checkbox" data-key="${UI.escHtml(it.key)}" ${checked}/>
+          <span style="flex:1">${UI.escHtml(it.label)}</span>
+        </label>`;
+      }).join('');
+      list.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          const k = cb.dataset.key;
+          const it = items.find(x => x.key === k);
+          if (cb.checked) selected.set(k, it); else selected.delete(k);
+          sendBtn.disabled = selected.size === 0;
+        });
+      });
+    }
+    render();
+    search.addEventListener('input', render);
+    modal.querySelector('#fwd-cancel').onclick = () => modal.remove();
+    modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+    sendBtn.onclick = async () => {
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Sending…';
+      const fwdMeta = {
+        nick: msg.nickname || '?',
+        source_label: sourceLabel,
+        kind: sourceKind,
+        original_id: msg.id,
+      };
+      if (sourceKind === 'room') fwdMeta.source_name = sourceName;
+      if (sourceKind === 'dm') fwdMeta.source_id = sourceId;
+      const fwdJSON = JSON.stringify(fwdMeta);
+      let okCount = 0, failCount = 0;
+      for (const target of selected.values()) {
+        try {
+          if (target.kind === 'room') {
+            const r = await apiFetch(`/api/messages/${encodeURIComponent(target.name)}/send`, 'POST', {
+              content: msg.content || '',
+              forwarded_from: fwdJSON,
+            });
+            if (r.ok) okCount++; else failCount++;
+          } else {
+            const r = await apiFetch(`/api/dms/${target.id}/messages`, 'POST', {
+              content: msg.content || '',
+              forwarded_from: fwdJSON,
+            });
+            if (r.ok) okCount++; else failCount++;
+          }
+        } catch { failCount++; }
+      }
+      modal.remove();
+      if (okCount && !failCount) UI.toast?.(`Forwarded to ${okCount}`, 'success');
+      else if (okCount && failCount) UI.toast?.(`Forwarded to ${okCount}, ${failCount} failed`, 'warn');
+      else UI.toast?.('Forward failed', 'error');
+    };
+    setTimeout(() => search.focus(), 50);
+  }
+
   function _msgHtml(msg, isCont) {
     const isOwn = msg.nickname === State.user?.nickname;
     const isAdmin = msg.nickname === 'admin' || msg._is_admin;
@@ -389,6 +525,7 @@ const Messages = (() => {
     const isMutedAuthor = !isOwn && typeof Mute !== 'undefined' && Mute.isUserMuted(msg.nickname);
     const contentHtml = msg.content ? _formatContent(msg.content) : '<em style="color:#444">Media</em>';
     const mediaHtml = _buildMediaHtml(msg);
+    const fwdBadge = _forwardedBadgeHtml(msg);
 
     // Pin button only shows in rooms (not DMs)
     const canPin = !State.currentRoomType || State.currentRoomType !== 'dm';
@@ -422,6 +559,7 @@ const Messages = (() => {
         <button class="msg-act-btn" title="Reply" data-rid="${msg.id}" data-rnick="${UI.escHtml(msg.nickname)}" data-rtxt="${UI.escHtml((msg.content||'').substring(0,80))}" onclick="Messages.setReplyTo(+this.dataset.rid,this.dataset.rnick,this.dataset.rtxt)">↩️</button>
         <button class="msg-act-btn" title="React" onclick="Messages.showReactMenu(${msg.id}, this)">😀</button>
         <button class="msg-act-btn" title="Copy" onclick="Messages.copyMessage(${msg.id})">📋</button>
+        ${State.currentRoomForwardingDisabled ? '' : `<button class="msg-act-btn" title="Forward" onclick="Messages.forwardMessage(${msg.id})">📤</button>`}
         ${canPin ? `<button class="msg-act-btn" title="Pin" onclick="pinMessage(${msg.id})">📌</button>` : ''}
         ${canEdit ? `<button class="msg-act-btn" title="Edit" onclick="Messages.startEdit(${msg.id})">✏️</button>` : ''}
         ${canDelete ? `<button class="msg-act-btn danger" title="Delete" onclick="Messages.deleteMsg(${msg.id})">🗑️</button>` : ''}
@@ -459,6 +597,7 @@ const Messages = (() => {
         <div class="msg-cont-wrap">
           <div style="flex:1;min-width:0">
             ${replyQuote}
+            ${fwdBadge}
             <div class="msg-content">${contentHtml}</div>
             ${mediaHtml}
             ${_reactionHtml(msg.reactions, msg.id)}
@@ -502,6 +641,7 @@ const Messages = (() => {
           ${pinnedTag}
         </div>
         ${replyQuote}
+        ${fwdBadge}
         <div class="msg-content">${contentHtml}</div>
         ${mediaHtml}
         ${_reactionHtml(msg.reactions, msg.id)}
@@ -1606,7 +1746,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

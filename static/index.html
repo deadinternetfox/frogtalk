@@ -5846,6 +5846,17 @@ window.ConnErr = (function(){
         <option value="owner">Owner Only</option>
       </select>
       <div style="font-size:11px;color:#666;margin-top:4px">Controls who can generate invite links for this channel</div>
+
+      <label class="modal-label" style="margin-top:16px">Message Forwarding</label>
+      <div class="modal-card">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+          <input type="checkbox" id="ch-forwarding-disabled" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer">
+          <div>
+            <div style="font-weight:600;font-size:14px">Disable Forwarding</div>
+            <div style="font-size:12px;color:#888">When enabled, members cannot forward messages from this channel to other rooms or DMs</div>
+          </div>
+        </label>
+      </div>
     </div>
     
     <!-- Directory tab -->
@@ -7248,8 +7259,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/state.js?v=192"></script>
 <script src="/static/js/mute.js?v=191"></script>
-<script src="/static/js/notifications.js?v=195"></script>
-<script src="/static/js/ws.js?v=218"></script>
+<script src="/static/js/notifications.js?v=219"></script>
+<script src="/static/js/ws.js?v=219"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=__APP_ASSET_VERSION__"></script>
   <script src="/static/js/rooms.js?v=__APP_ASSET_VERSION__"></script>

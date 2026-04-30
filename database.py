@@ -436,6 +436,7 @@ def list_rooms() -> List[Dict]:
             SELECT r.id, r.name, r.description, r.type, r.icon, r.slowmode, r.room_key_hint,
                    r.channel_type, r.channel_theme, r.invite_only, r.who_can_invite,
                    r.is_public, r.category, r.tags, r.dj_only_queue,
+                   COALESCE(r.forwarding_disabled, 0) AS forwarding_disabled,
                    u.nickname AS owner_nickname
             FROM rooms r LEFT JOIN users u ON r.owner_id = u.id
             ORDER BY r.id
@@ -481,14 +482,15 @@ def save_message(room_name: str, user_id: int, nickname: str, content: str,
                  view_once: int = 0,
                  bridge_platform: Optional[str] = None,
                  bridge_avatar: Optional[str] = None,
-                 reply_to: Optional[int] = None) -> int:
+                 reply_to: Optional[int] = None,
+                 forwarded_from: Optional[str] = None) -> int:
     with _conn() as con:
         cur = con.execute(
             """INSERT INTO messages (room_name, user_id, nickname, content, media_data, media_type,
-                                     media_blur, view_once, bridge_platform, bridge_avatar, reply_to)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                                     media_blur, view_once, bridge_platform, bridge_avatar, reply_to, forwarded_from)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
             (room_name, user_id, nickname, content, media_data, media_type,
-             media_blur, view_once, bridge_platform, bridge_avatar, reply_to)
+             media_blur, view_once, bridge_platform, bridge_avatar, reply_to, forwarded_from)
         )
         con.commit()
         return cur.lastrowid
@@ -568,7 +570,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                 """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content,
                           (m.media_type IS NOT NULL AND m.media_type != '') AS has_media,
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
-                          m.reply_to, m.bridge_platform,
+                          m.reply_to, m.bridge_platform, m.forwarded_from,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
@@ -584,7 +586,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                 """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content,
                           (m.media_type IS NOT NULL AND m.media_type != '') AS has_media,
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
-                          m.reply_to, m.bridge_platform,
+                          m.reply_to, m.bridge_platform, m.forwarded_from,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
@@ -619,7 +621,8 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
 def get_message(msg_id: int) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(
-            "SELECT id, room_name, user_id, nickname, content, media_data, media_type, created_at FROM messages WHERE id=?",
+            "SELECT id, room_name, user_id, nickname, content, media_data, media_type, "
+            "forwarded_from, created_at FROM messages WHERE id=?",
             (msg_id,)
         ).fetchone()
     return dict(row) if row else None
@@ -1197,6 +1200,20 @@ def _migrate():
             con.execute("ALTER TABLE rooms ADD COLUMN about TEXT DEFAULT ''")
         if "dj_only_queue" not in room_cols:
             con.execute("ALTER TABLE rooms ADD COLUMN dj_only_queue INTEGER DEFAULT 0")
+        # Forwarding controls: when set to 1, server rejects forwarded
+        # messages whose source is this room, and the client hides the
+        # Forward button on its messages.
+        if "forwarding_disabled" not in room_cols:
+            con.execute("ALTER TABLE rooms ADD COLUMN forwarding_disabled INTEGER DEFAULT 0")
+        # Forwarded-from metadata for room messages: JSON blob
+        # {nick, source_label, kind:'room'|'dm', original_id?}.
+        if "forwarded_from" not in msg_cols:
+            con.execute("ALTER TABLE messages ADD COLUMN forwarded_from TEXT")
+        # Same for DMs.
+        if "forwarding_disabled" not in dm_cols:
+            con.execute("ALTER TABLE dm_channels ADD COLUMN forwarding_disabled INTEGER DEFAULT 0")
+        if "forwarded_from" not in dm_msg_cols:
+            con.execute("ALTER TABLE dm_messages ADD COLUMN forwarded_from TEXT")
 
         # ── Music channels: track queue + DJ roles ─────────────────────────
         con.execute("""CREATE TABLE IF NOT EXISTS music_queue (
@@ -1961,6 +1978,7 @@ def get_dm_channels(user_id: int) -> List[Dict]:
                    dc.user_a, dc.user_b,
                    COALESCE(dc.last_read_a, 0) AS last_read_a,
                    COALESCE(dc.last_read_b, 0) AS last_read_b,
+                   COALESCE(dc.forwarding_disabled, 0) AS forwarding_disabled,
                    u.id AS other_id, u.nickname AS other_nick,
                    u.avatar AS other_avatar, u.presence AS other_presence,
                    u.last_seen AS other_last_seen,
@@ -2088,6 +2106,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        (dm.media_type IS NOT NULL AND dm.media_type != '') AS has_media,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
+                       dm.forwarded_from,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id > ? AND dm.deleted=0
@@ -2099,6 +2118,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        (dm.media_type IS NOT NULL AND dm.media_type != '') AS has_media,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
+                       dm.forwarded_from,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id < ? AND dm.deleted=0
@@ -2110,6 +2130,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        (dm.media_type IS NOT NULL AND dm.media_type != '') AS has_media,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
+                       dm.forwarded_from,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.deleted=0
@@ -2123,15 +2144,16 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
 def send_dm_message(channel_id: int, sender_id: int, content: str,
                     media_data: Optional[str] = None, media_type: Optional[str] = None,
                     media_name: Optional[str] = None, reply_to: Optional[int] = None,
-                    media_blur: int = 0, view_once: int = 0) -> int:
+                    media_blur: int = 0, view_once: int = 0,
+                    forwarded_from: Optional[str] = None) -> int:
     with _conn() as con:
         cur = con.execute(
             """INSERT INTO dm_messages
                (channel_id, sender_id, content, media_data, media_type, media_name, reply_to,
-                media_blur, view_once)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+                media_blur, view_once, forwarded_from)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (channel_id, sender_id, content, media_data, media_type, media_name, reply_to,
-             1 if media_blur else 0, 1 if view_once else 0)
+             1 if media_blur else 0, 1 if view_once else 0, forwarded_from)
         )
         con.commit()
         msg_id = cur.lastrowid
@@ -2442,6 +2464,74 @@ def drain_pending_ice_candidates(target_id: int) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def _ensure_pending_call_signals_table(con):
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_call_signals (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id     INTEGER NOT NULL DEFAULT 0,
+            target_id   INTEGER NOT NULL,
+            from_id     INTEGER NOT NULL,
+            from_nick   TEXT    NOT NULL DEFAULT '',
+            kind        TEXT    NOT NULL,
+            payload     TEXT    NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+        """
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pending_call_sig_target ON pending_call_signals(target_id)"
+    )
+
+
+def queue_call_signal(call_id: int, target_id: int, from_id: int,
+                      from_nick: str, kind: str, payload: str) -> None:
+    """Buffer a call control signal (call_end / call_reject) addressed to a
+    user who isn't currently on WS. Bounded to the last 8 rows per target,
+    GC'd after 5 minutes."""
+    with _conn() as con:
+        _ensure_pending_call_signals_table(con)
+        con.execute(
+            """INSERT INTO pending_call_signals
+               (call_id, target_id, from_id, from_nick, kind, payload)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (int(call_id or 0), int(target_id), int(from_id),
+             str(from_nick or ""), str(kind or ""), str(payload or "")),
+        )
+        con.execute(
+            """DELETE FROM pending_call_signals
+               WHERE id IN (
+                 SELECT id FROM pending_call_signals
+                 WHERE target_id=?
+                 ORDER BY id DESC LIMIT -1 OFFSET 8
+               )""",
+            (int(target_id),),
+        )
+        con.execute(
+            "DELETE FROM pending_call_signals WHERE created_at < datetime('now', '-5 minutes')"
+        )
+        con.commit()
+
+
+def drain_pending_call_signals(target_id: int) -> List[Dict]:
+    """Pop and return every queued call signal for this user, oldest first."""
+    with _conn() as con:
+        _ensure_pending_call_signals_table(con)
+        rows = con.execute(
+            """SELECT id, call_id, from_id, from_nick, kind, payload
+               FROM pending_call_signals WHERE target_id=?
+               ORDER BY id ASC""",
+            (int(target_id),),
+        ).fetchall()
+        if rows:
+            con.execute(
+                "DELETE FROM pending_call_signals WHERE target_id=?",
+                (int(target_id),),
+            )
+            con.commit()
+    return [dict(r) for r in rows]
+
+
 def has_recent_mobile_token(user_id: int, max_age_days: int = 30) -> bool:
     """True if the user has at least one FCM/APNs token updated within the
     last `max_age_days`. Used by the call-unreachable check so stale web-push
@@ -2541,7 +2631,7 @@ def get_room_by_name(room_name: str) -> Optional[Dict]:
                    r.invite_only, r.who_can_invite,
                    r.is_public, r.category, r.tags, r.directory_description,
                    (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
-                   r.banner, r.about, r.dj_only_queue,
+                   r.banner, r.about, r.dj_only_queue, r.forwarding_disabled,
                    u.nickname AS owner_nickname
             FROM rooms r LEFT JOIN users u ON r.owner_id = u.id
             WHERE r.name = ?
@@ -2554,7 +2644,7 @@ get_room = get_room_by_name
 
 def update_room_settings(room_name: str, **kwargs) -> bool:
     """Update room settings. Accepts: name, description, icon, slowmode, channel_type, channel_theme, invite_only, who_can_invite, is_public, category, tags, directory_description."""
-    valid_cols = {'name', 'description', 'icon', 'slowmode', 'channel_type', 'channel_theme', 'invite_only', 'who_can_invite', 'is_public', 'category', 'tags', 'directory_description', 'banner', 'about'}
+    valid_cols = {'name', 'description', 'icon', 'slowmode', 'channel_type', 'channel_theme', 'invite_only', 'who_can_invite', 'is_public', 'category', 'tags', 'directory_description', 'banner', 'about', 'forwarding_disabled'}
     updates = {k: v for k, v in kwargs.items() if k in valid_cols and v is not None}
     if not updates:
         return False

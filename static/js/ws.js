@@ -304,6 +304,10 @@ const WS = (() => {
         if (typeof handleWSDMViewOnceViewedByPeer === 'function') handleWSDMViewOnceViewedByPeer(data);
         break;
       }
+      case 'dm_forwarding': {
+        if (typeof handleWSDMForwarding === 'function') handleWSDMForwarding(data);
+        break;
+      }
       // ── WebRTC call signaling ─────────────────────
       case 'call_offer': {
         if (typeof handleCallOffer === 'function') handleCallOffer(data);

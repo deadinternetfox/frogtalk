@@ -620,6 +620,7 @@ const Rooms = (() => {
     const roomData = State.rooms.find(r => r.name === name);
     State.currentRoomOwner = roomData?.owner_nickname || null;
     State.currentRoomMods = [];
+    State.currentRoomForwardingDisabled = !!(roomData?.forwarding_disabled);
     // Fetch moderator list for permission checks (non-blocking)
     if (type !== 'dm') {
       fetch(`/api/rooms/${encodeURIComponent(name)}`, {
@@ -627,6 +628,9 @@ const Rooms = (() => {
       }).then(r => r.ok ? r.json() : null).then(d => {
         if (d && Array.isArray(d.moderators)) {
           State.currentRoomMods = d.moderators.map(m => m.nickname);
+        }
+        if (d && typeof d.forwarding_disabled !== 'undefined') {
+          State.currentRoomForwardingDisabled = !!d.forwarding_disabled;
         }
       }).catch(() => {});
     }
@@ -1028,6 +1032,8 @@ const Rooms = (() => {
     if (inviteOnlyEl) inviteOnlyEl.checked = !!data.room.invite_only;
     const whoCanInviteEl = document.getElementById('ch-who-can-invite');
     if (whoCanInviteEl) whoCanInviteEl.value = data.room.who_can_invite || 'everyone';
+    const fwdEl = document.getElementById('ch-forwarding-disabled');
+    if (fwdEl) fwdEl.checked = !!data.room.forwarding_disabled;
     
     // Populate directory fields
     const dirListedEl = document.getElementById('ch-dir-listed');
@@ -1263,6 +1269,7 @@ const Rooms = (() => {
         banner, about,
         invite_only: document.getElementById('ch-invite-only')?.checked ? 1 : 0,
         who_can_invite: document.getElementById('ch-who-can-invite')?.value || 'everyone',
+        forwarding_disabled: document.getElementById('ch-forwarding-disabled')?.checked ? 1 : 0,
         channel_theme: JSON.stringify({
           bg: document.getElementById('ch-theme-bg').value,
           text: document.getElementById('ch-theme-text').value,
