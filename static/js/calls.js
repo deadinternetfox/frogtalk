@@ -189,15 +189,12 @@ function _clearPersistedIncomingCall() {
 /* ── Initiate call ─────────────────────────────────────────────────────────── */
 async function startCall (type, nick, uid) {
   if (_callState !== 'idle') { toast('Already in a call', 'error'); return; }
-  // Don't even try to dial if WS is mid-reconnect — the call_offer would be
-  // dropped on the floor and the user would sit on a 45 s "Calling…" ghost.
-  // Wait up to 4 s for it to come back; otherwise tell them so they can retry.
+  // If WS is mid-reconnect, give it a brief window to come back so the
+  // call_offer rides a live socket. Don't abort if it's still not open —
+  // _sendCallSignal() buffers into _outboundCallQueue and ws:open flushes,
+  // so the dial still works once the socket finishes its handshake.
   if (!_wsLooksOpen()) {
-    const ok = await _waitForWsOpen(4_000);
-    if (!ok) {
-      toast('Reconnecting… try the call again in a moment', 'error');
-      return;
-    }
+    try { await _waitForWsOpen(8_000); } catch {}
   }
   _callType     = type;
   _callPeerNick = nick  || STATE.dmPeerNick;
@@ -345,18 +342,28 @@ async function handleCallOffer (data) {
 }
 
 let _pendingOffer = null;
+let _acceptInFlight = false;
 
 async function acceptCall () {
   _clearPersistedIncomingCall();
   hideIncomingCall();
   try { Notifications.stopRinging(); } catch {}
   try { window.Android?.dismissRing?.(); } catch {}
+  // Re-entrancy guard. Cold-start-from-notification can trigger acceptCall
+  // twice (once via _autoAcceptPending, once via the user tapping the
+  // in-app accept button) and the second invocation would race the first's
+  // `finally { _pendingOffer = null }` and crash on `_pendingOffer.sdp`.
+  if (_acceptInFlight) return;
   if (!_pendingOffer?.sdp) {
     // Offer hasn't landed yet (notification tap raced ahead of the WS
     // call_offer push). Queue the intent so it auto-accepts on arrival.
     _autoAcceptPending = true;
     return;
   }
+  _acceptInFlight = true;
+  // Snapshot so a concurrent reset/finally can't null it out from under
+  // the awaits below.
+  const offer = _pendingOffer;
   // If user answered from outside the DM view (Android tray / Electron),
   // bring the DM thread into view in the background.
   try {
@@ -388,7 +395,7 @@ async function acceptCall () {
     _pc = createPC();
     _localStream.getTracks().forEach(t => _pc.addTrack(t, _localStream));
 
-    await _pc.setRemoteDescription({ type: 'offer', sdp: _pendingOffer.sdp });
+    await _pc.setRemoteDescription({ type: 'offer', sdp: offer.sdp });
     _remoteDescApplied = true;
     _flushPendingIce();
     const answer = await _pc.createAnswer();
@@ -397,7 +404,7 @@ async function acceptCall () {
     _sendCallAnswerReliable({
       type        : 'call_answer',
       to_nickname : _callPeerNick,
-      call_id     : _pendingOffer.call_id || _callId || undefined,
+      call_id     : offer.call_id || _callId || undefined,
       sdp         : answer.sdp,
     });
     _armConnectingHardCap();
@@ -415,6 +422,7 @@ async function acceptCall () {
     return;
   } finally {
     _pendingOffer = null;
+    _acceptInFlight = false;
   }
 }
 
