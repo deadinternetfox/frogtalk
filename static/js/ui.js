@@ -551,13 +551,29 @@ const ChatVideo = (() => {
   // Convert a data: URL to a blob: URL synchronously. Returns null on failure.
   function _dataUrlToBlobUrl(dataUrl) {
     try {
-      const comma = dataUrl.indexOf(',');
-      if (comma < 0) return null;
-      const header = dataUrl.slice(5, comma); // strip 'data:'
-      const payload = dataUrl.slice(comma + 1);
+      // MediaRecorder produces mime types like
+      //   `data:video/webm;codecs=vp9,opus;videonote=1;base64,...`
+      // — note the comma INSIDE `codecs=vp9,opus`. A naïve indexOf(',')
+      // splits at the wrong comma and we end up feeding garbage bytes to
+      // the blob, which is exactly the "buffers forever, grey circle"
+      // chat symptom. Locate the real header/payload separator by
+      // looking for `;base64,` first (covers all our recorder output)
+      // and fall back to lastIndexOf(',') for non-base64 data: URLs.
+      let header, payload, isB64;
+      const b64Marker = dataUrl.toLowerCase().indexOf(';base64,');
+      if (b64Marker >= 0) {
+        header  = dataUrl.slice(5, b64Marker);
+        payload = dataUrl.slice(b64Marker + 8);
+        isB64   = true;
+      } else {
+        const comma = dataUrl.lastIndexOf(',');
+        if (comma < 0) return null;
+        header  = dataUrl.slice(5, comma);
+        payload = dataUrl.slice(comma + 1);
+        isB64   = false;
+      }
       const parts = header.split(';');
-      const mime = parts[0] || 'application/octet-stream';
-      const isB64 = parts.some(p => p.toLowerCase() === 'base64');
+      const mime  = parts[0] || 'application/octet-stream';
       let bytes;
       if (isB64) {
         const bin = atob(payload);
@@ -568,9 +584,10 @@ const ChatVideo = (() => {
         bytes = new Uint8Array(txt.length);
         for (let i = 0; i < txt.length; i++) bytes[i] = txt.charCodeAt(i);
       }
-      // Strip codec parameters and our internal `;videonote=1` hint from
-      // the blob mime — some Android WebView builds reject unknown mime
-      // params on createObjectURL playback.
+      // Strip our internal `;videonote=1` hint and any unsupported codec
+      // params from the blob mime — some Android WebView builds reject
+      // unknown mime params on createObjectURL playback. Keep just
+      // `type/subtype` (e.g. `video/webm`) which the WebView can sniff.
       return URL.createObjectURL(new Blob([bytes], { type: mime }));
     } catch { return null; }
   }
