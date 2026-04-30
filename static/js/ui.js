@@ -612,6 +612,13 @@ const ChatVideo = (() => {
     let candidates = [];     // fractional positions to try (0..1)
     let candidateIdx = 0;
     let lastSnapshot = null; // {url, score} — best frame so far if all candidates dim
+    // Block drawPoster while the duration-recovery seek-to-1e9 is in
+    // flight: that seek fires `seeked` on the end-of-stream frame
+    // (typically black on a freshly recorded MediaRecorder blob), and
+    // since `candidates.length === 0` at that moment drawPoster would
+    // immediately accept it as the final poster — pinning the chat
+    // bubble to a black circle forever.
+    let posterArmed = false;
 
     // Returns "interest score" for a frame: higher == more visual variety.
     // We sample sparse pixels and compute mean brightness + variance; pure
@@ -662,7 +669,7 @@ const ChatVideo = (() => {
     };
 
     const drawPoster = () => {
-      if (posterDrawn) return;
+      if (posterDrawn || !posterArmed) return;
       try {
         const w = v.videoWidth, h = v.videoHeight;
         if (!w || !h) return;
@@ -730,6 +737,7 @@ const ChatVideo = (() => {
           ? [0.05, 0.15, 0.35, 0.55]
           : [0.5, 0.35, 0.65, 0.2, 0.8, 0.05];
         candidateIdx = 0;
+        posterArmed = true;
         tryNextCandidate();
       };
       if (!isFinite(v.duration) || v.duration <= 0) {
@@ -753,7 +761,7 @@ const ChatVideo = (() => {
     v.addEventListener('loadeddata', () => { if (!candidates.length) drawPoster(); });
     // Safety: if the browser never fires seeked (some Android WebViews on
     // data: URLs), fall back to a timer.
-    setTimeout(() => { if (!posterDrawn) drawPoster(); }, 2500);
+    setTimeout(() => { posterArmed = true; if (!posterDrawn) drawPoster(); }, 2500);
 
     if (overlay) {
       overlay.addEventListener('click', (e) => {

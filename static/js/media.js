@@ -318,8 +318,13 @@ function finaliseVideoNote () {
 function _attVidNoteCapturePoster (v, posterEl) {
   if (!v || !posterEl) return;
   let drawn = false;
+  // We MUST not draw while the recovery seek-to-1e9 is in flight, else
+  // the `seeked` event for that seek paints the end-of-stream frame
+  // (typically black on a freshly stopped MediaRecorder) and pins it as
+  // the poster forever.
+  let armed = false;
   const draw = () => {
-    if (drawn) return;
+    if (drawn || !armed) return;
     try {
       const w = v.videoWidth, h = v.videoHeight;
       if (!w || !h) return;
@@ -334,25 +339,26 @@ function _attVidNoteCapturePoster (v, posterEl) {
       drawn = true;
     } catch {}
   };
-  const startSeek = () => {
+  const armAndSeek = () => {
+    armed = true;
     try { v.currentTime = 0.05; } catch { draw(); }
   };
   v.addEventListener('seeked',     draw);
   v.addEventListener('loadeddata', draw);
   v.addEventListener('loadedmetadata', () => {
     if (!isFinite(v.duration) || v.duration <= 0) {
-      // Force duration to materialise first.
-      const onDur = () => { v.removeEventListener('durationchange', onDur); startSeek(); };
+      // Force duration to materialise FIRST without arming the draw — the
+      // recovery seek to 1e9 fires a 'seeked' on the end-of-stream frame.
+      const onDur = () => { v.removeEventListener('durationchange', onDur); armAndSeek(); };
       v.addEventListener('durationchange', onDur, { once: true });
-      try { v.currentTime = 1e9; } catch { startSeek(); }
-      setTimeout(startSeek, 600);
+      try { v.currentTime = 1e9; } catch { armAndSeek(); }
+      setTimeout(armAndSeek, 600);
     } else {
-      startSeek();
+      armAndSeek();
     }
   });
-  // Last-resort safety in case nothing fires (happens occasionally on
-  // older WebView builds): try to draw whatever's loaded after a beat.
-  setTimeout(draw, 1500);
+  // Last-resort safety in case nothing fires.
+  setTimeout(() => { armed = true; draw(); }, 1800);
   try { v.load(); } catch {}
 }
 
