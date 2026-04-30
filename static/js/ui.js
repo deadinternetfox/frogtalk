@@ -502,13 +502,33 @@ const ChatVideo = (() => {
     const durEl = wrap.querySelector('.cv-dur');
     const loading = wrap.querySelector('.cv-loading');
 
+    // Telegram-style "video note": flagged at render time via the
+    // `data-video-note="1"` attribute (driven by the `;videonote=1` mime
+    // hint set when finaliseVideoNote produced the blob). Apply the
+    // .is-note class up front so the wrapper is round immediately —
+    // independent of whether videoWidth/Height metadata ever resolves on
+    // this device. This also bumps preload to "auto" so the WebView
+    // actually fetches the first keyframe (mandatory for poster capture
+    // on Android Chromium WebView, where preload="metadata" on data:
+    // URLs frequently never paints anything).
+    const flaggedAsNote = wrap.dataset.videoNote === '1';
+    if (flaggedAsNote) {
+      wrap.classList.add('is-note');
+      const icon = wrap.querySelector('.cv-icon');
+      if (icon) icon.textContent = '🎥';
+      try { v.preload = 'auto'; v.setAttribute('preload', 'auto'); } catch {}
+    }
+
     // Strip native controls until the user starts playback so the themed
     // overlay isn't fighting browser UI for the same pixels.
     try { v.removeAttribute('controls'); } catch {}
-    v.preload = 'metadata';
+    if (!flaggedAsNote) v.preload = 'metadata';
     v.muted = true;
     v.playsInline = true;
     try { v.setAttribute('playsinline', ''); } catch {}
+    // Force the loader to actually start. Some WebView builds otherwise
+    // leave preload="metadata" data: URLs in HAVE_NOTHING forever.
+    try { v.load(); } catch {}
 
     let posterDrawn = false;
     let candidates = [];     // fractional positions to try (0..1)
@@ -599,10 +619,14 @@ const ChatVideo = (() => {
       // Detect Telegram-style "video note": square (or near-square) clip
       // recorded from the front-facing camera at 480×480. Apply .is-note
       // so CSS can render the wrapper as a circle with our brand ring,
-      // and swap the badge label.
+      // and swap the badge label. (May already have been pre-applied via
+      // the `data-video-note="1"` hint from the renderer, in which case
+      // this is a no-op.) Tolerance widened to 15% because some Android
+      // cameras silently ignore the 480x480 constraint and pick e.g.
+      // 640x480 or 720x720 close-but-not-square depending on sensor.
       try {
         const w = v.videoWidth, h = v.videoHeight;
-        if (w && h && Math.abs(w - h) <= Math.max(2, Math.round(Math.min(w, h) * 0.04))) {
+        if (w && h && Math.abs(w - h) <= Math.max(2, Math.round(Math.min(w, h) * 0.15))) {
           wrap.classList.add('is-note');
           const icon = wrap.querySelector('.cv-icon');
           if (icon) icon.textContent = '🎥';
@@ -613,11 +637,33 @@ const ChatVideo = (() => {
           }
         }
       } catch {}
-      // Try a few positions and keep the most visually interesting frame.
-      // Middle-first because intros / outros are commonly fades from black.
-      candidates = [0.5, 0.35, 0.65, 0.2, 0.8, 0.05];
-      candidateIdx = 0;
-      tryNextCandidate();
+      // MediaRecorder webm/mp4 blobs from Chromium report duration=Infinity
+      // until the player is forced to seek past the end. In that state the
+      // subsequent fractional seek for poster capture quietly no-ops on
+      // some Android WebViews, leaving us with no thumbnail at all. Force
+      // duration to materialise first, then snapshot.
+      const startCandidates = () => {
+        // Try a few positions and keep the most visually interesting frame.
+        // Middle-first because intros / outros are commonly fades from black.
+        // Note videos are short and typically a face-cam — first frame is
+        // already meaningful, so we lead with 0.05 to avoid the dead-air
+        // mid-clip frame on a 1-2s clip.
+        candidates = wrap.classList.contains('is-note')
+          ? [0.05, 0.15, 0.35, 0.55]
+          : [0.5, 0.35, 0.65, 0.2, 0.8, 0.05];
+        candidateIdx = 0;
+        tryNextCandidate();
+      };
+      if (!isFinite(v.duration) || v.duration <= 0) {
+        let settled = false;
+        const cont = () => { if (settled) return; settled = true; startCandidates(); };
+        const onDur = () => { v.removeEventListener('durationchange', onDur); cont(); };
+        v.addEventListener('durationchange', onDur, { once: true });
+        try { v.currentTime = 1e9; } catch { cont(); }
+        setTimeout(cont, 800);
+      } else {
+        startCandidates();
+      }
     };
 
     if (v.readyState >= 1) onMeta();

@@ -314,6 +314,16 @@ const Messages = (() => {
     // Base media element
     let inner;
     if (msg.media_type?.startsWith('video')) {
+      // Telegram-style "video note" hint travels via mime-type param so
+      // the wrapper renders as a round bubble immediately (instead of
+      // waiting on videoWidth/Height metadata which some Android cameras
+      // resolve at non-square sizes despite the 480x480 constraint).
+      const isNote = (msg.media_type || '').includes('videonote=1');
+      const noteAttr = isNote ? ' data-video-note="1"' : '';
+      const noteCls  = isNote ? ' is-note' : '';
+      const preload  = isNote ? 'auto' : 'metadata';
+      const badgeIco = isNote ? '🎥' : '🎬';
+      const badgeLbl = isNote ? 'Note' : 'Video';
       if (msg.media_blur) {
         // Spoiler videos: skip the themed wrapper so the poster background
         // can't leak the thumbnail through the spoiler overlay.
@@ -322,12 +332,12 @@ const Messages = (() => {
         // Themed inline player (ChatVideo in ui.js wires interaction).
         // The wrapper draws a real first-frame thumbnail and a brand-coloured
         // play button; native controls appear once the user starts playback.
-        inner = `<div class="chat-video" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}">`+
+        inner = `<div class="chat-video${noteCls}"${noteAttr} data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}">`+
           `<div class="cv-poster"></div>`+
-          `<video class="msg-media clickable-media" src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" preload="metadata" muted playsinline></video>`+
+          `<video class="msg-media clickable-media" src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" preload="${preload}" muted playsinline></video>`+
           `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
           `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
-          `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
+          `<div class="cv-badge"><span class="cv-icon">${badgeIco}</span><span class="cv-dur">${badgeLbl}</span></div>`+
         `</div>`;
       }
     } else if (msg.media_type?.startsWith('audio')) {
@@ -1405,15 +1415,21 @@ const Messages = (() => {
       const mediaType = data.media_type || container.getAttribute('data-media-type') || '';
       let html;
       if (mediaType.startsWith('video')) {
+        const isNote = mediaType.includes('videonote=1');
+        const noteAttr = isNote ? ' data-video-note="1"' : '';
+        const noteCls  = isNote ? ' is-note' : '';
+        const preload  = isNote ? 'auto' : 'metadata';
+        const badgeIco = isNote ? '🎥' : '🎬';
+        const badgeLbl = isNote ? 'Note' : 'Video';
         if (isBlur) {
           html = `<video class="msg-media clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" onclick="Messages.openMedia(this)" preload="metadata" controls muted playsinline></video>`;
         } else {
-          html = `<div class="chat-video" data-sender="${UI.escHtml(sender)}" data-time="${time}">`+
+          html = `<div class="chat-video${noteCls}"${noteAttr} data-sender="${UI.escHtml(sender)}" data-time="${time}">`+
             `<div class="cv-poster"></div>`+
-            `<video class="msg-media clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" preload="metadata" muted playsinline></video>`+
+            `<video class="msg-media clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" preload="${preload}" muted playsinline></video>`+
             `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
             `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
-            `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
+            `<div class="cv-badge"><span class="cv-icon">${badgeIco}</span><span class="cv-dur">${badgeLbl}</span></div>`+
           `</div>`;
         }
       } else if (mediaType.startsWith('audio')) {

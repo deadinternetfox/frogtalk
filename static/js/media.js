@@ -262,12 +262,23 @@ function finaliseVideoNote () {
   const ext  = mime.includes('mp4') ? 'mp4' : 'webm';
   const blob = new Blob(_mediaChunks, { type: mime });
 
+  // Tag this attachment as a Telegram-style "video note" so the renderer
+  // can render it as a round bubble immediately (without needing to wait
+  // on videoWidth/videoHeight metadata to detect the square aspect, which
+  // some Android cameras silently ignore the 480x480 constraint on).
+  // We piggyback on the mime-type with a `;videonote=1` parameter so the
+  // hint travels through the message bus for both rooms (no media_name
+  // column) and DMs without any schema changes. Browsers strip unknown
+  // params when decoding, so playback is unaffected.
+  const taggedMime = mime + ';videonote=1';
+
   // Put into pending attachment
   window._pendingAttachment = {
     blob,
-    name: `video-${Date.now()}.${ext}`,
-    type: mime,
+    name: `videonote-${Date.now()}.${ext}`,
+    type: taggedMime,
     isVideo: true,
+    isVideoNote: true,
   };
 
   // Show preview with video thumbnail

@@ -978,12 +978,18 @@ function renderDMMessage (m) {
       inner = `<img src="${mediaUrl}" class="msg-media" onclick="openLightbox('${mediaUrl}')" loading="lazy">`;
     } else if (mimeType.startsWith('video/') || (!mimeType && mediaUrl.startsWith('data:video'))) {
       const _vSender = esc(senderNick || '');
-      inner = `<div class="chat-video" data-sender="${_vSender}" data-time="${time}">`+
+      const _isNote = (mimeType || '').includes('videonote=1') || /(^|\/)videonote-/.test(m.media_name || '');
+      const _noteAttr = _isNote ? ' data-video-note="1"' : '';
+      const _noteCls  = _isNote ? ' is-note' : '';
+      const _preload  = _isNote ? 'auto' : 'metadata';
+      const _badgeIco = _isNote ? '🎥' : '🎬';
+      const _badgeLbl = _isNote ? 'Note' : 'Video';
+      inner = `<div class="chat-video${_noteCls}"${_noteAttr} data-sender="${_vSender}" data-time="${time}">`+
         `<div class="cv-poster"></div>`+
-        `<video src="${mediaUrl}" class="msg-media clickable-media" data-sender="${_vSender}" data-time="${time}" preload="metadata" muted playsinline></video>`+
+        `<video src="${mediaUrl}" class="msg-media clickable-media" data-sender="${_vSender}" data-time="${time}" preload="${_preload}" muted playsinline></video>`+
         `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
         `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
-        `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
+        `<div class="cv-badge"><span class="cv-icon">${_badgeIco}</span><span class="cv-dur">${_badgeLbl}</span></div>`+
       `</div>`;
     } else if (mimeType.startsWith('audio/') || (!mimeType && mediaUrl.startsWith('data:audio'))) {
       inner = `<audio src="${mediaUrl}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
@@ -1331,12 +1337,18 @@ async function loadDMMedia (msgId, channelId) {
     const mediaType = data.media_type || '';
     let html;
     if (mediaType.startsWith('video')) {
-      html = `<div class="chat-video">`+
+      const _isNote = mediaType.includes('videonote=1') || /(^|\/)videonote-/.test(data.media_name || '');
+      const _noteAttr = _isNote ? ' data-video-note="1"' : '';
+      const _noteCls  = _isNote ? ' is-note' : '';
+      const _preload  = _isNote ? 'auto' : 'metadata';
+      const _badgeIco = _isNote ? '🎥' : '🎬';
+      const _badgeLbl = _isNote ? 'Note' : 'Video';
+      html = `<div class="chat-video${_noteCls}"${_noteAttr}>`+
         `<div class="cv-poster"></div>`+
-        `<video src="${data.media_data}" class="msg-media clickable-media" preload="metadata" muted playsinline></video>`+
+        `<video src="${data.media_data}" class="msg-media clickable-media" preload="${_preload}" muted playsinline></video>`+
         `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
         `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
-        `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
+        `<div class="cv-badge"><span class="cv-icon">${_badgeIco}</span><span class="cv-dur">${_badgeLbl}</span></div>`+
       `</div>`;
       // ChatVideo's MutationObserver only fires for newly-added nodes; the
       // outerHTML swap below replaces an existing element, so kick the scan
