@@ -556,17 +556,14 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 } else {
-                    // Body-tap on the call notification (no auto_accept).
-                    // Show ringing UI; reload only if JS isn't already
-                    // showing the incoming-call overlay.
-                    webView?.evaluateJavascript(
-                        "(function(){try{return (typeof _callState!=='undefined'&&_callState!=='idle')?'live':'cold';}catch(e){return 'cold';}})()"
-                    ) { result ->
-                        val r = (result ?: "").trim('"')
-                        if (r != "live") {
-                            webView?.loadUrl(buildAppUrl(APP_URL, intent))
-                        }
-                    }
+                    // Body-tap / Open on the call notification.
+                    // Do NOT reload the WebView here — the activity is already
+                    // running, so the live WS/RTCPeerConnection is what will
+                    // deliver the offer. A loadUrl() would tear all of that
+                    // down and leave both peers stuck on "Calling…/Connecting…".
+                    // The activity has been brought to front by the system;
+                    // that's all we need to do.
+                    Log.i(TAG, "incoming-call body tap: bring-to-front only, no reload")
                 }
             } else {
                 // Warm tap on a message notification: don't reload the whole

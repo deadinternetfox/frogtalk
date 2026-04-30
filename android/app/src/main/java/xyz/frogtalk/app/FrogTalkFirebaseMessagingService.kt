@@ -214,11 +214,18 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // We deliberately do NOT expose an "Answer" action that auto-accepts
-        // from the notification. Cold-start auto-accept races the WebSocket
-        // and RTCPeerConnection bring-up and wedges the call. The body tap
-        // and "Open" action just bring the app to the in-app ringing UI,
-        // where acceptCall() runs against fully-initialised JS state.
+        // Distinct intent for the "Answer" action: same as openIntent but with
+        // auto_accept=true so MainActivity tells the WebView to skip the
+        // ringing UI and accept immediately. Safe now that onNewIntent's
+        // body-tap branch no longer reloads the WebView (which was tearing
+        // down the live RTCPeerConnection mid-handshake).
+        val answerIntent = Intent(openIntent).apply { putExtra("auto_accept", true) }
+        val answerPending = PendingIntent.getActivity(
+            this,
+            baseRequest xor 0xA1,
+            answerIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         val declineIntent = Intent(this, CallDeclineReceiver::class.java).apply {
             putExtra(CallService.EXTRA_CALL_ID, callId)
@@ -261,13 +268,17 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             // restarting the ringtone.
             .setOnlyAlertOnce(true)
 
-        // Plain action buttons (no CallStyle): CallStyle's green button is
-        // hard-labelled "Answer" by the system, but tapping it must NOT
-        // auto-accept (see comment above). "Open" makes the behaviour
-        // honest — the user accepts/declines from the in-app ringing UI.
-        builder
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePending)
-            .addAction(android.R.drawable.ic_menu_view, "Open", openPending)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // CallStyle gives the proper green Answer / red Decline buttons
+            // and matches the system Phone app's look.
+            builder.setStyle(
+                NotificationCompat.CallStyle.forIncomingCall(person, declinePending, answerPending)
+            )
+        } else {
+            builder
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePending)
+                .addAction(android.R.drawable.ic_menu_call, "Answer", answerPending)
+        }
 
         nm.notify(RING_NOTIFICATION_ID, builder.build())
     }
