@@ -44,6 +44,15 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
         if (kind == "call") {
             val peer = data["from_nickname"].orEmpty()
             val callId = data["call_id"].orEmpty()
+            // When the app is already visible, the in-app ringing overlay
+            // (driven by the WS call_offer path) is the single source of
+            // truth. Posting the FCM CallStyle heads-up on top of it just
+            // creates a second "Answer" button whose auto-accept races
+            // with the in-app accept and wedges the call. Skip it.
+            if (MainActivity.isAppVisible) {
+                Log.i(TAG, "FCM call push: app visible, suppressing duplicate notification")
+                return
+            }
             // Single source of truth for the incoming-call UI: the CallStyle
             // heads-up below. We deliberately do NOT also fire CallService's
             // ACTION_RING here — that posts another notification on the same
