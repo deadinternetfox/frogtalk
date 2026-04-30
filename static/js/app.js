@@ -331,14 +331,17 @@ const App = {
     } catch {}
 
     // Recover pending incoming call as early as possible so reloads don't hide
-    // the ring UI behind rooms/sidebar loading.
+    // the ring UI behind rooms/sidebar loading. Capture the autoAccept flag
+    // before the if/else so the fallback path doesn't lose it (the else
+    // branch reads from a property we just nulled).
+    const wasAutoAccept = !!this.pendingIncomingCall?.autoAccept;
     if (this.pendingIncomingCall) {
       const restored = await this.recoverIncomingCall(this.pendingIncomingCall);
       if (restored) {
         this.pendingIncomingCall = null;
       }
     } else {
-      await this.recoverLatestIncomingCall({ autoAccept: this.pendingIncomingCall?.autoAccept });
+      await this.recoverLatestIncomingCall({ autoAccept: wasAutoAccept });
     }
 
     // Load rooms then join first available room (or show onboarding)
@@ -349,8 +352,11 @@ const App = {
       if (restored) {
         this.pendingIncomingCall = null;
       }
-    } else {
-      await this.recoverLatestIncomingCall();
+    } else if (wasAutoAccept) {
+      // Second-pass safety net: if the first recovery missed (the call_offer
+      // hadn't been persisted yet when we asked), try again now that rooms
+      // and the WS connection are settled.
+      await this.recoverLatestIncomingCall({ autoAccept: wasAutoAccept });
     }
 
     // Process pending invite / share link

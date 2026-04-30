@@ -529,7 +529,45 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         try {
             if (intent.getBooleanExtra("incoming_call", false) == true) {
-                webView?.loadUrl(buildAppUrl(APP_URL, intent))
+                val autoAccept = intent.getBooleanExtra("auto_accept", false)
+                if (autoAccept) {
+                    // The activity is already running (this is onNewIntent),
+                    // so the WebView is alive. A full page reload here would
+                    // destroy the live WS socket + RTCPeerConnection + the
+                    // already-arrived _pendingOffer, which is exactly the
+                    // "one says calling / other says connecting" deadlock.
+                    //
+                    // Probe JS for a pending offer first. If it's there,
+                    // acceptCall() inline. If JS isn't ready or has nothing
+                    // to accept, fall back to a URL reload so the app can
+                    // recover the offer via REST.
+                    val probe = "(function(){try{" +
+                        "if(typeof acceptCall!=='function')return 'noop';" +
+                        "if(typeof _pendingOffer!=='undefined'&&_pendingOffer&&_pendingOffer.sdp){acceptCall();return 'ok';}" +
+                        // Offer hasn't landed yet — flag so handleCallOffer auto-accepts.
+                        "try{_autoAcceptPending=true;}catch(e){}" +
+                        "return 'queued';" +
+                    "}catch(e){return 'err';}})()"
+                    webView?.evaluateJavascript(probe) { result ->
+                        val r = (result ?: "").trim('"')
+                        Log.i(TAG, "auto-accept probe result=$r")
+                        if (r != "ok" && r != "queued") {
+                            webView?.loadUrl(buildAppUrl(APP_URL, intent))
+                        }
+                    }
+                } else {
+                    // Body-tap on the call notification (no auto_accept).
+                    // Show ringing UI; reload only if JS isn't already
+                    // showing the incoming-call overlay.
+                    webView?.evaluateJavascript(
+                        "(function(){try{return (typeof _callState!=='undefined'&&_callState!=='idle')?'live':'cold';}catch(e){return 'cold';}})()"
+                    ) { result ->
+                        val r = (result ?: "").trim('"')
+                        if (r != "live") {
+                            webView?.loadUrl(buildAppUrl(APP_URL, intent))
+                        }
+                    }
+                }
             } else {
                 // Warm tap on a message notification: don't reload the whole
                 // page, just route the WebView to the right DM thread via JS.

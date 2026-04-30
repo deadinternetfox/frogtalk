@@ -46,6 +46,11 @@ const WS = (() => {
       }, 30000);
       UI.setConnectionStatus && UI.setConnectionStatus('connected');
       if (typeof ConnErr !== 'undefined') ConnErr.onWsOk();
+      // Notify subsystems (calls.js, etc.) so they can flush any locally
+      // queued sends. Cold-start incoming-call answers fire ICE before this
+      // socket reaches OPEN, and without a flush hook those candidates are
+      // silently dropped.
+      try { window.dispatchEvent(new CustomEvent('ws:open', { detail: { room } })); } catch {}
     };
 
     ws.onmessage = async (e) => {

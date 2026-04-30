@@ -64,6 +64,53 @@ let _pendingAnswerRetryTimer = null;
 // remember the intent and auto-accept the moment the offer lands.
 let _autoAcceptPending = false;
 
+// Outbound buffer for call signaling that fires before the WS reaches OPEN
+// (cold-start callees gather ICE while the socket is still in CONNECTING).
+// wsSend()/WS.send() silently no-op in that window, so without this buffer
+// the callee's local ICE candidates are lost forever — producing the
+// "connected but stuck on Connecting…" deadlock.
+const _outboundCallQueue = [];
+function _wsLooksOpen() {
+  try { return (typeof WS !== 'undefined' && typeof WS.isOpen === 'function') ? WS.isOpen() : true; }
+  catch { return true; }
+}
+function _sendCallSignal(payload) {
+  if (!payload) return;
+  if (_wsLooksOpen()) {
+    try { wsSend(payload); return; } catch {}
+  }
+  _outboundCallQueue.push(payload);
+  // Cap so a stuck socket can't grow this unbounded.
+  if (_outboundCallQueue.length > 128) _outboundCallQueue.splice(0, _outboundCallQueue.length - 128);
+}
+function _flushOutboundCallQueue() {
+  if (!_outboundCallQueue.length) return;
+  if (!_wsLooksOpen()) return;
+  while (_outboundCallQueue.length) {
+    const msg = _outboundCallQueue.shift();
+    try { wsSend(msg); } catch { /* dropped: peer can recover via ICE-restart */ }
+  }
+}
+// Resolve when WS reaches OPEN (or timeout). Used by startCall so we don't
+// fire call_offer into a half-dead socket and leave the user staring at a
+// 45 s ringing screen for nothing.
+function _waitForWsOpen(timeoutMs) {
+  return new Promise(resolve => {
+    if (_wsLooksOpen()) { resolve(true); return; }
+    let done = false;
+    const finish = (ok) => { if (done) return; done = true; window.removeEventListener('ws:open', onOpen); clearTimeout(t); resolve(ok); };
+    const onOpen = () => finish(true);
+    window.addEventListener('ws:open', onOpen, { once: true });
+    const t = setTimeout(() => finish(_wsLooksOpen()), Math.max(250, timeoutMs | 0));
+  });
+}
+try {
+  window.addEventListener('ws:open', () => {
+    // Tiny delay so wsSend() sees readyState=OPEN.
+    setTimeout(_flushOutboundCallQueue, 0);
+  });
+} catch {}
+
 function _isResolvedAvatar(avatar) {
   const value = String(avatar || '').trim();
   return !!value && value !== '🐸';
@@ -142,6 +189,16 @@ function _clearPersistedIncomingCall() {
 /* ── Initiate call ─────────────────────────────────────────────────────────── */
 async function startCall (type, nick, uid) {
   if (_callState !== 'idle') { toast('Already in a call', 'error'); return; }
+  // Don't even try to dial if WS is mid-reconnect — the call_offer would be
+  // dropped on the floor and the user would sit on a 45 s "Calling…" ghost.
+  // Wait up to 4 s for it to come back; otherwise tell them so they can retry.
+  if (!_wsLooksOpen()) {
+    const ok = await _waitForWsOpen(4_000);
+    if (!ok) {
+      toast('Reconnecting… try the call again in a moment', 'error');
+      return;
+    }
+  }
   _callType     = type;
   _callPeerNick = nick  || STATE.dmPeerNick;
   _callPeerUID  = uid   || _activeDM?.user_id;
@@ -189,7 +246,7 @@ async function startCall (type, nick, uid) {
     const offer = await _pc.createOffer();
     await _pc.setLocalDescription(offer);
 
-    wsSend({
+    _sendCallSignal({
       type         : 'call_offer',
       to_id        : _callPeerUID || undefined,
       to_nickname  : _callPeerNick,
@@ -236,7 +293,7 @@ async function handleCallOffer (data) {
       await _pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
       const ans = await _pc.createAnswer();
       await _pc.setLocalDescription(ans);
-      wsSend({
+      _sendCallSignal({
         type: 'call_answer',
         to_nickname: _callPeerNick,
         call_id: data.call_id,
@@ -254,7 +311,7 @@ async function handleCallOffer (data) {
     if (data.call_id && _callId && String(data.call_id) === String(_callId)) {
       return;
     }
-    wsSend({ type: 'call_reject', to_nickname: data.from_nickname, reason: 'busy' });
+    _sendCallSignal({ type: 'call_reject', to_nickname: data.from_nickname, reason: 'busy' });
     return;
   }
   _callState    = 'ringing';
@@ -363,7 +420,7 @@ async function acceptCall () {
 
 function rejectCall () {
   _clearPersistedIncomingCall();
-  wsSend({ type: 'call_reject', to_nickname: _callPeerNick, call_id: _callId || undefined, reason: 'declined' });
+  _sendCallSignal({ type: 'call_reject', to_nickname: _callPeerNick, call_id: _callId || undefined, reason: 'declined' });
   hideIncomingCall();
   try { Notifications.stopRinging(); } catch {}
   try { window.Android?.dismissRing?.(); } catch {}
@@ -457,7 +514,7 @@ function _armConnectingHardCap () {
         _pc.restartIce();
         const offer = await _pc.createOffer({ iceRestart: true });
         await _pc.setLocalDescription(offer);
-        wsSend({
+        _sendCallSignal({
           type: 'call_offer',
           to_nickname: _callPeerNick,
           call_id: _callId || undefined,
@@ -550,7 +607,7 @@ function endCall (notifyPeer = true) {
     const wasConnected = (_callState === 'active') || ((_callSeconds | 0) > 0);
     const durationSecs = (_callSeconds | 0) > 0 ? (_callSeconds | 0) : undefined;
     try {
-      wsSend({
+      _sendCallSignal({
         type: 'call_end',
         to_nickname: _callPeerNick,
         call_id: _callId || undefined,
@@ -602,6 +659,7 @@ function resetCall () {
     clearTimeout(_pendingAnswerRetryTimer); _pendingAnswerRetryTimer = null;
     _pendingAnswerSend = null;
     _pendingIceQueue.length = 0;
+    _outboundCallQueue.length = 0;
     _remoteDescApplied = false;
     _didRelayRetry = false;
     _autoAcceptPending = false;
@@ -636,7 +694,7 @@ function createPC () {
 
   pc.onicecandidate = e => {
     if (e.candidate && _callPeerNick) {
-      wsSend({ type: 'ice_candidate', to_nickname: _callPeerNick, call_id: _callId || undefined, candidate: JSON.stringify(e.candidate) });
+      _sendCallSignal({ type: 'ice_candidate', to_nickname: _callPeerNick, call_id: _callId || undefined, candidate: JSON.stringify(e.candidate) });
     }
   };
 
