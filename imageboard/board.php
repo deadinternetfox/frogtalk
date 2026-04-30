@@ -2011,7 +2011,27 @@ if ($singleThread) {
         .mrb-pending-notice { flex: 1; min-width: 0; padding: 6px 10px; font-size: 11px; color: #7a6040; font-family: 'Courier New', monospace; background: rgba(92,61,14,0.04); border: 1px dashed rgba(92,61,14,0.25); border-radius: 4px; line-height: 1.4; }
 
         /* ── FROGTALK MINI WIDGET (replaces Swamp Chat) ── */
-        .frog-mini-headline { color:#00ff41; font-size:12px; margin:0; display:flex; align-items:center; gap:6px; }
+        .frog-mini-headline {
+            color:#00ff41;
+            font-size:12px;
+            margin:0;
+            display:inline-flex;
+            align-items:center;
+            gap:6px;
+            line-height:1;
+            white-space:nowrap;
+        }
+        .frog-mini-headline .frog-mini-emoji {
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            line-height:1;
+            transform:translateY(1px);
+        }
+        .frog-mini-headline .frog-mini-label {
+            display:inline-block;
+            line-height:1;
+        }
         .frog-mini-note { color:#4a8f4a; font-size:11px; }
         .frog-mini-wrap { display:none; height: 360px; border-top:1px solid rgba(0,255,65,0.15); }
         .frog-mini-wrap.open { display:block; }
@@ -3547,7 +3567,7 @@ if ($singleThread) {
     <!-- ═══ FROGTALK MINI WIDGET ═══ -->
     <div class="chat-widget" id="chatWidget">
         <div class="chat-header" onclick="toggleFrogMini()">
-            <h4 class="frog-mini-headline">🐸 FrogTalk</h4>
+            <h4 class="frog-mini-headline"><span class="frog-mini-emoji" aria-hidden="true">🐸</span><span class="frog-mini-label">FrogTalk</span></h4>
             <span class="frog-mini-note" id="frogMiniState">Checking login…</span>
             <button class="chat-toggle" id="chatToggleBtn">▲</button>
         </div>
