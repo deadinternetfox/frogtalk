@@ -324,6 +324,11 @@ const Messages = (() => {
       const preload  = isNote ? 'auto' : 'metadata';
       const badgeIco = isNote ? '🎥' : '🎬';
       const badgeLbl = isNote ? 'Note' : 'Video';
+      // For video notes (recorded webm), don't put the giant base64 data: URL
+      // in `src` — the WebView wedges decoding webm data: URLs at HTML-parse
+      // time and never recovers. Stash it on `data-pending-src` so ChatVideo
+      // can swap to a blob: URL synchronously before any load happens.
+      const _vSrcAttr = isNote ? `data-pending-src="${msg.media_data}"` : `src="${msg.media_data}"`;
       if (msg.media_blur) {
         // Spoiler videos: skip the themed wrapper so the poster background
         // can't leak the thumbnail through the spoiler overlay.
@@ -334,7 +339,7 @@ const Messages = (() => {
         // play button; native controls appear once the user starts playback.
         inner = `<div class="chat-video${noteCls}"${noteAttr} data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}">`+
           `<div class="cv-poster"></div>`+
-          `<video class="msg-media clickable-media" src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" preload="${preload}" muted playsinline></video>`+
+          `<video class="msg-media clickable-media" ${_vSrcAttr} data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" preload="${preload}" muted playsinline></video>`+
           `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
           `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
           `<div class="cv-badge"><span class="cv-icon">${badgeIco}</span><span class="cv-dur">${badgeLbl}</span></div>`+
@@ -1421,12 +1426,14 @@ const Messages = (() => {
         const preload  = isNote ? 'auto' : 'metadata';
         const badgeIco = isNote ? '🎥' : '🎬';
         const badgeLbl = isNote ? 'Note' : 'Video';
+        // See render-side comment above on why notes use data-pending-src.
+        const _vSrcAttr = isNote ? `data-pending-src="${data.media_data}"` : `src="${data.media_data}"`;
         if (isBlur) {
           html = `<video class="msg-media clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" onclick="Messages.openMedia(this)" preload="metadata" controls muted playsinline></video>`;
         } else {
           html = `<div class="chat-video${noteCls}"${noteAttr} data-sender="${UI.escHtml(sender)}" data-time="${time}">`+
             `<div class="cv-poster"></div>`+
-            `<video class="msg-media clickable-media" src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}" preload="${preload}" muted playsinline></video>`+
+            `<video class="msg-media clickable-media" ${_vSrcAttr} data-sender="${UI.escHtml(sender)}" data-time="${time}" preload="${preload}" muted playsinline></video>`+
             `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
             `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
             `<div class="cv-badge"><span class="cv-icon">${badgeIco}</span><span class="cv-dur">${badgeLbl}</span></div>`+

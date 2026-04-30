@@ -361,7 +361,20 @@ function _attPreviewPlayVidNote (wrap, ev) {
   if (ev) { ev.preventDefault(); ev.stopPropagation(); }
   const v   = wrap.querySelector('video');
   const btn = wrap.querySelector('.att-vn-play');
+  const ps  = wrap.querySelector('.att-vn-poster');
   if (!v) return;
+  const showIdle = () => {
+    if (btn) btn.style.display = '';
+    if (ps)  ps.style.opacity  = '1';
+  };
+  const hideIdle = () => {
+    if (btn) btn.style.display = 'none';
+    // Hide the poster overlay so we can actually see the playing video
+    // underneath (the previous version left it covering the <video>
+    // forever, which is why the preview just looked like a static frame
+    // / black circle when you tapped play).
+    if (ps)  ps.style.opacity  = '0';
+  };
   if (v.paused) {
     // Same Infinity-duration recovery the chat player uses, so the
     // first tap actually starts decoding instead of resolving play()
@@ -372,7 +385,7 @@ function _attPreviewPlayVidNote (wrap, ev) {
       if (p && typeof p.catch === 'function') {
         p.catch(() => { try { v.muted = true; v.play().catch(()=>{}); } catch {} });
       }
-      if (btn) btn.style.display = 'none';
+      hideIdle();
     };
     if (!isFinite(v.duration) || v.duration <= 0) {
       let settled = false;
@@ -387,10 +400,10 @@ function _attPreviewPlayVidNote (wrap, ev) {
       try { v.currentTime = 0; } catch {}
       finish();
     }
-    v.onended = () => { v.pause(); if (btn) btn.style.display = ''; };
+    v.onended = () => { try { v.pause(); } catch {} showIdle(); };
   } else {
     try { v.pause(); } catch {}
-    if (btn) btn.style.display = '';
+    showIdle();
   }
 }
 

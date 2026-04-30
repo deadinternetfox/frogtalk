@@ -984,9 +984,13 @@ function renderDMMessage (m) {
       const _preload  = _isNote ? 'auto' : 'metadata';
       const _badgeIco = _isNote ? '🎥' : '🎬';
       const _badgeLbl = _isNote ? 'Note' : 'Video';
+      // Video notes are MediaRecorder webm; keeping the data: URL in `src`
+      // wedges Android WebView at HTML-parse time. Defer to data-pending-src
+      // so ChatVideo can swap to a blob: URL before any load happens.
+      const _vSrcAttr = _isNote ? `data-pending-src="${mediaUrl}"` : `src="${mediaUrl}"`;
       inner = `<div class="chat-video${_noteCls}"${_noteAttr} data-sender="${_vSender}" data-time="${time}">`+
         `<div class="cv-poster"></div>`+
-        `<video src="${mediaUrl}" class="msg-media clickable-media" data-sender="${_vSender}" data-time="${time}" preload="${_preload}" muted playsinline></video>`+
+        `<video ${_vSrcAttr} class="msg-media clickable-media" data-sender="${_vSender}" data-time="${time}" preload="${_preload}" muted playsinline></video>`+
         `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
         `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
         `<div class="cv-badge"><span class="cv-icon">${_badgeIco}</span><span class="cv-dur">${_badgeLbl}</span></div>`+
@@ -1343,9 +1347,12 @@ async function loadDMMedia (msgId, channelId) {
       const _preload  = _isNote ? 'auto' : 'metadata';
       const _badgeIco = _isNote ? '🎥' : '🎬';
       const _badgeLbl = _isNote ? 'Note' : 'Video';
+      // See render-side comment: notes go through data-pending-src so the
+      // WebView never tries to parse the multi-MB webm data: URL.
+      const _vSrcAttr = _isNote ? `data-pending-src="${data.media_data}"` : `src="${data.media_data}"`;
       html = `<div class="chat-video${_noteCls}"${_noteAttr}>`+
         `<div class="cv-poster"></div>`+
-        `<video src="${data.media_data}" class="msg-media clickable-media" preload="${_preload}" muted playsinline></video>`+
+        `<video ${_vSrcAttr} class="msg-media clickable-media" preload="${_preload}" muted playsinline></video>`+
         `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
         `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
         `<div class="cv-badge"><span class="cv-icon">${_badgeIco}</span><span class="cv-dur">${_badgeLbl}</span></div>`+

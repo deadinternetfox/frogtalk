@@ -512,9 +512,22 @@ const ChatVideo = (() => {
     // missing thumbnail and the "tap play but nothing happens" symptom
     // for video notes (and regular videos > a few hundred KB).
     const setup = () => _wireVideo(wrap, v, overlay, poster, durEl, loading);
-    const _origSrc = v.getAttribute('src') || '';
-    if (_origSrc.startsWith('data:')) {
-      const blobUrl = _dataUrlToBlobUrl(_origSrc);
+    // Renderers that know upfront the source is a giant data: URL (video
+    // notes) emit `data-pending-src` instead of `src` so the WebView
+    // never even tries to load the base64 URL — Android Chromium gets
+    // wedged decoding multi-MB webm data: URLs at HTML-parse time and
+    // *never* recovers, even after we replace .src. Picking up a
+    // pending src here lets us hand the element a blob: URL as its
+    // very first src.
+    const _pendingSrc = v.getAttribute('data-pending-src') || '';
+    const _origSrc = v.getAttribute('src') || '' || _pendingSrc;
+    const _srcToConvert = _origSrc.startsWith('data:') ? _origSrc
+                       : (_pendingSrc.startsWith('data:') ? _pendingSrc : '');
+    if (_srcToConvert) {
+      // Stop any in-flight data: URL load before swapping.
+      try { v.removeAttribute('src'); v.load(); } catch {}
+      try { v.removeAttribute('data-pending-src'); } catch {}
+      const blobUrl = _dataUrlToBlobUrl(_srcToConvert);
       if (blobUrl) {
         try { v.src = blobUrl; v.load(); } catch {}
         // Revoke when the wrapper leaves the DOM.
@@ -528,8 +541,8 @@ const ChatVideo = (() => {
           mo.observe(document.body, { childList: true, subtree: true });
         } catch {}
       } else {
-        // atob failed (non-base64 data URL?) — leave the original src.
-        try { v.load(); } catch {}
+        // atob failed (non-base64 data URL?) — restore the original src.
+        try { v.src = _srcToConvert; v.load(); } catch {}
       }
     }
     setup();
