@@ -599,6 +599,11 @@ function handleWSDMRead (data) {
 
 /* Shortcut: open DM by nickname (creates channel if needed) */
 async function openDMWithNick (nick) {
+  // Guard against blank/whitespace nicks — these come from notification taps
+  // where dm_nick was missing/empty and would otherwise hit /api/dms/open/
+  // with an empty path segment, surfacing a useless "User not found" toast.
+  nick = String(nick || '').trim();
+  if (!nick) return;
   const r = await apiFetch('/api/dms/open/' + encodeURIComponent(nick), 'POST');
   if (!r.ok) {
     const err = await r.json().catch(() => ({}));

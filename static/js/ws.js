@@ -85,6 +85,10 @@ const WS = (() => {
     }
   }
 
+  function isOpen() {
+    return !!(_ws && _ws.readyState === WebSocket.OPEN);
+  }
+
   async function handleServerMsg(data) {
     const room = _room;
     switch (data.type) {
@@ -453,5 +457,5 @@ const WS = (() => {
     if (_room) connect(_room);
   }
 
-  return { connect, disconnect, send, reconnectNow };
+  return { connect, disconnect, send, reconnectNow, isOpen };
 })();

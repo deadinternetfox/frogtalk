@@ -14,6 +14,19 @@ const ICE_SERVERS = [
     urls: 'turn:161.97.182.73:3478?transport=tcp',
     username: 'frogtalk',
     credential: 'FrogTurn2024!'
+  },
+  // TLS-on-5349 / TLS-on-443: punches through carrier networks and corporate
+  // firewalls that block 3478 udp/tcp. If coturn isn't TLS-configured these
+  // entries simply fail to gather — the plain TURN entries above still work.
+  {
+    urls: 'turns:161.97.182.73:5349?transport=tcp',
+    username: 'frogtalk',
+    credential: 'FrogTurn2024!'
+  },
+  {
+    urls: 'turns:161.97.182.73:443?transport=tcp',
+    username: 'frogtalk',
+    credential: 'FrogTurn2024!'
   }
 ];
 
@@ -33,6 +46,19 @@ let _speakerMuted = false;
 let _callRingTimeout = null;
 let _reconnectTimer = null;
 let _callPeerAvatar = null;
+// Inbound ICE candidates that arrive before setRemoteDescription resolves
+// would throw on addIceCandidate and be lost forever. Buffer them and drain
+// once the remote description is applied.
+let _pendingIceQueue = [];
+let _remoteDescApplied = false;
+// Hard cap: if the call is in 'active' (answer applied) but the PC never
+// reaches connectionState='connected' within this many ms, attempt one
+// relay-only restart, then give up.
+let _connectingHardCap = null;
+let _didRelayRetry = false;
+// Buffered call_answer SDP for callees on flaky WS — replayed on reconnect.
+let _pendingAnswerSend = null;
+let _pendingAnswerRetryTimer = null;
 
 function _isResolvedAvatar(avatar) {
   const value = String(avatar || '').trim();
@@ -277,15 +303,18 @@ async function acceptCall () {
     _localStream.getTracks().forEach(t => _pc.addTrack(t, _localStream));
 
     await _pc.setRemoteDescription({ type: 'offer', sdp: _pendingOffer.sdp });
+    _remoteDescApplied = true;
+    _flushPendingIce();
     const answer = await _pc.createAnswer();
     await _pc.setLocalDescription(answer);
 
-    wsSend({
+    _sendCallAnswerReliable({
       type        : 'call_answer',
       to_nickname : _callPeerNick,
       call_id     : _pendingOffer.call_id || _callId || undefined,
       sdp         : answer.sdp,
     });
+    _armConnectingHardCap();
 
     if (_callType === 'video') {
       const lv = document.getElementById('local-video');
@@ -325,11 +354,22 @@ async function handleCallAnswer (data) {
   clearTimeout(_callRingTimeout); _callRingTimeout = null;
   try {
     await _pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
-  } catch (e) { console.warn('setRemoteDescription (answer) failed', e); return; }
+    _remoteDescApplied = true;
+    _flushPendingIce();
+  } catch (e) {
+    console.warn('setRemoteDescription (answer) failed', e);
+    // Don't silently swallow — the call is dead. End cleanly with
+    // was_connected:true so the server doesn't mark it as a missed call
+    // (we *did* reach the answer step; the failure is local SDP).
+    toast('Call setup failed (answer)', 'error');
+    endCall();
+    return;
+  }
   // Mid-call renegotiation answer — don't change state / status text.
   if (data.renegotiate) return;
   _callId = data.call_id || _callId;
   _callState = 'active';
+  _armConnectingHardCap();
   // Caller side: ensure DM opens if answer happened while user is elsewhere.
   try {
     if (_callPeerNick && typeof openDMWithNick === 'function') {
@@ -347,9 +387,68 @@ async function handleCallAnswer (data) {
 /* ── ICE candidates ────────────────────────────────────────────────────────── */
 async function handleIceCandidate (data) {
   if (!_pc || !data.candidate) return;
-  try {
-    await _pc.addIceCandidate(JSON.parse(data.candidate));
-  } catch {}
+  let parsed;
+  try { parsed = JSON.parse(data.candidate); } catch { return; }
+  // Buffer until setRemoteDescription is applied — otherwise addIceCandidate
+  // throws and the candidate is lost forever, which is the #1 cause of
+  // "answered but stuck on Connecting…" on cold-start callees.
+  if (!_remoteDescApplied) {
+    _pendingIceQueue.push(parsed);
+    return;
+  }
+  try { await _pc.addIceCandidate(parsed); } catch (e) {
+    // Late-arriving candidates after a relay restart routinely fail and are
+    // non-fatal — keep silent.
+  }
+}
+
+async function _flushPendingIce () {
+  if (!_pc || !_pendingIceQueue.length) return;
+  const queue = _pendingIceQueue.slice();
+  _pendingIceQueue.length = 0;
+  for (const c of queue) {
+    try { await _pc.addIceCandidate(c); } catch {}
+  }
+}
+
+function _armConnectingHardCap () {
+  clearTimeout(_connectingHardCap);
+  _connectingHardCap = setTimeout(async () => {
+    if (!_pc) return;
+    const s = _pc.connectionState;
+    if (s === 'connected' || _callState !== 'active') return;
+    // Still not connected after 30 s of being 'active'. Try one relay-only
+    // restart — forces TURN, which resolves carrier-NAT / firewall blocks
+    // that prevent direct paths from ever completing.
+    if (!_didRelayRetry && _pc.restartIce) {
+      _didRelayRetry = true;
+      console.warn('[calls] connecting hard-cap hit — forcing ICE restart (relay)');
+      try {
+        try { _pc.setConfiguration({ iceServers: ICE_SERVERS, iceTransportPolicy: 'relay' }); } catch {}
+        _pc.restartIce();
+        const offer = await _pc.createOffer({ iceRestart: true });
+        await _pc.setLocalDescription(offer);
+        wsSend({
+          type: 'call_offer',
+          to_nickname: _callPeerNick,
+          call_id: _callId || undefined,
+          call_type: _callType,
+          sdp: offer.sdp,
+          renegotiate: true,
+        });
+        // Give the relay attempt another 20 s before giving up entirely.
+        setTimeout(() => {
+          if (_pc && _pc.connectionState !== 'connected' && _callState === 'active') {
+            toast('Could not establish connection — your network may be blocking calls', 'error');
+            endCall();
+          }
+        }, 20_000);
+        return;
+      } catch (e) { console.warn('relay restart failed', e); }
+    }
+    toast('Could not establish connection', 'error');
+    endCall();
+  }, 30_000);
 }
 
 /* ── Remote rejected ───────────────────────────────────────────────────────── */
@@ -435,14 +534,46 @@ function endCall (notifyPeer = true) {
   resetCall();
 }
 
+// Buffered send for the callee's `call_answer`. Aggressive Android doze and
+// brief network blips routinely drop the WS between accept-tap and the
+// outbound answer; the global wsSend() silently no-ops when the socket is
+// not OPEN, leaving the caller stuck on "Ringing…". This retries every
+// 500 ms for up to 10 s until the message actually goes out.
+function _sendCallAnswerReliable (payload) {
+  clearTimeout(_pendingAnswerRetryTimer);
+  _pendingAnswerSend = payload;
+  const deadline = Date.now() + 10_000;
+  const attempt = () => {
+    if (!_pendingAnswerSend) return;
+    const open = (typeof WS !== 'undefined' && typeof WS.isOpen === 'function')
+      ? WS.isOpen() : true;
+    if (open) {
+      try { wsSend(_pendingAnswerSend); _pendingAnswerSend = null; return; } catch {}
+    }
+    if (Date.now() >= deadline) {
+      _pendingAnswerSend = null;
+      console.warn('[calls] could not deliver call_answer within 10 s — giving up');
+      toast('Could not connect — please try again', 'error');
+      endCall();
+      return;
+    }
+    _pendingAnswerRetryTimer = setTimeout(attempt, 500);
+  };
+  attempt();
+}
+
 function resetCall () {
-  try {
-    if (_pc) { try { _pc.close(); } catch {} _pc = null; }
     if (_localStream) { try { _localStream.getTracks().forEach(t => t.stop()); } catch {} _localStream = null; }
     if (_screenStream) { try { _screenStream.getTracks().forEach(t => t.stop()); } catch {} _screenStream = null; }
     clearInterval(_callTimer); _callTimer = null; _callSeconds = 0;
     clearTimeout(_callRingTimeout); _callRingTimeout = null;
     clearTimeout(_reconnectTimer); _reconnectTimer = null;
+    clearTimeout(_connectingHardCap); _connectingHardCap = null;
+    clearTimeout(_pendingAnswerRetryTimer); _pendingAnswerRetryTimer = null;
+    _pendingAnswerSend = null;
+    _pendingIceQueue.length = 0;
+    _remoteDescApplied = false;
+    _didRelayRetry = false;
     _callState = 'idle'; _callPeerNick = null; _callPeerUID = null; _callId = null;
     _callPeerAvatar = null;
     _mutedAudio = false; _mutedVideo = false; _speakerMuted = false;

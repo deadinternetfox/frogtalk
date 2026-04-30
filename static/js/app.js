@@ -148,7 +148,7 @@ const App = {
       this.pendingProfile = pendingProfile;
       window.history.replaceState({}, '', window.location.pathname);
     }
-    const pendingDM = params.get('dm');
+    const pendingDM = (params.get('dm') || '').trim();
     if (pendingDM) {
       this.pendingDM = pendingDM;
       window.history.replaceState({}, '', window.location.pathname);
@@ -342,7 +342,7 @@ const App = {
         App.openFirstAvailableRoom();
       }
       this.pendingRoom = null;
-    } else if (this.pendingDM) {
+    } else if (this.pendingDM && String(this.pendingDM).trim()) {
       // Share link: /u/{nick} "Send a message" -> open DM with that user
       if (typeof openDMWithNick === 'function') {
         try { openDMWithNick(this.pendingDM); } catch {}

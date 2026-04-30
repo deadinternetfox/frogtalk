@@ -202,6 +202,24 @@ def init_db():
             FOREIGN KEY (callee_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        -- Trickle-ICE candidates buffered for a peer that isn't on a WS yet.
+        -- Cold-start callees (push-wake) take 1-3 s to reconnect, during which
+        -- the caller has already trickled the first half of its candidates.
+        -- Without this buffer those candidates are lost and ICE often can't
+        -- complete with only the late ones, producing the "answered but stuck
+        -- on Connecting…" symptom. Drained on the target's next WS connect.
+        CREATE TABLE IF NOT EXISTS pending_ice_candidates (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id     INTEGER NOT NULL,
+            target_id   INTEGER NOT NULL,
+            from_id     INTEGER NOT NULL,
+            from_nick   TEXT    NOT NULL DEFAULT '',
+            candidate   TEXT    NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_pending_ice_target
+            ON pending_ice_candidates(target_id, call_id);
+
         -- ── Room pins ──────────────────────────────────────────────────
         CREATE TABLE IF NOT EXISTS pinned_messages (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2352,6 +2370,92 @@ def delete_pending_call_offer(call_id: int):
     with _conn() as con:
         con.execute("DELETE FROM pending_call_offers WHERE call_id=?", (call_id,))
         con.commit()
+
+
+def _ensure_pending_ice_table(con):
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_ice_candidates (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            call_id     INTEGER NOT NULL,
+            target_id   INTEGER NOT NULL,
+            from_id     INTEGER NOT NULL,
+            from_nick   TEXT    NOT NULL DEFAULT '',
+            candidate   TEXT    NOT NULL,
+            created_at  TEXT DEFAULT (datetime('now'))
+        )
+        """
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pending_ice_target ON pending_ice_candidates(target_id, call_id)"
+    )
+
+
+def queue_ice_candidate(call_id: int, target_id: int, from_id: int,
+                        from_nick: str, candidate: str) -> None:
+    """Buffer an ICE candidate addressed to a user who isn't currently on WS."""
+    if not candidate:
+        return
+    with _conn() as con:
+        _ensure_pending_ice_table(con)
+        # Bound the buffer per (call_id, target_id) to avoid runaway growth on
+        # a stuck peer; keep the most recent 64 candidates.
+        con.execute(
+            """INSERT INTO pending_ice_candidates
+               (call_id, target_id, from_id, from_nick, candidate)
+               VALUES (?, ?, ?, ?, ?)""",
+            (int(call_id or 0), int(target_id), int(from_id), str(from_nick or ""), str(candidate)),
+        )
+        con.execute(
+            """DELETE FROM pending_ice_candidates
+               WHERE id IN (
+                 SELECT id FROM pending_ice_candidates
+                 WHERE target_id=? AND call_id=?
+                 ORDER BY id DESC LIMIT -1 OFFSET 64
+               )""",
+            (int(target_id), int(call_id or 0)),
+        )
+        # Garbage-collect anything older than 60 seconds — ICE candidates are
+        # useless past that point and we don't want stale rows fanning out.
+        con.execute(
+            "DELETE FROM pending_ice_candidates WHERE created_at < datetime('now', '-60 seconds')"
+        )
+        con.commit()
+
+
+def drain_pending_ice_candidates(target_id: int) -> List[Dict]:
+    """Pop and return every queued ICE candidate for this user, oldest first."""
+    with _conn() as con:
+        _ensure_pending_ice_table(con)
+        rows = con.execute(
+            """SELECT id, call_id, from_id, from_nick, candidate
+               FROM pending_ice_candidates WHERE target_id=?
+               ORDER BY id ASC""",
+            (int(target_id),),
+        ).fetchall()
+        if rows:
+            con.execute(
+                "DELETE FROM pending_ice_candidates WHERE target_id=?",
+                (int(target_id),),
+            )
+            con.commit()
+    return [dict(r) for r in rows]
+
+
+def has_recent_mobile_token(user_id: int, max_age_days: int = 30) -> bool:
+    """True if the user has at least one FCM/APNs token updated within the
+    last `max_age_days`. Used by the call-unreachable check so stale web-push
+    subscriptions from uninstalled browsers don't keep the caller spinning."""
+    with _conn() as con:
+        _ensure_fcm_tokens_table(con)
+        row = con.execute(
+            f"""SELECT 1 FROM fcm_tokens
+                WHERE user_id=? AND platform IN ('android','ios')
+                  AND updated_at >= datetime('now', '-{int(max_age_days)} days')
+                LIMIT 1""",
+            (int(user_id),),
+        ).fetchone()
+    return bool(row)
 
 
 def update_call_status(call_id: int, status: str, started_at: Optional[str] = None,

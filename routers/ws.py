@@ -141,6 +141,26 @@ async def websocket_endpoint(
         return
     db.update_last_seen(user["id"])
 
+    # Drain any ICE candidates that the other side trickled while this user
+    # was still cold-booting from a push-wake. Without this drain, ICE often
+    # can't complete with only the late candidates and the call sticks on
+    # "Connecting…".
+    try:
+        pending_ice = db.drain_pending_ice_candidates(user["id"])
+        for row in pending_ice:
+            try:
+                await manager.send_personal(websocket, {
+                    "type": "ice_candidate",
+                    "from_id": int(row.get("from_id") or 0),
+                    "from_nickname": str(row.get("from_nick") or ""),
+                    "call_id": row.get("call_id"),
+                    "candidate": row.get("candidate"),
+                })
+            except Exception:
+                pass
+    except Exception:
+        logger.exception("drain_pending_ice_candidates failed")
+
     # Auto-add to room_members on connect so they appear in the offline list
     # when they're not connected. Skip DM channels (prefixed with "dm-").
     if not room_name.startswith("dm-"):
@@ -687,8 +707,16 @@ async def websocket_endpoint(
                 # can stop spinning instead of ringing into the void.
                 if not manager.is_user_online(to_id):
                     try:
-                        from routers.push import has_any_push_target
-                        reachable = has_any_push_target(to_id)
+                        # Use the stricter "fresh mobile token" test rather
+                        # than has_any_push_target: stale web-push subs from
+                        # uninstalled browsers linger forever and would keep
+                        # the caller spinning on "Calling…" indefinitely.
+                        reachable = db.has_recent_mobile_token(to_id, max_age_days=30)
+                        if not reachable:
+                            # Fall back to any-target so we don't hard-fail a
+                            # desktop-only callee with a live web-push sub.
+                            from routers.push import has_any_push_target
+                            reachable = has_any_push_target(to_id)
                     except Exception:
                         reachable = True  # fail open
                     if not reachable:
@@ -859,13 +887,30 @@ async def websocket_endpoint(
                 to_id = _resolve_to_id(data)
                 if not to_id:
                     continue
-                await manager.send_to_user(to_id, {
+                cand = data.get("candidate")
+                ice_payload = {
                     "type": "ice_candidate",
                     "from_id": user["id"],
                     "from_nickname": user["nickname"],
                     "call_id": data.get("call_id"),
-                    "candidate": data.get("candidate"),
-                })
+                    "candidate": cand,
+                }
+                delivered = await manager.send_to_user(to_id, ice_payload)
+                # Cold-start callees (push-wake) take 1–3 s to reconnect, during
+                # which the caller has already trickled the first half of its
+                # candidates. Buffer them so they survive that gap; the WS
+                # connect handler drains them as soon as the peer joins.
+                if not delivered and cand:
+                    try:
+                        db.queue_ice_candidate(
+                            int(data.get("call_id") or 0),
+                            int(to_id),
+                            int(user["id"]),
+                            str(user["nickname"]),
+                            str(cand),
+                        )
+                    except Exception:
+                        logger.exception("queue_ice_candidate failed")
 
             # ── Group voice channel signaling ─────────────────────────
             elif msg_type == "voice_join":
