@@ -650,6 +650,7 @@ function _sendCallAnswerReliable (payload) {
 }
 
 function resetCall () {
+  try {
     if (_localStream) { try { _localStream.getTracks().forEach(t => t.stop()); } catch {} _localStream = null; }
     if (_screenStream) { try { _screenStream.getTracks().forEach(t => t.stop()); } catch {} _screenStream = null; }
     clearInterval(_callTimer); _callTimer = null; _callSeconds = 0;
