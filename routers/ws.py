@@ -669,14 +669,29 @@ async def websocket_endpoint(
                 is_renegotiate = bool(data.get("renegotiate"))
                 if is_renegotiate:
                     # Don't create a new call row; just forward the SDP to the peer.
-                    await manager.send_to_user(to_id, {
+                    reneg_payload = {
                         "type": "call_offer",
                         "from_id": user["id"],
                         "from_nickname": user["nickname"],
                         "call_type": call_type,
                         "sdp": data.get("sdp"),
                         "renegotiate": True,
-                    })
+                        "force_relay": bool(data.get("force_relay")),
+                        "call_id": int(data.get("call_id") or 0),
+                    }
+                    delivered_reneg = await manager.send_to_user(to_id, reneg_payload)
+                    if not delivered_reneg:
+                        try:
+                            db.queue_call_signal(
+                                call_id=int(data.get("call_id") or 0),
+                                target_id=to_id,
+                                from_id=user["id"],
+                                from_nick=user["nickname"],
+                                kind="call_offer",
+                                payload=json.dumps(reneg_payload),
+                            )
+                        except Exception:
+                            logger.exception("queue_call_signal(call_offer renegotiate) failed")
                     continue
                 call_id_db = db.create_call(user["id"], to_id, call_type)
                 payload_offer = {
@@ -770,14 +785,31 @@ async def websocket_endpoint(
                     db.update_call_status(call_id, "active",
                                           started_at=datetime.utcnow().isoformat())
                     db.delete_pending_call_offer(call_id)
-                await manager.send_to_user(to_id, {
+                answer_payload = {
                     "type": "call_answer",
                     "from_id": user["id"],
                     "from_nickname": user["nickname"],
                     "call_id": call_id,
                     "sdp": data.get("sdp"),
                     "renegotiate": is_renegotiate,
-                })
+                }
+                delivered_ans = await manager.send_to_user(to_id, answer_payload)
+                if not delivered_ans:
+                    # Caller's WS is in flap window — buffer the SDP so they
+                    # transition out of "Calling…" the moment they reconnect.
+                    # Without this the call is permanently dead even though
+                    # the callee already accepted.
+                    try:
+                        db.queue_call_signal(
+                            call_id=call_id or 0,
+                            target_id=to_id,
+                            from_id=user["id"],
+                            from_nick=user["nickname"],
+                            kind="call_answer",
+                            payload=json.dumps(answer_payload),
+                        )
+                    except Exception:
+                        logger.exception("queue_call_signal(call_answer) failed")
 
             elif msg_type == "call_reject":
                 to_id = _resolve_to_id(data)
