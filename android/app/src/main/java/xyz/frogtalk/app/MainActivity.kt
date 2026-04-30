@@ -76,12 +76,9 @@ class MainActivity : AppCompatActivity() {
                 sourceIntent.getStringExtra(CallService.EXTRA_PEER_NICK)
                     ?.takeIf { it.isNotBlank() }
                     ?.let { builder.appendQueryParameter("peer_nick", it) }
-                // The notification's "Answer" button sets auto_accept=true;
-                // forward that to the WebView so we skip the ringing UI and
-                // jump straight into the connected-call screen.
-                if (sourceIntent.getBooleanExtra("auto_accept", false)) {
-                    builder.appendQueryParameter("auto_accept", "1")
-                }
+                // (Removed auto_accept handling: the notification no longer
+                //  has an Answer button — tapping always just opens the app
+                //  and the in-app #incoming-call popup handles Accept.)
             }
             // Generic deep-link: open a DM with this nick on launch. Used by
             // both message-notification taps and incoming-call taps so the
@@ -545,47 +542,17 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
         try {
             if (intent.getBooleanExtra("incoming_call", false) == true) {
-                val autoAccept = intent.getBooleanExtra("auto_accept", false)
-                if (autoAccept) {
-                    // The activity is already running (this is onNewIntent),
-                    // so the WebView is alive. A full page reload here would
-                    // destroy the live WS socket + RTCPeerConnection + the
-                    // already-arrived _pendingOffer, which is exactly the
-                    // "one says calling / other says connecting" deadlock.
-                    //
-                    // Probe JS for a pending offer first. If it's there,
-                    // acceptCall() inline. If JS isn't ready or has nothing
-                    // to accept, fall back to a URL reload so the app can
-                    // recover the offer via REST.
-                    val probe = "(function(){try{" +
-                        "if(typeof acceptCall!=='function')return 'noop';" +
-                        "if(typeof _pendingOffer!=='undefined'&&_pendingOffer&&_pendingOffer.sdp){acceptCall();return 'ok';}" +
-                        // Offer hasn't landed yet — flag so handleCallOffer auto-accepts.
-                        "try{_autoAcceptPending=true;}catch(e){}" +
-                        "return 'queued';" +
-                    "}catch(e){return 'err';}})()"
-                    webView?.evaluateJavascript(probe) { result ->
-                        val r = (result ?: "").trim('"')
-                        Log.i(TAG, "auto-accept probe result=$r")
-                        if (r != "ok" && r != "queued") {
-                            webView?.loadUrl(buildAppUrl(APP_URL, intent))
-                        }
-                    }
-                } else {
-                    // Body-tap / Open on the call notification.
-                    // Do NOT reload the WebView here — the activity is already
-                    // running, so the live WS/RTCPeerConnection is what will
-                    // deliver the offer. A loadUrl() would tear all of that
-                    // down and leave both peers stuck on "Calling…/Connecting…".
-                    // The activity has been brought to front by the system;
-                    // that's all we need to do.
-                    Log.i(TAG, "incoming-call body tap: bring-to-front only, no reload")
-                }
-                // In both auto-accept and body-tap cases, the user has now
-                // landed inside the app where the in-app ringing overlay (or
-                // the connecting/active call overlay) takes over. The system
-                // tray ringing notification is redundant from this point on
-                // and just noisy — clear it.
+                // Tap on the incoming-call notification body. The activity is
+                // already running, so the live WS/RTCPeerConnection is what
+                // delivers the offer to the in-app #incoming-call popup. We
+                // intentionally do NOT reload the WebView here — doing so
+                // would tear down the live socket + peer connection and
+                // leave both ends stuck on "Calling…/Connecting…". The
+                // system has already brought us to the foreground; that's
+                // all that's needed.
+                Log.i(TAG, "incoming-call body tap: bring-to-front only, no reload")
+                // Clear the system tray ringing notification — redundant
+                // once the in-app overlay takes over and just noisy.
                 try {
                     val nm = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
                     nm.cancel(CallService.RING_NOTIFICATION_ID)

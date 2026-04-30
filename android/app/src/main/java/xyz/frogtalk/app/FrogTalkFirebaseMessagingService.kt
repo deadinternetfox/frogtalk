@@ -228,13 +228,10 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
         // ringing UI and accept immediately. Safe now that onNewIntent's
         // body-tap branch no longer reloads the WebView (which was tearing
         // down the live RTCPeerConnection mid-handshake).
-        val answerIntent = Intent(openIntent).apply { putExtra("auto_accept", true) }
-        val answerPending = PendingIntent.getActivity(
-            this,
-            baseRequest xor 0xA1,
-            answerIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        // (Removed: see CallStyle/regular-notification block below — we no
+        //  longer expose an Answer button; the in-app #incoming-call popup
+        //  is the single Accept/Decline surface and tapping the
+        //  notification merely opens the app.)
 
         val declineIntent = Intent(this, CallDeclineReceiver::class.java).apply {
             putExtra(CallService.EXTRA_CALL_ID, callId)
@@ -247,12 +244,11 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val person = Person.Builder()
-            .setName(displayName)
-            .setKey(displayName)
-            .setIcon(IconCompat.createWithResource(this, R.mipmap.ic_launcher))
-            .setImportant(true)
-            .build()
+        // (Person/CallStyle removed: the call notification is now a plain
+        //  high-priority heads-up with a single Decline action; tapping the
+        //  body just opens the app and the in-app #incoming-call popup is
+        //  the single Accept surface. This avoids CallStyle's mandatory
+        //  "Answer" button which used to auto-accept and race the WS offer.)
 
         val accent = try { ContextCompat.getColor(this, R.color.frog_green) } catch (_: Throwable) { 0x4CAF50.or(0xFF000000.toInt()) }
 
@@ -277,17 +273,12 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             // restarting the ringtone.
             .setOnlyAlertOnce(true)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // CallStyle gives the proper green Answer / red Decline buttons
-            // and matches the system Phone app's look.
-            builder.setStyle(
-                NotificationCompat.CallStyle.forIncomingCall(person, declinePending, answerPending)
-            )
-        } else {
-            builder
-                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePending)
-                .addAction(android.R.drawable.ic_menu_call, "Answer", answerPending)
-        }
+        // CallStyle would force a green "Answer" button which we don't
+        // want — auto-accept races the WS offer and lands the user in a
+        // half-connected call. Plain notification with a single Decline
+        // action; tapping the body opens the app where the in-app
+        // #incoming-call popup is the single Accept surface.
+        builder.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePending)
 
         nm.notify(RING_NOTIFICATION_ID, builder.build())
     }

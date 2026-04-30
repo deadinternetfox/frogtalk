@@ -161,12 +161,10 @@ const App = {
     const incomingCall = params.get('incoming_call');
     const pendingCallId = params.get('call_id');
     const pendingPeerNick = params.get('peer_nick');
-    const autoAccept = params.get('auto_accept') === '1';
     if (incomingCall === '1' && pendingCallId) {
       this.pendingIncomingCall = {
         callId: pendingCallId,
         peerNick: pendingPeerNick || '',
-        autoAccept,
       };
       this.setPendingIncomingCall(this.pendingIncomingCall);
       window.history.replaceState({}, '', window.location.pathname);
@@ -312,17 +310,14 @@ const App = {
     } catch {}
 
     // Recover pending incoming call as early as possible so reloads don't hide
-    // the ring UI behind rooms/sidebar loading. Capture the autoAccept flag
-    // before the if/else so the fallback path doesn't lose it (the else
-    // branch reads from a property we just nulled).
-    const wasAutoAccept = !!this.pendingIncomingCall?.autoAccept;
+    // the ring UI behind rooms/sidebar loading.
     if (this.pendingIncomingCall) {
       const restored = await this.recoverIncomingCall(this.pendingIncomingCall);
       if (restored) {
         this.pendingIncomingCall = null;
       }
     } else {
-      await this.recoverLatestIncomingCall({ autoAccept: wasAutoAccept });
+      await this.recoverLatestIncomingCall();
     }
 
     // Load rooms then join first available room (or show onboarding)
@@ -333,11 +328,6 @@ const App = {
       if (restored) {
         this.pendingIncomingCall = null;
       }
-    } else if (wasAutoAccept) {
-      // Second-pass safety net: if the first recovery missed (the call_offer
-      // hadn't been persisted yet when we asked), try again now that rooms
-      // and the WS connection are settled.
-      await this.recoverLatestIncomingCall({ autoAccept: wasAutoAccept });
     }
 
     // Process pending invite / share link
@@ -538,11 +528,6 @@ const App = {
       }
       if (typeof handleCallOffer === 'function') {
         await handleCallOffer(offer);
-        // If the user came in via the notification's "Answer" button, skip
-        // the ringing UI and accept immediately.
-        if (pending?.autoAccept && typeof acceptCall === 'function') {
-          setTimeout(() => { try { acceptCall(); } catch {} }, 0);
-        }
         return true;
       }
       return false;
@@ -568,11 +553,6 @@ const App = {
       }
       if (typeof handleCallOffer === 'function') {
         await handleCallOffer(offer);
-        // Honour notification-Answer cold-starts that didn't have an explicit
-        // call_id in the URL but landed on this fallback path.
-        if (opts?.autoAccept && typeof acceptCall === 'function') {
-          setTimeout(() => { try { acceptCall(); } catch {} }, 0);
-        }
         return true;
       }
       return false;
