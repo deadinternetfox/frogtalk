@@ -500,11 +500,18 @@ async def websocket_endpoint(
                     # actively using the app. sender_name plumbs the raw
                     # nickname into dm_nick so the tap PendingIntent opens
                     # the correct DM thread.
-                    preview = (content or "📎 Media")[:80]
+                    #
+                    # PRIVACY: never put the message body into the push
+                    # payload. E2E is opt-in and per-device — phones
+                    # without a passphrase set send DMs in cleartext, and
+                    # forwarding that here ends up rendering in the
+                    # system tray on whatever device(s) the recipient
+                    # has the app installed on. Generic body only; the
+                    # in-app fetch on tap loads the real message.
                     _push_always(
                         other_id,
-                        f"💬 {user['nickname']}",
-                        preview,
+                        "FrogTalk",
+                        f"💬 New message from {user['nickname']}",
                         "/app",
                         extra={
                             "sender_name": user["nickname"],

@@ -1428,9 +1428,11 @@ async def _handle_dm_event(event: dict) -> None:
         pass
     try:
         from routers.push import send_push
-        preview = (str(payload.get("content") or "") or "📎 Media")[:80]
+        # PRIVACY: never include plaintext content in the push body. E2E
+        # is opt-in per device; forwarding the body would leak it to the
+        # tray on devices that don't have the passphrase.
         send_push(
-            peer["id"], f"💬 {sender['nickname']}", preview, "/app",
+            peer["id"], "FrogTalk", f"💬 New message from {sender['nickname']}", "/app",
             extra={"from_nickname": sender["nickname"]},
         )
     except Exception:

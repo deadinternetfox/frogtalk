@@ -527,26 +527,25 @@ function openFriendSoundEditor(nick) {
   if (!modal) {
     modal = document.createElement('div');
     modal.id = 'friend-sound-modal';
-    modal.className = 'hidden';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:950;display:none;align-items:center;justify-content:center;padding:14px';
+    modal.className = 'fsm-overlay hidden';
     modal.innerHTML = `
-      <div id="fsm-box" style="background:#141414;border:1px solid #2a4a2a;border-radius:16px;width:100%;max-width:440px;max-height:92vh;overflow:auto;display:flex;flex-direction:column">
-        <div style="padding:16px 18px;border-bottom:1px solid #222;display:flex;align-items:center;gap:10px">
-          <span style="font-size:22px">🔔</span>
-          <div style="flex:1;min-width:0">
-            <div style="font-weight:700;color:#e0e0e0;font-size:15px">Custom sounds</div>
-            <div id="fsm-peer" style="font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+      <div id="fsm-box" class="fsm-card">
+        <div class="fsm-head">
+          <span class="fsm-head-ico">🔔</span>
+          <div class="fsm-head-info">
+            <div class="fsm-head-title">Custom sounds</div>
+            <div id="fsm-peer" class="fsm-head-sub"></div>
           </div>
-          <button onclick="closeFriendSoundEditor()" style="background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px">✕</button>
+          <button class="fsm-close" type="button" aria-label="Close" onclick="closeFriendSoundEditor()">✕</button>
         </div>
-        <div style="padding:14px 18px;display:flex;flex-direction:column;gap:14px">
+        <div class="fsm-body">
           <div class="fsm-section">
             <div class="fsm-section-head">
               <div class="fsm-section-title"><span>💬</span> Message alert</div>
               <button class="fsm-upload-btn" type="button" onclick="_uploadFriendSound('msg')" title="Upload your own mp3/wav/ogg"><span>📁</span> Upload</button>
             </div>
             <div id="fsm-msg-custom"></div>
-            <div id="fsm-msg-list" style="display:flex;flex-direction:column;gap:4px"></div>
+            <div id="fsm-msg-list" class="fsm-list"></div>
           </div>
           <div class="fsm-section">
             <div class="fsm-section-head">
@@ -554,12 +553,12 @@ function openFriendSoundEditor(nick) {
               <button class="fsm-upload-btn" type="button" onclick="_uploadFriendSound('ring')" title="Upload your own mp3/wav/ogg"><span>📁</span> Upload</button>
             </div>
             <div id="fsm-ring-custom"></div>
-            <div id="fsm-ring-list" style="display:flex;flex-direction:column;gap:4px"></div>
+            <div id="fsm-ring-list" class="fsm-list"></div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:2px">
-            <button onclick="resetFriendSounds()" style="flex:1;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;transition:all .15s" onmouseover="this.style.borderColor='#3a2a2a';this.style.color='#ff9090'" onmouseout="this.style.borderColor='#2a2a2a';this.style.color='#aaa'">↺ Reset to default</button>
-            <button onclick="closeFriendSoundEditor()" style="flex:1;background:linear-gradient(135deg,#4caf50,#3d9b42);border:none;color:#000;font-weight:700;padding:10px;border-radius:8px;cursor:pointer;font-size:13px;box-shadow:0 4px 14px rgba(76,175,80,.25)">✓ Done</button>
-          </div>
+        </div>
+        <div class="fsm-actions">
+          <button class="fsm-btn" type="button" onclick="resetFriendSounds()">↺ Reset to default</button>
+          <button class="fsm-btn primary" type="button" onclick="closeFriendSoundEditor()">✓ Done</button>
         </div>
       </div>`;
     // Click outside the box to close
@@ -567,20 +566,6 @@ function openFriendSoundEditor(nick) {
       if (e.target === modal) closeFriendSoundEditor();
     });
     document.body.appendChild(modal);
-    // One-time styles for sound rows
-    const style = document.createElement('style');
-    style.textContent = `
-      .fsm-row{display:flex;align-items:center;gap:10px;padding:9px 12px;background:#0f0f0f;border:1px solid #222;border-radius:10px;cursor:pointer;transition:all .15s}
-      .fsm-row:hover{border-color:#3a5a3a;background:#141a14}
-      .fsm-row.selected{border-color:#4caf50;background:#162116}
-      .fsm-row .fsm-dot{width:14px;height:14px;border-radius:50%;border:2px solid #444;flex-shrink:0}
-      .fsm-row.selected .fsm-dot{border-color:#4caf50;background:#4caf50;box-shadow:inset 0 0 0 2px #141414}
-      .fsm-row .fsm-label{flex:1;color:#ddd;font-size:13px;font-weight:500}
-      .fsm-row.selected .fsm-label{color:#4caf50}
-      .fsm-row .fsm-play{background:#1a1a1a;border:1px solid #2a2a2a;color:#9c9;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s}
-      .fsm-row .fsm-play:hover{border-color:#4caf50;color:#4caf50;transform:scale(1.08)}
-    `;
-    document.head.appendChild(style);
   }
   modal._targetNick = nick;
   const peerEl = modal.querySelector('#fsm-peer');
