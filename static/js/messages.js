@@ -420,19 +420,24 @@ const Messages = (() => {
     const modal = document.createElement('div');
     modal.id = 'forward-picker-modal';
     modal.className = 'modal-overlay';
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
     const preview = (msg.content || '').slice(0, 120) || (msg.has_media || msg.media_type ? '[media]' : '');
     modal.innerHTML = `
-      <div style="background:#1e1e1e;border:1px solid #333;border-radius:8px;width:min(440px,92vw);max-height:80vh;display:flex;flex-direction:column;overflow:hidden">
-        <div style="padding:12px 16px;border-bottom:1px solid #333;font-weight:600">Forward message</div>
-        <div style="padding:8px 12px;border-bottom:1px solid #2a2a2a;font-size:12px;color:#9aa0a6">
-          From <b>${UI.escHtml(msg.nickname || '?')}</b>: ${UI.escHtml(preview)}
+      <div style="background:linear-gradient(180deg,#1f3a2c 0%,#13241b 100%);border:1px solid #3a6b48;border-radius:14px;width:min(460px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.6),0 0 0 1px rgba(76,175,80,.15)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #3a6b48">
+          <div style="font-weight:700;color:#cfe8d2;font-size:15px">↪ Forward message</div>
+          <button id="fwd-cancel-x" style="background:none;border:none;color:#9bbf9b;font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px" title="Close">✕</button>
         </div>
-        <input id="fwd-search" type="text" placeholder="Search rooms and DMs…" style="margin:8px 12px;padding:8px;background:#111;border:1px solid #333;color:#eee;border-radius:4px"/>
-        <div id="fwd-list" style="overflow-y:auto;flex:1;padding:4px 8px"></div>
-        <div style="padding:10px 12px;border-top:1px solid #333;display:flex;gap:8px;justify-content:flex-end">
-          <button id="fwd-cancel" style="background:#333;border:none;color:#eee;padding:8px 14px;border-radius:4px;cursor:pointer">Cancel</button>
-          <button id="fwd-send" style="background:#5b8def;border:none;color:#fff;padding:8px 14px;border-radius:4px;cursor:pointer" disabled>Send</button>
+        <div style="padding:10px 14px;border-bottom:1px solid #2a4a36;font-size:12px;color:#9bbf9b;background:rgba(0,0,0,.18)">
+          From <b style="color:#cfe8d2">${UI.escHtml(msg.nickname || '?')}</b>: <span style="color:#a8c4ad">${UI.escHtml(preview)}</span>
+        </div>
+        <div style="padding:10px 14px 4px">
+          <input id="fwd-search" type="text" placeholder="Search rooms and DMs…" style="width:100%;padding:9px 12px;background:rgba(0,0,0,.35);border:1px solid #3a6b48;color:#dff5e8;border-radius:8px;outline:none;font-size:13px"/>
+        </div>
+        <div id="fwd-list" style="overflow-y:auto;flex:1;padding:4px 10px 10px;scrollbar-width:thin;scrollbar-color:rgba(76,175,80,.4) transparent;color:#d6ecda"></div>
+        <div style="padding:12px 16px;border-top:1px solid #3a6b48;display:flex;gap:8px;justify-content:flex-end;background:rgba(0,0,0,.18)">
+          <button id="fwd-cancel" style="background:rgba(0,0,0,.35);border:1px solid #3a6b48;color:#cfe8d2;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">Cancel</button>
+          <button id="fwd-send" style="background:linear-gradient(135deg,#2a5a2a 0%,#1a3a1a 100%);border:1px solid #4caf50;color:#fff;padding:8px 18px;border-radius:8px;cursor:pointer;font-weight:600;opacity:.5" disabled>Send</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -455,26 +460,36 @@ const Messages = (() => {
     function render() {
       const q = search.value.trim().toLowerCase();
       const visible = items.filter(it => !q || it.label.toLowerCase().includes(q));
-      if (!visible.length) { list.innerHTML = '<div style="padding:20px;color:#888;text-align:center">No matches</div>'; return; }
+      if (!visible.length) { list.innerHTML = '<div style="padding:30px 20px;color:#85a89a;text-align:center;font-size:13px">No matches</div>'; return; }
       list.innerHTML = visible.map(it => {
         const checked = selected.has(it.key) ? 'checked' : '';
-        return `<label style="display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:4px;cursor:pointer" onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background=''">
-          <input type="checkbox" data-key="${UI.escHtml(it.key)}" ${checked}/>
-          <span style="flex:1">${UI.escHtml(it.label)}</span>
+        const bg = selected.has(it.key) ? 'background:rgba(76,175,80,.14);' : '';
+        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s">
+          <input type="checkbox" data-key="${UI.escHtml(it.key)}" ${checked} style="accent-color:#4caf50;width:16px;height:16px;cursor:pointer"/>
+          <span style="flex:1;color:#dff5e8;font-size:14px">${UI.escHtml(it.label)}</span>
         </label>`;
       }).join('');
+      list.querySelectorAll('.fwd-row').forEach(row => {
+        row.addEventListener('mouseenter', () => { if (!selected.has(row.dataset.key)) row.style.background = 'rgba(76,175,80,.08)'; });
+        row.addEventListener('mouseleave', () => { if (!selected.has(row.dataset.key)) row.style.background = ''; });
+      });
       list.querySelectorAll('input[type=checkbox]').forEach(cb => {
         cb.addEventListener('change', () => {
           const k = cb.dataset.key;
           const it = items.find(x => x.key === k);
           if (cb.checked) selected.set(k, it); else selected.delete(k);
           sendBtn.disabled = selected.size === 0;
+          sendBtn.style.opacity = sendBtn.disabled ? '.5' : '1';
+          // Re-render row highlight
+          const row = list.querySelector(`.fwd-row[data-key="${CSS.escape(k)}"]`);
+          if (row) row.style.background = cb.checked ? 'rgba(76,175,80,.14)' : '';
         });
       });
     }
     render();
     search.addEventListener('input', render);
     modal.querySelector('#fwd-cancel').onclick = () => modal.remove();
+    modal.querySelector('#fwd-cancel-x').onclick = () => modal.remove();
     modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
     sendBtn.onclick = async () => {
       sendBtn.disabled = true;

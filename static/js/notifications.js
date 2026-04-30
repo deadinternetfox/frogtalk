@@ -438,6 +438,17 @@ const Notifications = (() => {
       // notification (no mention-boost sound, no "@you" title).
       if (isMention && !_pref('notify_mentions', true)) isMention = false;
       _vibrate(isMention ? [30, 40, 30, 40, 60] : 40);
+      // Friendly fallback body so media-only messages don't show a blank tray
+      // entry. Picks an icon from the media_type when available.
+      const _mediaIcon = (mt) => {
+        const t = String(mt || '').toLowerCase();
+        if (t.startsWith('image')) return '🖼️ Image';
+        if (t.startsWith('video')) return '🎬 Video';
+        if (t.startsWith('audio')) return '🎵 Voice note';
+        return '📎 Media';
+      };
+      const _bodyText = contentText
+        || (msg.has_media || msg.media_type ? _mediaIcon(msg.media_type) : 'New message');
 
       // Play sound (only if sound is not disabled in settings)
       if (_pref('notify_sounds', true)) {
@@ -486,7 +497,7 @@ const Notifications = (() => {
             ? `${msg.nickname} mentioned you in #${msg.room_name || 'chat'}`
             : `${msg.nickname} in #${msg.room_name || 'chat'}`;
           new Notification(title, {
-            body: contentText.slice(0, 100),
+            body: _bodyText.slice(0, 100),
             icon: '/static/icons/icon-192.png',
             tag: 'frogtalk-msg-' + (msg.room_name || 'dm'),
           });
@@ -499,7 +510,7 @@ const Notifications = (() => {
           const title = isMention
             ? `${msg.nickname} mentioned you in #${msg.room_name || 'chat'}`
             : `${msg.nickname} in #${msg.room_name || 'chat'}`;
-          window.Android.showNotification(title, (contentText || 'New message').slice(0, 140));
+          window.Android.showNotification(title, _bodyText.slice(0, 140));
         }
       } catch {}
     },
@@ -571,7 +582,15 @@ const Notifications = (() => {
             return `${icon} ${t}${sub}`;
           } catch { return '📞 Call'; }
         }
-        return raw.replace(/<[^>]+>/g, '').slice(0, 140) || 'Media';
+        const stripped = raw.replace(/<[^>]+>/g, '').slice(0, 140);
+        if (stripped) return stripped;
+        // Media-only DM: pick a friendly icon by media_type.
+        const mt = String(msg.media_type || '').toLowerCase();
+        if (mt.startsWith('image')) return '🖼️ Image';
+        if (mt.startsWith('video')) return '🎬 Video';
+        if (mt.startsWith('audio')) return '🎵 Voice note';
+        if (msg.has_media || mt) return '📎 Media';
+        return 'New message';
       })();
       if (_pref('notify_desktop', true) &&
           typeof Notification !== 'undefined' &&

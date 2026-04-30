@@ -344,7 +344,13 @@ const GIFs = (() => {
   function toggle() {
     createPicker();
     const picker = document.getElementById('gif-picker');
-    _isOpen = !_isOpen;
+    if (!picker) return;
+    // Derive state from DOM rather than the cached _isOpen flag — when send()
+    // closes the picker, an outside-click handler bug or a missed teardown
+    // could leave _isOpen out of sync, leaving the button "stuck" (clicks
+    // would re-close instead of re-opening). Trusting the class is foolproof.
+    const wasOpen = picker.classList.contains('open');
+    _isOpen = !wasOpen;
     picker.classList.toggle('open', _isOpen);
     // Mutually exclusive with the emoji picker.
     if (_isOpen) {

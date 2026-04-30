@@ -977,9 +977,10 @@ function renderDMMessage (m) {
     if (mimeType.startsWith('image/') || (!mimeType && mediaUrl.startsWith('data:image'))) {
       inner = `<img src="${mediaUrl}" class="msg-media" onclick="openLightbox('${mediaUrl}')" loading="lazy">`;
     } else if (mimeType.startsWith('video/') || (!mimeType && mediaUrl.startsWith('data:video'))) {
-      inner = `<div class="chat-video">`+
+      const _vSender = esc(senderNick || '');
+      inner = `<div class="chat-video" data-sender="${_vSender}" data-time="${time}">`+
         `<div class="cv-poster"></div>`+
-        `<video src="${mediaUrl}" class="msg-media" preload="metadata" muted playsinline></video>`+
+        `<video src="${mediaUrl}" class="msg-media clickable-media" data-sender="${_vSender}" data-time="${time}" preload="metadata" muted playsinline></video>`+
         `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
         `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
         `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
@@ -1332,11 +1333,16 @@ async function loadDMMedia (msgId, channelId) {
     if (mediaType.startsWith('video')) {
       html = `<div class="chat-video">`+
         `<div class="cv-poster"></div>`+
-        `<video src="${data.media_data}" class="msg-media" preload="metadata" muted playsinline></video>`+
+        `<video src="${data.media_data}" class="msg-media clickable-media" preload="metadata" muted playsinline></video>`+
         `<div class="cv-loading"><div class="cv-spinner"></div></div>`+
         `<div class="cv-overlay"><div class="cv-play" aria-label="Play video" role="button"></div></div>`+
         `<div class="cv-badge"><span class="cv-icon">🎬</span><span class="cv-dur">Video</span></div>`+
       `</div>`;
+      // ChatVideo's MutationObserver only fires for newly-added nodes; the
+      // outerHTML swap below replaces an existing element, so kick the scan
+      // manually right after to ensure poster generation + themed overlay
+      // run on the freshly-rendered video.
+      try { setTimeout(() => { try { ChatVideo?.scan?.(document); } catch {} }, 0); } catch {}
     } else if (mediaType.startsWith('audio')) {
       html = `<audio src="${data.media_data}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
     } else {
