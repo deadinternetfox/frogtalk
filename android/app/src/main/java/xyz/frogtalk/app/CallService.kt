@@ -104,18 +104,11 @@ class CallService : Service() {
                         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                     )
 
-                    // Distinct intent for the "Answer" action: same target as the
-                    // full-screen/body tap, but with auto_accept=true so MainActivity
-                    // tells the WebView to skip the incoming-call overlay and go
-                    // straight into acceptCall(). Without a separate PendingIntent
-                    // (different requestCode), the system reuses the body-tap one
-                    // and the extra is silently dropped.
-                    val answerIntent = Intent(fullScreen).apply { putExtra("auto_accept", true) }
-                    val answerPending = PendingIntent.getActivity(
-                        this, 12, answerIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-
+                    // Notification action just opens the app to the in-app
+                    // ringing UI. We tried auto_accept-from-notification but
+                    // it kept racing the WS/RTC bring-up on cold start and
+                    // wedging the call. Letting the user tap accept inside
+                    // the app is reliable because by then JS state is live.
                     val ringBuilder = NotificationCompat.Builder(this, CHANNEL_RING_ID)
                         .setSmallIcon(R.drawable.ic_notification)
                         .setContentTitle("Incoming FrogTalk call")
@@ -133,7 +126,7 @@ class CallService : Service() {
                         .setFullScreenIntent(fullScreenPending, true)
                         .setContentIntent(fullScreenPending)
                         .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePending)
-                        .addAction(android.R.drawable.ic_menu_call, "Answer", answerPending)
+                        .addAction(android.R.drawable.ic_menu_view, "Open", fullScreenPending)
                     val ringNotif = ringBuilder.build()
 
                     try {

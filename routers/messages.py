@@ -155,6 +155,12 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
     try:
         import bridge_outbound
         outbound_text = (body.bridge_plain or "").strip() or content
+        # Mark forwarded messages on bridges so Telegram / Discord users see
+        # the same "↪ Forwarded from X" indicator as in-app users.
+        if fwd_meta:
+            src_nick = str(fwd_meta.get("source_nick") or "").strip()
+            label = f"↪ Forwarded from {src_nick}" if src_nick else "↪ Forwarded message"
+            outbound_text = f"{label}\n{outbound_text}" if outbound_text else label
         bridge_outbound.forward_user_message(
             room_name, current_user["nickname"], outbound_text, body.media_data,
             sender_avatar=current_user.get("avatar"),
