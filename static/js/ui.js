@@ -596,6 +596,23 @@ const ChatVideo = (() => {
       if (durEl && isFinite(v.duration) && v.duration > 0) {
         durEl.textContent = fmtDuration(v.duration);
       }
+      // Detect Telegram-style "video note": square (or near-square) clip
+      // recorded from the front-facing camera at 480×480. Apply .is-note
+      // so CSS can render the wrapper as a circle with our brand ring,
+      // and swap the badge label.
+      try {
+        const w = v.videoWidth, h = v.videoHeight;
+        if (w && h && Math.abs(w - h) <= Math.max(2, Math.round(Math.min(w, h) * 0.04))) {
+          wrap.classList.add('is-note');
+          const icon = wrap.querySelector('.cv-icon');
+          if (icon) icon.textContent = '🎥';
+          const dur = wrap.querySelector('.cv-dur');
+          if (dur && (!dur.textContent || dur.textContent === 'Video')) {
+            dur.textContent = isFinite(v.duration) && v.duration > 0
+              ? fmtDuration(v.duration) : 'Note';
+          }
+        }
+      } catch {}
       // Try a few positions and keep the most visually interesting frame.
       // Middle-first because intros / outros are commonly fades from black.
       candidates = [0.5, 0.35, 0.65, 0.2, 0.8, 0.05];
@@ -620,15 +637,56 @@ const ChatVideo = (() => {
         // Capture poster before play so a flash-of-black is impossible.
         drawPoster();
         wrap.classList.add('cv-playing');
-        try { v.controls = true; } catch {}
+        const isNote = wrap.classList.contains('is-note');
+        // For video notes we keep the circular bubble and suppress native
+        // controls (they'd render a square bar bursting out of the circle).
+        // Tap-to-toggle is wired below.
+        try { v.controls = !isNote; } catch {}
         try { v.muted = false; } catch {}
-        try { v.currentTime = 0; } catch {}
-        const p = v.play();
-        if (p && typeof p.catch === 'function') {
-          p.catch(() => {
-            // Browser blocked unmuted autoplay — retry muted (user can unmute via controls).
-            try { v.muted = true; v.play().catch(() => {}); } catch {}
-          });
+
+        // MediaRecorder-produced webm/mp4 blobs frequently report
+        // `duration === Infinity` until the browser has been forced to
+        // seek to the end (Chromium bug). In that state, setting
+        // currentTime = 0 can be a no-op or throw, leaving the element
+        // stuck at "no current frame" so the subsequent play() resolves
+        // but no pixels move. Force the duration to materialise first
+        // by seeking past the end, then rewind and play.
+        const finishPlay = () => {
+          const p = v.play();
+          if (p && typeof p.catch === 'function') {
+            p.catch(() => {
+              // Browser blocked unmuted autoplay — retry muted (user can unmute via controls).
+              try { v.muted = true; v.play().catch(() => {}); } catch {}
+            });
+          }
+        };
+        const needsDurationFix = !isFinite(v.duration) || v.duration <= 0;
+        if (needsDurationFix) {
+          let settled = false;
+          const recover = () => {
+            if (settled) return;
+            settled = true;
+            try { v.currentTime = 0; } catch {}
+            finishPlay();
+          };
+          const onDur = () => {
+            v.removeEventListener('durationchange', onDur);
+            v.removeEventListener('seeked', onSeeked);
+            recover();
+          };
+          const onSeeked = () => {
+            v.removeEventListener('seeked', onSeeked);
+            v.removeEventListener('durationchange', onDur);
+            recover();
+          };
+          v.addEventListener('durationchange', onDur, { once: true });
+          v.addEventListener('seeked', onSeeked, { once: true });
+          try { v.currentTime = 1e9; } catch { recover(); }
+          // Safety: if neither event fires (rare WebView), play anyway.
+          setTimeout(recover, 600);
+        } else {
+          try { v.currentTime = 0; } catch {}
+          finishPlay();
         }
       });
     }
@@ -636,6 +694,16 @@ const ChatVideo = (() => {
     v.addEventListener('ended', () => {
       wrap.classList.remove('cv-playing');
       try { v.controls = false; } catch {}
+    });
+    // Video notes: tap the circle while playing to pause/resume (native
+    // controls are hidden for the round bubble).
+    v.addEventListener('click', (e) => {
+      if (!wrap.classList.contains('is-note')) return;
+      if (!wrap.classList.contains('cv-playing')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (v.paused) { v.play().catch(() => {}); }
+      else { try { v.pause(); } catch {} }
     });
   }
 

@@ -1919,6 +1919,45 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   .chat-video .cv-play{width:54px;height:54px}
   .chat-video .cv-play::before{border-left-width:15px;border-top-width:9px;border-bottom-width:9px;margin-left:4px}
 }
+/* ─── Video note (Telegram-style round bubble) ───────────────────────────
+   Recognised in ChatVideo.init() by ~square videoWidth/Height (480x480
+   recorded by media.js). Wrapper becomes a circle with a brand-green
+   ring; <video> is cropped via object-fit:cover so the user's face fills
+   the circle exactly. Once playback starts we keep the circle (do not
+   re-expose native controls' rectangular chrome) — tapping the video
+   pauses/resumes via the bound listener below. */
+.chat-video.is-note{
+  width:240px;max-width:240px;height:240px;
+  border-radius:50%;
+  border:2px solid rgba(76,175,80,.6);
+  box-shadow:0 10px 28px rgba(0,0,0,.55),
+             0 0 0 4px rgba(76,175,80,.10),
+             0 0 0 1px rgba(125,212,155,.18) inset;
+  background:#06170c;
+}
+.chat-video.is-note video{
+  width:100%;height:100%;max-height:none;
+  border-radius:50%;
+  object-fit:cover;
+}
+.chat-video.is-note .cv-poster{border-radius:50%}
+.chat-video.is-note .cv-overlay{border-radius:50%}
+.chat-video.is-note .cv-play{width:56px;height:56px;box-shadow:0 6px 18px rgba(0,0,0,.55),0 0 0 6px rgba(76,175,80,.18)}
+/* Pull the duration badge in from the corner so it sits inside the circle */
+.chat-video.is-note .cv-badge{
+  left:50%;bottom:10px;transform:translateX(-50%);
+  padding:3px 9px;font-size:10px;
+  background:rgba(6,23,12,.78);
+  border:1px solid rgba(125,212,155,.25);
+}
+/* Hide native controls overlay while playing — it would burst out of the
+   circle. Users can long-press / open in lightbox for full controls. */
+.chat-video.is-note video::-webkit-media-controls{display:none !important}
+.chat-video.is-note.cv-playing video{filter:none}
+@media (max-width:480px){
+  .chat-video.is-note{width:200px;max-width:200px;height:200px}
+  .chat-video.is-note .cv-play{width:48px;height:48px}
+}
 .media-lazy-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;width:200px;height:100px;border-radius:8px;margin-top:6px;background:linear-gradient(180deg,#12231d,#0f1d18);border:1px dashed #2f5548;cursor:pointer;transition:background .2s,border-color .2s}
 .media-lazy-placeholder:hover{background:linear-gradient(180deg,#152922,#11211c);border-color:#3e6a5b}
 .media-lazy-placeholder.media-lazy-auto{cursor:default}
