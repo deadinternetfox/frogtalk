@@ -494,9 +494,15 @@ const UI = (() => {
       overlay.innerHTML =
         '<div class="modal-box" role="dialog" aria-modal="true" ' +
         'style="max-width:min(420px,94vw);padding:18px 18px 14px;' +
-        'background:var(--surface-color,#1e1e1e);' +
-        'border:1px solid var(--border-color,#2a2a2a);border-radius:10px;' +
-        'box-shadow:0 12px 40px rgba(0,0,0,.55);color:var(--text-color,#e8e8e8)">' +
+        // Match chat surfaces (#chat-header / #input-area): accent-tinted
+        // gradient over --surface-color so the dialog feels like part of
+        // the app instead of a plain charcoal box.
+        'background:linear-gradient(180deg,' +
+          'color-mix(in srgb, var(--accent-color,#4caf50) 14%, var(--surface-color,#1e1e1e)) 0%,' +
+          'color-mix(in srgb, var(--accent-color,#4caf50) 8%,  var(--surface-color,#1e1e1e)) 100%);' +
+        'border:1px solid color-mix(in srgb, var(--accent-color,#4caf50) 30%, var(--border-color,#2a2a2a));' +
+        'border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.55);' +
+        'color:var(--text-color,#e8e8e8)">' +
           titleHtml +
           `<div style="font-size:14px;line-height:1.45;color:var(--text-color,#d6d6d6);white-space:pre-wrap;opacity:.92">${escHtml(message)}</div>` +
           '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">' +
