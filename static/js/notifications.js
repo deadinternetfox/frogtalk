@@ -17,25 +17,11 @@ const Notifications = (() => {
       await new Promise(res => window.addEventListener('load', res, { once: true }));
     }
     try {
-      _swReg = await navigator.serviceWorker.register('/sw.js?v=189', { scope: '/' });
+      _swReg = await navigator.serviceWorker.register('/sw.js?v=190', { scope: '/' });
       console.log('[SW] registered, scope:', _swReg.scope);
-      // Listen for SW-to-page messages (used by notification-click actions on
-      // incoming calls so the user can hit Accept/Decline right from the OS
-      // notification even when the app was backgrounded).
-      try {
-        navigator.serviceWorker.addEventListener('message', (ev) => {
-          const m = ev.data || {};
-          if (m.type === 'ft-call-action') {
-            if (m.action === 'reject') {
-              try { if (typeof rejectCall === 'function') rejectCall(); } catch {}
-            } else {
-              // Try accept — if no pending offer yet, the WS call_offer that
-              // arrived alongside the push will drive the UI anyway.
-              try { if (typeof acceptCall === 'function') acceptCall(); } catch {}
-            }
-          }
-        });
-      } catch {}
+      // Note: incoming-call accept/decline is handled exclusively by the
+      // in-page #incoming-call popup (driven by WS call_offer). The SW
+      // notification has no action buttons and posts no ft-call-action.
       return _swReg;
     } catch (err) {
       console.warn('[SW] registration failed:', err);

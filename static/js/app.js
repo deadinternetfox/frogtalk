@@ -173,28 +173,9 @@ const App = {
     } else {
       this.pendingIncomingCall = this.getPendingIncomingCall();
     }
-    // Cold-start: service worker opened the page with a URL fragment carrying
-    // the user's notification button choice. Honour it as soon as calls.js
-    // is ready (handleCallOffer will auto-accept; rejectCall fires standalone).
-    try {
-      const hash = String(window.location.hash || '');
-      const m = hash.match(/(ftCallAccept|ftCallReject)=([^&]+)/);
-      if (m) {
-        const action = m[1] === 'ftCallReject' ? 'reject' : 'accept';
-        // Defer until calls.js has loaded.
-        const apply = () => {
-          if (action === 'reject') {
-            try { if (typeof rejectCall === 'function') rejectCall(); } catch {}
-          } else {
-            try { if (typeof acceptCall === 'function') acceptCall(); } catch {}
-          }
-        };
-        if (document.readyState === 'complete') setTimeout(apply, 50);
-        else window.addEventListener('load', () => setTimeout(apply, 50), { once: true });
-        // Strip the fragment so a refresh doesn't re-trigger.
-        window.history.replaceState({}, '', window.location.pathname + window.location.search);
-      }
-    } catch {}
+    // (Removed: legacy cold-start ftCallAccept/ftCallReject hash handler.
+    //  OS notification action buttons no longer exist — the in-page
+    //  #incoming-call popup is the single Accept/Decline surface.)
 
     if (!State.token || !State.user) {
       const switched = params.get('switched') === '1';

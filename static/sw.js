@@ -112,35 +112,29 @@ self.addEventListener('push', event => {
       requireInteraction: !!data.requireInteraction || isCall,
       silent: false,
     };
-    if (isCall) {
-      opts.actions = [
-        { action: 'accept', title: '✅ Accept' },
-        { action: 'reject', title: '❌ Decline' },
-      ];
-    }
+    // Calls intentionally have NO action buttons. Tapping the notification
+    // just opens/focuses the app, where the in-page #incoming-call popup
+    // (driven by the WS call_offer event) is the single source of truth
+    // for Accept/Decline. OS-level buttons proved unreliable: the page
+    // they nudged could miss the WS offer (cold start race) and end up
+    // "accepting" with no peer connection, leaving the caller hanging.
     return self.registration.showNotification(data.title, opts);
   })());
 });
 
 // ── NotificationClick: focus or open /app ────────────────────────────────────
+// All notifications (calls included) just open / focus the app. The page's
+// existing handlers (WS call_offer drives #incoming-call; message tap routes
+// to room) take it from there.
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const d = event.notification.data || {};
-  const action = event.action || '';
-  const baseUrl = d.url || '/app';
-  // For call actions, attach intent so the page auto-accepts/rejects on focus
-  let url = baseUrl;
-  if (d.kind === 'call' && d.call_id) {
-    const tag = action === 'reject' ? 'ftCallReject' : 'ftCallAccept';
-    url = `${baseUrl}#${tag}=${encodeURIComponent(d.call_id)}&from=${encodeURIComponent(d.from_nickname||'')}`;
-  }
+  const url = d.url || '/app';
   event.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const win of wins) {
       if (win.url.includes(self.location.origin)) {
         try { win.focus(); } catch {}
-        // Nudge page with intent
-        try { win.postMessage({ type: 'ft-call-action', action: action || 'accept', call_id: d.call_id, from_nickname: d.from_nickname }); } catch {}
         return;
       }
     }
