@@ -161,6 +161,33 @@ async def websocket_endpoint(
     except Exception:
         logger.exception("drain_pending_ice_candidates failed")
 
+    # Drain queued call control signals (call_end / call_reject) that the
+    # other side sent while this user was off-WS. Without this, hangup races
+    # against the callee's WS-flap window and the callee gets stuck on a
+    # zombie "Connecting…" overlay forever.
+    try:
+        pending_sigs = db.drain_pending_call_signals(user["id"])
+        for row in pending_sigs:
+            try:
+                kind = str(row.get("kind") or "")
+                payload_str = row.get("payload") or "{}"
+                try:
+                    payload = json.loads(payload_str)
+                except Exception:
+                    payload = {}
+                if not isinstance(payload, dict):
+                    payload = {}
+                payload.setdefault("type", kind or "call_end")
+                payload.setdefault("from_id", int(row.get("from_id") or 0))
+                payload.setdefault("from_nickname", str(row.get("from_nick") or ""))
+                if row.get("call_id"):
+                    payload.setdefault("call_id", row.get("call_id"))
+                await manager.send_personal(websocket, payload)
+            except Exception:
+                pass
+    except Exception:
+        logger.exception("drain_pending_call_signals failed")
+
     # Auto-add to room_members on connect so they appear in the offline list
     # when they're not connected. Skip DM channels (prefixed with "dm-").
     if not room_name.startswith("dm-"):
@@ -786,12 +813,25 @@ async def websocket_endpoint(
                     "📵",
                     "declined",
                 )
-                await manager.send_to_user(to_id, {
+                reject_payload = {
                     "type": "call_reject",
                     "from_id": user["id"],
                     "from_nickname": user["nickname"],
                     "call_id": call_id,
-                })
+                }
+                delivered = await manager.send_to_user(to_id, reject_payload)
+                if not delivered:
+                    try:
+                        db.queue_call_signal(
+                            call_id=call_id or 0,
+                            target_id=to_id,
+                            from_id=user["id"],
+                            from_nick=user["nickname"],
+                            kind="call_reject",
+                            payload=json.dumps(reject_payload),
+                        )
+                    except Exception:
+                        logger.exception("queue_call_signal(call_reject) failed")
 
             elif msg_type == "call_end":
                 to_id = _resolve_to_id(data)
@@ -876,12 +916,25 @@ async def websocket_endpoint(
                         # rejected, ended, or unknown — just mark ended, log already written
                         db.update_call_status(call_id, "ended",
                                               ended_at=datetime.utcnow().isoformat())
-                await manager.send_to_user(to_id, {
+                end_payload = {
                     "type": "call_end",
                     "from_id": user["id"],
                     "from_nickname": user["nickname"],
                     "call_id": call_id,
-                })
+                }
+                delivered = await manager.send_to_user(to_id, end_payload)
+                if not delivered:
+                    try:
+                        db.queue_call_signal(
+                            call_id=call_id or 0,
+                            target_id=to_id,
+                            from_id=user["id"],
+                            from_nick=user["nickname"],
+                            kind="call_end",
+                            payload=json.dumps(end_payload),
+                        )
+                    except Exception:
+                        logger.exception("queue_call_signal(call_end) failed")
 
             elif msg_type == "ice_candidate":
                 to_id = _resolve_to_id(data)

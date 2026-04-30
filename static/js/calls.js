@@ -247,6 +247,13 @@ async function handleCallOffer (data) {
     return;
   }
   if (_callState !== 'idle') {
+    // Same call we're already on: drop silently. The caller's live WS push
+    // and our REST recovery both deliver the same offer to a cold-started
+    // client — without this, the second arrival triggers call_reject(busy)
+    // and the caller hangs up while we're still ringing/active.
+    if (data.call_id && _callId && String(data.call_id) === String(_callId)) {
+      return;
+    }
     wsSend({ type: 'call_reject', to_nickname: data.from_nickname, reason: 'busy' });
     return;
   }

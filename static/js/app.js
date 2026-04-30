@@ -338,7 +338,7 @@ const App = {
         this.pendingIncomingCall = null;
       }
     } else {
-      await this.recoverLatestIncomingCall();
+      await this.recoverLatestIncomingCall({ autoAccept: this.pendingIncomingCall?.autoAccept });
     }
 
     // Load rooms then join first available room (or show onboarding)
@@ -565,7 +565,7 @@ const App = {
     }
   },
 
-  async recoverLatestIncomingCall() {
+  async recoverLatestIncomingCall(opts) {
     if (!State.token) return false;
     try {
       const res = await fetch('/api/calls/pending-latest', {
@@ -581,6 +581,11 @@ const App = {
       }
       if (typeof handleCallOffer === 'function') {
         await handleCallOffer(offer);
+        // Honour notification-Answer cold-starts that didn't have an explicit
+        // call_id in the URL but landed on this fallback path.
+        if (opts?.autoAccept && typeof acceptCall === 'function') {
+          setTimeout(() => { try { acceptCall(); } catch {} }, 0);
+        }
         return true;
       }
       return false;
