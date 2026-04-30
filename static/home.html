@@ -895,36 +895,63 @@
     position: fixed;
     bottom: 0; left: 0; right: 0;
     background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
-    padding: 1rem 1.5rem;
+    padding: .75rem 1rem;
     display: none;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    gap: .75rem;
     z-index: 1000;
     box-shadow: 0 -4px 20px rgba(0,0,0,.3);
+    /* Use system font stack so low-end devices missing custom fonts
+       still render at the intended size instead of falling back to a
+       wider/taller font that pushes text out of the row. */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.25;
   }
   .mobile-banner.show { display: flex; }
   .mobile-banner-content {
-    display: flex; align-items: center; gap: .75rem;
+    display: flex; align-items: center; gap: .65rem;
+    flex: 1 1 auto;
+    min-width: 0; /* allow text children to shrink instead of overflowing upward */
   }
-  .mobile-banner-icon { font-size: 2rem; }
-  .mobile-banner-text h4 { color: #fff; font-size: .95rem; margin: 0; }
-  .mobile-banner-text p { color: rgba(255,255,255,.8); font-size: .75rem; margin: 0; }
+  .mobile-banner-icon { font-size: 1.75rem; flex: 0 0 auto; line-height: 1; }
+  .mobile-banner-text { min-width: 0; flex: 1 1 auto; }
+  .mobile-banner-text h4 {
+    color: #fff; font-size: .9rem; margin: 0; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mobile-banner-text p {
+    color: rgba(255,255,255,.85); font-size: .72rem; margin: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .mobile-banner-btn {
     background: #fff; color: #16a34a;
-    padding: .6rem 1.2rem; border-radius: 8px;
-    font-weight: 700; font-size: .85rem;
+    padding: .55rem 1rem; border-radius: 8px;
+    font-weight: 700; font-size: .82rem;
     text-decoration: none;
     white-space: nowrap;
+    flex: 0 0 auto;
     box-shadow: 0 2px 8px rgba(0,0,0,.2);
   }
   .mobile-banner-btn:hover { background: #f0fdf4; }
   .mobile-banner-close {
     background: transparent; border: none;
-    color: rgba(255,255,255,.7); font-size: 1.5rem;
-    cursor: pointer; padding: 0 .5rem;
+    color: rgba(255,255,255,.7); font-size: 1.35rem;
+    cursor: pointer; padding: 0 .25rem;
+    flex: 0 0 auto; line-height: 1;
   }
   .mobile-banner-close:hover { color: #fff; }
+
+  /* Narrow / low-end phones (~360px and under) */
+  @media (max-width: 380px) {
+    .mobile-banner { padding: .6rem .65rem; gap: .5rem; }
+    .mobile-banner-content { gap: .5rem; }
+    .mobile-banner-icon { font-size: 1.4rem; }
+    .mobile-banner-text h4 { font-size: .82rem; }
+    .mobile-banner-text p  { font-size: .68rem; }
+    .mobile-banner-btn { padding: .5rem .75rem; font-size: .78rem; }
+  }
 
   @media (min-width: 769px) {
     .mobile-banner { display: none !important; }
