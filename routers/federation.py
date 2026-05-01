@@ -1,4 +1,5 @@
 """Federation and network discovery routes (phase-1 scaffold)."""
+import base64
 import os
 import time
 import asyncio
@@ -1442,15 +1443,21 @@ async def _handle_dm_event(event: dict) -> None:
 async def _handle_friend_event(event: dict) -> None:
     payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
-    from_nick = str(payload.get("from_nickname") or "").strip()
-    to_nick = str(payload.get("to_nickname") or "").strip()
-    if not from_nick or not to_nick:
-        return
 
-    from_user = _ensure_local_user_by_nickname(from_nick)
-    to_user = _ensure_local_user_by_nickname(to_nick)
-    if not from_user or not to_user:
-        return
+    # Sound events use different keys — handle them before the from/to guard.
+    if event_type in ("friend.sound.created", "friend.sound.deleted"):
+        from_nick = None  # handled inside the blocks below
+        to_nick = None
+    else:
+        from_nick = str(payload.get("from_nickname") or "").strip()
+        to_nick = str(payload.get("to_nickname") or "").strip()
+        if not from_nick or not to_nick:
+            return
+
+        from_user = _ensure_local_user_by_nickname(from_nick)
+        to_user = _ensure_local_user_by_nickname(to_nick)
+        if not from_user or not to_user:
+            return
 
     if event_type == "friend.requested":
         db.send_friend_request(from_user["id"], to_user["id"])
@@ -1498,6 +1505,81 @@ async def _handle_friend_event(event: dict) -> None:
             )
         except Exception:
             pass
+
+    if event_type == "friend.sound.created":
+        owner_nick = str(payload.get("owner_nick") or "").strip()
+        friend_nick = str(payload.get("friend_nick") or "").strip()
+        kind = str(payload.get("kind") or "").strip()
+        file_data_b64 = str(payload.get("file_data_b64") or "").strip()
+        filename = str(payload.get("filename") or "sound.bin").strip()
+        content_type = str(payload.get("content_type") or "application/octet-stream").strip()
+        file_ext = str(payload.get("file_ext") or Path(filename).suffix).strip().lower()
+        if not owner_nick or not friend_nick or kind not in ("msg", "ring") or not file_data_b64:
+            return
+        owner = _ensure_local_user_by_nickname(owner_nick)
+        friend = _ensure_local_user_by_nickname(friend_nick)
+        if not owner or not friend:
+            return
+        try:
+            raw = base64.b64decode(file_data_b64)
+        except Exception:
+            return
+        if not raw:
+            return
+        sound_root = Path(os.getenv("FROGTALK_FRIEND_SOUND_DIR", "data/friend_sounds"))
+        target_dir = sound_root / str(owner["id"]) / str(friend["id"]) / kind
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return
+        import uuid as _uuid
+        target_path = target_dir / f"{_uuid.uuid4().hex}{file_ext or '.bin'}"
+        try:
+            target_path.write_bytes(raw)
+        except Exception:
+            return
+        try:
+            db.add_friend_sound_asset(
+                owner_user_id=owner["id"],
+                friend_user_id=friend["id"],
+                kind=kind,
+                filename=filename,
+                content_type=content_type,
+                file_path=str(target_path),
+                file_size=len(raw),
+                is_active=1,
+            )
+        except Exception:
+            try:
+                target_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return
+
+    if event_type == "friend.sound.deleted":
+        owner_nick = str(payload.get("owner_nick") or "").strip()
+        friend_nick = str(payload.get("friend_nick") or "").strip()
+        kind = str(payload.get("kind") or "").strip()
+        if not owner_nick or not friend_nick or kind not in ("msg", "ring"):
+            return
+        owner = _ensure_local_user_by_nickname(owner_nick)
+        friend = _ensure_local_user_by_nickname(friend_nick)
+        if not owner or not friend:
+            return
+        try:
+            active = db.get_active_friend_sound_asset(owner["id"], friend["id"], kind)
+            if active:
+                deleted = db.delete_friend_sound_asset(owner["id"], active["id"])
+                if deleted:
+                    fp = Path(str(deleted.get("file_path") or ""))
+                    if fp.exists() and fp.is_file():
+                        try:
+                            fp.unlink()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        return
 
 
 async def _handle_social_event(event: dict) -> None:
