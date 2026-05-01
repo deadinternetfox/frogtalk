@@ -222,7 +222,7 @@ const Notifications = (() => {
   // reduce localStorage pressure while allowing short media clips.
   // Data URLs inflate binary size by ~33% and localStorage is usually ~5MB.
   // Keep custom files small enough to reliably persist across devices.
-  const CUSTOM_MAX_BYTES = 2 * 1024 * 1024;
+  const CUSTOM_MAX_BYTES = 10 * 1024 * 1024;
   function _customSounds() {
     try { return JSON.parse(localStorage.getItem('ft_custom_sounds') || '{}') || {}; }
     catch { return {}; }
@@ -247,42 +247,53 @@ const Notifications = (() => {
     _saveCustomSounds(map);
   }
   let _customAudio = null;
+  let _customAudioToken = 0;
   const _FALLBACK_PREVIEW_BEEP = 'data:audio/wav;base64,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';
-  function _playCustomSound(dataUrl) {
-    if (!dataUrl) return;
+  function _playAudioUrl(dataUrl, opts) {
+    if (!dataUrl) return false;
+    const token = ++_customAudioToken;
     try {
       if (_customAudio) {
         try {
           _customAudio.pause();
           _customAudio.currentTime = 0;
+          _customAudio.src = '';
+          _customAudio.load();
         } catch {}
       }
-      _customAudio = new Audio(dataUrl);
-      _customAudio.volume = 0.9;
-      _customAudio.play().catch((e) => { console.warn('[FTDBG] custom play rejected', e?.message || e); });
-    } catch {}
-  }
-  function _playPreviewFallback(kind, tone) {
-    try {
-      if (_customAudio) {
-        try {
-          _customAudio.pause();
-          _customAudio.currentTime = 0;
-        } catch {}
-      }
-      _customAudio = new Audio(_FALLBACK_PREVIEW_BEEP);
-      _customAudio.volume = 0.95;
-      const maps = kind === 'ring'
-        ? { default: 0.95, classic: 0.9, digital: 1.05, melody: 1.12, marimba: 1.18, sonar: 0.82 }
-        : { pop: 1.0, chime: 1.1, ding: 1.2, click: 0.85, bell: 1.25, soft: 0.9, bubble: 1.3, zap: 1.4, coin: 1.15, knock: 0.75 };
-      _customAudio.playbackRate = maps[tone] || 1.0;
-      _customAudio.play().catch((e) => { console.warn('[FTDBG] preview fallback play rejected', e?.message || e); });
+      const a = new Audio(dataUrl);
+      a.volume = opts?.volume ?? 0.9;
+      if (opts?.playbackRate) a.playbackRate = opts.playbackRate;
+      _customAudio = a;
+      a.play().then(() => {
+        if (token !== _customAudioToken) {
+          try {
+            a.pause();
+            a.currentTime = 0;
+            a.src = '';
+            a.load();
+          } catch {}
+        }
+      }).catch((e) => { console.warn('[FTDBG] custom play rejected', e?.message || e); });
       return true;
     } catch {
       return false;
     }
   }
+  function _playCustomSound(dataUrl) {
+    _playAudioUrl(dataUrl, { volume: 0.9 });
+  }
+  function _playPreviewFallback(kind, tone) {
+    const maps = kind === 'ring'
+      ? { default: 0.95, classic: 0.9, digital: 1.05, melody: 1.12, marimba: 1.18, sonar: 0.82 }
+      : { pop: 1.0, chime: 1.1, ding: 1.2, click: 0.85, bell: 1.25, soft: 0.9, bubble: 1.3, zap: 1.4, coin: 1.15, knock: 0.75 };
+    return _playAudioUrl(_FALLBACK_PREVIEW_BEEP, {
+      volume: 0.95,
+      playbackRate: maps[tone] || 1.0,
+    });
+  }
   function _stopCustomSound() {
+    _customAudioToken += 1;
     if (!_customAudio) return;
     try {
       _customAudio.pause();
@@ -393,15 +404,20 @@ const Notifications = (() => {
           return { ok: true, mode: 'custom-friend' };
         }
       }
+      const fn = MSG_TONES[tone] || MSG_TONES.pop;
+      const tag = opts?.preview ? ('preview-tone:' + tone) : ('tone:' + tone);
+      const ok = _playWithCtx(fn, tag);
+      if (ok) {
+        console.log('[FTDBG] playTone', tone, 'ok=', ok, 'preview=', !!opts?.preview);
+        return { ok: true, mode: opts?.preview ? 'webaudio-preview' : 'webaudio' };
+      }
       if (opts?.preview) {
         const fb = _playPreviewFallback('msg', tone);
         console.log('[FTDBG] preview fallback msg tone=', tone, 'ok=', fb);
         return fb ? { ok: true, mode: 'htmlaudio-preview' } : { ok: false, reason: 'preview_fallback_failed' };
       }
-      const fn = MSG_TONES[tone] || MSG_TONES.pop;
-      const ok = _playWithCtx(fn, 'tone:' + tone);
       console.log('[FTDBG] playTone', tone, 'ok=', ok);
-      return ok ? { ok: true, mode: 'webaudio' } : { ok: false, reason: 'webaudio_unavailable' };
+      return { ok: false, reason: 'webaudio_unavailable' };
     } catch (e) { console.warn('[FT sound]', e); }
     return { ok: false, reason: 'tone_exception' };
   }
@@ -428,15 +444,20 @@ const Notifications = (() => {
           return { ok: true, mode: 'custom-friend' };
         }
       }
+      const fn = RING_TONES[tone] || RING_TONES.default;
+      const tag = opts?.preview ? ('preview-ring:' + tone) : ('ring:' + tone);
+      const ok = _playWithCtx(fn, tag);
+      if (ok) {
+        console.log('[FTDBG] playRing', tone, 'ok=', ok, 'preview=', !!opts?.preview);
+        return { ok: true, mode: opts?.preview ? 'webaudio-preview' : 'webaudio' };
+      }
       if (opts?.preview) {
         const fb = _playPreviewFallback('ring', tone);
         console.log('[FTDBG] preview fallback ring tone=', tone, 'ok=', fb);
         return fb ? { ok: true, mode: 'htmlaudio-preview' } : { ok: false, reason: 'preview_fallback_failed' };
       }
-      const fn = RING_TONES[tone] || RING_TONES.default;
-      const ok = _playWithCtx(fn, 'ring:' + tone);
       console.log('[FTDBG] playRing', tone, 'ok=', ok);
-      return ok ? { ok: true, mode: 'webaudio' } : { ok: false, reason: 'webaudio_unavailable' };
+      return { ok: false, reason: 'webaudio_unavailable' };
     } catch (e) { console.warn('[FT ring]', e); }
     return { ok: false, reason: 'ring_exception' };
   }
@@ -554,7 +575,7 @@ const Notifications = (() => {
     // Custom uploaded sound API
     getCustomSound(nick, kind) { return _getCustomSound(nick, kind); },
     setCustomSound(nick, kind, dataUrl) { _setCustomSound(nick, kind, dataUrl); },
-    // Accepts a File/Blob, returns a Promise<{ok, error?, dataUrl?}>
+    // Accepts a File/Blob, returns a Promise<{ok, error?, dataUrl?, asset?}>
     uploadCustomSound(nick, kind, file, onProgress) {
       return new Promise((resolve) => {
         if (!file) return resolve({ ok: false, error: 'No file' });
@@ -566,8 +587,48 @@ const Notifications = (() => {
         ) {
           return resolve({ ok: false, error: 'Unsupported file type' });
         }
+
+        const sessionToken = (typeof State !== 'undefined' && State && State.token) ? String(State.token) : '';
+        const safeKind = kind === 'ring' ? 'ring' : 'msg';
+        if (nick && sessionToken) {
+          try {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/api/friends/sounds/upload/' + encodeURIComponent(nick) + '/' + safeKind, true);
+            xhr.setRequestHeader('X-Session-Token', sessionToken);
+            xhr.upload.onprogress = (ev) => {
+              if (!onProgress || !ev || !ev.lengthComputable) return;
+              try {
+                const pct = Math.max(0, Math.min(100, Math.round((ev.loaded / ev.total) * 100)));
+                onProgress(pct);
+              } catch {}
+            };
+            xhr.onerror = () => resolve({ ok: false, error: 'Upload failed' });
+            xhr.onload = () => {
+              let payload = {};
+              try { payload = JSON.parse(xhr.responseText || '{}') || {}; } catch {}
+              if (xhr.status < 200 || xhr.status >= 300 || !payload.ok || !payload.asset?.url) {
+                return resolve({ ok: false, error: payload.error || 'Upload failed' });
+              }
+              const separator = payload.asset.url.includes('?') ? '&' : '?';
+              const authedUrl = payload.asset.url + separator + 'token=' + encodeURIComponent(sessionToken);
+              try { _setCustomSound(nick, safeKind, authedUrl); } catch {}
+              if (onProgress) {
+                try { onProgress(100); } catch {}
+              }
+              console.log('[FTDBG] upload stored on server', safeKind, file.name);
+              resolve({ ok: true, dataUrl: authedUrl, asset: payload.asset });
+            };
+            const fd = new FormData();
+            fd.append('media', file, file.name || 'sound');
+            xhr.send(fd);
+            return;
+          } catch (e) {
+            console.warn('[FTDBG] server upload init failed, falling back to local storage', e?.message || e);
+          }
+        }
+
         if (file.size > CUSTOM_MAX_BYTES) {
-          return resolve({ ok: false, error: 'File too large for browser storage (max 2 MB)' });
+          return resolve({ ok: false, error: 'File too large (max 10 MB)' });
         }
         const fr = new FileReader();
         fr.onprogress = (ev) => {
@@ -579,11 +640,11 @@ const Notifications = (() => {
         };
         fr.onload = () => {
           try {
-            _setCustomSound(nick, kind, fr.result);
+            _setCustomSound(nick, safeKind, fr.result);
             if (onProgress) {
               try { onProgress(100); } catch {}
             }
-            console.log('[FTDBG] upload stored', kind, file.name);
+            console.log('[FTDBG] upload stored locally', safeKind, file.name);
             resolve({ ok: true, dataUrl: fr.result });
           } catch (e) {
             const msg = (e && e.message) ? e.message : String(e);

@@ -1,9 +1,11 @@
 """Friends, tags, user search routes."""
 import logging
+import os
 import time
 import uuid
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from pathlib import Path
+from fastapi import APIRouter, Depends, Request, UploadFile, File
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -17,6 +19,13 @@ _log = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/friends", tags=["friends"])
 users_router = APIRouter(prefix="/users", tags=["users_ext"])
+
+_SOUND_MAX_BYTES = int(os.getenv("FROGTALK_FRIEND_SOUND_MAX_BYTES", str(10 * 1024 * 1024)))
+_SOUND_ROOT = Path(os.getenv("FROGTALK_FRIEND_SOUND_DIR", "data/friend_sounds"))
+_ALLOWED_SOUND_MIME_PREFIXES = ("audio/",)
+_ALLOWED_SOUND_EXTS = {
+    ".mp3", ".wav", ".ogg", ".m4a", ".aac", ".opus", ".flac", ".weba", ".mp4", ".webm"
+}
 
 
 def _friend_push(user_id: int, title: str, body: str,
@@ -254,3 +263,143 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
         "requests_in": db.get_friend_requests_in(current_user["id"]),
         "requests_out": db.get_friend_requests_out(current_user["id"]),
     }
+
+
+def _sound_kind_or_none(kind: str) -> Optional[str]:
+    k = (kind or "").strip().lower()
+    return k if k in {"msg", "ring"} else None
+
+
+def _friend_sound_payload(asset: dict) -> dict:
+    return {
+        "id": asset.get("id"),
+        "friend_user_id": asset.get("friend_user_id"),
+        "kind": asset.get("kind"),
+        "filename": asset.get("filename"),
+        "content_type": asset.get("content_type"),
+        "file_size": asset.get("file_size"),
+        "is_active": bool(asset.get("is_active")),
+        "created_at": asset.get("created_at"),
+        "updated_at": asset.get("updated_at"),
+        "url": f"/api/friends/sounds/file/{asset.get('id')}",
+    }
+
+
+@router.post("/sounds/upload/{nickname}/{kind}")
+@limiter.limit("120/hour")
+async def upload_friend_sound(
+    request: Request,
+    nickname: str,
+    kind: str,
+    media: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
+    safe_kind = _sound_kind_or_none(kind)
+    if not safe_kind:
+        return JSONResponse(status_code=400, content={"error": "kind must be msg or ring"})
+    friend = db.get_user_profile(nickname)
+    if not friend:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    if not db.are_friends(current_user["id"], friend["id"]):
+        return JSONResponse(status_code=403, content={"error": "You can only set sounds for friends"})
+    if not media:
+        return JSONResponse(status_code=400, content={"error": "Media required"})
+
+    content_type = (media.content_type or "application/octet-stream").strip().lower()
+    name = (media.filename or "sound.bin").strip()
+    ext = Path(name).suffix.lower()
+    if not any(content_type.startswith(p) for p in _ALLOWED_SOUND_MIME_PREFIXES):
+        if ext not in _ALLOWED_SOUND_EXTS:
+            return JSONResponse(status_code=400, content={"error": "Unsupported audio file type"})
+    raw = await media.read()
+    if not raw:
+        return JSONResponse(status_code=400, content={"error": "Empty upload"})
+    if len(raw) > _SOUND_MAX_BYTES:
+        return JSONResponse(status_code=413, content={"error": f"Upload too large (max {_SOUND_MAX_BYTES // (1024 * 1024)}MB)"})
+
+    if ext not in _ALLOWED_SOUND_EXTS:
+        ext = ".bin"
+    target_dir = _SOUND_ROOT / str(current_user["id"]) / str(friend["id"]) / safe_kind
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / f"{uuid.uuid4().hex}{ext}"
+    with open(target_path, "wb") as fh:
+        fh.write(raw)
+
+    asset = db.add_friend_sound_asset(
+        owner_user_id=current_user["id"],
+        friend_user_id=friend["id"],
+        kind=safe_kind,
+        filename=name or target_path.name,
+        content_type=content_type,
+        file_path=str(target_path),
+        file_size=len(raw),
+        is_active=1,
+    )
+    return {"ok": True, "asset": _friend_sound_payload(asset)}
+
+
+@router.get("/sounds/{nickname}/{kind}")
+async def list_friend_sounds(nickname: str, kind: str, current_user: dict = Depends(get_current_user)):
+    safe_kind = _sound_kind_or_none(kind)
+    if not safe_kind:
+        return JSONResponse(status_code=400, content={"error": "kind must be msg or ring"})
+    friend = db.get_user_profile(nickname)
+    if not friend:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    if not db.are_friends(current_user["id"], friend["id"]):
+        return JSONResponse(status_code=403, content={"error": "You can only view sounds for friends"})
+    assets = db.list_friend_sound_assets(current_user["id"], friend["id"], safe_kind)
+    active = db.get_active_friend_sound_asset(current_user["id"], friend["id"], safe_kind)
+    return {
+        "ok": True,
+        "assets": [_friend_sound_payload(a) for a in assets],
+        "active": _friend_sound_payload(active) if active else None,
+    }
+
+
+@router.post("/sounds/activate/{asset_id}")
+async def activate_friend_sound(asset_id: int, current_user: dict = Depends(get_current_user)):
+    asset = db.set_active_friend_sound_asset(current_user["id"], asset_id)
+    if not asset:
+        return JSONResponse(status_code=404, content={"error": "Sound not found"})
+    return {"ok": True, "asset": _friend_sound_payload(asset)}
+
+
+@router.delete("/sounds/{asset_id}")
+async def delete_friend_sound(asset_id: int, current_user: dict = Depends(get_current_user)):
+    deleted = db.delete_friend_sound_asset(current_user["id"], asset_id)
+    if not deleted:
+        return JSONResponse(status_code=404, content={"error": "Sound not found"})
+    try:
+        fp = Path(str(deleted.get("file_path") or ""))
+        if fp.exists() and fp.is_file():
+            fp.unlink()
+    except Exception:
+        pass
+    # Keep one active asset if any remain for the same friend+kind.
+    remaining = db.list_friend_sound_assets(current_user["id"], deleted["friend_user_id"], deleted["kind"])
+    if remaining and not any(bool(x.get("is_active")) for x in remaining):
+        db.set_active_friend_sound_asset(current_user["id"], remaining[0]["id"])
+    return {"ok": True}
+
+
+@router.get("/sounds/file/{asset_id}")
+async def get_friend_sound_file(asset_id: int, request: Request, token: Optional[str] = None):
+    session_token = (token or "").strip() or (request.headers.get("X-Session-Token", "").strip())
+    if not session_token:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    user = db.get_user_by_token(session_token)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Invalid or expired session"})
+    asset = db.get_friend_sound_asset(user["id"], asset_id)
+    if not asset:
+        return JSONResponse(status_code=404, content={"error": "Sound not found"})
+    fp = Path(str(asset.get("file_path") or ""))
+    if not fp.exists() or not fp.is_file():
+        return JSONResponse(status_code=404, content={"error": "Sound file missing"})
+    return FileResponse(
+        str(fp),
+        media_type=asset.get("content_type") or "application/octet-stream",
+        filename=asset.get("filename") or fp.name,
+        headers={"Cache-Control": "private, max-age=300"},
+    )

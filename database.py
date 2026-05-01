@@ -110,6 +110,24 @@ def init_db():
             FOREIGN KEY (friend_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
+        CREATE TABLE IF NOT EXISTS friend_sound_assets (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_user_id  INTEGER NOT NULL,
+            friend_user_id INTEGER NOT NULL,
+            kind           TEXT NOT NULL,
+            filename       TEXT NOT NULL,
+            content_type   TEXT NOT NULL,
+            file_path      TEXT NOT NULL UNIQUE,
+            file_size      INTEGER NOT NULL DEFAULT 0,
+            is_active      INTEGER NOT NULL DEFAULT 1,
+            created_at     TEXT DEFAULT (datetime('now')),
+            updated_at     TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (friend_user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_friend_sound_owner_friend_kind
+            ON friend_sound_assets(owner_user_id, friend_user_id, kind, is_active, created_at DESC);
+
         -- ── User tags/interests ─────────────────────────────────────────
         CREATE TABLE IF NOT EXISTS user_tags (
             id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -919,6 +937,28 @@ def _migrate():
         con.execute("CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_name, id DESC)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_reactions_msg ON reactions(message_id)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_dm_messages_sender ON dm_messages(channel_id, sender_id, id)")
+
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS friend_sound_assets (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner_user_id  INTEGER NOT NULL,
+                friend_user_id INTEGER NOT NULL,
+                kind           TEXT NOT NULL,
+                filename       TEXT NOT NULL,
+                content_type   TEXT NOT NULL,
+                file_path      TEXT NOT NULL UNIQUE,
+                file_size      INTEGER NOT NULL DEFAULT 0,
+                is_active      INTEGER NOT NULL DEFAULT 1,
+                created_at     TEXT DEFAULT (datetime('now')),
+                updated_at     TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (friend_user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        con.execute("""
+            CREATE INDEX IF NOT EXISTS idx_friend_sound_owner_friend_kind
+            ON friend_sound_assets(owner_user_id, friend_user_id, kind, is_active, created_at DESC)
+        """)
 
         # Federation metadata and replication queues (additive/non-breaking).
         con.execute(
@@ -1921,6 +1961,110 @@ def friend_request_status(from_id: int, to_id: int) -> str:
             (from_id, to_id)
         ).fetchone()
     return 'sent' if sent else 'received'
+
+
+def add_friend_sound_asset(owner_user_id: int, friend_user_id: int, kind: str,
+                           filename: str, content_type: str, file_path: str,
+                           file_size: int, is_active: int = 1) -> Dict:
+    """Insert a new friend sound asset and optionally mark it active."""
+    with _conn() as con:
+        if is_active:
+            con.execute(
+                """
+                UPDATE friend_sound_assets
+                SET is_active=0, updated_at=datetime('now')
+                WHERE owner_user_id=? AND friend_user_id=? AND kind=?
+                """,
+                (owner_user_id, friend_user_id, kind),
+            )
+        cur = con.execute(
+            """
+            INSERT INTO friend_sound_assets
+                (owner_user_id, friend_user_id, kind, filename, content_type, file_path, file_size, is_active)
+            VALUES (?,?,?,?,?,?,?,?)
+            """,
+            (owner_user_id, friend_user_id, kind, filename, content_type, file_path, int(file_size or 0), 1 if is_active else 0),
+        )
+        con.commit()
+        row = con.execute(
+            "SELECT * FROM friend_sound_assets WHERE id=?",
+            (cur.lastrowid,),
+        ).fetchone()
+    return dict(row) if row else {}
+
+
+def list_friend_sound_assets(owner_user_id: int, friend_user_id: int, kind: str) -> List[Dict]:
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT * FROM friend_sound_assets
+            WHERE owner_user_id=? AND friend_user_id=? AND kind=?
+            ORDER BY is_active DESC, created_at DESC, id DESC
+            """,
+            (owner_user_id, friend_user_id, kind),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_friend_sound_asset(owner_user_id: int, asset_id: int) -> Optional[Dict]:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM friend_sound_assets WHERE id=? AND owner_user_id=?",
+            (asset_id, owner_user_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_active_friend_sound_asset(owner_user_id: int, friend_user_id: int, kind: str) -> Optional[Dict]:
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT * FROM friend_sound_assets
+            WHERE owner_user_id=? AND friend_user_id=? AND kind=? AND is_active=1
+            ORDER BY updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (owner_user_id, friend_user_id, kind),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def set_active_friend_sound_asset(owner_user_id: int, asset_id: int) -> Optional[Dict]:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM friend_sound_assets WHERE id=? AND owner_user_id=?",
+            (asset_id, owner_user_id),
+        ).fetchone()
+        if not row:
+            return None
+        con.execute(
+            """
+            UPDATE friend_sound_assets
+            SET is_active=0, updated_at=datetime('now')
+            WHERE owner_user_id=? AND friend_user_id=? AND kind=?
+            """,
+            (owner_user_id, row["friend_user_id"], row["kind"]),
+        )
+        con.execute(
+            "UPDATE friend_sound_assets SET is_active=1, updated_at=datetime('now') WHERE id=?",
+            (asset_id,),
+        )
+        con.commit()
+        fresh = con.execute("SELECT * FROM friend_sound_assets WHERE id=?", (asset_id,)).fetchone()
+    return dict(fresh) if fresh else None
+
+
+def delete_friend_sound_asset(owner_user_id: int, asset_id: int) -> Optional[Dict]:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM friend_sound_assets WHERE id=? AND owner_user_id=?",
+            (asset_id, owner_user_id),
+        ).fetchone()
+        if not row:
+            return None
+        con.execute("DELETE FROM friend_sound_assets WHERE id=?", (asset_id,))
+        con.commit()
+    return dict(row)
 
 
 # ---------------------------------------------------------------------------

@@ -589,10 +589,13 @@ function openFriendSoundEditor(nick) {
     document.body.appendChild(modal);
   }
   modal._targetNick = nick;
+  modal._serverSounds = {};
   const peerEl = modal.querySelector('#fsm-peer');
   if (peerEl) peerEl.textContent = 'for @' + nick;
   _renderFriendSoundList('msg');
   _renderFriendSoundList('ring');
+  void _syncServerSounds('msg');
+  void _syncServerSounds('ring');
   modal.style.display = 'flex';
   modal.classList.remove('hidden');
 }
@@ -613,6 +616,7 @@ function closeFriendSoundEditor() {
     m._uploadBusy = {};
     m._uploadProgress = {};
     m._uploadStatus = {};
+    m._serverSounds = {};
     m._customPreviewKind = '';
     m._customPreviewSource = '';
     _renderPendingUpload('msg');
@@ -651,6 +655,7 @@ function _bindFriendSoundModalEvents(modal) {
     const action = actionEl.dataset.fsmAction;
     const kind = actionEl.dataset.kind || '';
     const key = actionEl.dataset.key || '';
+    const assetId = Number(actionEl.dataset.assetId || 0) || 0;
     // Keep audio unlocked as part of this trusted user gesture.
     try { window.Notifications?.unlockAudio?.(); } catch {}
     if (action === 'close') return closeFriendSoundEditor();
@@ -662,10 +667,10 @@ function _bindFriendSoundModalEvents(modal) {
     if (action === 'clear-pending') return _clearPendingUpload(kind);
     if (action === 'preview') {
       e.stopPropagation();
-      return _previewFriendSound(kind, key);
+      return _previewFriendSound(kind, key, assetId || null);
     }
-    if (action === 'use-custom') return _selectCustomSound(kind);
-    if (action === 'delete-custom') return _deleteCustomSound(kind);
+    if (action === 'use-custom') return _selectCustomSound(kind, assetId || null);
+    if (action === 'delete-custom') return _deleteCustomSound(kind, assetId || null);
   }, true); // capture phase — fires before any child stopPropagation
 
   modal.addEventListener('change', async (e) => {
@@ -690,7 +695,7 @@ function _bindFriendSoundModalEvents(modal) {
       modal._uploadStatus = modal._uploadStatus || {};
       modal._uploadStatus[kind] = 'file too large (max ' + Math.round(max / (1024 * 1024)) + ' MB)';
       _renderPendingUpload(kind);
-      if (typeof toast === 'function') toast('File too large for browser storage (max ' + Math.round(max / (1024 * 1024)) + ' MB)', 'error');
+      if (typeof toast === 'function') toast('File too large (max ' + Math.round(max / (1024 * 1024)) + ' MB)', 'error');
       return;
     }
     _setPendingUpload(kind, file);
@@ -758,13 +763,36 @@ function _renderFriendSoundList(kind) {
   const current = Notifications.getFriendSound ? Notifications.getFriendSound(nick, kind) : null;
   const customData = (Notifications.getCustomSound && Notifications.getCustomSound(nick, kind)) || null;
   const customMeta = _getCustomSoundMeta(nick, kind);
+  const serverState = m._serverSounds?.[kind] || null;
   _renderCurrentChoice(kind, current, customMeta);
 
   // Render the "uploaded file" chip if present
   const customContainerId = kind === 'msg' ? 'fsm-msg-custom' : 'fsm-ring-custom';
   const customEl = m.querySelector('#' + customContainerId);
   if (customEl) {
-    if (customData) {
+    if (Array.isArray(serverState?.assets) && serverState.assets.length) {
+      const rows = serverState.assets.map((asset) => {
+        const aid = Number(asset?.id || 0) || 0;
+        const isActive = !!asset?.is_active;
+        const playingSaved = _isPreviewing(kind, 'saved:' + aid);
+        const name = asset?.filename || ('Custom ' + aid);
+        const sizeKb = asset?.file_size ? Math.round(asset.file_size / 1024) + ' KB' : '';
+        return `
+          <div class="fsm-custom-chip" style="${isActive ? 'box-shadow:0 0 0 2px rgba(76,175,80,.35)' : ''}">
+            <button class="fcc-btn" type="button" title="${playingSaved ? 'Stop preview' : 'Preview'}" data-fsm-action="preview" data-kind="${kind}" data-key="custom" data-asset-id="${aid}">${playingSaved ? '■' : '▶'}</button>
+            <div style="flex:1;min-width:0">
+              <div class="fcc-name">${esc(name)}</div>
+              <div class="fcc-meta">${sizeKb} · ${isActive ? '✓ Active' : 'tap to use'}</div>
+            </div>
+            ${isActive
+              ? '<span style="color:#4caf50;font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>'
+              : `<button class="fcc-btn" type="button" title="Use this" data-fsm-action="use-custom" data-kind="${kind}" data-asset-id="${aid}">✓</button>`}
+            <button class="fcc-btn danger" type="button" title="Delete" data-fsm-action="delete-custom" data-kind="${kind}" data-asset-id="${aid}">✕</button>
+          </div>`;
+      }).join('');
+      customEl.innerHTML = rows;
+      customEl.style.marginBottom = '8px';
+    } else if (customData) {
       const isSelected = current === 'custom';
       const playingSaved = _isPreviewing(kind, 'saved');
       const name = customMeta?.name || 'Custom file';
@@ -811,7 +839,7 @@ function _renderCurrentChoice(kind, current, customMeta) {
   if (!el) return;
   const isDefault = !current;
   const label = isDefault
-    ? 'App default (' + (kind === 'msg' ? (localStorage.getItem('notify_tone') || 'pop') : (localStorage.getItem('notify_ringtone') || 'default')) + ')'
+    ? 'App default (' + (kind === 'msg' ? (localStorage.getItem('ft_notify_tone') || 'pop') : (localStorage.getItem('ft_notify_ring') || 'default')) + ')'
     : (current === 'custom' ? ('Custom: ' + (customMeta?.name || 'uploaded file')) : _friendSoundLabel(kind, current));
   el.innerHTML = `
     <div class="fsm-custom-chip" style="margin-bottom:8px;box-shadow:0 0 0 2px rgba(76,175,80,.22)">
@@ -858,13 +886,13 @@ function _selectFriendSoundKey(kind, key) {
 
 function _previewDefaultFriendSound(kind) {
   if (!window.Notifications) return;
-  try { Notifications.stopCustomSound?.(); } catch {}
+  try { Notifications.stopAllPreviewAudio?.(); } catch {}
   _setCustomPreviewState('', '');
   if (kind === 'msg') {
-    const tone = localStorage.getItem('notify_tone') || 'pop';
+    const tone = localStorage.getItem('ft_notify_tone') || 'pop';
     Notifications.previewTone(tone, { force: true, preview: true });
   } else {
-    const ring = localStorage.getItem('notify_ringtone') || 'default';
+    const ring = localStorage.getItem('ft_notify_ring') || 'default';
     Notifications.previewRingtone(ring, { force: true, preview: true });
   }
 }
@@ -888,20 +916,120 @@ function _setCustomSoundMeta(nick, kind, meta) {
   _saveCustomSoundMetaMap(m);
 }
 
-function _selectCustomSound(kind) {
+function _serverSessionToken() {
+  try { return String(State?.token || ''); } catch { return ''; }
+}
+
+function _authedSoundUrl(url) {
+  const u = String(url || '');
+  if (!u) return '';
+  const tok = _serverSessionToken();
+  if (!tok) return u;
+  const sep = u.includes('?') ? '&' : '?';
+  return u + sep + 'token=' + encodeURIComponent(tok);
+}
+
+async function _syncServerSounds(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  const tok = _serverSessionToken();
+  if (!m || !nick || !tok) return;
+  try {
+    const res = await fetch('/api/friends/sounds/' + encodeURIComponent(nick) + '/' + encodeURIComponent(kind), {
+      headers: { 'X-Session-Token': tok },
+      credentials: 'same-origin',
+    });
+    if (!res.ok) throw new Error('load failed');
+    const payload = await res.json().catch(() => ({}));
+    const assets = Array.isArray(payload?.assets) ? payload.assets : [];
+    const active = payload?.active || assets.find(a => a?.is_active) || null;
+    m._serverSounds = m._serverSounds || {};
+    m._serverSounds[kind] = { assets, active, loaded: true };
+    if (active?.url) {
+      const authed = _authedSoundUrl(active.url);
+      try { Notifications.setCustomSound?.(nick, kind, authed); } catch {}
+      _setCustomSoundMeta(nick, kind, {
+        name: active.filename || 'Custom file',
+        size: Number(active.file_size || 0) || 0,
+        assetId: Number(active.id || 0) || 0,
+        url: String(active.url || ''),
+      });
+    }
+    _renderFriendSoundList(kind);
+  } catch {
+    m._serverSounds = m._serverSounds || {};
+    m._serverSounds[kind] = { assets: [], active: null, loaded: false };
+  }
+}
+
+async function _activateServerSound(kind, assetId) {
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  const tok = _serverSessionToken();
+  if (!m || !nick || !tok || !assetId) return false;
+  try {
+    const res = await fetch('/api/friends/sounds/activate/' + encodeURIComponent(String(assetId)), {
+      method: 'POST',
+      headers: { 'X-Session-Token': tok },
+      credentials: 'same-origin',
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || !payload?.ok) return false;
+    await _syncServerSounds(kind);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function _deleteServerSound(kind, assetId) {
+  const m = document.getElementById('friend-sound-modal');
+  const tok = _serverSessionToken();
+  if (!m || !tok || !assetId) return false;
+  try {
+    const res = await fetch('/api/friends/sounds/' + encodeURIComponent(String(assetId)), {
+      method: 'DELETE',
+      headers: { 'X-Session-Token': tok },
+      credentials: 'same-origin',
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || !payload?.ok) return false;
+    await _syncServerSounds(kind);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function _selectCustomSound(kind, assetId) {
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
   if (!nick || !window.Notifications) return;
+  const serverState = m?._serverSounds?.[kind] || null;
+  const pickId = Number(assetId || serverState?.active?.id || serverState?.assets?.[0]?.id || 0) || 0;
+  if (pickId) {
+    const ok = await _activateServerSound(kind, pickId);
+    if (!ok && typeof toast === 'function') toast('Could not activate this sound', 'error');
+  }
   Notifications.setFriendSound(nick, kind, 'custom');
   _renderFriendSoundList(kind);
-  _previewFriendSound(kind, 'custom');
+  _previewFriendSound(kind, 'custom', pickId || null);
   if (typeof toast === 'function') toast('Using your custom sound', 'success');
 }
 
-function _deleteCustomSound(kind) {
+async function _deleteCustomSound(kind, assetId) {
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
   if (!nick || !window.Notifications) return;
+  const serverState = m?._serverSounds?.[kind] || null;
+  const pickId = Number(assetId || serverState?.active?.id || 0) || 0;
+  if (pickId) {
+    const ok = await _deleteServerSound(kind, pickId);
+    if (!ok) {
+      if (typeof toast === 'function') toast('Could not delete custom sound', 'error');
+      return;
+    }
+  }
   Notifications.setCustomSound(nick, kind, null);
   _setCustomSoundMeta(nick, kind, null);
   // If this custom was the active selection, fall back to default
@@ -978,11 +1106,12 @@ function _previewPendingUpload(kind) {
   const p = m?._pendingUploads?.[kind];
   if (!p?.url) return;
   if (_isPreviewing(kind, 'pending')) {
-    try { Notifications.stopCustomSound?.(); } catch {}
+    try { Notifications.stopAllPreviewAudio?.(); } catch {}
     _setCustomPreviewState('', '');
     return;
   }
   try {
+    Notifications.stopAllPreviewAudio?.();
     Notifications.playCustomSound(p.url);
     _setCustomPreviewState(kind, 'pending');
     if (typeof toast === 'function') toast('Previewing selected file', 'info');
@@ -1078,19 +1207,44 @@ async function _uploadFriendSound(kind, file) {
   }
   _setCustomSoundMeta(nick, kind, { name: file.name || 'Custom file', size: file.size || 0 });
   Notifications.setFriendSound(nick, kind, 'custom');
+  if (res.asset?.id) {
+    _setCustomSoundMeta(nick, kind, {
+      name: res.asset.filename || file.name || 'Custom file',
+      size: Number(res.asset.file_size || file.size || 0) || 0,
+      assetId: Number(res.asset.id || 0) || 0,
+      url: String(res.asset.url || ''),
+    });
+    void _syncServerSounds(kind);
+  }
   _renderFriendSoundList(kind);
   if (typeof toast === 'function') toast('Custom sound saved & active', 'success');
   Notifications.playCustomSound(res.dataUrl);
-  _setCustomPreviewState(kind, 'saved');
+  _setCustomPreviewState(kind, 'saved:' + (Number(res.asset?.id || 0) || 'local'));
   return true;
 }
 
-function _previewFriendSound(kind, key) {
+function _previewFriendSound(kind, key, assetId) {
   if (!window.Notifications || !key) return;
-  try { Notifications.stopCustomSound?.(); } catch {}
+  try { Notifications.stopAllPreviewAudio?.(); } catch {}
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
   if (key === 'custom' && nick) {
+    const serverState = m?._serverSounds?.[kind] || null;
+    const sid = Number(assetId || serverState?.active?.id || 0) || 0;
+    const serverAsset = sid
+      ? (Array.isArray(serverState?.assets) ? serverState.assets.find(a => Number(a?.id || 0) === sid) : null)
+      : (serverState?.active || null);
+    if (serverAsset?.url) {
+      const sourceKey = 'saved:' + (Number(serverAsset.id || 0) || 'x');
+      if (_isPreviewing(kind, sourceKey)) {
+        try { Notifications.stopCustomSound?.(); } catch {}
+        _setCustomPreviewState('', '');
+        return;
+      }
+      Notifications.playCustomSound(_authedSoundUrl(serverAsset.url));
+      _setCustomPreviewState(kind, sourceKey);
+      return;
+    }
     const data = Notifications.getCustomSound(nick, kind);
     if (data) {
       if (_isPreviewing(kind, 'saved')) {
