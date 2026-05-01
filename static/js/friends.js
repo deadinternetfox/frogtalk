@@ -544,11 +544,12 @@ function openFriendSoundEditor(nick) {
               <div class="fsm-section-title"><span>💬</span> Message alert</div>
               <button class="fsm-upload-btn" type="button" onclick="_uploadFriendSound('msg')" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm"><span>📁</span> Upload</button>
             </div>
-            <div class="fsm-empty-hint" style="margin:4px 0 8px">Default picks:
-              <button class="fcc-btn" type="button" onclick="_selectFriendSoundKey('msg', null)">App default</button>
-              <button class="fcc-btn" type="button" onclick="_selectFriendSoundKey('msg', 'pop')">Pop</button>
-              <button class="fcc-btn" type="button" onclick="_selectFriendSoundKey('msg', 'chime')">Chime</button>
-              <button class="fcc-btn" type="button" onclick="_selectFriendSoundKey('msg', 'ding')">Ding</button>
+            <div class="fsm-quick-row" aria-label="Message defaults">
+              <span class="fsm-quick-label">Default picks</span>
+              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('msg', null)">App default</button>
+              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('msg', 'pop')">Pop</button>
+              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('msg', 'chime')">Chime</button>
+              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('msg', 'ding')">Ding</button>
             </div>
             <div id="fsm-msg-custom"></div>
             <div id="fsm-msg-list" class="fsm-list"></div>
@@ -558,17 +559,18 @@ function openFriendSoundEditor(nick) {
               <div class="fsm-section-title"><span>📞</span> Incoming call ringtone</div>
               <button class="fsm-upload-btn" type="button" onclick="_uploadFriendSound('ring')" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm"><span>📁</span> Upload</button>
             </div>
-            <div class="fsm-empty-hint" style="margin:4px 0 8px">Default picks:
-              <button class="fcc-btn" type="button" onclick="_selectFriendSoundKey('ring', null)">App default</button>
-              <button class="fcc-btn" type="button" onclick="_selectFriendSoundKey('ring', 'classic')">Classic</button>
-              <button class="fcc-btn" type="button" onclick="_selectFriendSoundKey('ring', 'digital')">Digital</button>
-              <button class="fcc-btn" type="button" onclick="_selectFriendSoundKey('ring', 'melody')">Melody</button>
+            <div class="fsm-quick-row" aria-label="Ringtone defaults">
+              <span class="fsm-quick-label">Default picks</span>
+              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('ring', null)">App default</button>
+              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('ring', 'classic')">Classic</button>
+              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('ring', 'digital')">Digital</button>
+              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('ring', 'melody')">Melody</button>
             </div>
             <div id="fsm-ring-custom"></div>
             <div id="fsm-ring-list" class="fsm-list"></div>
           </div>
         </div>
-        <input id="fsm-file-input" type="file" accept="audio/*,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.aac,.opus,.flac,.mp4,.webm" style="display:none">
+        <input id="fsm-file-input" class="fsm-file-input" type="file" accept="audio/*,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.aac,.opus,.flac,.mp4,.webm" tabindex="-1" aria-hidden="true">
         <div class="fsm-actions">
           <button class="fsm-btn" type="button" onclick="resetFriendSounds()">↺ Reset to default</button>
           <button class="fsm-btn primary" type="button" onclick="closeFriendSoundEditor()">✓ Done</button>
@@ -713,6 +715,18 @@ function _selectFriendSoundKey(kind, key) {
   Notifications.setFriendSound(nick, kind, key);
   _renderFriendSoundList(kind);
   if (key) _previewFriendSound(kind, key);
+  else _previewDefaultFriendSound(kind);
+}
+
+function _previewDefaultFriendSound(kind) {
+  if (!window.Notifications) return;
+  if (kind === 'msg') {
+    const tone = localStorage.getItem('notify_tone') || 'pop';
+    Notifications.previewTone(tone, { force: true });
+  } else {
+    const ring = localStorage.getItem('notify_ringtone') || 'default';
+    Notifications.previewRingtone(ring, { force: true });
+  }
 }
 
 // Custom-sound metadata: { [friend:<nick>:<kind>]: { name, size } }
@@ -796,6 +810,6 @@ function _previewFriendSound(kind, key) {
     if (data) return Notifications.playCustomSound(data);
     return _uploadFriendSound(kind);
   }
-  if (kind === 'msg') Notifications.previewTone(key);
-  else Notifications.previewRingtone(key);
+  if (kind === 'msg') Notifications.previewTone(key, { force: true });
+  else Notifications.previewRingtone(key, { force: true });
 }

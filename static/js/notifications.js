@@ -325,8 +325,8 @@ const Notifications = (() => {
     setTimeout(() => { try { ctx.close(); } catch {} }, totalMs);
   }
 
-  function _playTone(name) {
-    if (!_pref('notify_sounds', true)) return;
+  function _playTone(name, opts) {
+    if (!opts?.force && !_pref('notify_sounds', true)) return;
     try {
       const tone = name || _currentTone();
       if (tone === 'silent') return;
@@ -347,8 +347,8 @@ const Notifications = (() => {
     } catch {}
   }
 
-  function _playRing(name) {
-    if (!_pref('notify_sounds', true)) return;
+  function _playRing(name, opts) {
+    if (!opts?.force && !_pref('notify_sounds', true)) return;
     try {
       const tone = name || 'default';
       if (tone === 'silent') return;
@@ -368,8 +368,8 @@ const Notifications = (() => {
   }
 
   return { init, registerSW, requestPermission, promptInstall,
-    previewTone(name) { _playTone(name); _vibrate(80); },
-    previewRingtone(name) { _playRing(name); },
+    previewTone(name, opts) { _playTone(name, opts); _vibrate(80); },
+    previewRingtone(name, opts) { _playRing(name, opts); },
     // Per-friend sound settings API (used by friends UI)
     getFriendTones: _friendTones,
     setFriendTones(map) { _saveFriendTones(map); },
