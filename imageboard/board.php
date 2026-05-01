@@ -6277,7 +6277,10 @@ if ($singleThread) {
     (function() {
         // Light background poll — only to detect @mentions when chat is closed
         setTimeout(function() {
-            if (!chatOpen && !chatBgInterval && !chatPollInterval) {
+            const isClosedOrMissing = (typeof chatOpen === 'undefined') || !chatOpen;
+            const noBgPoll = (typeof chatBgInterval === 'undefined') || !chatBgInterval;
+            const noLivePoll = (typeof chatPollInterval === 'undefined') || !chatPollInterval;
+            if (isClosedOrMissing && noBgPoll && noLivePoll && typeof fetchChat === 'function') {
                 fetchChat(); // initial fetch to get myAnonId + seed chatLastTime
                 chatBgInterval = setInterval(fetchChat, 15000);
             }
