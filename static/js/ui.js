@@ -3534,9 +3534,9 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
       <div class="profile-header" style="position:relative;background:linear-gradient(135deg, ${meta.color}26 0%, #0d1f0d 100%);padding:20px;min-height:130px;border-bottom:1px solid ${meta.color}33">
         <button class="profile-close-btn" onclick="closeModal('modal-bridge-user-info')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5" title="Close">✕</button>
         <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:16px;padding-top:36px">
-          <div class="profile-avatar-large" style="width:90px;height:90px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4);position:relative">
+          <div class="profile-avatar-large" style="width:90px;height:90px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4);position:relative;overflow:visible">
             ${avatar}
-            <div class="bp-platform-pip" title="Bridged from ${safePlat}" style="position:absolute;right:-2px;bottom:-2px;width:30px;height:30px;border-radius:50%;background:${meta.color};color:#0a0a0a;display:flex;align-items:center;justify-content:center;font-size:15px;border:3px solid #111">${meta.icon}</div>
+            <div class="bp-platform-pip" title="Bridged from ${safePlat}" style="position:absolute;right:-6px;bottom:-6px;width:30px;height:30px;border-radius:50%;background:${meta.color};color:#0a0a0a;display:flex;align-items:center;justify-content:center;font-size:15px;border:3px solid #111;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,.45)">${meta.icon}</div>
           </div>
           <div style="flex:1;min-width:0;padding-bottom:4px">
             <div class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3)">${safeNick}</div>
