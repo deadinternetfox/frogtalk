@@ -5220,6 +5220,26 @@ button:disabled, .btn:disabled{ opacity:.55; cursor:not-allowed }
 </head>
 <body>
 
+<script>
+// Detect mini-widget embed mode (?mini=1) and add class for scoped CSS overrides
+if (new URLSearchParams(location.search).get('mini') === '1') {
+  document.body.classList.add('mini-embedded');
+}
+</script>
+<style>
+/* ── Mini-widget embed overrides ── */
+body.mini-embedded #board-server-icon,
+body.mini-embedded #board-server-icon + .server-divider,
+body.mini-embedded #social-board-server-icon,
+body.mini-embedded #social-board-server-icon + .server-divider { display:none !important; }
+/* Compact auth form to avoid scrolling inside 480px iframe */
+body.mini-embedded .auth-logo { font-size:36px; margin-bottom:2px; }
+body.mini-embedded .auth-title { font-size:20px; margin-bottom:2px; }
+body.mini-embedded .auth-subtitle { font-size:11px; margin-bottom:12px; }
+body.mini-embedded .auth-box { padding:22px 24px 18px; }
+body.mini-embedded .auth-tabs { margin-bottom:14px; }
+</style>
+
 <!-- ═══════════════════════════ BOOT SPLASH ══════════════════════ -->
 <div id="boot-splash" style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:linear-gradient(135deg,#0a0a0a 0%,#0d1f0a 100%);z-index:10000;transition:opacity .25s ease">
   <div style="font-size:72px;line-height:1;filter:drop-shadow(0 4px 16px rgba(76,175,80,.4));animation:bsplash-pulse 1.6s ease-in-out infinite">🐸</div>
@@ -7102,7 +7122,7 @@ window.ConnErr = (function(){
     <div class="server-icon" data-tip="Friends" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFriends()">👥</div>
     <div class="server-icon" data-tip="Channel Directory" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();showChannelDirectory()">🧭</div>
     <div class="server-divider"></div>
-    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🍀</div>
+    <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="social-board-server-icon" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🍀</div>
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="Social.navTo('profile')">⚙️</div>
     <div class="ssm-spacer"></div>

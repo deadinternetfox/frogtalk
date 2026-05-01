@@ -2033,7 +2033,7 @@ if ($singleThread) {
             line-height:1;
         }
         .frog-mini-note { color:#4a8f4a; font-size:11px; }
-        .frog-mini-wrap { display:none; height: 360px; border-top:1px solid rgba(0,255,65,0.15); }
+        .frog-mini-wrap { display:none; height: 480px; border-top:1px solid rgba(0,255,65,0.15); }
         .frog-mini-wrap.open { display:block; }
         .frog-mini-frame { width:100%; height:100%; border:none; background:#0b120b; }
         .frog-mini-guest { display:flex; flex-direction:column; gap:10px; align-items:stretch; padding:12px; border-top:1px solid rgba(0,255,65,0.15); }
@@ -5647,7 +5647,7 @@ if ($singleThread) {
             stateEl.textContent = _miniNick ? ('Logged in as ' + _miniNick) : 'Logged in';
             guest.style.display = 'none';
             wrap.classList.add('open');
-            if (!frame.src || frame.src === 'about:blank') frame.src = '/app';
+            if (!frame.src || frame.src === 'about:blank') frame.src = '/app?mini=1';
         } else if (!frogMiniAuthPending) {
             // Only reset to guest state if auth is not in progress
             stateEl.textContent = 'Not logged in';
@@ -5688,7 +5688,7 @@ if ($singleThread) {
             frogMiniAuthPendingTimer = null;
             _frogMiniApplyState();
         }, 10 * 60 * 1000);
-        frame.src = mode === 'register' ? '/app?register=1' : '/app';
+        frame.src = mode === 'register' ? '/app?register=1&mini=1' : '/app?mini=1';
         guest.style.display = 'none';
         wrap.classList.add('open');
     }
