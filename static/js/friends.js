@@ -536,20 +536,19 @@ function openFriendSoundEditor(nick) {
             <div class="fsm-head-title">Custom sounds</div>
             <div id="fsm-peer" class="fsm-head-sub"></div>
           </div>
-          <button class="fsm-close" type="button" aria-label="Close" onclick="closeFriendSoundEditor()">✕</button>
+          <button class="fsm-close" type="button" aria-label="Close" data-fsm-action="close">✕</button>
         </div>
         <div class="fsm-body">
           <div class="fsm-section">
             <div class="fsm-section-head">
               <div class="fsm-section-title"><span>💬</span> Message alert</div>
-              <button class="fsm-upload-btn" type="button" onclick="_uploadFriendSound('msg')" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm"><span>📁</span> Upload</button>
+              <button class="fsm-upload-btn" type="button" data-fsm-action="upload" data-kind="msg" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm"><span>📁</span> Upload</button>
             </div>
             <div class="fsm-quick-row" aria-label="Message defaults">
-              <span class="fsm-quick-label">Default picks</span>
-              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('msg', null)">App default</button>
-              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('msg', 'pop')">Pop</button>
-              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('msg', 'chime')">Chime</button>
-              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('msg', 'ding')">Ding</button>
+              <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="msg" data-key="">App default</button>
+              <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="msg" data-key="pop">Pop</button>
+              <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="msg" data-key="chime">Chime</button>
+              <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="msg" data-key="ding">Ding</button>
             </div>
             <div id="fsm-msg-custom"></div>
             <div id="fsm-msg-list" class="fsm-list"></div>
@@ -557,14 +556,13 @@ function openFriendSoundEditor(nick) {
           <div class="fsm-section">
             <div class="fsm-section-head">
               <div class="fsm-section-title"><span>📞</span> Incoming call ringtone</div>
-              <button class="fsm-upload-btn" type="button" onclick="_uploadFriendSound('ring')" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm"><span>📁</span> Upload</button>
+              <button class="fsm-upload-btn" type="button" data-fsm-action="upload" data-kind="ring" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm"><span>📁</span> Upload</button>
             </div>
             <div class="fsm-quick-row" aria-label="Ringtone defaults">
-              <span class="fsm-quick-label">Default picks</span>
-              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('ring', null)">App default</button>
-              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('ring', 'classic')">Classic</button>
-              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('ring', 'digital')">Digital</button>
-              <button class="fsm-quick-btn" type="button" onclick="_selectFriendSoundKey('ring', 'melody')">Melody</button>
+              <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="ring" data-key="">App default</button>
+              <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="ring" data-key="classic">Classic</button>
+              <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="ring" data-key="digital">Digital</button>
+              <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="ring" data-key="melody">Melody</button>
             </div>
             <div id="fsm-ring-custom"></div>
             <div id="fsm-ring-list" class="fsm-list"></div>
@@ -572,14 +570,11 @@ function openFriendSoundEditor(nick) {
         </div>
         <input id="fsm-file-input" class="fsm-file-input" type="file" accept="audio/*,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.aac,.opus,.flac,.mp4,.webm" tabindex="-1" aria-hidden="true">
         <div class="fsm-actions">
-          <button class="fsm-btn" type="button" onclick="resetFriendSounds()">↺ Reset to default</button>
-          <button class="fsm-btn primary" type="button" onclick="closeFriendSoundEditor()">✓ Done</button>
+          <button class="fsm-btn" type="button" data-fsm-action="reset">↺ Reset to default</button>
+          <button class="fsm-btn primary" type="button" data-fsm-action="close">✓ Done</button>
         </div>
       </div>`;
-    // Click outside the box to close
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeFriendSoundEditor();
-    });
+    _bindFriendSoundModalEvents(modal);
     document.body.appendChild(modal);
   }
   modal._targetNick = nick;
@@ -594,6 +589,33 @@ function openFriendSoundEditor(nick) {
 function closeFriendSoundEditor() {
   const m = document.getElementById('friend-sound-modal');
   if (m) { m.style.display = 'none'; m.classList.add('hidden'); }
+}
+
+function _bindFriendSoundModalEvents(modal) {
+  if (!modal || modal._fsmEventsBound) return;
+  modal._fsmEventsBound = true;
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      closeFriendSoundEditor();
+      return;
+    }
+    const actionEl = e.target.closest('[data-fsm-action]');
+    if (!actionEl || !modal.contains(actionEl)) return;
+    const action = actionEl.dataset.fsmAction;
+    const kind = actionEl.dataset.kind || '';
+    const key = actionEl.dataset.key || '';
+    if (action === 'close') return closeFriendSoundEditor();
+    if (action === 'reset') return resetFriendSounds();
+    if (action === 'upload') return _uploadFriendSound(kind);
+    if (action === 'pick') return _selectFriendSoundKey(kind, key || null);
+    if (action === 'pick-row') return _selectFriendSound(actionEl);
+    if (action === 'preview') {
+      e.stopPropagation();
+      return _previewFriendSound(kind, key);
+    }
+    if (action === 'use-custom') return _selectCustomSound(kind);
+    if (action === 'delete-custom') return _deleteCustomSound(kind);
+  });
 }
 
 function resetFriendSounds() {
@@ -666,15 +688,15 @@ function _renderFriendSoundList(kind) {
       const sizeKb = customMeta?.size ? Math.round(customMeta.size / 1024) + ' KB' : '';
       customEl.innerHTML = `
         <div class="fsm-custom-chip" style="${isSelected ? 'box-shadow:0 0 0 2px rgba(76,175,80,.35)' : ''}">
-          <button class="fcc-btn" title="Preview" onclick="_previewFriendSound('${kind}','custom')">▶</button>
+          <button class="fcc-btn" type="button" title="Preview" data-fsm-action="preview" data-kind="${kind}" data-key="custom">▶</button>
           <div style="flex:1;min-width:0">
             <div class="fcc-name">${esc(name)}</div>
             <div class="fcc-meta">${sizeKb} · ${isSelected ? '✓ Active' : 'tap to use'}</div>
           </div>
           ${isSelected
             ? '<span style="color:#4caf50;font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>'
-            : `<button class="fcc-btn" title="Use this" onclick="_selectCustomSound('${kind}')">✓</button>`}
-          <button class="fcc-btn danger" title="Delete" onclick="_deleteCustomSound('${kind}')">✕</button>
+            : `<button class="fcc-btn" type="button" title="Use this" data-fsm-action="use-custom" data-kind="${kind}">✓</button>`}
+          <button class="fcc-btn danger" type="button" title="Delete" data-fsm-action="delete-custom" data-kind="${kind}">✕</button>
         </div>`;
       customEl.style.marginBottom = '8px';
     } else {
@@ -688,9 +710,9 @@ function _renderFriendSoundList(kind) {
     const label = it.isDefault ? 'Default (app setting)' : _friendSoundLabel(kind, it.key);
     const key = it.isDefault ? '' : esc(it.key);
     const rightBtn = it.isDefault ? ''
-      : `<button class="fsm-play" title="Preview" onclick="event.stopPropagation();_previewFriendSound('${kind}','${key}')">▶</button>`;
+      : `<button class="fsm-play" type="button" title="Preview" data-fsm-action="preview" data-kind="${kind}" data-key="${key}">▶</button>`;
     return `
-      <div class="fsm-row ${selected ? 'selected' : ''}" data-kind="${kind}" data-key="${key}" data-default="${it.isDefault ? '1' : ''}" onclick="_selectFriendSound(this)">
+      <div class="fsm-row ${selected ? 'selected' : ''}" data-fsm-action="pick-row" data-kind="${kind}" data-key="${key}" data-default="${it.isDefault ? '1' : ''}">
         <span class="fsm-dot"></span>
         <span class="fsm-label">${esc(label)}</span>
         ${rightBtn}
@@ -798,7 +820,12 @@ function _uploadFriendSound(kind) {
     if (typeof toast === 'function') toast('Custom sound saved & active', 'success');
     Notifications.playCustomSound(res.dataUrl);
   };
-  input.click();
+  try {
+    if (typeof input.showPicker === 'function') input.showPicker();
+    else input.click();
+  } catch {
+    try { input.click(); } catch {}
+  }
 }
 
 function _previewFriendSound(kind, key) {
