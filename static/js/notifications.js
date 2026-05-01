@@ -197,7 +197,9 @@ const Notifications = (() => {
   }
   function _saveFriendTones(map) {
     try { localStorage.setItem('ft_friend_tones', JSON.stringify(map || {})); }
-    catch {}
+    catch {
+      throw new Error('Storage quota exceeded for friend sound settings');
+    }
   }
   function _toneForFriend(nick) {
     if (!nick) return null;
@@ -213,7 +215,9 @@ const Notifications = (() => {
   // ── Custom uploaded sounds (per-friend & app-wide) ────────────────────────
   // Stored as data URLs in a dedicated localStorage slot. Keep files capped to
   // reduce localStorage pressure while allowing short media clips.
-  const CUSTOM_MAX_BYTES = 12 * 1024 * 1024;
+  // Data URLs inflate binary size by ~33% and localStorage is usually ~5MB.
+  // Keep custom files small enough to reliably persist across devices.
+  const CUSTOM_MAX_BYTES = 2 * 1024 * 1024;
   function _customSounds() {
     try { return JSON.parse(localStorage.getItem('ft_custom_sounds') || '{}') || {}; }
     catch { return {}; }
@@ -283,10 +287,11 @@ const Notifications = (() => {
   function _stopAllPreviewAudio() {
     _stopCustomSound();
     try {
-      if (_sharedCtx && _sharedCtx.state === 'running') {
-        _sharedCtx.suspend();
+      if (_sharedCtx && _sharedCtx.state !== 'closed') {
+        _sharedCtx.close();
       }
     } catch {}
+    _sharedCtx = null;
   }
 
   // ── Message-tone catalog (used for default + per-friend alerts) ───────────
@@ -502,7 +507,14 @@ const Notifications = (() => {
     previewRingtone(name, opts) { return _playRing(name, opts); },
     // Per-friend sound settings API (used by friends UI)
     getFriendTones: _friendTones,
-    setFriendTones(map) { _saveFriendTones(map); },
+    setFriendTones(map) {
+      try {
+        _saveFriendTones(map);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     setFriendSound(nick, kind, tone) {
       if (!nick) return;
       const map = _friendTones();
@@ -510,7 +522,12 @@ const Notifications = (() => {
       if (tone && tone !== 'default') map[nick][kind] = tone;
       else delete map[nick][kind];
       if (!map[nick].msg && !map[nick].ring) delete map[nick];
-      _saveFriendTones(map);
+      try {
+        _saveFriendTones(map);
+        return true;
+      } catch {
+        return false;
+      }
     },
     getFriendSound(nick, kind) {
       if (kind === 'ring') return _ringForFriend(nick);
@@ -535,7 +552,7 @@ const Notifications = (() => {
           return resolve({ ok: false, error: 'Unsupported file type' });
         }
         if (file.size > CUSTOM_MAX_BYTES) {
-          return resolve({ ok: false, error: 'File too large (max 12 MB)' });
+          return resolve({ ok: false, error: 'File too large for browser storage (max 2 MB)' });
         }
         const fr = new FileReader();
         fr.onprogress = (ev) => {

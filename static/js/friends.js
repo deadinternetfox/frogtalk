@@ -837,7 +837,11 @@ function _selectFriendSoundKey(kind, key) {
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
   if (!nick || !window.Notifications) return;
-  Notifications.setFriendSound(nick, kind, key);
+  const saved = Notifications.setFriendSound(nick, kind, key);
+  if (saved === false) {
+    if (typeof toast === 'function') toast('Cannot save sound choice: browser storage is full', 'error');
+    return;
+  }
   _renderFriendSoundList(kind);
   if (key) _previewFriendSound(kind, key);
   else _previewDefaultFriendSound(kind);
@@ -845,6 +849,8 @@ function _selectFriendSoundKey(kind, key) {
 
 function _previewDefaultFriendSound(kind) {
   if (!window.Notifications) return;
+  try { Notifications.stopCustomSound?.(); } catch {}
+  _setCustomPreviewState('', '');
   if (kind === 'msg') {
     const tone = localStorage.getItem('notify_tone') || 'pop';
     Notifications.previewTone(tone, { force: true, preview: true });
@@ -997,9 +1003,16 @@ async function _commitPendingUpload(kind) {
   const input = m.querySelector('#fsm-native-upload-' + kind);
   if (input) input.disabled = true;
   _renderPendingUpload(kind);
-  const ok = await _uploadFriendSound(kind, p.file);
-  m._uploadBusy[kind] = false;
-  if (input) input.disabled = false;
+  let ok = false;
+  try {
+    ok = await _uploadFriendSound(kind, p.file);
+  } catch {
+    ok = false;
+    m._uploadStatus[kind] = 'upload failed';
+  } finally {
+    m._uploadBusy[kind] = false;
+    if (input) input.disabled = false;
+  }
   if (!ok) _renderPendingUpload(kind);
   if (ok) _clearPendingUpload(kind);
 }
