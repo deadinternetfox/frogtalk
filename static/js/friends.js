@@ -683,6 +683,15 @@ function _bindFriendSoundModalEvents(modal) {
       if (typeof toast === 'function') toast('No file selected', 'info');
       return;
     }
+    const max = Number(window.Notifications?.CUSTOM_SOUND_MAX_BYTES || 0) || (2 * 1024 * 1024);
+    if (file.size > max) {
+      _setPendingUpload(kind, file);
+      modal._uploadStatus = modal._uploadStatus || {};
+      modal._uploadStatus[kind] = 'file too large (max ' + Math.round(max / (1024 * 1024)) + ' MB)';
+      _renderPendingUpload(kind);
+      if (typeof toast === 'function') toast('File too large for browser storage (max ' + Math.round(max / (1024 * 1024)) + ' MB)', 'error');
+      return;
+    }
     _setPendingUpload(kind, file);
     if (typeof toast === 'function') toast('Selected ' + (file.name || 'file') + '. Uploading…', 'info');
     await _commitPendingUpload(kind);
@@ -839,8 +848,7 @@ function _selectFriendSoundKey(kind, key) {
   if (!nick || !window.Notifications) return;
   const saved = Notifications.setFriendSound(nick, kind, key);
   if (saved === false) {
-    if (typeof toast === 'function') toast('Cannot save sound choice: browser storage is full', 'error');
-    return;
+    if (typeof toast === 'function') toast('Storage full: selection applied for this session only', 'warning');
   }
   _renderFriendSoundList(kind);
   if (key) _previewFriendSound(kind, key);
@@ -1014,6 +1022,11 @@ async function _commitPendingUpload(kind) {
     if (input) input.disabled = false;
   }
   if (!ok) _renderPendingUpload(kind);
+  if (!ok && (!m._uploadStatus || !m._uploadStatus[kind])) {
+    m._uploadStatus = m._uploadStatus || {};
+    m._uploadStatus[kind] = 'upload failed';
+    _renderPendingUpload(kind);
+  }
   if (ok) _clearPendingUpload(kind);
 }
 

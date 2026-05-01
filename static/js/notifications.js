@@ -191,9 +191,14 @@ const Notifications = (() => {
 
   // ── Per-friend custom sounds ──────────────────────────────────────────────
   // Schema: ft_friend_tones → { [nick]: { msg: 'chime', ring: 'classic' } }
+  const _friendTonesMem = {};
   function _friendTones() {
-    try { return JSON.parse(localStorage.getItem('ft_friend_tones') || '{}') || {}; }
-    catch { return {}; }
+    try {
+      const persisted = JSON.parse(localStorage.getItem('ft_friend_tones') || '{}') || {};
+      return { ...persisted, ..._friendTonesMem };
+    } catch {
+      return { ..._friendTonesMem };
+    }
   }
   function _saveFriendTones(map) {
     try { localStorage.setItem('ft_friend_tones', JSON.stringify(map || {})); }
@@ -254,7 +259,7 @@ const Notifications = (() => {
       }
       _customAudio = new Audio(dataUrl);
       _customAudio.volume = 0.9;
-      _customAudio.play().catch(() => {});
+      _customAudio.play().catch((e) => { console.warn('[FTDBG] custom play rejected', e?.message || e); });
     } catch {}
   }
   function _playPreviewFallback(kind, tone) {
@@ -271,7 +276,7 @@ const Notifications = (() => {
         ? { default: 0.95, classic: 0.9, digital: 1.05, melody: 1.12, marimba: 1.18, sonar: 0.82 }
         : { pop: 1.0, chime: 1.1, ding: 1.2, click: 0.85, bell: 1.25, soft: 0.9, bubble: 1.3, zap: 1.4, coin: 1.15, knock: 0.75 };
       _customAudio.playbackRate = maps[tone] || 1.0;
-      _customAudio.play().catch(() => {});
+      _customAudio.play().catch((e) => { console.warn('[FTDBG] preview fallback play rejected', e?.message || e); });
       return true;
     } catch {
       return false;
@@ -524,8 +529,15 @@ const Notifications = (() => {
       if (!map[nick].msg && !map[nick].ring) delete map[nick];
       try {
         _saveFriendTones(map);
+        delete _friendTonesMem[nick];
         return true;
       } catch {
+        // Storage full: keep selection active for this runtime session.
+        _friendTonesMem[nick] = _friendTonesMem[nick] || {};
+        if (tone && tone !== 'default') _friendTonesMem[nick][kind] = tone;
+        else delete _friendTonesMem[nick][kind];
+        if (!_friendTonesMem[nick].msg && !_friendTonesMem[nick].ring) delete _friendTonesMem[nick];
+        console.warn('[FTDBG] setFriendSound persisted=false, using memory fallback', nick, kind, tone);
         return false;
       }
     },
@@ -583,6 +595,7 @@ const Notifications = (() => {
         fr.readAsDataURL(file);
       });
     },
+    CUSTOM_SOUND_MAX_BYTES: CUSTOM_MAX_BYTES,
     playCustomSound(dataUrl) { _playCustomSound(dataUrl); },
     stopCustomSound() { _stopCustomSound(); },
     stopAllPreviewAudio() { _stopAllPreviewAudio(); },
