@@ -185,6 +185,10 @@ class BridgeMessageRequest(BaseModel):
     remote_chat_id: Optional[str] = None
     remote_msg_id: Optional[str] = None
     reply_to_remote_id: Optional[str] = None
+    # Human-readable source context for bridged profile cards.
+    source_name: Optional[str] = None
+    source_id: Optional[str] = None
+    source_parent: Optional[str] = None
 
 
 class BridgeMutateRequest(BaseModel):
@@ -796,6 +800,9 @@ async def receive_bridge_message(body: BridgeMessageRequest):
         media_type=media_type,
         bridge_platform=platform,
         bridge_avatar=body.sender_avatar or None,
+        bridge_source_name=(body.source_name or None),
+        bridge_source_id=(body.source_id or None),
+        bridge_source_parent=(body.source_parent or None),
         reply_to=reply_to_ft_id,
     )
 
@@ -824,6 +831,9 @@ async def receive_bridge_message(body: BridgeMessageRequest):
         "platform": platform,
         "bridge_platform": platform,
         "avatar": body.sender_avatar or None,
+        "bridge_source_name": body.source_name,
+        "bridge_source_id": body.source_id,
+        "bridge_source_parent": body.source_parent,
         "reply_to": reply_to_ft_id,
         "reply_nickname": reply_nickname,
         "reply_content": reply_content,

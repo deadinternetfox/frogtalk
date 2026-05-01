@@ -3486,7 +3486,7 @@ let _userInfoTargetId = null;
 // These users have no FrogTalk account, so DM / call / friend / follow are
 // not possible. We render a small explanatory card themed to the source
 // platform instead of the regular blank-loading profile modal.
-function showBridgedUserInfo(nickname, platform) {
+function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourceParent) {
   const plat = String(platform || '').toLowerCase();
   const meta = ({
     telegram: { label: 'Telegram', color: '#4fc3e8', icon: '✈️' },
@@ -3494,6 +3494,9 @@ function showBridgedUserInfo(nickname, platform) {
   })[plat] || { label: 'Bridge', color: '#888', icon: '🌉' };
   const safeNick = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(nickname) : String(nickname).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
   const safePlat = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(meta.label) : meta.label;
+  const safeSourceName = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceName || 'Unknown source')) : String(sourceName || 'Unknown source');
+  const safeSourceId = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceId || '')) : String(sourceId || '');
+  const safeSourceParent = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceParent || '')) : String(sourceParent || '');
   const avatar = (typeof UI !== 'undefined' && UI.avatarEl) ? UI.avatarEl(null, nickname, 90) : '🐸';
 
   const host = document.getElementById('modal-bridge-user-info') || (() => {
@@ -3529,6 +3532,16 @@ function showBridgedUserInfo(nickname, platform) {
           </div>
         </div>
 
+        <div class="profile-section" style="background:#1a1a1a;border-radius:12px;padding:12px;margin-bottom:12px;border:1px solid ${meta.color}26">
+          <div class="profile-section-title" style="font-size:11px;color:${meta.color};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;font-weight:700">Bridge Source</div>
+          <div style="display:grid;grid-template-columns:110px 1fr;gap:8px 10px;font-size:13px;line-height:1.5">
+            <div style="color:#7f8c8d">Platform</div><div style="color:#fff">${safePlat}</div>
+            <div style="color:#7f8c8d">Channel / Chat</div><div style="color:#fff;word-break:break-word">${safeSourceName}</div>
+            ${safeSourceParent ? `<div style="color:#7f8c8d">Server / Group</div><div style="color:#fff;word-break:break-word">${safeSourceParent}</div>` : ''}
+            ${safeSourceId ? `<div style="color:#7f8c8d">Source ID</div><div style="color:#bbb;word-break:break-all">${safeSourceId}</div>` : ''}
+          </div>
+        </div>
+
         <div class="profile-section" style="background:#1a1a1a;border-radius:12px;padding:12px;margin-bottom:12px">
           <div class="profile-section-title" style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;font-weight:600">Not Available</div>
           <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
@@ -3555,14 +3568,14 @@ function showBridgedUserInfo(nickname, platform) {
   }
 }
 
-function showUserInfo(nickname, userId, bridgePlatform) {
+function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent) {
   // Bridge users (Telegram / Discord mirrors) have no FrogTalk account.
   // Showing the regular profile modal results in a permanently-blank
   // "Loading…" state and exposes irrelevant DM / call / friend buttons.
   // Route them to a dedicated bridged-user popup that explains the
   // origin and offers no actions that can't possibly work.
   if (bridgePlatform && typeof showBridgedUserInfo === 'function') {
-    showBridgedUserInfo(nickname, bridgePlatform);
+    showBridgedUserInfo(nickname, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent);
     return;
   }
   _userInfoTarget = nickname;
@@ -4170,8 +4183,9 @@ async function checkModStatus() {
 
 // Update showUserInfo to check mod status
 const _originalShowUserInfo = showUserInfo;
-showUserInfo = async function(nickname, userId) {
-  _originalShowUserInfo(nickname, userId);
+showUserInfo = async function(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent) {
+  _originalShowUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent);
+  if (bridgePlatform) return;
   
   // Check mod status and show kick/ban buttons
   const kickBtn = document.getElementById('userinfo-kick-btn');

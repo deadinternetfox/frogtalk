@@ -132,7 +132,10 @@ async def send_to_frogtalk(room: str, token: str, content: str,
                            sender_avatar: str = None,
                            remote_chat_id: int | None = None,
                            remote_msg_id: int | None = None,
-                           reply_to_remote_id: str | None = None):
+                           reply_to_remote_id: str | None = None,
+                           source_name: str | None = None,
+                           source_id: str | None = None,
+                           source_parent: str | None = None):
     """Send a message from Discord to FrogTalk via REST."""
     async with httpx.AsyncClient(timeout=10) as client:
         payload = {
@@ -153,6 +156,12 @@ async def send_to_frogtalk(room: str, token: str, content: str,
             payload["remote_msg_id"] = str(remote_msg_id)
         if reply_to_remote_id:
             payload["reply_to_remote_id"] = reply_to_remote_id
+        if source_name:
+            payload["source_name"] = str(source_name)
+        if source_id:
+            payload["source_id"] = str(source_id)
+        if source_parent:
+            payload["source_parent"] = str(source_parent)
         r = await client.post(
             f"{FROGTALK_API}/api/bridge/message",
             json=payload
@@ -797,6 +806,9 @@ def _run_bot_in_thread(token: str):
                     remote_chat_id=channel_id,
                     remote_msg_id=message.id,
                     reply_to_remote_id=reply_to_remote_id,
+                    source_name=("#" + (getattr(message.channel, "name", "channel") or "channel")),
+                    source_id=str(channel_id),
+                    source_parent=(getattr(getattr(message, "guild", None), "name", "Discord server") or "Discord server"),
                 )
 
         # ── Mirror inbound edits ──────────────────────────────────────────

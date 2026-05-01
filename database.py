@@ -82,6 +82,9 @@ def init_db():
             media_type TEXT,
             edited     INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now')),
+            bridge_source_name TEXT,
+            bridge_source_id TEXT,
+            bridge_source_parent TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
@@ -500,15 +503,22 @@ def save_message(room_name: str, user_id: int, nickname: str, content: str,
                  view_once: int = 0,
                  bridge_platform: Optional[str] = None,
                  bridge_avatar: Optional[str] = None,
+                                 bridge_source_name: Optional[str] = None,
+                                 bridge_source_id: Optional[str] = None,
+                                 bridge_source_parent: Optional[str] = None,
                  reply_to: Optional[int] = None,
                  forwarded_from: Optional[str] = None) -> int:
     with _conn() as con:
         cur = con.execute(
             """INSERT INTO messages (room_name, user_id, nickname, content, media_data, media_type,
-                                     media_blur, view_once, bridge_platform, bridge_avatar, reply_to, forwarded_from)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                                                         media_blur, view_once, bridge_platform, bridge_avatar,
+                                                                         bridge_source_name, bridge_source_id, bridge_source_parent,
+                                                                         reply_to, forwarded_from)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (room_name, user_id, nickname, content, media_data, media_type,
-             media_blur, view_once, bridge_platform, bridge_avatar, reply_to, forwarded_from)
+                         media_blur, view_once, bridge_platform, bridge_avatar,
+                         bridge_source_name, bridge_source_id, bridge_source_parent,
+                         reply_to, forwarded_from)
         )
         con.commit()
         return cur.lastrowid
@@ -588,7 +598,8 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                 """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content,
                           (m.media_type IS NOT NULL AND m.media_type != '') AS has_media,
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
-                          m.reply_to, m.bridge_platform, m.forwarded_from,
+                          m.reply_to, m.bridge_platform, m.bridge_source_name,
+                          m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
@@ -604,7 +615,8 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                 """SELECT m.id, m.room_name, m.user_id, m.nickname, m.content,
                           (m.media_type IS NOT NULL AND m.media_type != '') AS has_media,
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
-                          m.reply_to, m.bridge_platform, m.forwarded_from,
+                          m.reply_to, m.bridge_platform, m.bridge_source_name,
+                          m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
@@ -841,6 +853,12 @@ def _migrate():
             con.execute("ALTER TABLE messages ADD COLUMN bridge_platform TEXT")
         if "bridge_avatar" not in msg_cols:
             con.execute("ALTER TABLE messages ADD COLUMN bridge_avatar TEXT")
+        if "bridge_source_name" not in msg_cols:
+            con.execute("ALTER TABLE messages ADD COLUMN bridge_source_name TEXT")
+        if "bridge_source_id" not in msg_cols:
+            con.execute("ALTER TABLE messages ADD COLUMN bridge_source_id TEXT")
+        if "bridge_source_parent" not in msg_cols:
+            con.execute("ALTER TABLE messages ADD COLUMN bridge_source_parent TEXT")
         # Track which channel-media messages have already been promoted to the
         # user's public wall via "Make Public". Filtering on this lets the
         # Private Media tab truly move items out instead of copying them, so

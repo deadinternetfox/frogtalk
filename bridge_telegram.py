@@ -251,7 +251,10 @@ async def send_to_frogtalk(room: str, token: str, content: str,
                            media_url: Optional[str] = None,
                            remote_chat_id: Optional[int] = None,
                            remote_msg_id: Optional[int] = None,
-                           reply_to_remote_id: Optional[int] = None):
+                           reply_to_remote_id: Optional[int] = None,
+                           source_name: Optional[str] = None,
+                           source_id: Optional[str] = None,
+                           source_parent: Optional[str] = None):
     """Send a message from Telegram to FrogTalk via REST."""
     payload = {
         "room_name": room, "content": content,
@@ -268,6 +271,12 @@ async def send_to_frogtalk(room: str, token: str, content: str,
         payload["remote_msg_id"] = str(remote_msg_id)
     if reply_to_remote_id is not None:
         payload["reply_to_remote_id"] = str(reply_to_remote_id)
+    if source_name:
+        payload["source_name"] = str(source_name)
+    if source_id:
+        payload["source_id"] = str(source_id)
+    if source_parent:
+        payload["source_parent"] = str(source_parent)
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
             f"{FROGTALK_API}/api/bridge/message", json=payload
@@ -562,10 +571,21 @@ async def process_update(update: dict):
 
     # Extract message content
     sender = msg.get("from", {})
+    chat = msg.get("chat", {})
     sender_name = sender.get("first_name", "Unknown")
     if sender.get("last_name"):
         sender_name += " " + sender["last_name"]
     sender_id = sender.get("id") or 0
+    chat_type = str(chat.get("type") or "").strip().lower()
+    chat_title = (chat.get("title") or "").strip()
+    chat_username = (chat.get("username") or "").strip()
+    source_name = chat_title or (("@" + chat_username) if chat_username else "Telegram chat")
+    source_parent = {
+        "supergroup": "Telegram supergroup",
+        "group": "Telegram group",
+        "channel": "Telegram channel",
+        "private": "Telegram private chat",
+    }.get(chat_type, "Telegram chat")
 
     content = msg.get("text") or msg.get("caption") or ""
 
@@ -661,6 +681,9 @@ async def process_update(update: dict):
             remote_chat_id=chat_id,
             remote_msg_id=msg.get("message_id"),
             reply_to_remote_id=reply_to_remote_id,
+            source_name=source_name,
+            source_id=str(chat_id),
+            source_parent=source_parent,
         )
 
 

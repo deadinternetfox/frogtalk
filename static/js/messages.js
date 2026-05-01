@@ -639,10 +639,10 @@ const Messages = (() => {
 
     if (isMutedAuthor) {
       return `<div class="msg-group is-muted-user" id="msg-${msg.id}" data-nick="${UI.escHtml(msg.nickname||'')}">
-        <div class="msg-avatar" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
+        <div class="msg-avatar" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
         <div class="msg-body">
           <div class="msg-meta">
-            <span class="msg-author" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}')">${UI.escHtml(msg.nickname)}</span>
+            <span class="msg-author" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}')">${UI.escHtml(msg.nickname)}</span>
             ${_bridgeBadge(msg)}
             <span class="msg-time">${time}</span>
           </div>
@@ -661,10 +661,10 @@ const Messages = (() => {
     }
 
     return `<div class="msg-group" id="msg-${msg.id}" data-nick="${UI.escHtml(msg.nickname||'')}">
-      <div class="msg-avatar" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
+      <div class="msg-avatar" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
       <div class="msg-body">
         <div class="msg-meta">
-          <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(msg.nickname)}</span>
+          <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(msg.nickname)}</span>
           ${_bridgeBadge(msg)}
           <span class="msg-time">${time}</span>
           ${editedTag}
