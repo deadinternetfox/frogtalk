@@ -6,6 +6,13 @@ const Notifications = (() => {
   let _swReg = null;
   let _installPrompt = null;
   let _audioPrimed = false;
+  const _audioDebugEnabled = () => {
+    try { return window.localStorage?.getItem('ft_sound_debug') === '1'; }
+    catch { return false; }
+  };
+  const _audioDbg = (...args) => {
+    if (_audioDebugEnabled()) console.log('[FTDBG]', ...args);
+  };
 
   // ── Service Worker registration ────────────────────────────────────────────
   async function registerSW() {
@@ -291,6 +298,8 @@ const Notifications = (() => {
   let _customAudio = null;
   let _customAudioToken = 0;
   let _customAudioStopTimer = null;
+  const _audioBlobUrlByElement = new WeakMap();
+  const _audioProbeSeen = new Set();
   const _FALLBACK_PREVIEW_BEEP = 'data:audio/wav;base64,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';
   function _customMaxMsForKind(kind) {
     return kind === 'ring' ? CUSTOM_RING_MAX_MS : CUSTOM_MSG_MAX_MS;
@@ -303,11 +312,89 @@ const Notifications = (() => {
   function _teardownCustomAudioElement(a) {
     if (!a) return;
     try {
+      const oldBlob = _audioBlobUrlByElement.get(a);
+      if (oldBlob) {
+        URL.revokeObjectURL(oldBlob);
+        _audioBlobUrlByElement.delete(a);
+      }
+    } catch {}
+    try {
       a.pause();
       a.currentTime = 0;
       a.src = '';
       a.load();
     } catch {}
+  }
+  function _isFriendSoundApiUrl(url) {
+    const u = String(url || '');
+    if (!u) return false;
+    if (u.startsWith('/api/friends/sounds/file/')) return true;
+    try {
+      const abs = new URL(u, window.location.origin);
+      return abs.origin === window.location.origin && abs.pathname.startsWith('/api/friends/sounds/file/');
+    } catch {
+      return false;
+    }
+  }
+  async function _fetchFriendSoundBlobUrl(url) {
+    const token = String((typeof State !== 'undefined' && State && State.token) ? State.token : '');
+    const headers = {};
+    if (token) headers['X-Session-Token'] = token;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers,
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+    if (!res.ok) throw new Error('http_' + String(res.status || 0));
+    const blob = await res.blob();
+    const blobType = String(blob?.type || contentType || '').toLowerCase();
+    if (blobType && !_isPlayableMimeOnDevice(blobType)) {
+      throw new Error('unsupported_mime_' + blobType);
+    }
+    return {
+      objectUrl: URL.createObjectURL(blob),
+      contentType: contentType || blobType,
+      size: Number(blob?.size || 0) || 0,
+    };
+  }
+  function _scheduleCustomAutoStop(token, a, maxDurationMs) {
+    const n = Number(maxDurationMs || 0);
+    if (!Number.isFinite(n) || n <= 0) return;
+    _customAudioStopTimer = setTimeout(() => {
+      if (token !== _customAudioToken) return;
+      if (_customAudio !== a) return;
+      _audioDbg('custom:auto-stop', { maxDurationMs: n });
+      _teardownCustomAudioElement(a);
+      _customAudio = null;
+      _clearCustomAudioStopTimer();
+    }, n);
+  }
+  async function _debugProbeCustomPlayFailure(url, err, token) {
+    if (!_audioDebugEnabled()) return;
+    try {
+      const key = String(url || '').slice(0, 256);
+      if (!key || _audioProbeSeen.has(key)) return;
+      _audioProbeSeen.add(key);
+      const headers = {};
+      const st = String((typeof State !== 'undefined' && State && State.token) ? State.token : '');
+      if (st) headers['X-Session-Token'] = st;
+      const res = await fetch(url, { method: 'GET', headers, credentials: 'same-origin', cache: 'no-store' });
+      const ct = String(res.headers.get('content-type') || '').toLowerCase();
+      _audioDbg('custom:probe', {
+        token,
+        status: Number(res.status || 0) || 0,
+        ok: !!res.ok,
+        contentType: ct || '(none)',
+        error: String(err?.message || err || ''),
+      });
+    } catch (probeErr) {
+      _audioDbg('custom:probe-failed', {
+        token,
+        error: String(probeErr?.message || probeErr || ''),
+      });
+    }
   }
   function _playAudioUrl(dataUrl, opts) {
     if (!dataUrl) return false;
@@ -326,22 +413,61 @@ const Notifications = (() => {
         if (_customAudio === a) _customAudio = null;
       }, { once: true });
       _customAudio = a;
+      _audioDbg('custom:play-attempt', {
+        token,
+        kind: String(opts?.kind || ''),
+        isFriendUrl: _isFriendSoundApiUrl(dataUrl),
+        sourcePreview: String(dataUrl).slice(0, 120),
+      });
       a.play().then(() => {
         if (token !== _customAudioToken) {
           _teardownCustomAudioElement(a);
           return;
         }
-        const maxDurationMs = Number(opts?.maxDurationMs || 0);
-        if (Number.isFinite(maxDurationMs) && maxDurationMs > 0) {
-          _customAudioStopTimer = setTimeout(() => {
-            if (token !== _customAudioToken) return;
-            if (_customAudio !== a) return;
-            _teardownCustomAudioElement(a);
-            _customAudio = null;
-            _clearCustomAudioStopTimer();
-          }, maxDurationMs);
+        _scheduleCustomAutoStop(token, a, opts?.maxDurationMs);
+      }).catch(async (err) => {
+        _audioDbg('custom:play-rejected', {
+          token,
+          message: String(err?.message || err || ''),
+          kind: String(opts?.kind || ''),
+        });
+        if (token !== _customAudioToken) return;
+        if (!_isFriendSoundApiUrl(dataUrl)) {
+          console.warn('[FTDBG] custom play rejected', String(err?.message || err || 'play_failed'));
+          void _debugProbeCustomPlayFailure(dataUrl, err, token);
+          return;
         }
-      }).catch(() => {});
+        try {
+          const fetched = await _fetchFriendSoundBlobUrl(dataUrl);
+          if (token !== _customAudioToken) return;
+          _audioDbg('custom:blob-retry', {
+            token,
+            contentType: fetched.contentType || '(none)',
+            size: fetched.size,
+          });
+          try {
+            const oldBlob = _audioBlobUrlByElement.get(a);
+            if (oldBlob) URL.revokeObjectURL(oldBlob);
+          } catch {}
+          _audioBlobUrlByElement.set(a, fetched.objectUrl);
+          a.src = fetched.objectUrl;
+          a.load();
+          await a.play();
+          if (token !== _customAudioToken) {
+            _teardownCustomAudioElement(a);
+            return;
+          }
+          _scheduleCustomAutoStop(token, a, opts?.maxDurationMs);
+          _audioDbg('custom:blob-retry-ok', { token });
+        } catch (retryErr) {
+          _audioDbg('custom:blob-retry-failed', {
+            token,
+            message: String(retryErr?.message || retryErr || ''),
+          });
+          console.warn('[FTDBG] custom play rejected', String(retryErr?.message || retryErr || 'play_failed'));
+          void _debugProbeCustomPlayFailure(dataUrl, retryErr, token);
+        }
+      });
       return true;
     } catch {
       return false;
@@ -351,6 +477,7 @@ const Notifications = (() => {
     return _playAudioUrl(dataUrl, {
       volume: 0.9,
       maxDurationMs: _customMaxMsForKind(kind),
+      kind: kind === 'ring' ? 'ring' : 'msg',
     });
   }
   function _playPreviewFallback(kind, tone) {
