@@ -2027,6 +2027,14 @@ if ($singleThread) {
             justify-content:center;
             line-height:1;
             transform:translateY(1px);
+            cursor:pointer;
+            padding:2px;
+            border-radius:6px;
+            transition:background .15s ease, transform .15s ease;
+        }
+        .frog-mini-headline .frog-mini-emoji:hover {
+            background:rgba(0,255,65,0.1);
+            transform:translateY(1px) scale(1.05);
         }
         .frog-mini-headline .frog-mini-label {
             display:inline-block;
@@ -2042,31 +2050,7 @@ if ($singleThread) {
             transform:translateY(1px);
             white-space:nowrap;
         }
-        .frog-mini-open-full {
-            width:24px;
-            height:24px;
-            border:1px solid rgba(0,255,65,0.28);
-            border-radius:6px;
-            background:rgba(0,255,65,0.06);
-            color:#9fffa3;
-            font-size:13px;
-            line-height:1;
-            display:inline-flex;
-            align-items:center;
-            justify-content:center;
-            cursor:pointer;
-            margin-left:auto;
-            margin-right:10px;
-            transition:background .15s ease, border-color .15s ease, color .15s ease;
-        }
-        .frog-mini-open-full:hover {
-            background:rgba(0,255,65,0.12);
-            border-color:rgba(0,255,65,0.45);
-            color:#d5ffd7;
-        }
-        .chat-header .chat-toggle {
-            margin-left:2px;
-        }
+        .chat-header .chat-toggle { margin-left:auto; }
         .frog-mini-wrap { display:none; height: 480px; border-top:1px solid rgba(0,255,65,0.15); }
         .frog-mini-wrap.open { display:block; }
         .frog-mini-frame { width:100%; height:100%; border:none; background:#0b120b; }
@@ -3601,9 +3585,8 @@ if ($singleThread) {
     <!-- ═══ FROGTALK MINI WIDGET ═══ -->
     <div class="chat-widget" id="chatWidget">
         <div class="chat-header" onclick="toggleFrogMini()">
-            <h4 class="frog-mini-headline"><span class="frog-mini-emoji" aria-hidden="true">🐸</span><span class="frog-mini-label">FrogTalk</span></h4>
+            <h4 class="frog-mini-headline"><span class="frog-mini-emoji" role="button" tabindex="0" title="Open full FrogTalk" aria-label="Open full FrogTalk in new tab" onclick="event.stopPropagation();frogMiniOpenFullApp()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();frogMiniOpenFullApp();}">🐸</span><span class="frog-mini-label">FrogTalk</span></h4>
             <span class="frog-mini-note" id="frogMiniState">Checking login…</span>
-            <button class="frog-mini-open-full" id="frogMiniOpenFull" type="button" title="Open full FrogTalk" aria-label="Open full FrogTalk in new tab" onclick="event.stopPropagation();frogMiniOpenFullApp()">↗</button>
             <button class="chat-toggle" id="chatToggleBtn">▲</button>
         </div>
         <div class="chat-body" id="chatBody" style="display:block;max-height:none;">
@@ -5645,13 +5628,6 @@ if ($singleThread) {
     let frogMiniAuthPending = false;
     let frogMiniAuthPendingTimer = null;
 
-    function _frogMiniUpdateOpenFullBtn() {
-        const openFullBtn = document.getElementById('frogMiniOpenFull');
-        if (!openFullBtn) return;
-        // Only show for board visitors who are not already logged in.
-        openFullBtn.style.display = frogMiniLogged ? 'none' : 'inline-flex';
-    }
-
     function _frogMiniToken() {
         try {
             // FrogTalk app stores auth as fc_token/fc_user.
@@ -5680,7 +5656,6 @@ if ($singleThread) {
         if (!stateEl || !guest || !wrap || !frame) return;
 
         frogMiniLogged = !!_frogMiniToken() && _frogMiniHasUser();
-        _frogMiniUpdateOpenFullBtn();
         if (frogMiniLogged) {
             // Auth succeeded — clear pending flag
             frogMiniAuthPending = false;
