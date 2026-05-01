@@ -524,6 +524,7 @@ loadFriends = async function() {
 function openFriendSoundEditor(nick) {
   if (!nick) return;
   try { window.Notifications?.stopCustomSound?.(); } catch {}
+  try { window.Notifications?.stopAllPreviewAudio?.(); } catch {}
   let modal = document.getElementById('friend-sound-modal');
   if (!modal) {
     modal = document.createElement('div');

@@ -287,7 +287,10 @@ const Notifications = (() => {
     try {
       _customAudio.pause();
       _customAudio.currentTime = 0;
+      _customAudio.src = '';
+      _customAudio.load();
     } catch {}
+    _customAudio = null;
   }
   function _stopAllPreviewAudio() {
     _stopCustomSound();
