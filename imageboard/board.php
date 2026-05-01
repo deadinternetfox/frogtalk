@@ -5607,6 +5607,8 @@ if ($singleThread) {
     let frogMiniOpen = false;
     let frogMiniLogged = false;
     let frogMiniSyncTimer = null;
+    let frogMiniAuthPending = false;
+    let frogMiniAuthPendingTimer = null;
 
     function _frogMiniToken() {
         try {
@@ -5637,13 +5639,17 @@ if ($singleThread) {
 
         frogMiniLogged = !!_frogMiniToken() && _frogMiniHasUser();
         if (frogMiniLogged) {
+            // Auth succeeded — clear pending flag
+            frogMiniAuthPending = false;
+            if (frogMiniAuthPendingTimer) { clearTimeout(frogMiniAuthPendingTimer); frogMiniAuthPendingTimer = null; }
             let _miniNick = '';
             try { const _u = JSON.parse(localStorage.getItem('fc_user') || '{}'); _miniNick = _u.nickname || ''; } catch (e) {}
             stateEl.textContent = _miniNick ? ('Logged in as ' + _miniNick) : 'Logged in';
             guest.style.display = 'none';
             wrap.classList.add('open');
             if (!frame.src || frame.src === 'about:blank') frame.src = '/app';
-        } else {
+        } else if (!frogMiniAuthPending) {
+            // Only reset to guest state if auth is not in progress
             stateEl.textContent = 'Not logged in';
             guest.style.display = 'flex';
             wrap.classList.remove('open');
@@ -5673,6 +5679,15 @@ if ($singleThread) {
         const wrap = document.getElementById('frogMiniWrap');
         const guest = document.getElementById('frogMiniGuest');
         if (!frame || !wrap || !guest) return;
+        // Set pending flag so _frogMiniApplyState doesn't collapse UI before user logs in
+        frogMiniAuthPending = true;
+        if (frogMiniAuthPendingTimer) clearTimeout(frogMiniAuthPendingTimer);
+        // Safety: clear pending after 10 minutes
+        frogMiniAuthPendingTimer = setTimeout(function() {
+            frogMiniAuthPending = false;
+            frogMiniAuthPendingTimer = null;
+            _frogMiniApplyState();
+        }, 10 * 60 * 1000);
         frame.src = mode === 'register' ? '/app?register=1' : '/app';
         guest.style.display = 'none';
         wrap.classList.add('open');
