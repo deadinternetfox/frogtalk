@@ -336,28 +336,76 @@ const Notifications = (() => {
       return false;
     }
   }
+  function _sessionToken() {
+    try { return String((typeof State !== 'undefined' && State && State.token) ? State.token : ''); }
+    catch { return ''; }
+  }
+  function _parseMaybeUrl(url) {
+    try { return new URL(String(url || ''), window.location.origin); }
+    catch { return null; }
+  }
+  function _removeTokenQuery(url) {
+    const u = _parseMaybeUrl(url);
+    if (!u) return String(url || '');
+    u.searchParams.delete('token');
+    return (u.origin === window.location.origin) ? (u.pathname + (u.search || '')) : u.toString();
+  }
+  function _addTokenQuery(url, token) {
+    const t = String(token || '');
+    if (!t) return String(url || '');
+    const u = _parseMaybeUrl(url);
+    if (!u) return String(url || '');
+    u.searchParams.set('token', t);
+    return (u.origin === window.location.origin) ? (u.pathname + (u.search || '')) : u.toString();
+  }
+  function _candidateFriendSoundUrls(url) {
+    const out = [];
+    const raw = String(url || '');
+    if (raw) out.push(raw);
+    const noToken = _removeTokenQuery(raw);
+    if (noToken && !out.includes(noToken)) out.push(noToken);
+    const token = _sessionToken();
+    if (token) {
+      const withToken = _addTokenQuery(noToken || raw, token);
+      if (withToken && !out.includes(withToken)) out.push(withToken);
+    }
+    return out;
+  }
   async function _fetchFriendSoundBlobUrl(url) {
-    const token = String((typeof State !== 'undefined' && State && State.token) ? State.token : '');
+    const token = _sessionToken();
     const headers = {};
     if (token) headers['X-Session-Token'] = token;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers,
-      credentials: 'same-origin',
-      cache: 'no-store',
-    });
-    const contentType = String(res.headers.get('content-type') || '').toLowerCase();
-    if (!res.ok) throw new Error('http_' + String(res.status || 0));
-    const blob = await res.blob();
-    const blobType = String(blob?.type || contentType || '').toLowerCase();
-    if (blobType && !_isPlayableMimeOnDevice(blobType)) {
-      throw new Error('unsupported_mime_' + blobType);
+    let lastStatus = 0;
+    const candidates = _candidateFriendSoundUrls(url);
+    for (const candidate of candidates) {
+      const res = await fetch(candidate, {
+        method: 'GET',
+        headers,
+        credentials: 'same-origin',
+        cache: 'no-store',
+      });
+      lastStatus = Number(res.status || 0) || 0;
+      const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+      if (!res.ok) {
+        _audioDbg('custom:blob-fetch-http', {
+          status: lastStatus,
+          candidate: String(candidate || '').slice(0, 220),
+          contentType: contentType || '(none)',
+        });
+        continue;
+      }
+      const blob = await res.blob();
+      const blobType = String(blob?.type || contentType || '').toLowerCase();
+      if (blobType && !_isPlayableMimeOnDevice(blobType)) {
+        throw new Error('unsupported_mime_' + blobType);
+      }
+      return {
+        objectUrl: URL.createObjectURL(blob),
+        contentType: contentType || blobType,
+        size: Number(blob?.size || 0) || 0,
+      };
     }
-    return {
-      objectUrl: URL.createObjectURL(blob),
-      contentType: contentType || blobType,
-      size: Number(blob?.size || 0) || 0,
-    };
+    throw new Error('http_' + String(lastStatus || 0));
   }
   function _scheduleCustomAutoStop(token, a, maxDurationMs) {
     const n = Number(maxDurationMs || 0);
@@ -400,6 +448,12 @@ const Notifications = (() => {
     if (!dataUrl) return false;
     const token = ++_customAudioToken;
     _clearCustomAudioStopTimer();
+    let settled = false;
+    const finish = (ok, error) => {
+      if (settled) return;
+      settled = true;
+      try { opts?._resolveResult?.({ ok: !!ok, error: error ? String(error) : '' }); } catch {}
+    };
     try {
       if (_customAudio) {
         _teardownCustomAudioElement(_customAudio);
@@ -422,9 +476,11 @@ const Notifications = (() => {
       a.play().then(() => {
         if (token !== _customAudioToken) {
           _teardownCustomAudioElement(a);
+          finish(false, 'play_interrupted');
           return;
         }
         _scheduleCustomAutoStop(token, a, opts?.maxDurationMs);
+        finish(true, '');
       }).catch(async (err) => {
         _audioDbg('custom:play-rejected', {
           token,
@@ -433,8 +489,9 @@ const Notifications = (() => {
         });
         if (token !== _customAudioToken) return;
         if (!_isFriendSoundApiUrl(dataUrl)) {
-          console.warn('[FTDBG] custom play rejected', String(err?.message || err || 'play_failed'));
+          if (_audioDebugEnabled()) console.warn('[FTDBG] custom play rejected', String(err?.message || err || 'play_failed'));
           void _debugProbeCustomPlayFailure(dataUrl, err, token);
+          finish(false, String(err?.message || err || 'play_failed'));
           return;
         }
         try {
@@ -455,23 +512,39 @@ const Notifications = (() => {
           await a.play();
           if (token !== _customAudioToken) {
             _teardownCustomAudioElement(a);
+            finish(false, 'play_interrupted');
             return;
           }
           _scheduleCustomAutoStop(token, a, opts?.maxDurationMs);
           _audioDbg('custom:blob-retry-ok', { token });
+          finish(true, '');
         } catch (retryErr) {
           _audioDbg('custom:blob-retry-failed', {
             token,
             message: String(retryErr?.message || retryErr || ''),
           });
-          console.warn('[FTDBG] custom play rejected', String(retryErr?.message || retryErr || 'play_failed'));
+          if (_audioDebugEnabled()) console.warn('[FTDBG] custom play rejected', String(retryErr?.message || retryErr || 'play_failed'));
           void _debugProbeCustomPlayFailure(dataUrl, retryErr, token);
+          finish(false, String(retryErr?.message || retryErr || 'play_failed'));
         }
       });
       return true;
     } catch {
+      finish(false, 'play_exception');
       return false;
     }
+  }
+  function _playCustomSoundWithResult(dataUrl, kind) {
+    return new Promise((resolve) => {
+      const started = _playAudioUrl(dataUrl, {
+        volume: 0.9,
+        maxDurationMs: _customMaxMsForKind(kind),
+        kind: kind === 'ring' ? 'ring' : 'msg',
+        reportErrors: true,
+        _resolveResult: resolve,
+      });
+      if (!started) resolve({ ok: false, error: 'play_not_started' });
+    });
   }
   function _playCustomSound(dataUrl, kind) {
     return _playAudioUrl(dataUrl, {
@@ -766,54 +839,48 @@ const Notifications = (() => {
         const sessionToken = (typeof State !== 'undefined' && State && State.token) ? String(State.token) : '';
         const safeKind = kind === 'ring' ? 'ring' : 'msg';
         if (nick && sessionToken) {
-          (async () => {
+          const fd = new FormData();
+          fd.append('media', file, file.name || 'sound');
+          const xhr = new XMLHttpRequest();
+          const TIMEOUT_MS = 120000;
+          let settled = false;
+          const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            resolve(result);
+          };
+          xhr.upload.onprogress = (ev) => {
+            if (!onProgress || !ev || !ev.lengthComputable) return;
             try {
-              if (onProgress) {
-                try { onProgress(5); } catch {}
-              }
-              const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-              let timeoutHit = false;
-              const timer = setTimeout(() => {
-                timeoutHit = true;
-                try { ctrl?.abort(); } catch {}
-              }, 120000);
-              const fd = new FormData();
-              fd.append('media', file, file.name || 'sound');
-              const fetchPromise = fetch('/api/friends/sounds/upload/' + encodeURIComponent(nick) + '/' + safeKind, {
-                method: 'POST',
-                headers: { 'X-Session-Token': sessionToken },
-                body: fd,
-                credentials: 'same-origin',
-                signal: ctrl?.signal,
-              });
-              const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('upload_timeout')), 125000);
-              });
-              const res = await Promise.race([fetchPromise, timeoutPromise]);
-              clearTimeout(timer);
-              if (onProgress) {
-                try { onProgress(90); } catch {}
-              }
-              const payload = await res.json().catch(() => ({}));
-              if (!res.ok || !payload?.ok || !payload?.asset?.url) {
-                return resolve({ ok: false, error: payload?.error || ('Upload failed (' + res.status + ')') });
-              }
-              const separator = payload.asset.url.includes('?') ? '&' : '?';
-              const authedUrl = payload.asset.url + separator + 'token=' + encodeURIComponent(sessionToken);
-              try { _setCustomSound(nick, safeKind, authedUrl); } catch {}
-              if (onProgress) {
-                try { onProgress(100); } catch {}
-              }
-              return resolve({ ok: true, dataUrl: authedUrl, asset: payload.asset });
-            } catch (e) {
-              const msg = String(e?.name || '').toLowerCase() === 'aborterror' ? 'Upload timed out' : 'Upload failed';
-              const text = String(e?.message || e || '');
-              if (text === 'upload_timeout') {
-                return resolve({ ok: false, error: 'Upload timed out' });
-              }
-              return resolve({ ok: false, error: msg });
+              // Reserve 0-90 for actual upload bytes, 90-100 for server processing
+              const pct = Math.max(5, Math.min(90, Math.round((ev.loaded / ev.total) * 90)));
+              onProgress(pct);
+            } catch {}
+          };
+          xhr.upload.onloadstart = () => {
+            try { if (onProgress) onProgress(5); } catch {}
+          };
+          xhr.onload = () => {
+            try { if (onProgress) onProgress(95); } catch {}
+            let payload = {};
+            try { payload = JSON.parse(xhr.responseText); } catch {}
+            if (xhr.status < 200 || xhr.status >= 300 || !payload?.ok || !payload?.asset?.url) {
+              return finish({ ok: false, error: payload?.error || ('Upload failed (' + xhr.status + ')') });
             }
-          })();
+            const separator = payload.asset.url.includes('?') ? '&' : '?';
+            const authedUrl = payload.asset.url + separator + 'token=' + encodeURIComponent(sessionToken);
+            try { _setCustomSound(nick, safeKind, authedUrl); } catch {}
+            try { if (onProgress) onProgress(100); } catch {}
+            finish({ ok: true, dataUrl: authedUrl, asset: payload.asset });
+          };
+          xhr.onerror = () => finish({ ok: false, error: 'Upload failed' });
+          xhr.onabort = () => finish({ ok: false, error: 'Upload timed out' });
+          xhr.ontimeout = () => finish({ ok: false, error: 'Upload timed out' });
+          xhr.timeout = TIMEOUT_MS;
+          xhr.open('POST', '/api/friends/sounds/upload/' + encodeURIComponent(nick) + '/' + safeKind);
+          xhr.setRequestHeader('X-Session-Token', sessionToken);
+          xhr.withCredentials = true;
+          xhr.send(fd);
           return;
         }
 
@@ -851,6 +918,7 @@ const Notifications = (() => {
     CUSTOM_SOUND_MAX_RING_SECONDS: CUSTOM_RING_MAX_MS / 1000,
     canPlayCustomContentType(contentType) { return _isPlayableMimeOnDevice(contentType); },
     playCustomSound(dataUrl, kind) { return _playCustomSound(dataUrl, kind); },
+    previewCustomSound(dataUrl, kind) { return _playCustomSoundWithResult(dataUrl, kind); },
     stopCustomSound() { _stopCustomSound(); },
     stopAllPreviewAudio() { _stopAllPreviewAudio(); },
 

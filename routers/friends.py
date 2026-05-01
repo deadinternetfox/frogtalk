@@ -1,4 +1,5 @@
 """Friends, tags, user search routes."""
+import base64
 import logging
 import os
 import time
@@ -359,7 +360,44 @@ async def upload_friend_sound(
         file_size=len(raw),
         is_active=1,
     )
+    # Replicate to peer nodes via federation so any node can serve the file.
+    try:
+        _emit_friend_event("friend.sound.created", {
+            "owner_nick": current_user.get("nickname", ""),
+            "friend_nick": nickname,
+            "kind": safe_kind,
+            "filename": name or target_path.name,
+            "content_type": safe_content_type,
+            "file_ext": Path(target_path).suffix.lower(),
+            "file_data_b64": base64.b64encode(raw).decode("ascii"),
+        })
+    except Exception:
+        pass
     return {"ok": True, "asset": _friend_sound_payload(asset)}
+
+
+@router.get("/sounds/file/{asset_id}")
+async def get_friend_sound_file(asset_id: int, request: Request, token: Optional[str] = None):
+    session_token = (token or "").strip() or (request.headers.get("X-Session-Token", "").strip())
+    if not session_token:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    user = db.get_user_by_token(session_token)
+    if not user:
+        return JSONResponse(status_code=401, content={"error": "Invalid or expired session"})
+    asset = db.get_friend_sound_asset(user["id"], asset_id)
+    if not asset:
+        return JSONResponse(status_code=404, content={"error": "Sound not found"})
+    fp = Path(str(asset.get("file_path") or ""))
+    if not fp.exists() or not fp.is_file():
+        return JSONResponse(status_code=404, content={"error": "Sound file missing"})
+    media_type = _normalize_sound_content_type(asset.get("content_type") or "", fp.suffix)
+    return FileResponse(
+        str(fp),
+        media_type=media_type,
+        filename=asset.get("filename") or fp.name,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.get("/sounds/{nickname}/{kind}")
@@ -404,28 +442,14 @@ async def delete_friend_sound(asset_id: int, current_user: dict = Depends(get_cu
     remaining = db.list_friend_sound_assets(current_user["id"], deleted["friend_user_id"], deleted["kind"])
     if remaining and not any(bool(x.get("is_active")) for x in remaining):
         db.set_active_friend_sound_asset(current_user["id"], remaining[0]["id"])
+    # Replicate deletion to peer nodes.
+    try:
+        friend_row = db.get_user_by_id(deleted["friend_user_id"])
+        _emit_friend_event("friend.sound.deleted", {
+            "owner_nick": current_user.get("nickname", ""),
+            "friend_nick": (friend_row or {}).get("nickname", ""),
+            "kind": deleted.get("kind", ""),
+        })
+    except Exception:
+        pass
     return {"ok": True}
-
-
-@router.get("/sounds/file/{asset_id}")
-async def get_friend_sound_file(asset_id: int, request: Request, token: Optional[str] = None):
-    session_token = (token or "").strip() or (request.headers.get("X-Session-Token", "").strip())
-    if not session_token:
-        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
-    user = db.get_user_by_token(session_token)
-    if not user:
-        return JSONResponse(status_code=401, content={"error": "Invalid or expired session"})
-    asset = db.get_friend_sound_asset(user["id"], asset_id)
-    if not asset:
-        return JSONResponse(status_code=404, content={"error": "Sound not found"})
-    fp = Path(str(asset.get("file_path") or ""))
-    if not fp.exists() or not fp.is_file():
-        return JSONResponse(status_code=404, content={"error": "Sound file missing"})
-    media_type = _normalize_sound_content_type(asset.get("content_type") or "", fp.suffix)
-    return FileResponse(
-        str(fp),
-        media_type=media_type,
-        filename=asset.get("filename") or fp.name,
-        content_disposition_type="inline",
-        headers={"Cache-Control": "private, max-age=300"},
-    )
