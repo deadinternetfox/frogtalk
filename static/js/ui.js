@@ -3491,26 +3491,16 @@ async function _resolveBridgeSourceFromConfig(platform) {
   const room = String(State?.currentRoom || '');
   if (!plat || !room || typeof apiFetch !== 'function') return null;
   try {
-    const url = plat === 'discord' ? '/api/bridge/discord-bridges' : '/api/bridge/bridges';
-    const res = await apiFetch(url);
+    const res = await apiFetch('/api/bridge/rooms/' + encodeURIComponent(room) + '/bridge-sources');
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || !Array.isArray(data?.bridges)) return null;
-    const rows = data.bridges.filter(b => String(b?.room_name || '') === room);
-    const row = rows.find(b => Number(b?.enabled ?? 1) === 1) || rows[0] || null;
+    if (!res.ok || !Array.isArray(data?.sources)) return null;
+    const rows = data.sources.filter(s => String(s?.platform || '').toLowerCase() === plat);
+    const row = rows[0] || null;
     if (!row) return null;
-    if (plat === 'discord') {
-      const id = row.discord_channel_id != null ? String(row.discord_channel_id) : '';
-      return {
-        name: String(row.discord_channel_name || (id ? ('#' + id) : '')).trim(),
-        id,
-        parent: String(row.discord_guild_name || 'Discord server').trim(),
-      };
-    }
-    const id = row.telegram_chat_id != null ? String(row.telegram_chat_id) : '';
     return {
-      name: String(row.telegram_chat_title || (id ? ('Telegram chat ' + id) : '')).trim(),
-      id,
-      parent: 'Telegram',
+      name: String(row.name || '').trim(),
+      id: String(row.id || '').trim(),
+      parent: String(row.parent || '').trim(),
     };
   } catch {
     return null;

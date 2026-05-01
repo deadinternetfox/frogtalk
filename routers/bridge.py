@@ -242,6 +242,50 @@ async def room_bridge_outbound(room_name: str, _: dict = Depends(get_current_use
     return {"outbound": outbound}
 
 
+@router.get("/rooms/{room_name}/bridge-sources")
+async def room_bridge_sources(room_name: str, current_user: dict = Depends(get_current_user)):
+    """Return active bridge source metadata for a room.
+
+    Unlike owner-only bridge management endpoints, this is safe for any room
+    member and is used by the client to render bridged-profile source labels.
+    """
+    if not db.user_can_access_room(
+        current_user["id"], room_name,
+        is_admin=bool(current_user.get("is_admin")),
+    ):
+        raise HTTPException(403, "Not a member of this room")
+
+    sources = []
+    try:
+        for b in db.get_telegram_bridges_for_room(room_name):
+            chat_id = b.get("telegram_chat_id")
+            chat_title = str(b.get("telegram_chat_title") or "").strip()
+            sources.append({
+                "platform": "telegram",
+                "name": chat_title or (f"Telegram chat {chat_id}" if chat_id is not None else "Telegram"),
+                "id": str(chat_id) if chat_id is not None else "",
+                "parent": "Telegram",
+            })
+    except Exception:
+        pass
+
+    try:
+        for b in db.get_discord_bridges_for_room(room_name):
+            ch_id = b.get("discord_channel_id")
+            ch_name = str(b.get("discord_channel_name") or "").strip()
+            guild_name = str(b.get("discord_guild_name") or "").strip()
+            sources.append({
+                "platform": "discord",
+                "name": ch_name or (f"#{ch_id}" if ch_id is not None else "Discord channel"),
+                "id": str(ch_id) if ch_id is not None else "",
+                "parent": guild_name or "Discord server",
+            })
+    except Exception:
+        pass
+
+    return {"sources": sources}
+
+
 @router.post("/bridges/create")
 async def create_bridge_endpoint(body: CreateBridgeRequest, current_user: dict = Depends(get_current_user)):
     # Verify user owns the room
