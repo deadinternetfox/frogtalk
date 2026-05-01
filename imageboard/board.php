@@ -5637,7 +5637,9 @@ if ($singleThread) {
 
         frogMiniLogged = !!_frogMiniToken() && _frogMiniHasUser();
         if (frogMiniLogged) {
-            stateEl.textContent = 'Auto-signed in';
+            let _miniNick = '';
+            try { const _u = JSON.parse(localStorage.getItem('fc_user') || '{}'); _miniNick = _u.nickname || ''; } catch (e) {}
+            stateEl.textContent = _miniNick ? ('Logged in as ' + _miniNick) : 'Logged in';
             guest.style.display = 'none';
             wrap.classList.add('open');
             if (!frame.src || frame.src === 'about:blank') frame.src = '/app';
