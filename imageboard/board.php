@@ -5606,9 +5606,26 @@ if ($singleThread) {
     // ── FrogTalk Mini Widget ──
     let frogMiniOpen = false;
     let frogMiniLogged = false;
+    let frogMiniSyncTimer = null;
 
     function _frogMiniToken() {
-        try { return localStorage.getItem('token') || ''; } catch (e) { return ''; }
+        try {
+            // FrogTalk app stores auth as fc_token/fc_user.
+            // Keep legacy 'token' fallback for older sessions.
+            return localStorage.getItem('fc_token')
+                || localStorage.getItem('token')
+                || '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function _frogMiniHasUser() {
+        try {
+            return !!(localStorage.getItem('fc_user') || localStorage.getItem('user'));
+        } catch (e) {
+            return false;
+        }
     }
 
     function _frogMiniApplyState() {
@@ -5618,7 +5635,7 @@ if ($singleThread) {
         const frame = document.getElementById('frogMiniFrame');
         if (!stateEl || !guest || !wrap || !frame) return;
 
-        frogMiniLogged = !!_frogMiniToken();
+        frogMiniLogged = !!_frogMiniToken() && _frogMiniHasUser();
         if (frogMiniLogged) {
             stateEl.textContent = 'Auto-signed in';
             guest.style.display = 'none';
@@ -5638,7 +5655,15 @@ if ($singleThread) {
         const toggle = document.getElementById('chatToggleBtn');
         if (body) body.style.display = frogMiniOpen ? 'block' : 'none';
         if (toggle) toggle.textContent = frogMiniOpen ? '▼' : '▲';
-        if (frogMiniOpen) _frogMiniApplyState();
+        if (frogMiniOpen) {
+            _frogMiniApplyState();
+            if (!frogMiniSyncTimer) {
+                frogMiniSyncTimer = setInterval(_frogMiniApplyState, 1200);
+            }
+        } else if (frogMiniSyncTimer) {
+            clearInterval(frogMiniSyncTimer);
+            frogMiniSyncTimer = null;
+        }
     }
 
     function frogMiniAuth(mode) {
@@ -5655,6 +5680,19 @@ if ($singleThread) {
         const body = document.getElementById('chatBody');
         if (body) body.style.display = 'none';
         _frogMiniApplyState();
+
+        // React when auth changes in another same-origin context (e.g. /app iframe).
+        window.addEventListener('storage', function(ev) {
+            const k = String(ev && ev.key || '');
+            if (!k || k === 'fc_token' || k === 'fc_user' || k === 'token' || k === 'user') {
+                _frogMiniApplyState();
+            }
+        });
+
+        // Also refresh when tab becomes visible after logging in inside iframe.
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden) _frogMiniApplyState();
+        });
     })();
     
     // ── Live Refresh System ──
