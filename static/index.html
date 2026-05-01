@@ -5221,17 +5221,46 @@ button:disabled, .btn:disabled{ opacity:.55; cursor:not-allowed }
 <body>
 
 <script>
-// Detect mini-widget embed mode (?mini=1) and add class for scoped CSS overrides
-if (new URLSearchParams(location.search).get('mini') === '1') {
-  document.body.classList.add('mini-embedded');
-}
+// Detect mini-widget embed mode and whether it came from board context.
+(function() {
+  const qs = new URLSearchParams(location.search);
+  const isMini = qs.get('mini') === '1';
+  const isBoardSource = qs.get('src') === 'board';
+  if (isMini) document.body.classList.add('mini-embedded');
+  if (isMini && isBoardSource) document.body.classList.add('mini-board-source');
+
+  window.__ftApplyMiniBoardGuestMode = function() {
+    if (!isMini || !isBoardSource) return;
+    let logged = false;
+    try {
+      const t = localStorage.getItem('fc_token') || localStorage.getItem('token') || '';
+      const u = localStorage.getItem('fc_user') || localStorage.getItem('user') || '';
+      logged = !!(t && u);
+    } catch (e) {
+      logged = false;
+    }
+    document.body.classList.toggle('mini-board-guest', !logged);
+  };
+
+  if (isMini && isBoardSource) {
+    window.__ftApplyMiniBoardGuestMode();
+    window.addEventListener('storage', function(ev) {
+      const k = String(ev && ev.key || '');
+      if (!k || k === 'fc_token' || k === 'fc_user' || k === 'token' || k === 'user') {
+        window.__ftApplyMiniBoardGuestMode();
+      }
+    });
+  }
+})();
 </script>
 <style>
 /* ── Mini-widget embed overrides ── */
-body.mini-embedded #board-server-icon,
-body.mini-embedded #board-server-icon + .server-divider,
-body.mini-embedded #social-board-server-icon,
-body.mini-embedded #social-board-server-icon + .server-divider { display:none !important; }
+body.mini-board-guest #board-server-icon,
+body.mini-board-guest #board-server-icon + .server-divider,
+body.mini-board-guest #social-board-server-icon,
+body.mini-board-guest #social-board-server-icon + .server-divider { display:none !important; }
+body.mini-board-guest #server-list { display:none !important; }
+body.mini-board-guest #sidebar { display:none !important; }
 /* Compact auth form to avoid scrolling inside 480px iframe */
 body.mini-embedded .auth-logo { font-size:36px; margin-bottom:2px; }
 body.mini-embedded .auth-title { font-size:20px; margin-bottom:2px; }

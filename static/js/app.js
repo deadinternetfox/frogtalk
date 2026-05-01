@@ -125,6 +125,7 @@ const App = {
     const showAuth = () => {
       document.getElementById('auth-overlay').classList.remove('hidden');
       document.getElementById('app').classList.add('hidden');
+      try { window.__ftApplyMiniBoardGuestMode && window.__ftApplyMiniBoardGuestMode(); } catch {}
       const nick = document.getElementById('auth-nickname');
       if (nick) nick.focus();
       hideSplash();
@@ -276,6 +277,7 @@ const App = {
   async launch() {
     document.getElementById('auth-overlay').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    try { window.__ftApplyMiniBoardGuestMode && window.__ftApplyMiniBoardGuestMode(); } catch {}
 
     // Apply saved theme
     const savedTheme = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'dark';

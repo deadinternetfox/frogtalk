@@ -2033,6 +2033,28 @@ if ($singleThread) {
             line-height:1;
         }
         .frog-mini-note { color:#4a8f4a; font-size:11px; }
+        .frog-mini-open-full {
+            width:24px;
+            height:24px;
+            border:1px solid rgba(0,255,65,0.28);
+            border-radius:6px;
+            background:rgba(0,255,65,0.06);
+            color:#9fffa3;
+            font-size:13px;
+            line-height:1;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+            margin-left:auto;
+            margin-right:6px;
+            transition:background .15s ease, border-color .15s ease, color .15s ease;
+        }
+        .frog-mini-open-full:hover {
+            background:rgba(0,255,65,0.12);
+            border-color:rgba(0,255,65,0.45);
+            color:#d5ffd7;
+        }
         .frog-mini-wrap { display:none; height: 480px; border-top:1px solid rgba(0,255,65,0.15); }
         .frog-mini-wrap.open { display:block; }
         .frog-mini-frame { width:100%; height:100%; border:none; background:#0b120b; }
@@ -3569,6 +3591,7 @@ if ($singleThread) {
         <div class="chat-header" onclick="toggleFrogMini()">
             <h4 class="frog-mini-headline"><span class="frog-mini-emoji" aria-hidden="true">🐸</span><span class="frog-mini-label">FrogTalk</span></h4>
             <span class="frog-mini-note" id="frogMiniState">Checking login…</span>
+            <button class="frog-mini-open-full" id="frogMiniOpenFull" type="button" title="Open full FrogTalk" aria-label="Open full FrogTalk in new tab" onclick="event.stopPropagation();frogMiniOpenFullApp()">⤢</button>
             <button class="chat-toggle" id="chatToggleBtn">▲</button>
         </div>
         <div class="chat-body" id="chatBody" style="display:block;max-height:none;">
@@ -5610,6 +5633,13 @@ if ($singleThread) {
     let frogMiniAuthPending = false;
     let frogMiniAuthPendingTimer = null;
 
+    function _frogMiniUpdateOpenFullBtn() {
+        const openFullBtn = document.getElementById('frogMiniOpenFull');
+        if (!openFullBtn) return;
+        // Only show for board visitors who are not already logged in.
+        openFullBtn.style.display = frogMiniLogged ? 'none' : 'inline-flex';
+    }
+
     function _frogMiniToken() {
         try {
             // FrogTalk app stores auth as fc_token/fc_user.
@@ -5638,6 +5668,7 @@ if ($singleThread) {
         if (!stateEl || !guest || !wrap || !frame) return;
 
         frogMiniLogged = !!_frogMiniToken() && _frogMiniHasUser();
+        _frogMiniUpdateOpenFullBtn();
         if (frogMiniLogged) {
             // Auth succeeded — clear pending flag
             frogMiniAuthPending = false;
@@ -5647,7 +5678,7 @@ if ($singleThread) {
             stateEl.textContent = _miniNick ? ('Logged in as ' + _miniNick) : 'Logged in';
             guest.style.display = 'none';
             wrap.classList.add('open');
-            if (!frame.src || frame.src === 'about:blank') frame.src = '/app?mini=1';
+            if (!frame.src || frame.src === 'about:blank') frame.src = '/app?mini=1&src=board';
         } else if (!frogMiniAuthPending) {
             // Only reset to guest state if auth is not in progress
             stateEl.textContent = 'Not logged in';
@@ -5688,9 +5719,13 @@ if ($singleThread) {
             frogMiniAuthPendingTimer = null;
             _frogMiniApplyState();
         }, 10 * 60 * 1000);
-        frame.src = mode === 'register' ? '/app?register=1&mini=1' : '/app?mini=1';
+        frame.src = mode === 'register' ? '/app?register=1&mini=1&src=board' : '/app?mini=1&src=board';
         guest.style.display = 'none';
         wrap.classList.add('open');
+    }
+
+    function frogMiniOpenFullApp() {
+        window.open('/app', '_blank', 'noopener,noreferrer');
     }
 
     (function initFrogMini() {
