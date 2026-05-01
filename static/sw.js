@@ -66,7 +66,7 @@ self.addEventListener('fetch', event => {
     url.pathname === '/static/index.html' ||
     url.pathname.startsWith('/static/js/')
   ) {
-    event.respondWith(fetch(event.request));
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }
 
