@@ -342,9 +342,8 @@ const Notifications = (() => {
         if (data) return _playCustomSound(data);
       }
       const fn = MSG_TONES[tone] || MSG_TONES.pop;
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      fn(ctx);
-    } catch {}
+      _playWithCtx(fn);
+    } catch (e) { console.warn('[FT sound]', e); }
   }
 
   function _playRing(name, opts) {
@@ -362,9 +361,20 @@ const Notifications = (() => {
         if (data) return _playCustomSound(data);
       }
       const fn = RING_TONES[tone] || RING_TONES.default;
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      fn(ctx);
-    } catch {}
+      _playWithCtx(fn);
+    } catch (e) { console.warn('[FT ring]', e); }
+  }
+
+  function _playWithCtx(fn) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ctx = new AC();
+    const run = () => { try { fn(ctx); } catch (e) { console.warn('[FT ctx]', e); } };
+    if (ctx.state === 'suspended') {
+      ctx.resume().then(run).catch(run);
+    } else {
+      run();
+    }
   }
 
   return { init, registerSW, requestPermission, promptInstall,

@@ -568,7 +568,6 @@ function openFriendSoundEditor(nick) {
             <div id="fsm-ring-list" class="fsm-list"></div>
           </div>
         </div>
-        <input id="fsm-file-input" class="fsm-file-input" type="file" accept="audio/*,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.aac,.opus,.flac,.mp4,.webm" tabindex="-1" aria-hidden="true">
         <div class="fsm-actions">
           <button class="fsm-btn" type="button" data-fsm-action="reset">↺ Reset to default</button>
           <button class="fsm-btn primary" type="button" data-fsm-action="close">✓ Done</button>
@@ -798,34 +797,43 @@ function _uploadFriendSound(kind) {
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
   if (!nick || !window.Notifications) return;
-  const input = m.querySelector('#fsm-file-input');
-  if (!input) {
-    if (typeof toast === 'function') toast('Upload control unavailable', 'error');
-    return;
-  }
-  m._uploadKind = kind;
-  input.value = '';
+
+  // Create a fresh input appended directly to body so no overflow:hidden
+  // clipping or modal stacking context interferes with the picker.
+  const old = document.getElementById('_fsm_upload_tmp');
+  if (old) old.remove();
+  const input = document.createElement('input');
+  input.id = '_fsm_upload_tmp';
+  input.type = 'file';
+  input.accept = 'audio/*,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.aac,.opus,.flac,.mp4,.webm';
+  input.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1';
+  document.body.appendChild(input);
+
   input.onchange = async () => {
+    input.remove();
     const f = input.files && input.files[0];
     if (!f) return;
-    const useKind = m._uploadKind || kind;
-    const res = await Notifications.uploadCustomSound(nick, useKind, f);
+    const res = await Notifications.uploadCustomSound(nick, kind, f);
     if (!res.ok) {
       if (typeof toast === 'function') toast(res.error || 'Upload failed', 'error');
       return;
     }
-    _setCustomSoundMeta(nick, useKind, { name: f.name || 'Custom file', size: f.size || 0 });
-    Notifications.setFriendSound(nick, useKind, 'custom');
-    _renderFriendSoundList(useKind);
+    _setCustomSoundMeta(nick, kind, { name: f.name || 'Custom file', size: f.size || 0 });
+    Notifications.setFriendSound(nick, kind, 'custom');
+    _renderFriendSoundList(kind);
     if (typeof toast === 'function') toast('Custom sound saved & active', 'success');
     Notifications.playCustomSound(res.dataUrl);
   };
-  try {
-    if (typeof input.showPicker === 'function') input.showPicker();
-    else input.click();
-  } catch {
-    try { input.click(); } catch {}
-  }
+
+  // Give the browser one tick to register the element, then trigger picker.
+  setTimeout(() => {
+    try {
+      if (typeof input.showPicker === 'function') input.showPicker();
+      else input.click();
+    } catch {
+      try { input.click(); } catch {}
+    }
+  }, 0);
 }
 
 function _previewFriendSound(kind, key) {
