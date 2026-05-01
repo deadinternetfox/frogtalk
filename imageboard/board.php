@@ -2036,6 +2036,10 @@ if ($singleThread) {
             color:#4a8f4a;
             font-size:11px;
             margin-left:8px;
+            display:inline-flex;
+            align-items:center;
+            line-height:1;
+            transform:translateY(1px);
             white-space:nowrap;
         }
         .frog-mini-open-full {
@@ -2052,13 +2056,16 @@ if ($singleThread) {
             justify-content:center;
             cursor:pointer;
             margin-left:auto;
-            margin-right:6px;
+            margin-right:10px;
             transition:background .15s ease, border-color .15s ease, color .15s ease;
         }
         .frog-mini-open-full:hover {
             background:rgba(0,255,65,0.12);
             border-color:rgba(0,255,65,0.45);
             color:#d5ffd7;
+        }
+        .chat-header .chat-toggle {
+            margin-left:2px;
         }
         .frog-mini-wrap { display:none; height: 480px; border-top:1px solid rgba(0,255,65,0.15); }
         .frog-mini-wrap.open { display:block; }
