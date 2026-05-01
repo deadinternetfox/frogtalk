@@ -635,6 +635,27 @@ function _setCustomPreviewState(kind, source) {
   _renderFriendSoundList('ring');
 }
 
+function _renderQuickButtons(kind, current) {
+  const m = document.getElementById('friend-sound-modal');
+  if (!m) return;
+  const buttons = Array.from(m.querySelectorAll('[data-fsm-action="pick"][data-kind="' + kind + '"]'));
+  buttons.forEach((btn) => {
+    const key = btn.dataset.key || '';
+    const isDefault = key === '';
+    const selected = (isDefault && !current) || (!isDefault && key === current);
+    btn.classList.toggle('active', selected);
+    if (selected) {
+      btn.style.boxShadow = '0 0 0 2px rgba(76,175,80,.35)';
+      btn.style.borderColor = '#4caf50';
+      btn.style.color = '#dff5e8';
+    } else {
+      btn.style.boxShadow = '';
+      btn.style.borderColor = '';
+      btn.style.color = '';
+    }
+  });
+}
+
 function _isPreviewing(kind, source) {
   const m = document.getElementById('friend-sound-modal');
   if (!m) return false;
@@ -689,7 +710,7 @@ function _bindFriendSoundModalEvents(modal) {
       if (typeof toast === 'function') toast('No file selected', 'info');
       return;
     }
-    const max = Number(window.Notifications?.CUSTOM_SOUND_MAX_BYTES || 0) || (2 * 1024 * 1024);
+    const max = Number(window.Notifications?.CUSTOM_SOUND_MAX_BYTES || 0) || (10 * 1024 * 1024);
     if (file.size > max) {
       _setPendingUpload(kind, file);
       modal._uploadStatus = modal._uploadStatus || {};
@@ -764,6 +785,7 @@ function _renderFriendSoundList(kind) {
   const customData = (Notifications.getCustomSound && Notifications.getCustomSound(nick, kind)) || null;
   const customMeta = _getCustomSoundMeta(nick, kind);
   const serverState = m._serverSounds?.[kind] || null;
+  _renderQuickButtons(kind, current);
   _renderCurrentChoice(kind, current, customMeta);
 
   // Render the "uploaded file" chip if present
