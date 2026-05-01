@@ -396,8 +396,12 @@ const Notifications = (() => {
     uploadCustomSound(nick, kind, file) {
       return new Promise((resolve) => {
         if (!file) return resolve({ ok: false, error: 'No file' });
-        if (!/^audio\//.test(file.type) && !/\.(mp3|wav|ogg|m4a|aac)$/i.test(file.name || '')) {
-          return resolve({ ok: false, error: 'Not an audio file' });
+        if (
+          !/^audio\//i.test(file.type)
+          && !/^video\/(mp4|webm)$/i.test(file.type)
+          && !/\.(mp3|wav|ogg|m4a|aac|opus|flac|mp4|webm)$/i.test(file.name || '')
+        ) {
+          return resolve({ ok: false, error: 'Unsupported file type' });
         }
         if (file.size > CUSTOM_MAX_BYTES) {
           return resolve({ ok: false, error: 'File too large (max 2 MB)' });
