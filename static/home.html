@@ -920,10 +920,13 @@
   .mobile-banner-text h4 {
     color: #fff; font-size: .9rem; margin: 0; font-weight: 600;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    letter-spacing: .01em;
+    line-height: 1.2;
   }
   .mobile-banner-text p {
     color: rgba(255,255,255,.85); font-size: .72rem; margin: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1.2;
   }
   .mobile-banner-btn {
     background: #fff; color: #16a34a;
@@ -948,9 +951,37 @@
     .mobile-banner { padding: .6rem .65rem; gap: .5rem; }
     .mobile-banner-content { gap: .5rem; }
     .mobile-banner-icon { font-size: 1.4rem; }
-    .mobile-banner-text h4 { font-size: .82rem; }
-    .mobile-banner-text p  { font-size: .68rem; }
+    .mobile-banner-text h4 { font-size: .80rem; }
+    .mobile-banner-text p  { font-size: .66rem; }
     .mobile-banner-btn { padding: .5rem .75rem; font-size: .78rem; }
+  }
+
+  /* Ultra-narrow phones: let text wrap and move actions to a cleaner second row. */
+  @media (max-width: 340px) {
+    .mobile-banner {
+      flex-wrap: wrap;
+      row-gap: .4rem;
+      padding: .55rem .6rem;
+    }
+    .mobile-banner-content {
+      flex: 1 1 100%;
+      min-width: 0;
+    }
+    .mobile-banner-text h4,
+    .mobile-banner-text p {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+    .mobile-banner-btn {
+      margin-left: calc(1.4rem + .5rem);
+      padding: .45rem .68rem;
+      font-size: .74rem;
+    }
+    .mobile-banner-close {
+      margin-left: auto;
+      font-size: 1.2rem;
+    }
   }
 
   @media (min-width: 769px) {

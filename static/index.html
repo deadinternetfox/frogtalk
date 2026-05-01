@@ -7334,7 +7334,10 @@ function openFrogBoard() {
 function updateBoardSideMenuAuth() {
   const menu = document.getElementById('board-side-menu');
   if (!menu) return;
-  menu.classList.toggle('guest-menu', !hasFrogTalkSession());
+  // Native clients (Android/Electron desktop) already live inside FrogTalk,
+  // so don't show the "Use FrogTalk while browsing" guest card there.
+  const showGuestCard = !hasFrogTalkSession() && !isNativeFrogClient();
+  menu.classList.toggle('guest-menu', showGuestCard);
 }
 
 function openBoardAuth(mode) {
