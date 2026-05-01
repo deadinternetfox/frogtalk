@@ -671,6 +671,12 @@ function _ensureFriendSoundModalGuard(modal) {
 function closeFriendSoundEditor() {
   const m = document.getElementById('friend-sound-modal');
   if (!m) return;
+  // Block close while an upload is in progress
+  const busyKinds = Object.entries(m._uploadBusy || {}).filter(([, v]) => v).map(([k]) => k);
+  if (busyKinds.length) {
+    if (typeof toast === 'function') toast('Upload in progress — please wait', 'info');
+    return;
+  }
   // Stop all audio FIRST, before clearing state or hiding
   try { window.Notifications?.stopCustomSound?.(); } catch {}
   try { window.Notifications?.stopAllPreviewAudio?.(); } catch {}
@@ -1036,19 +1042,11 @@ function _renderCurrentChoice(kind, current, customMeta) {
   const id = kind === 'msg' ? 'fsm-msg-current' : 'fsm-ring-current';
   const el = m.querySelector('#' + id);
   if (!el) return;
-  const isDefault = !current;
-  const label = isDefault
-    ? 'App default (' + (kind === 'msg' ? (localStorage.getItem('ft_notify_tone') || 'pop') : (localStorage.getItem('ft_notify_ring') || 'default')) + ')'
-    : (current === 'custom' ? ('Custom: ' + (customMeta?.name || 'uploaded file')) : _friendSoundLabel(kind, current));
-  el.innerHTML = `
-    <div class="fsm-custom-chip" style="margin-bottom:8px;box-shadow:0 0 0 2px rgba(76,175,80,.22)">
-      <button class="fcc-btn" type="button" title="Preview current" data-fsm-action="preview-current" data-kind="${kind}">▶</button>
-      <div style="flex:1;min-width:0">
-        <div class="fcc-name">Current: ${esc(label)}</div>
-        <div class="fcc-meta">${isDefault ? 'uses app setting' : 'active for this friend'}</div>
-      </div>
-      <span style="color:#4caf50;font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>
-    </div>`;
+  // Current state is represented by the ACTIVE row in the list below.
+  // Keep this container empty to avoid duplicate active cards.
+  void current;
+  void customMeta;
+  el.innerHTML = '';
 }
 
 function _previewCurrentChoice(kind) {
@@ -1057,6 +1055,10 @@ function _previewCurrentChoice(kind) {
   if (!nick || !window.Notifications) return;
   const current = Notifications.getFriendSound(nick, kind);
   if (!current) return _previewDefaultFriendSound(kind);
+  if (current === 'custom') {
+    const sid = Number(m?._serverSounds?.[kind]?.active?.id || 0) || 0;
+    return _previewFriendSound(kind, current, sid || null);
+  }
   return _previewFriendSound(kind, current);
 }
 
@@ -1148,6 +1150,19 @@ function _authedSoundUrl(url) {
   return u + sep + 'token=' + encodeURIComponent(tok);
 }
 
+function _fileToDataUrl(file) {
+  return new Promise((resolve) => {
+    try {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ''));
+      fr.onerror = () => resolve('');
+      fr.readAsDataURL(file);
+    } catch {
+      resolve('');
+    }
+  });
+}
+
 async function _syncServerSounds(kind) {
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
@@ -1166,7 +1181,12 @@ async function _syncServerSounds(kind) {
     m._serverSounds[kind] = { assets, active, loaded: true };
     if (active?.url) {
       const authed = _authedSoundUrl(active.url);
-      try { Notifications.setCustomSound?.(nick, kind, authed); } catch {}
+      // Don't overwrite a locally-cached data: URL with a server URL — server
+      // URLs with embedded tokens drift across nodes and cause http_400 on preview.
+      const existing = Notifications.getCustomSound?.(nick, kind);
+      if (!existing || !/^data:/i.test(existing)) {
+        try { Notifications.setCustomSound?.(nick, kind, authed); } catch {}
+      }
       _setCustomSoundMeta(nick, kind, {
         name: active.filename || 'Custom file',
         size: Number(active.file_size || 0) || 0,
@@ -1244,13 +1264,7 @@ async function _deleteCustomSound(kind, assetId) {
   if (!nick || !window.Notifications) return;
   const serverState = m?._serverSounds?.[kind] || null;
   const pickId = Number(assetId || serverState?.active?.id || 0) || 0;
-  if (pickId) {
-    const ok = await _deleteServerSound(kind, pickId);
-    if (!ok) {
-      if (typeof toast === 'function') toast('Could not delete custom sound', 'error');
-      return;
-    }
-  }
+  // Optimistic: update UI immediately so controls feel instant
   Notifications.setCustomSound(nick, kind, null);
   _setCustomSoundMeta(nick, kind, null);
   m._selectedByKind = m._selectedByKind || {};
@@ -1261,6 +1275,12 @@ async function _deleteCustomSound(kind, assetId) {
   }
   _renderFriendSoundList(kind);
   if (typeof toast === 'function') toast('Custom sound removed', 'info');
+  // Fire server delete in background; if it fails just warn
+  if (pickId) {
+    _deleteServerSound(kind, pickId).then(ok => {
+      if (!ok && typeof toast === 'function') toast('Warning: could not remove from server', 'warning');
+    }).catch(() => {});
+  }
 }
 
 function _setPendingUpload(kind, file) {
@@ -1324,7 +1344,7 @@ function _renderPendingUpload(kind) {
     </div>`;
 }
 
-function _previewPendingUpload(kind) {
+async function _previewPendingUpload(kind) {
   const m = document.getElementById('friend-sound-modal');
   const p = m?._pendingUploads?.[kind];
   if (!p?.url) return;
@@ -1336,12 +1356,13 @@ function _previewPendingUpload(kind) {
   try {
     try { Notifications.unlockAudio?.(); } catch {}
     Notifications.stopAllPreviewAudio?.();
-    const ok = Notifications.playCustomSound(p.url, kind);
-    if (!ok) throw new Error('play_failed');
+    const res = await (Notifications.previewCustomSound?.(p.url, kind)
+      || Promise.resolve({ ok: !!Notifications.playCustomSound?.(p.url, kind), error: 'play_failed' }));
+    if (!res?.ok) throw new Error(res?.error || 'play_failed');
     _setCustomPreviewState(kind, 'pending');
     if (typeof toast === 'function') toast('Previewing selected file', 'info');
-  } catch {
-    if (typeof toast === 'function') toast('Preview failed', 'error');
+  } catch (e) {
+    if (typeof toast === 'function') toast('Preview failed: ' + String(e?.message || 'unavailable'), 'error');
   }
 }
 
@@ -1356,7 +1377,6 @@ async function _commitPendingUpload(kind) {
     if (typeof toast === 'function') toast('No file selected', 'info');
     return;
   }
-  if (typeof toast === 'function') toast('Uploading ' + (p.file.name || 'file') + '...', 'info');
   m._uploadBusy = m._uploadBusy || {};
   m._uploadProgress = m._uploadProgress || {};
   m._uploadStatus = m._uploadStatus || {};
@@ -1477,16 +1497,31 @@ async function _uploadFriendSound(kind, file) {
     });
     void _syncServerSounds(kind);
   }
+  // Best effort: keep a local data URL for reliable preview even when
+  // server-token validation drifts across origins.
+  try {
+    const localDataUrl = await _fileToDataUrl(file);
+    if (localDataUrl) Notifications.setCustomSound?.(nick, kind, localDataUrl);
+  } catch {}
   _renderFriendSoundList(kind);
   if (typeof toast === 'function') toast('Custom sound saved & active', 'success');
   const uploadedCt = String(res.asset?.content_type || file.type || '').toLowerCase();
+  let localPreviewUrl = '';
+  try { localPreviewUrl = URL.createObjectURL(file); } catch {}
   if (_canPreviewAudioContentType(uploadedCt)) {
-    const played = Notifications.playCustomSound(res.dataUrl, kind);
-    if (played) {
+    // Prefer previewing the local selected file first to avoid cross-node
+    // token drift immediately after upload.
+    let played = await (Notifications.previewCustomSound?.(localPreviewUrl || res.dataUrl, kind)
+      || Promise.resolve({ ok: !!Notifications.playCustomSound?.(localPreviewUrl || res.dataUrl, kind), error: 'play_failed' }));
+    if (!played?.ok && localPreviewUrl) {
+      played = await (Notifications.previewCustomSound?.(res.dataUrl, kind)
+        || Promise.resolve({ ok: !!Notifications.playCustomSound?.(res.dataUrl, kind), error: 'play_failed' }));
+    }
+    if (played?.ok) {
       _setCustomPreviewState(kind, 'saved:' + (Number(res.asset?.id || 0) || 'local'));
     } else {
       _setCustomPreviewState('', '');
-      if (typeof toast === 'function') toast('Saved, but preview is unavailable on this device', 'warning');
+      if (typeof toast === 'function') toast('Saved, but preview failed: ' + String(played?.error || 'unavailable'), 'warning');
     }
   } else {
     _setCustomPreviewState('', '');
@@ -1495,13 +1530,28 @@ async function _uploadFriendSound(kind, file) {
   return true;
 }
 
-function _previewFriendSound(kind, key, assetId) {
+async function _previewFriendSound(kind, key, assetId) {
   if (!window.Notifications || !key) return;
   try { Notifications.unlockAudio?.(); } catch {}
   try { Notifications.stopAllPreviewAudio?.(); } catch {}
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
   if (key === 'custom' && nick) {
+    const localCached = String(Notifications.getCustomSound?.(nick, kind) || '');
+    const hasLocalPlayable = /^data:audio\//i.test(localCached) || /^blob:/i.test(localCached);
+    if (hasLocalPlayable) {
+      if (_isPreviewing(kind, 'saved')) {
+        try { Notifications.stopCustomSound?.(); } catch {}
+        _setCustomPreviewState('', '');
+        return;
+      }
+      const localRes = await (Notifications.previewCustomSound?.(localCached, kind)
+        || Promise.resolve({ ok: !!Notifications.playCustomSound?.(localCached, kind), error: 'play_failed' }));
+      if (localRes?.ok) {
+        _setCustomPreviewState(kind, 'saved');
+        return;
+      }
+    }
     const serverState = m?._serverSounds?.[kind] || null;
     const sid = Number(assetId || serverState?.active?.id || 0) || 0;
     const serverAsset = sid
@@ -1519,9 +1569,21 @@ function _previewFriendSound(kind, key, assetId) {
         _setCustomPreviewState('', '');
         return;
       }
-      const ok = Notifications.playCustomSound(_authedSoundUrl(serverAsset.url), kind);
-      if (!ok) {
-        if (typeof toast === 'function') toast('Preview failed', 'error');
+      const res = await (Notifications.previewCustomSound?.(_authedSoundUrl(serverAsset.url), kind)
+        || Promise.resolve({ ok: !!Notifications.playCustomSound?.(_authedSoundUrl(serverAsset.url), kind), error: 'play_failed' }));
+      if (!res?.ok) {
+        const local = Notifications.getCustomSound?.(nick, kind);
+        const remote = _authedSoundUrl(serverAsset.url);
+        if (local && local !== remote) {
+          const localRes = await (Notifications.previewCustomSound?.(local, kind)
+            || Promise.resolve({ ok: !!Notifications.playCustomSound?.(local, kind), error: 'play_failed' }));
+          if (localRes?.ok) {
+            _setCustomPreviewState(kind, sourceKey);
+            if (typeof toast === 'function') toast('Previewing local cached sound', 'info');
+            return;
+          }
+        }
+        if (typeof toast === 'function') toast('Preview failed: ' + String(res?.error || 'unavailable'), 'error');
         _setCustomPreviewState('', '');
         return;
       }
@@ -1535,9 +1597,10 @@ function _previewFriendSound(kind, key, assetId) {
         _setCustomPreviewState('', '');
         return;
       }
-      const ok = Notifications.playCustomSound(data, kind);
-      if (!ok) {
-        if (typeof toast === 'function') toast('Preview failed', 'error');
+      const res = await (Notifications.previewCustomSound?.(data, kind)
+        || Promise.resolve({ ok: !!Notifications.playCustomSound?.(data, kind), error: 'play_failed' }));
+      if (!res?.ok) {
+        if (typeof toast === 'function') toast('Preview failed: ' + String(res?.error || 'unavailable'), 'error');
         _setCustomPreviewState('', '');
         return;
       }
