@@ -339,6 +339,11 @@ function renderDMChannels () {
 
 /* ── Open / navigate ─────────────────────────────────────────────────────────── */
 async function openDMChannel (id, nickname, avatar) {
+  // If user lands in DMs from the empty-state welcome screen, clear the
+  // welcome-mode body flag first. That mode intentionally hides #input-area
+  // (display:none !important), which otherwise makes the composer vanish.
+  try { document.body.classList.remove('in-welcome'); } catch {}
+
   // Smooth transition: if we're coming from a public channel, clear its state
   if (State.currentRoomType && State.currentRoomType !== 'dm') {
     State.currentRoom = null;
