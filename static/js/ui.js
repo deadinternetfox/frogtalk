@@ -3510,9 +3510,24 @@ async function _resolveBridgeSourceFromConfig(platform) {
 function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourceParent, bridgeAvatar) {
   const plat = String(platform || '').toLowerCase();
   const meta = ({
-    telegram: { label: 'Telegram', color: '#4fc3e8', icon: '✈️' },
-    discord:  { label: 'Discord',  color: '#8aa5f5', icon: '🎮' },
-  })[plat] || { label: 'Bridge', color: '#888', icon: '🌉' };
+    telegram: {
+      label: 'Telegram',
+      color: '#4fc3e8',
+      logo: "<svg viewBox='0 0 24 24' width='16' height='16' fill='currentColor' aria-hidden='true'><path d='M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z'/></svg>",
+    },
+    discord: {
+      label: 'Discord',
+      color: '#8aa5f5',
+      logo: "<svg viewBox='0 0 24 24' width='16' height='16' fill='currentColor' aria-hidden='true'><path d='M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z'/></svg>",
+    },
+  })[plat] || {
+    label: 'Bridge',
+    color: '#9aa4ae',
+    logo: "<span style='font-size:13px;line-height:1' aria-hidden='true'>🌉</span>",
+  };
+  const pipBg = '#111a20';
+  const logoPip = `<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;line-height:1">${meta.logo}</span>`;
+  const logoBadge = `<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;line-height:1">${meta.logo}</span>`;
   const safeNick = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(nickname) : String(nickname).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
   const safePlat = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(meta.label) : meta.label;
   const sourceFallback = sourceName ? '' : 'Loading source...';
@@ -3536,11 +3551,11 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
         <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:16px;padding-top:36px">
           <div class="profile-avatar-large" style="width:90px;height:90px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4);position:relative;overflow:visible">
             ${avatar}
-            <div class="bp-platform-pip" title="Bridged from ${safePlat}" style="position:absolute;right:-6px;bottom:-6px;width:30px;height:30px;border-radius:50%;background:${meta.color};color:#0a0a0a;display:flex;align-items:center;justify-content:center;font-size:15px;border:3px solid #111;z-index:5;box-shadow:0 2px 8px rgba(0,0,0,.45)">${meta.icon}</div>
+            <div class="bp-platform-pip" title="Bridged from ${safePlat}" style="position:absolute;right:-6px;bottom:-6px;width:30px;height:30px;border-radius:50%;background:${pipBg};color:${meta.color};display:flex;align-items:center;justify-content:center;border:2px solid ${meta.color};z-index:5;box-shadow:0 2px 8px rgba(0,0,0,.45)">${logoPip}</div>
           </div>
           <div style="flex:1;min-width:0;padding-bottom:4px">
             <div class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3)">${safeNick}</div>
-            <div style="margin-top:4px"><span class="bridge-origin-badge" data-platform="${plat}" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:10px;background:${meta.color}26;color:${meta.color};border:1px solid ${meta.color}66">${meta.icon} via ${safePlat}</span></div>
+            <div style="margin-top:4px"><span class="bridge-origin-badge" data-platform="${plat}" style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:10px;background:${pipBg};color:${meta.color};border:1px solid ${meta.color}66">${logoBadge} VIA ${safePlat.toUpperCase()}</span></div>
           </div>
         </div>
       </div>
