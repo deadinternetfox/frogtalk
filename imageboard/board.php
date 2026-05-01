@@ -2032,7 +2032,12 @@ if ($singleThread) {
             display:inline-block;
             line-height:1;
         }
-        .frog-mini-note { color:#4a8f4a; font-size:11px; }
+        .frog-mini-note {
+            color:#4a8f4a;
+            font-size:11px;
+            margin-left:8px;
+            white-space:nowrap;
+        }
         .frog-mini-open-full {
             width:24px;
             height:24px;
@@ -3591,7 +3596,7 @@ if ($singleThread) {
         <div class="chat-header" onclick="toggleFrogMini()">
             <h4 class="frog-mini-headline"><span class="frog-mini-emoji" aria-hidden="true">🐸</span><span class="frog-mini-label">FrogTalk</span></h4>
             <span class="frog-mini-note" id="frogMiniState">Checking login…</span>
-            <button class="frog-mini-open-full" id="frogMiniOpenFull" type="button" title="Open full FrogTalk" aria-label="Open full FrogTalk in new tab" onclick="event.stopPropagation();frogMiniOpenFullApp()">⤢</button>
+            <button class="frog-mini-open-full" id="frogMiniOpenFull" type="button" title="Open full FrogTalk" aria-label="Open full FrogTalk in new tab" onclick="event.stopPropagation();frogMiniOpenFullApp()">↗</button>
             <button class="chat-toggle" id="chatToggleBtn">▲</button>
         </div>
         <div class="chat-body" id="chatBody" style="display:block;max-height:none;">
