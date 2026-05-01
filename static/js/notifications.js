@@ -139,27 +139,13 @@ const Notifications = (() => {
   async function init() {
     await registerSW();
     setupInstallPrompt();
-    // Prime WebAudio once on user interaction so incoming-call rings work
-    // reliably across browsers with autoplay restrictions.
+    // Prime audio only from trusted gestures to satisfy autoplay rules.
     try {
-      const prime = () => {
+      const prime = (ev) => {
         if (_audioPrimed) return;
+        if (ev && ev.isTrusted === false) return;
         _audioPrimed = true;
-        try {
-          const Ctx = window.AudioContext || window.webkitAudioContext;
-          if (!Ctx) return;
-          const ctx = new Ctx();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          gain.gain.value = 0;
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.start(); osc.stop(ctx.currentTime + 0.01);
-          if (ctx.state === 'suspended') {
-            const p = ctx.resume();
-            if (p && typeof p.catch === 'function') p.catch(() => {});
-          }
-          setTimeout(() => { try { if (ctx.state !== 'closed') ctx.close(); } catch {} }, 50);
-        } catch {}
+        try { _unlockAudio(); } catch {}
       };
       window.addEventListener('pointerdown', prime, { once: true, passive: true });
       window.addEventListener('keydown', prime, { once: true });
@@ -225,16 +211,18 @@ const Notifications = (() => {
   }
 
   // ── Custom uploaded sounds (per-friend & app-wide) ────────────────────────
-  // Stored as data URLs in a dedicated localStorage slot. Size-capped at ~2MB
-  // per file to avoid blowing the quota.
-  const CUSTOM_MAX_BYTES = 2 * 1024 * 1024;
+  // Stored as data URLs in a dedicated localStorage slot. Keep files capped to
+  // reduce localStorage pressure while allowing short media clips.
+  const CUSTOM_MAX_BYTES = 12 * 1024 * 1024;
   function _customSounds() {
     try { return JSON.parse(localStorage.getItem('ft_custom_sounds') || '{}') || {}; }
     catch { return {}; }
   }
   function _saveCustomSounds(map) {
     try { localStorage.setItem('ft_custom_sounds', JSON.stringify(map || {})); }
-    catch (e) { console.warn('Custom sound save failed (quota?)', e); }
+    catch (e) {
+      throw new Error('Storage quota exceeded for custom sounds');
+    }
   }
   function _customKey(nick, kind) {
     return (nick ? ('friend:' + nick) : 'app') + ':' + kind;
@@ -250,13 +238,54 @@ const Notifications = (() => {
     _saveCustomSounds(map);
   }
   let _customAudio = null;
+  const _FALLBACK_PREVIEW_BEEP = 'data:audio/wav;base64,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';
   function _playCustomSound(dataUrl) {
     if (!dataUrl) return;
     try {
-      if (_customAudio) { try { _customAudio.pause(); } catch {} }
+      if (_customAudio) {
+        try {
+          _customAudio.pause();
+          _customAudio.currentTime = 0;
+        } catch {}
+      }
       _customAudio = new Audio(dataUrl);
       _customAudio.volume = 0.9;
       _customAudio.play().catch(() => {});
+    } catch {}
+  }
+  function _playPreviewFallback(kind, tone) {
+    try {
+      if (_customAudio) {
+        try {
+          _customAudio.pause();
+          _customAudio.currentTime = 0;
+        } catch {}
+      }
+      _customAudio = new Audio(_FALLBACK_PREVIEW_BEEP);
+      _customAudio.volume = 0.95;
+      const maps = kind === 'ring'
+        ? { default: 0.95, classic: 0.9, digital: 1.05, melody: 1.12, marimba: 1.18, sonar: 0.82 }
+        : { pop: 1.0, chime: 1.1, ding: 1.2, click: 0.85, bell: 1.25, soft: 0.9, bubble: 1.3, zap: 1.4, coin: 1.15, knock: 0.75 };
+      _customAudio.playbackRate = maps[tone] || 1.0;
+      _customAudio.play().catch(() => {});
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  function _stopCustomSound() {
+    if (!_customAudio) return;
+    try {
+      _customAudio.pause();
+      _customAudio.currentTime = 0;
+    } catch {}
+  }
+  function _stopAllPreviewAudio() {
+    _stopCustomSound();
+    try {
+      if (_sharedCtx && _sharedCtx.state === 'running') {
+        _sharedCtx.suspend();
+      }
     } catch {}
   }
 
@@ -312,9 +341,10 @@ const Notifications = (() => {
       osc.type = type || 'sine';
       osc.frequency.value = freq;
       const t = ctx.currentTime + start;
+      const amp = Math.max(0.01, Math.min(0.9, (vol || 0.2) * 2.0));
       gain.gain.setValueAtTime(0, t);
-      gain.gain.linearRampToValueAtTime(vol, t + 0.015);
-      if (sustain > 0) gain.gain.setValueAtTime(vol, t + sustain);
+      gain.gain.linearRampToValueAtTime(amp, t + 0.015);
+      if (sustain > 0) gain.gain.setValueAtTime(amp, t + sustain);
       gain.gain.exponentialRampToValueAtTime(0.001, t + dur + sustain);
       osc.start(t);
       osc.stop(t + dur + sustain + 0.02);
@@ -322,64 +352,154 @@ const Notifications = (() => {
     const totalMs = Math.max(
       ...steps.map(([, s, d]) => (s + d + sustain)),
     ) * 1000 + 40;
-    setTimeout(() => { try { ctx.close(); } catch {} }, totalMs);
+    // Do NOT close the shared context — just let oscillators stop naturally.
+    void totalMs;
   }
 
   function _playTone(name, opts) {
-    if (!opts?.force && !_pref('notify_sounds', true)) return;
+    if (!opts?.force && !_pref('notify_sounds', true)) {
+      return { ok: false, reason: 'notify_sounds_disabled' };
+    }
     try {
       const tone = name || _currentTone();
-      if (tone === 'silent') return;
+      if (tone === 'silent') return { ok: false, reason: 'tone_silent' };
       // Custom uploaded app-wide tone
       if (tone === 'custom') {
         const data = _getCustomSound(null, 'msg');
-        if (data) return _playCustomSound(data);
+        if (data) {
+          _playCustomSound(data);
+          return { ok: true, mode: 'custom' };
+        }
       }
       // Per-friend custom: "custom:<nick>"
       if (typeof tone === 'string' && tone.startsWith('custom:')) {
         const nick = tone.slice(7);
         const data = _getCustomSound(nick, 'msg');
-        if (data) return _playCustomSound(data);
+        if (data) {
+          _playCustomSound(data);
+          return { ok: true, mode: 'custom-friend' };
+        }
+      }
+      if (opts?.preview) {
+        const fb = _playPreviewFallback('msg', tone);
+        console.log('[FTDBG] preview fallback msg tone=', tone, 'ok=', fb);
+        return fb ? { ok: true, mode: 'htmlaudio-preview' } : { ok: false, reason: 'preview_fallback_failed' };
       }
       const fn = MSG_TONES[tone] || MSG_TONES.pop;
-      _playWithCtx(fn);
+      const ok = _playWithCtx(fn, 'tone:' + tone);
+      console.log('[FTDBG] playTone', tone, 'ok=', ok);
+      return ok ? { ok: true, mode: 'webaudio' } : { ok: false, reason: 'webaudio_unavailable' };
     } catch (e) { console.warn('[FT sound]', e); }
+    return { ok: false, reason: 'tone_exception' };
   }
 
   function _playRing(name, opts) {
-    if (!opts?.force && !_pref('notify_sounds', true)) return;
+    if (!opts?.force && !_pref('notify_sounds', true)) {
+      return { ok: false, reason: 'notify_sounds_disabled' };
+    }
     try {
       const tone = name || 'default';
-      if (tone === 'silent') return;
+      if (tone === 'silent') return { ok: false, reason: 'ring_silent' };
       if (tone === 'custom') {
         const data = _getCustomSound(null, 'ring');
-        if (data) return _playCustomSound(data);
+        if (data) {
+          _playCustomSound(data);
+          return { ok: true, mode: 'custom' };
+        }
       }
       if (typeof tone === 'string' && tone.startsWith('custom:')) {
         const nick = tone.slice(7);
         const data = _getCustomSound(nick, 'ring');
-        if (data) return _playCustomSound(data);
+        if (data) {
+          _playCustomSound(data);
+          return { ok: true, mode: 'custom-friend' };
+        }
+      }
+      if (opts?.preview) {
+        const fb = _playPreviewFallback('ring', tone);
+        console.log('[FTDBG] preview fallback ring tone=', tone, 'ok=', fb);
+        return fb ? { ok: true, mode: 'htmlaudio-preview' } : { ok: false, reason: 'preview_fallback_failed' };
       }
       const fn = RING_TONES[tone] || RING_TONES.default;
-      _playWithCtx(fn);
+      const ok = _playWithCtx(fn, 'ring:' + tone);
+      console.log('[FTDBG] playRing', tone, 'ok=', ok);
+      return ok ? { ok: true, mode: 'webaudio' } : { ok: false, reason: 'webaudio_unavailable' };
     } catch (e) { console.warn('[FT ring]', e); }
+    return { ok: false, reason: 'ring_exception' };
   }
 
-  function _playWithCtx(fn) {
+  // Shared AudioContext — created once, kept alive and resumed synchronously
+  // inside click/touch handlers so mobile browsers accept it as a user gesture.
+  let _sharedCtx = null;
+  function _getCtx() {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return;
-    const ctx = new AC();
-    const run = () => { try { fn(ctx); } catch (e) { console.warn('[FT ctx]', e); } };
-    if (ctx.state === 'suspended') {
-      ctx.resume().then(run).catch(run);
-    } else {
-      run();
+    if (!AC) {
+      console.warn('[FTDBG] no AudioContext API');
+      return null;
+    }
+    if (!_sharedCtx || _sharedCtx.state === 'closed') {
+      try {
+        _sharedCtx = new AC();
+        console.log('[FTDBG] created AudioContext state=', _sharedCtx.state);
+      } catch {
+        console.warn('[FTDBG] failed creating AudioContext');
+        return null;
+      }
+    }
+    // resume() synchronously within a user-gesture call stack is accepted by
+    // all browsers; the returned promise is for the state change propagation.
+    if (_sharedCtx.state === 'suspended') {
+      try {
+        _sharedCtx.resume();
+        console.log('[FTDBG] resume requested in _getCtx');
+      } catch {}
+    }
+    return _sharedCtx;
+  }
+
+  function _unlockAudio() {
+    const ctx = _getCtx();
+    if (!ctx) return false;
+    try {
+      if (ctx.state === 'suspended') {
+        const p = ctx.resume();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      }
+      return true;
+    } catch {
+      return false;
     }
   }
 
+  function _playWithCtx(fn, tag) {
+    const ctx = _getCtx();
+    if (!ctx) {
+      console.warn('[FTDBG] no AudioContext for', tag);
+      return false;
+    }
+    console.log('[FTDBG] _playWithCtx tag=', tag, 'state=', ctx.state);
+    const run = () => { try { fn(ctx); } catch (e) { console.warn('[FT ctx]', e); } };
+    if (ctx.state === 'running') {
+      run();
+      return true;
+    }
+    try {
+      const p = ctx.resume();
+      if (p && typeof p.then === 'function') {
+        p.then(run).catch(run);
+      } else {
+        run();
+      }
+    } catch {
+      run();
+    }
+    return ctx.state === 'running';
+  }
+
   return { init, registerSW, requestPermission, promptInstall,
-    previewTone(name, opts) { _playTone(name, opts); _vibrate(80); },
-    previewRingtone(name, opts) { _playRing(name, opts); },
+    unlockAudio() { return _unlockAudio(); },
+    previewTone(name, opts) { const r = _playTone(name, opts); _vibrate(80); return r; },
+    previewRingtone(name, opts) { return _playRing(name, opts); },
     // Per-friend sound settings API (used by friends UI)
     getFriendTones: _friendTones,
     setFriendTones(map) { _saveFriendTones(map); },
@@ -403,9 +523,10 @@ const Notifications = (() => {
     getCustomSound(nick, kind) { return _getCustomSound(nick, kind); },
     setCustomSound(nick, kind, dataUrl) { _setCustomSound(nick, kind, dataUrl); },
     // Accepts a File/Blob, returns a Promise<{ok, error?, dataUrl?}>
-    uploadCustomSound(nick, kind, file) {
+    uploadCustomSound(nick, kind, file, onProgress) {
       return new Promise((resolve) => {
         if (!file) return resolve({ ok: false, error: 'No file' });
+        console.log('[FTDBG] upload start', kind, file.name, file.size);
         if (
           !/^audio\//i.test(file.type)
           && !/^video\/(mp4|webm)$/i.test(file.type)
@@ -414,20 +535,40 @@ const Notifications = (() => {
           return resolve({ ok: false, error: 'Unsupported file type' });
         }
         if (file.size > CUSTOM_MAX_BYTES) {
-          return resolve({ ok: false, error: 'File too large (max 2 MB)' });
+          return resolve({ ok: false, error: 'File too large (max 12 MB)' });
         }
         const fr = new FileReader();
+        fr.onprogress = (ev) => {
+          if (!onProgress || !ev || !ev.lengthComputable) return;
+          try {
+            const pct = Math.max(0, Math.min(100, Math.round((ev.loaded / ev.total) * 100)));
+            onProgress(pct);
+          } catch {}
+        };
         fr.onload = () => {
           try {
             _setCustomSound(nick, kind, fr.result);
+            if (onProgress) {
+              try { onProgress(100); } catch {}
+            }
+            console.log('[FTDBG] upload stored', kind, file.name);
             resolve({ ok: true, dataUrl: fr.result });
-          } catch (e) { resolve({ ok: false, error: String(e) }); }
+          } catch (e) {
+            const msg = (e && e.message) ? e.message : String(e);
+            console.warn('[FTDBG] upload store failed', msg);
+            resolve({ ok: false, error: msg || 'Failed to store custom sound' });
+          }
         };
-        fr.onerror = () => resolve({ ok: false, error: 'Read failed' });
+        fr.onerror = () => {
+          console.warn('[FTDBG] upload read failed');
+          resolve({ ok: false, error: 'Read failed' });
+        };
         fr.readAsDataURL(file);
       });
     },
     playCustomSound(dataUrl) { _playCustomSound(dataUrl); },
+    stopCustomSound() { _stopCustomSound(); },
+    stopAllPreviewAudio() { _stopAllPreviewAudio(); },
 
     // In-app + desktop notification for a new message
     notify(msg) {

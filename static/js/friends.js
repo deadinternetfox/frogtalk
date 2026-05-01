@@ -523,6 +523,7 @@ loadFriends = async function() {
 // via Notifications.setFriendSound and take effect immediately.
 function openFriendSoundEditor(nick) {
   if (!nick) return;
+  try { window.Notifications?.stopCustomSound?.(); } catch {}
   let modal = document.getElementById('friend-sound-modal');
   if (!modal) {
     modal = document.createElement('div');
@@ -542,7 +543,10 @@ function openFriendSoundEditor(nick) {
           <div class="fsm-section">
             <div class="fsm-section-head">
               <div class="fsm-section-title"><span>💬</span> Message alert</div>
-              <button class="fsm-upload-btn" type="button" data-fsm-action="upload" data-kind="msg" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm"><span>📁</span> Upload</button>
+              <label class="fsm-upload-wrap" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm">
+                <span class="fsm-upload-btn"><span>📁</span> Upload</span>
+                <input id="fsm-native-upload-msg" class="fsm-upload-native" type="file" data-kind="msg" accept="audio/*,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.aac,.opus,.flac,.mp4,.webm">
+              </label>
             </div>
             <div class="fsm-quick-row" aria-label="Message defaults">
               <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="msg" data-key="">App default</button>
@@ -550,13 +554,18 @@ function openFriendSoundEditor(nick) {
               <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="msg" data-key="chime">Chime</button>
               <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="msg" data-key="ding">Ding</button>
             </div>
+            <div id="fsm-msg-current"></div>
+            <div id="fsm-msg-pending"></div>
             <div id="fsm-msg-custom"></div>
             <div id="fsm-msg-list" class="fsm-list"></div>
           </div>
           <div class="fsm-section">
             <div class="fsm-section-head">
               <div class="fsm-section-title"><span>📞</span> Incoming call ringtone</div>
-              <button class="fsm-upload-btn" type="button" data-fsm-action="upload" data-kind="ring" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm"><span>📁</span> Upload</button>
+              <label class="fsm-upload-wrap" title="Upload mp3, wav, ogg, m4a, aac, opus, flac, mp4, or webm">
+                <span class="fsm-upload-btn"><span>📁</span> Upload</span>
+                <input id="fsm-native-upload-ring" class="fsm-upload-native" type="file" data-kind="ring" accept="audio/*,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.aac,.opus,.flac,.mp4,.webm">
+              </label>
             </div>
             <div class="fsm-quick-row" aria-label="Ringtone defaults">
               <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="ring" data-key="">App default</button>
@@ -564,6 +573,8 @@ function openFriendSoundEditor(nick) {
               <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="ring" data-key="digital">Digital</button>
               <button class="fsm-upload-btn fsm-quick-btn" type="button" data-fsm-action="pick" data-kind="ring" data-key="melody">Melody</button>
             </div>
+            <div id="fsm-ring-current"></div>
+            <div id="fsm-ring-pending"></div>
             <div id="fsm-ring-custom"></div>
             <div id="fsm-ring-list" class="fsm-list"></div>
           </div>
@@ -587,12 +598,48 @@ function openFriendSoundEditor(nick) {
 
 function closeFriendSoundEditor() {
   const m = document.getElementById('friend-sound-modal');
-  if (m) { m.style.display = 'none'; m.classList.add('hidden'); }
+  if (!m) return;
+  m.style.display = 'none';
+  m.classList.add('hidden');
+  try { window.Notifications?.stopCustomSound?.(); } catch {}
+  try { window.Notifications?.stopAllPreviewAudio?.(); } catch {}
+  try {
+    const pending = m._pendingUploads || {};
+    for (const k of Object.keys(pending)) {
+      if (pending[k]?.url) URL.revokeObjectURL(pending[k].url);
+    }
+    m._pendingUploads = {};
+    m._uploadBusy = {};
+    m._uploadProgress = {};
+    m._uploadStatus = {};
+    m._customPreviewKind = '';
+    m._customPreviewSource = '';
+    _renderPendingUpload('msg');
+    _renderPendingUpload('ring');
+  } catch {}
+}
+
+function _setCustomPreviewState(kind, source) {
+  const m = document.getElementById('friend-sound-modal');
+  if (!m) return;
+  m._customPreviewKind = kind || '';
+  m._customPreviewSource = source || '';
+  _renderPendingUpload('msg');
+  _renderPendingUpload('ring');
+  _renderFriendSoundList('msg');
+  _renderFriendSoundList('ring');
+}
+
+function _isPreviewing(kind, source) {
+  const m = document.getElementById('friend-sound-modal');
+  if (!m) return false;
+  return m._customPreviewKind === kind && m._customPreviewSource === source;
 }
 
 function _bindFriendSoundModalEvents(modal) {
   if (!modal || modal._fsmEventsBound) return;
   modal._fsmEventsBound = true;
+  // Capture phase makes this resilient even if nested controls stop bubbling.
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       closeFriendSoundEditor();
@@ -603,17 +650,42 @@ function _bindFriendSoundModalEvents(modal) {
     const action = actionEl.dataset.fsmAction;
     const kind = actionEl.dataset.kind || '';
     const key = actionEl.dataset.key || '';
+    // Keep audio unlocked as part of this trusted user gesture.
+    try { window.Notifications?.unlockAudio?.(); } catch {}
     if (action === 'close') return closeFriendSoundEditor();
     if (action === 'reset') return resetFriendSounds();
-    if (action === 'upload') return _uploadFriendSound(kind);
     if (action === 'pick') return _selectFriendSoundKey(kind, key || null);
     if (action === 'pick-row') return _selectFriendSound(actionEl);
+    if (action === 'preview-current') return _previewCurrentChoice(kind);
+    if (action === 'preview-pending') return _previewPendingUpload(kind);
+    if (action === 'clear-pending') return _clearPendingUpload(kind);
     if (action === 'preview') {
       e.stopPropagation();
       return _previewFriendSound(kind, key);
     }
     if (action === 'use-custom') return _selectCustomSound(kind);
     if (action === 'delete-custom') return _deleteCustomSound(kind);
+  }, true); // capture phase — fires before any child stopPropagation
+
+  modal.addEventListener('change', async (e) => {
+    const input = e.target?.closest?.('.fsm-upload-native');
+    if (!input || !modal.contains(input)) return;
+    const kind = input.dataset.kind || '';
+    modal._uploadBusy = modal._uploadBusy || {};
+    if (modal._uploadBusy[kind]) {
+      input.value = '';
+      if (typeof toast === 'function') toast('Upload already in progress', 'info');
+      return;
+    }
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) {
+      if (typeof toast === 'function') toast('No file selected', 'info');
+      return;
+    }
+    _setPendingUpload(kind, file);
+    if (typeof toast === 'function') toast('Selected ' + (file.name || 'file') + '. Uploading…', 'info');
+    await _commitPendingUpload(kind);
   });
 }
 
@@ -676,6 +748,7 @@ function _renderFriendSoundList(kind) {
   const current = Notifications.getFriendSound ? Notifications.getFriendSound(nick, kind) : null;
   const customData = (Notifications.getCustomSound && Notifications.getCustomSound(nick, kind)) || null;
   const customMeta = _getCustomSoundMeta(nick, kind);
+  _renderCurrentChoice(kind, current, customMeta);
 
   // Render the "uploaded file" chip if present
   const customContainerId = kind === 'msg' ? 'fsm-msg-custom' : 'fsm-ring-custom';
@@ -683,11 +756,12 @@ function _renderFriendSoundList(kind) {
   if (customEl) {
     if (customData) {
       const isSelected = current === 'custom';
+      const playingSaved = _isPreviewing(kind, 'saved');
       const name = customMeta?.name || 'Custom file';
       const sizeKb = customMeta?.size ? Math.round(customMeta.size / 1024) + ' KB' : '';
       customEl.innerHTML = `
         <div class="fsm-custom-chip" style="${isSelected ? 'box-shadow:0 0 0 2px rgba(76,175,80,.35)' : ''}">
-          <button class="fcc-btn" type="button" title="Preview" data-fsm-action="preview" data-kind="${kind}" data-key="custom">▶</button>
+          <button class="fcc-btn" type="button" title="${playingSaved ? 'Stop preview' : 'Preview'}" data-fsm-action="preview" data-kind="${kind}" data-key="custom">${playingSaved ? '■' : '▶'}</button>
           <div style="flex:1;min-width:0">
             <div class="fcc-name">${esc(name)}</div>
             <div class="fcc-meta">${sizeKb} · ${isSelected ? '✓ Active' : 'tap to use'}</div>
@@ -719,6 +793,36 @@ function _renderFriendSoundList(kind) {
   }).join('');
 }
 
+function _renderCurrentChoice(kind, current, customMeta) {
+  const m = document.getElementById('friend-sound-modal');
+  if (!m) return;
+  const id = kind === 'msg' ? 'fsm-msg-current' : 'fsm-ring-current';
+  const el = m.querySelector('#' + id);
+  if (!el) return;
+  const isDefault = !current;
+  const label = isDefault
+    ? 'App default (' + (kind === 'msg' ? (localStorage.getItem('notify_tone') || 'pop') : (localStorage.getItem('notify_ringtone') || 'default')) + ')'
+    : (current === 'custom' ? ('Custom: ' + (customMeta?.name || 'uploaded file')) : _friendSoundLabel(kind, current));
+  el.innerHTML = `
+    <div class="fsm-custom-chip" style="margin-bottom:8px;box-shadow:0 0 0 2px rgba(76,175,80,.22)">
+      <button class="fcc-btn" type="button" title="Preview current" data-fsm-action="preview-current" data-kind="${kind}">▶</button>
+      <div style="flex:1;min-width:0">
+        <div class="fcc-name">Current: ${esc(label)}</div>
+        <div class="fcc-meta">${isDefault ? 'uses app setting' : 'active for this friend'}</div>
+      </div>
+      <span style="color:#4caf50;font-size:11px;font-weight:700;padding:0 6px">ACTIVE</span>
+    </div>`;
+}
+
+function _previewCurrentChoice(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  const nick = m?._targetNick;
+  if (!nick || !window.Notifications) return;
+  const current = Notifications.getFriendSound(nick, kind);
+  if (!current) return _previewDefaultFriendSound(kind);
+  return _previewFriendSound(kind, current);
+}
+
 function _selectFriendSound(row) {
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
@@ -743,10 +847,10 @@ function _previewDefaultFriendSound(kind) {
   if (!window.Notifications) return;
   if (kind === 'msg') {
     const tone = localStorage.getItem('notify_tone') || 'pop';
-    Notifications.previewTone(tone, { force: true });
+    Notifications.previewTone(tone, { force: true, preview: true });
   } else {
     const ring = localStorage.getItem('notify_ringtone') || 'default';
-    Notifications.previewRingtone(ring, { force: true });
+    Notifications.previewRingtone(ring, { force: true, preview: true });
   }
 }
 
@@ -793,58 +897,192 @@ function _deleteCustomSound(kind) {
   if (typeof toast === 'function') toast('Custom sound removed', 'info');
 }
 
-function _uploadFriendSound(kind) {
+function _setPendingUpload(kind, file) {
+  const m = document.getElementById('friend-sound-modal');
+  if (!m || !kind || !file) return;
+  m._pendingUploads = m._pendingUploads || {};
+  m._uploadBusy = m._uploadBusy || {};
+  m._uploadProgress = m._uploadProgress || {};
+  m._uploadStatus = m._uploadStatus || {};
+  m._uploadBusy[kind] = false;
+  m._uploadProgress[kind] = 0;
+  m._uploadStatus[kind] = 'not uploaded yet';
+  const prev = m._pendingUploads[kind];
+  if (prev?.url) {
+    try { URL.revokeObjectURL(prev.url); } catch {}
+  }
+  let url = '';
+  try { url = URL.createObjectURL(file); } catch {}
+  m._pendingUploads[kind] = { file, url };
+  _renderPendingUpload(kind);
+}
+
+function _clearPendingUpload(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  if (!m || !m._pendingUploads?.[kind]) return;
+  const p = m._pendingUploads[kind];
+  if (p?.url) {
+    try { URL.revokeObjectURL(p.url); } catch {}
+  }
+  delete m._pendingUploads[kind];
+  if (m._uploadBusy) delete m._uploadBusy[kind];
+  if (m._uploadProgress) delete m._uploadProgress[kind];
+  if (m._uploadStatus) delete m._uploadStatus[kind];
+  _renderPendingUpload(kind);
+}
+
+function _renderPendingUpload(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  if (!m) return;
+  const id = kind === 'msg' ? 'fsm-msg-pending' : 'fsm-ring-pending';
+  const el = m.querySelector('#' + id);
+  if (!el) return;
+  const p = m._pendingUploads?.[kind] || null;
+  const busy = !!m._uploadBusy?.[kind];
+  const prog = Math.max(0, Math.min(100, m._uploadProgress?.[kind] || 0));
+  const status = m._uploadStatus?.[kind] || (busy ? ('uploading ' + prog + '%') : 'not uploaded yet');
+  const playingPending = _isPreviewing(kind, 'pending');
+  if (!p?.file) {
+    el.innerHTML = '';
+    return;
+  }
+  const kb = Math.max(1, Math.round((p.file.size || 0) / 1024));
+  el.innerHTML = `
+    <div class="fsm-custom-chip" style="margin-bottom:8px;box-shadow:0 0 0 2px rgba(255,193,7,.18)">
+      <button class="fcc-btn" type="button" title="${playingPending ? 'Stop preview' : 'Preview selected'}" data-fsm-action="preview-pending" data-kind="${kind}" ${busy ? 'disabled' : ''}>${playingPending ? '■' : '▶'}</button>
+      <div style="flex:1;min-width:0">
+        <div class="fcc-name">Selected: ${esc(p.file.name || 'file')}</div>
+        <div class="fcc-meta">${kb} KB · ${esc(status)}</div>
+      </div>
+      <button class="fcc-btn danger" type="button" title="Clear selected" data-fsm-action="clear-pending" data-kind="${kind}" ${busy ? 'disabled' : ''}>✕</button>
+    </div>`;
+}
+
+function _previewPendingUpload(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  const p = m?._pendingUploads?.[kind];
+  if (!p?.url) return;
+  if (_isPreviewing(kind, 'pending')) {
+    try { Notifications.stopCustomSound?.(); } catch {}
+    _setCustomPreviewState('', '');
+    return;
+  }
+  try {
+    Notifications.playCustomSound(p.url);
+    _setCustomPreviewState(kind, 'pending');
+    if (typeof toast === 'function') toast('Previewing selected file', 'info');
+  } catch {
+    if (typeof toast === 'function') toast('Preview failed', 'error');
+  }
+}
+
+async function _commitPendingUpload(kind) {
+  const m = document.getElementById('friend-sound-modal');
+  if (m?._uploadBusy?.[kind]) {
+    if (typeof toast === 'function') toast('Upload already in progress', 'info');
+    return;
+  }
+  const p = m?._pendingUploads?.[kind];
+  if (!p?.file) {
+    if (typeof toast === 'function') toast('No file selected', 'info');
+    return;
+  }
+  if (typeof toast === 'function') toast('Uploading ' + (p.file.name || 'file') + '...', 'info');
+  m._uploadBusy = m._uploadBusy || {};
+  m._uploadProgress = m._uploadProgress || {};
+  m._uploadStatus = m._uploadStatus || {};
+  m._uploadBusy[kind] = true;
+  m._uploadProgress[kind] = 1;
+  m._uploadStatus[kind] = 'uploading 1%';
+  const input = m.querySelector('#fsm-native-upload-' + kind);
+  if (input) input.disabled = true;
+  _renderPendingUpload(kind);
+  const ok = await _uploadFriendSound(kind, p.file);
+  m._uploadBusy[kind] = false;
+  if (input) input.disabled = false;
+  if (!ok) _renderPendingUpload(kind);
+  if (ok) _clearPendingUpload(kind);
+}
+
+async function _uploadFriendSound(kind, file) {
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
-  if (!nick || !window.Notifications) return;
-
-  // Create a fresh input appended directly to body so no overflow:hidden
-  // clipping or modal stacking context interferes with the picker.
-  const old = document.getElementById('_fsm_upload_tmp');
-  if (old) old.remove();
-  const input = document.createElement('input');
-  input.id = '_fsm_upload_tmp';
-  input.type = 'file';
-  input.accept = 'audio/*,video/mp4,video/webm,.mp3,.wav,.ogg,.m4a,.aac,.opus,.flac,.mp4,.webm';
-  input.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1';
-  document.body.appendChild(input);
-
-  input.onchange = async () => {
-    input.remove();
-    const f = input.files && input.files[0];
-    if (!f) return;
-    const res = await Notifications.uploadCustomSound(nick, kind, f);
-    if (!res.ok) {
-      if (typeof toast === 'function') toast(res.error || 'Upload failed', 'error');
-      return;
-    }
-    _setCustomSoundMeta(nick, kind, { name: f.name || 'Custom file', size: f.size || 0 });
-    Notifications.setFriendSound(nick, kind, 'custom');
-    _renderFriendSoundList(kind);
-    if (typeof toast === 'function') toast('Custom sound saved & active', 'success');
-    Notifications.playCustomSound(res.dataUrl);
-  };
-
-  // Give the browser one tick to register the element, then trigger picker.
-  setTimeout(() => {
+  if (!nick || !window.Notifications) return false;
+  if (!file) {
+    const picker = m.querySelector('#fsm-native-upload-' + kind);
+    if (!picker) return false;
+    // Fallback path used when custom preview triggers upload.
     try {
-      if (typeof input.showPicker === 'function') input.showPicker();
-      else input.click();
+      picker.click();
     } catch {
-      try { input.click(); } catch {}
+      if (typeof toast === 'function') toast('Unable to open file picker', 'error');
     }
-  }, 0);
+    return false;
+  }
+  let res = null;
+  try {
+    res = await Notifications.uploadCustomSound(nick, kind, file, (pct) => {
+      const mm = document.getElementById('friend-sound-modal');
+      if (!mm) return;
+      mm._uploadProgress = mm._uploadProgress || {};
+      mm._uploadStatus = mm._uploadStatus || {};
+      mm._uploadProgress[kind] = pct;
+      mm._uploadStatus[kind] = 'uploading ' + pct + '%';
+      _renderPendingUpload(kind);
+    });
+  } catch {
+    const mm = document.getElementById('friend-sound-modal');
+    if (mm) {
+      mm._uploadStatus = mm._uploadStatus || {};
+      mm._uploadStatus[kind] = 'upload failed';
+    }
+    if (typeof toast === 'function') toast('Upload failed', 'error');
+    return false;
+  }
+  if (!res.ok) {
+    const mm = document.getElementById('friend-sound-modal');
+    if (mm) {
+      mm._uploadStatus = mm._uploadStatus || {};
+      mm._uploadStatus[kind] = res.error || 'upload failed';
+    }
+    if (typeof toast === 'function') toast(res.error || 'Upload failed', 'error');
+    _renderPendingUpload(kind);
+    return false;
+  }
+  _setCustomSoundMeta(nick, kind, { name: file.name || 'Custom file', size: file.size || 0 });
+  Notifications.setFriendSound(nick, kind, 'custom');
+  _renderFriendSoundList(kind);
+  if (typeof toast === 'function') toast('Custom sound saved & active', 'success');
+  Notifications.playCustomSound(res.dataUrl);
+  _setCustomPreviewState(kind, 'saved');
+  return true;
 }
 
 function _previewFriendSound(kind, key) {
   if (!window.Notifications || !key) return;
+  try { Notifications.stopCustomSound?.(); } catch {}
   const m = document.getElementById('friend-sound-modal');
   const nick = m?._targetNick;
   if (key === 'custom' && nick) {
     const data = Notifications.getCustomSound(nick, kind);
-    if (data) return Notifications.playCustomSound(data);
+    if (data) {
+      if (_isPreviewing(kind, 'saved')) {
+        try { Notifications.stopCustomSound?.(); } catch {}
+        _setCustomPreviewState('', '');
+        return;
+      }
+      Notifications.playCustomSound(data);
+      _setCustomPreviewState(kind, 'saved');
+      return;
+    }
     return _uploadFriendSound(kind);
   }
-  if (kind === 'msg') Notifications.previewTone(key, { force: true });
-  else Notifications.previewRingtone(key, { force: true });
+  _setCustomPreviewState('', '');
+  const result = kind === 'msg'
+    ? Notifications.previewTone(key, { force: true, preview: true })
+    : Notifications.previewRingtone(key, { force: true, preview: true });
+  console.log('[FTDBG] preview', kind, key, result);
+  if (result && result.ok === false) {
+    if (typeof toast === 'function') toast('Preview blocked: ' + (result.reason || 'audio unavailable'), 'error');
+  }
 }
