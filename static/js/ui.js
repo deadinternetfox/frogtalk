@@ -3486,6 +3486,37 @@ let _userInfoTargetId = null;
 // These users have no FrogTalk account, so DM / call / friend / follow are
 // not possible. We render a small explanatory card themed to the source
 // platform instead of the regular blank-loading profile modal.
+async function _resolveBridgeSourceFromConfig(platform) {
+  const plat = String(platform || '').toLowerCase();
+  const room = String(State?.currentRoom || '');
+  if (!plat || !room || typeof apiFetch !== 'function') return null;
+  try {
+    const url = plat === 'discord' ? '/api/bridge/discord-bridges' : '/api/bridge/bridges';
+    const res = await apiFetch(url);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !Array.isArray(data?.bridges)) return null;
+    const rows = data.bridges.filter(b => String(b?.room_name || '') === room);
+    const row = rows.find(b => Number(b?.enabled ?? 1) === 1) || rows[0] || null;
+    if (!row) return null;
+    if (plat === 'discord') {
+      const id = row.discord_channel_id != null ? String(row.discord_channel_id) : '';
+      return {
+        name: String(row.discord_channel_name || (id ? ('#' + id) : '')).trim(),
+        id,
+        parent: String(row.discord_guild_name || 'Discord server').trim(),
+      };
+    }
+    const id = row.telegram_chat_id != null ? String(row.telegram_chat_id) : '';
+    return {
+      name: String(row.telegram_chat_title || (id ? ('Telegram chat ' + id) : '')).trim(),
+      id,
+      parent: 'Telegram',
+    };
+  } catch {
+    return null;
+  }
+}
+
 function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourceParent, bridgeAvatar) {
   const plat = String(platform || '').toLowerCase();
   const meta = ({
@@ -3494,10 +3525,8 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
   })[plat] || { label: 'Bridge', color: '#888', icon: '🌉' };
   const safeNick = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(nickname) : String(nickname).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
   const safePlat = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(meta.label) : meta.label;
-  const sourceFallback = (typeof State !== 'undefined' && State?.currentRoom)
-    ? ('#' + String(State.currentRoom))
-    : 'Source unavailable';
-  const safeSourceName = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceName || sourceFallback)) : String(sourceName || sourceFallback);
+  const sourceFallback = sourceName ? '' : 'Loading source...';
+  const safeSourceName = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceName || sourceFallback || 'Source unavailable')) : String(sourceName || sourceFallback || 'Source unavailable');
   const safeSourceId = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceId || '')) : String(sourceId || '');
   const safeSourceParent = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceParent || '')) : String(sourceParent || '');
   const avatar = (typeof UI !== 'undefined' && UI.avatarEl) ? UI.avatarEl(bridgeAvatar || null, nickname, 90) : '🐸';
@@ -3539,9 +3568,9 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
           <div class="profile-section-title" style="font-size:11px;color:${meta.color};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;font-weight:700">Bridge Source</div>
           <div style="display:grid;grid-template-columns:110px 1fr;gap:8px 10px;font-size:13px;line-height:1.5">
             <div style="color:#7f8c8d">Platform</div><div style="color:#fff">${safePlat}</div>
-            <div style="color:#7f8c8d">Source</div><div style="color:#fff;word-break:break-word">${safeSourceName}</div>
-            ${safeSourceParent ? `<div style="color:#7f8c8d">Server / Group</div><div style="color:#fff;word-break:break-word">${safeSourceParent}</div>` : ''}
-            ${safeSourceId ? `<div style="color:#7f8c8d">Source ID</div><div style="color:#bbb;word-break:break-all">${safeSourceId}</div>` : ''}
+            <div style="color:#7f8c8d">Source</div><div style="color:#fff;word-break:break-word" data-bridge-source="name">${safeSourceName}</div>
+            <div style="color:#7f8c8d;${safeSourceParent ? '' : 'display:none'}" data-bridge-source="parent-label">Server / Group</div><div style="color:#fff;word-break:break-word;${safeSourceParent ? '' : 'display:none'}" data-bridge-source="parent">${safeSourceParent}</div>
+            <div style="color:#7f8c8d;${safeSourceId ? '' : 'display:none'}" data-bridge-source="id-label">Source ID</div><div style="color:#bbb;word-break:break-all;${safeSourceId ? '' : 'display:none'}" data-bridge-source="id">${safeSourceId}</div>
           </div>
         </div>
       </div>
@@ -3552,6 +3581,34 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
     openModal('modal-bridge-user-info');
   } else {
     host.classList.remove('hidden');
+  }
+
+  if (!String(sourceName || '').trim()) {
+    void _resolveBridgeSourceFromConfig(plat).then((resolved) => {
+      if (!resolved) {
+        const el = host.querySelector('[data-bridge-source="name"]');
+        if (el && String(el.textContent || '').trim().toLowerCase() === 'loading source...') {
+          el.textContent = 'Source unavailable';
+        }
+        return;
+      }
+      const nameEl = host.querySelector('[data-bridge-source="name"]');
+      const parentLabelEl = host.querySelector('[data-bridge-source="parent-label"]');
+      const parentEl = host.querySelector('[data-bridge-source="parent"]');
+      const idLabelEl = host.querySelector('[data-bridge-source="id-label"]');
+      const idEl = host.querySelector('[data-bridge-source="id"]');
+      if (nameEl) nameEl.textContent = resolved.name || 'Source unavailable';
+      if (parentLabelEl) parentLabelEl.style.display = resolved.parent ? '' : 'none';
+      if (parentEl) {
+        parentEl.style.display = resolved.parent ? '' : 'none';
+        parentEl.textContent = resolved.parent || '';
+      }
+      if (idLabelEl) idLabelEl.style.display = resolved.id ? '' : 'none';
+      if (idEl) {
+        idEl.style.display = resolved.id ? '' : 'none';
+        idEl.textContent = resolved.id || '';
+      }
+    });
   }
 }
 

@@ -872,12 +872,18 @@ def _migrate():
             tg_cols = {r["name"] for r in con.execute("PRAGMA table_info(telegram_bridges)").fetchall()}
             if tg_cols and "direction" not in tg_cols:
                 con.execute("ALTER TABLE telegram_bridges ADD COLUMN direction TEXT DEFAULT 'both'")
+            if tg_cols and "telegram_chat_title" not in tg_cols:
+                con.execute("ALTER TABLE telegram_bridges ADD COLUMN telegram_chat_title TEXT DEFAULT ''")
         except Exception:
             pass
         try:
             dc_cols = {r["name"] for r in con.execute("PRAGMA table_info(discord_bridges)").fetchall()}
             if dc_cols and "direction" not in dc_cols:
                 con.execute("ALTER TABLE discord_bridges ADD COLUMN direction TEXT DEFAULT 'both'")
+            if dc_cols and "discord_channel_name" not in dc_cols:
+                con.execute("ALTER TABLE discord_bridges ADD COLUMN discord_channel_name TEXT DEFAULT ''")
+            if dc_cols and "discord_guild_name" not in dc_cols:
+                con.execute("ALTER TABLE discord_bridges ADD COLUMN discord_guild_name TEXT DEFAULT ''")
         except Exception:
             pass
         # Room columns for settings
@@ -1435,6 +1441,7 @@ def _migrate():
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             room_name        TEXT NOT NULL,
             telegram_chat_id INTEGER NOT NULL,
+            telegram_chat_title TEXT DEFAULT '',
             bot_token        TEXT NOT NULL,
             bot_name         TEXT DEFAULT '',
             enabled          INTEGER DEFAULT 1,
@@ -1452,6 +1459,8 @@ def _migrate():
             room_name          TEXT NOT NULL,
             discord_channel_id INTEGER NOT NULL,
             discord_guild_id   INTEGER DEFAULT 0,
+            discord_channel_name TEXT DEFAULT '',
+            discord_guild_name TEXT DEFAULT '',
             bot_token          TEXT NOT NULL,
             bot_name           TEXT DEFAULT '',
             enabled            INTEGER DEFAULT 1,
@@ -4836,13 +4845,14 @@ def room_set_dj_only(room_name: str, dj_only: int) -> bool:
 # ===========================================================================
 
 def create_telegram_bridge(room_name: str, telegram_chat_id: int, bot_token: str,
-                           bot_name: str, owner_id: int) -> Optional[int]:
+                           bot_name: str, owner_id: int,
+                           telegram_chat_title: str = "") -> Optional[int]:
     try:
         with _conn() as con:
             cur = con.execute(
-                """INSERT INTO telegram_bridges (room_name, telegram_chat_id, bot_token, bot_name, owner_id)
-                   VALUES (?,?,?,?,?)""",
-                (room_name, telegram_chat_id, bot_token, bot_name, owner_id))
+                """INSERT INTO telegram_bridges (room_name, telegram_chat_id, telegram_chat_title, bot_token, bot_name, owner_id)
+                   VALUES (?,?,?,?,?,?)""",
+                (room_name, telegram_chat_id, telegram_chat_title or "", bot_token, bot_name, owner_id))
             con.commit()
             return cur.lastrowid
     except Exception:
@@ -4889,13 +4899,19 @@ def toggle_telegram_bridge(bridge_id: int, owner_id: int, enabled: bool) -> bool
 # ---------------------------------------------------------------------------
 
 def create_discord_bridge(room_name: str, discord_channel_id: int, bot_token: str,
-                          bot_name: str, owner_id: int, discord_guild_id: int = 0) -> Optional[int]:
+                          bot_name: str, owner_id: int, discord_guild_id: int = 0,
+                          discord_channel_name: str = "",
+                          discord_guild_name: str = "") -> Optional[int]:
     try:
         with _conn() as con:
             cur = con.execute(
-                """INSERT INTO discord_bridges (room_name, discord_channel_id, discord_guild_id, bot_token, bot_name, owner_id)
-                   VALUES (?,?,?,?,?,?)""",
-                (room_name, discord_channel_id, discord_guild_id, bot_token, bot_name, owner_id))
+                """INSERT INTO discord_bridges (room_name, discord_channel_id, discord_guild_id,
+                                               discord_channel_name, discord_guild_name,
+                                               bot_token, bot_name, owner_id)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (room_name, discord_channel_id, discord_guild_id,
+                 discord_channel_name or "", discord_guild_name or "",
+                 bot_token, bot_name, owner_id))
             con.commit()
             return cur.lastrowid
     except Exception:

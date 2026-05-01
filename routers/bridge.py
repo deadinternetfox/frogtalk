@@ -258,7 +258,8 @@ async def create_bridge_endpoint(body: CreateBridgeRequest, current_user: dict =
         telegram_chat_id=body.telegram_chat_id,
         bot_token=body.bot_token,
         bot_name=body.bot_name,
-        owner_id=current_user["id"]
+        owner_id=current_user["id"],
+        telegram_chat_title="",
     )
     if not bridge_id:
         raise HTTPException(409, "Bridge already exists for this room/chat combination")
@@ -392,9 +393,20 @@ async def bridge_claim_code(body: ClaimCodeRequest, request: Request):
         bot_token=entry["bot_token"],
         bot_name=entry["bot_name"],
         owner_id=entry["owner_id"],
+        telegram_chat_title=body.telegram_chat_title,
     )
     if not bridge_id:
-        # Bridge may already exist for this chat+room — treat as success
+        # Bridge may already exist for this chat+room — update title best-effort
+        try:
+            with db._conn() as con:
+                con.execute(
+                    "UPDATE telegram_bridges SET telegram_chat_title=COALESCE(NULLIF(?, ''), telegram_chat_title) "
+                    "WHERE room_name=? AND telegram_chat_id=? AND owner_id=?",
+                    (body.telegram_chat_title or "", entry["room_name"], body.telegram_chat_id, entry["owner_id"]),
+                )
+                con.commit()
+        except Exception:
+            pass
         return {"ok": True, "already": True, "room_name": entry["room_name"]}
 
     entry["status"] = "claimed"
@@ -618,6 +630,8 @@ async def discord_bridge_claim_code(body: ClaimDiscordCodeRequest, request: Requ
         bot_name=entry.get("bot_name") or "Discord Bridge",
         owner_id=entry["owner_id"],
         discord_guild_id=body.discord_guild_id or 0,
+        discord_channel_name=body.discord_channel_name,
+        discord_guild_name=body.discord_guild_name,
     )
     if not bridge_id:
         existing = None
@@ -629,6 +643,18 @@ async def discord_bridge_claim_code(body: ClaimDiscordCodeRequest, request: Requ
         except Exception:
             existing = None
         if existing:
+            try:
+                with db._conn() as con:
+                    con.execute(
+                        "UPDATE discord_bridges SET "
+                        "discord_channel_name=COALESCE(NULLIF(?, ''), discord_channel_name), "
+                        "discord_guild_name=COALESCE(NULLIF(?, ''), discord_guild_name) "
+                        "WHERE id=? AND owner_id=?",
+                        (body.discord_channel_name or "", body.discord_guild_name or "", existing.get("id"), entry["owner_id"]),
+                    )
+                    con.commit()
+            except Exception:
+                pass
             entry["status"] = "claimed"
             entry["bridge_id"] = existing.get("id")
             try:
@@ -686,6 +712,8 @@ async def create_discord_bridge_endpoint(body: CreateDiscordBridgeRequest, curre
         bot_name=body.bot_name or "Discord Bridge",
         owner_id=current_user["id"],
         discord_guild_id=body.discord_guild_id or guild_id,
+        discord_channel_name=details.get("channel_name") or "",
+        discord_guild_name=details.get("guild_name") or "",
     )
     if not bridge_id:
         raise HTTPException(409, "Bridge already exists for this room/channel combination")
@@ -767,6 +795,24 @@ async def receive_bridge_message(body: BridgeMessageRequest):
     # Save to DB as a bridge message. user_id must reference a real user row
     # (FK constraint) — attribute to the bridge owner so history is preserved.
     bridge_owner_id = matched_bridge.get("owner_id") or 1
+    source_name = (body.source_name or "").strip()
+    source_id = (body.source_id or "").strip()
+    source_parent = (body.source_parent or "").strip()
+    if not source_name:
+        if platform == "telegram":
+            source_name = str(matched_bridge.get("telegram_chat_title") or "").strip()
+            if not source_name and matched_bridge.get("telegram_chat_id") is not None:
+                source_name = "Telegram chat " + str(matched_bridge.get("telegram_chat_id"))
+            if not source_id and matched_bridge.get("telegram_chat_id") is not None:
+                source_id = str(matched_bridge.get("telegram_chat_id"))
+        elif platform == "discord":
+            source_name = str(matched_bridge.get("discord_channel_name") or "").strip()
+            if not source_name and matched_bridge.get("discord_channel_id") is not None:
+                source_name = "#" + str(matched_bridge.get("discord_channel_id"))
+            if not source_id and matched_bridge.get("discord_channel_id") is not None:
+                source_id = str(matched_bridge.get("discord_channel_id"))
+            if not source_parent:
+                source_parent = str(matched_bridge.get("discord_guild_name") or "").strip()
 
     # Resolve an inbound reply: if the remote message is a reply to another
     # remote message that we've previously mirrored, attach it as a native
@@ -800,9 +846,9 @@ async def receive_bridge_message(body: BridgeMessageRequest):
         media_type=media_type,
         bridge_platform=platform,
         bridge_avatar=body.sender_avatar or None,
-        bridge_source_name=(body.source_name or None),
-        bridge_source_id=(body.source_id or None),
-        bridge_source_parent=(body.source_parent or None),
+        bridge_source_name=(source_name or None),
+        bridge_source_id=(source_id or None),
+        bridge_source_parent=(source_parent or None),
         reply_to=reply_to_ft_id,
     )
 
@@ -831,9 +877,9 @@ async def receive_bridge_message(body: BridgeMessageRequest):
         "platform": platform,
         "bridge_platform": platform,
         "avatar": body.sender_avatar or None,
-        "bridge_source_name": body.source_name,
-        "bridge_source_id": body.source_id,
-        "bridge_source_parent": body.source_parent,
+        "bridge_source_name": source_name,
+        "bridge_source_id": source_id,
+        "bridge_source_parent": source_parent,
         "reply_to": reply_to_ft_id,
         "reply_nickname": reply_nickname,
         "reply_content": reply_content,
