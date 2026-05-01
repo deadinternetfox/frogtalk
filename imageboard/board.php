@@ -2036,6 +2036,14 @@ if ($singleThread) {
             background:rgba(0,255,65,0.1);
             transform:translateY(1px) scale(1.05);
         }
+        .frog-mini-headline .frog-mini-emoji.disabled {
+            cursor:default;
+            opacity:.78;
+        }
+        .frog-mini-headline .frog-mini-emoji.disabled:hover {
+            background:transparent;
+            transform:translateY(1px);
+        }
         .frog-mini-headline .frog-mini-label {
             display:inline-block;
             line-height:1;
@@ -5711,13 +5719,30 @@ if ($singleThread) {
         wrap.classList.add('open');
     }
 
+    function frogMiniIsNativeClient() {
+        try {
+            const ua = String((navigator && navigator.userAgent) || '');
+            return /Electron|wv\)|; wv|FrogTalkAndroid|FrogTalkDesktop/i.test(ua);
+        } catch (e) {
+            return false;
+        }
+    }
+
     function frogMiniOpenFullApp() {
+        if (frogMiniIsNativeClient()) return;
         window.open('/app', '_blank', 'noopener,noreferrer');
     }
 
     (function initFrogMini() {
         const body = document.getElementById('chatBody');
+        const frogOpen = document.querySelector('.frog-mini-headline .frog-mini-emoji');
         if (body) body.style.display = 'none';
+        if (frogOpen && frogMiniIsNativeClient()) {
+            frogOpen.classList.add('disabled');
+            frogOpen.setAttribute('aria-disabled', 'true');
+            frogOpen.removeAttribute('title');
+            frogOpen.setAttribute('tabindex', '-1');
+        }
         _frogMiniApplyState();
 
         // React when auth changes in another same-origin context (e.g. /app iframe).
