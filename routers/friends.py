@@ -26,6 +26,29 @@ _ALLOWED_SOUND_MIME_PREFIXES = ("audio/",)
 _ALLOWED_SOUND_EXTS = {
     ".mp3", ".wav", ".ogg", ".m4a", ".aac", ".opus", ".flac", ".weba", ".mp4", ".webm"
 }
+_SOUND_MIME_BY_EXT = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".weba": "audio/webm",
+    ".mp4": "audio/mp4",
+    ".webm": "audio/webm",
+}
+
+
+def _normalize_sound_content_type(content_type: str, ext: str) -> str:
+    ct = (content_type or "").strip().lower()
+    e = (ext or "").strip().lower()
+    guessed = _SOUND_MIME_BY_EXT.get(e, "")
+    if not ct or ct in {"application/octet-stream", "binary/octet-stream"}:
+        return guessed or "application/octet-stream"
+    if not ct.startswith("audio/") and guessed:
+        return guessed
+    return ct
 
 
 def _friend_push(user_id: int, title: str, body: str,
@@ -319,6 +342,7 @@ async def upload_friend_sound(
 
     if ext not in _ALLOWED_SOUND_EXTS:
         ext = ".bin"
+    safe_content_type = _normalize_sound_content_type(content_type, ext)
     target_dir = _SOUND_ROOT / str(current_user["id"]) / str(friend["id"]) / safe_kind
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / f"{uuid.uuid4().hex}{ext}"
@@ -330,7 +354,7 @@ async def upload_friend_sound(
         friend_user_id=friend["id"],
         kind=safe_kind,
         filename=name or target_path.name,
-        content_type=content_type,
+        content_type=safe_content_type,
         file_path=str(target_path),
         file_size=len(raw),
         is_active=1,
@@ -397,9 +421,11 @@ async def get_friend_sound_file(asset_id: int, request: Request, token: Optional
     fp = Path(str(asset.get("file_path") or ""))
     if not fp.exists() or not fp.is_file():
         return JSONResponse(status_code=404, content={"error": "Sound file missing"})
+    media_type = _normalize_sound_content_type(asset.get("content_type") or "", fp.suffix)
     return FileResponse(
         str(fp),
-        media_type=asset.get("content_type") or "application/octet-stream",
+        media_type=media_type,
         filename=asset.get("filename") or fp.name,
+        content_disposition_type="inline",
         headers={"Cache-Control": "private, max-age=300"},
     )
