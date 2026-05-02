@@ -739,11 +739,12 @@ const Messages = (() => {
           }
         } catch { failCount++; }
       }
-      if (dmForwarded && typeof loadDMChannels === 'function') {
-        // Ensure the sidebar reflects forwarded DM activity and bumps touched chats.
-        try { await loadDMChannels(); } catch {}
-      }
       modal.remove();
+      if (dmForwarded && typeof loadDMChannels === 'function') {
+        // Refresh in background so the forward dialog never appears stuck on
+        // "Sending…" if /api/dms is slow.
+        Promise.resolve().then(() => loadDMChannels()).catch(() => {});
+      }
       if (okCount && !failCount) UI.toast?.(`Forwarded to ${okCount}`, 'success');
       else if (okCount && failCount) UI.toast?.(`Forwarded to ${okCount}, ${failCount} failed`, 'warn');
       else UI.toast?.('Forward failed', 'error');
