@@ -412,11 +412,12 @@ const Messages = (() => {
     const fresh = _forwardTargetsCache && (Date.now() - _forwardTargetsCacheAt) < _forwardTargetsCacheTtlMs;
     if (!forceRefresh && fresh) return _forwardTargetsCache;
 
-    let rooms = [], dms = [];
+    let rooms = [], dms = [], friends = [];
     try {
-      const [r1, r2] = await Promise.all([
+      const [r1, r2, r3] = await Promise.all([
         apiFetch('/api/rooms'),
-        apiFetch('/api/dms')
+        apiFetch('/api/dms'),
+        apiFetch('/api/friends')
       ]);
       try {
         const j1 = await r1.json();
@@ -426,9 +427,14 @@ const Messages = (() => {
         const j2 = await r2.json();
         dms = j2.channels || [];
       } catch {}
+      try {
+        const j3 = await r3.json();
+        friends = j3.friends || [];
+      } catch {}
     } catch {}
 
     const items = [];
+    const dmNickSet = new Set();
     rooms.forEach(r => {
       if (r.forwarding_disabled) return;
       items.push({ key: 'r:' + r.name, kind: 'room', name: r.name, label: '#' + r.name, hint: r.description || '' });
@@ -440,7 +446,17 @@ const Messages = (() => {
       // Only include DMs where we can identify the peer.
       // This keeps the forward picker meaningful and avoids ambiguous @?/DM # rows.
       if (!peer) return;
+      dmNickSet.add(peer.toLowerCase());
       items.push({ key: 'd:' + d.id, kind: 'dm', id: d.id, label: '@' + peer, hint: '' });
+    });
+    friends.forEach(f => {
+      const nick = String(f?.nickname || '').trim();
+      if (!nick) return;
+      if (dmNickSet.has(nick.toLowerCase())) return;
+      const status = String(f?.status_msg || '').trim();
+      const presence = String(f?.presence || '').trim();
+      const hint = status || (presence ? ('Friend · ' + presence) : 'Friend');
+      items.push({ key: 'f:' + nick.toLowerCase(), kind: 'friend', nickname: nick, label: '@' + nick, hint });
     });
 
     _forwardTargetsCache = items;
@@ -480,7 +496,7 @@ const Messages = (() => {
           From <b style="color:#cfe8d2">${UI.escHtml(msg.nickname || '?')}</b>: <span style="color:#a8c4ad">${UI.escHtml(preview)}</span>
         </div>
         <div style="padding:10px 14px 4px">
-          <input id="fwd-search" type="text" placeholder="Search rooms and DMs…" style="width:100%;padding:9px 12px;background:rgba(0,0,0,.28);border:1px solid #2f5548;color:#dff5e8;border-radius:8px;outline:none;font-size:13px"/>
+          <input id="fwd-search" type="text" placeholder="Search channels, DMs, and friends…" style="width:100%;padding:9px 12px;background:rgba(0,0,0,.28);border:1px solid #2f5548;color:#dff5e8;border-radius:8px;outline:none;font-size:13px"/>
         </div>
         <div id="fwd-list" style="overflow-y:auto;flex:1;padding:4px 10px 10px;scrollbar-width:thin;scrollbar-color:rgba(76,175,80,.4) transparent;color:#d6ecda"></div>
         <div style="padding:12px 16px;border-top:1px solid #2f5548;display:flex;gap:8px;justify-content:flex-end;background:rgba(0,0,0,.2)">
@@ -502,7 +518,12 @@ const Messages = (() => {
         list.innerHTML = '<div style="padding:24px 18px;color:#9bbf9b;text-align:center;font-size:13px">Loading conversations…</div>';
         return;
       }
-      const visible = items.filter(it => !q || it.label.toLowerCase().includes(q));
+      const visible = items.filter(it => {
+        if (!q) return true;
+        const label = String(it.label || '').toLowerCase();
+        const hint = String(it.hint || '').toLowerCase();
+        return label.includes(q) || hint.includes(q);
+      });
       if (!visible.length) { list.innerHTML = '<div style="padding:30px 20px;color:#85a89a;text-align:center;font-size:13px">No matches</div>'; return; }
       list.innerHTML = visible.map(it => {
         const checked = selected.has(it.key) ? 'checked' : '';
@@ -596,12 +617,25 @@ const Messages = (() => {
               forwarded_from: fwdJSON,
             });
             if (r.ok) okCount++; else failCount++;
-          } else {
+          } else if (target.kind === 'dm') {
             const r = await apiFetch(`/api/dms/${target.id}/messages`, 'POST', {
               content: msg.content || '',
               forwarded_from: fwdJSON,
             });
             if (r.ok) okCount++; else failCount++;
+          } else if (target.kind === 'friend') {
+            const open = await apiFetch('/api/dms/open/' + encodeURIComponent(target.nickname), 'POST');
+            if (!open.ok) { failCount++; continue; }
+            const ch = await open.json().catch(() => ({}));
+            const chId = Number(ch.channel_id || ch.id || 0);
+            if (!chId) { failCount++; continue; }
+            const r = await apiFetch(`/api/dms/${chId}/messages`, 'POST', {
+              content: msg.content || '',
+              forwarded_from: fwdJSON,
+            });
+            if (r.ok) okCount++; else failCount++;
+          } else {
+            failCount++;
           }
         } catch { failCount++; }
       }
