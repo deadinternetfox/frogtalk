@@ -687,67 +687,71 @@ const Messages = (() => {
       }
     })();
 
-    sendBtn.onclick = async () => {
+    sendBtn.onclick = () => {
+      const targets = Array.from(selected.values());
+      if (!targets.length) return;
       sendBtn.disabled = true;
       sendBtn.textContent = 'Sending…';
-      const fwdMeta = {
-        nick: msg.nickname || '?',
-        source_label: sourceLabel,
-        kind: sourceKind,
-        original_id: msg.id,
-      };
-      if (sourceKind === 'room') fwdMeta.source_name = sourceName;
-      if (sourceKind === 'dm') fwdMeta.source_id = sourceId;
-      const fwdJSON = JSON.stringify(fwdMeta);
-
-      const built = await _buildForwardBody({ msg, sourceKind, sourceName, sourceId, fwdJSON });
-      if (!built.ok) {
-        sendBtn.disabled = false;
-        sendBtn.textContent = 'Send';
-        UI.toast?.(built.error || 'Forward failed', 'error');
-        return;
-      }
-      const baseBody = built.body;
-
-      let okCount = 0, failCount = 0;
-      let dmForwarded = false;
-      for (const target of selected.values()) {
-        try {
-          if (target.kind === 'room') {
-            const body = await _roomForwardBody(target.name, baseBody);
-            const r = await apiFetch(`/api/messages/${encodeURIComponent(target.name)}/send`, 'POST', {
-              ...body,
-            });
-            if (r.ok) okCount++; else failCount++;
-          } else if (target.kind === 'dm') {
-            const r = await apiFetch(`/api/dms/${target.id}/messages`, 'POST', {
-              ...baseBody,
-            });
-            if (r.ok) { okCount++; dmForwarded = true; } else failCount++;
-          } else if (target.kind === 'friend') {
-            const open = await apiFetch('/api/dms/open/' + encodeURIComponent(target.nickname), 'POST');
-            if (!open.ok) { failCount++; continue; }
-            const ch = await open.json().catch(() => ({}));
-            const chId = Number(ch.channel_id || ch.id || 0);
-            if (!chId) { failCount++; continue; }
-            const r = await apiFetch(`/api/dms/${chId}/messages`, 'POST', {
-              ...baseBody,
-            });
-            if (r.ok) { okCount++; dmForwarded = true; } else failCount++;
-          } else {
-            failCount++;
-          }
-        } catch { failCount++; }
-      }
       modal.remove();
-      if (dmForwarded && typeof loadDMChannels === 'function') {
-        // Refresh in background so the forward dialog never appears stuck on
-        // "Sending…" if /api/dms is slow.
-        Promise.resolve().then(() => loadDMChannels()).catch(() => {});
-      }
-      if (okCount && !failCount) UI.toast?.(`Forwarded to ${okCount}`, 'success');
-      else if (okCount && failCount) UI.toast?.(`Forwarded to ${okCount}, ${failCount} failed`, 'warn');
-      else UI.toast?.('Forward failed', 'error');
+      Promise.resolve().then(async () => {
+        const fwdMeta = {
+          nick: msg.nickname || '?',
+          source_label: sourceLabel,
+          kind: sourceKind,
+          original_id: msg.id,
+        };
+        if (sourceKind === 'room') fwdMeta.source_name = sourceName;
+        if (sourceKind === 'dm') fwdMeta.source_id = sourceId;
+        const fwdJSON = JSON.stringify(fwdMeta);
+
+        const built = await _buildForwardBody({ msg, sourceKind, sourceName, sourceId, fwdJSON });
+        if (!built.ok) {
+          UI.toast?.(built.error || 'Forward failed', 'error');
+          return;
+        }
+        const baseBody = built.body;
+
+        let okCount = 0, failCount = 0;
+        let dmForwarded = false;
+        for (const target of targets) {
+          try {
+            if (target.kind === 'room') {
+              const body = await _roomForwardBody(target.name, baseBody);
+              const r = await apiFetch(`/api/messages/${encodeURIComponent(target.name)}/send`, 'POST', {
+                ...body,
+              });
+              if (r.ok) okCount++; else failCount++;
+            } else if (target.kind === 'dm') {
+              const r = await apiFetch(`/api/dms/${target.id}/messages`, 'POST', {
+                ...baseBody,
+              });
+              if (r.ok) { okCount++; dmForwarded = true; } else failCount++;
+            } else if (target.kind === 'friend') {
+              const open = await apiFetch('/api/dms/open/' + encodeURIComponent(target.nickname), 'POST');
+              if (!open.ok) { failCount++; continue; }
+              const ch = await open.json().catch(() => ({}));
+              const chId = Number(ch.channel_id || ch.id || 0);
+              if (!chId) { failCount++; continue; }
+              const r = await apiFetch(`/api/dms/${chId}/messages`, 'POST', {
+                ...baseBody,
+              });
+              if (r.ok) { okCount++; dmForwarded = true; } else failCount++;
+            } else {
+              failCount++;
+            }
+          } catch { failCount++; }
+        }
+        if (dmForwarded && typeof loadDMChannels === 'function') {
+          // Refresh in background so the forward dialog never appears stuck on
+          // "Sending…" if /api/dms is slow.
+          Promise.resolve().then(() => loadDMChannels()).catch(() => {});
+        }
+        if (okCount && !failCount) UI.toast?.(`Forwarded to ${okCount}`, 'success');
+        else if (okCount && failCount) UI.toast?.(`Forwarded to ${okCount}, ${failCount} failed`, 'warn');
+        else UI.toast?.('Forward failed', 'error');
+      }).catch(() => {
+        UI.toast?.('Forward failed', 'error');
+      });
     };
     setTimeout(() => search.focus(), 50);
   }
