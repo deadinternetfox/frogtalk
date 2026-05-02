@@ -1095,6 +1095,7 @@ function renderDMMessage (m) {
     <div class="msg-actions">
       <button class="msg-act-btn" title="Reply" onclick="replyToDM(${m.id},'${esc(senderNick)}','${esc((safeContent||'').substring(0,80))}')">↩️</button>
       <button class="msg-act-btn dm-react-btn" data-dmid="${m.id}" data-emoji="👍" title="React">👍</button>
+      <button class="msg-act-btn" title="Copy" onclick="Messages.copyMessage(${m.id})">📋</button>
       ${fwdDisabled ? '' : `<button class="msg-act-btn" title="Forward" onclick="forwardDMMessage(${m.id})">📤</button>`}
       ${mine ? `<button class="msg-act-btn" title="Edit" onclick="editDMMsg(${m.id})">✏️</button>` : ''}
       <button class="msg-act-btn danger" title="Delete" onclick="deleteDMMsg(${m.id})">🗑️</button>
