@@ -177,6 +177,7 @@ async function acceptFriend (nick, btn) {
     toast(nick + ' is now your friend! 🐸', 'success');
     if (btn) await _animateRemoveRow(btn);
     loadFriends();
+    try { if (typeof Social !== 'undefined' && Social.refreshProfileRelationship) Social.refreshProfileRelationship(nick); } catch {}
     wsSend({ type: 'friend_notify', action: 'accept', to_nick: nick });
   } else {
     if (btn) { btn.disabled = false; btn.textContent = '✓ Accept'; }

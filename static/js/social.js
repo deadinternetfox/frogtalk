@@ -2911,10 +2911,24 @@ const Social = (() => {
     if (r.ok) {
       if (btn) { btn.textContent = 'Friends ✓'; }
       UI.showToast(nickname + ' is now your friend! 🐸', 'success');
+      // Re-render profile actions/stats immediately so stale "Add Friend"
+      // buttons do not linger after accepting.
+      try {
+        if (_currentTab === 'profile' && _profileUser === nickname) {
+          await loadProfile(nickname);
+        }
+      } catch {}
     } else {
       if (btn) { btn.disabled = false; btn.textContent = 'Accept Friend'; }
       UI.showToast('Could not accept request', 'error');
     }
+  }
+
+  async function refreshProfileRelationship(nickname) {
+    try {
+      if (!nickname || _currentTab !== 'profile' || _profileUser !== nickname) return;
+      await loadProfile(nickname);
+    } catch {}
   }
 
   // ── new post modal ──────────────────────────────────────────────────────
@@ -3600,6 +3614,7 @@ const Social = (() => {
     shareProfile, profileShareUrl,
     openPostMenu, blockUserFromSocial,
     addFriendFromProfile, acceptFriendFromProfile,
+    refreshProfileRelationship,
     openNewPost, closeNewPost, handleNewPostMedia, openNewPostCamera, clearNewPostMedia, submitNewPost,    applyFilter, updateFilter,
     setPostPrivacy, cyclePostPrivacy, toggleAllowComments,
     showFollowers, showFollowing, closeUserList, expandPost,

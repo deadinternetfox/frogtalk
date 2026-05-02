@@ -368,7 +368,10 @@ async def search_messages(
 
 
 @router.get("/users/mentionable")
-async def get_mentionable_users(current_user: dict = Depends(get_current_user)):
+async def get_mentionable_users(
+    room_name: Optional[str] = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+):
     """Get all users for @mention autocomplete.
 
     The DB `presence` column is best-effort and frequently stale (e.g. when
@@ -377,7 +380,19 @@ async def get_mentionable_users(current_user: dict = Depends(get_current_user)):
     the current websocket connection state. A user is considered online iff
     they currently have at least one active websocket.
     """
-    users = db.get_room_members()
+    room_id = None
+    if room_name:
+        room = db.get_room(room_name)
+        if not room:
+            return {"users": []}
+        if not db.user_can_access_room(
+            current_user["id"], room_name,
+            is_admin=bool(current_user.get("is_admin")),
+        ):
+            return {"users": []}
+        room_id = room["id"]
+
+    users = db.get_room_members(room_id)
     for u in users:
         try:
             uid = u.get("id")

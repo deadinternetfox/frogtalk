@@ -3323,14 +3323,27 @@ def search_all_messages(user_id: int, query: str, limit: int = 50) -> Dict:
 # Room members for @mention
 # ---------------------------------------------------------------------------
 
-def get_room_members() -> List[Dict]:
-    """Get all users for @mention autocomplete."""
+def get_room_members(room_id: Optional[int] = None) -> List[Dict]:
+    """Get users for @mention autocomplete.
+
+    If ``room_id`` is provided, only members of that room are returned.
+    Otherwise, all users are returned (legacy behavior).
+    """
     with _conn() as con:
-        rows = con.execute("""
-            SELECT id, nickname, avatar, presence
-            FROM users
-            ORDER BY nickname
-        """).fetchall()
+        if room_id:
+            rows = con.execute("""
+                SELECT u.id, u.nickname, u.avatar, u.presence
+                FROM room_members rm
+                JOIN users u ON u.id = rm.user_id
+                WHERE rm.room_id = ?
+                ORDER BY u.nickname COLLATE NOCASE
+            """, (room_id,)).fetchall()
+        else:
+            rows = con.execute("""
+                SELECT id, nickname, avatar, presence
+                FROM users
+                ORDER BY nickname
+            """).fetchall()
     return [dict(r) for r in rows]
 
 

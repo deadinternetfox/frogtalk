@@ -4485,19 +4485,33 @@ let _mentionOpen = false;
 let _mentionIndex = 0;
 let _mentionLoadedAt = 0;
 let _mentionLoading = null;
+let _mentionScope = '';
+
+function _currentMentionScope() {
+  const room = String(State?.currentRoom || '').trim();
+  if (!room) return '';
+  const joined = Array.isArray(State?.rooms) && State.rooms.some(r => r && r.name === room);
+  return joined ? room : '';
+}
 
 async function loadMentionUsers(force = false) {
+  const scope = _currentMentionScope();
+  const scopeChanged = scope !== _mentionScope;
   // Throttle: at most one refresh every 10s unless forced.
   const now = Date.now();
-  if (!force && _mentionLoadedAt && now - _mentionLoadedAt < 10000) return;
+  if (!force && !scopeChanged && _mentionLoadedAt && now - _mentionLoadedAt < 10000) return;
   if (_mentionLoading) return _mentionLoading;
   _mentionLoading = (async () => {
     try {
-      const res = await apiFetch('/api/messages/users/mentionable');
+      const url = scope
+        ? `/api/messages/users/mentionable?room_name=${encodeURIComponent(scope)}`
+        : '/api/messages/users/mentionable';
+      const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
         _mentionUsers = data.users || [];
         _mentionLoadedAt = Date.now();
+        _mentionScope = scope;
       }
     } catch (e) {}
     finally { _mentionLoading = null; }
