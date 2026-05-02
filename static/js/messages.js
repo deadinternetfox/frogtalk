@@ -437,8 +437,10 @@ const Messages = (() => {
       if (d.forwarding_disabled) return;
       const peerRaw = d.other_nickname || d.nickname || d.other_user_nickname || d.peer_nickname || '';
       const peer = String(peerRaw || '').trim();
-      const label = peer ? ('@' + peer) : ('DM #' + String(d.id || '?'));
-      items.push({ key: 'd:' + d.id, kind: 'dm', id: d.id, label, hint: peer ? '' : 'Unknown recipient' });
+      // Only include DMs where we can identify the peer.
+      // This keeps the forward picker meaningful and avoids ambiguous @?/DM # rows.
+      if (!peer) return;
+      items.push({ key: 'd:' + d.id, kind: 'dm', id: d.id, label: '@' + peer, hint: '' });
     });
 
     _forwardTargetsCache = items;
