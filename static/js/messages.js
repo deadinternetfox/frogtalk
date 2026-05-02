@@ -408,6 +408,97 @@ const Messages = (() => {
   let _forwardTargetsCacheAt = 0;
   const _forwardTargetsCacheTtlMs = 45000;
 
+  function _isEncryptedPayloadString(v) {
+    return typeof v === 'string' && v.startsWith('ftenc:');
+  }
+
+  async function _resolveForwardMediaData(msg, { sourceKind, sourceName, sourceId }) {
+    let mediaData = (typeof msg.media_data === 'string' && msg.media_data) ? msg.media_data : '';
+    let mediaType = String(msg.media_type || '');
+    let mediaName = String(msg.media_name || '');
+    const hasMedia = !!(mediaData || msg.has_media || mediaType);
+    if (!hasMedia) return { ok: true, hasMedia: false };
+
+    if (!mediaData && msg.id) {
+      try {
+        if (sourceKind === 'room') {
+          const res = await apiFetch(`/api/messages/media/${msg.id}`);
+          if (!res.ok) return { ok: false, error: 'Failed to load media for forwarding' };
+          const data = await res.json();
+          mediaData = String(data.media_data || '');
+          mediaType = String(data.media_type || mediaType || '');
+          mediaName = String(data.media_name || mediaName || '');
+          if (_isEncryptedPayloadString(mediaData) && typeof Crypto !== 'undefined' && Crypto.decryptPayload) {
+            const roomKey = (State.roomKeys && (State.roomKeys[sourceName] || State.roomKeys[State.currentRoom])) || null;
+            const dec = await Crypto.decryptPayload(mediaData, roomKey);
+            if (!dec) return { ok: false, error: 'Could not decrypt media for forwarding' };
+            mediaData = dec;
+          }
+        } else if (sourceKind === 'dm' && sourceId) {
+          const res = await apiFetch(`/api/dms/${sourceId}/messages/${msg.id}/media`);
+          if (!res.ok) return { ok: false, error: 'Failed to load DM media for forwarding' };
+          const data = await res.json();
+          mediaData = String(data.media_data || '');
+          mediaType = String(data.media_type || mediaType || '');
+          mediaName = String(data.media_name || mediaName || '');
+          if (_isEncryptedPayloadString(mediaData) && typeof Crypto !== 'undefined' && Crypto.decryptPayload) {
+            const dec = await Crypto.decryptPayload(mediaData, STATE.sharedSecret || null);
+            if (!dec) return { ok: false, error: 'Could not decrypt DM media for forwarding' };
+            mediaData = dec;
+          }
+        }
+      } catch {
+        return { ok: false, error: 'Failed to prepare media for forwarding' };
+      }
+    }
+
+    if (!mediaData) return { ok: false, error: 'Media payload unavailable for forwarding' };
+    return {
+      ok: true,
+      hasMedia: true,
+      media_data: mediaData,
+      media_type: mediaType.slice(0, 120),
+      media_name: mediaName.slice(0, 180),
+      media_blur: msg.media_blur ? 1 : 0,
+      view_once: msg.view_once ? 1 : 0,
+    };
+  }
+
+  async function _buildForwardBody({ msg, sourceKind, sourceName, sourceId, fwdJSON }) {
+    const body = {
+      content: String(msg.content || ''),
+      forwarded_from: fwdJSON,
+    };
+
+    const media = await _resolveForwardMediaData(msg, { sourceKind, sourceName, sourceId });
+    if (!media.ok) return media;
+    if (media.hasMedia) {
+      body.media_data = media.media_data;
+      body.media_type = media.media_type;
+      body.media_name = media.media_name;
+      body.media_blur = media.media_blur;
+      body.view_once = media.view_once;
+    }
+
+    if (!body.content && !body.media_data) {
+      return { ok: false, error: 'Nothing to forward' };
+    }
+    return { ok: true, body };
+  }
+
+  async function _roomForwardBody(targetRoom, baseBody) {
+    const out = { ...baseBody };
+    const key = State.roomKeys && State.roomKeys[targetRoom];
+    const hasOutbound = !!(State.bridgeOut && State.bridgeOut[targetRoom]);
+    // Encrypt forwarded payloads when the destination room has an E2EE key and
+    // no known outbound bridge for that room.
+    if (key && !hasOutbound && typeof Crypto !== 'undefined') {
+      if (out.content && Crypto.encrypt) out.content = await Crypto.encrypt(out.content, key);
+      if (out.media_data && Crypto.encryptPayload) out.media_data = await Crypto.encryptPayload(out.media_data, key);
+    }
+    return out;
+  }
+
   async function _fetchForwardTargets(forceRefresh) {
     const fresh = _forwardTargetsCache && (Date.now() - _forwardTargetsCacheAt) < _forwardTargetsCacheTtlMs;
     if (!forceRefresh && fresh) return _forwardTargetsCache;
@@ -608,20 +699,29 @@ const Messages = (() => {
       if (sourceKind === 'room') fwdMeta.source_name = sourceName;
       if (sourceKind === 'dm') fwdMeta.source_id = sourceId;
       const fwdJSON = JSON.stringify(fwdMeta);
+
+      const built = await _buildForwardBody({ msg, sourceKind, sourceName, sourceId, fwdJSON });
+      if (!built.ok) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send';
+        UI.toast?.(built.error || 'Forward failed', 'error');
+        return;
+      }
+      const baseBody = built.body;
+
       let okCount = 0, failCount = 0;
       let dmForwarded = false;
       for (const target of selected.values()) {
         try {
           if (target.kind === 'room') {
+            const body = await _roomForwardBody(target.name, baseBody);
             const r = await apiFetch(`/api/messages/${encodeURIComponent(target.name)}/send`, 'POST', {
-              content: msg.content || '',
-              forwarded_from: fwdJSON,
+              ...body,
             });
             if (r.ok) okCount++; else failCount++;
           } else if (target.kind === 'dm') {
             const r = await apiFetch(`/api/dms/${target.id}/messages`, 'POST', {
-              content: msg.content || '',
-              forwarded_from: fwdJSON,
+              ...baseBody,
             });
             if (r.ok) { okCount++; dmForwarded = true; } else failCount++;
           } else if (target.kind === 'friend') {
@@ -631,8 +731,7 @@ const Messages = (() => {
             const chId = Number(ch.channel_id || ch.id || 0);
             if (!chId) { failCount++; continue; }
             const r = await apiFetch(`/api/dms/${chId}/messages`, 'POST', {
-              content: msg.content || '',
-              forwarded_from: fwdJSON,
+              ...baseBody,
             });
             if (r.ok) { okCount++; dmForwarded = true; } else failCount++;
           } else {
