@@ -404,6 +404,48 @@ const Messages = (() => {
     return `<div class="msg-forwarded" style="font-size:11px;color:#9aa0a6;margin:2px 0 4px;padding:3px 6px;border-left:2px solid #5b8def;background:rgba(91,141,239,0.08);border-radius:3px">↪ Forwarded from <b>${nick}</b>${src ? ` in ${src}` : ''}</div>`;
   }
 
+  let _forwardTargetsCache = null;
+  let _forwardTargetsCacheAt = 0;
+  const _forwardTargetsCacheTtlMs = 45000;
+
+  async function _fetchForwardTargets(forceRefresh) {
+    const fresh = _forwardTargetsCache && (Date.now() - _forwardTargetsCacheAt) < _forwardTargetsCacheTtlMs;
+    if (!forceRefresh && fresh) return _forwardTargetsCache;
+
+    let rooms = [], dms = [];
+    try {
+      const [r1, r2] = await Promise.all([
+        apiFetch('/api/rooms'),
+        apiFetch('/api/dms')
+      ]);
+      try {
+        const j1 = await r1.json();
+        rooms = (j1.rooms || j1 || []).filter(r => r && r.name);
+      } catch {}
+      try {
+        const j2 = await r2.json();
+        dms = j2.channels || [];
+      } catch {}
+    } catch {}
+
+    const items = [];
+    rooms.forEach(r => {
+      if (r.forwarding_disabled) return;
+      items.push({ key: 'r:' + r.name, kind: 'room', name: r.name, label: '#' + r.name, hint: r.description || '' });
+    });
+    dms.forEach(d => {
+      if (d.forwarding_disabled) return;
+      const peerRaw = d.other_nickname || d.nickname || d.other_user_nickname || d.peer_nickname || '';
+      const peer = String(peerRaw || '').trim();
+      const label = peer ? ('@' + peer) : ('DM #' + String(d.id || '?'));
+      items.push({ key: 'd:' + d.id, kind: 'dm', id: d.id, label, hint: peer ? '' : 'Unknown recipient' });
+    });
+
+    _forwardTargetsCache = items;
+    _forwardTargetsCacheAt = Date.now();
+    return items;
+  }
+
   async function forwardMessage(msgId) {
     const list = State.messages[State.currentRoom] || [];
     const msg = list.find(m => +m.id === +msgId);
@@ -418,17 +460,6 @@ const Messages = (() => {
 
   // Shared picker: opens modal listing rooms + DMs, multi-select, then sends.
   async function _openForwardPicker({ sourceKind, sourceName, sourceId, sourceLabel, msg }) {
-    let rooms = [], dms = [];
-    try {
-      const r1 = await apiFetch('/api/rooms');
-      const j1 = await r1.json();
-      rooms = (j1.rooms || j1 || []).filter(r => r && r.name);
-    } catch {}
-    try {
-      const r2 = await apiFetch('/api/dms');
-      const j2 = await r2.json();
-      dms = j2.channels || [];
-    } catch {}
     // Build modal
     const old = document.getElementById('forward-picker-modal');
     if (old) old.remove();
@@ -438,21 +469,21 @@ const Messages = (() => {
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
     const preview = (msg.content || '').slice(0, 120) || (msg.has_media || msg.media_type ? '[media]' : '');
     modal.innerHTML = `
-      <div style="background:linear-gradient(180deg,#1f3a2c 0%,#13241b 100%);border:1px solid #3a6b48;border-radius:14px;width:min(460px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.6),0 0 0 1px rgba(76,175,80,.15)">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #3a6b48">
+      <div style="background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%);border:1px solid #2f5548;border-radius:14px;width:min(460px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 48px rgba(0,0,0,.62)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #2f5548;background:linear-gradient(180deg,rgba(255,255,255,.02),rgba(255,255,255,0))">
           <div style="font-weight:700;color:#cfe8d2;font-size:15px">↪ Forward message</div>
           <button id="fwd-cancel-x" style="background:none;border:none;color:#9bbf9b;font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px" title="Close">✕</button>
         </div>
-        <div style="padding:10px 14px;border-bottom:1px solid #2a4a36;font-size:12px;color:#9bbf9b;background:rgba(0,0,0,.18)">
+        <div style="padding:10px 14px;border-bottom:1px solid #24473b;font-size:12px;color:#9bbf9b;background:rgba(0,0,0,.2)">
           From <b style="color:#cfe8d2">${UI.escHtml(msg.nickname || '?')}</b>: <span style="color:#a8c4ad">${UI.escHtml(preview)}</span>
         </div>
         <div style="padding:10px 14px 4px">
-          <input id="fwd-search" type="text" placeholder="Search rooms and DMs…" style="width:100%;padding:9px 12px;background:rgba(0,0,0,.35);border:1px solid #3a6b48;color:#dff5e8;border-radius:8px;outline:none;font-size:13px"/>
+          <input id="fwd-search" type="text" placeholder="Search rooms and DMs…" style="width:100%;padding:9px 12px;background:rgba(0,0,0,.28);border:1px solid #2f5548;color:#dff5e8;border-radius:8px;outline:none;font-size:13px"/>
         </div>
         <div id="fwd-list" style="overflow-y:auto;flex:1;padding:4px 10px 10px;scrollbar-width:thin;scrollbar-color:rgba(76,175,80,.4) transparent;color:#d6ecda"></div>
-        <div style="padding:12px 16px;border-top:1px solid #3a6b48;display:flex;gap:8px;justify-content:flex-end;background:rgba(0,0,0,.18)">
-          <button id="fwd-cancel" style="background:rgba(0,0,0,.35);border:1px solid #3a6b48;color:#cfe8d2;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">Cancel</button>
-          <button id="fwd-send" style="background:linear-gradient(135deg,#2a5a2a 0%,#1a3a1a 100%);border:1px solid #4caf50;color:#fff;padding:8px 18px;border-radius:8px;cursor:pointer;font-weight:600;opacity:.5" disabled>Send</button>
+        <div style="padding:12px 16px;border-top:1px solid #2f5548;display:flex;gap:8px;justify-content:flex-end;background:rgba(0,0,0,.2)">
+          <button id="fwd-cancel" style="background:linear-gradient(180deg,#15291f,#11221b);border:1px solid #2f5548;color:#cfe8d2;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">Cancel</button>
+          <button id="fwd-send" style="background:linear-gradient(135deg,#2a5a2a 0%,#1a3a1a 100%);border:1px solid #4caf50;color:#dff5e8;padding:8px 18px;border-radius:8px;cursor:pointer;font-weight:600;opacity:.5" disabled>Send</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -460,20 +491,15 @@ const Messages = (() => {
     const search = modal.querySelector('#fwd-search');
     const sendBtn = modal.querySelector('#fwd-send');
     const selected = new Map(); // key -> {kind,name?,id?,label}
-
-    const items = [];
-    rooms.forEach(r => {
-      if (r.forwarding_disabled) return;
-      items.push({ key: 'r:' + r.name, kind: 'room', name: r.name, label: '#' + r.name, hint: r.description || '' });
-    });
-    dms.forEach(d => {
-      if (d.forwarding_disabled) return;
-      const peer = d.other_nickname || d.nickname || '?';
-      items.push({ key: 'd:' + d.id, kind: 'dm', id: d.id, label: '@' + peer, hint: '' });
-    });
+    let items = [];
+    let loading = true;
 
     function render() {
       const q = search.value.trim().toLowerCase();
+      if (loading) {
+        list.innerHTML = '<div style="padding:24px 18px;color:#9bbf9b;text-align:center;font-size:13px">Loading conversations…</div>';
+        return;
+      }
       const visible = items.filter(it => !q || it.label.toLowerCase().includes(q));
       if (!visible.length) { list.innerHTML = '<div style="padding:30px 20px;color:#85a89a;text-align:center;font-size:13px">No matches</div>'; return; }
       list.innerHTML = visible.map(it => {
@@ -515,6 +541,28 @@ const Messages = (() => {
     modal.querySelector('#fwd-cancel').onclick = () => modal.remove();
     modal.querySelector('#fwd-cancel-x').onclick = () => modal.remove();
     modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+
+    // Open instantly, then hydrate targets async (uses short-lived cache).
+    (async () => {
+      const hasFreshCache = _forwardTargetsCache && (Date.now() - _forwardTargetsCacheAt) < _forwardTargetsCacheTtlMs;
+      if (hasFreshCache) {
+        items = _forwardTargetsCache.slice();
+        loading = false;
+        render();
+      }
+      try {
+        const fresh = await _fetchForwardTargets(!hasFreshCache);
+        if (!modal.isConnected) return;
+        items = (fresh || []).slice();
+      } catch {
+        if (!modal.isConnected) return;
+      } finally {
+        if (!modal.isConnected) return;
+        loading = false;
+        render();
+      }
+    })();
+
     sendBtn.onclick = async () => {
       sendBtn.disabled = true;
       sendBtn.textContent = 'Sending…';
