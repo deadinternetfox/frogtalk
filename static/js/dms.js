@@ -123,6 +123,7 @@ function _looksEncryptedBlob(content) {
 function _dmPreviewText(content, hasMedia, mediaType) {
   const c = _parseDMCallLog(content);
   if (c) return c.subtitle || c.title || 'Call update';
+  if (_looksEncryptedBlob(content)) return 'Encrypted message';
   if (content) return content;
   return (hasMedia || mediaType) ? 'Media' : '';
 }
@@ -285,8 +286,9 @@ async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
     }
   } catch {}
 
-  // If decrypt fails and this still looks like ciphertext, do not leak it in UI.
-  return _looksEncryptedBlob(raw) ? '' : raw;
+  // If decrypt fails, keep the raw payload so message rendering can still
+  // show a lock placeholder instead of an empty bubble.
+  return raw;
 }
 
 /* ── Sidebar DM list ────────────────────────────────────────────────────────── */
