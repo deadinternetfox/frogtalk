@@ -534,7 +534,7 @@ const Messages = (() => {
         const checkBg = chosen
           ? 'background:linear-gradient(135deg,#7fd2a7,#4caf50);border-color:#7fd2a7;color:#082114;'
           : 'background:rgba(0,0,0,.25);border-color:rgba(127,210,167,.45);color:transparent;';
-        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;border:1px solid #2f5548;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s">
+        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;margin-bottom:6px;border-radius:10px;border:1px solid #2f5548;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s">
           <input type="checkbox" data-key="${UI.escHtml(it.key)}" ${checked} style="position:absolute;opacity:0;pointer-events:none"/>
           <span aria-hidden="true" style="${checkBg}width:18px;height:18px;border:1px solid #2f5548;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;line-height:1;flex-shrink:0;transition:all .15s">✓</span>
           <span style="flex:1;min-width:0;color:#dff5e8;font-size:14px;display:flex;flex-direction:column;gap:2px">
@@ -609,6 +609,7 @@ const Messages = (() => {
       if (sourceKind === 'dm') fwdMeta.source_id = sourceId;
       const fwdJSON = JSON.stringify(fwdMeta);
       let okCount = 0, failCount = 0;
+      let dmForwarded = false;
       for (const target of selected.values()) {
         try {
           if (target.kind === 'room') {
@@ -622,7 +623,7 @@ const Messages = (() => {
               content: msg.content || '',
               forwarded_from: fwdJSON,
             });
-            if (r.ok) okCount++; else failCount++;
+            if (r.ok) { okCount++; dmForwarded = true; } else failCount++;
           } else if (target.kind === 'friend') {
             const open = await apiFetch('/api/dms/open/' + encodeURIComponent(target.nickname), 'POST');
             if (!open.ok) { failCount++; continue; }
@@ -633,11 +634,15 @@ const Messages = (() => {
               content: msg.content || '',
               forwarded_from: fwdJSON,
             });
-            if (r.ok) okCount++; else failCount++;
+            if (r.ok) { okCount++; dmForwarded = true; } else failCount++;
           } else {
             failCount++;
           }
         } catch { failCount++; }
+      }
+      if (dmForwarded && typeof loadDMChannels === 'function') {
+        // Ensure the sidebar reflects forwarded DM activity and bumps touched chats.
+        try { await loadDMChannels(); } catch {}
       }
       modal.remove();
       if (okCount && !failCount) UI.toast?.(`Forwarded to ${okCount}`, 'success');
