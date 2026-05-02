@@ -511,9 +511,9 @@ const Messages = (() => {
         const checkBg = chosen
           ? 'background:linear-gradient(135deg,#7fd2a7,#4caf50);border-color:#7fd2a7;color:#082114;'
           : 'background:rgba(0,0,0,.25);border-color:rgba(127,210,167,.45);color:transparent;';
-        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;border:1px solid;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s">
+        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;border:1px solid #2f5548;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s">
           <input type="checkbox" data-key="${UI.escHtml(it.key)}" ${checked} style="position:absolute;opacity:0;pointer-events:none"/>
-          <span aria-hidden="true" style="${checkBg}width:18px;height:18px;border:1px solid;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;line-height:1;flex-shrink:0;transition:all .15s">✓</span>
+          <span aria-hidden="true" style="${checkBg}width:18px;height:18px;border:1px solid #2f5548;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;line-height:1;flex-shrink:0;transition:all .15s">✓</span>
           <span style="flex:1;min-width:0;color:#dff5e8;font-size:14px;display:flex;flex-direction:column;gap:2px">
             <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(it.label)}</span>
             ${it.hint ? `<span style="font-size:11px;color:#8db69b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(it.hint)}</span>` : ''}
@@ -521,8 +521,18 @@ const Messages = (() => {
         </label>`;
       }).join('');
       list.querySelectorAll('.fwd-row').forEach(row => {
-        row.addEventListener('mouseenter', () => { if (!selected.has(row.dataset.key)) row.style.background = 'rgba(76,175,80,.08)'; });
-        row.addEventListener('mouseleave', () => { if (!selected.has(row.dataset.key)) row.style.background = ''; });
+        row.addEventListener('mouseenter', () => {
+          if (!selected.has(row.dataset.key)) {
+            row.style.background = 'rgba(76,175,80,.08)';
+            row.style.borderColor = 'rgba(76,175,80,.38)';
+          }
+        });
+        row.addEventListener('mouseleave', () => {
+          if (!selected.has(row.dataset.key)) {
+            row.style.background = 'rgba(0,0,0,.2)';
+            row.style.borderColor = 'rgba(58,107,72,.45)';
+          }
+        });
       });
       list.querySelectorAll('input[type=checkbox]').forEach(cb => {
         cb.addEventListener('change', () => {
