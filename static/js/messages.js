@@ -1639,6 +1639,7 @@ const Messages = (() => {
       const isDanger = btn.classList.contains('danger');
       const icon = (btn.textContent || '•').trim();
       const label = labelFor(btn);
+      const actionTitle = label.toLowerCase();
       const asBtn = document.createElement('button');
       asBtn.className = 'as-btn' + (isDanger ? ' danger' : '');
       asBtn.style.animationDelay = (40 + i * 28) + 'ms';
@@ -1647,8 +1648,27 @@ const Messages = (() => {
         e.stopPropagation();
         try { navigator.vibrate?.(8); } catch {}
         close();
-        // Defer so the sheet is gone before any menu/popup the button opens
-        setTimeout(() => btn.click(), 180);
+        // Defer so the sheet is gone before any menu/popup the action opens.
+        // On some media/link-only messages, programmatic clicks on hidden
+        // action-row buttons can be flaky, so invoke Forward directly.
+        setTimeout(() => {
+          if (actionTitle.includes('forward')) {
+            const isDM = !!msgEl.getAttribute('data-dmid');
+            if (isDM && typeof window.forwardDMMessage === 'function') {
+              window.forwardDMMessage(msgId);
+              return;
+            }
+            if (!isDM && typeof forwardMessage === 'function') {
+              forwardMessage(msgId);
+              return;
+            }
+          }
+          try {
+            btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+          } catch {
+            try { btn.click(); } catch {}
+          }
+        }, 180);
       };
       itemsWrap.appendChild(asBtn);
     });
