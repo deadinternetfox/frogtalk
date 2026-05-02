@@ -478,10 +478,20 @@ const Messages = (() => {
       if (!visible.length) { list.innerHTML = '<div style="padding:30px 20px;color:#85a89a;text-align:center;font-size:13px">No matches</div>'; return; }
       list.innerHTML = visible.map(it => {
         const checked = selected.has(it.key) ? 'checked' : '';
-        const bg = selected.has(it.key) ? 'background:rgba(76,175,80,.14);' : '';
-        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;transition:background .15s">
-          <input type="checkbox" data-key="${UI.escHtml(it.key)}" ${checked} style="accent-color:#4caf50;width:16px;height:16px;cursor:pointer"/>
-          <span style="flex:1;color:#dff5e8;font-size:14px">${UI.escHtml(it.label)}</span>
+        const chosen = selected.has(it.key);
+        const bg = chosen
+          ? 'background:linear-gradient(135deg,rgba(76,175,80,.2),rgba(46,120,68,.16));border-color:rgba(127,210,167,.55);box-shadow:inset 0 0 0 1px rgba(127,210,167,.12);'
+          : 'background:rgba(0,0,0,.2);border-color:rgba(58,107,72,.45);';
+        const checkBg = chosen
+          ? 'background:linear-gradient(135deg,#7fd2a7,#4caf50);border-color:#7fd2a7;color:#082114;'
+          : 'background:rgba(0,0,0,.25);border-color:rgba(127,210,167,.45);color:transparent;';
+        return `<label class="fwd-row" data-key="${UI.escHtml(it.key)}" style="${bg}display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;border:1px solid;cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s">
+          <input type="checkbox" data-key="${UI.escHtml(it.key)}" ${checked} style="position:absolute;opacity:0;pointer-events:none"/>
+          <span aria-hidden="true" style="${checkBg}width:18px;height:18px;border:1px solid;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;line-height:1;flex-shrink:0;transition:all .15s">✓</span>
+          <span style="flex:1;min-width:0;color:#dff5e8;font-size:14px;display:flex;flex-direction:column;gap:2px">
+            <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(it.label)}</span>
+            ${it.hint ? `<span style="font-size:11px;color:#8db69b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(it.hint)}</span>` : ''}
+          </span>
         </label>`;
       }).join('');
       list.querySelectorAll('.fwd-row').forEach(row => {
@@ -495,9 +505,8 @@ const Messages = (() => {
           if (cb.checked) selected.set(k, it); else selected.delete(k);
           sendBtn.disabled = selected.size === 0;
           sendBtn.style.opacity = sendBtn.disabled ? '.5' : '1';
-          // Re-render row highlight
-          const row = list.querySelector(`.fwd-row[data-key="${CSS.escape(k)}"]`);
-          if (row) row.style.background = cb.checked ? 'rgba(76,175,80,.14)' : '';
+          // Re-render to refresh themed checkbox + selected row style.
+          render();
         });
       });
     }
@@ -1647,12 +1656,13 @@ const Messages = (() => {
       asBtn.onclick = (e) => {
         e.stopPropagation();
         try { navigator.vibrate?.(8); } catch {}
-        close();
+        const isForwardAction = actionTitle.includes('forward');
+        close(isForwardAction);
         // Defer so the sheet is gone before any menu/popup the action opens.
         // On some media/link-only messages, programmatic clicks on hidden
         // action-row buttons can be flaky, so invoke Forward directly.
         setTimeout(() => {
-          if (actionTitle.includes('forward')) {
+          if (isForwardAction) {
             const isDM = !!msgEl.getAttribute('data-dmid');
             if (isDM && typeof window.forwardDMMessage === 'function') {
               window.forwardDMMessage(msgId);
@@ -1668,15 +1678,19 @@ const Messages = (() => {
           } catch {
             try { btn.click(); } catch {}
           }
-        }, 180);
+        }, isForwardAction ? 25 : 180);
       };
       itemsWrap.appendChild(asBtn);
     });
 
     if (!itemsWrap.children.length) return; // nothing to show
 
-    const close = () => {
+    const close = (immediate) => {
       if (sheet.classList.contains('closing')) return;
+      if (immediate) {
+        sheet.remove();
+        return;
+      }
       sheet.classList.add('closing');
       setTimeout(() => sheet.remove(), 180);
     };
