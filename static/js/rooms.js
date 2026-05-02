@@ -2575,7 +2575,7 @@ async function viewChannelProfile(channelName) {
 function _renderChannelComment(c, channelName) {
   const avatar = c.avatar ? `<img src="${UI.escHtml(c.avatar)}" class="ch-prof-cmt-avatar">` : `<div class="ch-prof-cmt-avatar ch-prof-cmt-avatar-fallback">🐸</div>`;
   const canDelete = (c.user_id === State.user.id) || State.user.is_admin;
-  const delBtn = canDelete ? `<button class="ch-prof-cmt-del" onclick="deleteChannelComment(${_jsStr(channelName)}, ${c.id})">🗑</button>` : '';
+  const delBtn = canDelete ? `<button type="button" class="ch-prof-cmt-del" title="Delete comment" aria-label="Delete comment" onclick="deleteChannelComment(${_jsStr(channelName)}, ${c.id})">🗑</button>` : '';
   const myVote = Number(c.my_vote || 0);
   const upCount = Number(c.like_count || 0);
   const downCount = Number(c.dislike_count || 0);
