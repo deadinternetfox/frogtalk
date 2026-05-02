@@ -2578,6 +2578,7 @@ function _renderChannelComment(c, channelName) {
   const delBtn = canDelete ? `<button class="ch-prof-cmt-del" onclick="deleteChannelComment(${_jsStr(channelName)}, ${c.id})">🗑</button>` : '';
   const myVote = Number(c.my_vote || 0);
   const upCount = Number(c.like_count || 0);
+  const downCount = Number(c.dislike_count || 0);
   const upActive = myVote === 1 ? ' is-up' : '';
   const downActive = myVote === -1 ? ' is-down' : '';
   return `<div class="ch-prof-cmt" data-comment-id="${c.id}">
@@ -2596,7 +2597,7 @@ function _renderChannelComment(c, channelName) {
           <span class="ch-prof-vote-icon">👍</span><span class="ch-prof-vote-count">${upCount}</span>
         </button>
         <button type="button" class="ch-prof-vote-btn${downActive}" data-vote="down" onclick="voteChannelComment(event, ${_jsStr(channelName)}, ${c.id}, -1, this)" aria-label="Dislike comment">
-          <span class="ch-prof-vote-icon">👎</span>
+          <span class="ch-prof-vote-icon">👎</span><span class="ch-prof-vote-count">${downCount}</span>
         </button>
       </div>
     </div>
@@ -2611,6 +2612,7 @@ async function voteChannelComment(ev, channelName, commentId, value, btn) {
   const upBtn = wrap.querySelector('.ch-prof-vote-btn[data-vote="up"]');
   const downBtn = wrap.querySelector('.ch-prof-vote-btn[data-vote="down"]');
   const upCountEl = upBtn?.querySelector('.ch-prof-vote-count');
+  const downCountEl = downBtn?.querySelector('.ch-prof-vote-count');
   // Determine current state from class flags
   const wasUp = upBtn?.classList.contains('is-up');
   const wasDown = downBtn?.classList.contains('is-down');
@@ -2620,10 +2622,15 @@ async function voteChannelComment(ev, channelName, commentId, value, btn) {
   if (value === -1 && wasDown) newValue = 0;
   // Optimistic UI
   const prevUp = Number(upCountEl?.textContent || '0');
+  const prevDown = Number(downCountEl?.textContent || '0');
   let nextUp = prevUp;
+  let nextDown = prevDown;
   if (wasUp && newValue !== 1) nextUp -= 1;
   if (!wasUp && newValue === 1) nextUp += 1;
+  if (wasDown && newValue !== -1) nextDown -= 1;
+  if (!wasDown && newValue === -1) nextDown += 1;
   if (upCountEl) upCountEl.textContent = String(Math.max(0, nextUp));
+  if (downCountEl) downCountEl.textContent = String(Math.max(0, nextDown));
   upBtn?.classList.toggle('is-up', newValue === 1);
   downBtn?.classList.toggle('is-down', newValue === -1);
   if (upBtn) upBtn.dataset.pending = '1';
@@ -2637,11 +2644,13 @@ async function voteChannelComment(ev, channelName, commentId, value, btn) {
     if (!r.ok) throw new Error('vote failed');
     const d = await r.json();
     if (upCountEl) upCountEl.textContent = String(d.like_count || 0);
+    if (downCountEl) downCountEl.textContent = String(d.dislike_count || 0);
     upBtn?.classList.toggle('is-up', Number(d.my_vote) === 1);
     downBtn?.classList.toggle('is-down', Number(d.my_vote) === -1);
   } catch {
     // Rollback
     if (upCountEl) upCountEl.textContent = String(prevUp);
+    if (downCountEl) downCountEl.textContent = String(prevDown);
     upBtn?.classList.toggle('is-up', !!wasUp);
     downBtn?.classList.toggle('is-down', !!wasDown);
     UI.showToast('Could not vote', 'error');
