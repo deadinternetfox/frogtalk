@@ -1178,19 +1178,7 @@ function renderDMMessage (m) {
       contentHtml = renderCustomEmojisInText(contentHtml);
     }
   }
-  let inlineEmbedHtml = '';
-  if (!mediaHtml && safeContent) {
-    const ytId = _extractYouTubeVideoId(safeContent);
-    if (ytId) {
-      inlineEmbedHtml = `<div class="yt-embed" style="margin-top:8px;max-width:480px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">`+
-        `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">`+
-          `<iframe src="https://www.youtube.com/embed/${esc(ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`+
-        `</div>`+
-      `</div>`;
-    }
-  }
-
-  if (!contentHtml && !mediaHtml && !inlineEmbedHtml) {
+  if (!contentHtml && !mediaHtml) {
     if (_isCipherBlob || m._decryptPending) {
       // Decryption hasn't succeeded yet — show a lock placeholder instead
       // of the misleading "Media" string. A re-decrypt happens on the next
@@ -1242,7 +1230,6 @@ function renderDMMessage (m) {
       ${replyQuote}
       ${fwdBadge}
       ${contentHtml ? `<div class="msg-content">${contentHtml}</div>` : ''}
-      ${inlineEmbedHtml}
       ${mediaHtml}
       ${reactionsHtml}
     </div>
