@@ -136,6 +136,27 @@ function _extractDMPreviewUrl(text) {
   return first;
 }
 
+function _extractYouTubeVideoId(text) {
+  if (typeof text !== 'string' || !text) return '';
+  const urls = text.match(/https?:\/\/[^\s<>"]+/g) || [];
+  for (const raw of urls) {
+    try {
+      const u = new URL(raw);
+      const host = String(u.hostname || '').toLowerCase().replace(/^www\./, '');
+      let id = '';
+      if (host === 'youtu.be') {
+        id = String(u.pathname || '').split('/').filter(Boolean)[0] || '';
+      } else if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+        if (u.pathname === '/watch') id = u.searchParams.get('v') || '';
+        else if (u.pathname.startsWith('/shorts/')) id = u.pathname.split('/')[2] || '';
+        else if (u.pathname.startsWith('/embed/')) id = u.pathname.split('/')[2] || '';
+      }
+      if (/^[A-Za-z0-9_-]{6,20}$/.test(id)) return id;
+    } catch {}
+  }
+  return '';
+}
+
 async function _loadDMPreview(msgId, url) {
   if (!msgId || !url) return;
   if (_dmPreviewCache[url] !== undefined) {
@@ -1157,7 +1178,19 @@ function renderDMMessage (m) {
       contentHtml = renderCustomEmojisInText(contentHtml);
     }
   }
-  if (!contentHtml && !mediaHtml) {
+  let inlineEmbedHtml = '';
+  if (!mediaHtml && safeContent) {
+    const ytId = _extractYouTubeVideoId(safeContent);
+    if (ytId) {
+      inlineEmbedHtml = `<div class="yt-embed" style="margin-top:8px;max-width:480px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">`+
+        `<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">`+
+          `<iframe src="https://www.youtube.com/embed/${esc(ytId)}" style="position:absolute;top:0;left:0;width:100%;height:100%;border:0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`+
+        `</div>`+
+      `</div>`;
+    }
+  }
+
+  if (!contentHtml && !mediaHtml && !inlineEmbedHtml) {
     if (_isCipherBlob || m._decryptPending) {
       // Decryption hasn't succeeded yet — show a lock placeholder instead
       // of the misleading "Media" string. A re-decrypt happens on the next
@@ -1209,6 +1242,7 @@ function renderDMMessage (m) {
       ${replyQuote}
       ${fwdBadge}
       ${contentHtml ? `<div class="msg-content">${contentHtml}</div>` : ''}
+      ${inlineEmbedHtml}
       ${mediaHtml}
       ${reactionsHtml}
     </div>

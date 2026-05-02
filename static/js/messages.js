@@ -1886,6 +1886,23 @@ const Messages = (() => {
       itemsWrap.appendChild(asBtn);
     });
 
+    // DM safety net: always expose Copy in the sheet, even if the underlying
+    // action row came from stale markup that omitted the copy button.
+    const isDMMessage = !!msgEl.getAttribute('data-dmid');
+    if (isDMMessage && !Array.from(itemsWrap.querySelectorAll('.as-btn')).some(b => /copy/i.test(b.textContent || ''))) {
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'as-btn';
+      copyBtn.style.animationDelay = (40 + itemsWrap.children.length * 28) + 'ms';
+      copyBtn.innerHTML = '<span class="as-ic">📋</span><span>Copy</span>';
+      copyBtn.onclick = (e) => {
+        e.stopPropagation();
+        try { navigator.vibrate?.(8); } catch {}
+        close(true);
+        setTimeout(() => { try { if (typeof copyMessage === 'function') copyMessage(msgId); } catch {} }, 10);
+      };
+      itemsWrap.appendChild(copyBtn);
+    }
+
     if (!itemsWrap.children.length) return; // nothing to show
 
     const close = (immediate) => {
