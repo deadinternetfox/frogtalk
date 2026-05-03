@@ -5059,8 +5059,12 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .reel-card.no-poster .reel-play-toggle{opacity:1}
 .reel-card.is-playing .reel-play-toggle{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.92)}
 .reel-progress{
-  position:absolute;left:10px;right:10px;bottom:max(12px, calc(10px + var(--safe-bottom)));height:8px;border-radius:999px;
-  background:rgba(255,255,255,.2);z-index:3;overflow:visible;cursor:pointer;touch-action:none
+  position:absolute;left:10px;right:10px;bottom:max(42px, calc(24px + var(--safe-bottom)));height:10px;border-radius:999px;
+  background:rgba(255,255,255,.24);z-index:5;overflow:visible;cursor:pointer;touch-action:none
+}
+.reel-card.is-playing .reel-progress{
+  opacity:0;
+  pointer-events:none;
 }
 .reel-progress > span{
   display:block;height:100%;width:0%;background:linear-gradient(90deg,#6dffa0,#45c16d);
@@ -5068,7 +5072,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 .reel-progress > span::after{
   content:"";position:absolute;right:-5px;top:50%;transform:translateY(-50%);
-  width:12px;height:12px;border-radius:50%;background:#85ffb0;
+  width:14px;height:14px;border-radius:50%;background:#85ffb0;
   box-shadow:0 0 0 2px rgba(0,0,0,.35),0 0 10px rgba(109,255,160,.5)
 }
 /* Gradient overlays */

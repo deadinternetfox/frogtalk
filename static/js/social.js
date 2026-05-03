@@ -2310,6 +2310,32 @@ const Social = (() => {
           e.stopPropagation();
           seekFromClientX(e.clientX);
         });
+
+        // Mobile fallback for browsers that don't deliver pointer events reliably.
+        let touchSeeking = false;
+        progWrap.addEventListener('touchstart', (e) => {
+          const t = e.changedTouches && e.changedTouches[0];
+          if (!t) return;
+          e.preventDefault();
+          e.stopPropagation();
+          touchSeeking = true;
+          seekFromClientX(t.clientX);
+        }, { passive: false });
+        progWrap.addEventListener('touchmove', (e) => {
+          if (!touchSeeking) return;
+          const t = e.changedTouches && e.changedTouches[0];
+          if (!t) return;
+          e.preventDefault();
+          seekFromClientX(t.clientX);
+        }, { passive: false });
+        const stopTouchSeek = (e) => {
+          if (!touchSeeking) return;
+          const t = e.changedTouches && e.changedTouches[0];
+          touchSeeking = false;
+          if (t) seekFromClientX(t.clientX);
+        };
+        progWrap.addEventListener('touchend', stopTouchSeek, { passive: true });
+        progWrap.addEventListener('touchcancel', () => { touchSeeking = false; }, { passive: true });
       }
       video.addEventListener('play', () => card.classList.add('is-playing'));
       video.addEventListener('pause', () => card.classList.remove('is-playing'));
