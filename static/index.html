@@ -7349,10 +7349,11 @@ window.ConnErr = (function(){
     <h3 style="margin:0 0 14px;color:#e0e0e0;font-size:16px">New Post</h3>
     <textarea id="snp-text" placeholder="What's on your mind?"></textarea>
     <div id="snp-media-preview" style="margin:10px 0;display:none;position:relative">
-      <img id="snp-media-img" style="max-width:100%;max-height:200px;border-radius:8px">
+      <img id="snp-media-img" style="max-width:100%;max-height:220px;border-radius:8px;display:none">
+      <video id="snp-media-vid" controls playsinline style="max-width:100%;max-height:220px;border-radius:8px;display:none;background:#000"></video>
       <button onclick="Social.clearNewPostMedia()" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,0.7);border:none;color:#fff;width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:14px">✕</button>
-      <!-- Filter controls -->
-      <div id="snp-filters" style="margin-top:8px">
+      <!-- Filter controls (images only) -->
+      <div id="snp-filters" style="margin-top:8px;display:none">
         <div class="filter-controls">
           <button class="filter-btn active" onclick="Social.applyFilter('none')">None</button>
           <button class="filter-btn" onclick="Social.applyFilter('warm')">Warm</button>

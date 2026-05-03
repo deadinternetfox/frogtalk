@@ -3468,8 +3468,8 @@ const Social = (() => {
       items.push({ icon: '✉️', label: 'Send message', onclick: () => dmUser(nick) });
       items.push({ icon: '🚫', label: `Block @${nick}`, danger: true, onclick: () => blockUserFromSocial(nick) });
     }
-    if (isOwn) {
-      items.push({ icon: '🗑️', label: 'Delete post', danger: true, onclick: () => deletePost(pid) });
+    if (isOwn || State.user?.is_admin) {
+      items.push({ icon: '🗑️', label: isOwn ? 'Delete post' : '🛡 Delete post (admin)', danger: true, onclick: () => deletePost(pid) });
     }
     if (typeof showActionSheet === 'function') {
       showActionSheet(`Post by @${nick}`, items);
@@ -3480,6 +3480,7 @@ const Social = (() => {
         return;
       }
       if (isOwn && confirm('Delete this post?')) deletePost(pid);
+      else if (State.user?.is_admin && confirm(`Delete post #${pid} as admin?`)) deletePost(pid);
       else if (!isOwn && confirm(`Block @${nick}?`)) blockUserFromSocial(nick);
     }
   }
@@ -3716,6 +3717,7 @@ const Social = (() => {
     const file = input.files[0];
     if (!file) return;
     if (file.size > 100 * 1024 * 1024) { UI.showToast('File too large (max 100MB)', 'error'); return; }
+    const isVideo = file.type.startsWith('video/');
     const reader = new FileReader();
     reader.onload = e => {
       _newPostMedia = e.target.result;
@@ -3724,7 +3726,19 @@ const Social = (() => {
       _filterState = { brightness: 100, contrast: 100, saturate: 100 };
       resetFilterUI();
       const img = document.getElementById('snp-media-img');
-      if (img) { img.src = e.target.result; document.getElementById('snp-media-preview').style.display = 'block'; }
+      const vid = document.getElementById('snp-media-vid');
+      const filters = document.getElementById('snp-filters');
+      const preview = document.getElementById('snp-media-preview');
+      if (isVideo) {
+        if (img) { img.style.display = 'none'; img.src = ''; }
+        if (vid) { vid.src = e.target.result; vid.style.display = 'block'; }
+        if (filters) filters.style.display = 'none';
+      } else {
+        if (vid) { vid.style.display = 'none'; vid.src = ''; }
+        if (img) { img.src = e.target.result; img.style.display = 'block'; }
+        if (filters) filters.style.display = 'block';
+      }
+      if (preview) preview.style.display = 'block';
     };
     reader.readAsDataURL(file);
   }
@@ -3738,7 +3752,12 @@ const Social = (() => {
       _filterState = { brightness: 100, contrast: 100, saturate: 100 };
       resetFilterUI();
       const img = document.getElementById('snp-media-img');
-      if (img) { img.src = dataUrl; document.getElementById('snp-media-preview').style.display = 'block'; }
+      const vid2 = document.getElementById('snp-media-vid');
+      const filters2 = document.getElementById('snp-filters');
+      if (vid2) { vid2.style.display = 'none'; vid2.src = ''; }
+      if (img) { img.src = dataUrl; img.style.display = 'block'; }
+      if (filters2) filters2.style.display = 'block';
+      document.getElementById('snp-media-preview').style.display = 'block';
     });
   }
 
@@ -3748,6 +3767,12 @@ const Social = (() => {
     _newPostOrigMedia = null;
     _filterState = { brightness: 100, contrast: 100, saturate: 100 };
     resetFilterUI();
+    const img = document.getElementById('snp-media-img');
+    const vid = document.getElementById('snp-media-vid');
+    if (img) { img.src = ''; img.style.display = 'none'; }
+    if (vid) { vid.src = ''; vid.style.display = 'none'; }
+    const filters = document.getElementById('snp-filters');
+    if (filters) filters.style.display = 'none';
     document.getElementById('snp-media-preview').style.display = 'none';
     const fi = document.getElementById('snp-media-input');
     if (fi) fi.value = '';
@@ -3785,7 +3810,7 @@ const Social = (() => {
 
   function applyFilterToPreview() {
     const img = document.getElementById('snp-media-img');
-    if (!img) return;
+    if (!img || !_newPostMediaType?.startsWith('image/')) return;
     const filterStr = `brightness(${_filterState.brightness}%) contrast(${_filterState.contrast}%) saturate(${_filterState.saturate}%)`;
     img.style.filter = filterStr;
   }
@@ -3905,10 +3930,16 @@ const Social = (() => {
       }
       const res = await api('/api/wall/posts', 'POST', body);
       if (res.ok) {
+        const isVideo = _newPostMediaType?.startsWith('video/');
         closeNewPost();
         UI.showToast('Posted!', 'success');
-        if (_currentTab === 'profile') loadProfile(State.user?.nickname);
-        else if (_currentTab === 'feed') loadFeed();
+        if (isVideo) {
+          switchTab('reels');
+        } else if (_currentTab === 'profile') {
+          loadProfile(State.user?.nickname);
+        } else if (_currentTab === 'feed') {
+          loadFeed();
+        }
       } else {
         const data = await res.json();
         UI.showToast(data.error || 'Could not post', 'error');
