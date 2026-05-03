@@ -480,7 +480,7 @@
 
   function renderNodes(nodes) {
     if (!Array.isArray(nodes) || !nodes.length) {
-      nodesBody.innerHTML = '<tr><td colspan="4" style="color:#93ab9a">No federation nodes found</td></tr>';
+      nodesBody.innerHTML = '<div class="node-card"><div style="color:#93ab9a">No federation nodes found</div></div>';
       renderNodeSummary([]);
       return;
     }
@@ -492,8 +492,8 @@
       const lastSeen = n.last_seen ? `Seen ${fmtWhen(n.last_seen)}` : 'No recent heartbeat';
       const caps = Array.isArray(n.capabilities) ? n.capabilities.length : 0;
       return `
-        <tr>
-          <td data-label="Node">
+        <article class="node-card">
+          <div class="node-card-main">
             <div class="node-name-row">
               <span class="node-name">${escHtml(n.display_name || n.server_id || 'Unknown node')}</span>
               ${n.is_local ? '<span class="mini-badge mini-badge-local">local</span>' : ''}
@@ -503,11 +503,19 @@
             <div class="node-endpoint">${escHtml(n.display_endpoint || 'hidden endpoint')}</div>
             <div class="node-meta">${escHtml(n.transport_label || 'Route unknown')} · ${escHtml(n.privacy_label || 'Privacy unknown')} · ${escHtml(n.region || 'Unknown region')} · ${caps} cap${caps === 1 ? '' : 's'} · ${escHtml(lastSeen)}</div>
             <div class="node-id-row"><span class="node-id-label">ID</span><code class="node-id">${escHtml(n.server_id || 'missing-id')}</code></div>
-          </td>
-          <td data-label="Status"><span class="mini-badge ${blocked ? 'danger' : 'success'}">${escHtml(status)}</span></td>
-          <td data-label="Trust"><span class="mini-badge ${trust === 'official' ? 'success' : ''}">${escHtml(trust)}</span></td>
-          <td data-label="Action" class="node-actions-cell">${nodeActionButton(n)}<button class="btn" data-node-probe="${n.server_id || ''}">${n.is_local ? 'Self-check' : 'Probe'}</button><button class="btn" data-node-copy="${n.server_id || ''}">Copy ID</button></td>
-        </tr>
+          </div>
+          <div class="node-card-sidebar">
+            <div class="node-stat">
+              <div class="node-stat-label">Status</div>
+              <div class="node-stat-value"><span class="mini-badge ${blocked ? 'danger' : 'success'}">${escHtml(status)}</span></div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-label">Trust</div>
+              <div class="node-stat-value"><span class="mini-badge ${trust === 'official' ? 'success' : ''}">${escHtml(trust)}</span></div>
+            </div>
+            <div class="node-actions-cell">${nodeActionButton(n)}<button class="btn" data-node-probe="${n.server_id || ''}">${n.is_local ? 'Self-check' : 'Probe'}</button><button class="btn" data-node-copy="${n.server_id || ''}">Copy ID</button></div>
+          </div>
+        </article>
       `;
     }).join('');
 

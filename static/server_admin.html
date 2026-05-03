@@ -281,24 +281,59 @@ input, select {
 .node-name {
   font-weight: 700;
 }
+.nodes-list {
+  display: grid;
+  gap: 14px;
+}
+.node-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(190px, 0.95fr);
+  gap: 18px;
+  padding: 16px 18px;
+  border: 1px solid #254331;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(17, 39, 24, 0.96), rgba(12, 29, 18, 0.96)),
+    radial-gradient(circle at top right, rgba(86, 209, 109, 0.08), transparent 38%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+}
+.node-card-main {
+  min-width: 0;
+}
+.node-card-sidebar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-content: start;
+}
+.node-chip-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
 .node-endpoint {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #d8eadc;
+  margin-top: 10px;
+  font-size: 18px;
+  line-height: 1.15;
+  color: #edf8f0;
   font-family: "IBM Plex Mono", monospace;
   overflow-wrap: anywhere;
 }
 .node-meta {
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: 10px;
+  font-size: 12px;
   color: var(--muted);
+  line-height: 1.45;
 }
 .node-id-row {
-  margin-top: 6px;
+  margin-top: 12px;
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: wrap;
 }
 .node-id-label {
   flex: 0 0 auto;
@@ -311,7 +346,7 @@ input, select {
   display: inline-block;
   min-width: 0;
   max-width: 100%;
-  padding: 2px 8px;
+  padding: 4px 10px;
   border: 1px solid #274233;
   border-radius: 999px;
   background: rgba(10, 19, 13, 0.78);
@@ -319,13 +354,36 @@ input, select {
   font-size: 11px;
   overflow-wrap: anywhere;
 }
-.node-actions-cell {
+.node-stat {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #264334;
+  border-radius: 14px;
+  background: rgba(10, 22, 14, 0.78);
+}
+.node-stat-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7ea18f;
+  margin-bottom: 8px;
+}
+.node-stat-value {
   display: flex;
-  gap: 8px;
+  align-items: center;
   flex-wrap: wrap;
+  gap: 6px;
+}
+.node-actions-cell {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 .node-actions-cell .btn {
-  min-width: 112px;
+  width: 100%;
+  min-width: 0;
+  height: 42px;
   justify-content: center;
   text-align: center;
 }
@@ -543,6 +601,15 @@ input, select {
   .node-actions-cell .btn {
     min-width: 0;
   }
+  .node-card {
+    grid-template-columns: 1fr;
+  }
+  .node-card-sidebar {
+    grid-template-columns: 1fr 1fr;
+  }
+  .node-actions-cell {
+    grid-template-columns: 1fr;
+  }
 }
 @keyframes panelRise {
   from {
@@ -664,19 +731,7 @@ input, select {
         <div class="panel">
           <div class="section-title">Federation Nodes</div>
           <div class="sub" style="margin-bottom:12px;">The current node is marked in-line. Its probe uses a local self-check instead of routing back through the public federation endpoint.</div>
-          <div class="table-wrap">
-            <table class="table nodes-table">
-              <thead>
-                <tr>
-                  <th>Node</th>
-                  <th>Status</th>
-                  <th>Trust</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="nodes-body"></tbody>
-            </table>
-          </div>
+          <div id="nodes-body" class="nodes-list"></div>
         </div>
         <div class="panel">
           <div class="section-title">Node Action Output</div>
