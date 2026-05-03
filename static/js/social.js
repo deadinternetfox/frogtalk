@@ -2290,6 +2290,7 @@ const Social = (() => {
 
   function _initReelCards(snap) {
     _syncReelMuteUi(snap);
+    const firstCardInList = snap.querySelector('.reel-card');
     snap.querySelectorAll('.reel-card').forEach(card => {
       const video = card.querySelector('video');
       const poster = card.querySelector('.reel-video-poster');
@@ -2331,6 +2332,31 @@ const Social = (() => {
           video.currentTime = Math.min(0.12, Math.max(0.06, video.duration / 10));
         } catch {}
       }, { once: true });
+      if (card === firstCardInList) {
+        video.addEventListener('loadedmetadata', () => {
+          // Force-decode a tiny first frame for the first visible reel.
+          if (posterDrawn || !card.isConnected) return;
+          const finish = () => {
+            try { drawPoster(); } catch {}
+            if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
+          };
+          try {
+            const p = video.play?.();
+            if (p && typeof p.then === 'function') {
+              p.then(() => {
+                setTimeout(() => {
+                  try { video.pause(); } catch {}
+                  finish();
+                }, 80);
+              }).catch(() => finish());
+            } else {
+              finish();
+            }
+          } catch {
+            finish();
+          }
+        }, { once: true });
+      }
       try { video.load(); } catch {}
       // Prime a visible first frame quickly (like feed/explore cards) to avoid
       // showing a flat grey/blank surface while users wait.
@@ -2369,7 +2395,10 @@ const Social = (() => {
       if (progWrap) {
         const snap = progWrap.closest('.reels-snap');
         let restoreSnapType = '';
+        let restoreOverflowY = '';
+        let restoreTouchAction = '';
         let snapLockTimer = 0;
+        let wasPlayingBeforeSeek = false;
         const clearLockTimer = () => {
           if (!snapLockTimer) return;
           try { clearTimeout(snapLockTimer); } catch {}
@@ -2387,12 +2416,18 @@ const Social = (() => {
         const lockSnapScroll = () => {
           if (!snap) return;
           restoreSnapType = snap.style.scrollSnapType || '';
+          restoreOverflowY = snap.style.overflowY || '';
+          restoreTouchAction = snap.style.touchAction || '';
           snap.style.scrollSnapType = 'none';
+          snap.style.overflowY = 'hidden';
+          snap.style.touchAction = 'none';
           armLockFailsafe();
         };
         const unlockSnapScroll = () => {
           if (!snap) return;
           snap.style.scrollSnapType = restoreSnapType;
+          snap.style.overflowY = restoreOverflowY;
+          snap.style.touchAction = restoreTouchAction;
           clearLockTimer();
         };
 
@@ -2401,10 +2436,7 @@ const Social = (() => {
           e.stopPropagation();
           seeking = true;
           _reelsBeginSeek(card);
-          if (!video.paused) {
-            try { video.pause(); } catch {}
-            card.classList.remove('is-playing');
-          }
+          wasPlayingBeforeSeek = !video.paused;
           lockSnapScroll();
           try { progWrap.setPointerCapture(e.pointerId); } catch {}
           seekFromClientX(e.clientX);
@@ -2423,6 +2455,9 @@ const Social = (() => {
           if (typeof e.clientX === 'number') seekFromClientX(e.clientX);
           _reelsEndSeek();
           unlockSnapScroll();
+          if (wasPlayingBeforeSeek && video.paused) {
+            _reelsPlayVideo(card, video);
+          }
         };
         progWrap.addEventListener('pointerup', stopSeek);
         progWrap.addEventListener('pointercancel', () => { seeking = false; unlockSnapScroll(); });
@@ -2452,10 +2487,7 @@ const Social = (() => {
           e.stopPropagation();
           touchSeeking = true;
           _reelsBeginSeek(card);
-          if (!video.paused) {
-            try { video.pause(); } catch {}
-            card.classList.remove('is-playing');
-          }
+          wasPlayingBeforeSeek = !video.paused;
           lockSnapScroll();
           seekFromClientX(t.clientX);
         }, { passive: false });
@@ -2475,6 +2507,9 @@ const Social = (() => {
           if (t) seekFromClientX(t.clientX);
           _reelsEndSeek();
           unlockSnapScroll();
+          if (wasPlayingBeforeSeek && video.paused) {
+            _reelsPlayVideo(card, video);
+          }
         };
         progWrap.addEventListener('touchend', stopTouchSeek, { passive: true });
         progWrap.addEventListener('touchcancel', () => { touchSeeking = false; unlockSnapScroll(); }, { passive: true });
