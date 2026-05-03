@@ -2325,14 +2325,30 @@ const Social = (() => {
       if (progWrap) {
         const snap = progWrap.closest('.reels-snap');
         let restoreSnapType = '';
+        let snapLockTimer = 0;
+        const clearLockTimer = () => {
+          if (!snapLockTimer) return;
+          try { clearTimeout(snapLockTimer); } catch {}
+          snapLockTimer = 0;
+        };
+        const armLockFailsafe = () => {
+          clearLockTimer();
+          snapLockTimer = setTimeout(() => {
+            seeking = false;
+            touchSeeking = false;
+            unlockSnapScroll();
+          }, 1200);
+        };
         const lockSnapScroll = () => {
           if (!snap) return;
           restoreSnapType = snap.style.scrollSnapType || '';
           snap.style.scrollSnapType = 'none';
+          armLockFailsafe();
         };
         const unlockSnapScroll = () => {
           if (!snap) return;
           snap.style.scrollSnapType = restoreSnapType;
+          clearLockTimer();
         };
 
         progWrap.addEventListener('pointerdown', (e) => {
@@ -2350,6 +2366,7 @@ const Social = (() => {
         progWrap.addEventListener('pointermove', (e) => {
           if (!seeking) return;
           e.preventDefault();
+          armLockFailsafe();
           seekFromClientX(e.clientX);
         });
         const stopSeek = (e) => {
@@ -2364,6 +2381,7 @@ const Social = (() => {
         // Fallback: keep scrubbing even if pointer leaves the progress bar.
         document.addEventListener('pointermove', (e) => {
           if (!seeking) return;
+          armLockFailsafe();
           seekFromClientX(e.clientX);
         }, { passive: true });
         document.addEventListener('pointerup', (e) => {
@@ -2396,6 +2414,7 @@ const Social = (() => {
           const t = e.changedTouches && e.changedTouches[0];
           if (!t) return;
           e.preventDefault();
+          armLockFailsafe();
           seekFromClientX(t.clientX);
         }, { passive: false });
         const stopTouchSeek = (e) => {
@@ -2413,6 +2432,7 @@ const Social = (() => {
           const t = e.changedTouches && e.changedTouches[0];
           if (!t) return;
           e.preventDefault();
+          armLockFailsafe();
           seekFromClientX(t.clientX);
         }, { passive: false });
         document.addEventListener('touchend', (e) => {
@@ -2421,7 +2441,12 @@ const Social = (() => {
         }, { passive: true });
       }
       video.addEventListener('play', () => card.classList.add('is-playing'));
-      video.addEventListener('pause', () => card.classList.remove('is-playing'));
+      video.addEventListener('pause', () => {
+        // Activation can emit transient pause events before first real frame;
+        // keep the playing-state UI during that short bootstrap window.
+        if (card === _reelsCurrentCard && !video.ended && Number(video.currentTime || 0) <= 0.15) return;
+        card.classList.remove('is-playing');
+      });
       video.addEventListener('ended', () => {
         card.classList.remove('is-playing');
         if (_currentTab !== 'reels') return;
