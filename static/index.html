@@ -5017,7 +5017,9 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 .reel-card:not(.is-ready):not(.is-playing):not(.no-poster) video{opacity:0}
 .reel-card video::-webkit-media-controls,
-.reel-card video::-webkit-media-controls-start-playback-button{display:none !important}
+.reel-card video::-webkit-media-controls-start-playback-button,
+.reel-card video::-webkit-media-controls-overlay-play-button,
+.reel-card video::-webkit-media-controls-enclosure{display:none !important}
 .reel-loading-layer{
   position:absolute;
   inset:0;
@@ -5061,10 +5063,6 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .reel-progress{
   position:absolute;left:10px;right:10px;bottom:max(42px, calc(24px + var(--safe-bottom)));height:10px;border-radius:999px;
   background:rgba(255,255,255,.24);z-index:5;overflow:visible;cursor:pointer;touch-action:none
-}
-.reel-card.is-playing .reel-progress{
-  opacity:0;
-  pointer-events:none;
 }
 .reel-progress > span{
   display:block;height:100%;width:0%;background:linear-gradient(90deg,#6dffa0,#45c16d);

@@ -2166,8 +2166,14 @@ const Social = (() => {
       reveal();
       return;
     }
-    // Keep loading from getting stuck over content on slow/odd decoders.
-    setTimeout(reveal, 1400);
+    // Prefer waiting for ready/play before reveal to avoid grey pre-frame flashes.
+    setTimeout(() => {
+      if (firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing') || (firstVideo.readyState >= 2)) {
+        reveal();
+      }
+    }, 2200);
+    // Hard cap to avoid loader getting stuck forever on bad/slow media.
+    setTimeout(reveal, 4200);
   }
 
   function _reelsAdvanceFrom(card) {
@@ -2298,6 +2304,10 @@ const Social = (() => {
           e.preventDefault();
           e.stopPropagation();
           seeking = true;
+          if (!video.paused) {
+            try { video.pause(); } catch {}
+            card.classList.remove('is-playing');
+          }
           lockSnapScroll();
           try { progWrap.setPointerCapture(e.pointerId); } catch {}
           seekFromClientX(e.clientX);
@@ -2339,6 +2349,10 @@ const Social = (() => {
           e.preventDefault();
           e.stopPropagation();
           touchSeeking = true;
+          if (!video.paused) {
+            try { video.pause(); } catch {}
+            card.classList.remove('is-playing');
+          }
           lockSnapScroll();
           seekFromClientX(t.clientX);
         }, { passive: false });
@@ -3838,6 +3852,7 @@ const Social = (() => {
         html += comments.map(c => {
           const myVote = Number(c.my_vote || 0);
           const upCount = Number(c.like_count || 0);
+          const downCount = Number(c.dislike_count || 0);
           const upActive = myVote === 1 ? ' is-up' : '';
           const downActive = myVote === -1 ? ' is-down' : '';
           return `
@@ -3852,7 +3867,7 @@ const Social = (() => {
                   <span class="sf-vote-icon">👍</span><span class="sf-vote-count">${upCount}</span>
                 </button>
                 <button type="button" class="sf-vote-btn${downActive}" data-vote="down" onclick="Social.voteComment(event, ${postId}, ${c.id}, -1, this)" aria-label="Dislike comment">
-                  <span class="sf-vote-icon">👎</span>
+                  <span class="sf-vote-icon">👎</span><span class="sf-vote-count">${downCount}</span>
                 </button>
               </div>
             </div>
@@ -3900,16 +3915,22 @@ const Social = (() => {
     const upBtn = wrap.querySelector('.sf-vote-btn[data-vote="up"]');
     const downBtn = wrap.querySelector('.sf-vote-btn[data-vote="down"]');
     const upCountEl = upBtn?.querySelector('.sf-vote-count');
+    const downCountEl = downBtn?.querySelector('.sf-vote-count');
     const wasUp = upBtn?.classList.contains('is-up');
     const wasDown = downBtn?.classList.contains('is-down');
     let newValue = value;
     if (value === 1 && wasUp) newValue = 0;
     if (value === -1 && wasDown) newValue = 0;
     const prevUp = Number(upCountEl?.textContent || '0');
+    const prevDown = Number(downCountEl?.textContent || '0');
     let nextUp = prevUp;
+    let nextDown = prevDown;
     if (wasUp && newValue !== 1) nextUp -= 1;
     if (!wasUp && newValue === 1) nextUp += 1;
+    if (wasDown && newValue !== -1) nextDown -= 1;
+    if (!wasDown && newValue === -1) nextDown += 1;
     if (upCountEl) upCountEl.textContent = String(Math.max(0, nextUp));
+    if (downCountEl) downCountEl.textContent = String(Math.max(0, nextDown));
     upBtn?.classList.toggle('is-up', newValue === 1);
     downBtn?.classList.toggle('is-down', newValue === -1);
     if (upBtn) upBtn.dataset.pending = '1';
@@ -3919,10 +3940,12 @@ const Social = (() => {
       if (!res.ok) throw new Error('vote failed');
       const d = await res.json();
       if (upCountEl) upCountEl.textContent = String(d.like_count || 0);
+      if (downCountEl) downCountEl.textContent = String(d.dislike_count || 0);
       upBtn?.classList.toggle('is-up', Number(d.my_vote) === 1);
       downBtn?.classList.toggle('is-down', Number(d.my_vote) === -1);
     } catch {
       if (upCountEl) upCountEl.textContent = String(prevUp);
+      if (downCountEl) downCountEl.textContent = String(prevDown);
       upBtn?.classList.toggle('is-up', !!wasUp);
       downBtn?.classList.toggle('is-down', !!wasDown);
       if (typeof UI !== 'undefined' && UI.showToast) UI.showToast('Could not vote', 'error');
