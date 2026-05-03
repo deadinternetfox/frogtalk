@@ -235,10 +235,31 @@ const Social = (() => {
   }
 
   function _socialLoadingHtml(label = 'Loading…', tone = 'default', variant = '') {
-    const cls = ['social-loading', 'social-loading-fun'];
-    if (tone === 'reels') cls.push('is-reels');
+    const cls = ['social-loading'];
+    if (tone === 'reels') cls.push('social-loading-fun', 'is-reels');
+    if (tone === 'fun') cls.push('social-loading-fun');
     if (variant === 'compact') cls.push('social-loading-compact');
     return `<div class="${cls.join(' ')}">${esc(label)}</div>`;
+  }
+
+  function _commentsSkeletonHtml(count = 3, includeInput = true) {
+    const rows = Array.from({ length: count }).map(() => `
+      <div class="sf-comment skel-row" aria-hidden="true" style="pointer-events:none">
+        <div class="sf-comment-avatar"><div class="skel-circle" style="width:24px;height:24px"></div></div>
+        <div class="sf-comment-body">
+          <div class="skel-line" style="width:28%;height:10px;margin-bottom:6px"></div>
+          <div class="skel-line" style="width:88%;height:10px;margin-bottom:6px"></div>
+          <div class="skel-line" style="width:42%;height:9px"></div>
+        </div>
+      </div>
+    `).join('');
+    const input = includeInput ? `
+      <div class="sf-comment-input skel-row" aria-hidden="true" style="pointer-events:none">
+        <div class="skel-line" style="height:34px;border-radius:10px;flex:1"></div>
+        <div class="skel-line" style="width:72px;height:34px;border-radius:10px"></div>
+      </div>
+    ` : '';
+    return `<div class="sf-comments-skeleton">${rows}${input}</div>`;
   }
 
   function _withTimeout(promise, timeoutMs = 3200) {
@@ -4391,7 +4412,7 @@ const Social = (() => {
     if (!el) return;
     if (el.style.display !== 'none') { el.style.display = 'none'; return; }
     el.style.display = 'block';
-    el.innerHTML = _socialLoadingHtml('Loading comments…', 'default', 'compact');
+    el.innerHTML = _commentsSkeletonHtml(3, true);
     try {
       const res = await api(`/api/wall/posts/${postId}/comments`);
       const data = await res.json();
@@ -5506,7 +5527,7 @@ const Social = (() => {
       overlay.onclick = e => { if (e.target === overlay) closePostDetail(); };
       document.body.appendChild(overlay);
     }
-    overlay.innerHTML = `<div class="spd-inner" style="display:flex;align-items:center;justify-content:center;min-height:260px;color:#8f8f8f">${_socialLoadingHtml('Loading post…')}</div>`;
+    overlay.innerHTML = `<div class="spd-inner spd-loading" style="min-height:260px">${_socialPostSkeletonCards(1)}</div>`;
     overlay.style.display = 'flex';
     try {
       const res = await api(`/api/wall/posts/${postId}`);

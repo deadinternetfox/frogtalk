@@ -1266,6 +1266,13 @@ async def serve_sitemap_static():
         ("/docs/node",    "monthly", "0.6"),
         ("/privacy",      "yearly",  "0.4"),
         ("/download/android", "weekly", "0.7"),
+        ("/download/ios", "weekly", "0.6"),
+        ("/download/linux", "weekly", "0.7"),
+        ("/download/deb", "weekly", "0.7"),
+        ("/download/windows", "weekly", "0.7"),
+        ("/download/windows-zip", "weekly", "0.7"),
+        ("/llms.txt", "monthly", "0.4"),
+        ("/opensearch.xml", "monthly", "0.3"),
     ]
     urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
     body = (
