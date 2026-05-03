@@ -2127,9 +2127,15 @@ const Social = (() => {
       const res = await api(`/api/wall/posts/${postId}/reactions`, 'POST', { emoji: '❤️' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to like');
-      const nextLiked = !!data.reacted;
+      const reactions = Array.isArray(data.reactions) ? data.reactions : [];
+      const heart = reactions.find(r => r && r.emoji === '❤️');
+      const nextCount = Number(heart?.count || 0);
+      const me = String(State?.user?.nickname || '');
+      const nextLiked = heart && Array.isArray(heart.users)
+        ? heart.users.includes(me)
+        : !!data.added;
       if (btn) btn.classList.toggle('liked', nextLiked);
-      if (countEl) countEl.textContent = String(Number(data.count || 0));
+      if (countEl) countEl.textContent = String(nextCount);
     } catch {
       if (btn) btn.classList.toggle('liked', wasLiked);
       if (countEl) countEl.textContent = String(prev);
@@ -3348,6 +3354,7 @@ const Social = (() => {
     const prevCount = countMatch ? Number(countMatch[1]) : 0;
     const prevReelCount = Number(reelCountEl?.textContent || '0');
     const prevReelIcon = reelIconEl?.textContent || '↩️';
+    const prevReelActive = !!reelBtn?.classList.contains('liked');
 
     if (btn) {
       btn.classList.toggle('liked', !prevActive);
@@ -3359,6 +3366,7 @@ const Social = (() => {
       const optimistic = Math.max(0, prevReelCount + ((prevReelIcon === '🔁') ? -1 : 1));
       reelCountEl.textContent = String(optimistic);
       reelIconEl.textContent = prevReelIcon === '🔁' ? '↩️' : '🔁';
+      reelBtn.classList.toggle('liked', !prevReelActive);
       reelBtn.disabled = true;
     }
     try {
@@ -3374,6 +3382,7 @@ const Social = (() => {
       if (reelCountEl && reelIconEl) {
         reelCountEl.textContent = String(Number(data.repost_count || 0));
         reelIconEl.textContent = data.reposted ? '🔁' : '↩️';
+        if (reelBtn) reelBtn.classList.toggle('liked', !!data.reposted);
       }
       try {
         UI.showToast(data.reposted ? (payload.quote ? 'Quote reposted' : 'Reposted') : 'Repost removed', 'success');
@@ -3386,6 +3395,7 @@ const Social = (() => {
       if (reelCountEl && reelIconEl) {
         reelCountEl.textContent = String(prevReelCount);
         reelIconEl.textContent = prevReelIcon;
+        if (reelBtn) reelBtn.classList.toggle('liked', prevReelActive);
       }
       try { UI.showToast(e?.message || 'Could not repost', 'error'); } catch {}
     } finally {
@@ -4394,21 +4404,28 @@ const Social = (() => {
 
   async function viewPostDetail(postId) {
     // Show a single post in a modal-like overlay
+    let overlay = document.getElementById('social-post-detail');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'social-post-detail';
+      overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `<div class="spd-inner" style="display:flex;align-items:center;justify-content:center;min-height:260px;color:#8f8f8f">Loading post…</div>`;
+    overlay.style.display = 'flex';
     try {
       const res = await api(`/api/wall/posts/${postId}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        overlay.innerHTML = `<div class="spd-inner" style="padding:24px;color:#a1a1a1">Could not load post</div>`;
+        return;
+      }
       const p = await res.json();
       p.reactions = p.reactions || [];
-      let overlay = document.getElementById('social-post-detail');
-      if (!overlay) {
-        overlay = document.createElement('div');
-        overlay.id = 'social-post-detail';
-        overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
-        document.body.appendChild(overlay);
-      }
       overlay.innerHTML = `<div class="spd-inner"><button class="social-close-btn" onclick="Social.closePostDetail()" style="position:absolute;top:8px;right:8px;z-index:1">✕</button>${renderFeedPost(p)}</div>`;
       overlay.style.display = 'flex';
-    } catch {}
+    } catch {
+      overlay.innerHTML = `<div class="spd-inner" style="padding:24px;color:#a1a1a1">Could not load post</div>`;
+    }
   }
 
   async function openPostComments(postId) {
