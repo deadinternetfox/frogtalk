@@ -447,10 +447,35 @@
     const sid = node.server_id || '';
     const blocked = !Boolean(node.enabled);
     if (!sid) return '';
+    if (node.is_local) {
+      return `<button class="btn" type="button" disabled>Current Node</button>`;
+    }
     if (blocked) {
       return `<button class="btn" data-node-unblock="${sid}">Unblock</button>`;
     }
     return `<button class="btn danger" data-node-block="${sid}">Block</button>`;
+  }
+
+  async function copyNodeId(serverId) {
+    if (!serverId) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(serverId);
+      } else {
+        const ghost = document.createElement('textarea');
+        ghost.value = serverId;
+        ghost.setAttribute('readonly', 'readonly');
+        ghost.style.position = 'fixed';
+        ghost.style.opacity = '0';
+        document.body.appendChild(ghost);
+        ghost.select();
+        document.execCommand('copy');
+        ghost.remove();
+      }
+      setNodeMessage(`Copied node id ${serverId}.`);
+    } catch (e) {
+      setNodeMessage(`Could not copy node id ${serverId}.`, true);
+    }
   }
 
   function renderNodes(nodes) {
@@ -471,15 +496,16 @@
           <td data-label="Node">
             <div class="node-name-row">
               <span class="node-name">${escHtml(n.display_name || n.server_id || 'Unknown node')}</span>
+              ${n.is_local ? '<span class="mini-badge success">this node</span>' : ''}
               ${n.official ? '<span class="mini-badge success">official</span>' : ''}
               ${n.onion_available ? '<span class="mini-badge">onion</span>' : ''}
             </div>
             <div class="node-endpoint">${escHtml(n.display_endpoint || 'hidden endpoint')}</div>
-            <div class="node-meta">${escHtml(n.transport_label || 'Route unknown')} · ${escHtml(n.privacy_label || 'Privacy unknown')} · ${escHtml(n.region || 'Unknown region')} · ${caps} cap${caps === 1 ? '' : 's'} · ${escHtml(lastSeen)}</div>
+            <div class="node-meta">${escHtml(n.transport_label || 'Route unknown')} · ${escHtml(n.privacy_label || 'Privacy unknown')} · ${escHtml(n.region || 'Unknown region')} · ${caps} cap${caps === 1 ? '' : 's'} · ${escHtml(lastSeen)} · ${escHtml(n.server_id || 'missing-id')}</div>
           </td>
           <td data-label="Status"><span class="mini-badge ${blocked ? 'danger' : 'success'}">${escHtml(status)}</span></td>
           <td data-label="Trust"><span class="mini-badge ${trust === 'official' ? 'success' : ''}">${escHtml(trust)}</span></td>
-          <td data-label="Action" class="node-actions-cell" style="display:flex; gap:6px; flex-wrap:wrap;">${nodeActionButton(n)}<button class="btn" data-node-probe="${n.server_id || ''}">Probe</button></td>
+          <td data-label="Action" class="node-actions-cell" style="display:flex; gap:6px; flex-wrap:wrap;">${nodeActionButton(n)}<button class="btn" data-node-probe="${n.server_id || ''}">${n.is_local ? 'Self-check' : 'Probe'}</button><button class="btn" data-node-copy="${n.server_id || ''}">Copy ID</button></td>
         </tr>
       `;
     }).join('');
@@ -492,6 +518,9 @@
     });
     nodesBody.querySelectorAll('[data-node-probe]').forEach((btn) => {
       btn.addEventListener('click', () => runNodeProbe(btn.getAttribute('data-node-probe')));
+    });
+    nodesBody.querySelectorAll('[data-node-copy]').forEach((btn) => {
+      btn.addEventListener('click', () => copyNodeId(btn.getAttribute('data-node-copy')));
     });
   }
 
@@ -518,7 +547,11 @@
     try {
       const data = await api(`/api/server-admin/nodes/${encodeURIComponent(serverId)}/probe`);
       if (data.healthy) {
-        setNodeMessage(`${serverId} healthy (${data.latency_ms ?? '--'} ms) over ${data.transport_label || 'network route'} via ${data.display_target || 'hidden endpoint'}`);
+        if (data.is_local) {
+          setNodeMessage(`${serverId} healthy via ${data.transport_label || 'local self-check'} (${data.display_target || 'local process'})`);
+        } else {
+          setNodeMessage(`${serverId} healthy (${data.latency_ms ?? '--'} ms) over ${data.transport_label || 'network route'} via ${data.display_target || 'hidden endpoint'}`);
+        }
       } else {
         setNodeMessage(`${serverId} probe failed over ${data.transport_label || 'network route'}: ${data.error || 'unknown error'}`, true);
       }

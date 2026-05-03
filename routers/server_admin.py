@@ -214,6 +214,11 @@ def _local_admin_server_view() -> dict:
     }
 
 
+def _local_server_id() -> str:
+    local = db.get_or_create_local_server_identity() or {}
+    return str(local.get("server_id") or "").strip()
+
+
 def _cleanup_sessions() -> None:
     now = time.time()
     dead = [token for token, exp in _SESSIONS.items() if exp <= now]
@@ -491,10 +496,12 @@ async def server_admin_nodes(request: Request, include_disabled: int = 1):
     if auth:
         return auth
 
-    nodes = [
-        _admin_node_view(node)
-        for node in db.list_federation_servers_admin(include_disabled=bool(include_disabled))
-    ]
+    local_sid = _local_server_id()
+    nodes = []
+    for node in db.list_federation_servers_admin(include_disabled=bool(include_disabled)):
+        view = _admin_node_view(node)
+        view["is_local"] = bool(local_sid and (view.get("server_id") or "") == local_sid)
+        nodes.append(view)
     return {"nodes": nodes, "count": len(nodes)}
 
 
@@ -516,6 +523,20 @@ async def server_admin_probe_node(server_id: str, request: Request):
     if not node:
         return JSONResponse(status_code=404, content={"error": "Node not found"})
 
+    local_sid = _local_server_id()
+    if local_sid and sid == local_sid:
+        return {
+            "ok": True,
+            "server_id": sid,
+            "display_target": "local process",
+            "route_mode": "local",
+            "transport_label": "Local self-check",
+            "healthy": True,
+            "latency_ms": 0,
+            "error": None,
+            "is_local": True,
+        }
+
     target = federation_router._select_peer_target(node)
     result = federation_router._probe_url(target, timeout_s=1.6)
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
@@ -528,6 +549,7 @@ async def server_admin_probe_node(server_id: str, request: Request):
         "healthy": bool(result.get("ok")),
         "latency_ms": result.get("latency_ms"),
         "error": result.get("error"),
+        "is_local": False,
     }
 
 
