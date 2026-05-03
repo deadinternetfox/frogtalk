@@ -23,6 +23,7 @@
 | ⚡ **Real-time** | WebSocket messaging with auto-reconnect, typing indicators, reactions |
 | 🔒 **Private Rooms** | Passphrase-protected rooms — only members with the passphrase can decrypt |
 | 💬 **Direct Messages** | Fully encrypted DMs between any two users |
+| 🎞 **Reels** | Vertical short-video feed with hot/new/top sorting, reactions, reposts, and comments |
 | 📎 **File Sharing** | Images, video, and file attachments up to 8 MB |
 | 🤖 **Discord & Telegram Bridges** | Mirror rooms to/from Discord channels or Telegram chats |
 | 🔔 **Push Notifications** | Web push for mobile and desktop |

@@ -1,8 +1,8 @@
 # FrogTalk
 
-> FrogTalk is a privacy-first, end-to-end encrypted chat, calling, and social platform. It combines Signal-style E2E messaging with Discord-style channels and a lightweight social feed. Open-source, no ads, no tracking, no data sale.
+> FrogTalk is a privacy-first, end-to-end encrypted chat, calling, and social platform. It combines Signal-style E2E messaging with Discord-style channels plus a lightweight social feed with Reels and stories. Open-source, no ads, no tracking, no data sale.
 
-FrogTalk runs on the web, Android, and desktop (Linux AppImage). It supports direct messages, group channels, voice and video calls, voice messages, stories, a public social feed ("Frog Social"), shared music listening, and live two-way bridges to Discord and Telegram. The same account works across all clients.
+FrogTalk runs on the web, Android, and desktop (Linux AppImage). It supports direct messages, group channels, voice and video calls, voice messages, stories, Reels, a public social feed ("Frog Social"), shared music listening, and live two-way bridges to Discord and Telegram. The same account works across all clients.
 
 ## Core links
 
@@ -23,7 +23,7 @@ FrogTalk runs on the web, Android, and desktop (Linux AppImage). It supports dir
 - **End-to-end encrypted DMs**: Messages between users are encrypted on-device.
 - **Voice & video calls**: 1-to-1 and group calls in browser and on Android.
 - **Channels & directory**: Public and private rooms with a searchable directory.
-- **Frog Social**: Public posts, stories, reactions, replies, polls.
+- **Frog Social**: Public posts, Reels, stories, reactions, replies, polls.
 - **Music together**: Synchronized shared listening sessions.
 - **Discord & Telegram bridges**: Two-way message bridging with both networks.
 - **Disappearing messages**: Per-chat expiry timers.

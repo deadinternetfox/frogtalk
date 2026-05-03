@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
   <ShortName>FrogTalk</ShortName>
-  <Description>Search FrogTalk users and public channels.</Description>
+  <Description>Search FrogTalk users, public channels, and social posts.</Description>
   <InputEncoding>UTF-8</InputEncoding>
   <Image width="16" height="16" type="image/x-icon">https://frogtalk.xyz/static/favicon.ico</Image>
   <Image width="192" height="192" type="image/png">https://frogtalk.xyz/static/icons/icon-192.png</Image>
