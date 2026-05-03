@@ -5,7 +5,7 @@
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'reaction-ui-sync-hotfix-v2',
+  ASSET_RESET_VERSION: 'reaction-ui-sync-hotfix-v3',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,

@@ -78,6 +78,20 @@ const Social = (() => {
     return res;
   };
 
+  async function _apiOkJson(path, fallback = {}, retryDelayMs = 220) {
+    let res = await api(path).catch(() => null);
+    if (!res || !res.ok) {
+      await new Promise(r => setTimeout(r, retryDelayMs));
+      res = await api(path).catch(() => null);
+    }
+    if (!res || !res.ok) {
+      const err = new Error('request_failed');
+      err.status = Number(res?.status || 0);
+      throw err;
+    }
+    return res.json().catch(() => fallback);
+  }
+
   function _authMediaSrc(raw) {
     const src = String(raw || '');
     if (!src) return '';
@@ -1912,13 +1926,12 @@ const Social = (() => {
     try {
       _updateTabLoadUi(loadUi, 42, 'Loading feed posts', 'Fetching latest posts');
       // Fire all three requests in parallel — stories and suggested don't depend on feed data.
-      const feedReqPromise = api('/api/social/feed?lite=1&limit=24');
+      const feedReqPromise = _apiOkJson('/api/social/feed?lite=1&limit=24', { posts: [] });
       const storiesEarlyPromise = _withTimeout(loadStoriesBar());
       const suggestedEarlyPromise = _withTimeout(
-        api('/api/social/suggested').then(r => r.json().catch(() => ({ users: [] })))
+        _apiOkJson('/api/social/suggested', { users: [] }).catch(() => ({ users: [] }))
       );
-      const feedRes = await feedReqPromise;
-      const feedData = await feedRes.json();
+      const feedData = await feedReqPromise;
       const posts = feedData.posts || [];
       _feedCache = { ts: Date.now(), posts };
       if (_currentTab !== 'feed') return;
@@ -2066,11 +2079,10 @@ const Social = (() => {
     }
     try {
       _updateTabLoadUi(loadUi, 42, 'Loading explore posts', `Fetching ${_exploreSort} posts`);
-      const postsReq = api(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`);
+      const postsReq = _apiOkJson(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`, { posts: [] });
       const channelsReq = api('/api/directory/new').catch(() => null);
 
-      const postsRes = await postsReq;
-      const postsData = await postsRes.json().catch(() => ({ posts: [] }));
+      const postsData = await postsReq;
       const posts = postsData.posts || [];
       _updateTabLoadUi(loadUi, 68, 'Loading explore resources', `${posts.length} posts ready`);
 
@@ -4081,13 +4093,12 @@ const Social = (() => {
         _updateTabLoadUi(loadUi, 34, 'Loading music tab', 'Using cached music feed');
       } else {
         _updateTabLoadUi(loadUi, 48, 'Loading music posts', 'Fetching latest shared tracks');
-        let fetchRes;
+        let feedData;
         if (_musicTabScope === 'explore') {
-          fetchRes = await api(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`).catch(() => null);
+          feedData = await _apiOkJson(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`, { posts: [] });
         } else {
-          fetchRes = await api(`/api/social/feed?lite=1&limit=100${moodQuery}`).catch(() => null);
+          feedData = await _apiOkJson(`/api/social/feed?lite=1&limit=100${moodQuery}`, { posts: [] });
         }
-        const feedData = fetchRes && fetchRes.ok ? await fetchRes.json() : { posts: [] };
         if (_currentTab !== 'music' || loadToken !== _musicTabLoadToken) return;
         const seen = new Set();
         all = [];
@@ -4719,13 +4730,17 @@ const Social = (() => {
     const top = sorted[0] || null;
     const topEmoji = top ? top.emoji : '😊';
     const topCount = top ? Number(top.count || 0) : 0;
-    const label = total > 0 ? `${topEmoji} ${topCount} • ${total} reactions` : 'React';
+    const label = total > 0 ? `${topCount} • ${total} reactions` : 'React';
+    const btnStyle = 'display:flex;align-items:center;gap:8px;min-height:34px;background:linear-gradient(180deg,#132516,#0e1a10);border:1px solid #224327;border-radius:18px;color:#d7e9d9;padding:6px 10px;cursor:pointer;';
+    const emojiStyle = 'font-size:18px;line-height:1;';
+    const labelStyle = 'font-size:12px;letter-spacing:.2px;white-space:nowrap;color:#c5dbc8;';
+    const caretStyle = 'font-size:11px;color:#7eb787;margin-left:2px;';
     return `<div class="sf-rx-bar">` +
       `<button type="button" class="sf-rx-main${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" ` +
-      `onclick="Social.showReactPicker(event,${postId})" aria-label="Open reactions">` +
-      `<span class="sf-rx-main-emoji">${topEmoji}</span>` +
-      `<span class="sf-rx-main-label">${esc(label)}</span>` +
-      `<span class="sf-rx-main-caret">▾</span>` +
+      `style="${btnStyle}" onclick="Social.showReactPicker(event,${postId})" aria-label="Open reactions">` +
+      `<span class="sf-rx-main-emoji" style="${emojiStyle}">${topEmoji}</span>` +
+      `<span class="sf-rx-main-label" style="${labelStyle}">${esc(label)}</span>` +
+      `<span class="sf-rx-main-caret" style="${caretStyle}">▾</span>` +
       `</button></div>`;
   }
 
