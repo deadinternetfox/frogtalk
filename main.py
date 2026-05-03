@@ -1,10 +1,11 @@
 """FrogTalk - Secure Social Chat Platform."""
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -775,6 +776,153 @@ body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-
 try {{
     if (localStorage.getItem('token') || localStorage.getItem('fc_token')) {{
     window.location.replace('/app?post={post_id}');
+  }}
+}} catch (e) {{}}
+</script>
+</body></html>"""
+    return HTMLResponse(content=html)
+
+
+@app.get("/r/{post_id}/media")
+async def serve_public_reel_media(post_id: int):
+    """Public media endpoint for share-enabled public reels."""
+    import base64
+    import database as db
+
+    post = db.get_wall_post(post_id)
+    if (not post
+            or (post.get("privacy") or "public") != "public"
+            or int(post.get("share_enabled", 1) or 0) != 1
+            or not str(post.get("media_type") or "").lower().startswith("video/")):
+        return _JSONResponse(status_code=404, content={"error": "Not found"})
+
+    media_data = str(post.get("media_data") or "").strip()
+    media_type = str(post.get("media_type") or "application/octet-stream")
+    if not media_data:
+        return _JSONResponse(status_code=404, content={"error": "Not found"})
+
+    if media_data.startswith("data:"):
+        try:
+            header, _, b64 = media_data.partition(",")
+            if ";base64" not in header:
+                return _JSONResponse(status_code=404, content={"error": "Not found"})
+            raw = base64.b64decode(b64, validate=False)
+            ct = header[5:].split(";", 1)[0] or media_type
+            return Response(
+                content=raw,
+                media_type=ct,
+                headers={
+                    "Cache-Control": "public, max-age=86400, immutable",
+                    "Content-Length": str(len(raw)),
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        except Exception:
+            return _JSONResponse(status_code=500, content={"error": "Decode failed"})
+
+    if media_data.startswith("/"):
+        safe_target = media_data
+    else:
+        parsed = urlparse(media_data)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return _JSONResponse(status_code=404, content={"error": "Not found"})
+        safe_target = media_data
+
+    return Response(
+        status_code=302,
+        headers={
+            "Location": safe_target,
+            "Cache-Control": "public, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.get("/r/{post_id}", response_class=HTMLResponse)
+async def serve_reel_landing(post_id: int):
+    """Public reel share page. Guests can watch; logged-in users open in-app."""
+    import database as db
+
+    post = db.get_wall_post(post_id)
+    if (not post
+            or (post.get("privacy") or "public") != "public"
+            or int(post.get("share_enabled", 1) or 0) != 1
+            or not str(post.get("media_type") or "").lower().startswith("video/")):
+        html = (
+            "<!DOCTYPE html><html><head><title>Reel not found — FrogTalk</title>"
+            "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+            "<style>body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui;"
+            "display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}"
+            ".card{background:#1a1a1a;padding:40px;border-radius:16px;text-align:center;max-width:430px}"
+            "h1{color:#4caf50}a{color:#4caf50}</style></head>"
+            "<body><div class=card><h1>🐸 Reel not found</h1>"
+            "<p>This reel is unavailable or not public.</p>"
+            "<a href=\"/app\">Go to FrogTalk</a></div></body></html>"
+        )
+        return HTMLResponse(content=html, status_code=404)
+
+    nick = post.get("nickname") or "frog"
+    content = (post.get("content") or "").strip()
+    desc = content.replace("\n", " ").strip()[:180] or f"A public reel by @{nick} on FrogTalk."
+    canonical = f"https://frogtalk.xyz/r/{post_id}"
+    media_url = f"https://frogtalk.xyz/r/{post_id}/media"
+    avatar = post.get("avatar") or ""
+    avatar_html = (
+        f"<img class=\"author-avatar\" src=\"{_og_escape(avatar)}\" alt=\"\">"
+        if avatar.startswith(("http://", "https://", "data:image/", "/"))
+        else "<div class=\"author-avatar author-fallback\">🐸</div>"
+    )
+
+    html = f"""<!DOCTYPE html>
+<html><head>
+<meta charset=\"utf-8\">
+<title>Reel by @{_og_escape(nick)} on FrogTalk</title>
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<meta name=\"description\" content=\"{_og_escape(desc)}\">
+<link rel=\"canonical\" href=\"{canonical}\">
+<meta property=\"og:type\" content=\"video.other\">
+<meta property=\"og:site_name\" content=\"FrogTalk\">
+<meta property=\"og:title\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
+<meta property=\"og:description\" content=\"{_og_escape(desc)}\">
+<meta property=\"og:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta property=\"og:video\" content=\"{_og_escape(media_url)}\">
+<meta property=\"og:video:type\" content=\"{_og_escape(str(post.get('media_type') or 'video/mp4'))}\">
+<meta property=\"og:url\" content=\"{canonical}\">
+<meta name=\"twitter:card\" content=\"summary_large_image\">
+<meta name=\"twitter:title\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
+<meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
+<meta name=\"twitter:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta name=\"theme-color\" content=\"#4caf50\">
+<style>
+body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
+ display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}}
+.card{{background:#1a1a1a;padding:20px;border-radius:20px;max-width:540px;width:100%;border:1px solid #2a4a2a;box-shadow:0 20px 60px rgba(0,0,0,0.5)}}
+.join-banner{{background:linear-gradient(135deg,#203726,#16241a);border:1px solid #33563c;color:#cfe7d6;padding:10px 12px;border-radius:12px;font-size:13px;margin-bottom:14px}}
+.author{{display:flex;align-items:center;gap:10px;margin-bottom:12px}}
+.author-avatar{{width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #4caf50;background:#1f1f1f}}
+.author-fallback{{display:flex;align-items:center;justify-content:center;font-size:20px}}
+.author-name{{color:#4caf50;font-weight:700}}
+.caption{{white-space:pre-wrap;line-height:1.5;color:#ddd;margin-bottom:12px;word-wrap:break-word}}
+.reel-video{{width:100%;max-height:76vh;object-fit:contain;border-radius:14px;border:1px solid #2a2a2a;background:#111}}
+.actions{{display:flex;gap:10px;margin-top:14px}}
+.btn{{display:block;flex:1;text-align:center;padding:13px;border-radius:10px;text-decoration:none;font-weight:600}}
+.btn-primary{{background:#4caf50;color:#000}}
+.btn-secondary{{background:#2a2a2a;color:#e0e0e0;border:1px solid #3a3a3a}}
+</style></head><body>
+<div class=\"card\">
+  <div class=\"join-banner\">Watching as guest. Join FrogTalk to like, comment, repost, and chat with friends.</div>
+  <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
+  {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
+  <video class=\"reel-video\" controls playsinline preload=\"metadata\" src=\"/r/{post_id}/media\"></video>
+  <div class=\"actions\">
+    <a href=\"/app?reel={post_id}\" class=\"btn btn-primary\">Join FrogTalk</a>
+    <a href=\"/\" class=\"btn btn-secondary\">Home</a>
+  </div>
+</div>
+<script>
+try {{
+  if (localStorage.getItem('token') || localStorage.getItem('fc_token')) {{
+    window.location.replace('/app?reel={post_id}');
   }}
 }} catch (e) {{}}
 </script>

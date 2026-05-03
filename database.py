@@ -5980,8 +5980,8 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
 
         if scope == "friends":
             rows = con.execute(f"""
-                SELECT DISTINCT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
-                       wp.privacy, wp.allow_comments, wp.created_at, wp.edited_at,
+                  SELECT DISTINCT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
+                      wp.privacy, wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
                        wp.track_title, wp.track_room, wp.track_mood,
                        1 AS has_media,
                        u.nickname, u.avatar,
@@ -6120,8 +6120,8 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
             )).fetchall()
         else:  # all public
             rows = con.execute(f"""
-                SELECT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
-                       wp.privacy, wp.allow_comments, wp.created_at, wp.edited_at,
+                  SELECT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
+                      wp.privacy, wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
                        wp.track_title, wp.track_room, wp.track_mood,
                        1 AS has_media,
                        u.nickname, u.avatar,

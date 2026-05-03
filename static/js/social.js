@@ -1922,6 +1922,36 @@ const Social = (() => {
     loadReelsTab();
   }
 
+  function openSharedReel(postId) {
+    const id = Number(postId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    try {
+      open('reels');
+      switchTab('reels');
+    } catch {}
+
+    const tryFocus = (attemptsLeft, reloaded) => {
+      const card = document.querySelector(`.reel-card[data-post-id="${id}"]`);
+      if (card) {
+        try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+        setTimeout(() => {
+          try { _reelsActivateCard(card, { reset: true }); } catch {}
+        }, 120);
+        return;
+      }
+      if (attemptsLeft <= 0) {
+        if (!reloaded) {
+          loadReelsTab().finally(() => setTimeout(() => tryFocus(16, true), 120));
+          return;
+        }
+        try { UI.showToast('This reel is unavailable right now', 'info'); } catch {}
+        return;
+      }
+      setTimeout(() => tryFocus(attemptsLeft - 1, reloaded), 120);
+    };
+    tryFocus(20, false);
+  }
+
   async function loadReelsTab() {
     _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
@@ -2475,6 +2505,7 @@ const Social = (() => {
   function _renderReelCard(post) {
     const videoSrc = esc(_authMediaSrc(post.media_data || ''));
     const nick = esc(post.nickname || '');
+    const rawNick = post.nickname || '';
     const avatarSrc = post.avatar ? esc(post.avatar) : '';
     const avatarHtml = avatarSrc
       ? `<img class="reel-author-avatar" src="${avatarSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
@@ -2490,6 +2521,9 @@ const Social = (() => {
     const likeCount = post.like_count ?? post.reaction_count ?? 0;
     const commentCount = post.comment_count ?? 0;
     const repostCount = post.repost_count ?? 0;
+    const postPrivacy = String(post.privacy || 'public').toLowerCase();
+    const shareEnabled = Number(post.share_enabled ?? 1) === 1;
+    const canShare = shareEnabled && postPrivacy !== 'friends' && postPrivacy !== 'private';
 
     return `
       <div class="reel-card" data-post-id="${post.id}">
@@ -2522,6 +2556,10 @@ const Social = (() => {
             <div class="reel-act-icon">${post.i_reposted ? '🔁' : '↩️'}</div>
             <span class="reel-act-count reel-repost-count">${repostCount}</span>
           </button>
+          ${canShare ? `<button class="reel-act-btn" title="Share" onclick="Social.shareReelUrl(${post.id}, { nickname: ${jsStr(rawNick)}, privacy: ${jsStr(postPrivacy)}, shareEnabled: ${shareEnabled ? 1 : 0} })">
+            <div class="reel-act-icon">📤</div>
+            <span class="reel-act-count">Share</span>
+          </button>` : ''}
         </div>
       </div>`;
   }
@@ -4184,6 +4222,12 @@ const Social = (() => {
     return `${window.location.origin}/p/${safeId}`;
   }
 
+  function reelShareUrl(postId) {
+    const id = Number(postId);
+    const safeId = Number.isFinite(id) && id > 0 ? id : 0;
+    return `${window.location.origin}/r/${safeId}`;
+  }
+
   async function sharePostUrl(postId, meta = {}) {
     const privacy = String(meta.privacy || 'public').toLowerCase();
     const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
@@ -4219,6 +4263,44 @@ const Social = (() => {
       try { UI.showToast('Post link copied to clipboard', 'success'); } catch {}
     } else {
       window.prompt('Copy this post link:', url);
+    }
+  }
+
+  async function shareReelUrl(postId, meta = {}) {
+    const privacy = String(meta.privacy || 'public').toLowerCase();
+    const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
+    const nick = meta.nickname || 'user';
+    if (!shareEnabled) {
+      try { UI.showToast('Share link is disabled for this reel', 'info'); } catch {}
+      return;
+    }
+    if (privacy === 'friends' || privacy === 'private') {
+      try { UI.showToast('Sharing is disabled for friends-only and private reels', 'info'); } catch {}
+      return;
+    }
+    const url = privacy === 'followers'
+      ? `${window.location.origin}/app?reel=${encodeURIComponent(String(postId))}`
+      : reelShareUrl(postId);
+    if (privacy === 'followers') {
+      try { UI.showToast('Followers-only reel link copied: viewer must be logged in with access', 'info'); } catch {}
+    }
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `Reel by @${nick} on FrogTalk`,
+          text: `Check out this FrogTalk reel by @${nick}`,
+          url,
+        });
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+    const ok = await UI.copy(url);
+    if (ok) {
+      try { UI.showToast('Reel link copied to clipboard', 'success'); } catch {}
+    } else {
+      window.prompt('Copy this reel link:', url);
     }
   }
 
@@ -5315,6 +5397,7 @@ const Social = (() => {
     submitComment, deleteComment, voteComment, deletePost, dmUser,
     shareProfile, profileShareUrl,
     sharePostUrl, postShareUrl,
+    shareReelUrl, reelShareUrl,
     openPostMenu, blockUserFromSocial,
     promptDeletePrivateMedia, promptDeletePostMedia,
     addFriendFromProfile, acceptFriendFromProfile,
@@ -5336,6 +5419,7 @@ const Social = (() => {
     // Reels
     loadReelsTab, switchReelsScope, switchReelsSort,
     toggleReelMute, toggleReelPlayback, reactReelHeart, openReelComments,
+    openSharedReel,
     openReelReactPicker, _reelPickEmoji,
     // Activity / notifications
     loadActivity, markAllActivityRead, openActivityItem,

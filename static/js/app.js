@@ -159,6 +159,11 @@ const App = {
       this.pendingRoom = pendingRoom;
       window.history.replaceState({}, '', window.location.pathname);
     }
+    const pendingReel = params.get('reel') || params.get('r');
+    if (pendingReel) {
+      this.pendingReel = pendingReel;
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     const pendingPost = params.get('post') || params.get('p');
     if (pendingPost) {
       this.pendingPost = pendingPost;
@@ -358,6 +363,23 @@ const App = {
         App.openFirstAvailableRoom();
       }
       this.pendingDM = null;
+    } else if (this.pendingReel) {
+      // Share link: /r/{id} or /?reel={id} — open FrogSocial reels and focus target reel.
+      App.openFirstAvailableRoom();
+      const reelId = Number(this.pendingReel);
+      this.pendingReel = null;
+      const tryOpenReel = (attempts) => {
+        try {
+          if (Number.isFinite(reelId) && reelId > 0 && typeof Social !== 'undefined' && Social.openSharedReel) {
+            Social.openSharedReel(reelId);
+            return;
+          }
+        } catch (e) {
+          console.error('[App] open shared reel failed', e);
+        }
+        if (attempts > 0) setTimeout(() => tryOpenReel(attempts - 1), 120);
+      };
+      tryOpenReel(16);
     } else if (this.pendingPost) {
       // Share link: /p/{id} or /?post={id} — open FrogSocial post detail.
       App.openFirstAvailableRoom();
