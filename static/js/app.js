@@ -5,7 +5,7 @@
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'loader-skeleton-hotfix-v1',
+  ASSET_RESET_VERSION: 'reaction-panel-click-hotfix-v1',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
