@@ -229,6 +229,124 @@ const Social = (() => {
     return !!(entry && (Date.now() - Number(entry.ts || 0) < _tabCacheTtlMs));
   }
 
+  function _socialLoadingHtml(label = 'Loading…', tone = 'default') {
+    return `<div class="social-loading social-loading-fun ${tone === 'reels' ? 'is-reels' : ''}">${esc(label)}</div>`;
+  }
+
+  function _socialPostSkeletonCards(count = 3) {
+    return Array.from({ length: count }).map(() => `
+      <div class="sf-post skel-row" aria-hidden="true" style="pointer-events:none">
+        <div class="sf-post-header">
+          <div class="skel-circle" style="width:36px;height:36px"></div>
+          <div style="flex:1;min-width:0">
+            <div class="skel-line" style="width:34%;height:11px;margin-bottom:6px"></div>
+            <div class="skel-line" style="width:22%;height:9px"></div>
+          </div>
+        </div>
+        <div style="padding:0 14px 10px">
+          <div class="skel-line" style="width:92%;height:10px;margin-bottom:6px"></div>
+          <div class="skel-line" style="width:68%;height:10px"></div>
+        </div>
+        <div class="skel-block" style="height:180px;margin:0 14px 10px;border-radius:12px"></div>
+        <div style="display:flex;gap:8px;padding:0 14px 12px">
+          <div class="skel-line" style="width:58px;height:20px;border-radius:10px"></div>
+          <div class="skel-line" style="width:58px;height:20px;border-radius:10px"></div>
+          <div class="skel-line" style="width:58px;height:20px;border-radius:10px"></div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function _feedSkeletonHtml() {
+    return `
+      <div id="social-feed-stories">
+        <div class="stories-bar" aria-hidden="true">
+          <div class="stories-scroll">
+            ${Array.from({ length: 5 }).map(() => `
+              <div class="story-circle" style="pointer-events:none">
+                <div class="story-avatar-ring viewed"><div class="story-avatar skel-circle" style="width:56px;height:56px"></div></div>
+                <span class="story-nick"><span class="skel-line" style="display:inline-block;width:46px;height:9px"></span></span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+      <div id="social-feed-suggest"></div>
+      <div class="social-feed">${_socialPostSkeletonCards(3)}</div>
+    `;
+  }
+
+  function _exploreSkeletonHtml() {
+    return `
+      <div class="explore-toolbar">
+        <div class="explore-tabs">
+          <button class="explore-tab ${_exploreSort==='trending'?'active':''}">🔥 Trending</button>
+          <button class="explore-tab ${_exploreSort==='new'?'active':''}">🆕 New</button>
+          <button class="explore-tab ${_exploreSort==='top'?'active':''}">⭐ Top</button>
+        </div>
+        <button class="explore-refresh" title="Refresh" disabled>🔄</button>
+      </div>
+      <div class="social-grid" aria-hidden="true">
+        ${Array.from({ length: 6 }).map(() => `<div class="social-grid-item" style="pointer-events:none"><div class="skel-block" style="height:100%;min-height:120px;border-radius:0"></div></div>`).join('')}
+      </div>
+      <div class="social-feed">${_socialPostSkeletonCards(2)}</div>
+    `;
+  }
+
+  function _reelsSkeletonHtml(scope, sort) {
+    return `
+      <div class="reels-scope-bar">
+        <button class="rsb-pill ${scope==='all'?'active':''}" disabled>🌐 All</button>
+        <button class="rsb-pill ${scope==='friends'?'active':''}" disabled>👥 Friends</button>
+        <div class="rsb-sort">
+          <button class="rsb-sort-chip ${sort==='hot'?'active':''}" disabled>🔥 Hot</button>
+          <button class="rsb-sort-chip ${sort==='new'?'active':''}" disabled>🆕 New</button>
+          <button class="rsb-sort-chip ${sort==='top'?'active':''}" disabled>⭐ Top</button>
+        </div>
+      </div>
+      <div class="reels-stage">
+        <div class="reels-snap" aria-hidden="true" style="gap:14px">
+          ${Array.from({ length: 3 }).map(() => `
+            <div class="reel-card" style="pointer-events:none">
+              <div class="skel-block" style="height:100%;border-radius:14px"></div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function _musicSkeletonHtml(scope, sort) {
+    return `
+      <div class="music-scope-bar">
+        <div class="msb-toggle" role="tablist" aria-label="Music feed scope">
+          <button class="msb-seg ${scope==='following'?'active':''}" role="tab" aria-selected="${scope==='following'}" disabled>
+            <span class="msb-seg-ico">👥</span><span>Following</span>
+          </button>
+          <button class="msb-seg ${scope==='explore'?'active':''}" role="tab" aria-selected="${scope==='explore'}" disabled>
+            <span class="msb-seg-ico">🌐</span><span>Explore</span>
+          </button>
+        </div>
+        ${scope==='explore' ? `
+          <div class="msb-sort">
+            <button class="msb-sort-chip ${sort==='new'?'active':''}" disabled>🆕 New</button>
+            <button class="msb-sort-chip ${sort==='trending'?'active':''}" disabled>🔥 Trending</button>
+            <button class="msb-sort-chip ${sort==='top'?'active':''}" disabled>⭐ Top</button>
+          </div>
+        ` : ''}
+      </div>
+      <div class="social-feed">${_socialPostSkeletonCards(3)}</div>
+    `;
+  }
+
+  function _animateSocialSwap(el) {
+    if (!el) return;
+    try { el.classList.remove('social-content-enter'); } catch {}
+    requestAnimationFrame(() => {
+      try { el.classList.add('social-content-enter'); } catch {}
+    });
+  }
+
   // ── STORIES ──────────────────────────────────────────────────────────────
   let _storyData = [];   // [{user_id, nickname, avatar, stories:[], has_unviewed}]
   let _storyViewIdx = 0; // index in current user's stories array
@@ -1421,7 +1539,7 @@ const Social = (() => {
     if (cached) {
       _renderFeedContent(content, cached);
     } else {
-      content.innerHTML = '<div class="social-loading">Loading feed…</div>';
+      content.innerHTML = _feedSkeletonHtml();
     }
     try {
       const feedRes = await api('/api/social/feed?lite=1&limit=24');
@@ -1430,6 +1548,7 @@ const Social = (() => {
       _feedCache = { ts: Date.now(), posts };
       if (_currentTab !== 'feed') return;
       _renderFeedContent(content, posts);
+      _animateSocialSwap(content);
     } catch {
       if (!cached && _currentTab === 'feed') {
         content.innerHTML = '<div class="social-empty">Could not load feed</div>';
@@ -1533,7 +1652,7 @@ const Social = (() => {
     if (cached) {
       _renderExploreContent(content, cached);
     } else {
-      content.innerHTML = '<div class="social-loading">Discovering…</div>';
+      content.innerHTML = _exploreSkeletonHtml();
     }
     try {
       const postsRes = await api(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`);
@@ -1542,6 +1661,7 @@ const Social = (() => {
       _exploreCache.set(cacheKey, { ts: Date.now(), posts });
       if (_currentTab !== 'explore') return;
       _renderExploreContent(content, posts);
+      _animateSocialSwap(content);
     } catch {
       if (!cached && _currentTab === 'explore') {
         content.innerHTML = '<div class="social-empty">Could not load explore</div>';
@@ -2005,7 +2125,7 @@ const Social = (() => {
         </div>
       </div>`;
 
-    content.innerHTML = scopeBar + '<div class="social-loading" style="margin-top:48px">Loading reels…</div>';
+    content.innerHTML = _reelsSkeletonHtml(scope, sort);
 
     try {
       const res = await api(`/api/social/reels?scope=${scope}&sort=${sort}&limit=20`).catch(() => null);
@@ -2031,6 +2151,7 @@ const Social = (() => {
           <div class="social-loading reels-stage-loading">Loading reels…</div>
           <div class="reels-snap" id="reels-snap">${cards}</div>
         </div>`;
+      _animateSocialSwap(content);
       const snap = document.getElementById('reels-snap');
       if (snap) {
         _initReelCards(snap);
@@ -3277,7 +3398,7 @@ const Social = (() => {
   async function loadMusicTab() {
     const content = document.getElementById('social-content');
     if (!content) return;
-    content.innerHTML = '<div class="social-loading">Loading music shares…</div>';
+    content.innerHTML = _musicSkeletonHtml(_musicTabScope, _musicTabSort);
     try {
       // Scope-driven fetch:
       //   following → own + followed posts (via /feed)
@@ -5218,10 +5339,10 @@ const Social = (() => {
     if (!overlay) {
       overlay = document.createElement('div');
       overlay.id = 'social-post-detail';
-      overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
+      overlay.onclick = e => { if (e.target === overlay) closePostDetail(); };
       document.body.appendChild(overlay);
     }
-    overlay.innerHTML = `<div class="spd-inner" style="display:flex;align-items:center;justify-content:center;min-height:260px;color:#8f8f8f">Loading post…</div>`;
+    overlay.innerHTML = `<div class="spd-inner" style="display:flex;align-items:center;justify-content:center;min-height:260px;color:#8f8f8f">${_socialLoadingHtml('Loading post…')}</div>`;
     overlay.style.display = 'flex';
     try {
       const res = await api(`/api/wall/posts/${postId}`);
@@ -5254,7 +5375,20 @@ const Social = (() => {
 
   function closePostDetail() {
     const o = document.getElementById('social-post-detail');
-    if (o) o.style.display = 'none';
+    if (!o) return;
+    try {
+      o.querySelectorAll('video,audio').forEach(m => {
+        try { m.pause(); } catch {}
+        try { m.currentTime = 0; } catch {}
+      });
+      o.querySelectorAll('iframe').forEach(frame => {
+        try {
+          const src = frame.getAttribute('src');
+          if (src) frame.setAttribute('src', src);
+        } catch {}
+      });
+    } catch {}
+    o.style.display = 'none';
   }
 
   // Open story viewer by nickname — used by the avatar ring on the profile page.
