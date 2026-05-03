@@ -1046,9 +1046,25 @@ def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
     local_base = _normalize_base_url(
         (os.getenv("FROGTALK_BASE_URL") or os.getenv("PUBLIC_URL") or local.get("base_url") or "")
     ).lower()
+    local_onion = _normalize_base_url(str(local.get("onion_url") or "")).lower()
+
+    own_hosts = {"localhost", "127.0.0.1", "::1"}
+    for raw in (
+        local_base,
+        local_onion,
+        _normalize_base_url(os.getenv("FROGTALK_PUBLIC_BASE_URL", "")),
+        _normalize_base_url(os.getenv("FROGTALK_BASE_URL", "")),
+    ):
+        try:
+            host = (urllib.parse.urlparse(raw).hostname or "").strip().lower()
+            if host:
+                own_hosts.add(host)
+        except Exception:
+            pass
 
     peers = db.list_federation_servers(official_only=False)
     targets: list[str] = []
+    seen_targets: set[str] = set()
     for srv in peers:
         if not srv.get("enabled"):
             continue
@@ -1058,9 +1074,24 @@ def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
         target = _select_peer_target(srv)
         if not target:
             continue
-        if local_base and target.lower() == local_base:
+        normalized_target = _normalize_base_url(target)
+        t_lower = normalized_target.lower()
+        if local_base and t_lower == local_base:
             continue
-        targets.append(target)
+        if local_onion and t_lower == local_onion:
+            continue
+
+        try:
+            target_host = (urllib.parse.urlparse(normalized_target).hostname or "").strip().lower()
+        except Exception:
+            target_host = ""
+        if target_host in own_hosts:
+            continue
+
+        if t_lower in seen_targets:
+            continue
+        seen_targets.add(t_lower)
+        targets.append(normalized_target)
 
     if not targets:
         return local_server_id, targets, []

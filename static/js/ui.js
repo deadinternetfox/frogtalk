@@ -3811,12 +3811,35 @@ async function loadUserWall(nickname) {
         }
       }
 
-      // Reactions rendering
-      const reactions = p.reactions || [];
-      const reactionHtml = reactions.map(r =>
-        `<button onclick="toggleWallReaction(${p.id},'${esc(r.emoji)}')" style="background:#1a2e1a;border:1px solid #2a3a2a;border-radius:12px;padding:2px 8px;font-size:13px;cursor:pointer;color:#ccc;display:inline-flex;align-items:center;gap:3px" title="${esc(r.users || '')}">${r.emoji} <span style="font-size:11px">${r.count}</span></button>`
-      ).join('');
-      const addReactionBtn = `<button onclick="showWallReactionPicker(${p.id})" style="background:none;border:1px dashed #333;border-radius:12px;padding:2px 8px;font-size:13px;cursor:pointer;color:#666" title="Add reaction">+</button>`;
+      // Reactions rendering (same style language as Social feed)
+      const reactions = Array.isArray(p.reactions) ? p.reactions : [];
+      const myNick = String(State?.user?.nickname || '').trim();
+      const normalized = reactions.map(r => {
+        const users = Array.isArray(r.users)
+          ? r.users.map(u => String(u || '').trim()).filter(Boolean)
+          : String(r.users || '').split(',').map(u => u.trim()).filter(Boolean);
+        return {
+          emoji: String(r.emoji || ''),
+          count: Number(r.count || 0),
+          users,
+        };
+      }).filter(r => r.emoji);
+      const totalReactions = normalized.reduce((n, r) => n + r.count, 0);
+      const myReaction = normalized.find(r => r.users.includes(myNick));
+      const myEmoji = myReaction ? myReaction.emoji : '';
+      const topEmojis = [...normalized]
+        .sort((a, b) => (b.count - a.count) || a.emoji.localeCompare(b.emoji))
+        .slice(0, 3)
+        .map(r => r.emoji)
+        .join('');
+      const reactionBarHtml = `<div class="sf-rx-bar">`
+        + (totalReactions > 0
+          ? `<button type="button" class="sf-rx-summary" onclick="showWallReactionDetail(${p.id})" aria-label="See reactions">`
+              + `<span class="sf-rx-emojis">${topEmojis}</span><span class="sf-rx-total">${totalReactions}</span></button>`
+          : '')
+        + `<button type="button" class="sf-rx-list" onclick="showWallReactionDetail(${p.id})" aria-label="Open reactions list">👥</button>`
+        + `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" onclick="showWallReactionPicker(${p.id})" aria-label="React">${myEmoji || '😊'}</button>`
+        + `</div>`;
 
       // Comments count
       const commentCount = p.comment_count || 0;
@@ -3837,7 +3860,7 @@ async function loadUserWall(nickname) {
         </div>
         <div style="font-size:14px;color:#ccc;line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(p.content)}</div>
         ${mediaHtml}
-        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;align-items:center">${reactionHtml}${addReactionBtn}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;align-items:center">${reactionBarHtml}</div>
         <div style="margin-top:6px;display:flex;align-items:center;gap:10px">${commentsToggle}</div>
         <div id="wall-comments-${p.id}" style="display:none;margin-top:8px"></div>
       </div>`;
@@ -3855,6 +3878,15 @@ async function toggleWallReaction(postId, emoji) {
   } catch {}
 }
 
+function showWallReactionDetail(postId) {
+  try {
+    if (window.Social && typeof window.Social.showReactionDetail === 'function') {
+      window.Social.showReactionDetail(postId);
+      return;
+    }
+  } catch {}
+}
+
 // Quick reaction picker for wall posts
 function showWallReactionPicker(postId) {
   const quickEmojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏'];
@@ -3863,11 +3895,15 @@ function showWallReactionPicker(postId) {
   // Remove existing picker
   const old = postEl.querySelector('.wall-reaction-picker');
   if (old) { old.remove(); return; }
+  const myEmoji = postEl.querySelector('.sf-rx-add')?.dataset?.myEmoji || '';
   const picker = document.createElement('div');
   picker.className = 'wall-reaction-picker';
-  picker.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;padding:6px;background:#1a1a1a;border-radius:8px;border:1px solid #333';
-  picker.innerHTML = quickEmojis.map(e =>
-    `<button onclick="toggleWallReaction(${postId},'${e}');this.parentElement.remove()" style="background:none;border:none;font-size:18px;cursor:pointer;padding:4px;border-radius:4px;transition:background 0.15s" onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background='none'">${e}</button>`
+  picker.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;padding:8px;background:#101710;border-radius:10px;border:1px solid #2a3a2a';
+  const removeBtnHtml = myEmoji
+    ? `<button onclick="toggleWallReaction(${postId},'${myEmoji}');this.parentElement.remove()" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:8px;padding:4px 8px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
+    : '';
+  picker.innerHTML = removeBtnHtml + quickEmojis.map(e =>
+    `<button onclick="toggleWallReaction(${postId},'${e}');this.parentElement.remove()" style="background:none;border:1px solid #2a2a2a;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:8px;transition:background .15s" onmouseover="this.style.background='#1a2e1a'" onmouseout="this.style.background='none'">${e}</button>`
   ).join('');
   postEl.appendChild(picker);
 }

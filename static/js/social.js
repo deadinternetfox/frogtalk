@@ -16,6 +16,7 @@ const Social = (() => {
   const _musicTitleInflight = new Map();
   const _profileCache = new Map();
   let _tabLoadUiToken = 0;
+  let _tabLoadUiWatchdog = null;
   let _reelsLoadToken = 0;
   let _profileTabLoadToken = 0;
   let _profileActiveTab = 'wall';
@@ -569,8 +570,24 @@ const Social = (() => {
   }
 
   function _beginTabLoadUi(tab, label, detail) {
+    if (_tabLoadUiWatchdog) {
+      clearTimeout(_tabLoadUiWatchdog);
+      _tabLoadUiWatchdog = null;
+    }
     const token = ++_tabLoadUiToken;
     _setTabLoadUi(tab, 8, label, detail || 'Preparing content…');
+    _tabLoadUiWatchdog = setTimeout(() => {
+      if (token !== _tabLoadUiToken) return;
+      const el = document.getElementById('social-load-banner');
+      if (!el) return;
+      const timedOutTab = el.dataset.tab || _currentTab;
+      _setTabLoadUi(timedOutTab, 100, 'Loaded', 'Showing available content');
+      el.classList.add('done');
+      setTimeout(() => {
+        if (token !== _tabLoadUiToken) return;
+        el.classList.remove('show');
+      }, 180);
+    }, 15000);
     return token;
   }
 
@@ -581,6 +598,10 @@ const Social = (() => {
 
   function _finishTabLoadUi(token) {
     if (token !== _tabLoadUiToken) return;
+    if (_tabLoadUiWatchdog) {
+      clearTimeout(_tabLoadUiWatchdog);
+      _tabLoadUiWatchdog = null;
+    }
     _setTabLoadUi(_currentTab, 100, 'Loaded', 'Ready');
     const doneToken = token;
     setTimeout(() => {
@@ -4694,17 +4715,18 @@ const Social = (() => {
       return users.includes(myNick);
     });
     const myEmoji = myReaction ? myReaction.emoji : '';
-    const sorted = [...reactions].sort((a, b) => b.count - a.count);
-    const topEmojis = sorted.slice(0, 3).map(r => r.emoji).join('');
-    const summaryHtml = total > 0
-      ? `<button type="button" class="sf-rx-summary" onclick="Social.showReactionDetail(${postId})" aria-label="See reactions">` +
-        `<span class="sf-rx-emojis">${topEmojis}</span><span class="sf-rx-total">${total}</span></button>`
-      : '';
-    const listBtnHtml = `<button type="button" class="sf-rx-list" onclick="Social.showReactionDetail(${postId})" aria-label="Open reactions list">👥</button>`;
-    return `<div class="sf-rx-bar">${summaryHtml}` +
-      `${listBtnHtml}` +
-      `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" ` +
-      `onclick="Social.showReactPicker(event,${postId})" aria-label="React">${myEmoji || '😊'}</button></div>`;
+    const sorted = [...reactions].sort((a, b) => (Number(b.count || 0) - Number(a.count || 0)) || String(a.emoji).localeCompare(String(b.emoji)));
+    const top = sorted[0] || null;
+    const topEmoji = top ? top.emoji : '😊';
+    const topCount = top ? Number(top.count || 0) : 0;
+    const label = total > 0 ? `${topEmoji} ${topCount} • ${total} reactions` : 'React';
+    return `<div class="sf-rx-bar">` +
+      `<button type="button" class="sf-rx-main${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" ` +
+      `onclick="Social.showReactPicker(event,${postId})" aria-label="Open reactions">` +
+      `<span class="sf-rx-main-emoji">${topEmoji}</span>` +
+      `<span class="sf-rx-main-label">${esc(label)}</span>` +
+      `<span class="sf-rx-main-caret">▾</span>` +
+      `</button></div>`;
   }
 
   function _updatePostReactions(postEl, reactions, myNick) {
@@ -4845,14 +4867,14 @@ const Social = (() => {
       ev?.preventDefault?.();
       ev?.stopPropagation?.();
     } catch {}
-    // Close any open emoji picker
+    // Close legacy inline pickers if any
     document.querySelectorAll('.sf-react-picker').forEach(p => p.remove());
     const eventPostEl = ev?.target?.closest?.('.sf-post[data-post-id]') || null;
     const postEl = eventPostEl && Number(eventPostEl.dataset.postId) === Number(postId)
       ? eventPostEl
       : document.querySelector(`.sf-post[data-post-id="${postId}"]`);
     const myNick = State.user?.nickname || '';
-    const addBtn = postEl?.querySelector('.sf-rx-add');
+    const addBtn = postEl?.querySelector('.sf-rx-main');
     if (addBtn) {
       addBtn.disabled = true;
       addBtn.classList.add('is-pending');
@@ -4865,9 +4887,9 @@ const Social = (() => {
       _updateReactionsInCaches(postId, reactions);
       _updateAllPostReactionBars(postId, reactions, myNick);
       _updateReelReactionUi(postId, reactions, myNick);
-      const openDetail = document.querySelector('.sf-rx-detail-overlay[data-post-id]');
-      if (openDetail && Number(openDetail.dataset.postId) === Number(postId)) {
-        showReactionDetail(postId);
+      const openPanel = document.querySelector('.sf-rx-panel-overlay[data-post-id]');
+      if (openPanel && Number(openPanel.dataset.postId) === Number(postId)) {
+        showReactPicker(null, postId, { refresh: true });
       }
     } catch (e) {
       try { UI.showToast(e?.message || 'Could not update reaction', 'error'); } catch {}
@@ -4960,99 +4982,92 @@ const Social = (() => {
     }
   }
 
-  function showReactPicker(ev, postId) {
+  function showReactPicker(ev, postId, opts = {}) {
     try {
       ev?.preventDefault?.();
       ev?.stopPropagation?.();
     } catch {}
-    const postEl = document.querySelector(`[data-post-id="${postId}"]`);
-    if (!postEl) return;
-    const old = postEl.querySelector('.sf-react-picker');
-    if (old) { old.remove(); return; }
-    const myEmoji = postEl.querySelector('.sf-rx-add')?.dataset?.myEmoji || '';
-    const emojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏','💯','✨'];
-    const picker = document.createElement('div');
-    picker.className = 'sf-react-picker';
-    const removeBtnHtml = myEmoji
-      ? `<button type="button" class="active" onclick="Social.reactPost(event, ${postId},${jsStr(myEmoji)})">Remove ${myEmoji}</button>`
-      : '';
-    picker.innerHTML = removeBtnHtml + emojis.map(e =>
-      `<button type="button" class="${e === myEmoji ? 'active' : ''}" onclick="Social.reactPost(event, ${postId},'${e}')">${e}</button>`
-    ).join('');
-    // Attach after the reaction bar if present, otherwise after post-actions
-    const anchor = postEl.querySelector('.sf-rx-bar') || postEl.querySelector('.sf-post-actions');
-    anchor?.after(picker);
-    // Dismiss on outside click
-    setTimeout(() => {
-      const dismiss = (ev) => {
-        if (!picker.contains(ev.target) && !ev.target.closest('.sf-rx-add')) {
-          picker.remove();
-          document.removeEventListener('click', dismiss, true);
-        }
-      };
-      document.addEventListener('click', dismiss, true);
-    }, 10);
-  }
+    const refresh = !!opts.refresh;
+    const old = document.querySelector('.sf-rx-panel-overlay');
+    if (old && !refresh && Number(old.dataset.postId || 0) === Number(postId)) {
+      old.remove();
+      return;
+    }
+    old?.remove();
 
-  async function showReactionDetail(postId) {
-    document.querySelector('.sf-rx-detail-overlay')?.remove();
+    const postEl = document.querySelector(`[data-post-id="${postId}"]`);
+    const myEmoji = postEl?.querySelector('.sf-rx-main')?.dataset?.myEmoji || '';
+    const emojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏','💯','✨'];
     const overlay = document.createElement('div');
-    overlay.className = 'sf-rx-detail-overlay';
+    overlay.className = 'sf-rx-panel-overlay';
     overlay.dataset.postId = String(postId);
+    const removeBtnHtml = myEmoji
+      ? `<button type="button" class="sf-rx-picker-btn remove" onclick="Social.reactPost(event, ${postId},${jsStr(myEmoji)})">Remove ${myEmoji}</button>`
+      : '';
     overlay.innerHTML = `
-      <div class="sf-rx-detail-sheet">
-        <div class="sf-rx-detail-header">
-          <div class="sf-rx-detail-tabs"></div>
-          <button class="sf-rx-detail-close" onclick="this.closest('.sf-rx-detail-overlay').remove()">✕</button>
+      <div class="sf-rx-panel">
+        <div class="sf-rx-panel-header">
+          <div class="sf-rx-panel-title">Reactions</div>
+          <button class="sf-rx-panel-close" onclick="this.closest('.sf-rx-panel-overlay').remove()">✕</button>
         </div>
-        <div class="sf-rx-detail-list"></div>
+        <div class="sf-rx-panel-list-wrap">
+          <div class="sf-rx-panel-tabs"></div>
+          <div class="sf-rx-panel-list"><div class="sf-rx-detail-loading">Loading reactions…</div></div>
+        </div>
+        <div class="sf-rx-picker-wrap">
+          <div class="sf-rx-picker-title">Pick your reaction</div>
+          <div class="sf-rx-picker-grid">${removeBtnHtml + emojis.map(e =>
+            `<button type="button" class="sf-rx-picker-btn ${e === myEmoji ? 'active' : ''}" onclick="Social.reactPost(event, ${postId},'${e}')">${e}</button>`
+          ).join('')}</div>
+        </div>
       </div>`;
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     document.body.appendChild(overlay);
-    const tabsEl = overlay.querySelector('.sf-rx-detail-tabs');
-    const listEl = overlay.querySelector('.sf-rx-detail-list');
-    listEl.innerHTML = '<div class="sf-rx-detail-loading">Loading reactions…</div>';
-    try {
-      const res = await api(`/api/wall/posts/${postId}/reactions/detail`);
-      const data = await res.json();
-      const rows = data.reactions || [];
-      const myNick = State.user?.nickname || '';
-      const emojis = [...new Set(rows.map(r => r.emoji))];
-      function renderList(filter) {
-        const toShow = filter === 'all' ? rows : rows.filter(r => r.emoji === filter);
-        if (toShow.length === 0) {
+
+    const tabsEl = overlay.querySelector('.sf-rx-panel-tabs');
+    const listEl = overlay.querySelector('.sf-rx-panel-list');
+    api(`/api/wall/posts/${postId}/reactions/detail`).then(res => res.json()).then(data => {
+      const rows = Array.isArray(data.reactions) ? data.reactions : [];
+      const me = String(State?.user?.nickname || '');
+      const emojisPresent = [...new Set(rows.map(r => String(r.emoji || '')))].filter(Boolean);
+      const renderList = (filter) => {
+        const filtered = filter === 'all' ? rows : rows.filter(r => r.emoji === filter);
+        if (!filtered.length) {
           listEl.innerHTML = '<div class="sf-rx-detail-empty">No reactions yet</div>';
           return;
         }
-        listEl.innerHTML = toShow.map(r => {
-          const isMe = r.nickname === myNick;
-          const av = r.avatar ? `<img src="${esc(r.avatar)}" alt="" loading="lazy" onerror="this.style.display='none'">` : `<div style="display:flex;align-items:center;justify-content:center;font-size:18px">🐸</div>`;
-          const when = timeAgo(r.created_at);
+        listEl.innerHTML = filtered.map(r => {
+          const isMe = String(r.nickname || '') === me;
+          const av = r.avatar
+            ? `<img src="${esc(r.avatar)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+            : `<div style="display:flex;align-items:center;justify-content:center;font-size:18px">🐸</div>`;
           return `<div class="sf-rx-detail-row${isMe ? ' is-me' : ''}">
             <div class="sf-rx-detail-avatar" onclick="Social.openProfile('${esc(r.nickname)}')">${av}</div>
             <span class="sf-rx-detail-nick" onclick="Social.openProfile('${esc(r.nickname)}')">${esc(r.nickname)}</span>
-            <span class="sf-rx-detail-emoji">${r.emoji}</span>
-            <span class="sf-rx-detail-time">${esc(when)}</span>
-            ${isMe ? `<button class="sf-rx-detail-remove" onclick="Social.reactPost(event,${postId},'${r.emoji}')">Remove</button>` : ''}
+            <span class="sf-rx-detail-emoji">${esc(r.emoji)}</span>
+            <span class="sf-rx-detail-time">${esc(timeAgo(r.created_at))}</span>
           </div>`;
         }).join('');
-      }
-      // Build filter tabs
+      };
       tabsEl.innerHTML = `<button type="button" class="sf-rx-tab active" data-filter="all">All ${rows.length}</button>` +
-        emojis.map(e => {
-          const cnt = rows.filter(r => r.emoji === e).length;
-          return `<button type="button" class="sf-rx-tab" data-filter="${esc(e)}">${e} ${cnt}</button>`;
+        emojisPresent.map(e => {
+          const count = rows.filter(r => r.emoji === e).length;
+          return `<button type="button" class="sf-rx-tab" data-filter="${esc(e)}">${esc(e)} ${count}</button>`;
         }).join('');
-      tabsEl.addEventListener('click', e => {
+      tabsEl.addEventListener('click', (e) => {
         const btn = e.target.closest('.sf-rx-tab');
         if (!btn) return;
         tabsEl.querySelectorAll('.sf-rx-tab').forEach(b => b.classList.toggle('active', b === btn));
-        renderList(btn.dataset.filter);
+        renderList(btn.dataset.filter || 'all');
       });
       renderList('all');
-    } catch {
+    }).catch(() => {
       listEl.innerHTML = '<div class="sf-rx-detail-empty">Could not load reactions</div>';
-    }
+    });
+  }
+
+  async function showReactionDetail(postId) {
+    showReactPicker(null, postId);
   }
 
   async function toggleComments(ev, postId) {
