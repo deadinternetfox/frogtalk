@@ -17,6 +17,8 @@ const Social = (() => {
   let _reelsLoadToken = 0;
   let _profileTabLoadToken = 0;
   let _profileActiveTab = 'wall';
+  const _profilePostsCache = new Map(); // nick → { ts, posts[] } — shared by wall/music/reels/media tabs
+  let _reelsDirectLaunchId = 0;          // set by openSharedReel to suppress scope-bar flash
 
   // ── helpers ──────────────────────────────────────────────────────────────
   const esc = s => UI.escHtml(s);
@@ -279,6 +281,47 @@ const Social = (() => {
 
   function _isProfileTabLoadCurrent(tab, token) {
     return _currentTab === 'profile' && _profileActiveTab === String(tab || '') && token === _profileTabLoadToken;
+  }
+
+  // Shared posts fetch with per-nickname cache.
+  // Wall, music, reels, and public media tabs all hit the same /posts endpoint
+  // — caching means switching between them is instant after the first load.
+  async function _fetchProfilePostsCached(nickname, loadToken, tabKey) {
+    const cacheKey = String(nickname || '').toLowerCase();
+    const cached = _profilePostsCache.get(cacheKey);
+    if (_cacheFresh(cached)) return cached.posts;
+    const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts').catch(() => null);
+    if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return null; // tab switched mid-flight
+    if (!res || !res.ok) throw new Error('Failed to load posts');
+    const data = await res.json().catch(() => ({ posts: [] }));
+    const posts = data.posts || [];
+    _profilePostsCache.set(cacheKey, { ts: Date.now(), posts });
+    return posts;
+  }
+
+  // Invalidate the profile posts cache (call after post create/delete).
+  function _invalidateProfilePostsCache(nickname) {
+    _profilePostsCache.delete(String(nickname || '').toLowerCase());
+  }
+
+  // Per-tab skeleton helpers for profile sub-tabs.
+  function _spGridSkeletonHtml(count = 6) {
+    return `<div class="social-grid">${Array.from({ length: count }).map(() =>
+      `<div class="social-grid-item skel-block" style="pointer-events:none;min-height:120px;aspect-ratio:9/14"></div>`
+    ).join('')}</div>`;
+  }
+
+  function _spChannelsSkeletonHtml(count = 3) {
+    return `<div class="sp-channels-list">${Array.from({ length: count }).map(() => `
+      <div class="sp-channel-card skel-row" style="pointer-events:none">
+        <div class="skel-circle" style="width:46px;height:46px;flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div class="skel-line" style="width:42%;height:12px;margin-bottom:7px"></div>
+          <div class="skel-line" style="width:62%;height:10px;margin-bottom:5px"></div>
+          <div class="skel-line" style="width:36%;height:9px"></div>
+        </div>
+      </div>
+    `).join('')}</div>`;
   }
 
   function _setTabLoadUi(tab, percent, label, detail) {
@@ -1981,7 +2024,7 @@ const Social = (() => {
 
         <!-- Posts area -->
         <div id="sp-posts" class="sp-posts">
-          <div class="social-loading">Loading posts…</div>
+          <div class="social-feed">${_socialPostSkeletonCards(3)}</div>
         </div>
       </div>`;
 
@@ -2001,11 +2044,8 @@ const Social = (() => {
       ? 'music'
       : ((view === 'public-media' || view === 'media-public') ? 'media' : 'wall');
     try {
-      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts');
-      if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return;
-      const data = await res.json();
-      if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load posts');
-      const posts = data.posts || [];
+      const posts = await _fetchProfilePostsCached(nickname, loadToken, tabKey);
+      if (posts === null) return; // tab switched
 
       if (view === 'public-media' || view === 'media-public') {
         // Public media = image/video posts only. Music shares have their
@@ -2085,18 +2125,13 @@ const Social = (() => {
     const token = _beginProfileTabLoad(tab);
     const container = document.getElementById('sp-posts');
     if (container) {
-      const label = tab === 'reels'
-        ? 'Loading reels…'
-        : tab === 'music'
-          ? 'Loading music…'
-          : tab === 'channels'
-            ? 'Loading channels…'
-            : tab === 'reposts'
-              ? 'Loading reposts…'
-              : tab === 'media'
-                ? 'Loading media…'
-                : 'Loading posts…';
-      container.innerHTML = `<div class="social-loading social-loading-compact">${label}</div>`;
+      if (tab === 'reels' || tab === 'media') {
+        container.innerHTML = _spGridSkeletonHtml();
+      } else if (tab === 'channels') {
+        container.innerHTML = _spChannelsSkeletonHtml();
+      } else {
+        container.innerHTML = `<div class="social-feed">${_socialPostSkeletonCards(3)}</div>`;
+      }
     }
     if (tab === 'channels') loadProfileChannels(_profileUser, token);
     else if (tab === 'reposts') loadProfileReposts(_profileUser, token);
@@ -2138,7 +2173,11 @@ const Social = (() => {
     const isSelf = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
     const safeMode = (!isSelf && mode === 'private') ? 'public' : (mode === 'private' ? 'private' : 'public');
     const toggleHtml = _profileMediaToggleHtml(nickname, safeMode);
-    container.innerHTML = `${toggleHtml}<div class="social-loading">Loading media…</div>`;
+    if (safeMode !== 'private' && !container.querySelector('.social-grid')) {
+      container.innerHTML = toggleHtml + _spGridSkeletonHtml();
+    } else if (safeMode === 'private') {
+      container.innerHTML = `${toggleHtml}<div class="social-feed">${_socialPostSkeletonCards(2)}</div>`;
+    }
 
     if (safeMode === 'private') {
       try {
@@ -2182,11 +2221,9 @@ const Social = (() => {
     }
 
     try {
-      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts');
+      const posts = await _fetchProfilePostsCached(nickname, loadToken, 'media');
+      if (posts === null) return;
       if (!_isProfileTabLoadCurrent('media', loadToken)) return;
-      const data = await res.json();
-      if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load posts');
-      const posts = data.posts || [];
       const mediaPosts = posts.filter(p =>
         p.media_data && p.privacy !== 'private' &&
         p.media_type && (p.media_type.startsWith('image/') || p.media_type.startsWith('video/'))
@@ -2282,6 +2319,7 @@ const Social = (() => {
   function openSharedReel(postId) {
     const id = Number(postId);
     if (!Number.isFinite(id) || id <= 0) return;
+    _reelsDirectLaunchId = id; // suppress scope-bar flash until reel is ready
     try {
       open('reels');
       switchTab('reels');
@@ -2315,6 +2353,8 @@ const Social = (() => {
     if (!content) return;
     const loadUi = _beginTabLoadUi('reels', 'Loading reels', 'Preparing reels shell');
     const loadToken = ++_reelsLoadToken;
+    const directLaunchId = _reelsDirectLaunchId;
+    _reelsDirectLaunchId = 0; // consume so a re-enter doesn't re-suppress
     _teardownReels();
     const smoothStepTimers = [];
 
@@ -2351,7 +2391,12 @@ const Social = (() => {
     const cachedPosts = _cacheFresh(cachedEntry) ? (cachedEntry.posts || []) : null;
     if (cachedPosts && cachedPosts.length) {
       const cachedCards = cachedPosts.map(p => _renderReelCard(p)).join('');
-      content.innerHTML = scopeBar + `
+      // For a direct reel launch, start the scope bar hidden so it fades in
+      // with the content rather than appearing immediately on a bare skeleton.
+      const initScopeBarHidden = directLaunchId
+        ? scopeBar.replace('<div class="reels-scope-bar">', '<div class="reels-scope-bar" style="opacity:0;transition:opacity .28s ease">')
+        : scopeBar;
+      content.innerHTML = initScopeBarHidden + `
         <div class="reels-stage" id="reels-stage">
           <div class="reels-snap" id="reels-snap">${cachedCards}</div>
         </div>`;
@@ -2362,9 +2407,22 @@ const Social = (() => {
         _initReelCards(snap);
         _reelsAutoplayVisible();
         _updateTabLoadUi(loadUi, 42, 'Preparing cached reels', 'Resuming reel playback');
+        if (directLaunchId) {
+          setTimeout(() => {
+            const bar = content.querySelector('.reels-scope-bar');
+            if (bar) bar.style.opacity = '1';
+          }, 180);
+        }
       }
     } else {
-      content.innerHTML = _reelsSkeletonHtml(scope, sort);
+      // For direct launch: skip the scope bar in the loading skeleton entirely.
+      content.innerHTML = directLaunchId
+        ? `<div class="reels-stage" id="reels-stage"><div class="reels-snap" aria-hidden="true">${
+            Array.from({ length: 3 }).map(() =>
+              `<div class="reel-card" style="pointer-events:none"><div class="skel-block" style="height:100%;border-radius:14px"></div></div>`
+            ).join('')
+          }</div></div>`
+        : _reelsSkeletonHtml(scope, sort);
       _updateTabLoadUi(loadUi, 18, 'Loading reels shell', 'Building reels layout');
     }
 
@@ -2402,6 +2460,16 @@ const Social = (() => {
           <div class="social-loading reels-stage-loading">Preparing reel playback…</div>
           <div class="reels-snap" id="reels-snap">${cards}</div>
         </div>`;
+      // For direct reel launch, fade the scope bar in with the content
+      // so there's no jarring jump from profile to the hot/new bar.
+      if (directLaunchId) {
+        const bar = content.querySelector('.reels-scope-bar');
+        if (bar) {
+          bar.style.opacity = '0';
+          bar.style.transition = 'opacity .3s ease';
+          requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.opacity = '1'; }));
+        }
+      }
       _updateTabLoadUi(loadUi, 82, 'Preparing reels stage', 'Mounting reel cards');
       _animateSocialSwap(content);
       const snap = document.getElementById('reels-snap');
@@ -3206,12 +3274,17 @@ const Social = (() => {
   async function loadProfileReels(nickname, loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
-    container.innerHTML = '<div class="social-loading">Loading reels…</div>';
+    // Show grid skeleton immediately (switchProfileTab already sets it, but handle
+    // direct calls such as initial profile load or forced refresh gracefully).
+    if (!container.querySelector('.social-grid')) {
+      container.innerHTML = _spGridSkeletonHtml();
+    }
     try {
-      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts').catch(() => null);
+      const allPosts = await _fetchProfilePostsCached(nickname, loadToken, 'reels');
+      if (allPosts === null) return;
+      const posts = allPosts.filter(p => p.media_type && p.media_type.startsWith('video/'));
+
       if (!_isProfileTabLoadCurrent('reels', loadToken)) return;
-      const data = res && res.ok ? await res.json() : { posts: [] };
-      const posts = (data.posts || []).filter(p => p.media_type && p.media_type.startsWith('video/'));
 
       if (posts.length === 0) {
         container.innerHTML = `<div class="social-empty" style="padding:40px 0">
@@ -3244,7 +3317,9 @@ const Social = (() => {
   async function loadProfileReposts(nickname, loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
-    container.innerHTML = '<div class="social-loading">Loading reposts…</div>';
+    if (!container.querySelector('.social-feed')) {
+      container.innerHTML = `<div class="social-feed">${_socialPostSkeletonCards(3)}</div>`;
+    }
     try {
       const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/reposts');
       if (!_isProfileTabLoadCurrent('reposts', loadToken)) return;
@@ -3349,7 +3424,9 @@ const Social = (() => {
   async function loadProfileChannels(nickname, loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
-    container.innerHTML = '<div class="social-loading">Loading channels…</div>';
+    if (!container.querySelector('.sp-channels-list')) {
+      container.innerHTML = _spChannelsSkeletonHtml();
+    }
     try {
       const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/channels');
       if (!_isProfileTabLoadCurrent('channels', loadToken)) return;
