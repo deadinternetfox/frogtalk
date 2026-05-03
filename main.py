@@ -1285,14 +1285,12 @@ async def serve_sitemap_static():
         ("/docs/api",     "monthly", "0.6"),
         ("/docs/node",    "monthly", "0.6"),
         ("/privacy",      "yearly",  "0.4"),
+        ("/ios", "weekly", "0.7"),
         ("/download/android", "weekly", "0.7"),
-        ("/download/ios", "weekly", "0.6"),
         ("/download/linux", "weekly", "0.7"),
         ("/download/deb", "weekly", "0.7"),
         ("/download/windows", "weekly", "0.7"),
         ("/download/windows-zip", "weekly", "0.7"),
-        ("/llms.txt", "monthly", "0.4"),
-        ("/opensearch.xml", "monthly", "0.3"),
     ]
     urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
     body = (
@@ -1309,10 +1307,18 @@ async def serve_sitemap_users():
     from fastapi.responses import Response
     import database as db
     rows = []
+    # Exclude internal system/bridge accounts. All auto-generated accounts embed
+    # the Unix-ms timestamp (starting with 1777...) in their username, so a single
+    # LIKE filter covers sync*, probe*, soc*, autosw*, global*, p2*, music* variants.
+    # Also exclude the two permanently reserved names.
     try:
         with db._conn() as con:
             rows = con.execute(
-                "SELECT nickname FROM users WHERE COALESCE(profile_public,1)=1 "
+                "SELECT nickname FROM users "
+                "WHERE COALESCE(profile_public,1)=1 "
+                "AND LENGTH(nickname) >= 2 "
+                "AND nickname NOT IN ('federation_sync','admin') "
+                "AND nickname NOT LIKE '%1777%' "
                 "ORDER BY id DESC LIMIT 5000"
             ).fetchall()
     except Exception as e:
@@ -1339,7 +1345,12 @@ async def serve_sitemap_rooms():
     try:
         with db._conn() as con:
             rows = con.execute(
-                "SELECT name FROM rooms WHERE COALESCE(type,'public')='public' "
+                "SELECT name FROM rooms "
+                "WHERE COALESCE(type,'public')='public' "
+                "AND name NOT LIKE 'phase2-%' "
+                "AND name NOT LIKE '%sync%' "
+                "AND name NOT LIKE '%1777%' "
+                "AND LENGTH(name) >= 2 "
                 "ORDER BY id DESC LIMIT 5000"
             ).fetchall()
     except Exception as e:
@@ -1396,7 +1407,7 @@ async def download_android():
 
 @app.get("/download/ios")
 async def download_ios():
-    """Redirect to TestFlight (or App Store, post-launch).
+    """Redirect to TestFlight/App Store, or serve local iOS landing page.
 
     iOS has no APK-style sideload for unmodified phones. The closest analogue
     to the Android `/download/android` flow is a TestFlight public link, which
@@ -1404,12 +1415,39 @@ async def download_ios():
     app is approved on the App Store, point IOS_DOWNLOAD_URL at the App Store
     URL instead.
     """
-    target = os.getenv(
-        "IOS_DOWNLOAD_URL",
-        "https://frogtalk.xyz/ios",  # placeholder landing page until enrolled
+    target = os.getenv("IOS_DOWNLOAD_URL", "").strip()
+    if target and target not in {"/ios", "https://frogtalk.xyz/ios"}:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=target, status_code=302)
+    return FileResponse(
+        "static/ios.html",
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
     )
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url=target, status_code=302)
+
+
+@app.get("/ios", include_in_schema=False)
+async def ios_landing_page():
+    """Public iOS coming-soon page with SEO/social metadata."""
+    target = os.getenv("IOS_DOWNLOAD_URL", "").strip()
+    if target and target not in {"/ios", "https://frogtalk.xyz/ios"}:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=target, status_code=302)
+    return FileResponse(
+        "static/ios.html",
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
+@app.get("/download/ios/", include_in_schema=False)
+async def download_ios_trailing_slash():
+    return await download_ios()
+
+
+@app.get("/ios/", include_in_schema=False)
+async def ios_landing_page_trailing_slash():
+    return await ios_landing_page()
 
 
 @app.get("/.well-known/apple-app-site-association", include_in_schema=False)
