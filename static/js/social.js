@@ -1921,6 +1921,8 @@ const Social = (() => {
       const snap = document.getElementById('reels-snap');
       if (snap) _initReelCards(snap);
 
+      // Wait briefly for first preview frame so we avoid the grey pre-play flash.
+      if (snap) await _waitForFirstReelPreview(snap);
       // Auto-play first visible reel
       _reelsAutoplayVisible();
 
@@ -1959,6 +1961,28 @@ const Social = (() => {
       first.play().catch(() => {});
       firstCard.classList.add('is-playing');
     }
+  }
+
+  function _waitForFirstReelPreview(snap) {
+    return new Promise((resolve) => {
+      const firstCard = snap?.querySelector('.reel-card');
+      if (!firstCard) { resolve(); return; }
+      if (firstCard.classList.contains('is-ready') || firstCard.classList.contains('no-poster')) {
+        resolve();
+        return;
+      }
+      const start = Date.now();
+      const tick = () => {
+        if (!firstCard.isConnected) { resolve(); return; }
+        if (firstCard.classList.contains('is-ready') || firstCard.classList.contains('no-poster')) {
+          resolve();
+          return;
+        }
+        if (Date.now() - start > 1400) { resolve(); return; }
+        setTimeout(tick, 40);
+      };
+      tick();
+    });
   }
 
   function _teardownReels() {
@@ -4267,9 +4291,22 @@ const Social = (() => {
     const allowCmt = cmtEl ? !!cmtEl.checked : _newPostAllowComments;
     const shareEl = document.getElementById('snp-share-enabled');
     const shareEnabled = shareEl ? !!shareEl.checked : _newPostShareEnabled;
+    const hasAttachedMedia = !!_newPostFile || !!_newPostMedia;
     localStorage.setItem('ft_default_allow_comments', allowCmt ? '1' : '0');
     localStorage.setItem('ft_default_share_link', shareEnabled ? '1' : '0');
     try {
+      if (hasAttachedMedia) {
+        try {
+          closeNewPost();
+          const ov = _ensureStoryUploadOverlay();
+          const title = ov?.querySelector('#story-upload-title');
+          const icon = ov?.querySelector('#story-upload-icon');
+          if (title) title.textContent = 'Uploading post';
+          if (icon) icon.textContent = '📤';
+          _hideStoryUploadRetryHint();
+          _updateStoryUploadOverlay(2, 'Starting upload…');
+        } catch {}
+      }
       const body = {
         content: text || '',
         privacy: _newPostPrivacy || 'public',
@@ -4277,27 +4314,47 @@ const Social = (() => {
         allow_comments: allowCmt,
       };
       if (_newPostFile) {
-        // Video chosen via file picker — read to base64 now (show uploading state)
+        // Video chosen via file picker — read to base64 now.
         if (postBtn) { postBtn.textContent = 'Uploading…'; }
         body.media_data = await new Promise((resolve, reject) => {
           const r = new FileReader();
+          r.onprogress = (e) => {
+            if (!hasAttachedMedia || !e?.lengthComputable) return;
+            const p = Math.max(5, Math.min(88, Math.round((e.loaded / e.total) * 88)));
+            _updateStoryUploadOverlay(p, `Preparing media… ${Math.round((e.loaded / e.total) * 100)}%`);
+          };
           r.onload = e => resolve(e.target.result);
           r.onerror = () => reject(new Error('Could not read video file'));
           r.readAsDataURL(_newPostFile);
         });
         body.media_type = _newPostFile.type;
         if (postBtn) { postBtn.textContent = 'Posting…'; }
+        if (hasAttachedMedia) _updateStoryUploadOverlay(92, 'Posting…');
       } else if (_newPostMedia && _newPostMediaType?.startsWith('image/') && _newPostOrigMedia) {
         body.media_data = await applyFilterToImage(_newPostOrigMedia);
         body.media_type = 'image/jpeg';
+        if (hasAttachedMedia) _updateStoryUploadOverlay(92, 'Posting…');
       } else if (_newPostMedia) {
         body.media_data = _newPostMedia;
         body.media_type = _newPostMediaType;
+        if (hasAttachedMedia) _updateStoryUploadOverlay(92, 'Posting…');
       }
       const res = await api('/api/wall/posts', 'POST', body);
       if (res.ok) {
         const isVideo = (_newPostFile?.type || _newPostMediaType || '').startsWith('video/');
-        closeNewPost();
+        if (hasAttachedMedia) {
+          try {
+            const ov = _ensureStoryUploadOverlay();
+            const title = ov?.querySelector('#story-upload-title');
+            const icon = ov?.querySelector('#story-upload-icon');
+            if (title) title.textContent = 'Post published!';
+            if (icon) icon.textContent = '✓';
+            _updateStoryUploadOverlay(100, 'Post published');
+            _hideStoryUploadOverlay(700);
+          } catch {}
+        } else {
+          closeNewPost();
+        }
         UI.showToast('Posted!', 'success');
         if (isVideo) {
           switchTab('reels');
@@ -4308,9 +4365,33 @@ const Social = (() => {
         }
       } else {
         const data = await res.json();
+        if (hasAttachedMedia) {
+          try {
+            const ov = _ensureStoryUploadOverlay();
+            const title = ov?.querySelector('#story-upload-title');
+            const icon = ov?.querySelector('#story-upload-icon');
+            if (title) title.textContent = 'Post failed';
+            if (icon) icon.textContent = '⚠️';
+            _updateStoryUploadOverlay(0, data.error || 'Could not post');
+            _hideStoryUploadOverlay(2200);
+          } catch {}
+        }
         UI.showToast(data.error || 'Could not post', 'error');
       }
-    } catch (err) { UI.showToast(err?.message || 'Network error', 'error'); }
+    } catch (err) {
+      if (hasAttachedMedia) {
+        try {
+          const ov = _ensureStoryUploadOverlay();
+          const title = ov?.querySelector('#story-upload-title');
+          const icon = ov?.querySelector('#story-upload-icon');
+          if (title) title.textContent = 'Post failed';
+          if (icon) icon.textContent = '⚠️';
+          _updateStoryUploadOverlay(0, err?.message || 'Network error');
+          _hideStoryUploadOverlay(2200);
+        } catch {}
+      }
+      UI.showToast(err?.message || 'Network error', 'error');
+    }
     finally {
       _newPostSubmitting = false;
       if (postBtn) {

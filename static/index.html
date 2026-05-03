@@ -5002,9 +5002,12 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   color:#041509;font-size:28px;line-height:1;
   display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;
   box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
+  opacity:0;
   transition:opacity .15s ease,transform .15s ease,background .15s ease
 }
 .reel-play-toggle:hover{transform:translate(-50%,-50%) scale(1.06);background:#7ad491}
+.reel-card.is-ready .reel-play-toggle,
+.reel-card.no-poster .reel-play-toggle{opacity:1}
 .reel-card.is-playing .reel-play-toggle{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.92)}
 .reel-progress{
   position:absolute;left:10px;right:10px;bottom:8px;height:4px;border-radius:999px;
