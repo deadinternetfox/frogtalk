@@ -1262,16 +1262,67 @@ def _sitemap_url(loc: str, lastmod: str = "", changefreq: str = "weekly", priori
 
 @app.get("/sitemap.xml", include_in_schema=False)
 async def serve_sitemap_index():
-    """Sitemap index referencing static + dynamic child sitemaps."""
+    """Combined flat sitemap (static pages + user profiles + rooms)."""
     from fastapi.responses import Response
+    import database as db
     today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
+
+    # Static pages
+    pages = [
+        ("/",             "daily",   "1.0"),
+        ("/docs/api",     "monthly", "0.6"),
+        ("/docs/node",    "monthly", "0.6"),
+        ("/privacy",      "yearly",  "0.4"),
+        ("/ios", "weekly", "0.7"),
+        ("/download/android", "weekly", "0.7"),
+        ("/download/linux", "weekly", "0.7"),
+        ("/download/deb", "weekly", "0.7"),
+        ("/download/windows", "weekly", "0.7"),
+        ("/download/windows-zip", "weekly", "0.7"),
+    ]
+    urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
+
+    # User profiles
+    try:
+        with db._conn() as con:
+            user_rows = con.execute(
+                "SELECT nickname FROM users "
+                "WHERE COALESCE(profile_public,1)=1 "
+                "AND LENGTH(nickname) >= 2 "
+                "AND nickname NOT IN ('federation_sync','admin') "
+                "AND nickname NOT LIKE '%1777%' "
+                "ORDER BY id DESC LIMIT 5000"
+            ).fetchall()
+        urls += "".join(
+            _sitemap_url(f"{SITE_URL}/u/{_xml_escape(r['nickname'])}", today, "weekly", "0.6")
+            for r in user_rows if r["nickname"]
+        )
+    except Exception as e:
+        print(f"[sitemap] users query error: {e}")
+
+    # Public rooms
+    try:
+        with db._conn() as con:
+            room_rows = con.execute(
+                "SELECT name FROM rooms "
+                "WHERE COALESCE(type,'public')='public' "
+                "AND name NOT LIKE 'phase2-%' "
+                "AND name NOT LIKE '%sync%' "
+                "AND name NOT LIKE '%1777%' "
+                "AND LENGTH(name) >= 2 "
+                "ORDER BY id DESC LIMIT 5000"
+            ).fetchall()
+        urls += "".join(
+            _sitemap_url(f"{SITE_URL}/c/{_xml_escape(r['name'])}", today, "weekly", "0.6")
+            for r in room_rows if r["name"]
+        )
+    except Exception as e:
+        print(f"[sitemap] rooms query error: {e}")
+
     body = (
         '<?xml version="1.0" encoding="UTF-8"?>'
-        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-        f'<sitemap><loc>{SITE_URL}/sitemap-static.xml</loc><lastmod>{today}</lastmod></sitemap>'
-        f'<sitemap><loc>{SITE_URL}/sitemap-users.xml</loc><lastmod>{today}</lastmod></sitemap>'
-        f'<sitemap><loc>{SITE_URL}/sitemap-rooms.xml</loc><lastmod>{today}</lastmod></sitemap>'
-        '</sitemapindex>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + urls + '</urlset>'
     )
     return Response(content=body, media_type="application/xml; charset=utf-8")
 
