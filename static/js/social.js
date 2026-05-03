@@ -1913,12 +1913,14 @@ const Social = (() => {
   let _reelsSeekCard = null;
   let _reelsSeekReleaseUntil = 0;
   let _reelsSeekReleaseCard = null;
+  let _reelsLastSeekAt = 0;
   let _reelsUserPausedCard = null;
   let _reelsScrubController = null;
   let _reelsScrubbing = false;
 
   function _reelsBeginSeek(card) {
     _reelsSeekCard = card || null;
+    _reelsLastSeekAt = Date.now();
     _reelsSeekLockUntil = Date.now() + 1800;
   }
 
@@ -2080,7 +2082,8 @@ const Social = (() => {
     const reset = opts.reset !== false;
     const seekReleaseGuard = card === _reelsSeekReleaseCard && Date.now() < _reelsSeekReleaseUntil;
     const seekLiveGuard = _reelsIsSeekLocked(card);
-    const shouldReset = !_reelsScrubbing && (_reelsCurrentCard !== card) && reset && !seekReleaseGuard && !seekLiveGuard;
+    const recentSeekGuard = (Date.now() - _reelsLastSeekAt) < 1800;
+    const shouldReset = !_reelsScrubbing && (_reelsCurrentCard !== card) && reset && !seekReleaseGuard && !seekLiveGuard && !recentSeekGuard;
     document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
       if (c === card) return;
       const v = c.querySelector('video');
@@ -2434,6 +2437,7 @@ const Social = (() => {
         const r = progWrap.getBoundingClientRect();
         if (!r.width) return;
         const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+        _reelsLastSeekAt = Date.now();
         try { video.currentTime = ratio * video.duration; } catch {}
         if (prog) prog.style.width = `${Math.round(ratio * 10000) / 100}%`;
       };
