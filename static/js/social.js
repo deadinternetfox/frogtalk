@@ -2045,6 +2045,9 @@ const Social = (() => {
         _armReelsStageReveal(snap, loadToken);
         // Start playback immediately so users transition from loading to motion fast.
         _reelsAutoplayVisible();
+        // Hard safety: never keep reels locked behind the loading gate.
+        setTimeout(() => _reelsRevealStage(loadToken), 450);
+        setTimeout(() => _reelsRevealStage(loadToken), 1400);
       }
 
       // IntersectionObserver: pause/play as cards scroll into/out of view
@@ -2212,7 +2215,6 @@ const Social = (() => {
   }
 
   function _reelsRevealStage(loadToken) {
-    if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
     const stage = document.getElementById('reels-stage');
     if (stage) stage.classList.remove('is-loading');
   }
