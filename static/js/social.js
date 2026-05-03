@@ -71,6 +71,7 @@ const Social = (() => {
       const host = video.parentElement;
       if (!host) return;
       host.classList.add('ft-video-host');
+      let posterDrawn = false;
       if (!host.querySelector('.ft-video-poster')) {
         const poster = document.createElement('div');
         poster.className = 'ft-video-poster';
@@ -86,12 +87,29 @@ const Social = (() => {
             e.stopPropagation();
             host.classList.add('is-playing');
             try { video.controls = true; } catch {}
+            try { video.muted = false; } catch {}
             try { video.play().catch(() => {}); } catch {}
           };
           host.appendChild(play);
         }
-        video.addEventListener('loadeddata', () => _drawVideoPoster(video, poster), { once: true });
-        setTimeout(() => _drawVideoPoster(video, poster), 900);
+        const drawPoster = () => {
+          if (posterDrawn) return;
+          _drawVideoPoster(video, poster);
+          if (poster.classList.contains('ready')) posterDrawn = true;
+        };
+        video.addEventListener('loadeddata', drawPoster, { once: true });
+        video.addEventListener('canplay', drawPoster);
+        video.addEventListener('seeked', drawPoster);
+        video.addEventListener('loadedmetadata', () => {
+          try {
+            if (!Number.isFinite(video.duration) || video.duration <= 0.12) return;
+            if (video.currentTime > 0) return;
+            video.currentTime = Math.min(0.12, Math.max(0.06, video.duration / 10));
+          } catch {}
+        }, { once: true });
+        try { video.preload = 'auto'; } catch {}
+        try { video.load(); } catch {}
+        setTimeout(drawPoster, 900);
       }
       video.addEventListener('play', () => host.classList.add('is-playing'));
       video.addEventListener('pause', () => host.classList.remove('is-playing'));
@@ -1371,6 +1389,7 @@ const Social = (() => {
   let _exploreSort = 'trending';
 
   async function loadExplore(sort) {
+    _ensureSocialVideoObserver();
     if (sort) _exploreSort = sort;
     const content = document.getElementById('social-content');
     content.innerHTML = '<div class="social-loading">Discovering…</div>';
@@ -1828,6 +1847,7 @@ const Social = (() => {
   }
 
   async function loadReelsTab() {
+    _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
     if (!content) return;
     _teardownReels();
@@ -2074,11 +2094,11 @@ const Social = (() => {
         </div>
         ${caption}
         <div class="reel-actions">
-          <button class="reel-act-btn" title="React" onclick="Social.openReelReactPicker(${post.id},this)">
+          <button class="reel-act-btn ${post.i_liked ? 'liked' : ''}" title="Like" onclick="Social.reactReelHeart(event,${post.id},this)">
             <div class="reel-act-icon">❤️</div>
             <span class="reel-act-count reel-like-count">${likeCount}</span>
           </button>
-          <button class="reel-act-btn" title="Comments" onclick="Social.openPostComments(${post.id})">
+          <button class="reel-act-btn" title="Comments" onclick="Social.openReelComments(event,${post.id})">
             <div class="reel-act-icon">💬</div>
             <span class="reel-act-count reel-comment-count">${commentCount}</span>
           </button>
@@ -2086,11 +2106,44 @@ const Social = (() => {
             <div class="reel-act-icon">${post.i_reposted ? '🔁' : '↩️'}</div>
             <span class="reel-act-count reel-repost-count">${repostCount}</span>
           </button>
-          <button class="reel-act-btn" title="Open full post" onclick="Social.viewPostDetail(${post.id})">
-            <div class="reel-act-icon">⤴</div>
-          </button>
         </div>
       </div>`;
+  }
+
+  async function reactReelHeart(ev, postId, btn) {
+    try {
+      ev?.preventDefault?.();
+      ev?.stopPropagation?.();
+    } catch {}
+    const countEl = btn?.querySelector('.reel-like-count');
+    const wasLiked = !!btn?.classList.contains('liked');
+    const prev = Number(countEl?.textContent || '0');
+    if (btn && countEl) {
+      btn.classList.toggle('liked', !wasLiked);
+      countEl.textContent = String(Math.max(0, prev + (!wasLiked ? 1 : -1)));
+      btn.disabled = true;
+    }
+    try {
+      const res = await api(`/api/wall/posts/${postId}/reactions`, 'POST', { emoji: '❤️' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to like');
+      const nextLiked = !!data.reacted;
+      if (btn) btn.classList.toggle('liked', nextLiked);
+      if (countEl) countEl.textContent = String(Number(data.count || 0));
+    } catch {
+      if (btn) btn.classList.toggle('liked', wasLiked);
+      if (countEl) countEl.textContent = String(prev);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function openReelComments(ev, postId) {
+    try {
+      ev?.preventDefault?.();
+      ev?.stopPropagation?.();
+    } catch {}
+    await openPostComments(postId);
   }
 
   async function loadProfileReels(nickname) {
@@ -4360,9 +4413,16 @@ const Social = (() => {
 
   async function openPostComments(postId) {
     await viewPostDetail(postId);
-    setTimeout(() => {
-      toggleComments(null, postId);
-    }, 20);
+    const openWhenReady = (tries = 0) => {
+      const el = document.getElementById(`sf-comments-${postId}`);
+      if (el) {
+        toggleComments(null, postId);
+        return;
+      }
+      if (tries >= 12) return;
+      setTimeout(() => openWhenReady(tries + 1), 25);
+    };
+    openWhenReady();
   }
 
   function closePostDetail() {
@@ -4772,7 +4832,8 @@ const Social = (() => {
     _closeMusicShareModal, _submitMusicShare,
     // Reels
     loadReelsTab, switchReelsScope, switchReelsSort,
-    toggleReelMute, toggleReelPlayback, openReelReactPicker, _reelPickEmoji,
+    toggleReelMute, toggleReelPlayback, reactReelHeart, openReelComments,
+    openReelReactPicker, _reelPickEmoji,
     // Activity / notifications
     loadActivity, markAllActivityRead, openActivityItem,
     handleSocialNotification, refreshActivityBadge, _onLogin, _onLogout,
