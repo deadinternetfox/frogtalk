@@ -689,7 +689,9 @@ async def serve_post_landing(post_id: int):
     """
     import database as db
     post = db.get_wall_post(post_id)
-    if not post or (post.get("privacy") or "public") != "public":
+    if (not post
+            or (post.get("privacy") or "public") != "public"
+            or int(post.get("share_enabled", 1) or 0) != 1):
         html = (
             "<!DOCTYPE html><html><head><title>Post not found — FrogTalk</title>"
             "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
@@ -877,7 +879,9 @@ async def og_post_image(post_id: int):
     from fastapi.responses import Response
     import database as db
     post = db.get_wall_post(post_id)
-    if not post or (post.get("privacy") or "public") != "public":
+    if (not post
+            or (post.get("privacy") or "public") != "public"
+            or int(post.get("share_enabled", 1) or 0) != 1):
         return _fallback_og_image()
     if not (post.get("media_type") or "").startswith("image/"):
         return _fallback_og_image()

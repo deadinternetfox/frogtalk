@@ -22,6 +22,30 @@ const Messages = (() => {
     return `<span class="bridge-origin-badge" data-platform="${p}" title="Mirrored from ${label}">${svg}<span>${label}</span></span>`;
   }
 
+  function _normalizeUrl(url) {
+    return String(url || '').replace(/&amp;/g, '&');
+  }
+
+  function _parseFrogSocialUrl(url) {
+    try {
+      const parsed = new URL(_normalizeUrl(url));
+      const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'localhost');
+      if (!hostOk) return null;
+      const path = parsed.pathname || '/';
+      const profilePath = path.match(/^\/u\/([A-Za-z0-9_]{1,32})\/?$/i);
+      if (profilePath) return { type: 'profile', nickname: profilePath[1] };
+      const postPath = path.match(/^\/p\/(\d+)\/?$/i);
+      if (postPath) return { type: 'post', postId: Number(postPath[1]) };
+      const qProfile = (parsed.searchParams.get('profile') || '').trim();
+      if (/^[A-Za-z0-9_]{1,32}$/.test(qProfile)) return { type: 'profile', nickname: qProfile };
+      const qPost = (parsed.searchParams.get('post') || parsed.searchParams.get('p') || '').trim();
+      if (/^\d+$/.test(qPost)) return { type: 'post', postId: Number(qPost) };
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   function _formatContent(text) {
     if (!text) return '';
     // Profile share card
@@ -68,6 +92,15 @@ const Messages = (() => {
     escaped = escaped.replace(urlRe, url => {
       // Skip invite URLs — already replaced above
       if (/\/invite\/[A-Za-z0-9]{6,16}/.test(url)) return url;
+      const social = _parseFrogSocialUrl(url);
+      if (social?.type === 'profile') {
+        return `<span class="social-profile-card-placeholder" data-social-profile="${UI.escHtml(social.nickname)}">` +
+          `<span class="invite-card-loading">🐸 Loading profile…</span></span>`;
+      }
+      if (social?.type === 'post') {
+        return `<span class="social-post-card-placeholder" data-social-post="${social.postId}">` +
+          `<span class="invite-card-loading">🐸 Loading post…</span></span>`;
+      }
       return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${UI.escHtml(url)}">${url}</a>`;
     });
     
@@ -76,6 +109,91 @@ const Messages = (() => {
       escaped = renderCustomEmojisInText(escaped);
     }
     return escaped;
+  }
+
+  async function _loadSocialProfileCard(msgId, nickname) {
+    const msgEl = document.getElementById(`msg-${msgId}`);
+    if (!msgEl) return;
+    const placeholder = msgEl.querySelector(`.social-profile-card-placeholder[data-social-profile="${nickname}"]`);
+    if (!placeholder) return;
+    try {
+      const res = await apiFetch(`/api/social/profile/${encodeURIComponent(nickname)}`);
+      if (!res.ok) {
+        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Profile unavailable</span>`;
+        return;
+      }
+      const d = await res.json();
+      const nick = UI.escHtml(d.nickname || nickname);
+      const subtitle = d.private
+        ? 'Private profile'
+        : UI.escHtml((d.bio || d.status_msg || 'Open in Frog Social').substring(0, 80));
+      placeholder.outerHTML =
+        `<div class="share-card" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
+          `<div style="flex-shrink:0">${UI.avatarEl(d.avatar || null, d.nickname || nickname, 42)}</div>` +
+          `<div class="share-card-info">` +
+            `<div class="share-card-label">Frog Social Profile</div>` +
+            `<div class="share-card-name">@${nick}</div>` +
+            `<div class="share-card-bio">${subtitle}</div>` +
+          `</div>` +
+        `</div>`;
+    } catch {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load profile</span>`;
+    }
+  }
+
+  async function _loadSocialPostCard(msgId, postId) {
+    const msgEl = document.getElementById(`msg-${msgId}`);
+    if (!msgEl) return;
+    const placeholder = msgEl.querySelector(`.social-post-card-placeholder[data-social-post="${postId}"]`);
+    if (!placeholder) return;
+    try {
+      const res = await apiFetch(`/api/wall/posts/${postId}`);
+      if (!res.ok) {
+        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`;
+        return;
+      }
+      const p = await res.json();
+      const nick = UI.escHtml(p.nickname || 'frog');
+      const privacy = String(p.privacy || 'public').toLowerCase();
+      const label = privacy === 'public' ? 'Frog Social Post' : (privacy === 'followers' ? 'Followers Post' : 'Private Post');
+      let preview = String(p.content || '').trim();
+      if (!preview) {
+        if ((p.media_type || '').startsWith('image/')) preview = '📷 Photo post';
+        else if ((p.media_type || '').startsWith('video/')) preview = '🎬 Video post';
+        else if ((p.media_type || '').startsWith('music/')) preview = '🎵 Music post';
+        else preview = 'Open this post in Frog Social';
+      }
+      const safePreview = UI.escHtml(preview.substring(0, 90));
+      const pid = Number(p.id || postId);
+      placeholder.outerHTML =
+        `<div class="share-card" data-social-post="${pid}" onclick="Messages.openSocialPost(this.dataset.socialPost)">` +
+          `<div style="flex-shrink:0">${UI.avatarEl(p.avatar || null, p.nickname || 'frog', 42)}</div>` +
+          `<div class="share-card-info">` +
+            `<div class="share-card-label">${UI.escHtml(label)}</div>` +
+            `<div class="share-card-name">@${nick}</div>` +
+            `<div class="share-card-bio">${safePreview}</div>` +
+          `</div>` +
+        `</div>`;
+    } catch {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load post</span>`;
+    }
+  }
+
+  function _hydrateSpecialCards(msgId) {
+    const msgEl = document.getElementById(`msg-${msgId}`);
+    if (!msgEl) return;
+    msgEl.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
+      const code = (el.dataset.inviteCode || '').trim();
+      if (code) _loadInviteCard(msgId, code);
+    });
+    msgEl.querySelectorAll('.social-profile-card-placeholder[data-social-profile]').forEach(el => {
+      const nick = (el.dataset.socialProfile || '').trim();
+      if (nick) _loadSocialProfileCard(msgId, nick);
+    });
+    msgEl.querySelectorAll('.social-post-card-placeholder[data-social-post]').forEach(el => {
+      const postId = Number(el.dataset.socialPost || '0');
+      if (Number.isFinite(postId) && postId > 0) _loadSocialPostCard(msgId, postId);
+    });
   }
 
   // Fetch invite info and render a join card
@@ -1025,16 +1143,12 @@ const Messages = (() => {
       setTimeout(() => _loadLinkPreview(id, url), 100);
     });
 
-    // Load invite cards
+    // Load invite + Frog Social cards
     const area2 = document.getElementById('messages-area');
     if (area2) {
-      area2.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
-        const msgEl = el.closest('[id^="msg-"]');
-        const code = el.dataset.inviteCode;
-        if (msgEl && code) {
-          const msgId = msgEl.id.replace('msg-', '');
-          setTimeout(() => _loadInviteCard(msgId, code), 150);
-        }
+      area2.querySelectorAll('[id^="msg-"]').forEach(msgEl => {
+        const msgId = msgEl.id.replace('msg-', '');
+        if (msgId) setTimeout(() => _hydrateSpecialCards(msgId), 150);
       });
     }
   }
@@ -1096,9 +1210,13 @@ const Messages = (() => {
           _attachLongPress(pendingEl, msg.id);
           const urlRe = /https?:\/\/[^\s<>"]+/g;
           const urls = (msg.content || '').match(urlRe);
-          if (urls && urls.length && !/\/invite\/[A-Za-z0-9]{6,16}/.test(urls[0])) setTimeout(() => _loadLinkPreview(msg.id, urls[0]), 100);
-          const invCodes = (msg.content || '').match(/\/invite\/([A-Za-z0-9]{6,16})/g);
-          if (invCodes) invCodes.forEach(m => _loadInviteCard(msg.id, m.replace('/invite/', '')));
+          if (urls && urls.length) {
+            const firstUrl = urls[0];
+            const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
+            const isSocial = !!_parseFrogSocialUrl(firstUrl);
+            if (!isInvite && !isSocial) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
+          }
+          setTimeout(() => _hydrateSpecialCards(msg.id), 100);
           const cached = State.messages[room] || [];
           const idx = cached.findIndex(m => m && m._pending && (nonce ? m._nonce === nonce : true));
           if (idx >= 0) cached[idx] = msg;
@@ -1171,12 +1289,12 @@ const Messages = (() => {
     const urlRe = /https?:\/\/[^\s<>"]+/g;
     const urls = (msg.content || '').match(urlRe);
     if (urls && urls.length) {
-      const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(urls[0]);
-      if (!isInvite) setTimeout(() => _loadLinkPreview(msg.id, urls[0]), 200);
+      const firstUrl = urls[0];
+      const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
+      const isSocial = !!_parseFrogSocialUrl(firstUrl);
+      if (!isInvite && !isSocial) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 200);
     }
-    // Load invite card if present
-    const invMatch = (msg.content || '').match(/\/invite\/([A-Za-z0-9]{6,16})/);
-    if (invMatch) setTimeout(() => _loadInviteCard(msg.id, invMatch[1]), 200);
+    setTimeout(() => _hydrateSpecialCards(msg.id), 200);
   }
 
   function updateEdited(id, content, room) {
@@ -1188,6 +1306,15 @@ const Messages = (() => {
     if (meta && !meta.querySelector('.msg-edited')) {
       meta.insertAdjacentHTML('beforeend', '<span class="msg-edited">(edited)</span>');
     }
+    const urlRe = /https?:\/\/[^\s<>"]+/g;
+    const urls = (content || '').match(urlRe);
+    if (urls && urls.length) {
+      const firstUrl = urls[0];
+      const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
+      const isSocial = !!_parseFrogSocialUrl(firstUrl);
+      if (!isInvite && !isSocial) setTimeout(() => _loadLinkPreview(id, firstUrl), 120);
+    }
+    setTimeout(() => _hydrateSpecialCards(id), 120);
   }
 
   function removeMessage(id) {
@@ -1291,6 +1418,34 @@ const Messages = (() => {
     const original = contentEl.dataset.originalText || '';
     delete contentEl.dataset.originalText;
     contentEl.innerHTML = _formatContent(original);
+    setTimeout(() => _hydrateSpecialCards(id), 80);
+  }
+
+  function openSocialProfile(nickname) {
+    const nick = String(nickname || '').trim();
+    if (!nick) return;
+    try {
+      if (typeof Social !== 'undefined' && Social.openProfile) {
+        Social.openProfile(nick);
+        return;
+      }
+    } catch {}
+    try { showUserInfo(nick); } catch {}
+  }
+
+  function openSocialPost(postId) {
+    const id = Number(postId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    try {
+      if (typeof Social !== 'undefined' && Social.open && Social.viewPostDetail) {
+        Social.open('feed');
+        setTimeout(() => {
+          try { Social.viewPostDetail(id); } catch {}
+        }, 50);
+        return;
+      }
+    } catch {}
+    try { window.location.href = `/app?post=${id}`; } catch {}
   }
 
   async function deleteMsg(id) {
@@ -2027,7 +2182,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
