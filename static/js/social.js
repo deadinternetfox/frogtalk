@@ -1926,11 +1926,11 @@ const Social = (() => {
     _reelsSeekLockUntil = Math.max(_reelsSeekLockUntil, Date.now() + ms);
   }
 
-  function _reelsEndSeek(card = null) {
+  function _reelsEndSeek(card = null, releaseMs = 2200) {
     _reelsSeekLockUntil = Date.now() + 500;
     if (card) {
       _reelsSeekReleaseCard = card;
-      _reelsSeekReleaseUntil = Date.now() + 1400;
+      _reelsSeekReleaseUntil = Date.now() + releaseMs;
     }
     setTimeout(() => {
       if (Date.now() > _reelsSeekLockUntil) _reelsSeekCard = null;
@@ -1941,6 +1941,13 @@ const Social = (() => {
     if (Date.now() > _reelsSeekLockUntil) return false;
     if (!card || !_reelsSeekCard) return true;
     return card === _reelsSeekCard;
+  }
+
+  function _reelsShouldHoldPosition(card = null) {
+    if (_reelsScrubbing) return true;
+    if (_reelsIsSeekLocked(card)) return true;
+    if (card && card === _reelsSeekReleaseCard && Date.now() < _reelsSeekReleaseUntil) return true;
+    return false;
   }
 
   function switchReelsScope(scope) {
@@ -2078,9 +2085,8 @@ const Social = (() => {
   function _reelsActivateCard(card, opts = {}) {
     if (!card || !card.classList.contains('reel-card')) return;
     const reset = opts.reset !== false;
-    const seekReleaseGuard = card === _reelsSeekReleaseCard && Date.now() < _reelsSeekReleaseUntil;
-    const seekLiveGuard = _reelsIsSeekLocked(card);
-    const shouldReset = !_reelsScrubbing && (_reelsCurrentCard !== card) && reset && !seekReleaseGuard && !seekLiveGuard;
+    const holdPosition = _reelsShouldHoldPosition(card);
+    const shouldReset = (_reelsCurrentCard !== card) && reset && !holdPosition;
     document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
       if (c === card) return;
       const v = c.querySelector('video');
@@ -2337,7 +2343,6 @@ const Social = (() => {
       try { video.removeAttribute('controls'); } catch {}
       try { video.controls = false; } catch {}
       let posterDrawn = false;
-      let seeking = false;
 
       const drawPoster = () => {
         try {
@@ -2440,7 +2445,12 @@ const Social = (() => {
       if (progWrap) {
         const snap = progWrap.closest('.reels-snap');
         let snapLockTimer = 0;
-        let wasPlayingBeforeSeek = false;
+        const seekState = {
+          active: false,
+          pointerId: null,
+          source: '',
+          wasPlayingBeforeSeek: false,
+        };
         let ignoreClickUntil = 0;
         const clearLockTimer = () => {
           if (!snapLockTimer) return;
@@ -2450,8 +2460,9 @@ const Social = (() => {
         const armLockFailsafe = () => {
           clearLockTimer();
           snapLockTimer = setTimeout(() => {
-            seeking = false;
-            touchSeeking = false;
+            seekState.active = false;
+            seekState.pointerId = null;
+            seekState.source = '';
             _reelsEndSeek(card);
             unlockSnapScroll();
           }, 1200);
@@ -2473,138 +2484,115 @@ const Social = (() => {
           clearLockTimer();
         };
 
-        progWrap.addEventListener('pointerdown', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          seeking = true;
+        const beginSeek = (clientX, source, pointerId = null) => {
+          if (seekState.active) return;
+          seekState.active = true;
+          seekState.pointerId = Number.isFinite(pointerId) ? pointerId : null;
+          seekState.source = source;
           _reelsBeginSeek(card);
-          wasPlayingBeforeSeek = !video.paused;
+          seekState.wasPlayingBeforeSeek = !video.paused;
           _reelsUserPausedCard = card;
-          if (wasPlayingBeforeSeek) {
+          if (seekState.wasPlayingBeforeSeek) {
             try { video.pause(); } catch {}
           }
           card.classList.remove('is-playing');
           lockSnapScroll();
-          try { progWrap.setPointerCapture(e.pointerId); } catch {}
-          seekFromClientX(e.clientX);
+          if (source === 'pointer' && seekState.pointerId !== null) {
+            try { progWrap.setPointerCapture(seekState.pointerId); } catch {}
+          }
+          if (typeof clientX === 'number') seekFromClientX(clientX);
+        };
+
+        const moveSeek = (clientX) => {
+          if (!seekState.active) return;
+          armLockFailsafe();
+          _reelsExtendSeekLock();
+          if (typeof clientX === 'number') seekFromClientX(clientX);
+        };
+
+        const endSeek = (clientX = null, pointerId = null) => {
+          if (!seekState.active) return;
+          if (typeof clientX === 'number') seekFromClientX(clientX);
+          if (seekState.source === 'pointer' && seekState.pointerId !== null) {
+            const releaseId = Number.isFinite(pointerId) ? pointerId : seekState.pointerId;
+            try { progWrap.releasePointerCapture(releaseId); } catch {}
+          }
+          seekState.active = false;
+          seekState.pointerId = null;
+          seekState.source = '';
+          _reelsEndSeek(card, 2600);
+          unlockSnapScroll();
+          if (seekState.wasPlayingBeforeSeek && video.paused) {
+            _reelsUserPausedCard = null;
+            _reelsPlayVideo(card, video);
+          }
+          seekState.wasPlayingBeforeSeek = false;
+          ignoreClickUntil = Date.now() + 560;
+        };
+
+        progWrap.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          beginSeek(e.clientX, 'pointer', e.pointerId);
         });
         progWrap.addEventListener('pointermove', (e) => {
-          if (!seeking) return;
+          if (!seekState.active || seekState.source !== 'pointer') return;
           e.preventDefault();
-          armLockFailsafe();
-          _reelsExtendSeekLock();
-          seekFromClientX(e.clientX);
+          moveSeek(e.clientX);
         });
-        const stopSeek = (e) => {
-          if (!seeking) return;
-          seeking = false;
-          try { progWrap.releasePointerCapture(e.pointerId); } catch {}
-          if (typeof e.clientX === 'number') seekFromClientX(e.clientX);
-          _reelsEndSeek(card);
-          unlockSnapScroll();
-          if (wasPlayingBeforeSeek && video.paused) {
-            _reelsUserPausedCard = null;
-            _reelsPlayVideo(card, video);
-          }
-          wasPlayingBeforeSeek = false;
-          ignoreClickUntil = Date.now() + 420;
-        };
-        progWrap.addEventListener('pointerup', stopSeek);
-        progWrap.addEventListener('pointercancel', () => {
-          seeking = false;
-          _reelsEndSeek(card);
-          unlockSnapScroll();
-          if (wasPlayingBeforeSeek && video.paused) {
-            _reelsUserPausedCard = null;
-            _reelsPlayVideo(card, video);
-          }
-          wasPlayingBeforeSeek = false;
-          ignoreClickUntil = Date.now() + 420;
-        });
+        progWrap.addEventListener('pointerup', (e) => endSeek(e.clientX, e.pointerId));
+        progWrap.addEventListener('pointercancel', () => endSeek(null, seekState.pointerId));
         // Fallback: keep scrubbing even if pointer leaves the progress bar.
         document.addEventListener('pointermove', (e) => {
-          if (!seeking) return;
-          armLockFailsafe();
-          _reelsExtendSeekLock();
-          seekFromClientX(e.clientX);
+          if (!seekState.active || seekState.source !== 'pointer') return;
+          moveSeek(e.clientX);
         }, { passive: true, signal: scrubAbort.signal });
         document.addEventListener('pointerup', (e) => {
-          if (!seeking) return;
-          stopSeek(e);
+          if (!seekState.active || seekState.source !== 'pointer') return;
+          endSeek(e.clientX, e.pointerId);
         }, { passive: true, signal: scrubAbort.signal });
         progWrap.addEventListener('click', (e) => {
           if (Date.now() < ignoreClickUntil) return;
           if (typeof e.clientX !== 'number') return;
           e.preventDefault();
           e.stopPropagation();
+          _reelsBeginSeek(card);
           seekFromClientX(e.clientX);
+          _reelsEndSeek(card, 1800);
         });
 
         // Mobile fallback for browsers that don't deliver pointer events reliably.
-        let touchSeeking = false;
         progWrap.addEventListener('touchstart', (e) => {
           const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
           if (!t) return;
           e.preventDefault();
           e.stopPropagation();
-          touchSeeking = true;
-          _reelsBeginSeek(card);
-          wasPlayingBeforeSeek = !video.paused;
-          _reelsUserPausedCard = card;
-          if (wasPlayingBeforeSeek) {
-            try { video.pause(); } catch {}
-          }
-          card.classList.remove('is-playing');
-          lockSnapScroll();
-          seekFromClientX(t.clientX);
+          beginSeek(t.clientX, 'touch');
         }, { passive: false });
         progWrap.addEventListener('touchmove', (e) => {
-          if (!touchSeeking) return;
+          if (!seekState.active || seekState.source !== 'touch') return;
           const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
           if (!t) return;
           e.preventDefault();
-          armLockFailsafe();
-          _reelsExtendSeekLock();
-          seekFromClientX(t.clientX);
+          moveSeek(t.clientX);
         }, { passive: false });
         const stopTouchSeek = (e) => {
-          if (!touchSeeking) return;
+          if (!seekState.active || seekState.source !== 'touch') return;
           const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
-          touchSeeking = false;
-          if (t) seekFromClientX(t.clientX);
-          _reelsEndSeek(card);
-          unlockSnapScroll();
-          if (wasPlayingBeforeSeek && video.paused) {
-            _reelsUserPausedCard = null;
-            _reelsPlayVideo(card, video);
-          }
-          wasPlayingBeforeSeek = false;
-          ignoreClickUntil = Date.now() + 520;
+          endSeek(t ? t.clientX : null, null);
         };
         progWrap.addEventListener('touchend', stopTouchSeek, { passive: true });
-        progWrap.addEventListener('touchcancel', () => {
-          touchSeeking = false;
-          _reelsEndSeek(card);
-          unlockSnapScroll();
-          if (wasPlayingBeforeSeek && video.paused) {
-            _reelsUserPausedCard = null;
-            _reelsPlayVideo(card, video);
-          }
-          wasPlayingBeforeSeek = false;
-          ignoreClickUntil = Date.now() + 520;
-        }, { passive: true });
+        progWrap.addEventListener('touchcancel', () => endSeek(null, null), { passive: true });
         // Fallback: continue touch scrub while finger moves off element.
         document.addEventListener('touchmove', (e) => {
-          if (!touchSeeking) return;
+          if (!seekState.active || seekState.source !== 'touch') return;
           const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
           if (!t) return;
           e.preventDefault();
-          armLockFailsafe();
-          _reelsExtendSeekLock();
-          seekFromClientX(t.clientX);
+          moveSeek(t.clientX);
         }, { passive: false, signal: scrubAbort.signal });
         document.addEventListener('touchend', (e) => {
-          if (!touchSeeking) return;
+          if (!seekState.active || seekState.source !== 'touch') return;
           stopTouchSeek(e);
         }, { passive: true, signal: scrubAbort.signal });
       }
