@@ -479,9 +479,22 @@ async def serve_profile_landing(nickname: str):
 <meta name=\"description\" content=\"This FrogTalk profile is private.\">
 <meta name=\"robots\" content=\"noindex\">
 <meta property=\"og:title\" content=\"FrogTalk — Private profile\">
+<meta property=\"og:site_name\" content=\"FrogTalk\">
 <meta property=\"og:description\" content=\"This FrogTalk profile is private. Sign in to view it.\">
 <meta property=\"og:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta property=\"og:image:secure_url\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta property=\"og:image:type\" content=\"image/png\">
+<meta property=\"og:image:width\" content=\"1200\">
+<meta property=\"og:image:height\" content=\"630\">
+<meta property=\"og:image:alt\" content=\"FrogTalk private profile\">
+<meta property=\"og:locale\" content=\"en_US\">
 <meta property=\"og:url\" content=\"https://frogtalk.xyz/u/{nick}\">
+<meta name=\"twitter:card\" content=\"summary_large_image\">
+<meta name=\"twitter:site\" content=\"@frogtalk\">
+<meta name=\"twitter:title\" content=\"FrogTalk — Private profile\">
+<meta name=\"twitter:description\" content=\"This FrogTalk profile is private. Sign in to view it.\">
+<meta name=\"twitter:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta name=\"twitter:image:alt\" content=\"FrogTalk private profile\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
 body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
@@ -539,12 +552,20 @@ p{{color:#aaa;font-size:14px;line-height:1.5;margin:6px 0 22px}}
 <meta property=\"og:title\" content=\"@{_og_escape(nick)} on FrogTalk\">
 <meta property=\"og:description\" content=\"{_og_escape(desc)}\">
 <meta property=\"og:image\" content=\"{_og_escape(og_image)}\">
+<meta property=\"og:image:secure_url\" content=\"{_og_escape(og_image)}\">
+<meta property=\"og:image:type\" content=\"image/png\">
+<meta property=\"og:image:width\" content=\"1200\">
+<meta property=\"og:image:height\" content=\"630\">
+<meta property=\"og:image:alt\" content=\"@{_og_escape(nick)} on FrogTalk\">
+<meta property=\"og:locale\" content=\"en_US\">
 <meta property=\"og:url\" content=\"{canonical}\">
 <meta property=\"profile:username\" content=\"{_og_escape(nick)}\">
 <meta name=\"twitter:card\" content=\"summary_large_image\">
+<meta name=\"twitter:site\" content=\"@frogtalk\">
 <meta name=\"twitter:title\" content=\"@{_og_escape(nick)} on FrogTalk\">
 <meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
 <meta name=\"twitter:image\" content=\"{_og_escape(og_image)}\">
+<meta name=\"twitter:image:alt\" content=\"@{_og_escape(nick)} on FrogTalk\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
 body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
@@ -644,11 +665,19 @@ async def serve_channel_landing(room_name: str):
 <meta property=\"og:title\" content=\"{_og_escape(title)}\">
 <meta property=\"og:description\" content=\"{_og_escape(desc)}\">
 <meta property=\"og:image\" content=\"{og_image}\">
+<meta property=\"og:image:secure_url\" content=\"{og_image}\">
+<meta property=\"og:image:type\" content=\"image/png\">
+<meta property=\"og:image:width\" content=\"1200\">
+<meta property=\"og:image:height\" content=\"630\">
+<meta property=\"og:image:alt\" content=\"FrogTalk channel #{_og_escape(room_name)}\">
+<meta property=\"og:locale\" content=\"en_US\">
 <meta property=\"og:url\" content=\"{canonical}\">
 <meta name=\"twitter:card\" content=\"summary_large_image\">
+<meta name=\"twitter:site\" content=\"@frogtalk\">
 <meta name=\"twitter:title\" content=\"{_og_escape(title)}\">
 <meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
 <meta name=\"twitter:image\" content=\"{og_image}\">
+<meta name=\"twitter:image:alt\" content=\"FrogTalk channel #{_og_escape(room_name)}\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
 body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
@@ -719,10 +748,13 @@ async def serve_post_landing(post_id: int):
     media_data = post.get("media_data") or ""
     media_type = (post.get("media_type") or "").lower()
     og_image = "https://frogtalk.xyz/static/icons/og-image.png"
+    og_image_type = "image/png"
     if media_type.startswith("image/") and media_data.startswith(("http://", "https://")):
         og_image = media_data
+        og_image_type = media_type
     elif media_type.startswith("image/") and media_data.startswith("data:image/"):
         og_image = f"https://frogtalk.xyz/og/post/{post_id}.img"
+        og_image_type = media_type
 
     canonical = f"https://frogtalk.xyz/p/{post_id}"
     avatar = post.get("avatar") or ""
@@ -749,11 +781,19 @@ async def serve_post_landing(post_id: int):
 <meta property=\"og:title\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
 <meta property=\"og:description\" content=\"{_og_escape(desc)}\">
 <meta property=\"og:image\" content=\"{_og_escape(og_image)}\">
+<meta property=\"og:image:secure_url\" content=\"{_og_escape(og_image)}\">
+<meta property=\"og:image:type\" content=\"{_og_escape(og_image_type)}\">
+<meta property=\"og:image:width\" content=\"1200\">
+<meta property=\"og:image:height\" content=\"630\">
+<meta property=\"og:image:alt\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
+<meta property=\"og:locale\" content=\"en_US\">
 <meta property=\"og:url\" content=\"{canonical}\">
 <meta name=\"twitter:card\" content=\"summary_large_image\">
+<meta name=\"twitter:site\" content=\"@frogtalk\">
 <meta name=\"twitter:title\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
 <meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
 <meta name=\"twitter:image\" content=\"{_og_escape(og_image)}\">
+<meta name=\"twitter:image:alt\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
 body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
@@ -892,13 +932,22 @@ async def serve_reel_landing(post_id: int):
 <meta property=\"og:title\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
 <meta property=\"og:description\" content=\"{_og_escape(desc)}\">
 <meta property=\"og:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta property=\"og:image:secure_url\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta property=\"og:image:type\" content=\"image/png\">
+<meta property=\"og:image:width\" content=\"1200\">
+<meta property=\"og:image:height\" content=\"630\">
+<meta property=\"og:image:alt\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
 <meta property=\"og:video\" content=\"{_og_escape(media_url)}\">
+<meta property=\"og:video:secure_url\" content=\"{_og_escape(media_url)}\">
 <meta property=\"og:video:type\" content=\"{_og_escape(str(post.get('media_type') or 'video/mp4'))}\">
+<meta property=\"og:locale\" content=\"en_US\">
 <meta property=\"og:url\" content=\"{canonical}\">
 <meta name=\"twitter:card\" content=\"summary_large_image\">
+<meta name=\"twitter:site\" content=\"@frogtalk\">
 <meta name=\"twitter:title\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
 <meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
 <meta name=\"twitter:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
+<meta name=\"twitter:image:alt\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
 body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
@@ -929,7 +978,7 @@ body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-
 <script>
 try {{
   if (localStorage.getItem('token') || localStorage.getItem('fc_token')) {{
-    window.location.replace('/?reel={post_id}');
+        window.location.replace('/app?reel={post_id}');
   }}
 }} catch (e) {{}}
 </script>
@@ -1496,6 +1545,9 @@ async def serve_home(request: Request):
     post = (qp.get("post") or qp.get("p") or "").strip()
     if post.isdigit() and int(post) > 0:
         return await serve_post_landing(int(post))
+    reel = (qp.get("reel") or qp.get("r") or "").strip()
+    if reel.isdigit() and int(reel) > 0:
+        return await serve_reel_landing(int(reel))
     code = (qp.get("invite") or qp.get("i") or "").strip()
     if code:
         return await serve_invite_landing(code)
