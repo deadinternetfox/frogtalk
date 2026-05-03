@@ -1,5 +1,7 @@
 """FrogTalk - Secure Social Chat Platform."""
+import hashlib
 import os
+import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
@@ -386,8 +388,13 @@ def _serve_app_shell_response() -> HTMLResponse:
     except Exception:
         html_mtime = 0.0
     try:
-        asset_mtime = max(os.path.getmtime(p) for p in _shell_asset_paths())
-        asset_version = str(int(asset_mtime))
+        # Use a stable fingerprint over shell assets so any file change
+        # always bumps the versioned script URLs.
+        parts = []
+        for p in _shell_asset_paths():
+            st = os.stat(p)
+            parts.append(f"{p}:{st.st_mtime_ns}:{st.st_size}")
+        asset_version = hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:12]
     except Exception:
         asset_version = str(int(time.time()))
     cached = _SHELL_CACHE
