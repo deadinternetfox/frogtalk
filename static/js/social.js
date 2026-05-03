@@ -15,6 +15,8 @@ const Social = (() => {
   const _profileCache = new Map();
   let _tabLoadUiToken = 0;
   let _reelsLoadToken = 0;
+  let _profileTabLoadToken = 0;
+  let _profileActiveTab = 'wall';
 
   // ── helpers ──────────────────────────────────────────────────────────────
   const esc = s => UI.escHtml(s);
@@ -267,6 +269,16 @@ const Social = (() => {
       Promise.resolve(promise),
       new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
     ]);
+  }
+
+  function _beginProfileTabLoad(tab) {
+    _profileActiveTab = String(tab || 'wall');
+    _profileTabLoadToken += 1;
+    return _profileTabLoadToken;
+  }
+
+  function _isProfileTabLoadCurrent(tab, token) {
+    return _currentTab === 'profile' && _profileActiveTab === String(tab || '') && token === _profileTabLoadToken;
   }
 
   function _setTabLoadUi(tab, percent, label, detail) {
@@ -1973,7 +1985,8 @@ const Social = (() => {
         </div>
       </div>`;
 
-      loadProfilePosts(nickname, 'wall');
+      const wallToken = _beginProfileTabLoad('wall');
+      loadProfilePosts(nickname, 'wall', wallToken);
     } catch {
       content.innerHTML = '<div class="social-empty">Could not load profile</div>';
     } finally {
@@ -1981,11 +1994,15 @@ const Social = (() => {
     }
   }
 
-  async function loadProfilePosts(nickname, view) {
+  async function loadProfilePosts(nickname, view, loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
+    const tabKey = view === 'music'
+      ? 'music'
+      : ((view === 'public-media' || view === 'media-public') ? 'media' : 'wall');
     try {
       const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts');
+      if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return;
       const data = await res.json();
       if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load posts');
       const posts = data.posts || [];
@@ -2057,6 +2074,7 @@ const Social = (() => {
       }
       container.innerHTML = `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
     } catch {
+      if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return;
       container.innerHTML = '<div class="social-empty">Could not load posts</div>';
     }
   }
@@ -2064,11 +2082,27 @@ const Social = (() => {
   function switchProfileTab(tab, btn) {
     document.querySelectorAll('.sp-tab').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    if (tab === 'channels') loadProfileChannels(_profileUser);
-    else if (tab === 'reposts') loadProfileReposts(_profileUser);
-    else if (tab === 'reels') loadProfileReels(_profileUser);
-    else if (tab === 'media') loadProfileMediaCombined(_profileUser, 'public');
-    else loadProfilePosts(_profileUser, tab);
+    const token = _beginProfileTabLoad(tab);
+    const container = document.getElementById('sp-posts');
+    if (container) {
+      const label = tab === 'reels'
+        ? 'Loading reels…'
+        : tab === 'music'
+          ? 'Loading music…'
+          : tab === 'channels'
+            ? 'Loading channels…'
+            : tab === 'reposts'
+              ? 'Loading reposts…'
+              : tab === 'media'
+                ? 'Loading media…'
+                : 'Loading posts…';
+      container.innerHTML = `<div class="social-loading social-loading-compact">${label}</div>`;
+    }
+    if (tab === 'channels') loadProfileChannels(_profileUser, token);
+    else if (tab === 'reposts') loadProfileReposts(_profileUser, token);
+    else if (tab === 'reels') loadProfileReels(_profileUser, token);
+    else if (tab === 'media') loadProfileMediaCombined(_profileUser, 'public', token);
+    else loadProfilePosts(_profileUser, tab, token);
   }
 
   function _profileMediaToggleHtml(nickname, mode) {
@@ -2095,10 +2129,10 @@ const Social = (() => {
         btn.classList.add('primary');
       }
     } catch {}
-    await loadProfileMediaCombined(_profileUser, mode === 'private' ? 'private' : 'public');
+    await loadProfileMediaCombined(_profileUser, mode === 'private' ? 'private' : 'public', _profileTabLoadToken);
   }
 
-  async function loadProfileMediaCombined(nickname, mode = 'public') {
+  async function loadProfileMediaCombined(nickname, mode = 'public', loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
     const isSelf = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
@@ -2109,6 +2143,7 @@ const Social = (() => {
     if (safeMode === 'private') {
       try {
         const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/media');
+        if (!_isProfileTabLoadCurrent('media', loadToken)) return;
         const data = await res.json();
         const items = data.media || [];
 
@@ -2140,6 +2175,7 @@ const Social = (() => {
           </div>`;
         }).join('')}</div>`;
       } catch {
+        if (!_isProfileTabLoadCurrent('media', loadToken)) return;
         container.innerHTML = `${toggleHtml}<div class="social-empty">Could not load private media</div>`;
       }
       return;
@@ -2147,6 +2183,7 @@ const Social = (() => {
 
     try {
       const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts');
+      if (!_isProfileTabLoadCurrent('media', loadToken)) return;
       const data = await res.json();
       if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load posts');
       const posts = data.posts || [];
@@ -2182,6 +2219,7 @@ const Social = (() => {
           </div>`;
       }).join('')}</div>`;
     } catch {
+      if (!_isProfileTabLoadCurrent('media', loadToken)) return;
       container.innerHTML = `${toggleHtml}<div class="social-empty">Could not load public media</div>`;
     }
   }
@@ -3165,12 +3203,13 @@ const Social = (() => {
     }, 80);
   }
 
-  async function loadProfileReels(nickname) {
+  async function loadProfileReels(nickname, loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
     container.innerHTML = '<div class="social-loading">Loading reels…</div>';
     try {
       const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts').catch(() => null);
+      if (!_isProfileTabLoadCurrent('reels', loadToken)) return;
       const data = res && res.ok ? await res.json() : { posts: [] };
       const posts = (data.posts || []).filter(p => p.media_type && p.media_type.startsWith('video/'));
 
@@ -3196,17 +3235,19 @@ const Social = (() => {
           </div>`;
       }).join('')}</div>`;
     } catch {
+      if (!_isProfileTabLoadCurrent('reels', loadToken)) return;
       container.innerHTML = `<div class="social-empty">Could not load reels</div>`;
     }
   }
 
   // ── REPOSTS tab — posts this user has reposted ──────────────────────
-  async function loadProfileReposts(nickname) {
+  async function loadProfileReposts(nickname, loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
     container.innerHTML = '<div class="social-loading">Loading reposts…</div>';
     try {
       const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/reposts');
+      if (!_isProfileTabLoadCurrent('reposts', loadToken)) return;
       const data = await res.json();
       if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load reposts');
       const posts = data.posts || [];
@@ -3221,6 +3262,7 @@ const Social = (() => {
       }
       container.innerHTML = `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
     } catch {
+      if (!_isProfileTabLoadCurrent('reposts', loadToken)) return;
       container.innerHTML = '<div class="social-empty">Could not load reposts</div>';
     }
   }
@@ -3289,7 +3331,7 @@ const Social = (() => {
             // If the grid is now empty, reload the tab so the empty-state
             // hero appears instead of an empty blank area.
             const grid = document.querySelector('.social-media-grid');
-            if (grid && !grid.children.length) loadProfileMedia(_profileUser);
+            if (grid && !grid.children.length) loadProfileMediaCombined(_profileUser, 'private', _profileTabLoadToken);
           }, 300);
         }
       } else {
@@ -3304,12 +3346,13 @@ const Social = (() => {
   }
 
   // ── CHANNELS tab — channels created by this user ──────────────────────
-  async function loadProfileChannels(nickname) {
+  async function loadProfileChannels(nickname, loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
     container.innerHTML = '<div class="social-loading">Loading channels…</div>';
     try {
       const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/channels');
+      if (!_isProfileTabLoadCurrent('channels', loadToken)) return;
       const data = await res.json();
       const channels = data.channels || [];
 
@@ -3344,6 +3387,7 @@ const Social = (() => {
         </div>`;
       }).join('')}</div>`;
     } catch {
+      if (!_isProfileTabLoadCurrent('channels', loadToken)) return;
       container.innerHTML = '<div class="social-empty">Could not load channels</div>';
     }
   }
