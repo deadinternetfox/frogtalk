@@ -1863,7 +1863,10 @@ const Social = (() => {
   let _reelsSort  = 'hot';   // 'hot' | 'new' | 'top'
   let _reelsMuted = true;    // global mute state for all reels
   let _reelsCurrentVideo = null; // currently playing video element
+  let _reelsCurrentCard = null;
   let _reelsObserver = null;
+  let _reelsScrollRaf = 0;
+  let _reelsScrollSnap = null;
 
   function switchReelsScope(scope) {
     if (_reelsScope === scope) return;
@@ -1933,21 +1936,82 @@ const Social = (() => {
             const vid = entry.target.querySelector('video');
             if (!vid) return;
             if (entry.isIntersecting) {
-              _reelsCurrentVideo = vid;
-              vid.muted = _reelsMuted;
-              try { vid.currentTime = 0; } catch {}
-              vid.play().catch(() => {});
-              entry.target.classList.add('is-playing');
+              _reelsActivateCard(entry.target, { reset: true });
             } else {
-              vid.pause();
+              try { vid.pause(); } catch {}
               entry.target.classList.remove('is-playing');
             }
           });
         }, { root: snap, threshold: 0.6 });
         snap.querySelectorAll('.reel-card').forEach(card => _reelsObserver.observe(card));
       }
+
+      if (snap) {
+        _reelsScrollSnap = snap;
+        const onScroll = () => {
+          if (_reelsScrollRaf) return;
+          _reelsScrollRaf = requestAnimationFrame(() => {
+            _reelsScrollRaf = 0;
+            _reelsSyncActiveFromScroll(snap);
+          });
+        };
+        snap._reelsOnScroll = onScroll;
+        snap.addEventListener('scroll', onScroll, { passive: true });
+      }
     } catch (e) {
       content.innerHTML = scopeBar + `<div class="reels-empty"><div class="reels-empty-icon">⚠️</div><div class="reels-empty-title">Could not load reels</div></div>`;
+    }
+  }
+
+  function _reelsActivateCard(card, opts = {}) {
+    if (!card || !card.classList.contains('reel-card')) return;
+    const reset = opts.reset !== false;
+    const shouldReset = reset || _reelsCurrentCard !== card;
+    document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
+      if (c === card) return;
+      const v = c.querySelector('video');
+      if (v) {
+        try { v.pause(); } catch {}
+      }
+      c.classList.remove('is-playing');
+    });
+    const v = card.querySelector('video');
+    if (!v) return;
+    _reelsCurrentCard = card;
+    _reelsCurrentVideo = v;
+    v.muted = _reelsMuted;
+    if (shouldReset) {
+      try { v.currentTime = 0; } catch {}
+    }
+    v.play().catch(() => {});
+    card.classList.add('is-playing');
+  }
+
+  function _reelsSyncActiveFromScroll(snap) {
+    if (!snap) return;
+    const cards = Array.from(snap.querySelectorAll('.reel-card'));
+    if (!cards.length) return;
+    const rootRect = snap.getBoundingClientRect();
+    const centerY = rootRect.top + (rootRect.height / 2);
+    let best = null;
+    let bestDist = Infinity;
+    for (const card of cards) {
+      const r = card.getBoundingClientRect();
+      const c = r.top + (r.height / 2);
+      const d = Math.abs(c - centerY);
+      if (d < bestDist) {
+        bestDist = d;
+        best = card;
+      }
+    }
+    if (!best) return;
+    if (best !== _reelsCurrentCard) {
+      _reelsActivateCard(best, { reset: true });
+      return;
+    }
+    if (_reelsCurrentVideo && _reelsCurrentVideo.paused) {
+      _reelsCurrentVideo.play().catch(() => {});
+      _reelsCurrentCard?.classList.add('is-playing');
     }
   }
 
@@ -1955,14 +2019,7 @@ const Social = (() => {
     const snap = document.getElementById('reels-snap');
     if (!snap) return;
     const firstCard = snap.querySelector('.reel-card');
-    const first = firstCard?.querySelector('video');
-    if (first && firstCard) {
-      _reelsCurrentVideo = first;
-      first.muted = _reelsMuted;
-      try { first.currentTime = 0; } catch {}
-      first.play().catch(() => {});
-      firstCard.classList.add('is-playing');
-    }
+    if (firstCard) _reelsActivateCard(firstCard, { reset: true });
   }
 
   function _waitForFirstReelPreview(snap) {
@@ -1992,10 +2049,21 @@ const Social = (() => {
       try { _reelsObserver.disconnect(); } catch {}
       _reelsObserver = null;
     }
+    const snap = _reelsScrollSnap || document.getElementById('reels-snap');
+    if (snap && snap._reelsOnScroll) {
+      try { snap.removeEventListener('scroll', snap._reelsOnScroll); } catch {}
+      try { delete snap._reelsOnScroll; } catch {}
+    }
+    _reelsScrollSnap = null;
+    if (_reelsScrollRaf) {
+      try { cancelAnimationFrame(_reelsScrollRaf); } catch {}
+      _reelsScrollRaf = 0;
+    }
     document.querySelectorAll('.reels-snap video').forEach(v => {
       try { v.pause(); } catch {}
     });
     _reelsCurrentVideo = null;
+    _reelsCurrentCard = null;
   }
 
   function _initReelCards(snap) {
@@ -2089,11 +2157,7 @@ const Social = (() => {
         const nextCard = card.nextElementSibling;
         if (!nextCard || !nextCard.classList.contains('reel-card')) return;
         nextCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        const nv = nextCard.querySelector('video');
-        if (!nv) return;
-        nv.muted = _reelsMuted;
-        try { nv.currentTime = 0; } catch {}
-        setTimeout(() => { nv.play().catch(() => {}); }, 220);
+        setTimeout(() => { _reelsActivateCard(nextCard, { reset: true }); }, 220);
       });
       video.addEventListener('click', (e) => toggleReelPlayback(e, video));
     });
