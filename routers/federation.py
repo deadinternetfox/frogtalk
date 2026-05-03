@@ -1702,6 +1702,56 @@ async def _handle_social_event(event: dict) -> None:
         except Exception:
             _log.debug("federated repost notif WS push failed", exc_info=True)
 
+    if event_type == "social.comment.created":
+        actor_nick = str(payload.get("actor_nickname") or "").strip()
+        owner_nick = str(payload.get("owner_nickname") or "").strip()
+        if not actor_nick or not owner_nick:
+            return
+        actor = _ensure_local_user_by_nickname(actor_nick)
+        owner = _ensure_local_user_by_nickname(owner_nick)
+        if not actor or not owner or actor["id"] == owner["id"]:
+            return
+
+        post_id = payload.get("post_id")
+        comment_id = payload.get("comment_id")
+        try:
+            post_id_int = int(post_id)
+        except Exception:
+            post_id_int = None
+        try:
+            comment_id_int = int(comment_id)
+        except Exception:
+            comment_id_int = None
+        preview = str(payload.get("preview") or "").strip() or None
+
+        notif_id = db.add_social_notification(
+            user_id=owner["id"],
+            actor_id=actor["id"],
+            kind="comment",
+            post_id=post_id_int,
+            comment_id=comment_id_int,
+            preview=(preview[:140] if preview else None),
+        )
+        if notif_id is None:
+            return
+
+        unread = db.get_social_notification_unread_count(owner["id"])
+        try:
+            from ws_manager import manager
+            await manager.send_to_user(owner["id"], {
+                "type": "social_notification",
+                "event": "comment",
+                "id": notif_id,
+                "actor": actor_nick,
+                "actor_avatar": str(payload.get("actor_avatar") or actor.get("avatar") or ""),
+                "post_id": post_id_int,
+                "comment_id": comment_id_int,
+                "preview": (preview[:140] if preview else None),
+                "unread": unread,
+            })
+        except Exception:
+            _log.debug("federated comment notif WS push failed", exc_info=True)
+
 
 # ──────────────────────────────────────────────────────────────
 # Phase 6: Tor federation

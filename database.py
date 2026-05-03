@@ -4127,13 +4127,16 @@ def update_wall_post(post_id: int, user_id: int, content: str = None,
         return cur.rowcount > 0
 
 
-def delete_wall_post(post_id: int, user_id: int) -> bool:
-    """Delete a wall post."""
+def delete_wall_post(post_id: int, user_id: int, force: bool = False) -> bool:
+    """Delete a wall post. If force=True (admin), skip ownership check."""
     with _conn() as con:
-        cur = con.execute(
-            "DELETE FROM wall_posts WHERE id=? AND user_id=?",
-            (post_id, user_id)
-        )
+        if force:
+            cur = con.execute("DELETE FROM wall_posts WHERE id=?", (post_id,))
+        else:
+            cur = con.execute(
+                "DELETE FROM wall_posts WHERE id=? AND user_id=?",
+                (post_id, user_id)
+            )
         return cur.rowcount > 0
 
 
@@ -5977,7 +5980,7 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
 
         if scope == "friends":
             rows = con.execute(f"""
-                SELECT DISTINCT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type,
+                SELECT DISTINCT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
                        wp.privacy, wp.allow_comments, wp.created_at, wp.edited_at,
                        wp.track_title, wp.track_room, wp.track_mood,
                        1 AS has_media,
@@ -6081,7 +6084,7 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
             )).fetchall()
         else:  # all public
             rows = con.execute(f"""
-                SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type,
+                SELECT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
                        wp.privacy, wp.allow_comments, wp.created_at, wp.edited_at,
                        wp.track_title, wp.track_room, wp.track_mood,
                        1 AS has_media,

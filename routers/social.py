@@ -374,19 +374,16 @@ async def get_post_media(post_id: int, current_user: dict = Depends(get_current_
             _log.debug("post media decode failed pid=%s", post_id, exc_info=True)
             return JSONResponse(status_code=500, content={"error": "Decode failed"})
 
-    # Fallback: media_data isn't a base64 data URI \u2014 just return JSON
-    # with the URL for the client to follow. Existing renderers already
-    # handle URL-style values directly.
-        # Fallback: media_data isn't a base64 data URI.
-        # Return an HTTP redirect so <img>/<video src="/api/social/posts/{id}/media">
-        # still resolves to actual media bytes instead of JSON.
-        return Response(
-            status_code=302,
-            headers={
-                "Location": str(media_data),
-                "Cache-Control": "private, max-age=86400",
-            },
-        )
+    # Fallback: media_data isn't a base64 data URI.
+    # Return an HTTP redirect so <img>/<video src="/api/social/posts/{id}/media">
+    # still resolves to actual media bytes instead of JSON.
+    return Response(
+        status_code=302,
+        headers={
+            "Location": str(media_data),
+            "Cache-Control": "private, max-age=86400",
+        },
+    )
 
 
 @router.get("/profile/{nickname}/media")
@@ -646,6 +643,9 @@ async def get_reels(
                                limit=limit, offset=offset)
     _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
+        # Serve media lazily through the authenticated media endpoint so we
+        # never ship multi-MB base64 blobs in the reels listing payload.
+        p["media_data"] = f"/api/social/posts/{p['id']}/media"
         p["reactions"] = _rmap.get(p["id"], [])
     return {"posts": posts}
 

@@ -119,6 +119,13 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
         return JSONResponse(status_code=400, content={"error": f"Post too long (max {MAX_POST_CONTENT} chars)"})
     
     if body.media_data:
+        media_type = (body.media_type or '').strip().lower()
+        if not (media_type.startswith('image/') or media_type.startswith('video/') or media_type.startswith('music/')):
+            return JSONResponse(status_code=400, content={"error": "Unsupported media type"})
+        if (media_type.startswith('image/') or media_type.startswith('video/')) and not str(body.media_data).startswith('data:'):
+            return JSONResponse(status_code=400, content={"error": "Media payload must be a data URI"})
+        if media_type.startswith('music/') and not re.match(r'^https?://', str(body.media_data), flags=re.IGNORECASE):
+            return JSONResponse(status_code=400, content={"error": "Music media must be a valid URL"})
         is_video = (body.media_type or '').startswith('video/')
         limit = MAX_VIDEO_BYTES if is_video else MAX_MEDIA_BYTES
         if len(body.media_data) > limit:
@@ -556,6 +563,22 @@ async def add_post_comment(request: Request, post_id: int, body: AddCommentReque
                 "preview": preview[:140],
                 "unread": unread,
             })
+
+        try:
+            db.insert_federation_outbox_event({
+                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+                "event_type": "social.comment.created",
+                "payload": {
+                    "actor_nickname": current_user.get("nickname") or "",
+                    "actor_avatar": current_user.get("avatar") or "",
+                    "owner_nickname": post.get("nickname") or "",
+                    "post_id": post_id,
+                    "comment_id": comment_id,
+                    "preview": preview[:140],
+                },
+            })
+        except Exception:
+            _log.debug("comment federation emit failed", exc_info=True)
 
     return {
         "id": comment_id,

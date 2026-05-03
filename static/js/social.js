@@ -80,6 +80,7 @@ const Social = (() => {
   }
 
   function switchTab(tab) {
+    if (_currentTab === 'reels' && tab !== 'reels') _teardownReels();
     _currentTab = tab;
     // "My Profile" in the top nav should always jump to the logged-in
     // user's own profile — even if we were just viewing someone else.
@@ -1722,6 +1723,7 @@ const Social = (() => {
   let _reelsSort  = 'hot';   // 'hot' | 'new' | 'top'
   let _reelsMuted = true;    // global mute state for all reels
   let _reelsCurrentVideo = null; // currently playing video element
+  let _reelsObserver = null;
 
   function switchReelsScope(scope) {
     if (_reelsScope === scope) return;
@@ -1738,6 +1740,7 @@ const Social = (() => {
   async function loadReelsTab() {
     const content = document.getElementById('social-content');
     if (!content) return;
+    _teardownReels();
 
     const scope = _reelsScope;
     const sort  = _reelsSort;
@@ -1774,14 +1777,15 @@ const Social = (() => {
 
       const cards = posts.map(p => _renderReelCard(p)).join('');
       content.innerHTML = scopeBar + `<div class="reels-snap" id="reels-snap">${cards}</div>`;
+      const snap = document.getElementById('reels-snap');
+      if (snap) _initReelCards(snap);
 
       // Auto-play first visible reel
       _reelsAutoplayVisible();
 
       // IntersectionObserver: pause/play as cards scroll into/out of view
-      const snap = document.getElementById('reels-snap');
       if (snap && window.IntersectionObserver) {
-        const obs = new IntersectionObserver((entries) => {
+        _reelsObserver = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
             const vid = entry.target.querySelector('video');
             if (!vid) return;
@@ -1789,12 +1793,14 @@ const Social = (() => {
               _reelsCurrentVideo = vid;
               vid.muted = _reelsMuted;
               vid.play().catch(() => {});
+              entry.target.classList.add('is-playing');
             } else {
               vid.pause();
+              entry.target.classList.remove('is-playing');
             }
           });
         }, { root: snap, threshold: 0.6 });
-        snap.querySelectorAll('.reel-card').forEach(card => obs.observe(card));
+        snap.querySelectorAll('.reel-card').forEach(card => _reelsObserver.observe(card));
       }
     } catch (e) {
       content.innerHTML = scopeBar + `<div class="reels-empty"><div class="reels-empty-icon">⚠️</div><div class="reels-empty-title">Could not load reels</div></div>`;
@@ -1804,12 +1810,68 @@ const Social = (() => {
   function _reelsAutoplayVisible() {
     const snap = document.getElementById('reels-snap');
     if (!snap) return;
-    const first = snap.querySelector('video');
-    if (first) {
+    const firstCard = snap.querySelector('.reel-card');
+    const first = firstCard?.querySelector('video');
+    if (first && firstCard) {
       _reelsCurrentVideo = first;
       first.muted = _reelsMuted;
       first.play().catch(() => {});
+      firstCard.classList.add('is-playing');
     }
+  }
+
+  function _teardownReels() {
+    if (_reelsObserver) {
+      try { _reelsObserver.disconnect(); } catch {}
+      _reelsObserver = null;
+    }
+    document.querySelectorAll('.reels-snap video').forEach(v => {
+      try { v.pause(); } catch {}
+    });
+    _reelsCurrentVideo = null;
+  }
+
+  function _initReelCards(snap) {
+    snap.querySelectorAll('.reel-card').forEach(card => {
+      const video = card.querySelector('video');
+      const poster = card.querySelector('.reel-video-poster');
+      const prog = card.querySelector('.reel-progress > span');
+      if (!video) return;
+
+      const drawPoster = () => {
+        try {
+          if (!poster || !video.videoWidth || !video.videoHeight) return;
+          const c = document.createElement('canvas');
+          const maxW = 320;
+          c.width = Math.min(video.videoWidth, maxW);
+          c.height = Math.max(1, Math.round(c.width * (video.videoHeight / video.videoWidth)));
+          const ctx = c.getContext('2d');
+          if (!ctx) return;
+          ctx.drawImage(video, 0, 0, c.width, c.height);
+          poster.style.backgroundImage = `url(${c.toDataURL('image/jpeg', 0.72)})`;
+          card.classList.add('is-ready');
+        } catch {}
+      };
+
+      video.addEventListener('loadeddata', drawPoster, { once: true });
+      video.addEventListener('timeupdate', () => {
+        if (!prog || !video.duration) return;
+        prog.style.width = `${Math.min(100, Math.max(0, (video.currentTime / video.duration) * 100))}%`;
+      });
+      video.addEventListener('play', () => card.classList.add('is-playing'));
+      video.addEventListener('pause', () => card.classList.remove('is-playing'));
+      video.addEventListener('click', (e) => toggleReelPlayback(e, video));
+    });
+  }
+
+  function toggleReelPlayback(ev, video) {
+    try {
+      ev?.preventDefault?.();
+      ev?.stopPropagation?.();
+    } catch {}
+    if (!video) return;
+    if (video.paused) video.play().catch(() => {});
+    else video.pause();
   }
 
   function toggleReelMute(btn) {
@@ -1848,25 +1910,18 @@ const Social = (() => {
 
   async function _reelPickEmoji(postId, emoji, btn) {
     btn.closest('.reel-react-picker')?.remove();
+    const card = document.querySelector(`.reel-card[data-post-id="${postId}"]`);
+    const likeCount = card?.querySelector('.reel-like-count');
+    const prevLike = Number(likeCount?.textContent || '0');
     try {
-      await api(`/api/wall/posts/${postId}/react`, { method: 'POST', body: JSON.stringify({ emoji }) });
-    } catch {}
-    // Refresh the reaction count on the card
-    try {
-      const res = await api(`/api/wall/posts/${postId}`).catch(() => null);
-      const data = res && res.ok ? await res.json() : null;
-      if (data && data.post) {
-        const card = document.querySelector(`.reel-card[data-post-id="${postId}"]`);
-        if (card) {
-          const likeCount = card.querySelector('.reel-like-count');
-          if (likeCount) likeCount.textContent = data.post.like_count || data.post.reaction_count || 0;
-          const commentCount = card.querySelector('.reel-comment-count');
-          if (commentCount) commentCount.textContent = data.post.comment_count || 0;
-          const repostCount = card.querySelector('.reel-repost-count');
-          if (repostCount) repostCount.textContent = data.post.repost_count || 0;
-        }
+      const res = await api(`/api/wall/posts/${postId}/reactions`, 'POST', { emoji });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && emoji === '❤️' && likeCount && typeof data.count !== 'undefined') {
+        likeCount.textContent = String(Number(data.count || 0));
       }
-    } catch {}
+    } catch {
+      if (likeCount) likeCount.textContent = String(prevLike);
+    }
   }
 
   function _renderReelCard(post) {
@@ -1890,7 +1945,10 @@ const Social = (() => {
 
     return `
       <div class="reel-card" data-post-id="${post.id}">
+        <div class="reel-video-poster"></div>
         <video src="${videoSrc}" loop playsinline preload="metadata" muted></video>
+        <button class="reel-play-toggle" title="Play or pause" onclick="Social.toggleReelPlayback(event,this.previousElementSibling)">▶</button>
+        <div class="reel-progress"><span></span></div>
         <div class="reel-overlay-top"></div>
         <div class="reel-overlay-bottom"></div>
         <button class="reel-mute-btn" onclick="Social.toggleReelMute(this)" title="Toggle mute">🔇</button>
@@ -1907,7 +1965,7 @@ const Social = (() => {
             <div class="reel-act-icon">❤️</div>
             <span class="reel-act-count reel-like-count">${likeCount}</span>
           </button>
-          <button class="reel-act-btn" title="Comments" onclick="Social.viewPostDetail(${post.id})">
+          <button class="reel-act-btn" title="Comments" onclick="Social.openPostComments(${post.id})">
             <div class="reel-act-icon">💬</div>
             <span class="reel-act-count reel-comment-count">${commentCount}</span>
           </button>
@@ -3094,6 +3152,12 @@ const Social = (() => {
   }
 
   async function toggleRepost(ev, postId, meta = {}) {
+    if (typeof ev === 'number') {
+      const reelBtn = postId && typeof postId.closest === 'function' ? postId : null;
+      postId = Number(ev);
+      ev = null;
+      meta = { ...(meta || {}), _reelBtn: reelBtn };
+    }
     try {
       ev?.preventDefault?.();
       ev?.stopPropagation?.();
@@ -3110,15 +3174,26 @@ const Social = (() => {
     }
     const postEl = document.querySelector(`.sf-post[data-post-id="${postId}"]`);
     const btn = postEl?.querySelector('[data-role="repost-toggle"]');
+    const reelBtn = meta?._reelBtn || document.querySelector(`.reel-card[data-post-id="${postId}"] .reel-act-btn[title="Repost"]`);
+    const reelIconEl = reelBtn?.querySelector('.reel-act-icon');
+    const reelCountEl = reelBtn?.querySelector('.reel-repost-count');
     const prevActive = !!btn?.classList.contains('liked');
     const countMatch = (btn?.textContent || '').match(/(\d+)\s*$/);
     const prevCount = countMatch ? Number(countMatch[1]) : 0;
+    const prevReelCount = Number(reelCountEl?.textContent || '0');
+    const prevReelIcon = reelIconEl?.textContent || '↩️';
 
     if (btn) {
       btn.classList.toggle('liked', !prevActive);
       const next = Math.max(0, prevCount + (!prevActive ? 1 : -1));
       btn.innerHTML = `🔁 ${next}`;
       btn.disabled = true;
+    }
+    if (reelBtn && reelCountEl && reelIconEl) {
+      const optimistic = Math.max(0, prevReelCount + ((prevReelIcon === '🔁') ? -1 : 1));
+      reelCountEl.textContent = String(optimistic);
+      reelIconEl.textContent = prevReelIcon === '🔁' ? '↩️' : '🔁';
+      reelBtn.disabled = true;
     }
     try {
       const payload = {};
@@ -3130,6 +3205,10 @@ const Social = (() => {
         btn.classList.toggle('liked', !!data.reposted);
         btn.innerHTML = `🔁 ${Number(data.repost_count || 0)}`;
       }
+      if (reelCountEl && reelIconEl) {
+        reelCountEl.textContent = String(Number(data.repost_count || 0));
+        reelIconEl.textContent = data.reposted ? '🔁' : '↩️';
+      }
       try {
         UI.showToast(data.reposted ? (payload.quote ? 'Quote reposted' : 'Reposted') : 'Repost removed', 'success');
       } catch {}
@@ -3138,9 +3217,14 @@ const Social = (() => {
         btn.classList.toggle('liked', prevActive);
         btn.innerHTML = `🔁 ${prevCount}`;
       }
+      if (reelCountEl && reelIconEl) {
+        reelCountEl.textContent = String(prevReelCount);
+        reelIconEl.textContent = prevReelIcon;
+      }
       try { UI.showToast(e?.message || 'Could not repost', 'error'); } catch {}
     } finally {
       if (btn) btn.disabled = false;
+      if (reelBtn) reelBtn.disabled = false;
     }
   }
 
@@ -3163,6 +3247,10 @@ const Social = (() => {
   }
 
   async function toggleComments(ev, postId) {
+    if (typeof postId === 'undefined' && (typeof ev === 'number' || typeof ev === 'string')) {
+      postId = Number(ev);
+      ev = null;
+    }
     try {
       ev?.preventDefault?.();
       ev?.stopPropagation?.();
@@ -3720,6 +3808,11 @@ const Social = (() => {
   function handleNewPostMedia(input) {
     const file = input.files[0];
     if (!file) return;
+    if (!file.type || (!file.type.startsWith('image/') && !file.type.startsWith('video/'))) {
+      UI.showToast('Unsupported file type', 'error');
+      input.value = '';
+      return;
+    }
     if (file.size > 100 * 1024 * 1024) { UI.showToast('File too large (max 100MB)', 'error'); return; }
     const isVideo = file.type.startsWith('video/');
 
@@ -4128,6 +4221,13 @@ const Social = (() => {
     } catch {}
   }
 
+  async function openPostComments(postId) {
+    await viewPostDetail(postId);
+    setTimeout(() => {
+      toggleComments(null, postId);
+    }, 20);
+  }
+
   function closePostDetail() {
     const o = document.getElementById('social-post-detail');
     if (o) o.style.display = 'none';
@@ -4523,7 +4623,7 @@ const Social = (() => {
     setPostPrivacy, cyclePostPrivacy, toggleAllowComments, toggleShareLink,
     showFollowers, showFollowing, closeUserList, openProfileFromUserList, expandPost,
     loadFeed, loadExplore, loadProfile, moveToWall, previewMedia,
-    viewPostDetail, closePostDetail,
+    viewPostDetail, closePostDetail, openPostComments,
     viewStories, nextStory, prevStory, closeStoryViewer, openStoryProfileFromViewer,
     viewProfileStories,
     openAddStory, closeAddStory, handleStoryMedia, openStoryCamera, submitStory, submitStoryFromTap, handleStoryShareTap, setStoryPrivacy, cycleStoryPrivacy,
@@ -4535,7 +4635,7 @@ const Social = (() => {
     _closeMusicShareModal, _submitMusicShare,
     // Reels
     loadReelsTab, switchReelsScope, switchReelsSort,
-    toggleReelMute, openReelReactPicker, _reelPickEmoji,
+    toggleReelMute, toggleReelPlayback, openReelReactPicker, _reelPickEmoji,
     // Activity / notifications
     loadActivity, markAllActivityRead, openActivityItem,
     handleSocialNotification, refreshActivityBadge, _onLogin, _onLogout,
