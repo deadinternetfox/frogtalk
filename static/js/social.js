@@ -321,9 +321,19 @@ const Social = (() => {
     const cacheKey = String(nickname || '').toLowerCase();
     const cached = _profilePostsCache.get(cacheKey);
     if (_cacheFresh(cached)) return cached.posts;
-    const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts').catch(() => null);
-    if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return null; // tab switched mid-flight
-    if (!res || !res.ok) throw new Error('Failed to load posts');
+    let res = null;
+    for (let i = 0; i < 2; i += 1) {
+      res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts').catch(() => null);
+      if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return null; // tab switched mid-flight
+      if (res && res.ok) break;
+      if (i === 0) await new Promise(resolve => setTimeout(resolve, 180));
+    }
+    if (!res || !res.ok) {
+      // Soft-fail to last known data so wall/reels/media tabs don't show hard errors
+      // during brief backend/network hiccups.
+      if (cached && Array.isArray(cached.posts)) return cached.posts;
+      throw new Error('Failed to load posts');
+    }
     const data = await res.json().catch(() => ({ posts: [] }));
     const posts = data.posts || [];
     _profilePostsCache.set(cacheKey, { ts: Date.now(), posts });
@@ -339,9 +349,17 @@ const Social = (() => {
     const cacheKey = String(nickname || '').toLowerCase();
     const cached = _profileChannelsCache.get(cacheKey);
     if (_cacheFresh(cached)) return cached.channels;
-    const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/channels').catch(() => null);
+    let res = null;
+    for (let i = 0; i < 2; i += 1) {
+      res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/channels').catch(() => null);
+      if (res && res.ok) break;
+      if (i === 0) await new Promise(resolve => setTimeout(resolve, 180));
+    }
     if (loadToken != null && !_isProfileTabLoadCurrent('channels', loadToken)) return null;
-    if (!res || !res.ok) throw new Error('Failed to load channels');
+    if (!res || !res.ok) {
+      if (cached && Array.isArray(cached.channels)) return cached.channels;
+      throw new Error('Failed to load channels');
+    }
     const data = await res.json().catch(() => ({ channels: [] }));
     const channels = data.channels || [];
     _profileChannelsCache.set(cacheKey, { ts: Date.now(), channels });
@@ -352,9 +370,17 @@ const Social = (() => {
     const cacheKey = String(nickname || '').toLowerCase();
     const cached = _profileRepostsCache.get(cacheKey);
     if (_cacheFresh(cached)) return cached.posts;
-    const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/reposts').catch(() => null);
+    let res = null;
+    for (let i = 0; i < 2; i += 1) {
+      res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/reposts').catch(() => null);
+      if (res && res.ok) break;
+      if (i === 0) await new Promise(resolve => setTimeout(resolve, 180));
+    }
     if (loadToken != null && !_isProfileTabLoadCurrent('reposts', loadToken)) return null;
-    if (!res || !res.ok) throw new Error('Failed to load reposts');
+    if (!res || !res.ok) {
+      if (cached && Array.isArray(cached.posts)) return cached.posts;
+      throw new Error('Failed to load reposts');
+    }
     const data = await res.json().catch(() => ({ posts: [] }));
     const posts = data.posts || [];
     _profileRepostsCache.set(cacheKey, { ts: Date.now(), posts });
