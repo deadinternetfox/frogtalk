@@ -2254,7 +2254,7 @@ const Social = (() => {
       if (hasRealFirstFrame()) {
         reveal();
       }
-    }, 2200);
+    }, 1200);
     // Rescue path: try to decode one tiny frame before giving up.
     setTimeout(() => {
       if (revealed) return;
@@ -2277,8 +2277,14 @@ const Social = (() => {
         if (revealed) return;
         if (!hasRealFirstFrame()) firstCard.classList.add('no-poster');
         reveal();
-      }, 1100);
-    }, 4200);
+      }, 800);
+    }, 1800);
+    // Hard fallback: never allow stage to remain loading indefinitely.
+    setTimeout(() => {
+      if (revealed) return;
+      if (!hasRealFirstFrame()) firstCard.classList.add('no-poster');
+      reveal();
+    }, 3200);
   }
 
   function _reelsAdvanceFrom(card) {
@@ -2424,10 +2430,14 @@ const Social = (() => {
       }, 320);
       setTimeout(() => {
         if (!posterDrawn) {
-          if ((video.readyState || 0) >= 2) card.classList.add('no-poster');
+          card.classList.add('no-poster');
           if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
         }
       }, 2600);
+      video.addEventListener('error', () => {
+        card.classList.add('no-poster');
+        if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
+      });
 
       video.addEventListener('timeupdate', () => {
         if (!prog || !video.duration) return;
