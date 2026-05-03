@@ -1915,6 +1915,7 @@ const Social = (() => {
   let _reelsSeekReleaseCard = null;
   let _reelsUserPausedCard = null;
   let _reelsScrubController = null;
+  let _reelsScrubbing = false;
 
   function _reelsBeginSeek(card) {
     _reelsSeekCard = card || null;
@@ -2079,7 +2080,7 @@ const Social = (() => {
     const reset = opts.reset !== false;
     const seekReleaseGuard = card === _reelsSeekReleaseCard && Date.now() < _reelsSeekReleaseUntil;
     const seekLiveGuard = _reelsIsSeekLocked(card);
-    const shouldReset = (_reelsCurrentCard !== card) && reset && !seekReleaseGuard && !seekLiveGuard;
+    const shouldReset = !_reelsScrubbing && (_reelsCurrentCard !== card) && reset && !seekReleaseGuard && !seekLiveGuard;
     document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
       if (c === card) return;
       const v = c.querySelector('video');
@@ -2298,6 +2299,7 @@ const Social = (() => {
   }
 
   function _teardownReels() {
+    _reelsScrubbing = false;
     if (_reelsScrubController) { try { _reelsScrubController.abort(); } catch {} _reelsScrubController = null; }
     if (_reelsObserver) {
       try { _reelsObserver.disconnect(); } catch {}
@@ -2437,7 +2439,6 @@ const Social = (() => {
       };
       if (progWrap) {
         const snap = progWrap.closest('.reels-snap');
-        let restoreSnapType = '';
         let snapLockTimer = 0;
         let wasPlayingBeforeSeek = false;
         let ignoreClickUntil = 0;
@@ -2457,13 +2458,18 @@ const Social = (() => {
         };
         const lockSnapScroll = () => {
           if (!snap) return;
-          restoreSnapType = snap.style.scrollSnapType || '';
           snap.style.scrollSnapType = 'none';
+          snap.style.overflowY = 'hidden';
+          snap.style.touchAction = 'none';
+          _reelsScrubbing = true;
           armLockFailsafe();
         };
         const unlockSnapScroll = () => {
           if (!snap) return;
-          snap.style.scrollSnapType = restoreSnapType;
+          snap.style.scrollSnapType = '';
+          snap.style.overflowY = '';
+          snap.style.touchAction = '';
+          _reelsScrubbing = false;
           clearLockTimer();
         };
 
