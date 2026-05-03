@@ -728,6 +728,9 @@ const Notifications = (() => {
   function _getCtx() {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
+    // Never create a context before first trusted user gesture.
+    // This avoids autoplay-policy warnings and blocked resume attempts.
+    if (!_audioPrimed && !_sharedCtx) return null;
     if (!_sharedCtx || _sharedCtx.state === 'closed') {
       try {
         _sharedCtx = new AC();
@@ -746,6 +749,7 @@ const Notifications = (() => {
   }
 
   function _unlockAudio() {
+    _audioPrimed = true;
     const ctx = _getCtx();
     if (!ctx) return false;
     try {
