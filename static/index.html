@@ -4997,12 +4997,14 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .reel-card.is-playing .reel-video-poster{opacity:.12}
 .reel-play-toggle{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:72px;height:72px;border-radius:50%;border:1px solid rgba(255,255,255,.32);
-  background:rgba(0,0,0,.42);backdrop-filter:blur(6px);color:#fff;font-size:30px;
+  width:62px;height:62px;border-radius:50%;border:2px solid rgba(255,255,255,.86);
+  background:linear-gradient(145deg,rgba(88,219,126,.95),rgba(54,154,85,.92));
+  color:#041509;font-size:28px;line-height:1;
   display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;
+  box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
   transition:opacity .15s ease,transform .15s ease,background .15s ease
 }
-.reel-play-toggle:hover{background:rgba(0,0,0,.58);transform:translate(-50%,-50%) scale(1.04)}
+.reel-play-toggle:hover{transform:translate(-50%,-50%) scale(1.06);background:#7ad491}
 .reel-card.is-playing .reel-play-toggle{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.92)}
 .reel-progress{
   position:absolute;left:10px;right:10px;bottom:8px;height:4px;border-radius:999px;
