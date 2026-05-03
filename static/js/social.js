@@ -2225,8 +2225,7 @@ const Social = (() => {
     const hasRealFirstFrame = () => {
       if (!firstCard?.isConnected || !firstVideo?.isConnected) return false;
       if (firstCard.classList.contains('is-ready')) return true;
-      if (firstCard.classList.contains('is-playing') && Number(firstVideo.currentTime || 0) > 0.03) return true;
-      if (Number(firstVideo.currentTime || 0) > 0.06) return true;
+      if (firstCard.classList.contains('no-poster') && ((firstVideo.readyState || 0) >= 2 || Number(firstVideo.currentTime || 0) > 0.03)) return true;
       return false;
     };
     const maybeReveal = () => {
@@ -2237,16 +2236,16 @@ const Social = (() => {
     firstVideo.addEventListener('loadeddata', maybeReveal, { once: true });
     firstVideo.addEventListener('canplay', maybeReveal, { once: true });
     firstVideo.addEventListener('playing', maybeReveal, { once: true });
+    firstVideo.addEventListener('seeked', maybeReveal, { once: true });
+    firstVideo.addEventListener('timeupdate', maybeReveal, { once: true });
     if (hasRealFirstFrame()) {
       reveal();
       return;
     }
     // Prefer waiting for an actual frame before reveal to avoid grey pre-frame flashes.
     setTimeout(() => {
-      if (hasRealFirstFrame()) {
-        reveal();
-      }
-    }, 2200);
+      maybeReveal();
+    }, 1800);
     // Rescue path: try to decode one tiny frame before giving up.
     setTimeout(() => {
       if (revealed) return;
@@ -2268,9 +2267,15 @@ const Social = (() => {
       setTimeout(() => {
         if (revealed) return;
         if (!hasRealFirstFrame()) firstCard.classList.add('no-poster');
-        reveal();
-      }, 1100);
-    }, 4200);
+        maybeReveal();
+      }, 900);
+    }, 3200);
+    // Hard stop: never leave the loading gate indefinitely.
+    setTimeout(() => {
+      if (revealed) return;
+      if (!hasRealFirstFrame()) firstCard.classList.add('no-poster');
+      reveal();
+    }, 4600);
   }
 
   function _reelsAdvanceFrom(card) {
