@@ -5943,3 +5943,164 @@ def get_federation_server_transport(server_id: str) -> str:
             (server_id,),
         ).fetchone()
     return row["transport_preference"] if row else "auto"
+
+
+# ─── Reels ────────────────────────────────────────────────────────────────────
+
+def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
+                    limit: int = 20, offset: int = 0) -> List[Dict]:
+    """Return video posts for the Reels tab.
+
+    scope='all'     → all public videos (explore-style)
+    scope='friends' → videos posted, reposted, or liked by accepted friends
+
+    sort='hot'  → ❤️ like reactions × 3 + other reactions + reposts × 2 + comments + recency bonus
+    sort='new'  → newest first
+    sort='top'  → all-time highest like reaction count
+    """
+    with _conn() as con:
+        if sort == "new":
+            order = "wp.created_at DESC"
+        elif sort == "top":
+            order = ("(SELECT COUNT(*) FROM wall_post_reactions "
+                     "WHERE post_id=wp.id AND emoji='❤️') DESC, wp.created_at DESC")
+        else:  # hot
+            order = """(
+                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji='❤️') * 3 +
+                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji!='❤️') +
+                (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) * 2 +
+                (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) +
+                CASE WHEN julianday('now') - julianday(wp.created_at) < 1 THEN 10
+                     WHEN julianday('now') - julianday(wp.created_at) < 7 THEN 5
+                     ELSE 0 END
+            ) DESC, wp.created_at DESC"""
+
+        if scope == "friends":
+            rows = con.execute(f"""
+                SELECT DISTINCT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type,
+                       wp.privacy, wp.allow_comments, wp.created_at, wp.edited_at,
+                       wp.track_title, wp.track_room, wp.track_mood,
+                       1 AS has_media,
+                       u.nickname, u.avatar,
+                       (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) AS reaction_count,
+                       (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji='❤️') AS like_count,
+                       (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) AS comment_count,
+                       (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) AS repost_count,
+                       EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
+                       -- source info: who in your friend list triggered this reel
+                       (SELECT u2.nickname FROM users u2 WHERE u2.id = (
+                           SELECT CASE
+                               WHEN wp.user_id IN (
+                                   SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                                   FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                               ) THEN wp.user_id
+                               WHEN EXISTS(SELECT 1 FROM wall_reposts wr2
+                                   WHERE wr2.post_id=wp.id AND wr2.user_id IN (
+                                       SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                                       FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                                   )) THEN (SELECT wr2.user_id FROM wall_reposts wr2
+                                       WHERE wr2.post_id=wp.id AND wr2.user_id IN (
+                                           SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                                           FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                                       ) LIMIT 1)
+                               ELSE (SELECT wpr2.user_id FROM wall_post_reactions wpr2
+                                   WHERE wpr2.post_id=wp.id AND wpr2.user_id IN (
+                                       SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                                       FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                                   ) LIMIT 1)
+                           END
+                       )) AS friend_actor_nick,
+                       (SELECT u3.avatar FROM users u3 WHERE u3.id = (
+                           SELECT CASE
+                               WHEN wp.user_id IN (
+                                   SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                                   FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                               ) THEN wp.user_id
+                               WHEN EXISTS(SELECT 1 FROM wall_reposts wr3
+                                   WHERE wr3.post_id=wp.id AND wr3.user_id IN (
+                                       SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                                       FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                                   )) THEN (SELECT wr3.user_id FROM wall_reposts wr3
+                                       WHERE wr3.post_id=wp.id AND wr3.user_id IN (
+                                           SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                                           FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                                       ) LIMIT 1)
+                               ELSE (SELECT wpr3.user_id FROM wall_post_reactions wpr3
+                                   WHERE wpr3.post_id=wp.id AND wpr3.user_id IN (
+                                       SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                                       FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                                   ) LIMIT 1)
+                           END
+                       )) AS friend_actor_avatar
+                FROM wall_posts wp
+                JOIN users u ON wp.user_id = u.id
+                WHERE wp.media_type LIKE 'video/%'
+                  AND wp.privacy IN ('public', 'friends')
+                  AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
+                  AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+                  AND (
+                      -- friend posted it
+                      wp.user_id IN (
+                          SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                          FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                      )
+                      OR
+                      -- friend reposted it
+                      EXISTS (SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id IN (
+                          SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                          FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                      ))
+                      OR
+                      -- friend reacted/liked it
+                      EXISTS (SELECT 1 FROM wall_post_reactions wpr WHERE wpr.post_id=wp.id AND wpr.user_id IN (
+                          SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
+                          FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
+                      ))
+                  )
+                ORDER BY {order}
+                LIMIT ? OFFSET ?
+            """, (
+                viewer_id,
+                # friend_actor_nick subquery
+                viewer_id, viewer_id, viewer_id,
+                viewer_id, viewer_id, viewer_id,
+                viewer_id, viewer_id, viewer_id,
+                viewer_id, viewer_id, viewer_id,
+                # friend_actor_avatar subquery
+                viewer_id, viewer_id, viewer_id,
+                viewer_id, viewer_id, viewer_id,
+                viewer_id, viewer_id, viewer_id,
+                viewer_id, viewer_id, viewer_id,
+                # block filters
+                viewer_id, viewer_id,
+                # AND clause friend checks
+                viewer_id, viewer_id, viewer_id,
+                viewer_id, viewer_id, viewer_id,
+                viewer_id, viewer_id, viewer_id,
+                limit, offset,
+            )).fetchall()
+        else:  # all public
+            rows = con.execute(f"""
+                SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type,
+                       wp.privacy, wp.allow_comments, wp.created_at, wp.edited_at,
+                       wp.track_title, wp.track_room, wp.track_mood,
+                       1 AS has_media,
+                       u.nickname, u.avatar,
+                       (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) AS reaction_count,
+                       (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji='❤️') AS like_count,
+                       (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) AS comment_count,
+                       (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) AS repost_count,
+                       EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
+                       NULL AS friend_actor_nick,
+                       NULL AS friend_actor_avatar
+                FROM wall_posts wp
+                JOIN users u ON wp.user_id = u.id
+                WHERE wp.media_type LIKE 'video/%'
+                  AND wp.privacy = 'public'
+                  AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
+                  AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+                ORDER BY {order}
+                LIMIT ? OFFSET ?
+            """, (viewer_id, viewer_id, viewer_id, limit, offset)).fetchall()
+
+    return [dict(r) for r in rows]

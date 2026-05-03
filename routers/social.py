@@ -196,6 +196,26 @@ async def profile_posts(
     return {"posts": posts}
 
 
+@router.get("/profile/{nickname}/reposts")
+async def profile_reposts(
+    nickname: str,
+    limit: int = Query(30, le=50),
+    offset: int = Query(0),
+    current_user: dict = Depends(get_current_user),
+):
+    """Posts that this user has reposted. Visible only if viewer can see the profile."""
+    user = db.get_user_by_nick(nickname)
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    if _private_blocked(user, current_user["id"]):
+        return {"posts": [], "private": True}
+    posts = db.get_user_reposts(user["id"], current_user["id"], limit, offset)
+    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
+    for p in posts:
+        p["reactions"] = _rmap.get(p["id"], [])
+    return {"posts": posts}
+
+
 @router.get("/profile/{nickname}/followers")
 async def list_followers(nickname: str, current_user: dict = Depends(get_current_user)):
     user = db.get_user_by_nick(nickname)
@@ -258,10 +278,11 @@ async def get_feed(
     _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
         p["reactions"] = _rmap.get(p["id"], [])
-        if use_lite and p.get("has_media"):
-            mt = (p.get("media_type") or "").lower()
-            if mt.startswith("image/") or mt.startswith("video/"):
-                p["media_data"] = f"/api/social/posts/{p['id']}/media"
+        # Only construct a lazy-load URL if media_data is missing.
+        # If database already returned media_data (e.g., for images/videos in lite mode),
+        # use it directly—the frontend will render it or fetch as needed.
+        if use_lite and p.get("has_media") and not p.get("media_data"):
+            p["media_data"] = f"/api/social/posts/{p['id']}/media"
     return {"posts": posts}
 
 
@@ -283,10 +304,11 @@ async def get_explore(
     _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
     for p in posts:
         p["reactions"] = _rmap.get(p["id"], [])
-        if use_lite and p.get("has_media"):
-            mt = (p.get("media_type") or "").lower()
-            if mt.startswith("image/") or mt.startswith("video/"):
-                p["media_data"] = f"/api/social/posts/{p['id']}/media"
+        # Only construct a lazy-load URL if media_data is missing.
+        # If database already returned media_data (e.g., for images/videos in lite mode),
+        # use it directly—the frontend will render it or fetch as needed.
+        if use_lite and p.get("has_media") and not p.get("media_data"):
+            p["media_data"] = f"/api/social/posts/{p['id']}/media"
     return {"posts": posts}
 
 
@@ -355,7 +377,16 @@ async def get_post_media(post_id: int, current_user: dict = Depends(get_current_
     # Fallback: media_data isn't a base64 data URI \u2014 just return JSON
     # with the URL for the client to follow. Existing renderers already
     # handle URL-style values directly.
-    return JSONResponse(content={"url": media_data, "media_type": media_type})
+        # Fallback: media_data isn't a base64 data URI.
+        # Return an HTTP redirect so <img>/<video src="/api/social/posts/{id}/media">
+        # still resolves to actual media bytes instead of JSON.
+        return Response(
+            status_code=302,
+            headers={
+                "Location": str(media_data),
+                "Cache-Control": "private, max-age=86400",
+            },
+        )
 
 
 @router.get("/profile/{nickname}/media")
@@ -590,6 +621,33 @@ async def story_viewers(story_id: int, current_user: dict = Depends(get_current_
 
 class MarkNotifsReadRequest(BaseModel):
     ids: Optional[list] = None  # None or [] => mark all unread as read
+
+
+@router.get("/reels")
+@limiter.limit("300/hour")
+async def get_reels(
+    request: Request,
+    scope: str = Query("all"),
+    sort: str = Query("hot"),
+    limit: int = Query(20, le=50),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    """Video posts for the Reels tab.
+
+    scope: 'all' = all public videos, 'friends' = videos posted/reposted/liked by friends.
+    sort:  'hot' = ❤️-driven ranking, 'new' = newest, 'top' = all-time hearts.
+    """
+    if scope not in ("all", "friends"):
+        scope = "all"
+    if sort not in ("hot", "new", "top"):
+        sort = "hot"
+    posts = db.get_reels_posts(current_user["id"], scope=scope, sort=sort,
+                               limit=limit, offset=offset)
+    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
+    for p in posts:
+        p["reactions"] = _rmap.get(p["id"], [])
+    return {"posts": posts}
 
 
 @router.get("/notifications")

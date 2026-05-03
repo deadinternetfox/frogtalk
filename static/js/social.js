@@ -87,6 +87,7 @@ const Social = (() => {
     renderNav();
     if (tab === 'feed') loadFeed();
     else if (tab === 'explore') loadExplore();
+    else if (tab === 'reels') loadReelsTab();
     else if (tab === 'music') loadMusicTab();
     else if (tab === 'activity') loadActivity();
     else if (tab === 'profile') loadProfile(_profileUser || State.user?.nickname);
@@ -1715,14 +1716,245 @@ const Social = (() => {
     }
   }
 
-  async function loadProfileReels(_nickname) {
+  // ── REELS TAB ──────────────────────────────────────────────────────────────
+
+  let _reelsScope = 'all';   // 'all' | 'friends'
+  let _reelsSort  = 'hot';   // 'hot' | 'new' | 'top'
+  let _reelsMuted = true;    // global mute state for all reels
+  let _reelsCurrentVideo = null; // currently playing video element
+
+  function switchReelsScope(scope) {
+    if (_reelsScope === scope) return;
+    _reelsScope = scope;
+    loadReelsTab();
+  }
+
+  function switchReelsSort(sort) {
+    if (_reelsSort === sort) return;
+    _reelsSort = sort;
+    loadReelsTab();
+  }
+
+  async function loadReelsTab() {
+    const content = document.getElementById('social-content');
+    if (!content) return;
+
+    const scope = _reelsScope;
+    const sort  = _reelsSort;
+
+    const scopeBar = `
+      <div class="reels-scope-bar">
+        <button class="rsb-pill ${scope==='all'?'active':''}" onclick="Social.switchReelsScope('all')">🌐 All</button>
+        <button class="rsb-pill ${scope==='friends'?'active':''}" onclick="Social.switchReelsScope('friends')">👥 Friends</button>
+        <div class="rsb-sort">
+          <button class="rsb-sort-chip ${sort==='hot'?'active':''}" onclick="Social.switchReelsSort('hot')">🔥 Hot</button>
+          <button class="rsb-sort-chip ${sort==='new'?'active':''}" onclick="Social.switchReelsSort('new')">🆕 New</button>
+          <button class="rsb-sort-chip ${sort==='top'?'active':''}" onclick="Social.switchReelsSort('top')">⭐ Top</button>
+        </div>
+      </div>`;
+
+    content.innerHTML = scopeBar + '<div class="social-loading" style="margin-top:48px">Loading reels…</div>';
+
+    try {
+      const res = await api(`/api/social/reels?scope=${scope}&sort=${sort}&limit=20`).catch(() => null);
+      const data = res && res.ok ? await res.json() : { posts: [] };
+      const posts = data.posts || [];
+
+      if (posts.length === 0) {
+        content.innerHTML = scopeBar + `
+          <div class="reels-empty">
+            <div class="reels-empty-icon">🎞</div>
+            <div class="reels-empty-title">${scope === 'friends' ? 'No friend reels yet' : 'No reels yet'}</div>
+            <div class="reels-empty-sub">${scope === 'friends'
+              ? 'Reels posted, reposted, or liked by your friends will appear here.'
+              : 'When people share videos they\'ll show up here. Be the first!'}</div>
+          </div>`;
+        return;
+      }
+
+      const cards = posts.map(p => _renderReelCard(p)).join('');
+      content.innerHTML = scopeBar + `<div class="reels-snap" id="reels-snap">${cards}</div>`;
+
+      // Auto-play first visible reel
+      _reelsAutoplayVisible();
+
+      // IntersectionObserver: pause/play as cards scroll into/out of view
+      const snap = document.getElementById('reels-snap');
+      if (snap && window.IntersectionObserver) {
+        const obs = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            const vid = entry.target.querySelector('video');
+            if (!vid) return;
+            if (entry.isIntersecting) {
+              _reelsCurrentVideo = vid;
+              vid.muted = _reelsMuted;
+              vid.play().catch(() => {});
+            } else {
+              vid.pause();
+            }
+          });
+        }, { root: snap, threshold: 0.6 });
+        snap.querySelectorAll('.reel-card').forEach(card => obs.observe(card));
+      }
+    } catch (e) {
+      content.innerHTML = scopeBar + `<div class="reels-empty"><div class="reels-empty-icon">⚠️</div><div class="reels-empty-title">Could not load reels</div></div>`;
+    }
+  }
+
+  function _reelsAutoplayVisible() {
+    const snap = document.getElementById('reels-snap');
+    if (!snap) return;
+    const first = snap.querySelector('video');
+    if (first) {
+      _reelsCurrentVideo = first;
+      first.muted = _reelsMuted;
+      first.play().catch(() => {});
+    }
+  }
+
+  function toggleReelMute(btn) {
+    _reelsMuted = !_reelsMuted;
+    // Apply to all currently rendered videos
+    document.querySelectorAll('.reels-snap video').forEach(v => { v.muted = _reelsMuted; });
+    if (btn) btn.textContent = _reelsMuted ? '🔇' : '🔊';
+  }
+
+  function openReelReactPicker(postId, btn) {
+    // Close any open pickers first
+    document.querySelectorAll('.reel-react-picker').forEach(p => p.remove());
+
+    const card = btn.closest('.reel-card');
+    if (!card) return;
+
+    const emojis = ['❤️','🔥','😂','😮','😢','👏','💯','🎉','💪','😍'];
+    const rows = [];
+    for (let i = 0; i < emojis.length; i += 5) {
+      rows.push(`<div class="reel-react-row">${emojis.slice(i, i+5).map(e =>
+        `<button class="reel-react-emoji" onclick="Social._reelPickEmoji(${postId},'${e}',this)">${e}</button>`
+      ).join('')}</div>`);
+    }
+    const picker = document.createElement('div');
+    picker.className = 'reel-react-picker';
+    picker.innerHTML = rows.join('');
+    card.appendChild(picker);
+    // Dismiss on outside click
+    setTimeout(() => {
+      const dismiss = (ev) => {
+        if (!picker.contains(ev.target)) { picker.remove(); document.removeEventListener('click', dismiss, true); }
+      };
+      document.addEventListener('click', dismiss, true);
+    }, 10);
+  }
+
+  async function _reelPickEmoji(postId, emoji, btn) {
+    btn.closest('.reel-react-picker')?.remove();
+    try {
+      await api(`/api/wall/posts/${postId}/react`, { method: 'POST', body: JSON.stringify({ emoji }) });
+    } catch {}
+    // Refresh the reaction count on the card
+    try {
+      const res = await api(`/api/wall/posts/${postId}`).catch(() => null);
+      const data = res && res.ok ? await res.json() : null;
+      if (data && data.post) {
+        const card = document.querySelector(`.reel-card[data-post-id="${postId}"]`);
+        if (card) {
+          const likeCount = card.querySelector('.reel-like-count');
+          if (likeCount) likeCount.textContent = data.post.like_count || data.post.reaction_count || 0;
+          const commentCount = card.querySelector('.reel-comment-count');
+          if (commentCount) commentCount.textContent = data.post.comment_count || 0;
+          const repostCount = card.querySelector('.reel-repost-count');
+          if (repostCount) repostCount.textContent = data.post.repost_count || 0;
+        }
+      }
+    } catch {}
+  }
+
+  function _renderReelCard(post) {
+    const videoSrc = esc(post.media_data || '');
+    const nick = esc(post.nickname || '');
+    const avatarSrc = post.avatar ? esc(post.avatar) : '';
+    const avatarHtml = avatarSrc
+      ? `<img class="reel-author-avatar" src="${avatarSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
+      : `<div class="reel-author-avatar" style="display:flex;align-items:center;justify-content:center;font-size:18px">🐸</div>`;
+
+    const friendLabel = post.friend_actor_nick
+      ? `<span class="reel-friend-label">${post.friend_actor_avatar
+          ? `<img src="${esc(post.friend_actor_avatar)}" style="width:16px;height:16px;border-radius:50%;object-fit:cover" alt="">`
+          : ''}${esc(post.friend_actor_nick)} ${post.user_id == (window.State?.user?.id) ? 'posted' : 'liked/reposted'}</span>`
+      : '';
+
+    const caption = post.content ? `<div class="reel-caption">${esc(post.content)}</div>` : '';
+    const likeCount = post.like_count ?? post.reaction_count ?? 0;
+    const commentCount = post.comment_count ?? 0;
+    const repostCount = post.repost_count ?? 0;
+
+    return `
+      <div class="reel-card" data-post-id="${post.id}">
+        <video src="${videoSrc}" loop playsinline preload="metadata" muted></video>
+        <div class="reel-overlay-top"></div>
+        <div class="reel-overlay-bottom"></div>
+        <button class="reel-mute-btn" onclick="Social.toggleReelMute(this)" title="Toggle mute">🔇</button>
+        <div class="reel-author" onclick="Social.openProfile('${nick}')">
+          ${avatarHtml}
+          <div class="reel-author-info">
+            <span class="reel-author-nick">@${nick}</span>
+            ${friendLabel}
+          </div>
+        </div>
+        ${caption}
+        <div class="reel-actions">
+          <button class="reel-act-btn" title="React" onclick="Social.openReelReactPicker(${post.id},this)">
+            <div class="reel-act-icon">❤️</div>
+            <span class="reel-act-count reel-like-count">${likeCount}</span>
+          </button>
+          <button class="reel-act-btn" title="Comments" onclick="Social.viewPostDetail(${post.id})">
+            <div class="reel-act-icon">💬</div>
+            <span class="reel-act-count reel-comment-count">${commentCount}</span>
+          </button>
+          <button class="reel-act-btn" title="Repost" onclick="Social.toggleRepost(${post.id},this)">
+            <div class="reel-act-icon">${post.i_reposted ? '🔁' : '↩️'}</div>
+            <span class="reel-act-count reel-repost-count">${repostCount}</span>
+          </button>
+          <button class="reel-act-btn" title="Open full post" onclick="Social.viewPostDetail(${post.id})">
+            <div class="reel-act-icon">⤴</div>
+          </button>
+        </div>
+      </div>`;
+  }
+
+  async function loadProfileReels(nickname) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
-    container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-      <div style="font-size:36px;margin-bottom:8px">🎞</div>
-      <div style="font-size:15px;color:#888">Reels coming soon</div>
-      <div style="color:#666;font-size:12px;margin-top:6px">This tab is reserved for your upcoming reels feature.</div>
-    </div>`;
+    container.innerHTML = '<div class="social-loading">Loading reels…</div>';
+    try {
+      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts').catch(() => null);
+      const data = res && res.ok ? await res.json() : { posts: [] };
+      const posts = (data.posts || []).filter(p => p.media_type && p.media_type.startsWith('video/'));
+
+      if (posts.length === 0) {
+        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+          <div style="font-size:36px;margin-bottom:8px">🎞</div>
+          <div style="font-size:15px;color:#888">No reels yet</div>
+          <div style="color:#666;font-size:12px;margin-top:6px">Video posts will appear here.</div>
+        </div>`;
+        return;
+      }
+
+      // Grid view for profile reels
+      container.innerHTML = `<div class="social-grid">${posts.map(p => {
+        return `
+          <div class="social-grid-item is-video" onclick="Social.viewPostDetail(${p.id})">
+            <video src="${esc(p.media_data || '')}" muted preload="metadata"></video>
+            <span class="social-grid-video-ico">▶</span>
+            <div class="social-grid-overlay">
+              <span>❤️ ${p.reaction_count || 0}</span>
+              <span>💬 ${p.comment_count || 0}</span>
+            </div>
+          </div>`;
+      }).join('')}</div>`;
+    } catch {
+      container.innerHTML = `<div class="social-empty">Could not load reels</div>`;
+    }
   }
 
   // ── REPOSTS tab — posts this user has reposted ──────────────────────
@@ -3148,18 +3380,28 @@ const Social = (() => {
       ? `<button type="button" class="modal-btn secondary" id="spmd-del-media-btn">Remove Media Only</button>`
       : `<button type="button" class="modal-btn secondary" id="spmd-del-media-btn" disabled title="Media-only post: delete full post instead" style="opacity:.5;cursor:not-allowed">Remove Media Only</button>`;
 
-    overlay.innerHTML = `<div class="spd-inner">
+    overlay.innerHTML = `<div class="spd-inner spmd-mode">
       <button class="social-close-btn" onclick="Social.closePostDetail()" style="position:absolute;top:8px;right:8px;z-index:1">✕</button>
       <div style="margin:0 0 10px 0;font-size:13px;color:#9aa;line-height:1.45">
         Choose how to delete this media.
       </div>
       ${renderFeedPost(post)}
-      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding-top:8px">
+      <div id="spmd-actions" style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding:10px 16px;margin:10px -16px -16px;position:sticky;bottom:-16px;z-index:2;background:linear-gradient(180deg,rgba(17,17,17,.15),rgba(17,17,17,.96) 22%,rgba(17,17,17,.98));border-top:1px solid #262626;backdrop-filter:blur(2px)">
         ${mediaBtn}
         <button type="button" class="modal-btn primary" id="spmd-del-post-btn" style="background:#b3261e;color:#fff">Delete Full Post</button>
       </div>
     </div>`;
     overlay.style.display = 'flex';
+
+    // Ensure users see the action buttons immediately even on long posts.
+    requestAnimationFrame(() => {
+      const panel = overlay.querySelector('.spd-inner');
+      const actions = document.getElementById('spmd-actions');
+      if (!panel || !actions) return;
+      const target = Math.max(0, actions.offsetTop - panel.clientHeight + actions.clientHeight + 20);
+      panel.scrollTop = target;
+      setTimeout(() => { panel.scrollTop = target; }, 40);
+    });
 
     const mediaBtnEl = document.getElementById('spmd-del-media-btn');
     const postBtnEl = document.getElementById('spmd-del-post-btn');
@@ -4230,6 +4472,9 @@ const Social = (() => {
     switchMusicScope, switchMusicSort,
     openMusicShareModal, closeMusicShareModal,
     _closeMusicShareModal, _submitMusicShare,
+    // Reels
+    loadReelsTab, switchReelsScope, switchReelsSort,
+    toggleReelMute, openReelReactPicker, _reelPickEmoji,
     // Activity / notifications
     loadActivity, markAllActivityRead, openActivityItem,
     handleSocialNotification, refreshActivityBadge, _onLogin, _onLogout,

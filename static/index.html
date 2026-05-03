@@ -4913,6 +4913,138 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   .msb-footer{padding:12px 14px}
   .msb-art{width:48px; height:48px; font-size:20px}
 }
+
+/* ─── Reels tab ────────────────────────────────────────────────────────────── */
+/* Scope bar (All / Friends) */
+.reels-scope-bar{
+  display:flex;align-items:center;gap:8px;padding:10px 14px 6px;
+  border-bottom:1px solid #1e1e1e;background:#0a0a0a;position:sticky;top:0;z-index:10
+}
+.rsb-pill{
+  padding:5px 16px;border-radius:999px;font-size:13px;font-weight:600;border:none;
+  background:#1a1a1a;color:#888;cursor:pointer;transition:background .15s,color .15s
+}
+.rsb-pill.active{background:#1a3a1a;color:#4caf50}
+.rsb-pill:hover:not(.active){color:#e0e0e0}
+.rsb-sort{display:flex;gap:6px;margin-left:auto}
+.rsb-sort-chip{
+  padding:4px 12px;border-radius:999px;font-size:12px;font-weight:600;border:none;
+  background:#181818;color:#777;cursor:pointer;transition:background .15s,color .15s
+}
+.rsb-sort-chip.active{background:#1a3a1a;color:#4caf50}
+.rsb-sort-chip:hover:not(.active){color:#ccc}
+
+/* Snap scroll container */
+.reels-snap{
+  display:flex;flex-direction:column;
+  overflow-y:scroll;scroll-snap-type:y mandatory;
+  height:calc(100vh - 108px);        /* full-bleed below topbar+scopebar */
+  scrollbar-width:none;-ms-overflow-style:none
+}
+.reels-snap::-webkit-scrollbar{display:none}
+
+/* Individual reel card */
+.reel-card{
+  position:relative;flex:0 0 100%;scroll-snap-align:start;
+  display:flex;align-items:center;justify-content:center;
+  background:#000;min-height:calc(100vh - 108px);overflow:hidden
+}
+.reel-card video{
+  width:100%;height:100%;object-fit:contain;max-height:calc(100vh - 108px)
+}
+/* Gradient overlays */
+.reel-overlay-top{
+  position:absolute;top:0;left:0;right:0;height:90px;pointer-events:none;
+  background:linear-gradient(to bottom,rgba(0,0,0,.65),transparent)
+}
+.reel-overlay-bottom{
+  position:absolute;bottom:0;left:0;right:0;height:180px;pointer-events:none;
+  background:linear-gradient(to top,rgba(0,0,0,.72),transparent)
+}
+/* Author info (bottom-left) */
+.reel-author{
+  position:absolute;bottom:72px;left:14px;display:flex;align-items:center;gap:10px;
+  max-width:calc(100% - 80px);cursor:pointer
+}
+.reel-author-avatar{
+  width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;
+  border:2px solid #fff;background:#1a2a1a
+}
+.reel-author-info{display:flex;flex-direction:column;gap:2px}
+.reel-author-nick{
+  font-size:14px;font-weight:700;color:#fff;
+  text-shadow:0 1px 6px rgba(0,0,0,.7);line-height:1.2
+}
+.reel-friend-label{
+  font-size:11px;color:#aaa;line-height:1;
+  display:flex;align-items:center;gap:4px
+}
+.reel-caption{
+  position:absolute;bottom:20px;left:14px;right:72px;
+  font-size:13px;color:#e8e8e8;line-height:1.45;
+  text-shadow:0 1px 5px rgba(0,0,0,.7);
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden
+}
+/* Action bar (right side, Instagram-style) */
+.reel-actions{
+  position:absolute;bottom:60px;right:12px;
+  display:flex;flex-direction:column;align-items:center;gap:18px
+}
+.reel-act-btn{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  background:none;border:none;cursor:pointer;color:#fff;padding:0
+}
+.reel-act-icon{
+  width:44px;height:44px;border-radius:50%;
+  background:rgba(255,255,255,.12);backdrop-filter:blur(4px);
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;transition:transform .12s,background .15s
+}
+.reel-act-btn:hover .reel-act-icon{
+  background:rgba(255,255,255,.22);transform:scale(1.1)
+}
+.reel-act-btn.liked .reel-act-icon{color:#ff5b7f}
+.reel-act-count{
+  font-size:12px;font-weight:600;color:#fff;
+  text-shadow:0 1px 4px rgba(0,0,0,.7)
+}
+/* Mute button */
+.reel-mute-btn{
+  position:absolute;top:14px;right:14px;
+  width:38px;height:38px;border-radius:50%;
+  background:rgba(0,0,0,.45);backdrop-filter:blur(4px);
+  border:none;cursor:pointer;font-size:18px;color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s
+}
+.reel-mute-btn:hover{background:rgba(0,0,0,.65)}
+/* Empty / loading states */
+.reels-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-height:340px;gap:12px;padding:40px 20px;text-align:center;color:#888
+}
+.reels-empty-icon{font-size:52px;opacity:.5;line-height:1}
+.reels-empty-title{font-size:16px;font-weight:700;color:#bbb}
+.reels-empty-sub{font-size:13px;max-width:380px;margin:0 auto}
+/* Reaction picker row on a reel */
+.reel-react-picker{
+  position:absolute;right:70px;bottom:120px;
+  display:flex;gap:6px;flex-direction:column;align-items:flex-end;
+  background:rgba(20,20,20,.85);backdrop-filter:blur(8px);
+  border-radius:16px;padding:10px 8px;
+  box-shadow:0 4px 24px rgba(0,0,0,.5)
+}
+.reel-react-row{display:flex;gap:4px}
+.reel-react-emoji{
+  font-size:24px;cursor:pointer;padding:4px;border-radius:50%;transition:transform .12s;
+  background:none;border:none
+}
+.reel-react-emoji:hover{transform:scale(1.25)}
+@media(max-width:520px){
+  .reels-scope-bar{padding:8px 10px 5px}
+  .reel-author{bottom:66px}
+  .reel-actions{right:8px;gap:14px}
+}
 .sf-music-card{
   display:flex;margin:8px 14px 10px;background:#0e0e0e;
   border:1px solid #2a2a2a;border-radius:12px;overflow:hidden;
@@ -7193,6 +7325,7 @@ window.ConnErr = (function(){
     <nav class="social-nav">
       <button class="social-nav-btn active" onclick="Social.switchTab('feed')" data-tab="feed">Feed</button>
       <button class="social-nav-btn" onclick="Social.switchTab('explore')" data-tab="explore">Explore</button>
+      <button class="social-nav-btn" onclick="Social.switchTab('reels')" data-tab="reels">🎞 Reels</button>
       <button class="social-nav-btn" onclick="Social.switchTab('music')" data-tab="music">Music</button>
       <button class="social-nav-btn" onclick="Social.switchTab('profile')" data-tab="profile">My Profile</button>
       <button class="social-nav-bell social-nav-activity" onclick="Social.switchTab('activity')" data-tab="activity" title="Activity" aria-label="Activity">
