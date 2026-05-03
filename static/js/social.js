@@ -2161,15 +2161,20 @@ const Social = (() => {
       revealed = true;
       _reelsRevealStage(loadToken);
     };
-    firstVideo.addEventListener('loadeddata', reveal, { once: true });
-    firstVideo.addEventListener('canplay', reveal, { once: true });
-    firstVideo.addEventListener('playing', reveal, { once: true });
-    if (firstVideo.readyState >= 2 || firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing')) {
+    const maybeReveal = () => {
+      if (firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing')) {
+        reveal();
+      }
+    };
+    firstVideo.addEventListener('loadeddata', maybeReveal, { once: true });
+    firstVideo.addEventListener('canplay', maybeReveal, { once: true });
+    firstVideo.addEventListener('playing', maybeReveal, { once: true });
+    if (firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing')) {
       reveal();
       return;
     }
-    // Keep loading from getting stuck over ready content.
-    setTimeout(reveal, 1200);
+    // Keep loading from getting stuck over content even on slow/odd decoders.
+    setTimeout(reveal, 2400);
   }
 
   function _reelsAdvanceFrom(card) {
@@ -2401,7 +2406,7 @@ const Social = (() => {
       <div class="reel-card" data-post-id="${post.id}">
         <div class="reel-loading-layer"><span class="reel-loading-dot"></span></div>
         <div class="reel-video-poster"></div>
-        <video src="${videoSrc}" loop playsinline preload="auto" muted></video>
+        <video src="${videoSrc}" playsinline preload="auto" muted></video>
         <button class="reel-play-toggle" title="Play or pause" onclick="Social.toggleReelPlayback(event,this.previousElementSibling)">▶</button>
         <div class="reel-progress"><span></span></div>
         <div class="reel-overlay-top"></div>
