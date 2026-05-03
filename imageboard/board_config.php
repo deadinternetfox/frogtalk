@@ -22,8 +22,8 @@ define('ALLOWED_TYPES', ['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 define('THUMB_WIDTH', 250);
 
 // Admin credentials — password stored as bcrypt hash (never cleartext)
-define('ADMIN_USER', 'frogadmin');
-define('ADMIN_PASS_HASH', '$2y$12$5t10KE6x1E/nQiHAQAV.C.w6R6uJDWXS9rLDhhweUnHaFL.Hp5/7S');
+define('ADMIN_USER', 'frog');
+define('ADMIN_PASS_HASH', '$2b$12$y6eaDb7rqWantrMKWiMMpuixeA05hBQPo8Ay6q5Fh1ENUk2BR9RT2');
 
 // Ensure directories
 foreach ([DATA_DIR, UPLOAD_DIR, PREVIEW_DIR] as $dir) {
