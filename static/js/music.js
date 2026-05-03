@@ -40,6 +40,8 @@ const Music = (() => {
   let _lastEmitHash = '';
   let _emitTimer = null;
   let _msHandlersBound = false;
+  let _autoAdvanceLastKey = '';
+  let _autoAdvanceLastAt = 0;
 
   // Live radio-sync probe state. We poll the iframe's actual play head
   // every ~4s while the panel is visible and audio is playing, and update
@@ -483,6 +485,9 @@ const Music = (() => {
         if (parsed.event === 'onStateChange' && typeof parsed.info === 'number') {
           const prev = _lastPlayerState;
           _lastPlayerState = parsed.info;
+          if (parsed.info === 0) {
+            try { _maybeAutoAdvanceOnEnded(); } catch {}
+          }
           const wasPlaying = (prev === 1);
           const nowPlaying = (parsed.info === 1);
           // Reconcile _paused to YT ground truth on every state change.
@@ -1736,11 +1741,37 @@ const Music = (() => {
   }
 
   async function skip() {
+    const expectedTrackId = (arguments.length > 0) ? arguments[0] : null;
     if (!_room) return;
+    const body = (Number.isInteger(expectedTrackId) && expectedTrackId > 0)
+      ? { expected_track_id: expectedTrackId }
+      : null;
     const res = await fetch(`/api/rooms/${encodeURIComponent(_room)}/queue/skip`, {
-      method: 'POST', headers: { 'X-Session-Token': State.token }
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': State.token,
+      },
+      body: JSON.stringify(body || {}),
     });
     if (res.ok) { _state = await _fetchState(_room); _render(); }
+  }
+
+  function _maybeAutoAdvanceOnEnded() {
+    const q = (_state && _state.queue) || [];
+    const cur = q[0];
+    if (!_room || !cur) return;
+    if (!_state || !_state.can_control) return;
+    if (q.length < 2) return;
+    if ((cur.provider || '') !== 'youtube') return;
+
+    const key = `${_room}:${cur.id}`;
+    const now = Date.now();
+    if (key === _autoAdvanceLastKey && (now - _autoAdvanceLastAt) < 6000) return;
+    _autoAdvanceLastKey = key;
+    _autoAdvanceLastAt = now;
+
+    skip(parseInt(cur.id, 10) || null).catch(() => {});
   }
 
   async function clearQueue() {

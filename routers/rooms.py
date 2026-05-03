@@ -101,6 +101,10 @@ class ReorderRoomsRequest(BaseModel):
     order: list[str]
 
 
+class MusicSkipRequest(BaseModel):
+    expected_track_id: Optional[int] = None
+
+
 @router.post("/reorder")
 async def reorder_rooms(body: ReorderRoomsRequest,
                         current_user: dict = Depends(get_current_user)):
@@ -818,12 +822,26 @@ async def music_delete_track(room_name: str, track_id: int,
 
 
 @router.post("/{room_name}/queue/skip")
-async def music_skip(room_name: str, current_user: dict = Depends(get_current_user)):
+async def music_skip(room_name: str,
+                     body: Optional[MusicSkipRequest] = None,
+                     current_user: dict = Depends(get_current_user)):
     """Mark the current head track as played, advancing the queue."""
     is_admin = bool(current_user.get("is_admin"))
     if not _can_control(room_name, current_user["id"], is_admin):
         return JSONResponse(status_code=403, content={"error": "Only DJs or mods can skip"})
     current = db.music_get_current(room_name)
+    # Optional stale guard for client-side auto-advance: only skip when the
+    # caller still sees this exact head track. Prevents multi-client races.
+    expected_id = None
+    if body is not None and body.expected_track_id is not None:
+        try:
+            expected_id = int(body.expected_track_id)
+        except Exception:
+            expected_id = None
+    if expected_id is not None:
+        current_id = int(current["id"]) if current else None
+        if current_id != expected_id:
+            return {"ok": False, "stale": True, "skipped": None}
     if current:
         db.music_mark_played(current["id"], room_name)
     next_current = db.music_get_current(room_name)
