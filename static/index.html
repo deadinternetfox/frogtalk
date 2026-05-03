@@ -4997,16 +4997,19 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 /* Gradient overlays */
 .reel-overlay-top{
   position:absolute;top:0;left:0;right:0;height:90px;pointer-events:none;
-  background:linear-gradient(to bottom,rgba(0,0,0,.65),transparent)
+  background:linear-gradient(to bottom,rgba(0,0,0,.65),transparent);
+  z-index:2
 }
 .reel-overlay-bottom{
   position:absolute;bottom:0;left:0;right:0;height:180px;pointer-events:none;
-  background:linear-gradient(to top,rgba(0,0,0,.72),transparent)
+  background:linear-gradient(to top,rgba(0,0,0,.72),transparent);
+  z-index:2
 }
 /* Author info (bottom-left) */
 .reel-author{
   position:absolute;bottom:72px;left:14px;display:flex;align-items:center;gap:10px;
-  max-width:calc(100% - 80px);cursor:pointer
+  max-width:calc(100% - 80px);cursor:pointer;
+  z-index:3
 }
 .reel-author-avatar{
   width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;
@@ -5025,12 +5028,14 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   position:absolute;bottom:20px;left:14px;right:72px;
   font-size:13px;color:#e8e8e8;line-height:1.45;
   text-shadow:0 1px 5px rgba(0,0,0,.7);
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+  z-index:3
 }
 /* Action bar (right side, Instagram-style) */
 .reel-actions{
   position:absolute;bottom:60px;right:12px;
-  display:flex;flex-direction:column;align-items:center;gap:18px
+  display:flex;flex-direction:column;align-items:center;gap:18px;
+  z-index:3
 }
 .reel-act-btn{
   display:flex;flex-direction:column;align-items:center;gap:3px;
@@ -5057,7 +5062,8 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   background:rgba(0,0,0,.45);backdrop-filter:blur(4px);
   border:none;cursor:pointer;font-size:18px;color:#fff;
   display:flex;align-items:center;justify-content:center;
-  transition:background .15s
+  transition:background .15s;
+  z-index:3
 }
 .reel-mute-btn:hover{background:rgba(0,0,0,.65)}
 /* Empty / loading states */

@@ -1927,9 +1927,11 @@ const Social = (() => {
       const poster = card.querySelector('.reel-video-poster');
       const prog = card.querySelector('.reel-progress > span');
       if (!video) return;
+      let posterDrawn = false;
 
       const drawPoster = () => {
         try {
+          if (posterDrawn) return;
           if (!poster || !video.videoWidth || !video.videoHeight) return;
           const c = document.createElement('canvas');
           const maxW = 320;
@@ -1940,10 +1942,22 @@ const Social = (() => {
           ctx.drawImage(video, 0, 0, c.width, c.height);
           poster.style.backgroundImage = `url(${c.toDataURL('image/jpeg', 0.72)})`;
           card.classList.add('is-ready');
+          posterDrawn = true;
         } catch {}
       };
 
       video.addEventListener('loadeddata', drawPoster, { once: true });
+      video.addEventListener('canplay', drawPoster);
+      video.addEventListener('seeked', drawPoster);
+      video.addEventListener('loadedmetadata', () => {
+        try {
+          if (!Number.isFinite(video.duration) || video.duration <= 0.12) return;
+          if (video.currentTime > 0) return;
+          video.currentTime = Math.min(0.12, Math.max(0.06, video.duration / 10));
+        } catch {}
+      }, { once: true });
+      try { video.load(); } catch {}
+
       video.addEventListener('timeupdate', () => {
         if (!prog || !video.duration) return;
         prog.style.width = `${Math.min(100, Math.max(0, (video.currentTime / video.duration) * 100))}%`;
@@ -2045,7 +2059,7 @@ const Social = (() => {
     return `
       <div class="reel-card" data-post-id="${post.id}">
         <div class="reel-video-poster"></div>
-        <video src="${videoSrc}" loop playsinline preload="metadata" muted></video>
+        <video src="${videoSrc}" loop playsinline preload="auto" muted></video>
         <button class="reel-play-toggle" title="Play or pause" onclick="Social.toggleReelPlayback(event,this.previousElementSibling)">▶</button>
         <div class="reel-progress"><span></span></div>
         <div class="reel-overlay-top"></div>
