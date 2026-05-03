@@ -2278,10 +2278,27 @@ const Social = (() => {
         try { video.currentTime = ratio * video.duration; } catch {}
       };
       if (progWrap) {
+        const snap = progWrap.closest('.reels-snap');
+        let restoreSnapType = '';
+        let restoreOverflowY = '';
+        const lockSnapScroll = () => {
+          if (!snap) return;
+          restoreSnapType = snap.style.scrollSnapType || '';
+          restoreOverflowY = snap.style.overflowY || '';
+          snap.style.scrollSnapType = 'none';
+          snap.style.overflowY = 'hidden';
+        };
+        const unlockSnapScroll = () => {
+          if (!snap) return;
+          snap.style.scrollSnapType = restoreSnapType;
+          snap.style.overflowY = restoreOverflowY;
+        };
+
         progWrap.addEventListener('pointerdown', (e) => {
           e.preventDefault();
           e.stopPropagation();
           seeking = true;
+          lockSnapScroll();
           try { progWrap.setPointerCapture(e.pointerId); } catch {}
           seekFromClientX(e.clientX);
         });
@@ -2294,10 +2311,20 @@ const Social = (() => {
           if (!seeking) return;
           seeking = false;
           try { progWrap.releasePointerCapture(e.pointerId); } catch {}
-          seekFromClientX(e.clientX);
+          if (typeof e.clientX === 'number') seekFromClientX(e.clientX);
+          unlockSnapScroll();
         };
         progWrap.addEventListener('pointerup', stopSeek);
-        progWrap.addEventListener('pointercancel', () => { seeking = false; });
+        progWrap.addEventListener('pointercancel', () => { seeking = false; unlockSnapScroll(); });
+        // Fallback: keep scrubbing even if pointer leaves the progress bar.
+        document.addEventListener('pointermove', (e) => {
+          if (!seeking) return;
+          seekFromClientX(e.clientX);
+        }, { passive: true });
+        document.addEventListener('pointerup', (e) => {
+          if (!seeking) return;
+          stopSeek(e);
+        }, { passive: true });
         progWrap.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -2312,6 +2339,7 @@ const Social = (() => {
           e.preventDefault();
           e.stopPropagation();
           touchSeeking = true;
+          lockSnapScroll();
           seekFromClientX(t.clientX);
         }, { passive: false });
         progWrap.addEventListener('touchmove', (e) => {
@@ -2326,9 +2354,22 @@ const Social = (() => {
           const t = e.changedTouches && e.changedTouches[0];
           touchSeeking = false;
           if (t) seekFromClientX(t.clientX);
+          unlockSnapScroll();
         };
         progWrap.addEventListener('touchend', stopTouchSeek, { passive: true });
-        progWrap.addEventListener('touchcancel', () => { touchSeeking = false; }, { passive: true });
+        progWrap.addEventListener('touchcancel', () => { touchSeeking = false; unlockSnapScroll(); }, { passive: true });
+        // Fallback: continue touch scrub while finger moves off element.
+        document.addEventListener('touchmove', (e) => {
+          if (!touchSeeking) return;
+          const t = e.changedTouches && e.changedTouches[0];
+          if (!t) return;
+          e.preventDefault();
+          seekFromClientX(t.clientX);
+        }, { passive: false });
+        document.addEventListener('touchend', (e) => {
+          if (!touchSeeking) return;
+          stopTouchSeek(e);
+        }, { passive: true });
       }
       video.addEventListener('play', () => card.classList.add('is-playing'));
       video.addEventListener('pause', () => card.classList.remove('is-playing'));
