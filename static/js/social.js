@@ -2048,7 +2048,7 @@ const Social = (() => {
             if (!vid) return;
             if (entry.isIntersecting) {
               if (_reelsIsSeekLocked()) return;
-              _reelsActivateCard(entry.target, { reset: true });
+              _reelsActivateCard(entry.target, { reset: false });
             } else {
               try { vid.pause(); } catch {}
               entry.target.classList.remove('is-playing');
@@ -2146,7 +2146,7 @@ const Social = (() => {
     }
     if (!best) return;
     if (best !== _reelsCurrentCard) {
-      _reelsActivateCard(best, { reset: true });
+      _reelsActivateCard(best, { reset: false });
       return;
     }
     if (_reelsCurrentVideo && _reelsCurrentVideo.paused && _reelsUserPausedCard !== _reelsCurrentCard) {
