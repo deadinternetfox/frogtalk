@@ -4112,7 +4112,6 @@ const Social = (() => {
       const data = await res.json();
       const comments = data.comments || [];
       let html = '';
-      html += _commentContextBlock(postId);
       if (comments.length === 0) {
         html += '<div style="color:#666;font-size:12px;padding:8px 0;text-align:center">No comments yet</div>';
       } else {
@@ -4457,16 +4456,6 @@ const Social = (() => {
     const nick = (root.querySelector('.reel-author-nick')?.textContent || '').replace(/^@+/, '').trim();
     const text = (root.querySelector('.reel-caption')?.textContent || '').trim();
     return { nick, text };
-  }
-
-  function _commentContextBlock(postId) {
-    const ctx = _postContext(postId);
-    const snippet = _shareSnippet(ctx.text, 220);
-    if (!snippet) return '';
-    return `<div class="sf-comments-context">
-      <div class="sf-comments-label">Description${ctx.nick ? ` · @${esc(ctx.nick)}` : ''}</div>
-      <div class="sf-comments-desc">${esc(snippet)}</div>
-    </div>`;
   }
 
   function reelShareUrl(postId) {
