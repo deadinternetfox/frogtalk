@@ -267,6 +267,11 @@ input, select {
   border-color: rgba(255, 106, 106, 0.6);
   color: #ffd3d3;
 }
+.mini-badge-local {
+  border-color: rgba(118, 201, 255, 0.45);
+  color: #d9f3ff;
+  background: rgba(12, 29, 38, 0.88);
+}
 .node-name-row {
   display: flex;
   gap: 6px;
@@ -287,6 +292,42 @@ input, select {
   margin-top: 4px;
   font-size: 11px;
   color: var(--muted);
+}
+.node-id-row {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.node-id-label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7da490;
+}
+.node-id {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid #274233;
+  border-radius: 999px;
+  background: rgba(10, 19, 13, 0.78);
+  color: #d3ead9;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.node-actions-cell {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.node-actions-cell .btn {
+  min-width: 112px;
+  justify-content: center;
+  text-align: center;
 }
 .node-status-line {
   display: flex;
@@ -498,6 +539,9 @@ input, select {
   }
   .nodes-table td[data-label="Action"] .btn {
     flex: 1 1 120px;
+  }
+  .node-actions-cell .btn {
+    min-width: 0;
   }
 }
 @keyframes panelRise {
