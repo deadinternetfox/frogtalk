@@ -3669,6 +3669,8 @@ def get_public_channels(category: str = None, search: str = None,
             FROM rooms r
             JOIN users u ON r.owner_id = u.id
             WHERE r.is_public=1
+              AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
+                  >= datetime('now', '-30 days')
         """
         params = []
         if category:
@@ -3916,6 +3918,8 @@ def get_suggested_channels(user_id: int, limit: int = 10) -> List[Dict]:
             FROM rooms r
             JOIN users u ON r.owner_id = u.id
             WHERE r.is_public=1
+                            AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
+                                    >= datetime('now', '-30 days')
               AND r.id NOT IN (SELECT room_id FROM room_members WHERE user_id=?)
             ORDER BY member_count DESC
             LIMIT ?
@@ -3951,6 +3955,8 @@ def get_new_public_channels(limit: int = 10) -> List[Dict]:
             FROM rooms r
             JOIN users u ON r.owner_id = u.id
             WHERE r.is_public=1
+              AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
+                  >= datetime('now', '-30 days')
             ORDER BY r.id DESC
             LIMIT ?
         """, (limit,)).fetchall()
