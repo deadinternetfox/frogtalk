@@ -28,6 +28,7 @@ const Social = (() => {
   let _bgPrefetchRic = 0;                // handle for pending background cache-warm callback
   const _socialApiTimeoutMs = 12000;     // fail-fast guard so tabs don't appear stuck forever
   let _reactionButtonDelegated = false;
+  let _tabLoadUiPulseIndex = 0;
 
   // ── helpers ──────────────────────────────────────────────────────────────
   const esc = s => UI.escHtml(s);
@@ -606,18 +607,50 @@ const Social = (() => {
     }
     const token = ++_tabLoadUiToken;
     _setTabLoadUi(tab, 8, label, detail || 'Preparing content…');
-    _tabLoadUiWatchdog = setTimeout(() => {
+    _tabLoadUiPulseIndex = 0;
+
+    const pulseHints = {
+      feed: [
+        'Downloading newest posts…',
+        'Hydrating story and suggestion blocks…',
+        'Finalizing feed cards…',
+      ],
+      explore: [
+        'Downloading ranked explore posts…',
+        'Resolving channels and previews…',
+        'Finalizing explore layout…',
+      ],
+      music: [
+        'Downloading music shares…',
+        'Filtering tracks and moods…',
+        'Finalizing playlist layout…',
+      ],
+      reels: [
+        'Downloading reels and metadata…',
+        'Preparing autoplay and snap state…',
+        'Finalizing reel stage…',
+      ],
+    };
+
+    const pulse = () => {
       if (token !== _tabLoadUiToken) return;
       const el = document.getElementById('social-load-banner');
-      if (!el) return;
-      const timedOutTab = el.dataset.tab || _currentTab;
-      _setTabLoadUi(timedOutTab, 100, 'Loaded', 'Showing available content');
-      el.classList.add('done');
-      setTimeout(() => {
-        if (token !== _tabLoadUiToken) return;
-        el.classList.remove('show');
-      }, 180);
-    }, 15000);
+      if (!el || !el.classList.contains('show')) return;
+      const activeTab = String(el.dataset.tab || tab || _currentTab || 'feed');
+      const curPct = Math.max(8, Number(el.dataset.pct || 8));
+      if (curPct >= 98) {
+        _tabLoadUiWatchdog = setTimeout(pulse, 2200);
+        return;
+      }
+      const nextPct = Math.min(97, curPct + (curPct < 70 ? 4 : (curPct < 88 ? 2 : 1)));
+      const hints = pulseHints[activeTab] || pulseHints.feed;
+      const hint = hints[_tabLoadUiPulseIndex % hints.length];
+      _tabLoadUiPulseIndex += 1;
+      _setTabLoadUi(activeTab, nextPct, el.dataset.label || 'Loading', hint);
+      _tabLoadUiWatchdog = setTimeout(pulse, 2200);
+    };
+
+    _tabLoadUiWatchdog = setTimeout(pulse, 2600);
     return token;
   }
 
@@ -1931,6 +1964,17 @@ const Social = (() => {
     const content = document.getElementById('social-content');
     if (!content) return;
     const loadUi = _beginTabLoadUi('feed', 'Opening feed', 'Checking cache…');
+    const smoothStepTimers = [];
+    const queueLoadStep = (delayMs, pct, label, detail) => {
+      const t = setTimeout(() => {
+        if (_currentTab !== 'feed') return;
+        _updateTabLoadUi(loadUi, pct, label, detail);
+      }, Math.max(0, Number(delayMs) || 0));
+      smoothStepTimers.push(t);
+    };
+    const clearQueuedSteps = () => {
+      while (smoothStepTimers.length) clearTimeout(smoothStepTimers.pop());
+    };
     let paintedFeed = false;
     const force = !!opts.force;
     const cached = !force && _cacheFresh(_feedCache) ? (_feedCache.posts || []) : null;
@@ -1944,6 +1988,10 @@ const Social = (() => {
     }
     try {
       _updateTabLoadUi(loadUi, 28, 'Connecting to server', 'Sending feed request…');
+      queueLoadStep(240, 34, 'Connecting to server', 'Negotiating feed session…');
+      queueLoadStep(620, 40, 'Downloading feed', 'Receiving post payloads…');
+      queueLoadStep(1080, 46, 'Downloading feed', 'Decoding feed timeline…');
+      queueLoadStep(1680, 52, 'Processing feed', 'Preparing cards and reactions…');
       // Fire all three requests in parallel — stories and suggested don't depend on feed data.
       const feedReqPromise = _apiOkJson('/api/social/feed?lite=1&limit=24', { posts: [] });
       const storiesEarlyPromise = _withTimeout(loadStoriesBar());
@@ -1952,6 +2000,7 @@ const Social = (() => {
       );
       _updateTabLoadUi(loadUi, 44, 'Downloading feed', 'Receiving latest posts from server…');
       const feedData = await feedReqPromise;
+      clearQueuedSteps();
       const posts = feedData.posts || [];
       _feedCache = { ts: Date.now(), posts };
       if (_currentTab !== 'feed') return;
@@ -1997,10 +2046,12 @@ const Social = (() => {
 
       await Promise.allSettled([storiesPromise, suggestedPromise]);
     } catch {
+      clearQueuedSteps();
       if (!cached && _currentTab === 'feed') {
         content.innerHTML = '<div class="social-empty">Could not load feed</div>';
       }
     } finally {
+      clearQueuedSteps();
       // Guard against a stale skeleton lingering after a timeout/race where no
       // real feed content was ever painted.
       if (_currentTab === 'feed' && !paintedFeed) {
@@ -2102,6 +2153,17 @@ const Social = (() => {
     const content = document.getElementById('social-content');
     if (!content) return;
     const loadUi = _beginTabLoadUi('explore', 'Opening explore', `Checking ${_exploreSort} cache…`);
+    const smoothStepTimers = [];
+    const queueLoadStep = (delayMs, pct, label, detail) => {
+      const t = setTimeout(() => {
+        if (_currentTab !== 'explore') return;
+        _updateTabLoadUi(loadUi, pct, label, detail);
+      }, Math.max(0, Number(delayMs) || 0));
+      smoothStepTimers.push(t);
+    };
+    const clearQueuedSteps = () => {
+      while (smoothStepTimers.length) clearTimeout(smoothStepTimers.pop());
+    };
     const force = !!opts.force;
     const cacheKey = String(_exploreSort || 'trending');
     const cachedEntry = !force ? _exploreCache.get(cacheKey) : null;
@@ -2116,11 +2178,16 @@ const Social = (() => {
     }
     try {
       _updateTabLoadUi(loadUi, 30, 'Connecting to server', `Sending ${_exploreSort} explore request…`);
+      queueLoadStep(220, 36, 'Connecting to server', 'Negotiating explore request…');
+      queueLoadStep(620, 42, 'Downloading posts', `Downloading ${_exploreSort} results…`);
+      queueLoadStep(1080, 50, 'Downloading posts', 'Processing ranking payload…');
+      queueLoadStep(1620, 58, 'Processing posts', 'Preparing cards and media metadata…');
       const postsReq = _apiOkJson(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`, { posts: [] });
       const channelsReq = api('/api/directory/new').catch(() => null);
 
       _updateTabLoadUi(loadUi, 46, 'Downloading posts', `Fetching ${_exploreSort} ranked posts…`);
       const postsData = await postsReq;
+      clearQueuedSteps();
       const posts = postsData.posts || [];
       _updateTabLoadUi(loadUi, 68, 'Loading channels', `${posts.length} post${posts.length !== 1 ? 's' : ''} received — fetching channels…`);
 
@@ -2137,10 +2204,12 @@ const Social = (() => {
       _renderExploreContent(content, posts, channels);
       _animateSocialSwap(content);
     } catch {
+      clearQueuedSteps();
       if (!cached && _currentTab === 'explore') {
         content.innerHTML = '<div class="social-empty">Could not load explore</div>';
       }
     } finally {
+      clearQueuedSteps();
       _schedBgPrefetch('explore');
       _finishTabLoadUi(loadUi);
     }
@@ -4115,6 +4184,17 @@ const Social = (() => {
     const content = document.getElementById('social-content');
     if (!content) return;
     const loadUi = _beginTabLoadUi('music', 'Opening music tab', 'Checking music cache…');
+    const smoothStepTimers = [];
+    const queueLoadStep = (delayMs, pct, label, detail) => {
+      const t = setTimeout(() => {
+        if (_currentTab !== 'music' || loadToken !== _musicTabLoadToken) return;
+        _updateTabLoadUi(loadUi, pct, label, detail);
+      }, Math.max(0, Number(delayMs) || 0));
+      smoothStepTimers.push(t);
+    };
+    const clearQueuedSteps = () => {
+      while (smoothStepTimers.length) clearTimeout(smoothStepTimers.pop());
+    };
     const loadToken = ++_musicTabLoadToken;
     content.innerHTML = _musicSkeletonHtml(_musicTabScope, _musicTabSort);
     try {
@@ -4131,12 +4211,17 @@ const Social = (() => {
       } else {
         _updateTabLoadUi(loadUi, 32, 'Connecting to server', `Fetching ${_musicTabScope === 'explore' ? 'all public' : 'your'} shared tracks…`);
         _updateTabLoadUi(loadUi, 46, 'Downloading tracks', _musicTabScope === 'explore' ? `Explore · ${_musicTabSort} — receiving posts…` : 'Feed — receiving your posts…');
+        queueLoadStep(220, 40, 'Connecting to server', 'Negotiating music feed request…');
+        queueLoadStep(620, 48, 'Downloading tracks', 'Receiving track posts and metadata…');
+        queueLoadStep(1080, 54, 'Downloading tracks', 'Parsing music sources…');
+        queueLoadStep(1640, 60, 'Processing tracks', 'Preparing playlist candidates…');
         let feedData;
         if (_musicTabScope === 'explore') {
           feedData = await _apiOkJson(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`, { posts: [] });
         } else {
           feedData = await _apiOkJson(`/api/social/feed?lite=1&limit=100${moodQuery}`, { posts: [] });
         }
+        clearQueuedSteps();
         if (_currentTab !== 'music' || loadToken !== _musicTabLoadToken) return;
         const seen = new Set();
         all = [];
@@ -4278,8 +4363,10 @@ const Social = (() => {
       // the "Now playing" strip at the top of the tab.
       _applyMusicState();
     } catch {
+      clearQueuedSteps();
       content.innerHTML = '<div class="social-empty">Could not load music shares</div>';
     } finally {
+      clearQueuedSteps();
       _schedBgPrefetch('music');
       _finishTabLoadUi(loadUi);
     }
