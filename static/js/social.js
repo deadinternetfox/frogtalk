@@ -8,7 +8,12 @@ const Social = (() => {
   let _profileData = null;
   let _feedCache = null;
   const _exploreCache = new Map();
-  const _tabCacheTtlMs = 12000;
+  const _tabCacheTtlMs = 20000;
+  let _activityCache = null;
+  const _reelsCache = new Map();
+  const _musicCache = new Map();
+  const _profileCache = new Map();
+  let _tabLoadUiToken = 0;
   let _reelsLoadToken = 0;
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -229,8 +234,75 @@ const Social = (() => {
     return !!(entry && (Date.now() - Number(entry.ts || 0) < _tabCacheTtlMs));
   }
 
-  function _socialLoadingHtml(label = 'Loading…', tone = 'default') {
-    return `<div class="social-loading social-loading-fun ${tone === 'reels' ? 'is-reels' : ''}">${esc(label)}</div>`;
+  function _socialLoadingHtml(label = 'Loading…', tone = 'default', variant = '') {
+    const cls = ['social-loading', 'social-loading-fun'];
+    if (tone === 'reels') cls.push('is-reels');
+    if (variant === 'compact') cls.push('social-loading-compact');
+    return `<div class="${cls.join(' ')}">${esc(label)}</div>`;
+  }
+
+  function _withTimeout(promise, timeoutMs = 3200) {
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  }
+
+  function _setTabLoadUi(tab, percent, label, detail) {
+    const overlay = document.getElementById('social-overlay');
+    if (!overlay) return;
+    let el = document.getElementById('social-load-banner');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'social-load-banner';
+      el.innerHTML = `
+        <div class="slb-head">
+          <span class="slb-title"></span>
+          <span class="slb-pct"></span>
+        </div>
+        <div class="slb-detail"></div>
+        <div class="slb-track"><span class="slb-fill"></span></div>`;
+      overlay.appendChild(el);
+    }
+    const pct = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+    el.dataset.tab = String(tab || '');
+    el.classList.remove('done');
+    el.classList.add('show');
+    const titleEl = el.querySelector('.slb-title');
+    const pctEl = el.querySelector('.slb-pct');
+    const detailEl = el.querySelector('.slb-detail');
+    const fillEl = el.querySelector('.slb-fill');
+    if (titleEl) titleEl.textContent = label || 'Loading';
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (detailEl) detailEl.textContent = detail || 'Preparing content…';
+    if (fillEl) fillEl.style.width = `${pct}%`;
+  }
+
+  function _beginTabLoadUi(tab, label, detail) {
+    const token = ++_tabLoadUiToken;
+    _setTabLoadUi(tab, 8, label, detail || 'Preparing content…');
+    return token;
+  }
+
+  function _updateTabLoadUi(token, percent, label, detail) {
+    if (token !== _tabLoadUiToken) return;
+    _setTabLoadUi(_currentTab, percent, label, detail);
+  }
+
+  function _finishTabLoadUi(token) {
+    if (token !== _tabLoadUiToken) return;
+    _setTabLoadUi(_currentTab, 100, 'Loaded', 'Ready');
+    const doneToken = token;
+    setTimeout(() => {
+      if (doneToken !== _tabLoadUiToken) return;
+      const el = document.getElementById('social-load-banner');
+      if (!el) return;
+      el.classList.add('done');
+      setTimeout(() => {
+        if (doneToken !== _tabLoadUiToken) return;
+        el.classList.remove('show');
+      }, 220);
+    }, 80);
   }
 
   function _socialPostSkeletonCards(count = 3) {
@@ -1497,8 +1569,8 @@ const Social = (() => {
   }
 
   // ── FEED ────────────────────────────────────────────────────────────────
-  function _renderFeedContent(content, posts) {
-    let html = `<div id="social-feed-stories">${renderStoriesBar()}</div><div id="social-feed-suggest"></div>`;
+  function _renderFeedContent(content, posts, extras = {}) {
+    let html = `<div id="social-feed-stories">${extras.storiesHtml || renderStoriesBar()}</div><div id="social-feed-suggest">${extras.suggestedHtml || ''}</div>`;
 
     if (!posts.length) {
       html += `<div class="social-empty">
@@ -1511,55 +1583,83 @@ const Social = (() => {
     }
 
     content.innerHTML = html;
-
-    // Secondary sections (stories + suggestions) load after first paint.
-    loadStoriesBar().then((storiesHtml) => {
-      if (_currentTab !== 'feed') return;
-      const el = document.getElementById('social-feed-stories');
-      if (el) el.innerHTML = storiesHtml;
-    }).catch(() => {});
-
-    api('/api/social/suggested')
-      .then(r => r.json().catch(() => ({ users: [] })))
-      .then((sugData) => {
-        if (_currentTab !== 'feed') return;
-        const el = document.getElementById('social-feed-suggest');
-        if (!el) return;
-        el.innerHTML = _renderSuggestedUsers(sugData.users || []);
-      })
-      .catch(() => {});
   }
 
   async function loadFeed(opts = {}) {
     _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
     if (!content) return;
+    const loadUi = _beginTabLoadUi('feed', 'Loading feed', 'Building skeleton');
     const force = !!opts.force;
     const cached = !force && _cacheFresh(_feedCache) ? (_feedCache.posts || []) : null;
     if (cached) {
+      _updateTabLoadUi(loadUi, 28, 'Loading feed', 'Using cached posts');
       _renderFeedContent(content, cached);
     } else {
       content.innerHTML = _feedSkeletonHtml();
     }
     try {
+      _updateTabLoadUi(loadUi, 42, 'Loading feed posts', 'Fetching latest posts');
       const feedRes = await api('/api/social/feed?lite=1&limit=24');
       const feedData = await feedRes.json();
       const posts = feedData.posts || [];
       _feedCache = { ts: Date.now(), posts };
       if (_currentTab !== 'feed') return;
+      _updateTabLoadUi(loadUi, 62, 'Rendering feed', `${posts.length} posts`);
       _renderFeedContent(content, posts);
       _animateSocialSwap(content);
+
+      let storiesDone = false;
+      let suggestDone = false;
+      const refreshFeedSubresources = () => {
+        const doneCount = (storiesDone ? 1 : 0) + (suggestDone ? 1 : 0);
+        const pct = 70 + (doneCount * 15);
+        const detail = doneCount === 0
+          ? 'Loading stories and suggestions'
+          : doneCount === 1
+            ? 'Loading final feed resources'
+            : 'Feed resources ready';
+        _updateTabLoadUi(loadUi, pct, 'Loading feed resources', detail);
+      };
+      refreshFeedSubresources();
+
+      const storiesPromise = _withTimeout(loadStoriesBar()).then((storiesHtml) => {
+        if (_currentTab !== 'feed') return;
+        const el = document.getElementById('social-feed-stories');
+        if (el && typeof storiesHtml === 'string') el.innerHTML = storiesHtml;
+      }).catch(() => {}).finally(() => {
+        storiesDone = true;
+        refreshFeedSubresources();
+      });
+
+      const suggestedPromise = _withTimeout(
+        api('/api/social/suggested')
+          .then(r => r.json().catch(() => ({ users: [] })))
+          .then((sugData) => {
+            if (_currentTab !== 'feed') return;
+            const el = document.getElementById('social-feed-suggest');
+            if (!el) return;
+            el.innerHTML = _renderSuggestedUsers(sugData.users || []);
+          })
+      ).catch(() => {}).finally(() => {
+        suggestDone = true;
+        refreshFeedSubresources();
+      });
+
+      await Promise.allSettled([storiesPromise, suggestedPromise]);
     } catch {
       if (!cached && _currentTab === 'feed') {
         content.innerHTML = '<div class="social-empty">Could not load feed</div>';
       }
+    } finally {
+      _finishTabLoadUi(loadUi);
     }
   }
 
   // ── EXPLORE ─────────────────────────────────────────────────────────────
   let _exploreSort = 'trending';
 
-  function _renderExploreContent(content, posts) {
+  function _renderExploreContent(content, posts, channels = []) {
     let html = `<div class="explore-toolbar">
       <div class="explore-tabs">
         <button class="explore-tab ${_exploreSort==='trending'?'active':''}" onclick="Social.loadExplore('trending')">🔥 Trending</button>
@@ -1610,34 +1710,25 @@ const Social = (() => {
     }
 
     content.innerHTML = html;
-
-    // Channels are secondary to post discovery; load them after paint.
-    api('/api/directory/new')
-      .then(r => r.json().catch(() => ({ channels: [] })))
-      .then((channelsData) => {
-        if (_currentTab !== 'explore') return;
-        const newChannels = channelsData.channels || [];
-        const host = document.getElementById('explore-channels-host');
-        if (!host || newChannels.length === 0) return;
-        const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
-        host.innerHTML = `<div class="explore-channels-section">
-          <div class="explore-section-head">
-            <span class="explore-section-title">📺 New Channels</span>
-            <button class="explore-section-link" onclick="showChannelDirectory()">View all →</button>
-          </div>
-          <div class="explore-channels-scroll">${newChannels.slice(0, 8).map(ch => {
-            const iconHtml = ch.icon && ch.icon.startsWith('data:image')
-              ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
-              : esc(ch.icon || '💬');
-            return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
-              <div class="explore-channel-icon">${iconHtml}</div>
-              <div class="explore-channel-name">${esc(ch.name)}</div>
-              <div class="explore-channel-meta">${catIcons[ch.category]||''} ${ch.member_count || 0} members</div>
-            </div>`;
-          }).join('')}</div>
+    const host = document.getElementById('explore-channels-host');
+    if (!host || !channels.length) return;
+    const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
+    host.innerHTML = `<div class="explore-channels-section">
+      <div class="explore-section-head">
+        <span class="explore-section-title">📺 New Channels</span>
+        <button class="explore-section-link" onclick="showChannelDirectory()">View all →</button>
+      </div>
+      <div class="explore-channels-scroll">${channels.slice(0, 8).map(ch => {
+        const iconHtml = ch.icon && ch.icon.startsWith('data:image')
+          ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+          : esc(ch.icon || '💬');
+        return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
+          <div class="explore-channel-icon">${iconHtml}</div>
+          <div class="explore-channel-name">${esc(ch.name)}</div>
+          <div class="explore-channel-meta">${catIcons[ch.category]||''} ${ch.member_count || 0} members</div>
         </div>`;
-      })
-      .catch(() => {});
+      }).join('')}</div>
+    </div>`;
   }
 
   async function loadExplore(sort, opts = {}) {
@@ -1645,27 +1736,46 @@ const Social = (() => {
     if (sort) _exploreSort = sort;
     const content = document.getElementById('social-content');
     if (!content) return;
+    const loadUi = _beginTabLoadUi('explore', 'Loading explore', `Preparing ${_exploreSort} view`);
     const force = !!opts.force;
     const cacheKey = String(_exploreSort || 'trending');
     const cachedEntry = !force ? _exploreCache.get(cacheKey) : null;
     const cached = _cacheFresh(cachedEntry) ? (cachedEntry.posts || []) : null;
+    const cachedChannels = _cacheFresh(cachedEntry) ? (cachedEntry.channels || []) : [];
     if (cached) {
-      _renderExploreContent(content, cached);
+      _updateTabLoadUi(loadUi, 26, 'Loading explore', 'Using cached posts');
+      _renderExploreContent(content, cached, cachedChannels);
     } else {
       content.innerHTML = _exploreSkeletonHtml();
     }
     try {
-      const postsRes = await api(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`);
-      const postsData = await postsRes.json();
+      _updateTabLoadUi(loadUi, 42, 'Loading explore posts', `Fetching ${_exploreSort} posts`);
+      const postsReq = api(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`);
+      const channelsReq = api('/api/directory/new').catch(() => null);
+
+      const postsRes = await postsReq;
+      const postsData = await postsRes.json().catch(() => ({ posts: [] }));
       const posts = postsData.posts || [];
-      _exploreCache.set(cacheKey, { ts: Date.now(), posts });
+      _updateTabLoadUi(loadUi, 68, 'Loading explore resources', `${posts.length} posts ready`);
+
+      let channels = [];
+      const channelsRes = await channelsReq;
+      if (channelsRes && channelsRes.ok) {
+        const channelsData = await channelsRes.json().catch(() => ({ channels: [] }));
+        channels = channelsData.channels || [];
+      }
+
+      _exploreCache.set(cacheKey, { ts: Date.now(), posts, channels });
       if (_currentTab !== 'explore') return;
-      _renderExploreContent(content, posts);
+      _updateTabLoadUi(loadUi, 88, 'Rendering explore', `Posts + ${channels.length} channels`);
+      _renderExploreContent(content, posts, channels);
       _animateSocialSwap(content);
     } catch {
       if (!cached && _currentTab === 'explore') {
         content.innerHTML = '<div class="social-empty">Could not load explore</div>';
       }
+    } finally {
+      _finishTabLoadUi(loadUi);
     }
   }
 
@@ -1677,6 +1787,7 @@ const Social = (() => {
   async function loadProfile(nickname) {
     if (!nickname) nickname = State.user?.nickname;
     _profileUser = nickname;
+    const loadUi = _beginTabLoadUi('profile', 'Loading profile', `Fetching @${nickname}`);
     const content = document.getElementById('social-content');
     content.innerHTML = `
       <div class="social-profile fade-in">
@@ -1692,14 +1803,25 @@ const Social = (() => {
         <div style="padding:16px">${skelList(3, 36)}</div>
       </div>`;
     try {
-      const res = await api('/api/social/profile/' + encodeURIComponent(nickname));
-      if (!res.ok) { content.innerHTML = '<div class="social-empty">User not found</div>'; return; }
-      const u = await res.json();
+      const cacheKey = String(nickname || '').toLowerCase();
+      const cachedEntry = _profileCache.get(cacheKey);
+      let u = null;
+      if (_cacheFresh(cachedEntry) && cachedEntry.profile) {
+        u = cachedEntry.profile;
+        _updateTabLoadUi(loadUi, 44, 'Loading profile', 'Using cached profile');
+      } else {
+        _updateTabLoadUi(loadUi, 44, 'Loading profile', `Requesting @${nickname}`);
+        const res = await api('/api/social/profile/' + encodeURIComponent(nickname));
+        if (!res.ok) { content.innerHTML = '<div class="social-empty">User not found</div>'; return; }
+        u = await res.json();
+        _profileCache.set(cacheKey, { ts: Date.now(), profile: u });
+      }
       _profileData = u;
 
       // Fallback: if self profile says no story but stories feed includes
       // own active stories, patch story_status so ring remains visible.
       if (u.is_self && (!u.story_status || !u.story_status.count)) {
+        _updateTabLoadUi(loadUi, 66, 'Loading profile stories', 'Checking story ring status');
         try {
           const sr = await api('/api/social/stories');
           if (sr.ok) {
@@ -1748,6 +1870,8 @@ const Social = (() => {
         </div>`;
         return;
       }
+
+      _updateTabLoadUi(loadUi, 86, 'Rendering profile', 'Preparing wall and tabs');
 
       content.innerHTML = `
       <div class="social-profile fade-in">
@@ -1811,6 +1935,8 @@ const Social = (() => {
       loadProfilePosts(nickname, 'wall');
     } catch {
       content.innerHTML = '<div class="social-empty">Could not load profile</div>';
+    } finally {
+      _finishTabLoadUi(loadUi);
     }
   }
 
@@ -2108,6 +2234,7 @@ const Social = (() => {
     _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
     if (!content) return;
+    const loadUi = _beginTabLoadUi('reels', 'Loading reels', 'Preparing reels shell');
     const loadToken = ++_reelsLoadToken;
     _teardownReels();
 
@@ -2125,13 +2252,32 @@ const Social = (() => {
         </div>
       </div>`;
 
-    content.innerHTML = _reelsSkeletonHtml(scope, sort);
+    const cacheKey = `${scope}:${sort}`;
+    const cachedEntry = _reelsCache.get(cacheKey);
+    const cachedPosts = _cacheFresh(cachedEntry) ? (cachedEntry.posts || []) : null;
+    if (cachedPosts && cachedPosts.length) {
+      const cachedCards = cachedPosts.map(p => _renderReelCard(p)).join('');
+      content.innerHTML = scopeBar + `
+        <div class="reels-stage" id="reels-stage">
+          <div class="reels-snap" id="reels-snap">${cachedCards}</div>
+        </div>`;
+      _updateTabLoadUi(loadUi, 34, 'Loading reels', `Using ${cachedPosts.length} cached reels`);
+      const snap = document.getElementById('reels-snap');
+      if (snap) {
+        _initReelCards(snap);
+        _reelsAutoplayVisible();
+      }
+    } else {
+      content.innerHTML = _reelsSkeletonHtml(scope, sort);
+    }
 
     try {
+      _updateTabLoadUi(loadUi, 52, 'Loading reels list', `Scope: ${scope}, sort: ${sort}`);
       const res = await api(`/api/social/reels?scope=${scope}&sort=${sort}&limit=20`).catch(() => null);
       if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
       const data = res && res.ok ? await res.json() : { posts: [] };
       const posts = data.posts || [];
+      _reelsCache.set(cacheKey, { ts: Date.now(), posts });
 
       if (posts.length === 0) {
         content.innerHTML = scopeBar + `
@@ -2146,9 +2292,10 @@ const Social = (() => {
       }
 
       const cards = posts.map(p => _renderReelCard(p)).join('');
+      _updateTabLoadUi(loadUi, 74, 'Rendering reels', `${posts.length} reels loaded`);
       content.innerHTML = scopeBar + `
         <div class="reels-stage is-loading" id="reels-stage">
-          <div class="social-loading reels-stage-loading">Loading reels…</div>
+          <div class="social-loading reels-stage-loading">Preparing reel playback…</div>
           <div class="reels-snap" id="reels-snap">${cards}</div>
         </div>`;
       _animateSocialSwap(content);
@@ -2158,6 +2305,7 @@ const Social = (() => {
         _armReelsStageReveal(snap, loadToken);
         // Start playback immediately so users transition from loading to motion fast.
         _reelsAutoplayVisible();
+        _updateTabLoadUi(loadUi, 90, 'Loading reel media', 'Priming first playable video');
       }
 
       // IntersectionObserver: pause/play as cards scroll into/out of view
@@ -2192,6 +2340,8 @@ const Social = (() => {
       }
     } catch (e) {
       content.innerHTML = scopeBar + `<div class="reels-empty"><div class="reels-empty-icon">⚠️</div><div class="reels-empty-title">Could not load reels</div></div>`;
+    } finally {
+      _finishTabLoadUi(loadUi);
     }
   }
 
@@ -2861,7 +3011,7 @@ const Social = (() => {
 
     return `
       <div class="reel-card" data-post-id="${post.id}">
-        <div class="reel-loading-layer"><span class="reel-loading-dot"></span></div>
+        <div class="reel-loading-layer"><span class="reel-loading-spinner"></span></div>
         <div class="reel-video-poster"></div>
         <video src="${videoSrc}" playsinline preload="auto" muted></video>
         <button class="reel-play-toggle" title="Play or pause" onclick="Social.toggleReelPlayback(event,this.previousElementSibling)">▶</button>
@@ -3398,25 +3548,36 @@ const Social = (() => {
   async function loadMusicTab() {
     const content = document.getElementById('social-content');
     if (!content) return;
+    const loadUi = _beginTabLoadUi('music', 'Loading music tab', 'Preparing music skeleton');
     content.innerHTML = _musicSkeletonHtml(_musicTabScope, _musicTabSort);
     try {
       // Scope-driven fetch:
       //   following → own + followed posts (via /feed)
       //   explore   → all public posts (via /explore, sortable)
       const moodQuery = _musicTabMood ? `&mood=${encodeURIComponent(_musicTabMood)}` : '';
-      let fetchRes;
-      if (_musicTabScope === 'explore') {
-        fetchRes = await api(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`).catch(() => null);
+      const cacheKey = `${_musicTabScope}:${_musicTabSort}:${_musicTabMood || ''}`;
+      const cachedEntry = _musicCache.get(cacheKey);
+      let all = null;
+      if (_cacheFresh(cachedEntry) && Array.isArray(cachedEntry.posts)) {
+        all = cachedEntry.posts;
+        _updateTabLoadUi(loadUi, 34, 'Loading music tab', 'Using cached music feed');
       } else {
-        fetchRes = await api(`/api/social/feed?lite=1&limit=100${moodQuery}`).catch(() => null);
-      }
-      const feedData = fetchRes && fetchRes.ok ? await fetchRes.json() : { posts: [] };
-      const seen = new Set();
-      const all = [];
-      for (const p of (feedData.posts || [])) {
-        if (!p || seen.has(p.id)) continue;
-        seen.add(p.id);
-        all.push(p);
+        _updateTabLoadUi(loadUi, 48, 'Loading music posts', 'Fetching latest shared tracks');
+        let fetchRes;
+        if (_musicTabScope === 'explore') {
+          fetchRes = await api(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`).catch(() => null);
+        } else {
+          fetchRes = await api(`/api/social/feed?lite=1&limit=100${moodQuery}`).catch(() => null);
+        }
+        const feedData = fetchRes && fetchRes.ok ? await fetchRes.json() : { posts: [] };
+        const seen = new Set();
+        all = [];
+        for (const p of (feedData.posts || [])) {
+          if (!p || seen.has(p.id)) continue;
+          seen.add(p.id);
+          all.push(p);
+        }
+        _musicCache.set(cacheKey, { ts: Date.now(), posts: all });
       }
       const isMusic = (p) => {
         const mt = (p.media_type || '').toLowerCase();
@@ -3436,6 +3597,7 @@ const Social = (() => {
         ? musicPostsRaw
         : musicPostsRaw.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       _musicTabPosts = musicPosts;
+      _updateTabLoadUi(loadUi, 72, 'Rendering music tab', `${musicPosts.length} tracks ready`);
 
       const moodOrder = ['chill','hype','focus','party','late-night','morning','sad','romance'];
       const moodMeta = {
@@ -3547,6 +3709,8 @@ const Social = (() => {
       _applyMusicState();
     } catch {
       content.innerHTML = '<div class="social-empty">Could not load music shares</div>';
+    } finally {
+      _finishTabLoadUi(loadUi);
     }
   }
 
@@ -4227,7 +4391,7 @@ const Social = (() => {
     if (!el) return;
     if (el.style.display !== 'none') { el.style.display = 'none'; return; }
     el.style.display = 'block';
-    el.innerHTML = '<div style="color:#666;font-size:12px;padding:8px 0">Loading…</div>';
+    el.innerHTML = _socialLoadingHtml('Loading comments…', 'default', 'compact');
     try {
       const res = await api(`/api/wall/posts/${postId}/comments`);
       const data = await res.json();
@@ -5278,7 +5442,7 @@ const Social = (() => {
     const titleEl = document.getElementById('sul-title');
     const listEl = document.getElementById('sul-list');
     titleEl.textContent = title;
-    listEl.innerHTML = '<div class="social-loading">Loading…</div>';
+    listEl.innerHTML = _socialLoadingHtml('Loading list…', 'default', 'compact');
     overlay.classList.remove('hidden');
     try {
       const res = await api(url);
@@ -5582,6 +5746,7 @@ const Social = (() => {
     const content = document.getElementById('social-content');
     if (!content) return;
     if (_activityLoading) return;
+    const loadUi = _beginTabLoadUi('activity', 'Loading activity', 'Fetching notifications');
     _activityLoading = true;
     content.innerHTML = `
       <div class="social-activity-wrap">
@@ -5598,10 +5763,21 @@ const Social = (() => {
         </div>
       </div>`;
     try {
+      if (_cacheFresh(_activityCache)) {
+        _activityList = _activityCache.notifications || [];
+        _activityUnread = Number(_activityCache.unread || 0);
+        _renderActivityList();
+        const cachedMarkBtn = document.getElementById('social-activity-mark');
+        if (cachedMarkBtn) cachedMarkBtn.disabled = _activityUnread === 0;
+        _updateTabLoadUi(loadUi, 34, 'Loading activity', 'Using cached notifications');
+      }
+
+      _updateTabLoadUi(loadUi, 62, 'Loading activity', 'Refreshing latest notifications');
       const res = await api('/api/social/notifications?limit=60', 'GET');
       const data = res.ok ? await res.json() : { notifications: [], unread: 0 };
       _activityList = data.notifications || [];
       _activityUnread = Number(data.unread || 0);
+      _activityCache = { ts: Date.now(), notifications: _activityList.slice(), unread: _activityUnread };
       _renderActivityList();
       const markBtn = document.getElementById('social-activity-mark');
       if (markBtn) markBtn.disabled = _activityUnread === 0;
@@ -5621,6 +5797,7 @@ const Social = (() => {
       if (list) list.innerHTML = `<div class="social-activity-empty"><div class="ring">⚠️</div><div class="ttl">Could not load activity</div><div class="sub">Check your connection and try again.</div><div class="actions"><button class="btn primary" onclick="Social.switchTab('activity')">Retry</button></div></div>`;
     } finally {
       _activityLoading = false;
+      _finishTabLoadUi(loadUi);
     }
   }
 
