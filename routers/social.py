@@ -322,6 +322,7 @@ async def suggested_users(current_user: dict = Depends(get_current_user)):
 @router.get("/posts/{post_id}/media")
 async def get_post_media(
     post_id: int,
+    request: Request,
     token: Optional[str] = Query(None),
     x_session_token: Optional[str] = Header(None, alias="X-Session-Token"),
     authorization: Optional[str] = Header(None, alias="Authorization"),
@@ -377,15 +378,60 @@ async def get_post_media(
             if ";base64" in header:
                 raw = base64.b64decode(b64, validate=False)
                 ct = header[5:].split(";", 1)[0] or media_type
+                total = len(raw)
+                base_headers = {
+                    "Cache-Control": "private, max-age=86400, immutable",
+                    "Accept-Ranges": "bytes",
+                    "X-Content-Type-Options": "nosniff",
+                    "Vary": "X-Session-Token, Authorization",
+                }
+                range_header = (request.headers.get("range") or "").strip()
+                if range_header.lower().startswith("bytes=") and total > 0:
+                    try:
+                        spec = range_header[6:].split(",", 1)[0].strip()
+                        start_s, end_s = spec.split("-", 1)
+                        if start_s == "":
+                            # Suffix range: bytes=-N
+                            suffix = int(end_s)
+                            if suffix <= 0:
+                                raise ValueError("invalid suffix range")
+                            start = max(total - suffix, 0)
+                            end = total - 1
+                        else:
+                            start = int(start_s)
+                            end = int(end_s) if end_s else (total - 1)
+
+                        if start < 0 or end < start:
+                            raise ValueError("invalid range bounds")
+                        if start >= total:
+                            return Response(
+                                status_code=416,
+                                headers={
+                                    **base_headers,
+                                    "Content-Range": f"bytes */{total}",
+                                    "Content-Length": "0",
+                                },
+                            )
+
+                        end = min(end, total - 1)
+                        chunk = raw[start:end + 1]
+                        return Response(
+                            content=chunk,
+                            status_code=206,
+                            media_type=ct,
+                            headers={
+                                **base_headers,
+                                "Content-Range": f"bytes {start}-{end}/{total}",
+                                "Content-Length": str(len(chunk)),
+                            },
+                        )
+                    except Exception:
+                        # Malformed Range header; serve full content.
+                        pass
                 return Response(
                     content=raw,
                     media_type=ct,
-                    headers={
-                        "Cache-Control": "private, max-age=86400, immutable",
-                        "Content-Length": str(len(raw)),
-                        "X-Content-Type-Options": "nosniff",
-                        "Vary": "X-Session-Token, Authorization",
-                    },
+                    headers={**base_headers, "Content-Length": str(total)},
                 )
         except Exception:
             _log.debug("post media decode failed pid=%s", post_id, exc_info=True)
