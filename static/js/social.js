@@ -2769,7 +2769,7 @@ const Social = (() => {
             <div class="reel-act-icon">${post.i_reposted ? '🔁' : '↩️'}</div>
             <span class="reel-act-count reel-repost-count">${repostCount}</span>
           </button>
-          <button class="reel-act-btn ${canShare ? '' : 'disabled'}" title="Share" onclick="Social.shareReelUrl(${post.id}, { nickname: ${jsStr(rawNick)}, privacy: ${jsStr(postPrivacy)}, shareEnabled: ${shareEnabled ? 1 : 0} })">
+          <button class="reel-act-btn ${canShare ? '' : 'disabled'}" title="Share" onclick="Social.shareReelUrl(${post.id}, { nickname: ${jsStr(rawNick)}, privacy: ${jsStr(postPrivacy)}, shareEnabled: ${shareEnabled ? 1 : 0}, text: ${jsStr(post.content || '')} })">
             <div class="reel-act-icon">📤</div>
             <span class="reel-act-count">Share</span>
           </button>
@@ -3899,7 +3899,7 @@ const Social = (() => {
     const shareBtnHtml = !canAudienceShare
       ? ''
       : (shareEnabled
-        ? `<button type="button" class="sf-react-btn" title="Share post" aria-label="Share post" onclick="Social.sharePostUrl(${p.id}, { nickname: '${escNick}', privacy: '${esc(postPrivacy)}', shareEnabled: 1 })">📤</button>`
+        ? `<button type="button" class="sf-react-btn" title="Share post" aria-label="Share post" onclick="Social.sharePostUrl(${p.id}, { nickname: '${escNick}', privacy: '${esc(postPrivacy)}', shareEnabled: 1, text: ${jsStr(postText)} })">📤</button>`
         : `<button type="button" class="sf-react-btn" title="Share disabled" aria-label="Share disabled" disabled><span style="text-decoration:line-through;opacity:.75">📤</span></button>`);
 
     return `
@@ -4112,6 +4112,7 @@ const Social = (() => {
       const data = await res.json();
       const comments = data.comments || [];
       let html = '';
+      html += _commentContextBlock(postId);
       if (comments.length === 0) {
         html += '<div style="color:#666;font-size:12px;padding:8px 0;text-align:center">No comments yet</div>';
       } else {
@@ -4435,6 +4436,39 @@ const Social = (() => {
     return `${window.location.origin}/p/${safeId}`;
   }
 
+  function _shareSnippet(raw, maxLen = 140) {
+    const text = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    if (text.length <= maxLen) return text;
+    return `${text.slice(0, Math.max(0, maxLen - 1)).trim()}…`;
+  }
+
+  function _postContext(postId) {
+    const root = document.querySelector(`.sf-post[data-post-id="${Number(postId)}"]`);
+    if (!root) return { nick: '', text: '' };
+    const nick = (root.querySelector('.sf-post-nick')?.textContent || '').replace(/^@+/, '').trim();
+    const text = (root.querySelector('.sf-post-text')?.textContent || '').trim();
+    return { nick, text };
+  }
+
+  function _reelContext(postId) {
+    const root = document.querySelector(`.reel-card[data-post-id="${Number(postId)}"]`);
+    if (!root) return { nick: '', text: '' };
+    const nick = (root.querySelector('.reel-author-nick')?.textContent || '').replace(/^@+/, '').trim();
+    const text = (root.querySelector('.reel-caption')?.textContent || '').trim();
+    return { nick, text };
+  }
+
+  function _commentContextBlock(postId) {
+    const ctx = _postContext(postId);
+    const snippet = _shareSnippet(ctx.text, 220);
+    if (!snippet) return '';
+    return `<div class="sf-comments-context">
+      <div class="sf-comments-label">Description${ctx.nick ? ` · @${esc(ctx.nick)}` : ''}</div>
+      <div class="sf-comments-desc">${esc(snippet)}</div>
+    </div>`;
+  }
+
   function reelShareUrl(postId) {
     const id = Number(postId);
     const safeId = Number.isFinite(id) && id > 0 ? id : 0;
@@ -4444,7 +4478,8 @@ const Social = (() => {
   async function sharePostUrl(postId, meta = {}) {
     const privacy = String(meta.privacy || 'public').toLowerCase();
     const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
-    const nick = meta.nickname || 'user';
+    const ctx = _postContext(postId);
+    const nick = meta.nickname || ctx.nick || 'user';
     if (!shareEnabled) {
       try { UI.showToast('Share link is disabled for this post', 'info'); } catch {}
       return;
@@ -4456,6 +4491,8 @@ const Social = (() => {
     const url = privacy === 'followers'
       ? `${window.location.origin}/app?post=${encodeURIComponent(String(postId))}`
       : postShareUrl(postId);
+    const snippet = _shareSnippet(meta.text || meta.content || ctx.text, 140);
+    const shareText = snippet || `Check out this FrogTalk post by @${nick}`;
     if (privacy === 'followers') {
       try { UI.showToast('Followers-only link copied: viewer must be logged in with access', 'info'); } catch {}
     }
@@ -4463,7 +4500,7 @@ const Social = (() => {
       if (navigator.share) {
         await navigator.share({
           title: `Post by @${nick} on FrogTalk`,
-          text: `Check out this FrogTalk post by @${nick}`,
+          text: shareText,
           url,
         });
         return;
@@ -4482,7 +4519,8 @@ const Social = (() => {
   async function shareReelUrl(postId, meta = {}) {
     const privacy = String(meta.privacy || 'public').toLowerCase();
     const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
-    const nick = meta.nickname || 'user';
+    const ctx = _reelContext(postId);
+    const nick = meta.nickname || ctx.nick || 'user';
     if (!shareEnabled) {
       try { UI.showToast('Share link is disabled for this reel', 'info'); } catch {}
       return;
@@ -4494,6 +4532,8 @@ const Social = (() => {
     const url = privacy === 'followers'
       ? `${window.location.origin}/?reel=${encodeURIComponent(String(postId))}`
       : reelShareUrl(postId);
+    const snippet = _shareSnippet(meta.text || meta.content || ctx.text, 140);
+    const shareText = snippet || `Check out this FrogTalk reel by @${nick}`;
     if (privacy === 'followers') {
       try { UI.showToast('Followers-only reel link copied: viewer must be logged in with access', 'info'); } catch {}
     }
@@ -4501,7 +4541,7 @@ const Social = (() => {
       if (navigator.share) {
         await navigator.share({
           title: `Reel by @${nick} on FrogTalk`,
-          text: `Check out this FrogTalk reel by @${nick}`,
+          text: shareText,
           url,
         });
         return;

@@ -13,6 +13,31 @@ let mainWindow = null;
 let tray = null;
 let _isClosingWindow = false;
 
+async function stopRendererMedia(win) {
+  if (!win || win.isDestroyed()) return;
+  try { win.webContents.setAudioMuted(true); } catch {}
+  try {
+    await win.webContents.executeJavaScript(`(() => {
+      try {
+        const media = document.querySelectorAll('video, audio');
+        media.forEach((el) => {
+          try { el.pause(); } catch {}
+          try { el.muted = true; } catch {}
+          try { el.removeAttribute('autoplay'); } catch {}
+          try { el.currentTime = 0; } catch {}
+        });
+      } catch {}
+      try {
+        if (window.Social && typeof window.Social.switchTab === 'function') {
+          window.Social.switchTab('feed');
+        }
+      } catch {}
+      try { window.dispatchEvent(new Event('frogtalk-desktop-before-close')); } catch {}
+      return true;
+    })()`, true);
+  } catch {}
+}
+
 function readAuthSnapshot() {
   try {
     return JSON.parse(fs.readFileSync(AUTH_SNAPSHOT_PATH, 'utf8')) || null;
@@ -259,18 +284,25 @@ function createWindow() {
     }
   } catch {}
 
-  // Close button minimizes to tray so calls/messages can still arrive.
-  // Use tray menu "Quit" (or OS quit) for a full exit.
+  // X should fully close the desktop app; before quit, force-stop all media.
   mainWindow.on('close', async (e) => {
-    if (app.isQuitting || _isClosingWindow) return;
+    if (app.isQuitting) {
+      try { await stopRendererMedia(mainWindow); } catch {}
+      return;
+    }
+    if (_isClosingWindow) return;
     e.preventDefault();
+    _isClosingWindow = true;
+    try { await stopRendererMedia(mainWindow); } catch {}
     try {
       await snapshotAuthFromRenderer(mainWindow);
     } catch {}
     try {
       await mainWindow.webContents.session.flushStorageData();
     } catch {}
-    try { mainWindow.hide(); } catch {}
+    app.isQuitting = true;
+    try { mainWindow.destroy(); } catch {}
+    try { app.quit(); } catch {}
   });
 
   mainWindow.on('closed', () => {
@@ -313,4 +345,7 @@ app.on('activate', () => {
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.setAudioMuted(true); } catch {}
+  }
 });

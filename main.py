@@ -745,6 +745,8 @@ async def serve_post_landing(post_id: int):
     nick = post.get("nickname") or "frog"
     content = (post.get("content") or "").strip()
     desc = content.replace("\n", " ").strip()[:180] or f"A public post by @{nick} on FrogTalk."
+    title_snippet = content.replace("\n", " ").strip()[:72]
+    title = f"{title_snippet} - @{nick} on FrogTalk" if title_snippet else f"Post by @{nick} on FrogTalk"
     media_data = post.get("media_data") or ""
     media_type = (post.get("media_type") or "").lower()
     og_image = "https://frogtalk.xyz/static/icons/og-image.png"
@@ -772,13 +774,13 @@ async def serve_post_landing(post_id: int):
     html = f"""<!DOCTYPE html>
 <html><head>
 <meta charset=\"utf-8\">
-<title>Post by @{_og_escape(nick)} on FrogTalk</title>
+<title>{_og_escape(title)}</title>
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <meta name=\"description\" content=\"{_og_escape(desc)}\">
 <link rel=\"canonical\" href=\"{canonical}\">
 <meta property=\"og:type\" content=\"article\">
 <meta property=\"og:site_name\" content=\"FrogTalk\">
-<meta property=\"og:title\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
+<meta property=\"og:title\" content=\"{_og_escape(title)}\">
 <meta property=\"og:description\" content=\"{_og_escape(desc)}\">
 <meta property=\"og:image\" content=\"{_og_escape(og_image)}\">
 <meta property=\"og:image:secure_url\" content=\"{_og_escape(og_image)}\">
@@ -790,7 +792,7 @@ async def serve_post_landing(post_id: int):
 <meta property=\"og:url\" content=\"{canonical}\">
 <meta name=\"twitter:card\" content=\"summary_large_image\">
 <meta name=\"twitter:site\" content=\"@frogtalk\">
-<meta name=\"twitter:title\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
+<meta name=\"twitter:title\" content=\"{_og_escape(title)}\">
 <meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
 <meta name=\"twitter:image\" content=\"{_og_escape(og_image)}\">
 <meta name=\"twitter:image:alt\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
@@ -911,6 +913,8 @@ async def serve_reel_landing(post_id: int):
     nick = post.get("nickname") or "frog"
     content = (post.get("content") or "").strip()
     desc = content.replace("\n", " ").strip()[:180] or f"A public reel by @{nick} on FrogTalk."
+    title_snippet = content.replace("\n", " ").strip()[:72]
+    title = f"{title_snippet} - @{nick} on FrogTalk" if title_snippet else f"Reel by @{nick} on FrogTalk"
     canonical = f"https://frogtalk.xyz/r/{post_id}"
     media_url = f"https://frogtalk.xyz/r/{post_id}/media"
     avatar = post.get("avatar") or ""
@@ -923,13 +927,13 @@ async def serve_reel_landing(post_id: int):
     html = f"""<!DOCTYPE html>
 <html><head>
 <meta charset=\"utf-8\">
-<title>Reel by @{_og_escape(nick)} on FrogTalk</title>
+<title>{_og_escape(title)}</title>
 <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <meta name=\"description\" content=\"{_og_escape(desc)}\">
 <link rel=\"canonical\" href=\"{canonical}\">
 <meta property=\"og:type\" content=\"video.other\">
 <meta property=\"og:site_name\" content=\"FrogTalk\">
-<meta property=\"og:title\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
+<meta property=\"og:title\" content=\"{_og_escape(title)}\">
 <meta property=\"og:description\" content=\"{_og_escape(desc)}\">
 <meta property=\"og:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
 <meta property=\"og:image:secure_url\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
@@ -944,7 +948,7 @@ async def serve_reel_landing(post_id: int):
 <meta property=\"og:url\" content=\"{canonical}\">
 <meta name=\"twitter:card\" content=\"summary_large_image\">
 <meta name=\"twitter:site\" content=\"@frogtalk\">
-<meta name=\"twitter:title\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
+<meta name=\"twitter:title\" content=\"{_og_escape(title)}\">
 <meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
 <meta name=\"twitter:image\" content=\"https://frogtalk.xyz/static/icons/og-image.png\">
 <meta name=\"twitter:image:alt\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
