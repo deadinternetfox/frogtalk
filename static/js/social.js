@@ -2077,7 +2077,8 @@ const Social = (() => {
     if (!card || !card.classList.contains('reel-card')) return;
     const reset = opts.reset !== false;
     const seekReleaseGuard = card === _reelsSeekReleaseCard && Date.now() < _reelsSeekReleaseUntil;
-    const shouldReset = (_reelsCurrentCard !== card) && reset && !seekReleaseGuard;
+    const seekLiveGuard = _reelsIsSeekLocked(card);
+    const shouldReset = (_reelsCurrentCard !== card) && reset && !seekReleaseGuard && !seekLiveGuard;
     document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
       if (c === card) return;
       const v = c.querySelector('video');
@@ -2447,7 +2448,7 @@ const Social = (() => {
           snapLockTimer = setTimeout(() => {
             seeking = false;
             touchSeeking = false;
-            _reelsEndSeek();
+            _reelsEndSeek(card);
             unlockSnapScroll();
           }, 1200);
         };
@@ -2475,9 +2476,11 @@ const Social = (() => {
           seeking = true;
           _reelsBeginSeek(card);
           wasPlayingBeforeSeek = !video.paused;
+          _reelsUserPausedCard = card;
           if (wasPlayingBeforeSeek) {
             try { video.pause(); } catch {}
           }
+          card.classList.remove('is-playing');
           lockSnapScroll();
           try { progWrap.setPointerCapture(e.pointerId); } catch {}
           seekFromClientX(e.clientX);
@@ -2497,6 +2500,7 @@ const Social = (() => {
           _reelsEndSeek(card);
           unlockSnapScroll();
           if (wasPlayingBeforeSeek && video.paused) {
+            _reelsUserPausedCard = null;
             _reelsPlayVideo(card, video);
           }
           wasPlayingBeforeSeek = false;
@@ -2507,7 +2511,10 @@ const Social = (() => {
           seeking = false;
           _reelsEndSeek(card);
           unlockSnapScroll();
-          if (wasPlayingBeforeSeek && video.paused) _reelsPlayVideo(card, video);
+          if (wasPlayingBeforeSeek && video.paused) {
+            _reelsUserPausedCard = null;
+            _reelsPlayVideo(card, video);
+          }
           wasPlayingBeforeSeek = false;
           ignoreClickUntil = Date.now() + 420;
         });
@@ -2540,9 +2547,11 @@ const Social = (() => {
           touchSeeking = true;
           _reelsBeginSeek(card);
           wasPlayingBeforeSeek = !video.paused;
+          _reelsUserPausedCard = card;
           if (wasPlayingBeforeSeek) {
             try { video.pause(); } catch {}
           }
+          card.classList.remove('is-playing');
           lockSnapScroll();
           seekFromClientX(t.clientX);
         }, { passive: false });
@@ -2563,6 +2572,7 @@ const Social = (() => {
           _reelsEndSeek(card);
           unlockSnapScroll();
           if (wasPlayingBeforeSeek && video.paused) {
+            _reelsUserPausedCard = null;
             _reelsPlayVideo(card, video);
           }
           wasPlayingBeforeSeek = false;
@@ -2573,7 +2583,10 @@ const Social = (() => {
           touchSeeking = false;
           _reelsEndSeek(card);
           unlockSnapScroll();
-          if (wasPlayingBeforeSeek && video.paused) _reelsPlayVideo(card, video);
+          if (wasPlayingBeforeSeek && video.paused) {
+            _reelsUserPausedCard = null;
+            _reelsPlayVideo(card, video);
+          }
           wasPlayingBeforeSeek = false;
           ignoreClickUntil = Date.now() + 520;
         }, { passive: true });
