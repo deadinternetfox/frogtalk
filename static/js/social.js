@@ -1914,6 +1914,7 @@ const Social = (() => {
   let _reelsSeekReleaseUntil = 0;
   let _reelsSeekReleaseCard = null;
   let _reelsUserPausedCard = null;
+  let _reelsScrubController = null;
 
   function _reelsBeginSeek(card) {
     _reelsSeekCard = card || null;
@@ -1925,7 +1926,7 @@ const Social = (() => {
   }
 
   function _reelsEndSeek(card = null) {
-    _reelsSeekLockUntil = Date.now() + 260;
+    _reelsSeekLockUntil = Date.now() + 500;
     if (card) {
       _reelsSeekReleaseCard = card;
       _reelsSeekReleaseUntil = Date.now() + 1400;
@@ -2302,6 +2303,10 @@ const Social = (() => {
   }
 
   function _teardownReels() {
+    if (_reelsScrubController) {
+      try { _reelsScrubController.abort(); } catch {}
+      _reelsScrubController = null;
+    }
     if (_reelsObserver) {
       try { _reelsObserver.disconnect(); } catch {}
       _reelsObserver = null;
@@ -2325,6 +2330,9 @@ const Social = (() => {
 
   function _initReelCards(snap) {
     _syncReelMuteUi(snap);
+    if (_reelsScrubController) { try { _reelsScrubController.abort(); } catch {} }
+    const scrubAbort = new AbortController();
+    _reelsScrubController = scrubAbort;
     const firstCardInList = snap.querySelector('.reel-card');
     snap.querySelectorAll('.reel-card').forEach(card => {
       const video = card.querySelector('video');
@@ -2438,8 +2446,6 @@ const Social = (() => {
       if (progWrap) {
         const snap = progWrap.closest('.reels-snap');
         let restoreSnapType = '';
-        let restoreOverflowY = '';
-        let restoreTouchAction = '';
         let snapLockTimer = 0;
         let wasPlayingBeforeSeek = false;
         let ignoreClickUntil = 0;
@@ -2460,8 +2466,6 @@ const Social = (() => {
         const lockSnapScroll = () => {
           if (!snap) return;
           restoreSnapType = snap.style.scrollSnapType || '';
-          restoreOverflowY = snap.style.overflowY || '';
-          restoreTouchAction = snap.style.touchAction || '';
           snap.style.scrollSnapType = 'none';
           snap.style.overflowY = 'hidden';
           snap.style.touchAction = 'none';
@@ -2470,8 +2474,8 @@ const Social = (() => {
         const unlockSnapScroll = () => {
           if (!snap) return;
           snap.style.scrollSnapType = restoreSnapType;
-          snap.style.overflowY = restoreOverflowY;
-          snap.style.touchAction = restoreTouchAction;
+          snap.style.overflowY = '';
+          snap.style.touchAction = '';
           clearLockTimer();
         };
 
@@ -2529,11 +2533,11 @@ const Social = (() => {
           armLockFailsafe();
           _reelsExtendSeekLock();
           seekFromClientX(e.clientX);
-        }, { passive: true });
+        }, { passive: true, signal: scrubAbort.signal });
         document.addEventListener('pointerup', (e) => {
           if (!seeking) return;
           stopSeek(e);
-        }, { passive: true });
+        }, { passive: true, signal: scrubAbort.signal });
         progWrap.addEventListener('click', (e) => {
           if (Date.now() < ignoreClickUntil) return;
           if (typeof e.clientX !== 'number') return;
@@ -2604,11 +2608,11 @@ const Social = (() => {
           armLockFailsafe();
           _reelsExtendSeekLock();
           seekFromClientX(t.clientX);
-        }, { passive: false });
+        }, { passive: false, signal: scrubAbort.signal });
         document.addEventListener('touchend', (e) => {
           if (!touchSeeking) return;
           stopTouchSeek(e);
-        }, { passive: true });
+        }, { passive: true, signal: scrubAbort.signal });
       }
       video.addEventListener('play', () => card.classList.add('is-playing'));
       video.addEventListener('pause', () => {
