@@ -1915,11 +1915,13 @@ const Social = (() => {
     const content = document.getElementById('social-content');
     if (!content) return;
     const loadUi = _beginTabLoadUi('feed', 'Loading feed', 'Building skeleton');
+    let paintedFeed = false;
     const force = !!opts.force;
     const cached = !force && _cacheFresh(_feedCache) ? (_feedCache.posts || []) : null;
     if (cached) {
       _updateTabLoadUi(loadUi, 28, 'Loading feed', 'Using cached posts');
       _renderFeedContent(content, cached);
+      paintedFeed = true;
     } else {
       content.innerHTML = _feedSkeletonHtml();
     }
@@ -1939,6 +1941,7 @@ const Social = (() => {
       // If storiesEarlyPromise already resolved, _storyData is populated and
       // _renderFeedContent will show the real stories bar on the first paint.
       _renderFeedContent(content, posts);
+      paintedFeed = true;
       _animateSocialSwap(content);
 
       let storiesDone = false;
@@ -1980,6 +1983,21 @@ const Social = (() => {
         content.innerHTML = '<div class="social-empty">Could not load feed</div>';
       }
     } finally {
+      // Guard against a stale skeleton lingering after a timeout/race where no
+      // real feed content was ever painted.
+      if (_currentTab === 'feed' && !paintedFeed) {
+        const hasSkeleton = !!content.querySelector('.skel-row, .skel-block, .is-skeleton');
+        if (hasSkeleton) {
+          content.innerHTML = `
+            <div class="social-empty">
+              <div style="font-size:42px;margin-bottom:10px">⏳</div>
+              <div style="font-size:16px;font-weight:600;margin-bottom:6px">Feed is taking too long</div>
+              <div style="color:#8aa08f;font-size:14px;margin-bottom:10px">Try refreshing the feed.</div>
+              <button type="button" class="explore-refresh" onclick="Social.loadFeed({force:true})" style="margin:0 auto">Retry feed</button>
+            </div>`;
+          paintedFeed = true;
+        }
+      }
       _schedBgPrefetch('feed');
       _finishTabLoadUi(loadUi);
     }
