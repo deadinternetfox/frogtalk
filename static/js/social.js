@@ -18,6 +18,9 @@ const Social = (() => {
   let _profileTabLoadToken = 0;
   let _profileActiveTab = 'wall';
   const _profilePostsCache = new Map(); // nick → { ts, posts[] } — shared by wall/music/reels/media tabs
+  const _profileChannelsCache = new Map(); // nick → { ts, channels[] }
+  const _profileRepostsCache = new Map();  // nick → { ts, posts[] }
+  let _profilePrefetchRic = 0;             // idle callback handle for profile subtab warming
   let _reelsDirectLaunchId = 0;          // set by openSharedReel to suppress scope-bar flash
   let _bgPrefetchRic = 0;                // handle for pending background cache-warm callback
 
@@ -305,10 +308,76 @@ const Social = (() => {
     _profilePostsCache.delete(String(nickname || '').toLowerCase());
   }
 
+  async function _fetchProfileChannelsCached(nickname, loadToken = null) {
+    const cacheKey = String(nickname || '').toLowerCase();
+    const cached = _profileChannelsCache.get(cacheKey);
+    if (_cacheFresh(cached)) return cached.channels;
+    const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/channels').catch(() => null);
+    if (loadToken != null && !_isProfileTabLoadCurrent('channels', loadToken)) return null;
+    if (!res || !res.ok) throw new Error('Failed to load channels');
+    const data = await res.json().catch(() => ({ channels: [] }));
+    const channels = data.channels || [];
+    _profileChannelsCache.set(cacheKey, { ts: Date.now(), channels });
+    return channels;
+  }
+
+  async function _fetchProfileRepostsCached(nickname, loadToken = null) {
+    const cacheKey = String(nickname || '').toLowerCase();
+    const cached = _profileRepostsCache.get(cacheKey);
+    if (_cacheFresh(cached)) return cached.posts;
+    const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/reposts').catch(() => null);
+    if (loadToken != null && !_isProfileTabLoadCurrent('reposts', loadToken)) return null;
+    if (!res || !res.ok) throw new Error('Failed to load reposts');
+    const data = await res.json().catch(() => ({ posts: [] }));
+    const posts = data.posts || [];
+    _profileRepostsCache.set(cacheKey, { ts: Date.now(), posts });
+    return posts;
+  }
+
+  function _schedProfilePrefetch(nickname, isSelf) {
+    if (_profilePrefetchRic) {
+      try { cancelIdleCallback(_profilePrefetchRic); } catch { clearTimeout(_profilePrefetchRic); }
+      _profilePrefetchRic = 0;
+    }
+    const nick = String(nickname || '').trim();
+    if (!nick) return;
+
+    const run = async () => {
+      _profilePrefetchRic = 0;
+      const key = nick.toLowerCase();
+      const jobs = [];
+      if (!_cacheFresh(_profilePostsCache.get(key))) {
+        jobs.push(_withTimeout(
+          api('/api/social/profile/' + encodeURIComponent(nick) + '/posts')
+            .then(r => r && r.ok ? r.json().catch(() => ({ posts: [] })) : null)
+            .then(data => {
+              if (data && Array.isArray(data.posts)) {
+                _profilePostsCache.set(key, { ts: Date.now(), posts: data.posts });
+              }
+            })
+            .catch(() => null)
+        ));
+      }
+      if (!_cacheFresh(_profileChannelsCache.get(key))) {
+        jobs.push(_withTimeout(_fetchProfileChannelsCached(nick).catch(() => null)));
+      }
+      if (!_cacheFresh(_profileRepostsCache.get(key)) && isSelf) {
+        jobs.push(_withTimeout(_fetchProfileRepostsCached(nick).catch(() => null)));
+      }
+      if (jobs.length) await Promise.allSettled(jobs);
+    };
+
+    try {
+      _profilePrefetchRic = requestIdleCallback(run, { timeout: 1200 });
+    } catch {
+      _profilePrefetchRic = setTimeout(run, 140);
+    }
+  }
+
   // Per-tab skeleton helpers for profile sub-tabs.
   function _spGridSkeletonHtml(count = 6) {
     return `<div class="social-grid">${Array.from({ length: count }).map(() =>
-      `<div class="social-grid-item skel-block" style="pointer-events:none;min-height:120px;aspect-ratio:9/14"></div>`
+      `<div class="social-grid-item" style="pointer-events:none;min-height:120px;aspect-ratio:9/14"><div class="skel-block" style="height:100%;min-height:120px;border-radius:0"></div></div>`
     ).join('')}</div>`;
   }
 
@@ -2109,6 +2178,7 @@ const Social = (() => {
 
       const wallToken = _beginProfileTabLoad('wall');
       loadProfilePosts(nickname, 'wall', wallToken);
+      _schedProfilePrefetch(nickname, isSelf);
     } catch {
       content.innerHTML = '<div class="social-empty">Could not load profile</div>';
     } finally {
@@ -3374,11 +3444,8 @@ const Social = (() => {
       container.innerHTML = `<div class="social-feed">${_socialPostSkeletonCards(3)}</div>`;
     }
     try {
-      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/reposts');
-      if (!_isProfileTabLoadCurrent('reposts', loadToken)) return;
-      const data = await res.json();
-      if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load reposts');
-      const posts = data.posts || [];
+      const posts = await _fetchProfileRepostsCached(nickname, loadToken);
+      if (posts === null || !_isProfileTabLoadCurrent('reposts', loadToken)) return;
 
       if (posts.length === 0) {
         container.innerHTML = `<div class="social-empty" style="padding:40px 0">
@@ -3481,10 +3548,8 @@ const Social = (() => {
       container.innerHTML = _spChannelsSkeletonHtml();
     }
     try {
-      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/channels');
-      if (!_isProfileTabLoadCurrent('channels', loadToken)) return;
-      const data = await res.json();
-      const channels = data.channels || [];
+      const channels = await _fetchProfileChannelsCached(nickname, loadToken);
+      if (channels === null || !_isProfileTabLoadCurrent('channels', loadToken)) return;
 
       if (channels.length === 0) {
         container.innerHTML = `<div class="social-empty" style="padding:40px 0">
