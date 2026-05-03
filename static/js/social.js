@@ -252,6 +252,7 @@ const Social = (() => {
   function switchTab(tab) {
     if (_currentTab === 'reels' && tab !== 'reels') _teardownReels();
     _currentTab = tab;
+    try { _syncReelsMusicInterlock(); } catch {}
     // "My Profile" in the top nav should always jump to the logged-in
     // user's own profile — even if we were just viewing someone else.
     if (tab === 'profile') _profileUser = State.user?.nickname || null;
@@ -2484,6 +2485,59 @@ const Social = (() => {
   let _reelsSeekReleaseCard = null;
   let _reelsUserPausedCard = null;
   let _reelsScrubController = null;
+    let _reelsAutoPausedMusic = false;
+    let _reelsAutoPausedMusicUrl = '';
+    let _reelsMusicInterlockBusy = false;
+
+    function _clearReelsMusicInterlock() {
+      _reelsAutoPausedMusic = false;
+      _reelsAutoPausedMusicUrl = '';
+    }
+
+    function _syncReelsMusicInterlock() {
+      if (_reelsMusicInterlockBusy) return;
+      _reelsMusicInterlockBusy = true;
+      try {
+        const M = window.Music;
+        if (!M || typeof M.getCurrent !== 'function') {
+          _clearReelsMusicInterlock();
+          return;
+        }
+        const cur = M.getCurrent();
+        const onReelsWithSound = _currentTab === 'reels' && !_reelsMuted;
+        const sameTrack = !!(_reelsAutoPausedMusicUrl && cur && cur.active && cur.url === _reelsAutoPausedMusicUrl);
+
+        if (onReelsWithSound) {
+          if (!cur || !cur.active) {
+            _clearReelsMusicInterlock();
+            return;
+          }
+          if (_reelsAutoPausedMusic) {
+            if (!sameTrack) _clearReelsMusicInterlock();
+            return;
+          }
+          if (!cur.paused && typeof M.togglePauseGlobal === 'function' && M.togglePauseGlobal()) {
+            _reelsAutoPausedMusic = true;
+            _reelsAutoPausedMusicUrl = cur.url || '';
+          }
+          return;
+        }
+
+        if (!_reelsAutoPausedMusic) return;
+        if (!cur || !cur.active || !sameTrack) {
+          _clearReelsMusicInterlock();
+          return;
+        }
+        if (cur.paused && typeof M.togglePauseGlobal === 'function') {
+          M.togglePauseGlobal();
+        }
+        _clearReelsMusicInterlock();
+      } catch {
+        _clearReelsMusicInterlock();
+      } finally {
+        _reelsMusicInterlockBusy = false;
+      }
+    }
 
   function _reelsBeginSeek(card) {
     _reelsSeekCard = card || null;
@@ -3288,6 +3342,7 @@ const Social = (() => {
     // Apply to all currently rendered videos
     document.querySelectorAll('.reels-snap video').forEach(v => { v.muted = _reelsMuted; });
     _syncReelMuteUi();
+      try { _syncReelsMusicInterlock(); } catch {}
     if (btn) btn.textContent = _reelsMuted ? '🔇' : '🔊';
   }
 
@@ -4208,6 +4263,10 @@ const Social = (() => {
     try {
       if (window.Music && typeof Music.getCurrent === 'function') cur = Music.getCurrent();
     } catch {}
+    try {
+      if (cur.active) document.body.setAttribute('data-social-nowplaying', '1');
+      else document.body.removeAttribute('data-social-nowplaying');
+    } catch {}
     // Cards
     document.querySelectorAll('.sf-music-card').forEach(card => {
       const url = card.getAttribute('data-track-url') || '';
@@ -4266,6 +4325,7 @@ const Social = (() => {
             <button class="mtnp-btn mtnp-stop" onclick="Music.close()" title="Stop">✕</button>
           </div>`;
     }
+    try { _syncReelsMusicInterlock(); } catch {}
   }
 
   function _toggleNowPlaying() {

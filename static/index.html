@@ -5226,10 +5226,12 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   background:rgba(0,0,0,.45);backdrop-filter:blur(4px);
   border:none;cursor:pointer;font-size:18px;color:#fff;
   display:flex;align-items:center;justify-content:center;
-  transition:background .15s;
+  transition:background .15s,top .18s ease;
   z-index:3
 }
 .reel-mute-btn:hover{background:rgba(0,0,0,.65)}
+body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
+@media(max-width:500px){body[data-social-nowplaying="1"] .reel-mute-btn{top:72px}}
 /* Empty / loading states */
 .reels-empty{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
