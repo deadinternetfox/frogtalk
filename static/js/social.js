@@ -295,7 +295,7 @@ const Social = (() => {
         <div class="story-progress">${progress}</div>
         <div class="story-header">
           <div class="story-header-avatar">${UI.avatarEl(user.avatar, user.nickname, 32)}</div>
-          <span class="story-header-nick">${esc(user.nickname)}</span>
+          <span class="story-header-nick" onclick="event.stopPropagation();Social.openStoryProfileFromViewer('${esc(user.nickname)}')" style="cursor:pointer" title="Open profile">${esc(user.nickname)}</span>
           <span class="story-header-time">${timeAgo(story.created_at)}</span>
           <button class="story-close" onclick="event.stopPropagation();Social.closeStoryViewer()">✕</button>
         </div>
@@ -1491,10 +1491,11 @@ const Social = (() => {
         <!-- Tabs -->
         <div class="sp-tabs">
           <button class="sp-tab active" data-pt="wall" onclick="Social.switchProfileTab('wall',this)">📝 Wall</button>
-          <button class="sp-tab" data-pt="public-media" onclick="Social.switchProfileTab('public-media',this)">🌍 Public Media</button>
           <button class="sp-tab" data-pt="music" onclick="Social.switchProfileTab('music',this)">🎵 Music</button>
-          ${isSelf ? `<button class="sp-tab" data-pt="private-media" onclick="Social.switchProfileTab('private-media',this)">🔒 Private Media</button>` : ''}
           <button class="sp-tab" data-pt="channels" onclick="Social.switchProfileTab('channels',this)">📺 Channels</button>
+          ${isSelf ? `<button class="sp-tab" data-pt="reposts" onclick="Social.switchProfileTab('reposts',this)">🔁 Reposts</button>` : ''}
+          <button class="sp-tab" data-pt="reels" onclick="Social.switchProfileTab('reels',this)">🎞 Reels</button>
+          <button class="sp-tab" data-pt="media" onclick="Social.switchProfileTab('media',this)">🖼️ Media</button>
         </div>
 
         <!-- Posts area -->
@@ -1518,7 +1519,7 @@ const Social = (() => {
       if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load posts');
       const posts = data.posts || [];
 
-      if (view === 'public-media') {
+      if (view === 'public-media' || view === 'media-public') {
         // Public media = image/video posts only. Music shares have their
         // own tab — exclude them from this grid (their media_data is a URL,
         // not an image blob, so they'd render as broken thumbs here).
@@ -1589,9 +1590,158 @@ const Social = (() => {
   function switchProfileTab(tab, btn) {
     document.querySelectorAll('.sp-tab').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    if (tab === 'private-media') loadProfileMedia(_profileUser);
-    else if (tab === 'channels') loadProfileChannels(_profileUser);
+    if (tab === 'channels') loadProfileChannels(_profileUser);
+    else if (tab === 'reposts') loadProfileReposts(_profileUser);
+    else if (tab === 'reels') loadProfileReels(_profileUser);
+    else if (tab === 'media') loadProfileMediaCombined(_profileUser, 'public');
     else loadProfilePosts(_profileUser, tab);
+  }
+
+  function _profileMediaToggleHtml(nickname, mode) {
+    const isPublic = mode !== 'private';
+    const isSelf = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
+    return `
+      <div class="sp-media-toggle" style="display:flex;gap:8px;align-items:center;margin:0 0 12px 0;flex-wrap:wrap">
+        <span style="font-size:12px;opacity:.75">Media:</span>
+        <button type="button" class="sp-action-btn ${isPublic ? 'primary' : 'secondary'} sp-media-toggle-btn"
+          onclick="Social.switchProfileMediaMode('public',this)">🌍 Public</button>
+        ${isSelf ? `<button type="button" class="sp-action-btn ${!isPublic ? 'primary' : 'secondary'} sp-media-toggle-btn"
+          onclick="Social.switchProfileMediaMode('private',this)">🔒 Private</button>` : ''}
+      </div>`;
+  }
+
+  async function switchProfileMediaMode(mode, btn) {
+    try {
+      const row = btn?.closest('.sp-media-toggle');
+      row?.querySelectorAll('.sp-media-toggle-btn').forEach(b => {
+        b.classList.remove('primary');
+        if (!b.classList.contains('secondary')) b.classList.add('secondary');
+      });
+      if (btn) {
+        btn.classList.remove('secondary');
+        btn.classList.add('primary');
+      }
+    } catch {}
+    await loadProfileMediaCombined(_profileUser, mode === 'private' ? 'private' : 'public');
+  }
+
+  async function loadProfileMediaCombined(nickname, mode = 'public') {
+    const container = document.getElementById('sp-posts');
+    if (!container) return;
+    const isSelf = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
+    const safeMode = (!isSelf && mode === 'private') ? 'public' : (mode === 'private' ? 'private' : 'public');
+    const toggleHtml = _profileMediaToggleHtml(nickname, safeMode);
+    container.innerHTML = `${toggleHtml}<div class="social-loading">Loading media…</div>`;
+
+    if (safeMode === 'private') {
+      try {
+        const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/media');
+        const data = await res.json();
+        const items = data.media || [];
+
+        if (items.length === 0) {
+          container.innerHTML = `${toggleHtml}<div class="social-empty" style="padding:32px 0">
+            <div style="font-size:36px;margin-bottom:8px">🖼️</div>
+            <div style="font-size:15px;color:#888">No private media yet</div>
+            <div style="color:#666;font-size:12px;margin-top:6px">Media you send in channels shows here — only you can see it until you hit <em>Make Public</em>.</div>
+          </div>`;
+          return;
+        }
+
+        container.innerHTML = `${toggleHtml}<div class="social-media-grid">${items.map(item => {
+          const isAudio = item.media_type && item.media_type.startsWith('audio');
+          return `
+          <div class="social-media-item" data-msg-id="${item.id}">
+            <div class="social-media-thumb" onclick="Social.previewMedia(${item.id})">
+              ${isAudio
+                ? `<div class="social-media-audio-icon">🎵</div>`
+                : `<img src="/api/messages/media/${item.id}?thumb=1" alt="" loading="lazy" onerror="this.closest('.social-media-item')?.remove()">`
+              }
+              <div class="social-media-info">
+                <span>#${esc(item.room_name)}</span>
+                <span>${timeAgo(item.created_at)}</span>
+              </div>
+            </div>
+            <button class="social-media-wall-btn" onclick="Social.moveToWall(${item.id},this)" title="Post to Public Media">🌍 Make Public</button>
+          </div>`;
+        }).join('')}</div>`;
+      } catch {
+        container.innerHTML = `${toggleHtml}<div class="social-empty">Could not load private media</div>`;
+      }
+      return;
+    }
+
+    try {
+      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/posts');
+      const data = await res.json();
+      if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load posts');
+      const posts = data.posts || [];
+      const mediaPosts = posts.filter(p =>
+        p.media_data && p.privacy !== 'private' &&
+        p.media_type && (p.media_type.startsWith('image/') || p.media_type.startsWith('video/'))
+      );
+
+      if (mediaPosts.length === 0) {
+        container.innerHTML = `${toggleHtml}<div class="social-empty" style="padding:32px 0">
+          <div style="font-size:36px;margin-bottom:8px">🌍</div>
+          <div style="font-size:15px;color:#888">No public media yet</div>
+        </div>`;
+        return;
+      }
+
+      container.innerHTML = `${toggleHtml}<div class="social-grid">${mediaPosts.map(p => {
+        const isVideo = p.media_type && p.media_type.startsWith('video/');
+        const thumb = isVideo
+          ? `<video src="${esc(p.media_data)}" muted preload="metadata"></video>`
+          : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
+        return `
+          <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
+            ${thumb}
+            ${isVideo ? `<span class="social-grid-video-ico">▶</span>` : ''}
+            <div class="social-grid-overlay">
+              <span>❤️ ${p.reaction_count || 0}</span>
+              <span>💬 ${p.comment_count || 0}</span>
+            </div>
+          </div>`;
+      }).join('')}</div>`;
+    } catch {
+      container.innerHTML = `${toggleHtml}<div class="social-empty">Could not load public media</div>`;
+    }
+  }
+
+  async function loadProfileReels(_nickname) {
+    const container = document.getElementById('sp-posts');
+    if (!container) return;
+    container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+      <div style="font-size:36px;margin-bottom:8px">🎞</div>
+      <div style="font-size:15px;color:#888">Reels coming soon</div>
+      <div style="color:#666;font-size:12px;margin-top:6px">This tab is reserved for your upcoming reels feature.</div>
+    </div>`;
+  }
+
+  // ── REPOSTS tab — posts this user has reposted ──────────────────────
+  async function loadProfileReposts(nickname) {
+    const container = document.getElementById('sp-posts');
+    if (!container) return;
+    container.innerHTML = '<div class="social-loading">Loading reposts…</div>';
+    try {
+      const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + '/reposts');
+      const data = await res.json();
+      if (!res.ok || data.detail || data.error) throw new Error(data.detail || data.error || 'Failed to load reposts');
+      const posts = data.posts || [];
+
+      if (posts.length === 0) {
+        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
+          <div style="font-size:36px;margin-bottom:8px">🔁</div>
+          <div style="font-size:15px;color:#888">No reposts yet</div>
+          <div style="color:#666;font-size:12px;margin-top:6px">When you repost posts from people you follow, they'll appear here.</div>
+        </div>`;
+        return;
+      }
+      container.innerHTML = `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
+    } catch {
+      container.innerHTML = '<div class="social-empty">Could not load reposts</div>';
+    }
   }
 
   // ── MEDIA tab — channel media sent by this user ──────────────────────
@@ -2555,17 +2705,47 @@ const Social = (() => {
     const rxHtml = otherReactions.map(r =>
       `<button class="sf-reaction" onclick="Social.reactPost(${p.id},'${esc(r.emoji)}')">${r.emoji} ${r.count}</button>`
     ).join('');
+    const postPrivacy = String(p.privacy || 'public').toLowerCase();
+    const shareEnabled = Number(p.share_enabled ?? 1) === 1;
+    const canAudienceShare = (postPrivacy === 'public' || postPrivacy === 'followers');
+    const isRepostCard = String(p.feed_kind || 'post') === 'repost';
+    const repostByNick = String(p.repost_by_nickname || '').trim();
+    const repostByEsc = esc(repostByNick || p.nickname || '');
+    const repostQuote = String(p.repost_quote || '').trim();
+    const displayTime = isRepostCard ? (p.feed_sort_at || p.created_at) : p.created_at;
+    const repostCount = Number(p.repost_count || 0);
+    const iReposted = Number(p.i_reposted || 0) === 1;
+    const escNick = esc(p.nickname);
+    const repostContextHtml = isRepostCard
+      ? `<div class="sf-repost-context">
+           <span class="sf-repost-icon">🔁</span>
+           <button type="button" class="sf-repost-by" onclick="Social.openProfile('${repostByEsc}')">${repostByEsc}</button>
+           <span class="sf-repost-word">reposted</span>
+           ${repostQuote ? `<div class="sf-repost-quote">${_formatPostContent(repostQuote)}</div>` : ''}
+         </div>`
+      : '';
+    const repostBtnHtml = !canAudienceShare
+      ? ''
+      : (shareEnabled
+        ? `<button type="button" data-role="repost-toggle" class="sf-comment-btn ${iReposted ? 'liked' : ''}" title="Repost" aria-label="Repost" onclick="Social.toggleRepost(event, ${p.id}, { nickname: '${escNick}', privacy: '${esc(postPrivacy)}', shareEnabled: 1 })">🔁 ${repostCount}</button>`
+        : `<button type="button" class="sf-comment-btn" title="Repost disabled" aria-label="Repost disabled" disabled><span style="text-decoration:line-through;opacity:.75">🔁</span> ${repostCount}</button>`);
+    const shareBtnHtml = !canAudienceShare
+      ? ''
+      : (shareEnabled
+        ? `<button type="button" class="sf-react-btn" title="Share post" aria-label="Share post" onclick="Social.sharePostUrl(${p.id}, { nickname: '${escNick}', privacy: '${esc(postPrivacy)}', shareEnabled: 1 })">📤</button>`
+        : `<button type="button" class="sf-react-btn" title="Share disabled" aria-label="Share disabled" disabled><span style="text-decoration:line-through;opacity:.75">📤</span></button>`);
 
     return `
     <div class="sf-post" data-post-id="${p.id}">
+      ${repostContextHtml}
       <div class="sf-post-header">
-        <div class="sf-post-avatar" onclick="Social.openProfile('${esc(p.nickname)}')">${UI.avatarEl(p.avatar, p.nickname, 36)}</div>
-        <div class="sf-post-info" onclick="Social.openProfile('${esc(p.nickname)}')">
-          <span class="sf-post-nick">${esc(p.nickname)}</span>
-          <span class="sf-post-time">${timeAgo(p.created_at)}</span>
+        <div class="sf-post-avatar" onclick="Social.openProfile('${escNick}')">${UI.avatarEl(p.avatar, p.nickname, 36)}</div>
+        <div class="sf-post-info" onclick="Social.openProfile('${escNick}')">
+          <span class="sf-post-nick">${escNick}</span>
+          <span class="sf-post-time">${timeAgo(displayTime)}</span>
         </div>
         <button class="sf-post-menu" title="More options" aria-label="Post options"
-          data-nick="${esc(p.nickname)}" data-uid="${p.user_id}" data-pid="${p.id}" data-privacy="${esc(p.privacy || 'public')}"
+          data-nick="${escNick}" data-uid="${p.user_id}" data-pid="${p.id}" data-privacy="${esc(postPrivacy)}" data-share-enabled="${Number(p.share_enabled ?? 1)}" data-i-reposted="${iReposted ? 1 : 0}"
           onclick="event.stopPropagation();Social.openPostMenu(this)">⋯</button>
       </div>
       ${postText ? `<div class="sf-post-text ${isMusicPost ? 'is-music-caption' : ''}">${_formatPostContent(postText)}</div>` : ''}
@@ -2575,6 +2755,8 @@ const Social = (() => {
           ${iLiked ? '❤️' : '🤍'} <span>${heartCount}</span>
         </button>
         <button type="button" class="sf-comment-btn" onclick="Social.toggleComments(event, ${p.id})">💬 ${p.comment_count || 0}</button>
+        ${repostBtnHtml}
+        ${shareBtnHtml}
         <button type="button" class="sf-react-btn" onclick="Social.showReactPicker(event, ${p.id})">😊</button>
         ${rxHtml}
       </div>
@@ -2642,6 +2824,57 @@ const Social = (() => {
       }
     } finally {
       if (likeBtn) likeBtn.classList.remove('is-pending');
+    }
+  }
+
+  async function toggleRepost(ev, postId, meta = {}) {
+    try {
+      ev?.preventDefault?.();
+      ev?.stopPropagation?.();
+    } catch {}
+    const privacy = String(meta.privacy || 'public').toLowerCase();
+    const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
+    if (!shareEnabled) {
+      try { UI.showToast('Repost is disabled for this post', 'info'); } catch {}
+      return;
+    }
+    if (privacy !== 'public' && privacy !== 'followers') {
+      try { UI.showToast('Only public and followers posts can be reposted', 'info'); } catch {}
+      return;
+    }
+    const postEl = document.querySelector(`.sf-post[data-post-id="${postId}"]`);
+    const btn = postEl?.querySelector('[data-role="repost-toggle"]');
+    const prevActive = !!btn?.classList.contains('liked');
+    const countMatch = (btn?.textContent || '').match(/(\d+)\s*$/);
+    const prevCount = countMatch ? Number(countMatch[1]) : 0;
+
+    if (btn) {
+      btn.classList.toggle('liked', !prevActive);
+      const next = Math.max(0, prevCount + (!prevActive ? 1 : -1));
+      btn.innerHTML = `🔁 ${next}`;
+      btn.disabled = true;
+    }
+    try {
+      const payload = {};
+      if (typeof meta.quote === 'string') payload.quote = meta.quote;
+      const res = await api(`/api/wall/posts/${postId}/repost`, 'POST', payload);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not repost');
+      if (btn) {
+        btn.classList.toggle('liked', !!data.reposted);
+        btn.innerHTML = `🔁 ${Number(data.repost_count || 0)}`;
+      }
+      try {
+        UI.showToast(data.reposted ? (payload.quote ? 'Quote reposted' : 'Reposted') : 'Repost removed', 'success');
+      } catch {}
+    } catch (e) {
+      if (btn) {
+        btn.classList.toggle('liked', prevActive);
+        btn.innerHTML = `🔁 ${prevCount}`;
+      }
+      try { UI.showToast(e?.message || 'Could not repost', 'error'); } catch {}
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -2794,15 +3027,31 @@ const Social = (() => {
     const uid  = +btn.dataset.uid;
     const pid  = +btn.dataset.pid;
     const privacy = (btn.dataset.privacy || 'public').toLowerCase();
+    const shareEnabled = Number(btn.dataset.shareEnabled || '1') === 1;
+    const iReposted = Number(btn.dataset.iReposted || '0') === 1;
     const isOwn = uid === State.user?.id;
 
     const items = [];
     items.push({ icon: '👤', label: `View @${nick}`, onclick: () => openProfile(nick) });
-    items.push({
-      icon: '🔗',
-      label: 'Share URL',
-      onclick: () => sharePostUrl(pid, { nickname: nick, privacy })
-    });
+    if (privacy !== 'friends' && privacy !== 'private' && shareEnabled) {
+      items.push({
+        icon: '🔁',
+        label: 'Repost',
+        onclick: () => toggleRepost(null, pid, { nickname: nick, privacy, shareEnabled: 1 })
+      });
+      items.push({
+        icon: '📝',
+        label: iReposted ? 'Edit quote repost' : 'Quote repost',
+        onclick: () => openQuoteRepost(pid, { nickname: nick, privacy, shareEnabled: 1 })
+      });
+    }
+    if (privacy !== 'friends' && privacy !== 'private' && shareEnabled) {
+      items.push({
+        icon: '📤',
+        label: 'Share',
+        onclick: () => sharePostUrl(pid, { nickname: nick, privacy, shareEnabled: 1 })
+      });
+    }
     if (!isOwn) {
       items.push({ icon: '✉️', label: 'Send message', onclick: () => dmUser(nick) });
       items.push({ icon: '🚫', label: `Block @${nick}`, danger: true, onclick: () => blockUserFromSocial(nick) });
@@ -2814,8 +3063,8 @@ const Social = (() => {
       showActionSheet(`Post by @${nick}`, items);
     } else {
       // Fallback: simple confirm-based menu
-      if (confirm('Copy post link?')) {
-        sharePostUrl(pid, { nickname: nick, privacy });
+      if (privacy !== 'friends' && privacy !== 'private' && shareEnabled && confirm('Copy post link?')) {
+        sharePostUrl(pid, { nickname: nick, privacy, shareEnabled: 1 });
         return;
       }
       if (isOwn && confirm('Delete this post?')) deletePost(pid);
@@ -2830,13 +3079,22 @@ const Social = (() => {
   }
 
   async function sharePostUrl(postId, meta = {}) {
-    const url = postShareUrl(postId);
     const privacy = String(meta.privacy || 'public').toLowerCase();
+    const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
     const nick = meta.nickname || 'user';
-    if (privacy !== 'public') {
-      try {
-        UI.showToast('This post is not public - link access depends on viewer permissions', 'info');
-      } catch {}
+    if (!shareEnabled) {
+      try { UI.showToast('Share link is disabled for this post', 'info'); } catch {}
+      return;
+    }
+    if (privacy === 'friends' || privacy === 'private') {
+      try { UI.showToast('Sharing is disabled for friends-only and private posts', 'info'); } catch {}
+      return;
+    }
+    const url = privacy === 'followers'
+      ? `${window.location.origin}/app?post=${encodeURIComponent(String(postId))}`
+      : postShareUrl(postId);
+    if (privacy === 'followers') {
+      try { UI.showToast('Followers-only link copied: viewer must be logged in with access', 'info'); } catch {}
     }
     try {
       if (navigator.share) {
@@ -2981,7 +3239,11 @@ const Social = (() => {
   let _newPostMediaType = null;
   let _newPostOrigMedia = null; // original unfiltered image
   let _newPostPrivacy = 'public';
+  let _newPostShareEnabled = true;
   let _newPostAllowComments = true;
+  let _newPostSubmitting = false;
+  let _quoteRepostPostId = 0;
+  let _quoteRepostMeta = null;
   let _filterState = { brightness: 100, contrast: 100, saturate: 100 };
 
   const _filterPresets = {
@@ -2995,10 +3257,12 @@ const Social = (() => {
   };
 
   function openNewPost() {
+    _newPostSubmitting = false;
     _newPostMedia = null;
     _newPostMediaType = null;
     _newPostOrigMedia = null;
     _newPostPrivacy = (localStorage.getItem('ft_default_post_privacy') || 'public');
+    _newPostShareEnabled = (localStorage.getItem('ft_default_share_link') !== '0');
     _newPostAllowComments = (localStorage.getItem('ft_default_allow_comments') !== '0');
     _filterState = { brightness: 100, contrast: 100, saturate: 100 };
     document.getElementById('social-new-post').classList.remove('hidden');
@@ -3006,8 +3270,22 @@ const Social = (() => {
     document.getElementById('snp-media-preview').style.display = 'none';
     resetFilterUI();
     setPostPrivacy(_newPostPrivacy);
+    const share = document.getElementById('snp-share-enabled');
+    if (share) share.checked = _newPostShareEnabled;
+    const schip = document.getElementById('snp-share-chip');
+    if (schip) {
+      schip.innerHTML = _newPostShareEnabled ? '📤 On' : '<span style="text-decoration:line-through">📤</span> Off';
+      schip.classList.toggle('on', _newPostShareEnabled);
+      schip.classList.toggle('off', !_newPostShareEnabled);
+    }
     const cmt = document.getElementById('snp-allow-comments');
     if (cmt) cmt.checked = _newPostAllowComments;
+    const postBtn = document.getElementById('snp-submit-btn');
+    if (postBtn) {
+      postBtn.disabled = false;
+      postBtn.textContent = 'Post';
+      postBtn.style.opacity = '';
+    }
     // Sync comments chip label to saved default (without flipping value)
     const cchip = document.getElementById('snp-comments-chip');
     if (cchip) {
@@ -3146,6 +3424,19 @@ const Social = (() => {
     }
   }
 
+  function toggleShareLink() {
+    _newPostShareEnabled = !_newPostShareEnabled;
+    localStorage.setItem('ft_default_share_link', _newPostShareEnabled ? '1' : '0');
+    const cb = document.getElementById('snp-share-enabled');
+    if (cb) cb.checked = _newPostShareEnabled;
+    const chip = document.getElementById('snp-share-chip');
+    if (chip) {
+      chip.innerHTML = _newPostShareEnabled ? '📤 On' : '<span style="text-decoration:line-through">📤</span> Off';
+      chip.classList.toggle('on', _newPostShareEnabled);
+      chip.classList.toggle('off', !_newPostShareEnabled);
+    }
+  }
+
   function applyFilterToImage(dataUrl) {
     // Apply CSS filters to canvas and return filtered data URL
     return new Promise(resolve => {
@@ -3170,15 +3461,27 @@ const Social = (() => {
   }
 
   async function submitNewPost() {
+    if (_newPostSubmitting) return;
     const text = document.getElementById('snp-text').value.trim();
     if (!text && !_newPostMedia) return;
+    _newPostSubmitting = true;
+    const postBtn = document.getElementById('snp-submit-btn');
+    if (postBtn) {
+      postBtn.disabled = true;
+      postBtn.textContent = 'Posting…';
+      postBtn.style.opacity = '.75';
+    }
     const cmtEl = document.getElementById('snp-allow-comments');
     const allowCmt = cmtEl ? !!cmtEl.checked : _newPostAllowComments;
+    const shareEl = document.getElementById('snp-share-enabled');
+    const shareEnabled = shareEl ? !!shareEl.checked : _newPostShareEnabled;
     localStorage.setItem('ft_default_allow_comments', allowCmt ? '1' : '0');
+    localStorage.setItem('ft_default_share_link', shareEnabled ? '1' : '0');
     try {
       const body = {
         content: text || '',
         privacy: _newPostPrivacy || 'public',
+        share_enabled: shareEnabled,
         allow_comments: allowCmt,
       };
       if (_newPostMedia && _newPostMediaType?.startsWith('image/') && _newPostOrigMedia) {
@@ -3199,6 +3502,69 @@ const Social = (() => {
         UI.showToast(data.error || 'Could not post', 'error');
       }
     } catch { UI.showToast('Network error', 'error'); }
+    finally {
+      _newPostSubmitting = false;
+      if (postBtn) {
+        postBtn.disabled = false;
+        postBtn.textContent = 'Post';
+        postBtn.style.opacity = '';
+      }
+    }
+  }
+
+  function openQuoteRepost(postId, meta = {}) {
+    const privacy = String(meta.privacy || 'public').toLowerCase();
+    const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
+    if (!shareEnabled) {
+      try { UI.showToast('Repost is disabled for this post', 'info'); } catch {}
+      return;
+    }
+    if (privacy !== 'public' && privacy !== 'followers') {
+      try { UI.showToast('Only public and followers posts can be reposted', 'info'); } catch {}
+      return;
+    }
+    _quoteRepostPostId = Number(postId || 0);
+    _quoteRepostMeta = meta || {};
+    const overlay = document.getElementById('social-quote-repost');
+    const input = document.getElementById('qrp-text');
+    const title = document.getElementById('qrp-title');
+    if (!overlay || !input) return;
+    if (title) title.textContent = `Quote repost @${meta.nickname || 'user'}`;
+    input.value = '';
+    overlay.classList.remove('hidden');
+    setTimeout(() => input.focus(), 30);
+  }
+
+  function closeQuoteRepost() {
+    const overlay = document.getElementById('social-quote-repost');
+    const input = document.getElementById('qrp-text');
+    if (overlay) overlay.classList.add('hidden');
+    if (input) input.value = '';
+    _quoteRepostPostId = 0;
+    _quoteRepostMeta = null;
+  }
+
+  async function submitQuoteRepost() {
+    const input = document.getElementById('qrp-text');
+    const btn = document.getElementById('qrp-submit');
+    const quote = String(input?.value || '').trim();
+    if (!_quoteRepostPostId) return;
+    if (!quote) {
+      try { UI.showToast('Write a short quote first', 'info'); } catch {}
+      input?.focus();
+      return;
+    }
+    if (quote.length > 1000) {
+      try { UI.showToast('Quote is too long (max 1000 chars)', 'error'); } catch {}
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
+    try {
+      await toggleRepost(null, _quoteRepostPostId, { ...(_quoteRepostMeta || {}), quote });
+      closeQuoteRepost();
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Quote repost'; }
+    }
   }
 
   // ── followers/following list popup ──────────────────────────────────────
@@ -3227,8 +3593,8 @@ const Social = (() => {
       }
       listEl.innerHTML = users.map(u => `
         <div class="sul-user">
-          <div class="sul-avatar" onclick="Social.openProfile('${esc(u.nickname)}')">${UI.avatarEl(u.avatar, u.nickname, 40)}</div>
-          <div class="sul-info" onclick="Social.openProfile('${esc(u.nickname)}')">
+          <div class="sul-avatar" onclick="Social.openProfileFromUserList('${esc(u.nickname)}')">${UI.avatarEl(u.avatar, u.nickname, 40)}</div>
+          <div class="sul-info" onclick="Social.openProfileFromUserList('${esc(u.nickname)}')">
             <div class="sul-nick">${esc(u.nickname)}</div>
             ${u.bio ? `<div class="sul-bio">${esc(u.bio.substring(0, 60))}</div>` : ''}
           </div>
@@ -3244,6 +3610,16 @@ const Social = (() => {
 
   function closeUserList() {
     document.getElementById('social-userlist').classList.add('hidden');
+  }
+
+  function openProfileFromUserList(nickname) {
+    closeUserList();
+    openProfile(nickname);
+  }
+
+  function openStoryProfileFromViewer(nickname) {
+    closeStoryViewer();
+    openProfile(nickname);
   }
 
   function expandPost(postId) {
@@ -3417,6 +3793,7 @@ const Social = (() => {
     if (kind === 'like')    return `<div class="social-activity-icon like" title="like">❤</div>`;
     if (kind === 'comment') return `<div class="social-activity-icon comment" title="comment">💬</div>`;
     if (kind === 'follow')  return `<div class="social-activity-icon follow" title="follow">＋</div>`;
+    if (kind === 'repost')  return `<div class="social-activity-icon" title="repost">🔁</div>`;
     return `<div class="social-activity-icon" title="${esc(kind)}">•</div>`;
   }
 
@@ -3433,6 +3810,7 @@ const Social = (() => {
       return `${nick} commented on your post${preview}`;
     }
     if (n.kind === 'follow') return `${nick} started following you`;
+    if (n.kind === 'repost') return `${nick} reposted your post`;
     return `${nick} did something`;
   }
 
@@ -3569,6 +3947,9 @@ const Social = (() => {
       } else if (n.event === 'follow') {
         emoji = '＋';
         body = `<b>${esc(n.actor || 'Someone')}</b> started following you`;
+      } else if (n.event === 'repost') {
+        emoji = '🔁';
+        body = `<b>${esc(n.actor || 'Someone')}</b> reposted your post`;
       } else {
         return;
       }
@@ -3628,7 +4009,7 @@ const Social = (() => {
     if (onActivityTab) {
       _activityList.unshift({
         id: payload.id,
-        kind: payload.event,                // 'like' | 'comment' | 'follow'
+        kind: payload.event,                // 'like' | 'comment' | 'follow' | 'repost'
         post_id: payload.post_id || null,
         comment_id: payload.comment_id || null,
         emoji: payload.emoji || null,
@@ -3653,8 +4034,11 @@ const Social = (() => {
 
   return {
     open, close, openProfile, switchTab, switchProfileTab,
+    switchProfileMediaMode, loadProfileMediaCombined,
     openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
     toggleFollow, reactPost, showReactPicker, toggleComments,
+    toggleRepost,
+    openQuoteRepost, closeQuoteRepost, submitQuoteRepost,
     submitComment, deleteComment, voteComment, deletePost, dmUser,
     shareProfile, profileShareUrl,
     sharePostUrl, postShareUrl,
@@ -3662,11 +4046,11 @@ const Social = (() => {
     addFriendFromProfile, acceptFriendFromProfile,
     refreshProfileRelationship,
     openNewPost, closeNewPost, handleNewPostMedia, openNewPostCamera, clearNewPostMedia, submitNewPost,    applyFilter, updateFilter,
-    setPostPrivacy, cyclePostPrivacy, toggleAllowComments,
-    showFollowers, showFollowing, closeUserList, expandPost,
+    setPostPrivacy, cyclePostPrivacy, toggleAllowComments, toggleShareLink,
+    showFollowers, showFollowing, closeUserList, openProfileFromUserList, expandPost,
     loadFeed, loadExplore, loadProfile, moveToWall, previewMedia,
     viewPostDetail, closePostDetail,
-    viewStories, nextStory, prevStory, closeStoryViewer,
+    viewStories, nextStory, prevStory, closeStoryViewer, openStoryProfileFromViewer,
     viewProfileStories,
     openAddStory, closeAddStory, handleStoryMedia, openStoryCamera, submitStory, submitStoryFromTap, handleStoryShareTap, setStoryPrivacy, cycleStoryPrivacy,
     loadMusicTab, openMusicEmbed, promptMusicShare,
