@@ -466,6 +466,21 @@ async def toggle_post_repost(
         except Exception:
             _log.debug("repost notif failed", exc_info=True)
 
+        try:
+            db.insert_federation_outbox_event({
+                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+                "event_type": "social.repost.created",
+                "payload": {
+                    "actor_nickname": current_user.get("nickname") or "",
+                    "actor_avatar": current_user.get("avatar") or "",
+                    "owner_nickname": post.get("nickname") or "",
+                    "post_id": post_id,
+                    "quote": quote,
+                },
+            })
+        except Exception:
+            _log.debug("repost federation emit failed", exc_info=True)
+
     return {
         "ok": True,
         "reposted": reposted,

@@ -1,5 +1,6 @@
 """Federation and network discovery routes (phase-1 scaffold)."""
 import base64
+import logging
 import os
 import time
 import asyncio
@@ -22,6 +23,7 @@ from pydantic import BaseModel
 import database as db
 
 router = APIRouter(tags=["federation"])
+_log = logging.getLogger(__name__)
 
 
 class ServerRegisterBody(BaseModel):
@@ -1653,6 +1655,52 @@ async def _handle_social_event(event: dict) -> None:
             db.follow_user(follower["id"], following["id"])
         elif action == "unfollow":
             db.unfollow_user(follower["id"], following["id"])
+        return
+
+    if event_type == "social.repost.created":
+        actor_nick = str(payload.get("actor_nickname") or "").strip()
+        owner_nick = str(payload.get("owner_nickname") or "").strip()
+        if not actor_nick or not owner_nick:
+            return
+        actor = _ensure_local_user_by_nickname(actor_nick)
+        owner = _ensure_local_user_by_nickname(owner_nick)
+        if not actor or not owner or actor["id"] == owner["id"]:
+            return
+
+        post_id = payload.get("post_id")
+        try:
+            post_id_int = int(post_id)
+        except Exception:
+            post_id_int = None
+        if post_id_int is not None and post_id_int <= 0:
+            post_id_int = None
+
+        quote = str(payload.get("quote") or "").strip() or None
+        notif_id = db.add_social_notification(
+            user_id=owner["id"],
+            actor_id=actor["id"],
+            kind="repost",
+            post_id=post_id_int,
+            preview=(quote[:140] if quote else None),
+        )
+        if notif_id is None:
+            return
+
+        unread = db.get_social_notification_unread_count(owner["id"])
+        try:
+            from ws_manager import manager
+            await manager.send_to_user(owner["id"], {
+                "type": "social_notification",
+                "event": "repost",
+                "id": notif_id,
+                "actor": actor_nick,
+                "actor_avatar": str(payload.get("actor_avatar") or actor.get("avatar") or ""),
+                "post_id": post_id_int,
+                "preview": (quote[:140] if quote else None),
+                "unread": unread,
+            })
+        except Exception:
+            _log.debug("federated repost notif WS push failed", exc_info=True)
 
 
 # ──────────────────────────────────────────────────────────────
