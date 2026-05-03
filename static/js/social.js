@@ -3186,7 +3186,7 @@ const Social = (() => {
       // Grid view for profile reels
       container.innerHTML = `<div class="social-grid">${posts.map(p => {
         return `
-          <div class="social-grid-item is-video" onclick="Social.viewPostDetail(${p.id})">
+          <div class="social-grid-item is-video" onclick="Social.openSharedReel(${p.id})">
             <video src="${esc(_authMediaSrc(p.media_data || ''))}" muted preload="metadata"></video>
             <span class="social-grid-video-ico">▶</span>
             <div class="social-grid-overlay">
