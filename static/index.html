@@ -4442,13 +4442,11 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sf-react-picker button.active{background:#1a2e1a;box-shadow:0 0 0 2px #4caf50}
 /* Reaction bar */
 .sf-rx-bar{display:flex;align-items:center;gap:4px;padding:4px 0}
-.sf-rx-main{display:flex;align-items:center;gap:8px;min-height:34px;background:linear-gradient(180deg,#132516,#0e1a10);border:1px solid #224327;border-radius:18px;color:#d7e9d9;padding:6px 10px;cursor:pointer;transition:transform .14s,box-shadow .14s,border-color .14s}
-.sf-rx-main:hover{border-color:#2d6134;box-shadow:0 6px 16px rgba(0,0,0,.28)}
-.sf-rx-main.active{border-color:#3f8f49;box-shadow:0 0 0 1px rgba(79,175,80,.35) inset}
+.sf-rx-main{background:none;border:none;color:#ccc;cursor:pointer;font-size:14px;padding:4px 8px;border-radius:8px;transition:background .15s;display:flex;align-items:center;gap:4px}
+.sf-rx-main:hover{background:#1a1a1a}
+.sf-rx-main.active{color:#4caf50}
 .sf-rx-main.is-pending{opacity:.62;pointer-events:none}
-.sf-rx-main-emoji{font-size:18px;line-height:1}
-.sf-rx-main-label{font-size:12px;letter-spacing:.2px;white-space:nowrap;color:#c5dbc8}
-.sf-rx-main-caret{font-size:11px;color:#7eb787;margin-left:2px}
+.sf-rx-main-label{font-size:14px;white-space:nowrap}
 .sf-rx-summary{background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:3px;padding:4px 8px;border-radius:16px;color:#ccc;font-size:13px;transition:background .15s}
 .sf-rx-summary:hover{background:#1a2e1a}
 .sf-rx-emojis{font-size:15px;letter-spacing:-2px}

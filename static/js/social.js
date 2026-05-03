@@ -4769,16 +4769,10 @@ const Social = (() => {
     const topEmoji = top ? top.emoji : '😊';
     const label = total > 0 ? String(total) : 'React';
     const pid = Number(postId) || 0;
-    const btnStyle = 'display:flex;align-items:center;gap:8px;min-height:34px;background:linear-gradient(180deg,#132516,#0e1a10);border:1px solid #224327;border-radius:18px;color:#d7e9d9;padding:6px 10px;cursor:pointer;';
-    const emojiStyle = 'font-size:18px;line-height:1;';
-    const labelStyle = 'font-size:12px;letter-spacing:.2px;white-space:nowrap;color:#c5dbc8;';
-    const caretStyle = 'font-size:11px;color:#7eb787;margin-left:2px;';
     return `<div class="sf-rx-bar">` +
       `<button type="button" class="sf-rx-main${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" ` +
-      `data-post-id="${pid}" onclick="Social.showReactPicker(event,${pid})" style="${btnStyle}" aria-label="Open reactions">` +
-      `<span class="sf-rx-main-emoji" style="${emojiStyle}">${topEmoji}</span>` +
-      `<span class="sf-rx-main-label" style="${labelStyle}">${esc(label)}</span>` +
-      `<span class="sf-rx-main-caret" style="${caretStyle}">▾</span>` +
+      `data-post-id="${pid}" aria-label="React to post">` +
+      `${topEmoji} <span class="sf-rx-main-label">${esc(label)}</span>` +
       `</button></div>`;
   }
 
