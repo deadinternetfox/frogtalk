@@ -12,6 +12,8 @@ const Social = (() => {
   let _activityCache = null;
   const _reelsCache = new Map();
   const _musicCache = new Map();
+  const _musicTitleCache = new Map();
+  const _musicTitleInflight = new Map();
   const _profileCache = new Map();
   let _tabLoadUiToken = 0;
   let _reelsLoadToken = 0;
@@ -3730,6 +3732,83 @@ const Social = (() => {
     return { provider: provider || 'link', id: u, thumb: '', embed: '' };
   }
 
+  function _prettyMusicFallbackTitle(trackUrl, provider) {
+    const url = String(trackUrl || '').trim();
+    const prov = String(provider || '').toLowerCase();
+    try {
+      if (prov === 'soundcloud') {
+        const parsed = new URL(url, window.location.origin);
+        const slug = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '')
+          .replace(/[-_]+/g, ' ')
+          .trim();
+        if (slug) return slug.replace(/\b\w/g, c => c.toUpperCase()).slice(0, 140);
+      }
+    } catch {}
+    if (prov === 'youtube') return 'YouTube video';
+    if (prov === 'spotify') return 'Spotify track';
+    if (prov === 'soundcloud') return 'SoundCloud track';
+    return 'Track';
+  }
+
+  async function _fetchMusicTitle(trackUrl, provider) {
+    const url = String(trackUrl || '').trim();
+    if (!url) return '';
+    const key = `${String(provider || '').toLowerCase()}|${url}`;
+    const cached = _musicTitleCache.get(key);
+    if (typeof cached === 'string') return cached;
+    if (_musicTitleInflight.has(key)) return _musicTitleInflight.get(key);
+
+    const req = (async () => {
+      try {
+        const res = await api(`/api/preview?url=${encodeURIComponent(url)}`);
+        if (!res.ok) return '';
+        const data = await res.json().catch(() => ({}));
+        const preview = data.preview || {};
+        const title = String(preview.title || '').trim();
+        const normalized = title && !/^youtube video$/i.test(title) ? title : '';
+        _musicTitleCache.set(key, normalized);
+        return normalized;
+      } catch {
+        _musicTitleCache.set(key, '');
+        return '';
+      } finally {
+        _musicTitleInflight.delete(key);
+      }
+    })();
+
+    _musicTitleInflight.set(key, req);
+    return req;
+  }
+
+  function _hydrateMusicCardTitles(scope) {
+    const root = scope || document;
+    root.querySelectorAll('.sf-music-card[data-track-title-pending="1"]').forEach(card => {
+      const url = String(card.getAttribute('data-track-url') || '').trim();
+      const provider = String(card.getAttribute('data-provider') || '').trim();
+      if (!url) {
+        card.dataset.trackTitlePending = '0';
+        return;
+      }
+      _fetchMusicTitle(url, provider).then(title => {
+        if (!title) return;
+        const safe = esc(title);
+        card.dataset.trackTitlePending = '0';
+        card.setAttribute('data-track-title', title);
+        const titleEl = card.querySelector('.sfmc-title');
+        if (titleEl) {
+          titleEl.textContent = title;
+          titleEl.setAttribute('title', title);
+        }
+        const playEls = [card.querySelector('.sfmc-play')];
+        playEls.forEach(el => {
+          if (el) el.setAttribute('aria-label', (el.getAttribute('aria-label') || 'Play').replace(/\s+.*$/, ''));
+        });
+        const cover = card.querySelector('.sfmc-cover');
+        if (cover) cover.setAttribute('title', title);
+      }).catch(() => {});
+    });
+  }
+
   function _renderMusicCard(p) {
     const prov = (p.media_type || '').split('/')[1] || 'link';
     // media_data is the raw track URL. Early-2026 shares briefly encoded a
@@ -3748,9 +3827,10 @@ const Social = (() => {
       }
     } catch {}
     const t = _parseMusicTrack(trackUrl, prov);
+    const cachedTitle = _musicTitleCache.get(`${String(t.provider || '').toLowerCase()}|${trackUrl}`) || '';
     // Try to pluck a title from the post content (we store the track title
     // on its own line after "🎵 Now playing …: ").
-    let title = metaTitle;
+    let title = metaTitle || cachedTitle;
     let roomHint = metaRoom;
     try {
       // Legacy posts stored the track title as "🎵 Now playing in #room: <title>".
@@ -3762,12 +3842,8 @@ const Social = (() => {
     // If we still don't have a title, derive a pretty fallback from the URL
     // (e.g. "open.spotify.com/track/..." → "Spotify track") instead of
     // showing the raw link.
-    if (!title) {
-      if (t.provider === 'youtube') title = 'YouTube track';
-      else if (t.provider === 'spotify') title = 'Spotify track';
-      else if (t.provider === 'soundcloud') title = 'SoundCloud track';
-      else title = 'Track';
-    }
+    const needsHydrate = !title;
+    if (!title) title = _prettyMusicFallbackTitle(trackUrl, t.provider);
     const label = t.provider === 'youtube' ? 'YouTube'
               : t.provider === 'spotify' ? 'Spotify'
               : t.provider === 'soundcloud' ? 'SoundCloud' : 'Music';
@@ -3796,7 +3872,7 @@ const Social = (() => {
     const playTitle = initialState === 'playing' ? 'Pause'
                     : initialState === 'paused'  ? 'Resume' : 'Play';
     return `
-      <div class="sf-music-card ${stateCls}" data-provider="${esc(t.provider)}" data-track-url="${esc(fullUrl)}">
+      <div class="sf-music-card ${stateCls}" data-provider="${esc(t.provider)}" data-track-url="${esc(fullUrl)}" data-track-title-pending="${needsHydrate ? '1' : '0'}">
         <div class="sfmc-cover ${t.thumb ? '' : 'no-art'}" ${artBg}
              onclick="${coverAction}">
           <span class="sfmc-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
@@ -4127,6 +4203,7 @@ const Social = (() => {
   // music:statechange event (see _wireMusicEvents) and called directly
   // after a tab load.
   function _applyMusicState() {
+    try { _hydrateMusicCardTitles(document); } catch {}
     let cur = { active: false };
     try {
       if (window.Music && typeof Music.getCurrent === 'function') cur = Music.getCurrent();
@@ -4413,13 +4490,25 @@ const Social = (() => {
                         : t.provider === 'soundcloud' ? '☁️' : '🎵';
     }
     const incomingTitle = (_musicShareOpts && _musicShareOpts.title) || '';
-    titleEl.textContent = incomingTitle || url;
+    titleEl.textContent = incomingTitle || _prettyMusicFallbackTitle(url, t.provider);
     const bits = [label];
     if (_musicShareOpts && _musicShareOpts.room) bits.push(`from #${_musicShareOpts.room}`);
     subEl.textContent = bits.join(' · ');
     hint.className = 'msb-hint is-ok';
     hint.textContent = `✓ Detected ${label}`;
     if (submit) submit.disabled = false;
+    if (!incomingTitle) {
+      const currentUrl = url;
+      _fetchMusicTitle(currentUrl, t.provider).then(title => {
+        if (!title || !_musicShareOpts) return;
+        const liveModal = document.getElementById('music-share-modal');
+        const liveUrl = (liveModal?.querySelector('#msb-url')?.value || '').trim();
+        if (liveUrl !== currentUrl) return;
+        _musicShareOpts.title = title;
+        const liveTitleEl = liveModal?.querySelector('#msb-track-title');
+        if (liveTitleEl) liveTitleEl.textContent = title;
+      }).catch(() => {});
+    }
   }
 
   function closeMusicShareModal() {
