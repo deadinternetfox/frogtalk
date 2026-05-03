@@ -1995,6 +1995,7 @@ const Social = (() => {
           ctx.drawImage(video, 0, 0, c.width, c.height);
           poster.style.backgroundImage = `url(${c.toDataURL('image/jpeg', 0.72)})`;
           card.classList.add('is-ready');
+          card.classList.remove('no-poster');
           posterDrawn = true;
         } catch {}
       };
@@ -2011,6 +2012,9 @@ const Social = (() => {
         } catch {}
       }, { once: true });
       try { video.load(); } catch {}
+      setTimeout(() => {
+        if (!posterDrawn) card.classList.add('no-poster');
+      }, 1800);
 
       video.addEventListener('timeupdate', () => {
         if (!prog || !video.duration) return;

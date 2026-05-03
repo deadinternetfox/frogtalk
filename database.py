@@ -6038,9 +6038,40 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                 FROM wall_posts wp
                 JOIN users u ON wp.user_id = u.id
                 WHERE wp.media_type LIKE 'video/%'
-                  AND wp.privacy IN ('public', 'friends')
                   AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
                   AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+                  AND (
+                      wp.user_id = ?
+                      OR wp.privacy = 'public'
+                      OR (
+                          wp.privacy = 'friends'
+                          AND EXISTS (
+                              SELECT 1 FROM friends vf
+                              WHERE (
+                                  (vf.user_id = ? AND vf.friend_id = wp.user_id)
+                                  OR (vf.friend_id = ? AND vf.user_id = wp.user_id)
+                              )
+                              AND vf.status = 'accepted'
+                          )
+                      )
+                      OR (
+                          wp.privacy = 'followers'
+                          AND (
+                              EXISTS (
+                                  SELECT 1 FROM friends vf2
+                                  WHERE (
+                                      (vf2.user_id = ? AND vf2.friend_id = wp.user_id)
+                                      OR (vf2.friend_id = ? AND vf2.user_id = wp.user_id)
+                                  )
+                                  AND vf2.status = 'accepted'
+                              )
+                              OR EXISTS (
+                                  SELECT 1 FROM followers fl
+                                  WHERE fl.follower_id = ? AND fl.following_id = wp.user_id
+                              )
+                          )
+                      )
+                  )
                   AND (
                       -- friend posted it
                       wp.user_id IN (
@@ -6076,6 +6107,11 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                 viewer_id, viewer_id, viewer_id,
                 # block filters
                 viewer_id, viewer_id,
+                # visibility rules for viewer
+                viewer_id,
+                viewer_id, viewer_id,
+                viewer_id, viewer_id,
+                viewer_id,
                 # AND clause friend checks
                 viewer_id, viewer_id, viewer_id,
                 viewer_id, viewer_id, viewer_id,

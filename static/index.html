@@ -4359,8 +4359,10 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .social-grid-item.is-video .ft-video-poster.ready{opacity:.45}
 .ft-video-host video::-webkit-media-controls{display:none !important}
 .ft-video-host video::-webkit-media-controls-enclosure{display:none !important}
+.ft-video-host video::-webkit-media-controls-start-playback-button{display:none !important}
 .reel-card video::-webkit-media-controls{display:none !important}
 .reel-card video::-webkit-media-controls-enclosure{display:none !important}
+.reel-card video::-webkit-media-controls-start-playback-button{display:none !important}
 .sf-post-actions{display:flex;align-items:center;gap:4px;padding:10px 14px;flex-wrap:wrap}
 .sf-like,.sf-comment-btn,.sf-react-btn{background:none;border:none;color:#ccc;cursor:pointer;font-size:14px;padding:4px 8px;border-radius:8px;transition:background .15s;display:flex;align-items:center;gap:4px}
 .sf-like:hover,.sf-comment-btn:hover,.sf-react-btn:hover{background:#1a1a1a}
@@ -4381,8 +4383,8 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sf-comment-body{flex:1;min-width:0}
 .sf-comment-nick{font-size:13px;font-weight:600;color:#e0e0e0;cursor:pointer}
 .sf-comment-nick:hover{text-decoration:underline}
-.sf-comment-text{font-size:13px;color:#aaa;margin-left:4px}
-.sf-comment-time{font-size:11px;color:#555;margin-left:6px}
+.sf-comment-text{display:block;font-size:13px;color:#aaa;margin:2px 0 0}
+.sf-comment-time{display:block;font-size:11px;color:#555;margin:4px 0 0}
 .sf-comment-del{background:none;border:none;color:#666;cursor:pointer;font-size:12px;padding:2px}
 .sf-comment-input{display:flex;gap:8px;margin-top:8px;align-items:center}
 .sf-comment-input input{flex:1;background:#0a0a0a;border:1px solid #2a2a2a;border-radius:20px;color:#e0e0e0;padding:7px 14px;font-size:13px;outline:none}
@@ -4990,6 +4992,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   width:100%;height:100%;object-fit:contain;max-height:calc(100vh - 108px);
   z-index:1;background:transparent;outline:none
 }
+.reel-card.no-poster .reel-video-poster{opacity:0 !important;filter:none;transform:none}
 .reel-card.is-ready .reel-video-poster{opacity:.24}
 .reel-card.is-playing .reel-video-poster{opacity:.12}
 .reel-play-toggle{
