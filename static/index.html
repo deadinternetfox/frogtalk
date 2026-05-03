@@ -1993,18 +1993,18 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 }
 
 .reaction-pill{
-  background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;
+  background:rgba(20,45,30,.85);border:1px solid #2f5548;border-radius:12px;
   padding:2px 8px;font-size:13px;cursor:pointer;transition:all .15s
 }
-.reaction-pill:hover{background:#2a2a2a}
+.reaction-pill:hover{background:rgba(76,175,80,.12)}
 .reaction-pill.mine{background:#1a3a1a;border-color:#4caf50}
 
 /* ─── Reaction picker (Discord-style) ─────────────────────────── */
 .react-picker{
   position:fixed;z-index:9200;
-  background:linear-gradient(180deg,#1a1a1a,#141414);
-  border:1px solid #2a2a2a;border-radius:14px;
-  box-shadow:0 16px 40px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.3);
+  background:linear-gradient(180deg,#1f3a2c 0%,#193024 55%,#13241b 100%);
+  border:1px solid #3a6b48;border-radius:14px;
+  box-shadow:0 16px 40px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.3),0 0 0 1px rgba(76,175,80,.10);
   padding:6px;
   min-width:320px;max-width:min(360px,calc(100vw - 16px));
   animation:rpPop .18s cubic-bezier(.2,.9,.3,1.2);
@@ -2027,36 +2027,36 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   width:38px;height:38px;border-radius:10px;
   display:flex;align-items:center;justify-content:center;
   transition:transform .12s ease,background .12s ease;
-  padding:0;color:#e0e0e0;
+  padding:0;color:#dff5e8;
 }
-.rp-quick-btn:hover{background:#2a2a2a;transform:scale(1.18)}
+.rp-quick-btn:hover{background:rgba(76,175,80,.14);transform:scale(1.18)}
 .rp-quick-btn:active{transform:scale(.95)}
 .rp-quick-btn.rp-plus{
-  font-size:20px;color:#888;margin-left:auto;
-  background:#1f1f1f;border:1px solid #2a2a2a;
+  font-size:20px;color:#9bbf9b;margin-left:auto;
+  background:rgba(15,30,20,.8);border:1px solid #2f5548;
 }
-.rp-quick-btn.rp-plus:hover{background:#2a2a2a;color:#4caf50;border-color:#3a3a3a}
+.rp-quick-btn.rp-plus:hover{background:rgba(76,175,80,.14);color:#4caf50;border-color:#4caf50}
 .react-picker.rp-expanded .rp-plus{background:#1a3a1a;color:#4caf50;border-color:#4caf50}
 .rp-body{
-  border-top:1px solid #2a2a2a;margin-top:4px;padding-top:6px;
+  border-top:1px solid #2f5548;margin-top:4px;padding-top:6px;
   display:flex;flex-direction:column;
 }
 .rp-search{padding:2px 4px 6px}
 .rp-search-input{
   width:100%;box-sizing:border-box;
-  background:#0f0f0f;border:1px solid #2a2a2a;border-radius:10px;
-  padding:8px 12px;color:#e0e0e0;font-size:13px;outline:none;
+  background:#0d1f0d;border:1px solid #2f5548;border-radius:10px;
+  padding:8px 12px;color:#dff5e8;font-size:13px;outline:none;
   transition:border-color .15s,box-shadow .15s;
 }
-.rp-search-input::placeholder{color:#666}
+.rp-search-input::placeholder{color:#5a8a6a}
 .rp-search-input:focus{border-color:#4caf50;box-shadow:0 0 0 2px rgba(76,175,80,.15)}
 .rp-grid{
   display:grid;grid-template-columns:repeat(8,1fr);gap:2px;
   padding:4px;max-height:260px;overflow-y:auto;
-  scrollbar-width:thin;scrollbar-color:#333 transparent;
+  scrollbar-width:thin;scrollbar-color:rgba(76,175,80,.35) transparent;
 }
 .rp-grid::-webkit-scrollbar{width:6px}
-.rp-grid::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+.rp-grid::-webkit-scrollbar-thumb{background:rgba(76,175,80,.35);border-radius:3px}
 .rp-grid::-webkit-scrollbar-track{background:transparent}
 .rp-emoji{
   background:transparent;border:none;cursor:pointer;
@@ -2064,16 +2064,16 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   width:36px;height:36px;border-radius:8px;
   display:flex;align-items:center;justify-content:center;
   transition:transform .1s ease,background .1s ease;
-  color:#e0e0e0;
+  color:#dff5e8;
 }
-.rp-emoji:hover{background:#2a2a2a;transform:scale(1.2)}
+.rp-emoji:hover{background:rgba(76,175,80,.14);transform:scale(1.2)}
 .rp-empty{
   grid-column:1/-1;padding:24px 8px;text-align:center;
-  color:#666;font-size:13px;
+  color:#85a89a;font-size:13px;
 }
 .rp-tabs{
   display:flex;align-items:center;gap:2px;
-  border-top:1px solid #2a2a2a;padding:4px;
+  border-top:1px solid #2f5548;padding:4px;
   overflow-x:auto;scrollbar-width:none;
 }
 .rp-tabs::-webkit-scrollbar{display:none}
@@ -2083,10 +2083,10 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   min-width:34px;height:34px;border-radius:8px;
   display:flex;align-items:center;justify-content:center;flex-shrink:0;
   transition:background .12s,transform .12s;
-  color:#e0e0e0;opacity:.65;
+  color:#dff5e8;opacity:.65;
 }
-.rp-tab:hover{background:#2a2a2a;opacity:1}
-.rp-tab.active{background:#1a3a1a;opacity:1;transform:scale(1.05)}
+.rp-tab:hover{background:rgba(76,175,80,.12);opacity:1}
+.rp-tab.active{background:linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 100%);opacity:1;transform:scale(1.05);box-shadow:0 0 0 1px rgba(76,175,80,.3)}
 @media (max-width:480px){
   .react-picker{min-width:min(320px,calc(100vw - 16px))}
   .rp-grid{grid-template-columns:repeat(7,1fr);max-height:220px}
