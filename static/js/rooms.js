@@ -350,8 +350,8 @@ const Rooms = (() => {
     if (el._dragBound) return;
     el._dragBound = true;
 
-    // Capture-phase click filter — when a drag has just happened, swallow
-    // the synthetic click so we don't accidentally switch channel.
+    // Capture-phase click filter — only active when a real drag-with-movement
+    // just finished, so a simple tap on the handle never eats the click.
     el.addEventListener('click', (e) => {
       if (el._dragSuppressClick) {
         e.stopImmediatePropagation();
@@ -362,55 +362,51 @@ const Rooms = (() => {
 
     el.addEventListener('pointerdown', (e) => {
       if (e.button && e.button !== 0) return;
-      // Don't start a drag from the channel-info icon button.
       if (e.target.closest && e.target.closest('.ch-icon-btn')) return;
 
       const isTouch = e.pointerType === 'touch';
       const fromHandle = !!(e.target.closest && e.target.closest('.ch-drag-handle'));
-      // Touch must start from the dedicated drag handle so long-press on the
-      // rest of the row keeps opening the channel options menu cleanly.
+      // Touch must come from the handle; taps on the row body open the channel.
       if (isTouch && !fromHandle) return;
 
-      // Stop the press from bubbling so bindLongPress doesn't arm a context
-      // menu while the user is grabbing the handle.
       if (fromHandle) {
+        // stopPropagation so the row's click / longpress bubbling doesn't fire.
+        // NOTE: do NOT call e.preventDefault() — on mobile Chrome preventing
+        // pointerdown suppresses the subsequent click event entirely, which
+        // would cause the channel to require two taps to select.
         e.stopPropagation();
-        try { e.preventDefault(); } catch {}
+        // bindLongPress armed its 500ms timer on touchstart (fires before
+        // pointerdown), so cancel it now via a synthetic touchcancel.
+        if (isTouch) {
+          try { el.dispatchEvent(new Event('touchcancel', { bubbles: false })); } catch {}
+        }
       }
 
       const startX = e.clientX, startY = e.clientY;
       const container = el.parentElement;
       let dragging = false;
+      let movedSignificantly = false; // true only when real movement occurred
+      let rafId = 0;
+      let rafX = 0, rafY = 0;
 
       const arm = () => {
         if (dragging) return;
         dragging = true;
         el.classList.add('dragging');
         try { navigator.vibrate && navigator.vibrate(12); } catch {}
-        // Note: no setPointerCapture — the row gets pointer-events:none while
-        // dragging so elementFromPoint can see neighbours under the pointer.
       };
 
-      // Touch from the handle: arm immediately. Mouse: wait for ~4px move so
-      // a plain click on the handle doesn't accidentally enter drag mode.
-      if (isTouch && fromHandle) arm();
-
-      const onMove = (ev) => {
-        const dx = ev.clientX - startX;
-        const dy = ev.clientY - startY;
-        const dist = Math.hypot(dx, dy);
-        if (!dragging) {
-          if (dist > 4) arm();
-          if (!dragging) return;
-        }
-        if (ev.cancelable) ev.preventDefault();
-        const below = document.elementFromPoint(ev.clientX, ev.clientY);
+      // Throttled reorder — runs inside rAF so DOM insertBefore only fires
+      // once per frame (~16ms) instead of on every raw pointermove event.
+      const doReorder = () => {
+        rafId = 0;
+        const below = document.elementFromPoint(rafX, rafY);
         const target = below && below.closest && below.closest('.channel-item');
         if (!target || target === el) return;
         if (target.parentElement !== container) return;
         if (target.classList.contains('channel-unjoined')) return;
         const rect = target.getBoundingClientRect();
-        const after = ev.clientY > rect.top + rect.height / 2;
+        const after = rafY > rect.top + rect.height / 2;
         if (after) {
           if (target.nextSibling !== el) container.insertBefore(el, target.nextSibling);
         } else {
@@ -418,11 +414,35 @@ const Rooms = (() => {
         }
       };
 
+      const onMove = (ev) => {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        const dist = Math.hypot(dx, dy);
+        if (!dragging) {
+          // Require intentional movement (>6px) before entering drag mode so a
+          // firm tap on the handle never accidentally becomes a drag.
+          if (dist < 6) return;
+          arm();
+          if (!dragging) return;
+        }
+        if (dist > 8) movedSignificantly = true;
+        if (ev.cancelable) ev.preventDefault();
+        // Queue a single reorder check per animation frame.
+        rafX = ev.clientX;
+        rafY = ev.clientY;
+        if (!rafId) rafId = requestAnimationFrame(doReorder);
+      };
+
       const onUp = () => {
+        if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
         if (dragging) {
           el.classList.remove('dragging');
-          el._dragSuppressClick = true;
-          _persistChannelOrder();
+          // Only suppress the tap-click and persist order when the user actually
+          // dragged to a new position — not when they just touched the handle.
+          if (movedSignificantly) {
+            el._dragSuppressClick = true;
+            _persistChannelOrder();
+          }
         }
         cleanup();
       };
