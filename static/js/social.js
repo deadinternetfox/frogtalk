@@ -2028,6 +2028,7 @@ const Social = (() => {
     _reelsCurrentCard = card;
     _reelsCurrentVideo = v;
     v.muted = _reelsMuted;
+    _syncReelMuteUi(card);
     if (shouldReset) {
       try { v.currentTime = 0; } catch {}
     }
@@ -2222,6 +2223,7 @@ const Social = (() => {
   }
 
   function _initReelCards(snap) {
+    _syncReelMuteUi(snap);
     snap.querySelectorAll('.reel-card').forEach(card => {
       const video = card.querySelector('video');
       const poster = card.querySelector('.reel-video-poster');
@@ -2411,7 +2413,17 @@ const Social = (() => {
     _reelsMuted = !_reelsMuted;
     // Apply to all currently rendered videos
     document.querySelectorAll('.reels-snap video').forEach(v => { v.muted = _reelsMuted; });
+    _syncReelMuteUi();
     if (btn) btn.textContent = _reelsMuted ? '🔇' : '🔊';
+  }
+
+  function _syncReelMuteUi(scope) {
+    const root = scope && scope.querySelectorAll ? scope : document;
+    root.querySelectorAll('.reel-mute-btn').forEach(btn => {
+      btn.textContent = _reelsMuted ? '🔇' : '🔊';
+      btn.setAttribute('aria-label', _reelsMuted ? 'Unmute reel' : 'Mute reel');
+      btn.title = _reelsMuted ? 'Unmute' : 'Mute';
+    });
   }
 
   function openReelReactPicker(postId, btn) {
