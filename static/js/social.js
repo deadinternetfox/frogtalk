@@ -4793,6 +4793,33 @@ const Social = (() => {
     });
   }
 
+  function _updateRepostsInCaches(postId, newRepostCount, isReposted) {
+    const pid = Number(postId);
+    const myNick = String(State?.user?.nickname || '');
+    const apply = (posts) => {
+      if (!Array.isArray(posts)) return;
+      posts.forEach(p => {
+        if (Number(p?.id) === pid) {
+          p.repost_count = Number(newRepostCount || 0);
+          p.i_reposted = !!isReposted;
+        }
+      });
+    };
+    apply(_feedCache?.posts);
+    _exploreCache.forEach(entry => apply(entry?.posts));
+    _reelsCache.forEach(entry => apply(entry?.posts));
+    _musicCache.forEach(entry => apply(entry?.posts));
+    _profilePostsCache.forEach(entry => apply(entry?.posts));
+    _profileRepostsCache.forEach(entry => apply(entry?.posts));
+  }
+
+  function _updateAllPostRepostBars(postId, newRepostCount, isReposted) {
+    document.querySelectorAll(`.sf-post[data-post-id="${postId}"] [data-role="repost-toggle"]`).forEach(btn => {
+      btn.classList.toggle('liked', !!isReposted);
+      btn.innerHTML = `🔁 ${Number(newRepostCount || 0)}`;
+    });
+  }
+
   function renderFeedPost(p) {
     const reactions = p.reactions || [];
 
@@ -5009,6 +5036,8 @@ const Social = (() => {
         reelIconEl.textContent = data.reposted ? '🔁' : '↩️';
         if (reelBtn) reelBtn.classList.toggle('liked', !!data.reposted);
       }
+      _updateRepostsInCaches(postId, data.repost_count || 0, data.reposted);
+      _updateAllPostRepostBars(postId, data.repost_count || 0, data.reposted);
       try {
         UI.showToast(data.reposted ? (payload.quote ? 'Quote reposted' : 'Reposted') : 'Repost removed', 'success');
       } catch {}

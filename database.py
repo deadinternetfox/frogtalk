@@ -4755,6 +4755,64 @@ def get_following_list(user_id: int, limit: int = 50) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def _calculate_post_score(post_id: int, context: str = 'explore') -> float:
+    """Unified post scoring function for ranking across Explore/Reels/Music.
+    
+    Args:
+        post_id: The wall_post id
+        context: 'explore', 'explore_top', 'reels_hot', 'reels_top', 'music' — determines weights
+    
+    Returns:
+        Float score for ordering (higher = more relevant)
+    
+    Scoring formula by context:
+    - explore (trending): reactions*2 + reposts*2 + comments + media_bonus(3) + recency_bonus
+    - explore_top: reactions + reposts*2 (all-time)
+    - reels_hot: like_reactions*3 + other_reactions + reposts*2 + comments + recency_bonus
+    - reels_top: like_reactions (all-time)
+    - music: same as explore trending
+    """
+    with _conn() as con:
+        row = con.execute(f"""
+            SELECT
+                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=?) AS reaction_count,
+                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=? AND emoji='❤️') AS like_count,
+                (SELECT COUNT(*) FROM wall_reposts WHERE post_id=?) AS repost_count,
+                (SELECT COUNT(*) FROM wall_comments WHERE post_id=?) AS comment_count,
+                (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
+                julianday('now') - julianday(wp.created_at) AS hours_old
+            FROM wall_posts wp
+            WHERE wp.id=?
+        """, (post_id, post_id, post_id, post_id, post_id)).fetchone()
+    
+    if not row:
+        return 0.0
+    
+    reactions = int(row['reaction_count'] or 0)
+    likes = int(row['like_count'] or 0)
+    other_reactions = reactions - likes
+    reposts = int(row['repost_count'] or 0)
+    comments = int(row['comment_count'] or 0)
+    has_media = int(row['has_media'] or 0)
+    hours_old = float(row['hours_old'] or 0)
+    
+    # Recency bonus: 10 points if <1 day, 5 points if <7 days, 0 otherwise
+    recency = 10 if hours_old < 24 else (5 if hours_old < 168 else 0)
+    media_bonus = 3 if has_media else 0
+    
+    if context == 'explore_top':
+        return float(reactions + reposts * 2)
+    elif context == 'reels_top':
+        return float(likes)
+    elif context in ('explore', 'music'):
+        return float(reactions * 2 + reposts * 2 + comments + media_bonus + recency)
+    elif context == 'reels_hot':
+        return float(likes * 3 + other_reactions + reposts * 2 + comments + recency)
+    else:
+        # Default to explore trending
+        return float(reactions * 2 + reposts * 2 + comments + media_bonus + recency)
+
+
 def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
                    mood: str = '', lite: bool = False) -> List[Dict]:
     """Posts from users the current user follows + own posts, newest first.
@@ -4886,12 +4944,13 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
 
 def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
                       sort: str = 'trending', mood: str = '',
-                      lite: bool = False) -> List[Dict]:
+                      lite: bool = False, friends_only: bool = False) -> List[Dict]:
     """All public posts — discover new people. Supports trending/new/top sort.
 
     Optional `mood` narrows to music-tagged posts with matching `track_mood`.
     When `lite` is True, we include media_data for images/videos/music (all needed
     for rendering).
+    When `friends_only` is True, filter to posts posted/reposted/reacted by accepted friends.
     """
     mood = (mood or '').strip().lower()
     # Include media_data for image/video (rendering) and music (URL references).
