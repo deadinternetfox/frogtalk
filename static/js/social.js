@@ -1950,6 +1950,15 @@ const Social = (() => {
       });
       video.addEventListener('play', () => card.classList.add('is-playing'));
       video.addEventListener('pause', () => card.classList.remove('is-playing'));
+      video.addEventListener('ended', () => {
+        const nextCard = card.nextElementSibling;
+        if (!nextCard || !nextCard.classList.contains('reel-card')) return;
+        nextCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const nv = nextCard.querySelector('video');
+        if (!nv) return;
+        nv.muted = _reelsMuted;
+        setTimeout(() => { nv.play().catch(() => {}); }, 220);
+      });
       video.addEventListener('click', (e) => toggleReelPlayback(e, video));
     });
   }
@@ -3895,6 +3904,25 @@ const Social = (() => {
   let _newPostFile = null;
   let _newPostObjectUrl = null;
 
+  function _captureVideoPoster(videoEl) {
+    if (!videoEl) return;
+    const draw = () => {
+      try {
+        if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+        const c = document.createElement('canvas');
+        const maxW = 720;
+        c.width = Math.min(videoEl.videoWidth, maxW);
+        c.height = Math.max(1, Math.round(c.width * (videoEl.videoHeight / videoEl.videoWidth)));
+        const ctx = c.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(videoEl, 0, 0, c.width, c.height);
+        videoEl.poster = c.toDataURL('image/jpeg', 0.74);
+      } catch {}
+    };
+    videoEl.addEventListener('loadeddata', draw, { once: true });
+    setTimeout(draw, 700);
+  }
+
   function handleNewPostMedia(input) {
     const file = input.files[0];
     if (!file) return;
@@ -3922,7 +3950,12 @@ const Social = (() => {
       _newPostMediaType = file.type;
       _newPostMedia = '__video_file__'; // sentinel so submitNewPost knows media is ready
       if (img) { img.style.display = 'none'; img.src = ''; }
-      if (vid) { vid.src = _newPostObjectUrl; vid.style.display = 'block'; }
+      if (vid) {
+        vid.poster = '';
+        vid.src = _newPostObjectUrl;
+        vid.style.display = 'block';
+        _captureVideoPoster(vid);
+      }
       if (filters) filters.style.display = 'none';
       if (preview) preview.style.display = 'block';
     } else {
@@ -3972,7 +4005,7 @@ const Social = (() => {
     const img = document.getElementById('snp-media-img');
     const vid = document.getElementById('snp-media-vid');
     if (img) { img.src = ''; img.style.display = 'none'; }
-    if (vid) { vid.src = ''; vid.style.display = 'none'; }
+    if (vid) { vid.src = ''; vid.poster = ''; vid.style.display = 'none'; }
     const filters = document.getElementById('snp-filters');
     if (filters) filters.style.display = 'none';
     document.getElementById('snp-media-preview').style.display = 'none';
