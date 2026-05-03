@@ -370,6 +370,9 @@ const App = {
       this.pendingReel = null;
       const tryOpenReel = (attempts) => {
         try {
+          if (typeof Social !== 'undefined' && Social.open) {
+            Social.open('reels');
+          }
           if (Number.isFinite(reelId) && reelId > 0 && typeof Social !== 'undefined' && Social.openSharedReel) {
             Social.openSharedReel(reelId);
             return;
@@ -379,7 +382,7 @@ const App = {
         }
         if (attempts > 0) setTimeout(() => tryOpenReel(attempts - 1), 120);
       };
-      tryOpenReel(16);
+      tryOpenReel(60);
     } else if (this.pendingPost) {
       // Share link: /p/{id} or /?post={id} — open FrogSocial post detail.
       App.openFirstAvailableRoom();

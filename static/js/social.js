@@ -1909,6 +1909,31 @@ const Social = (() => {
   let _reelsObserver = null;
   let _reelsScrollRaf = 0;
   let _reelsScrollSnap = null;
+  let _reelsSeekLockUntil = 0;
+  let _reelsSeekCard = null;
+  let _reelsUserPausedCard = null;
+
+  function _reelsBeginSeek(card) {
+    _reelsSeekCard = card || null;
+    _reelsSeekLockUntil = Date.now() + 1800;
+  }
+
+  function _reelsExtendSeekLock(ms = 900) {
+    _reelsSeekLockUntil = Math.max(_reelsSeekLockUntil, Date.now() + ms);
+  }
+
+  function _reelsEndSeek() {
+    _reelsSeekLockUntil = Date.now() + 260;
+    setTimeout(() => {
+      if (Date.now() > _reelsSeekLockUntil) _reelsSeekCard = null;
+    }, 300);
+  }
+
+  function _reelsIsSeekLocked(card = null) {
+    if (Date.now() > _reelsSeekLockUntil) return false;
+    if (!card || !_reelsSeekCard) return true;
+    return card === _reelsSeekCard;
+  }
 
   function switchReelsScope(scope) {
     if (_reelsScope === scope) return;
@@ -2014,6 +2039,7 @@ const Social = (() => {
             const vid = entry.target.querySelector('video');
             if (!vid) return;
             if (entry.isIntersecting) {
+              if (_reelsIsSeekLocked()) return;
               _reelsActivateCard(entry.target, { reset: true });
             } else {
               try { vid.pause(); } catch {}
@@ -2057,6 +2083,7 @@ const Social = (() => {
     if (!v) return;
     _reelsCurrentCard = card;
     _reelsCurrentVideo = v;
+    if (_reelsUserPausedCard && _reelsUserPausedCard !== card) _reelsUserPausedCard = null;
     v.muted = _reelsMuted;
     _syncReelMuteUi(card);
     if (shouldReset) {
@@ -2075,6 +2102,7 @@ const Social = (() => {
       return;
     }
     run.then(() => {
+      if (_reelsUserPausedCard === card) _reelsUserPausedCard = null;
       card.classList.add('is-playing');
     }).catch(() => {
       if (card !== _reelsCurrentCard || attempt >= 6) return;
@@ -2090,6 +2118,7 @@ const Social = (() => {
 
   function _reelsSyncActiveFromScroll(snap) {
     if (!snap) return;
+    if (_reelsIsSeekLocked()) return;
     const cards = Array.from(snap.querySelectorAll('.reel-card'));
     if (!cards.length) return;
     const rootRect = snap.getBoundingClientRect();
@@ -2110,7 +2139,7 @@ const Social = (() => {
       _reelsActivateCard(best, { reset: true });
       return;
     }
-    if (_reelsCurrentVideo && _reelsCurrentVideo.paused) {
+    if (_reelsCurrentVideo && _reelsCurrentVideo.paused && _reelsUserPausedCard !== _reelsCurrentCard) {
       _reelsCurrentVideo.play().catch(() => {});
       _reelsCurrentCard?.classList.add('is-playing');
     }
@@ -2303,6 +2332,21 @@ const Social = (() => {
         } catch {}
       }, { once: true });
       try { video.load(); } catch {}
+      // Prime a visible first frame quickly (like feed/explore cards) to avoid
+      // showing a flat grey/blank surface while users wait.
+      setTimeout(() => {
+        if (posterDrawn || !card.isConnected) return;
+        if ((video.readyState || 0) < 2) return;
+        try {
+          const wasPaused = !!video.paused;
+          const prev = Number(video.currentTime || 0);
+          video.currentTime = Math.min(0.14, Math.max(0.06, (video.duration || 0.2) / 10));
+          drawPoster();
+          if (wasPaused) {
+            try { video.currentTime = prev; } catch {}
+          }
+        } catch {}
+      }, 320);
       setTimeout(() => {
         if (!posterDrawn) {
           if ((video.readyState || 0) >= 2) card.classList.add('no-poster');
@@ -2336,6 +2380,7 @@ const Social = (() => {
           snapLockTimer = setTimeout(() => {
             seeking = false;
             touchSeeking = false;
+            _reelsEndSeek();
             unlockSnapScroll();
           }, 1200);
         };
@@ -2355,6 +2400,7 @@ const Social = (() => {
           e.preventDefault();
           e.stopPropagation();
           seeking = true;
+          _reelsBeginSeek(card);
           if (!video.paused) {
             try { video.pause(); } catch {}
             card.classList.remove('is-playing');
@@ -2367,6 +2413,7 @@ const Social = (() => {
           if (!seeking) return;
           e.preventDefault();
           armLockFailsafe();
+          _reelsExtendSeekLock();
           seekFromClientX(e.clientX);
         });
         const stopSeek = (e) => {
@@ -2374,6 +2421,7 @@ const Social = (() => {
           seeking = false;
           try { progWrap.releasePointerCapture(e.pointerId); } catch {}
           if (typeof e.clientX === 'number') seekFromClientX(e.clientX);
+          _reelsEndSeek();
           unlockSnapScroll();
         };
         progWrap.addEventListener('pointerup', stopSeek);
@@ -2382,6 +2430,7 @@ const Social = (() => {
         document.addEventListener('pointermove', (e) => {
           if (!seeking) return;
           armLockFailsafe();
+          _reelsExtendSeekLock();
           seekFromClientX(e.clientX);
         }, { passive: true });
         document.addEventListener('pointerup', (e) => {
@@ -2402,6 +2451,7 @@ const Social = (() => {
           e.preventDefault();
           e.stopPropagation();
           touchSeeking = true;
+          _reelsBeginSeek(card);
           if (!video.paused) {
             try { video.pause(); } catch {}
             card.classList.remove('is-playing');
@@ -2415,6 +2465,7 @@ const Social = (() => {
           if (!t) return;
           e.preventDefault();
           armLockFailsafe();
+          _reelsExtendSeekLock();
           seekFromClientX(t.clientX);
         }, { passive: false });
         const stopTouchSeek = (e) => {
@@ -2422,6 +2473,7 @@ const Social = (() => {
           const t = e.changedTouches && e.changedTouches[0];
           touchSeeking = false;
           if (t) seekFromClientX(t.clientX);
+          _reelsEndSeek();
           unlockSnapScroll();
         };
         progWrap.addEventListener('touchend', stopTouchSeek, { passive: true });
@@ -2433,6 +2485,7 @@ const Social = (() => {
           if (!t) return;
           e.preventDefault();
           armLockFailsafe();
+          _reelsExtendSeekLock();
           seekFromClientX(t.clientX);
         }, { passive: false });
         document.addEventListener('touchend', (e) => {
@@ -2463,8 +2516,14 @@ const Social = (() => {
       ev?.stopPropagation?.();
     } catch {}
     if (!video) return;
-    if (video.paused) video.play().catch(() => {});
-    else video.pause();
+    const card = video.closest('.reel-card');
+    if (video.paused) {
+      if (card && _reelsUserPausedCard === card) _reelsUserPausedCard = null;
+      video.play().catch(() => {});
+    } else {
+      if (card) _reelsUserPausedCard = card;
+      video.pause();
+    }
   }
 
   function toggleReelMute(btn) {
@@ -2581,10 +2640,10 @@ const Social = (() => {
             <div class="reel-act-icon">${post.i_reposted ? '🔁' : '↩️'}</div>
             <span class="reel-act-count reel-repost-count">${repostCount}</span>
           </button>
-          ${canShare ? `<button class="reel-act-btn" title="Share" onclick="Social.shareReelUrl(${post.id}, { nickname: ${jsStr(rawNick)}, privacy: ${jsStr(postPrivacy)}, shareEnabled: ${shareEnabled ? 1 : 0} })">
+          <button class="reel-act-btn ${canShare ? '' : 'disabled'}" title="Share" onclick="Social.shareReelUrl(${post.id}, { nickname: ${jsStr(rawNick)}, privacy: ${jsStr(postPrivacy)}, shareEnabled: ${shareEnabled ? 1 : 0} })">
             <div class="reel-act-icon">📤</div>
             <span class="reel-act-count">Share</span>
-          </button>` : ''}
+          </button>
         </div>
       </div>`;
   }
@@ -4304,7 +4363,7 @@ const Social = (() => {
       return;
     }
     const url = privacy === 'followers'
-      ? `${window.location.origin}/app?reel=${encodeURIComponent(String(postId))}`
+      ? `${window.location.origin}/?reel=${encodeURIComponent(String(postId))}`
       : reelShareUrl(postId);
     if (privacy === 'followers') {
       try { UI.showToast('Followers-only reel link copied: viewer must be logged in with access', 'info'); } catch {}

@@ -915,14 +915,14 @@ body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   <video class=\"reel-video\" controls playsinline preload=\"metadata\" src=\"/r/{post_id}/media\"></video>
   <div class=\"actions\">
-    <a href=\"/app?reel={post_id}\" class=\"btn btn-primary\">Join FrogTalk</a>
+    <a href=\"/?reel={post_id}\" class=\"btn btn-primary\">Join FrogTalk</a>
     <a href=\"/\" class=\"btn btn-secondary\">Home</a>
   </div>
 </div>
 <script>
 try {{
   if (localStorage.getItem('token') || localStorage.getItem('fc_token')) {{
-    window.location.replace('/app?reel={post_id}');
+    window.location.replace('/?reel={post_id}');
   }}
 }} catch (e) {{}}
 </script>
