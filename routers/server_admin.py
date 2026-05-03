@@ -365,11 +365,10 @@ async def server_admin_put_channel_retention(body: ChannelRetentionBody, request
         return auth
 
     settings = db.set_channel_retention_settings(body.directory_active_days, body.auto_delete_days)
-    sync = federation_router.enqueue_server_event("server.channel_retention.updated", settings)
     return {
         "ok": True,
         "channel_retention": settings,
-        "federation": sync,
+        "local_policy": True,
     }
 
 

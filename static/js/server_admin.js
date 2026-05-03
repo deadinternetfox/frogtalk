@@ -381,8 +381,7 @@
       }),
     });
     syncChannelRetention(payload.channel_retention || {});
-    const federated = payload.federation?.ok ? ' Federation sync queued.' : ' Federation sync pending retry.';
-    setActionMessage(`Channel timing saved.${federated}`);
+    setActionMessage('Channel timing saved on this node. Federation peers keep their own local timing.');
   }
 
   function renderStats(payload, pingMs) {

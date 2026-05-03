@@ -1656,7 +1656,12 @@ def cleanup_inactive_public_rooms() -> Dict[str, object]:
     settings = get_channel_retention_settings()
     auto_delete_days = int(settings["auto_delete_days"])
     if auto_delete_days <= 0:
-        return {"deleted": 0, "rooms": []}
+        return {
+            "deleted": 0,
+            "rooms": [],
+            "directory_active_days": int(settings.get("directory_active_days") or 30),
+            "auto_delete_days": auto_delete_days,
+        }
 
     with _conn() as con:
         rows = con.execute(
@@ -1677,7 +1682,12 @@ def cleanup_inactive_public_rooms() -> Dict[str, object]:
             continue
         if delete_room(room_name, requester_id=0, is_admin=True):
             deleted_rooms.append(room_name)
-    return {"deleted": len(deleted_rooms), "rooms": deleted_rooms}
+    return {
+        "deleted": len(deleted_rooms),
+        "rooms": deleted_rooms,
+        "directory_active_days": int(settings.get("directory_active_days") or 30),
+        "auto_delete_days": auto_delete_days,
+    }
 
 
 def save_push_subscription(user_id: int, endpoint: str, p256dh: str, auth_key: str):

@@ -1872,14 +1872,23 @@ async def _handle_social_event(event: dict) -> None:
 async def _handle_server_event(event: dict) -> None:
     payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
-    if event_type != "server.channel_retention.updated":
+    if event_type == "server.channel_retention.updated":
+        _log.warning("Ignoring remote channel retention settings update event")
+        return
+    if event_type != "server.channel_retention.pruned":
         return
 
-    directory_days = payload.get("directory_active_days")
-    auto_delete_days = payload.get("auto_delete_days")
-    if directory_days is None or auto_delete_days is None:
-        return
-    db.set_channel_retention_settings(int(directory_days), int(auto_delete_days))
+    source_server = str(event.get("source_server") or "unknown")
+    deleted_count = int(payload.get("deleted_count") or 0)
+    directory_days = int(payload.get("directory_active_days") or 30)
+    auto_delete_days = int(payload.get("auto_delete_days") or 0)
+    _log.info(
+        "Federation prune report from %s: deleted=%s (directory_active_days=%s, auto_delete_days=%s)",
+        source_server,
+        deleted_count,
+        directory_days,
+        auto_delete_days,
+    )
 
 
 # ──────────────────────────────────────────────────────────────

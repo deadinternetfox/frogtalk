@@ -56,8 +56,22 @@ async def cleanup_task():
                 print(f"[Cleanup] story cleanup error: {_e}")
             try:
                 stale = cleanup_inactive_public_rooms()
-                if int((stale or {}).get("deleted") or 0) > 0:
-                    print(f"[Cleanup] Auto-deleted {stale['deleted']} inactive public rooms")
+                deleted_rooms = int((stale or {}).get("deleted") or 0)
+                if deleted_rooms > 0:
+                    print(f"[Cleanup] Auto-deleted {deleted_rooms} inactive public rooms")
+                    room_names = (stale or {}).get("rooms") or []
+                    room_names = room_names if isinstance(room_names, list) else []
+                    report = {
+                        "deleted_count": deleted_rooms,
+                        "deleted_rooms": room_names[:25],
+                        "deleted_rooms_truncated": len(room_names) > 25,
+                        "directory_active_days": int((stale or {}).get("directory_active_days") or 30),
+                        "auto_delete_days": int((stale or {}).get("auto_delete_days") or 0),
+                        "pruned_at": int(time.time()),
+                    }
+                    outbox = federation_mod.enqueue_server_event("server.channel_retention.pruned", report)
+                    if not bool((outbox or {}).get("ok")):
+                        print(f"[Cleanup] Failed to enqueue prune report event: {(outbox or {}).get('error')}")
             except Exception as _e:
                 print(f"[Cleanup] inactive room cleanup error: {_e}")
         except Exception as e:
