@@ -4755,62 +4755,31 @@ def get_following_list(user_id: int, limit: int = 50) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
-def _calculate_post_score(post_id: int, context: str = 'explore') -> float:
-    """Unified post scoring function for ranking across Explore/Reels/Music.
-    
-    Args:
-        post_id: The wall_post id
-        context: 'explore', 'explore_top', 'reels_hot', 'reels_top', 'music' — determines weights
-    
-    Returns:
-        Float score for ordering (higher = more relevant)
-    
-    Scoring formula by context:
-    - explore (trending): reactions*2 + reposts*2 + comments + media_bonus(3) + recency_bonus
-    - explore_top: reactions + reposts*2 (all-time)
-    - reels_hot: like_reactions*3 + other_reactions + reposts*2 + comments + recency_bonus
-    - reels_top: like_reactions (all-time)
-    - music: same as explore trending
+def _calculate_post_score(context: str = 'explore', post_alias: str = 'wp') -> str:
+    """Return a reusable SQL score expression for post-ranking surfaces.
+
+    The same primitive signals are shared across Explore/Reels/Music, with only
+    context-specific weights changing. Callers append their own DESC/tiebreaker.
     """
-    with _conn() as con:
-        row = con.execute(f"""
-            SELECT
-                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=?) AS reaction_count,
-                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=? AND emoji='❤️') AS like_count,
-                (SELECT COUNT(*) FROM wall_reposts WHERE post_id=?) AS repost_count,
-                (SELECT COUNT(*) FROM wall_comments WHERE post_id=?) AS comment_count,
-                (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
-                julianday('now') - julianday(wp.created_at) AS hours_old
-            FROM wall_posts wp
-            WHERE wp.id=?
-        """, (post_id, post_id, post_id, post_id, post_id)).fetchone()
-    
-    if not row:
-        return 0.0
-    
-    reactions = int(row['reaction_count'] or 0)
-    likes = int(row['like_count'] or 0)
-    other_reactions = reactions - likes
-    reposts = int(row['repost_count'] or 0)
-    comments = int(row['comment_count'] or 0)
-    has_media = int(row['has_media'] or 0)
-    hours_old = float(row['hours_old'] or 0)
-    
-    # Recency bonus: 10 points if <1 day, 5 points if <7 days, 0 otherwise
-    recency = 10 if hours_old < 24 else (5 if hours_old < 168 else 0)
-    media_bonus = 3 if has_media else 0
-    
+    alias = str(post_alias or 'wp')
+    reactions = f"(SELECT COUNT(*) FROM wall_post_reactions WHERE post_id={alias}.id)"
+    likes = f"(SELECT COUNT(*) FROM wall_post_reactions WHERE post_id={alias}.id AND emoji='❤️')"
+    other_reactions = f"(SELECT COUNT(*) FROM wall_post_reactions WHERE post_id={alias}.id AND emoji!='❤️')"
+    reposts = f"(SELECT COUNT(*) FROM wall_reposts WHERE post_id={alias}.id)"
+    comments = f"(SELECT COUNT(*) FROM wall_comments WHERE post_id={alias}.id)"
+    media_bonus = f"CASE WHEN {alias}.media_type IS NOT NULL AND {alias}.media_type != '' THEN 3 ELSE 0 END"
+    recency = (
+        f"CASE WHEN julianday('now') - julianday({alias}.created_at) < 1 THEN 10 "
+        f"WHEN julianday('now') - julianday({alias}.created_at) < 7 THEN 5 ELSE 0 END"
+    )
+
     if context == 'explore_top':
-        return float(reactions + reposts * 2)
-    elif context == 'reels_top':
-        return float(likes)
-    elif context in ('explore', 'music'):
-        return float(reactions * 2 + reposts * 2 + comments + media_bonus + recency)
-    elif context == 'reels_hot':
-        return float(likes * 3 + other_reactions + reposts * 2 + comments + recency)
-    else:
-        # Default to explore trending
-        return float(reactions * 2 + reposts * 2 + comments + media_bonus + recency)
+        return f"({reactions} + ({reposts} * 2))"
+    if context == 'reels_top':
+        return likes
+    if context == 'reels_hot':
+        return f"(({likes} * 3) + {other_reactions} + ({reposts} * 2) + {comments} + {recency})"
+    return f"(({reactions} * 2) + ({reposts} * 2) + {comments} + {media_bonus} + {recency})"
 
 
 def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
@@ -4962,19 +4931,11 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
     )
     with _conn() as con:
         if sort == 'top':
-            order = "((SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) + ((SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) * 2)) DESC, wp.created_at DESC"
+            order = f"{_calculate_post_score('explore_top')} DESC, wp.created_at DESC"
         elif sort == 'new':
             order = "wp.created_at DESC"
         else:  # trending — mix of recency + engagement
-            order = """(
-                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) * 2 +
-                (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) * 2 +
-                (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) +
-                CASE WHEN wp.media_type IS NOT NULL AND wp.media_type != '' THEN 3 ELSE 0 END +
-                CASE WHEN julianday('now') - julianday(wp.created_at) < 1 THEN 10
-                     WHEN julianday('now') - julianday(wp.created_at) < 7 THEN 5
-                     ELSE 0 END
-            ) DESC, wp.created_at DESC"""
+            order = f"{_calculate_post_score('explore')} DESC, wp.created_at DESC"
         rows = con.execute(f"""
             SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy,
                    wp.allow_comments, wp.created_at, wp.edited_at,
@@ -6093,18 +6054,9 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
         if sort == "new":
             order = "wp.created_at DESC"
         elif sort == "top":
-            order = ("(SELECT COUNT(*) FROM wall_post_reactions "
-                     "WHERE post_id=wp.id AND emoji='❤️') DESC, wp.created_at DESC")
+            order = f"{_calculate_post_score('reels_top')} DESC, wp.created_at DESC"
         else:  # hot
-            order = """(
-                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji='❤️') * 3 +
-                (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji!='❤️') +
-                (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) * 2 +
-                (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) +
-                CASE WHEN julianday('now') - julianday(wp.created_at) < 1 THEN 10
-                     WHEN julianday('now') - julianday(wp.created_at) < 7 THEN 5
-                     ELSE 0 END
-            ) DESC, wp.created_at DESC"""
+            order = f"{_calculate_post_score('reels_hot')} DESC, wp.created_at DESC"
 
         if scope == "friends":
             rows = con.execute(f"""
