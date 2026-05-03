@@ -80,6 +80,28 @@ def _normalize_base_url(url: str) -> str:
     return (url or "").strip().rstrip("/")
 
 
+def enqueue_server_event(event_type: str, payload: dict) -> dict:
+    local = db.get_or_create_local_server_identity()
+    event_id = f"evt_{int(time.time() * 1000):016x}"
+    normalized_type = str(event_type or "").strip()
+    if not normalized_type:
+        return {"ok": False, "error": "missing_event_type"}
+
+    event = {
+        "event_id": event_id,
+        "event_type": normalized_type,
+        "event_version": 1,
+        "origin_server_id": local["server_id"],
+        "origin_time": datetime.utcnow().isoformat() + "Z",
+        "actor_global_user_id": "server-admin",
+        "payload": payload or {},
+        "signature": "",
+    }
+    if db.insert_federation_outbox_event(event):
+        return {"ok": True, "event_id": event_id}
+    return {"ok": False, "error": "enqueue_failed"}
+
+
 def _tor_proxy_url() -> str:
     return (os.getenv("FROGTALK_TOR_SOCKS_PROXY") or "socks5://127.0.0.1:9050").strip()
 
@@ -1027,6 +1049,8 @@ async def federation_inbox_processor() -> int:
                 await _handle_social_event(event)
             elif event_type.startswith("friend."):
                 await _handle_friend_event(event)
+            elif event_type.startswith("server."):
+                await _handle_server_event(event)
 
             await asyncio.to_thread(db.mark_federation_inbox_event, event_id, "applied")
             processed += 1
@@ -1843,6 +1867,19 @@ async def _handle_social_event(event: dict) -> None:
                     })
                 except Exception:
                     _log.debug("federated unlike notif WS push failed", exc_info=True)
+
+
+async def _handle_server_event(event: dict) -> None:
+    payload = event.get("payload") or {}
+    event_type = str(event.get("event_type") or "")
+    if event_type != "server.channel_retention.updated":
+        return
+
+    directory_days = payload.get("directory_active_days")
+    auto_delete_days = payload.get("auto_delete_days")
+    if directory_days is None or auto_delete_days is None:
+        return
+    db.set_channel_retention_settings(int(directory_days), int(auto_delete_days))
 
 
 # ──────────────────────────────────────────────────────────────

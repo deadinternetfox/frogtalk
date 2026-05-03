@@ -16,6 +16,11 @@ import bcrypt as _bcrypt
 
 DB_PATH = Path(os.getenv("DB_PATH", "data/frogtalk.db"))
 
+CHANNEL_DIRECTORY_ACTIVE_DAYS_KEY = "channels.directory_active_days"
+CHANNEL_AUTO_DELETE_DAYS_KEY = "channels.auto_delete_days"
+DEFAULT_CHANNEL_DIRECTORY_ACTIVE_DAYS = 30
+DEFAULT_CHANNEL_AUTO_DELETE_DAYS = 0
+
 
 def _conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -482,13 +487,23 @@ def create_room(name: str, description: str, room_type: str, owner_id: int,
 
 def delete_room(room_name: str, requester_id: int, is_admin: bool) -> bool:
     with _conn() as con:
-        row = con.execute("SELECT owner_id FROM rooms WHERE name=?", (room_name,)).fetchone()
+        row = con.execute("SELECT id, owner_id FROM rooms WHERE name=?", (room_name,)).fetchone()
         if not row:
             return False
         if not is_admin and row["owner_id"] != requester_id:
             return False
+        con.execute("DELETE FROM pinned_messages WHERE room_name=?", (room_name,))
+        con.execute("DELETE FROM room_djs WHERE room_name=?", (room_name,))
+        con.execute("DELETE FROM music_queue WHERE room_name=?", (room_name,))
+        con.execute("DELETE FROM telegram_bridges WHERE room_name=?", (room_name,))
+        con.execute("DELETE FROM discord_bridges WHERE room_name=?", (room_name,))
+        con.execute("DELETE FROM messages WHERE room_name=?", (room_name,))
         con.execute("DELETE FROM rooms WHERE name=?", (room_name,))
         con.commit()
+    try:
+        set_config(_music_anchor_config_key(room_name), "")
+    except Exception:
+        pass
     return True
 
 
@@ -1590,6 +1605,79 @@ def set_config(key: str, value: str):
     with _conn() as con:
         con.execute("INSERT OR REPLACE INTO config(key,value) VALUES(?,?)", (key, value))
         con.commit()
+
+
+def _get_positive_int_config(key: str, default: int, minimum: int = 0, maximum: int = 3650) -> int:
+    raw = get_config(key)
+    if raw is None or str(raw).strip() == "":
+        return int(default)
+    try:
+        value = int(str(raw).strip())
+    except Exception:
+        return int(default)
+    return max(minimum, min(maximum, value))
+
+
+def get_channel_directory_active_days() -> int:
+    return _get_positive_int_config(
+        CHANNEL_DIRECTORY_ACTIVE_DAYS_KEY,
+        DEFAULT_CHANNEL_DIRECTORY_ACTIVE_DAYS,
+        minimum=1,
+    )
+
+
+def get_channel_auto_delete_days() -> int:
+    return _get_positive_int_config(
+        CHANNEL_AUTO_DELETE_DAYS_KEY,
+        DEFAULT_CHANNEL_AUTO_DELETE_DAYS,
+        minimum=0,
+    )
+
+
+def get_channel_retention_settings() -> Dict[str, int]:
+    directory_days = get_channel_directory_active_days()
+    auto_delete_days = get_channel_auto_delete_days()
+    return {
+        "directory_active_days": directory_days,
+        "auto_delete_days": auto_delete_days,
+        "auto_delete_enabled": 1 if auto_delete_days > 0 else 0,
+    }
+
+
+def set_channel_retention_settings(directory_active_days: int, auto_delete_days: int) -> Dict[str, int]:
+    directory_days = max(1, min(3650, int(directory_active_days)))
+    delete_days = max(0, min(3650, int(auto_delete_days)))
+    set_config(CHANNEL_DIRECTORY_ACTIVE_DAYS_KEY, str(directory_days))
+    set_config(CHANNEL_AUTO_DELETE_DAYS_KEY, str(delete_days))
+    return get_channel_retention_settings()
+
+
+def cleanup_inactive_public_rooms() -> Dict[str, object]:
+    settings = get_channel_retention_settings()
+    auto_delete_days = int(settings["auto_delete_days"])
+    if auto_delete_days <= 0:
+        return {"deleted": 0, "rooms": []}
+
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT r.name
+            FROM rooms r
+            WHERE r.is_public=1
+              AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
+                  < datetime('now', '-' || ? || ' days')
+            """,
+            (auto_delete_days,),
+        ).fetchall()
+
+    deleted_rooms: List[str] = []
+    for row in rows:
+        room_name = str(row["name"] or "").strip()
+        if not room_name:
+            continue
+        if delete_room(room_name, requester_id=0, is_admin=True):
+            deleted_rooms.append(room_name)
+    return {"deleted": len(deleted_rooms), "rooms": deleted_rooms}
 
 
 def save_push_subscription(user_id: int, endpoint: str, p256dh: str, auth_key: str):
@@ -3659,6 +3747,7 @@ def delete_invite(code: str, room_id: int) -> bool:
 def get_public_channels(category: str = None, search: str = None,
                         limit: int = 50, offset: int = 0) -> List[Dict]:
     """Get public channels for directory."""
+    active_days = get_channel_directory_active_days()
     with _conn() as con:
         query = """
             SELECT r.id, r.name, r.description, r.directory_description,
@@ -3670,9 +3759,9 @@ def get_public_channels(category: str = None, search: str = None,
             JOIN users u ON r.owner_id = u.id
             WHERE r.is_public=1
               AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
-                  >= datetime('now', '-30 days')
+                  >= datetime('now', '-' || ? || ' days')
         """
-        params = []
+        params = [active_days]
         if category:
             query += " AND r.category=?"
             params.append(category)
@@ -3908,6 +3997,7 @@ def _attach_comment_votes(rows: List[Dict], target_type: str,
 
 def get_suggested_channels(user_id: int, limit: int = 10) -> List[Dict]:
     """Get public channels the user hasn't joined, ordered by popularity."""
+    active_days = get_channel_directory_active_days()
     with _conn() as con:
         rows = con.execute("""
             SELECT r.id, r.name, r.description, r.directory_description,
@@ -3918,12 +4008,12 @@ def get_suggested_channels(user_id: int, limit: int = 10) -> List[Dict]:
             FROM rooms r
             JOIN users u ON r.owner_id = u.id
             WHERE r.is_public=1
-                            AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
-                                    >= datetime('now', '-30 days')
+              AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
+                  >= datetime('now', '-' || ? || ' days')
               AND r.id NOT IN (SELECT room_id FROM room_members WHERE user_id=?)
             ORDER BY member_count DESC
             LIMIT ?
-        """, (user_id, limit)).fetchall()
+        """, (active_days, user_id, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -3945,6 +4035,7 @@ def get_user_channels(user_id: int) -> List[Dict]:
 
 def get_new_public_channels(limit: int = 10) -> List[Dict]:
     """Get newest public channels for explore."""
+    active_days = get_channel_directory_active_days()
     with _conn() as con:
         rows = con.execute("""
             SELECT r.id, r.name, r.description, r.directory_description,
@@ -3956,10 +4047,10 @@ def get_new_public_channels(limit: int = 10) -> List[Dict]:
             JOIN users u ON r.owner_id = u.id
             WHERE r.is_public=1
               AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
-                  >= datetime('now', '-30 days')
+                  >= datetime('now', '-' || ? || ' days')
             ORDER BY r.id DESC
             LIMIT ?
-        """, (limit,)).fetchall()
+        """, (active_days, limit)).fetchall()
     return [dict(r) for r in rows]
 
 

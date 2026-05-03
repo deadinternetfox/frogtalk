@@ -36,13 +36,13 @@ from routers import federation as federation_mod
 from routers import server_admin as server_admin_mod
 
 import asyncio
-from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories
+from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories, cleanup_inactive_public_rooms
 
 limiter = Limiter(key_func=get_remote_address)
 
 
 async def cleanup_task():
-    """Background task to clean up expired DM messages and CAPTCHAs."""
+    """Background task to clean up expiring content and inactive public rooms."""
     while True:
         await asyncio.sleep(60)  # Run every minute
         try:
@@ -54,6 +54,12 @@ async def cleanup_task():
                 cleanup_expired_stories()
             except Exception as _e:
                 print(f"[Cleanup] story cleanup error: {_e}")
+            try:
+                stale = cleanup_inactive_public_rooms()
+                if int((stale or {}).get("deleted") or 0) > 0:
+                    print(f"[Cleanup] Auto-deleted {stale['deleted']} inactive public rooms")
+            except Exception as _e:
+                print(f"[Cleanup] inactive room cleanup error: {_e}")
         except Exception as e:
             print(f"[Cleanup] Error: {e}")
 

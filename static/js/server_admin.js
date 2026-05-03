@@ -23,6 +23,9 @@
   const easterSaveBtn = document.getElementById('easter-save-btn');
   const easterUploadBtn = document.getElementById('easter-upload-btn');
   const easterUploadInput = document.getElementById('easter-upload-input');
+  const channelActiveDays = document.getElementById('channel-active-days');
+  const channelAutoDeleteDays = document.getElementById('channel-auto-delete-days');
+  const saveChannelRetentionBtn = document.getElementById('save-channel-retention-btn');
   let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
   let easterEggLoaded = false;
   let easterEggDirty = false;
@@ -361,6 +364,27 @@
     updatedBadge.textContent = `Updated ${fmtWhen(payload.timestamp)} · ${lastSync}`;
   }
 
+  function syncChannelRetention(payload) {
+    const retention = payload || {};
+    if (channelActiveDays) channelActiveDays.value = String(retention.directory_active_days ?? 30);
+    if (channelAutoDeleteDays) channelAutoDeleteDays.value = String(retention.auto_delete_days ?? 0);
+  }
+
+  async function saveChannelRetention() {
+    const directoryActiveDays = Math.max(1, Number(channelActiveDays?.value || 30) || 30);
+    const autoDeleteDays = Math.max(0, Number(channelAutoDeleteDays?.value || 0) || 0);
+    const payload = await api('/api/server-admin/channel-retention', {
+      method: 'PUT',
+      body: JSON.stringify({
+        directory_active_days: directoryActiveDays,
+        auto_delete_days: autoDeleteDays,
+      }),
+    });
+    syncChannelRetention(payload.channel_retention || {});
+    const federated = payload.federation?.ok ? ' Federation sync queued.' : ' Federation sync pending retry.';
+    setActionMessage(`Channel timing saved.${federated}`);
+  }
+
   function renderStats(payload, pingMs) {
     const db = payload.db || {};
     const ws = payload.ws || {};
@@ -571,10 +595,12 @@
 
   async function refreshDashboard() {
     const t0 = performance.now();
+    const config = await api('/api/server-admin/config');
     const stats = await api('/api/server-admin/stats');
     const users = await api('/api/server-admin/online-users');
     const pingMs = Math.max(1, Math.round(performance.now() - t0));
     latencyBadge.textContent = `Latency: ${pingMs} ms`;
+    syncChannelRetention(config.channel_retention || {});
     renderServerMeta(stats);
     renderStats(stats, pingMs);
     renderResources(stats);
@@ -666,6 +692,9 @@
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('refresh-btn').addEventListener('click', () => refreshDashboard().catch((e) => setActionMessage(e.message, true)));
   document.getElementById('sync-dir-btn').addEventListener('click', () => runAction('sync'));
+  saveChannelRetentionBtn?.addEventListener('click', () => {
+    saveChannelRetention().catch((e) => setActionMessage(e.message, true));
+  });
   frogTrigger?.addEventListener('click', handleFrogTap);
   easterEditor?.addEventListener('input', () => {
     easterEggDirty = true;

@@ -707,6 +707,15 @@ input, select {
             <button class="btn" id="sync-dir-btn" style="width:100%">Sync Official Directory</button>
           </div>
 
+          <div class="sub" style="margin-bottom:8px;">Directory visibility and inactive-channel cleanup are controlled here and replicated to the rest of the federation.</div>
+          <div class="form-row">
+            <input id="channel-active-days" type="number" min="1" max="3650" value="30" placeholder="Visible if active within (days)">
+            <input id="channel-auto-delete-days" type="number" min="0" max="3650" value="0" placeholder="Auto-delete after inactivity (0 = off)">
+          </div>
+          <div style="margin-bottom:10px;">
+            <button class="btn" id="save-channel-retention-btn" style="width:100%">Save Channel Timing</button>
+          </div>
+
           <div class="form-row">
             <input id="mod-nick" placeholder="Target nickname">
             <input id="mod-duration" type="number" min="1" value="60" placeholder="Duration (mins)">

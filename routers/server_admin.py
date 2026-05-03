@@ -269,6 +269,11 @@ class EasterEggBody(BaseModel):
     html: str = ""
 
 
+class ChannelRetentionBody(BaseModel):
+    directory_active_days: int = 30
+    auto_delete_days: int = 0
+
+
 def _cfg_easter_enabled() -> bool:
     return _is_true(db.get_config("server.webui.easter_egg.enabled") or "0")
 
@@ -344,7 +349,27 @@ async def server_webui_config():
     return {
         "enabled": True,
         "username_hint": _webui_username(),
+        "channel_retention": db.get_channel_retention_settings(),
         "easter_egg": _current_easter_egg_payload(),
+    }
+
+
+@router.put("/api/server-admin/channel-retention")
+async def server_admin_put_channel_retention(body: ChannelRetentionBody, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    settings = db.set_channel_retention_settings(body.directory_active_days, body.auto_delete_days)
+    sync = federation_router.enqueue_server_event("server.channel_retention.updated", settings)
+    return {
+        "ok": True,
+        "channel_retention": settings,
+        "federation": sync,
     }
 
 
