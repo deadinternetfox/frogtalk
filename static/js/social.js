@@ -1973,16 +1973,9 @@ const Social = (() => {
       if (snap) {
         _initReelCards(snap);
         _armReelsStageReveal(snap, loadToken);
+        // Start playback immediately so users transition from loading to motion fast.
+        _reelsAutoplayVisible();
       }
-
-      // Wait for first reel preview/playability before revealing cards to avoid grey pre-frame flashes.
-      if (snap) await _waitForFirstReelPreview(snap);
-      if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
-      // Auto-play first visible reel
-      _reelsAutoplayVisible();
-      if (snap) await _waitForFirstReelPlayable(snap);
-      if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
-      _reelsRevealStage(loadToken);
 
       // IntersectionObserver: pause/play as cards scroll into/out of view
       if (snap && window.IntersectionObserver) {
@@ -2173,8 +2166,8 @@ const Social = (() => {
       reveal();
       return;
     }
-    // Keep loading from getting stuck over content even on slow/odd decoders.
-    setTimeout(reveal, 2400);
+    // Keep loading from getting stuck over content on slow/odd decoders.
+    setTimeout(reveal, 1400);
   }
 
   function _reelsAdvanceFrom(card) {
