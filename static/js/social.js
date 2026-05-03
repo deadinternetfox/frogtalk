@@ -76,6 +76,8 @@ const Social = (() => {
         const poster = document.createElement('div');
         poster.className = 'ft-video-poster';
         host.appendChild(poster);
+        try { video.removeAttribute('controls'); } catch {}
+        try { video.controls = false; } catch {}
         if (host.classList.contains('sf-media')) {
           const play = document.createElement('button');
           play.type = 'button';
@@ -86,11 +88,22 @@ const Social = (() => {
             e.preventDefault();
             e.stopPropagation();
             host.classList.add('is-playing');
-            try { video.controls = true; } catch {}
+            try { video.removeAttribute('controls'); } catch {}
+            try { video.controls = false; } catch {}
             try { video.muted = false; } catch {}
             try { video.play().catch(() => {}); } catch {}
           };
           host.appendChild(play);
+          video.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (video.paused) {
+              host.classList.add('is-playing');
+              video.play().catch(() => {});
+            } else {
+              video.pause();
+            }
+          });
         }
         const drawPoster = () => {
           if (posterDrawn) return;
@@ -114,6 +127,10 @@ const Social = (() => {
       video.addEventListener('play', () => host.classList.add('is-playing'));
       video.addEventListener('pause', () => host.classList.remove('is-playing'));
       video.addEventListener('ended', () => host.classList.remove('is-playing'));
+      video.addEventListener('pause', () => {
+        try { video.removeAttribute('controls'); } catch {}
+        try { video.controls = false; } catch {}
+      });
     });
   }
 
@@ -1947,6 +1964,8 @@ const Social = (() => {
       const poster = card.querySelector('.reel-video-poster');
       const prog = card.querySelector('.reel-progress > span');
       if (!video) return;
+      try { video.removeAttribute('controls'); } catch {}
+      try { video.controls = false; } catch {}
       let posterDrawn = false;
 
       const drawPoster = () => {
@@ -1969,6 +1988,7 @@ const Social = (() => {
       video.addEventListener('loadeddata', drawPoster, { once: true });
       video.addEventListener('canplay', drawPoster);
       video.addEventListener('seeked', drawPoster);
+      video.addEventListener('playing', drawPoster);
       video.addEventListener('loadedmetadata', () => {
         try {
           if (!Number.isFinite(video.duration) || video.duration <= 0.12) return;
@@ -1981,6 +2001,7 @@ const Social = (() => {
       video.addEventListener('timeupdate', () => {
         if (!prog || !video.duration) return;
         prog.style.width = `${Math.min(100, Math.max(0, (video.currentTime / video.duration) * 100))}%`;
+        if (!posterDrawn && video.currentTime > 0.03) drawPoster();
       });
       video.addEventListener('play', () => card.classList.add('is-playing'));
       video.addEventListener('pause', () => card.classList.remove('is-playing'));
@@ -2150,6 +2171,10 @@ const Social = (() => {
       ev?.stopPropagation?.();
     } catch {}
     await openPostComments(postId);
+    setTimeout(() => {
+      const input = document.getElementById(`sf-ci-${postId}`);
+      if (input) input.focus();
+    }, 80);
   }
 
   async function loadProfileReels(nickname) {
