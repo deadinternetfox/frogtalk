@@ -680,6 +680,106 @@ try {{
     return HTMLResponse(content=html)
 
 
+@app.get("/p/{post_id}", response_class=HTMLResponse)
+async def serve_post_landing(post_id: int):
+    """Public post share page with OG card metadata.
+
+    Public posts are visible to logged-out users; non-public posts return a
+    generic not-found style page so privacy is not leaked.
+    """
+    import database as db
+    post = db.get_wall_post(post_id)
+    if not post or (post.get("privacy") or "public") != "public":
+        html = (
+            "<!DOCTYPE html><html><head><title>Post not found — FrogTalk</title>"
+            "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+            "<style>body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui;"
+            "display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}"
+            ".card{background:#1a1a1a;padding:40px;border-radius:16px;text-align:center;max-width:430px}"
+            "h1{color:#4caf50}a{color:#4caf50}</style></head>"
+            "<body><div class=card><h1>🐸 Post not found</h1>"
+            "<p>This post is unavailable or not public.</p>"
+            "<a href=\"/app\">Go to FrogTalk</a></div></body></html>"
+        )
+        return HTMLResponse(content=html, status_code=404)
+
+    nick = post.get("nickname") or "frog"
+    content = (post.get("content") or "").strip()
+    desc = content.replace("\n", " ").strip()[:180] or f"A public post by @{nick} on FrogTalk."
+    media_data = post.get("media_data") or ""
+    media_type = (post.get("media_type") or "").lower()
+    og_image = "https://frogtalk.xyz/static/icons/og-image.png"
+    if media_type.startswith("image/") and media_data.startswith(("http://", "https://")):
+        og_image = media_data
+    elif media_type.startswith("image/") and media_data.startswith("data:image/"):
+        og_image = f"https://frogtalk.xyz/og/post/{post_id}.img"
+
+    canonical = f"https://frogtalk.xyz/p/{post_id}"
+    avatar = post.get("avatar") or ""
+    avatar_html = (
+        f"<img class=\"author-avatar\" src=\"{_og_escape(avatar)}\" alt=\"\">"
+        if avatar.startswith(("http://", "https://", "data:image/", "/"))
+        else "<div class=\"author-avatar author-fallback\">🐸</div>"
+    )
+    media_html = ""
+    if media_type.startswith("image/") and media_data:
+        media_html = f"<img class=\"post-media\" src=\"{_og_escape(media_data)}\" alt=\"Post media\">"
+    elif media_type.startswith("video/") and media_data:
+        media_html = f"<video class=\"post-media\" controls playsinline preload=\"metadata\" src=\"{_og_escape(media_data)}\"></video>"
+
+    html = f"""<!DOCTYPE html>
+<html><head>
+<meta charset=\"utf-8\">
+<title>Post by @{_og_escape(nick)} on FrogTalk</title>
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
+<meta name=\"description\" content=\"{_og_escape(desc)}\">
+<link rel=\"canonical\" href=\"{canonical}\">
+<meta property=\"og:type\" content=\"article\">
+<meta property=\"og:site_name\" content=\"FrogTalk\">
+<meta property=\"og:title\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
+<meta property=\"og:description\" content=\"{_og_escape(desc)}\">
+<meta property=\"og:image\" content=\"{_og_escape(og_image)}\">
+<meta property=\"og:url\" content=\"{canonical}\">
+<meta name=\"twitter:card\" content=\"summary_large_image\">
+<meta name=\"twitter:title\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
+<meta name=\"twitter:description\" content=\"{_og_escape(desc)}\">
+<meta name=\"twitter:image\" content=\"{_og_escape(og_image)}\">
+<meta name=\"theme-color\" content=\"#4caf50\">
+<style>
+body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
+ display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}}
+.card{{background:#1a1a1a;padding:22px;border-radius:20px;max-width:520px;width:100%;border:1px solid #2a4a2a;box-shadow:0 20px 60px rgba(0,0,0,0.5)}}
+.author{{display:flex;align-items:center;gap:10px;margin-bottom:14px}}
+.author-avatar{{width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid #4caf50;background:#1f1f1f}}
+.author-fallback{{display:flex;align-items:center;justify-content:center;font-size:22px}}
+.author-name{{color:#4caf50;font-weight:700}}
+.caption{{white-space:pre-wrap;line-height:1.5;color:#ddd;margin-bottom:14px;word-wrap:break-word}}
+.post-media{{width:100%;max-height:70vh;object-fit:contain;border-radius:14px;border:1px solid #2a2a2a;background:#111}}
+.actions{{display:flex;gap:10px;margin-top:16px}}
+.btn{{display:block;flex:1;text-align:center;padding:13px;border-radius:10px;text-decoration:none;font-weight:600}}
+.btn-primary{{background:#4caf50;color:#000}}
+.btn-secondary{{background:#2a2a2a;color:#e0e0e0;border:1px solid #3a3a3a}}
+</style></head><body>
+<div class=\"card\">
+  <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
+  {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
+  {media_html}
+  <div class=\"actions\">
+    <a href=\"/app?post={post_id}\" class=\"btn btn-primary\">Open in FrogTalk</a>
+    <a href=\"/\" class=\"btn btn-secondary\">Home</a>
+  </div>
+</div>
+<script>
+try {{
+    if (localStorage.getItem('token') || localStorage.getItem('fc_token')) {{
+    window.location.replace('/app?post={post_id}');
+  }}
+}} catch (e) {{}}
+</script>
+</body></html>"""
+    return HTMLResponse(content=html)
+
+
 @app.get("/api/ping")
 async def api_ping():
     """Lightweight health probe used by the client connection-lost overlay."""
@@ -765,6 +865,26 @@ async def og_room_image(room_name: str):
         return _fallback_og_image()
     icon = room.get("icon") or ""
     raw, mime = _decode_data_url_to_bytes(icon)
+    if raw:
+        return Response(content=raw, media_type=mime or "image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
+    return _fallback_og_image()
+
+
+@app.get("/og/post/{post_id}.img")
+async def og_post_image(post_id: int):
+    """Binary proxy for a public post image for OG previews."""
+    from fastapi.responses import Response
+    import database as db
+    post = db.get_wall_post(post_id)
+    if not post or (post.get("privacy") or "public") != "public":
+        return _fallback_og_image()
+    if not (post.get("media_type") or "").startswith("image/"):
+        return _fallback_og_image()
+    md = post.get("media_data") or ""
+    if md.startswith(("http://", "https://")):
+        return Response(status_code=302, headers={"Location": md})
+    raw, mime = _decode_data_url_to_bytes(md)
     if raw:
         return Response(content=raw, media_type=mime or "image/png",
                         headers={"Cache-Control": "public, max-age=86400"})
@@ -1075,6 +1195,7 @@ async def apple_app_site_association():
                         "/dm/*",
                         "/room/*",
                         "/u/*",
+                        "/p/*",
                         "/c/*",
                         "/invite/*",
                     ],
@@ -1213,6 +1334,9 @@ async def serve_home(request: Request):
     room = (qp.get("room") or qp.get("channel") or qp.get("c") or "").strip()
     if room:
         return await serve_channel_landing(room)
+    post = (qp.get("post") or qp.get("p") or "").strip()
+    if post.isdigit() and int(post) > 0:
+        return await serve_post_landing(int(post))
     code = (qp.get("invite") or qp.get("i") or "").strip()
     if code:
         return await serve_invite_landing(code)

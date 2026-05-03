@@ -159,6 +159,11 @@ const App = {
       this.pendingRoom = pendingRoom;
       window.history.replaceState({}, '', window.location.pathname);
     }
+    const pendingPost = params.get('post') || params.get('p');
+    if (pendingPost) {
+      this.pendingPost = pendingPost;
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     const incomingCall = params.get('incoming_call');
     const pendingCallId = params.get('call_id');
     const pendingPeerNick = params.get('peer_nick');
@@ -353,6 +358,26 @@ const App = {
         App.openFirstAvailableRoom();
       }
       this.pendingDM = null;
+    } else if (this.pendingPost) {
+      // Share link: /p/{id} or /?post={id} — open FrogSocial post detail.
+      App.openFirstAvailableRoom();
+      const postId = Number(this.pendingPost);
+      this.pendingPost = null;
+      const tryOpenPost = (attempts) => {
+        try {
+          if (Number.isFinite(postId) && postId > 0 && typeof Social !== 'undefined' && Social.open && Social.viewPostDetail) {
+            Social.open('feed');
+            setTimeout(() => {
+              try { Social.viewPostDetail(postId); } catch {}
+            }, 60);
+            return;
+          }
+        } catch (e) {
+          console.error('[App] open shared post failed', e);
+        }
+        if (attempts > 0) setTimeout(() => tryOpenPost(attempts - 1), 120);
+      };
+      tryOpenPost(16);
     } else if (this.pendingProfile) {
       // Share link: /?profile={nick} — open the polished FrogSocial profile
       // view. Falls back to the legacy user-info modal if Social isn't loaded.

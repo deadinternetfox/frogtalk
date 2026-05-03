@@ -2565,7 +2565,7 @@ const Social = (() => {
           <span class="sf-post-time">${timeAgo(p.created_at)}</span>
         </div>
         <button class="sf-post-menu" title="More options" aria-label="Post options"
-          data-nick="${esc(p.nickname)}" data-uid="${p.user_id}" data-pid="${p.id}"
+          data-nick="${esc(p.nickname)}" data-uid="${p.user_id}" data-pid="${p.id}" data-privacy="${esc(p.privacy || 'public')}"
           onclick="event.stopPropagation();Social.openPostMenu(this)">⋯</button>
       </div>
       ${postText ? `<div class="sf-post-text ${isMusicPost ? 'is-music-caption' : ''}">${_formatPostContent(postText)}</div>` : ''}
@@ -2793,10 +2793,16 @@ const Social = (() => {
     const nick = btn.dataset.nick;
     const uid  = +btn.dataset.uid;
     const pid  = +btn.dataset.pid;
+    const privacy = (btn.dataset.privacy || 'public').toLowerCase();
     const isOwn = uid === State.user?.id;
 
     const items = [];
     items.push({ icon: '👤', label: `View @${nick}`, onclick: () => openProfile(nick) });
+    items.push({
+      icon: '🔗',
+      label: 'Share URL',
+      onclick: () => sharePostUrl(pid, { nickname: nick, privacy })
+    });
     if (!isOwn) {
       items.push({ icon: '✉️', label: 'Send message', onclick: () => dmUser(nick) });
       items.push({ icon: '🚫', label: `Block @${nick}`, danger: true, onclick: () => blockUserFromSocial(nick) });
@@ -2808,8 +2814,47 @@ const Social = (() => {
       showActionSheet(`Post by @${nick}`, items);
     } else {
       // Fallback: simple confirm-based menu
+      if (confirm('Copy post link?')) {
+        sharePostUrl(pid, { nickname: nick, privacy });
+        return;
+      }
       if (isOwn && confirm('Delete this post?')) deletePost(pid);
       else if (!isOwn && confirm(`Block @${nick}?`)) blockUserFromSocial(nick);
+    }
+  }
+
+  function postShareUrl(postId) {
+    const id = Number(postId);
+    const safeId = Number.isFinite(id) && id > 0 ? id : 0;
+    return `${window.location.origin}/p/${safeId}`;
+  }
+
+  async function sharePostUrl(postId, meta = {}) {
+    const url = postShareUrl(postId);
+    const privacy = String(meta.privacy || 'public').toLowerCase();
+    const nick = meta.nickname || 'user';
+    if (privacy !== 'public') {
+      try {
+        UI.showToast('This post is not public - link access depends on viewer permissions', 'info');
+      } catch {}
+    }
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `Post by @${nick} on FrogTalk`,
+          text: `Check out this FrogTalk post by @${nick}`,
+          url,
+        });
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+    const ok = await UI.copy(url);
+    if (ok) {
+      try { UI.showToast('Post link copied to clipboard', 'success'); } catch {}
+    } else {
+      window.prompt('Copy this post link:', url);
     }
   }
 
@@ -3612,6 +3657,7 @@ const Social = (() => {
     toggleFollow, reactPost, showReactPicker, toggleComments,
     submitComment, deleteComment, voteComment, deletePost, dmUser,
     shareProfile, profileShareUrl,
+    sharePostUrl, postShareUrl,
     openPostMenu, blockUserFromSocial,
     addFriendFromProfile, acceptFriendFromProfile,
     refreshProfileRelationship,
