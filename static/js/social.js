@@ -2953,7 +2953,7 @@ const Social = (() => {
     _newPostMedia = null;
     _newPostMediaType = null;
     _newPostOrigMedia = null;
-    _newPostPrivacy = (localStorage.getItem('ft_default_post_privacy') || 'private');
+    _newPostPrivacy = (localStorage.getItem('ft_default_post_privacy') || 'public');
     _newPostAllowComments = (localStorage.getItem('ft_default_allow_comments') !== '0');
     _filterState = { brightness: 100, contrast: 100, saturate: 100 };
     document.getElementById('social-new-post').classList.remove('hidden');
