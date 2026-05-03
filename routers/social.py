@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Query, Request, UploadFile, File, Form, Header
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from slowapi import Limiter
@@ -319,7 +319,11 @@ async def suggested_users(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/posts/{post_id}/media")
-async def get_post_media(post_id: int, current_user: dict = Depends(get_current_user)):
+async def get_post_media(
+    post_id: int,
+    token: Optional[str] = Query(None),
+    x_session_token: Optional[str] = Header(None, alias="X-Session-Token"),
+):
     """Lazy-load endpoint for wall-post media. Used by feed/explore in
     `lite=1` mode so each post body only carries this URL instead of the
     multi-MB inlined base64 payload. Decodes the stored data URI and
@@ -331,6 +335,11 @@ async def get_post_media(post_id: int, current_user: dict = Depends(get_current_
     `friends/followers/public`; followers see `followers/public`; everyone
     else only `public`. Either-side block hides the media entirely.
     """
+    session_token = (x_session_token or token or "").strip()
+    current_user = db.get_user_by_token(session_token) if session_token else None
+    if not current_user:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
     row = db.get_wall_post_media(post_id)
     if not row or not row.get("media_data"):
         return JSONResponse(status_code=404, content={"error": "Not found"})

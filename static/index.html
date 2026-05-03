@@ -4331,6 +4331,21 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sf-hashtag{color:#a0d8b0; font-weight:500}
 .sf-media{width:100%}
 .sf-media img,.sf-media video{width:100%;display:block;max-height:500px;object-fit:cover}
+.ft-video-host{position:relative;overflow:hidden;background:#000}
+.ft-video-poster{position:absolute;inset:0;z-index:1;background:#060606 center/cover no-repeat;opacity:0;transition:opacity .2s ease;pointer-events:none}
+.ft-video-poster.ready{opacity:.38}
+.ft-video-host.is-playing .ft-video-poster{opacity:0}
+.ft-video-play{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+  width:62px;height:62px;border-radius:50%;border:2px solid rgba(255,255,255,.86);
+  background:rgba(76,175,80,.9);color:#031106;font-size:28px;line-height:1;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
+  transition:transform .15s ease,opacity .15s ease,background .15s ease
+}
+.ft-video-play:hover{transform:translate(-50%,-50%) scale(1.06);background:#7ad491}
+.ft-video-host.is-playing .ft-video-play{opacity:0;pointer-events:none}
+.social-grid-item.is-video .ft-video-poster.ready{opacity:.45}
 .sf-post-actions{display:flex;align-items:center;gap:4px;padding:10px 14px;flex-wrap:wrap}
 .sf-like,.sf-comment-btn,.sf-react-btn{background:none;border:none;color:#ccc;cursor:pointer;font-size:14px;padding:4px 8px;border-radius:8px;transition:background .15s;display:flex;align-items:center;gap:4px}
 .sf-like:hover,.sf-comment-btn:hover,.sf-react-btn:hover{background:#1a1a1a}

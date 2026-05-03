@@ -31,6 +31,95 @@ const Social = (() => {
     return res;
   };
 
+  function _authMediaSrc(raw) {
+    const src = String(raw || '');
+    if (!src) return '';
+    if (!src.startsWith('/api/social/posts/')) return src;
+    const token = String(State?.token || '');
+    if (!token) return src;
+    try {
+      const u = new URL(src, window.location.origin);
+      if (!u.searchParams.get('token')) u.searchParams.set('token', token);
+      return `${u.pathname}${u.search}${u.hash}`;
+    } catch {
+      const sep = src.includes('?') ? '&' : '?';
+      return `${src}${sep}token=${encodeURIComponent(token)}`;
+    }
+  }
+
+  let _socialVideoObserverStarted = false;
+  function _drawVideoPoster(video, posterEl) {
+    try {
+      if (!video || !posterEl || !video.videoWidth || !video.videoHeight) return;
+      const c = document.createElement('canvas');
+      const maxW = 720;
+      c.width = Math.min(video.videoWidth, maxW);
+      c.height = Math.max(1, Math.round(c.width * (video.videoHeight / video.videoWidth)));
+      const ctx = c.getContext('2d');
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, c.width, c.height);
+      posterEl.style.backgroundImage = `url(${c.toDataURL('image/jpeg', 0.74)})`;
+      posterEl.classList.add('ready');
+    } catch {}
+  }
+
+  function _hydrateVideoThumbs(scope) {
+    const root = scope || document;
+    root.querySelectorAll('.sf-media video, .social-grid-item.is-video video').forEach(video => {
+      if (video.dataset.svInit === '1') return;
+      video.dataset.svInit = '1';
+      const host = video.parentElement;
+      if (!host) return;
+      host.classList.add('ft-video-host');
+      if (!host.querySelector('.ft-video-poster')) {
+        const poster = document.createElement('div');
+        poster.className = 'ft-video-poster';
+        host.appendChild(poster);
+        if (host.classList.contains('sf-media')) {
+          const play = document.createElement('button');
+          play.type = 'button';
+          play.className = 'ft-video-play';
+          play.setAttribute('aria-label', 'Play video');
+          play.textContent = '▶';
+          play.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            host.classList.add('is-playing');
+            try { video.controls = true; } catch {}
+            try { video.play().catch(() => {}); } catch {}
+          };
+          host.appendChild(play);
+        }
+        video.addEventListener('loadeddata', () => _drawVideoPoster(video, poster), { once: true });
+        setTimeout(() => _drawVideoPoster(video, poster), 900);
+      }
+      video.addEventListener('play', () => host.classList.add('is-playing'));
+      video.addEventListener('pause', () => host.classList.remove('is-playing'));
+      video.addEventListener('ended', () => host.classList.remove('is-playing'));
+    });
+  }
+
+  function _ensureSocialVideoObserver() {
+    if (_socialVideoObserverStarted) return;
+    _socialVideoObserverStarted = true;
+    _hydrateVideoThumbs(document);
+    if (typeof MutationObserver === 'undefined' || !document.body) return;
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) {
+        for (const node of m.addedNodes) {
+          if (node && node.nodeType === 1) {
+            if (node.matches && (node.matches('.sf-media video') || node.matches('.social-grid-item.is-video video'))) {
+              _hydrateVideoThumbs(node.parentElement || node);
+            } else if (node.querySelectorAll) {
+              _hydrateVideoThumbs(node);
+            }
+          }
+        }
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  }
+
   function timeAgo(iso) {
     if (!iso) return '';
     const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
@@ -1213,6 +1302,7 @@ const Social = (() => {
 
   // ── FEED ────────────────────────────────────────────────────────────────
   async function loadFeed() {
+    _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
     content.innerHTML = '<div class="social-loading">Loading feed…</div>';
     try {
@@ -1539,7 +1629,7 @@ const Social = (() => {
         container.innerHTML = `<div class="social-grid">${mediaPosts.map(p => {
           const isVideo = p.media_type && p.media_type.startsWith('video/');
           const thumb = isVideo
-            ? `<video src="${esc(p.media_data)}" muted preload="metadata"></video>`
+            ? `<video src="${esc(_authMediaSrc(p.media_data))}" muted preload="metadata"></video>`
             : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
           return `
           <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
@@ -1697,7 +1787,7 @@ const Social = (() => {
       container.innerHTML = `${toggleHtml}<div class="social-grid">${mediaPosts.map(p => {
         const isVideo = p.media_type && p.media_type.startsWith('video/');
         const thumb = isVideo
-          ? `<video src="${esc(p.media_data)}" muted preload="metadata"></video>`
+          ? `<video src="${esc(_authMediaSrc(p.media_data))}" muted preload="metadata"></video>`
           : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
         return `
           <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
@@ -1925,7 +2015,7 @@ const Social = (() => {
   }
 
   function _renderReelCard(post) {
-    const videoSrc = esc(post.media_data || '');
+    const videoSrc = esc(_authMediaSrc(post.media_data || ''));
     const nick = esc(post.nickname || '');
     const avatarSrc = post.avatar ? esc(post.avatar) : '';
     const avatarHtml = avatarSrc
@@ -2002,7 +2092,7 @@ const Social = (() => {
       container.innerHTML = `<div class="social-grid">${posts.map(p => {
         return `
           <div class="social-grid-item is-video" onclick="Social.viewPostDetail(${p.id})">
-            <video src="${esc(p.media_data || '')}" muted preload="metadata"></video>
+            <video src="${esc(_authMediaSrc(p.media_data || ''))}" muted preload="metadata"></video>
             <span class="social-grid-video-ico">▶</span>
             <div class="social-grid-overlay">
               <span>❤️ ${p.reaction_count || 0}</span>
@@ -2999,7 +3089,7 @@ const Social = (() => {
       if (p.media_type.startsWith('image/')) {
         mediaHtml = `<div class="sf-media"><img src="${esc(p.media_data)}" alt="" loading="lazy" decoding="async" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" onerror="this.closest('.sf-media')?.remove()"></div>`;
       } else if (p.media_type.startsWith('video/')) {
-        mediaHtml = `<div class="sf-media"><video src="${esc(p.media_data)}" controls preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
+        mediaHtml = `<div class="sf-media"><video src="${esc(_authMediaSrc(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
       } else if (p.media_type.startsWith('music/')) {
         mediaHtml = _renderMusicCard(p);
         isMusicPost = true;
