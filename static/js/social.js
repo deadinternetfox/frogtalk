@@ -19,6 +19,7 @@ const Social = (() => {
   let _profileActiveTab = 'wall';
   const _profilePostsCache = new Map(); // nick → { ts, posts[] } — shared by wall/music/reels/media tabs
   let _reelsDirectLaunchId = 0;          // set by openSharedReel to suppress scope-bar flash
+  let _bgPrefetchRic = 0;                // handle for pending background cache-warm callback
 
   // ── helpers ──────────────────────────────────────────────────────────────
   const esc = s => UI.escHtml(s);
@@ -322,6 +323,72 @@ const Social = (() => {
         </div>
       </div>
     `).join('')}</div>`;
+  }
+
+  // ── Background tab cache warming ──────────────────────────────────────
+  // After any main-tab load completes, prime the other tabs' caches during
+  // browser idle time so the next switch renders instantly from memory.
+  function _cancelBgPrefetch() {
+    if (!_bgPrefetchRic) return;
+    try { cancelIdleCallback(_bgPrefetchRic); } catch { clearTimeout(_bgPrefetchRic); }
+    _bgPrefetchRic = 0;
+  }
+
+  function _schedBgPrefetch(excludeTab) {
+    _cancelBgPrefetch();
+    const cb = () => { _bgPrefetchRic = 0; _doBgPrefetch(excludeTab); };
+    try {
+      _bgPrefetchRic = requestIdleCallback(cb, { timeout: 6000 });
+    } catch {
+      _bgPrefetchRic = setTimeout(cb, 1800);
+    }
+  }
+
+  async function _doBgPrefetch(excludeTab) {
+    if (!State?.user) return;
+    // Each block is isolated so one network failure can't cancel the rest.
+    try {
+      if (excludeTab !== 'feed' && !_cacheFresh(_feedCache)) {
+        const r = await api('/api/social/feed?lite=1&limit=24').catch(() => null);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => ({}));
+          if (Array.isArray(d.posts)) _feedCache = { ts: Date.now(), posts: d.posts };
+        }
+      }
+    } catch {}
+    try {
+      const _expKey = _exploreSort || 'trending';
+      if (excludeTab !== 'explore' && !_cacheFresh(_exploreCache.get(_expKey))) {
+        const r = await api(`/api/social/explore?lite=1&sort=${encodeURIComponent(_expKey)}&limit=24`).catch(() => null);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => ({}));
+          if (Array.isArray(d.posts)) _exploreCache.set(_expKey, { ts: Date.now(), posts: d.posts, channels: [] });
+        }
+      }
+    } catch {}
+    try {
+      const _rrKey = `${_reelsScope}:${_reelsSort}`;
+      if (excludeTab !== 'reels' && !_cacheFresh(_reelsCache.get(_rrKey))) {
+        const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12`).catch(() => null);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => ({}));
+          if (Array.isArray(d.posts)) _reelsCache.set(_rrKey, { ts: Date.now(), posts: d.posts });
+        }
+      }
+    } catch {}
+    try {
+      const _mKey = `${_musicTabScope}:${_musicTabSort}:`;
+      if (excludeTab !== 'music' && !_cacheFresh(_musicCache.get(_mKey))) {
+        const url = _musicTabScope === 'explore'
+          ? `/api/social/explore?lite=1&limit=40&sort=${encodeURIComponent(_musicTabSort)}`
+          : '/api/social/feed?lite=1&limit=40';
+        const r = await api(url).catch(() => null);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => ({}));
+          if (Array.isArray(d.posts)) _musicCache.set(_mKey, { ts: Date.now(), posts: d.posts });
+        }
+      }
+    } catch {}
   }
 
   function _setTabLoadUi(tab, percent, label, detail) {
@@ -1748,6 +1815,7 @@ const Social = (() => {
         content.innerHTML = '<div class="social-empty">Could not load feed</div>';
       }
     } finally {
+      _schedBgPrefetch('feed');
       _finishTabLoadUi(loadUi);
     }
   }
@@ -1871,6 +1939,7 @@ const Social = (() => {
         content.innerHTML = '<div class="social-empty">Could not load explore</div>';
       }
     } finally {
+      _schedBgPrefetch('explore');
       _finishTabLoadUi(loadUi);
     }
   }
@@ -2033,6 +2102,7 @@ const Social = (() => {
     } catch {
       content.innerHTML = '<div class="social-empty">Could not load profile</div>';
     } finally {
+      _schedBgPrefetch('profile');
       _finishTabLoadUi(loadUi);
     }
   }
@@ -2518,6 +2588,7 @@ const Social = (() => {
       content.innerHTML = scopeBar + `<div class="reels-empty"><div class="reels-empty-icon">⚠️</div><div class="reels-empty-title">Could not load reels</div></div>`;
     } finally {
       clearQueuedSteps();
+      _schedBgPrefetch('reels');
       _finishTabLoadUi(loadUi);
     }
   }
@@ -3902,6 +3973,7 @@ const Social = (() => {
     } catch {
       content.innerHTML = '<div class="social-empty">Could not load music shares</div>';
     } finally {
+      _schedBgPrefetch('music');
       _finishTabLoadUi(loadUi);
     }
   }
@@ -5989,6 +6061,7 @@ const Social = (() => {
       if (list) list.innerHTML = `<div class="social-activity-empty"><div class="ring">⚠️</div><div class="ttl">Could not load activity</div><div class="sub">Check your connection and try again.</div><div class="actions"><button class="btn primary" onclick="Social.switchTab('activity')">Retry</button></div></div>`;
     } finally {
       _activityLoading = false;
+      _schedBgPrefetch('activity');
       _finishTabLoadUi(loadUi);
     }
   }

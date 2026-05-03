@@ -1555,6 +1555,12 @@ def _migrate():
             "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)",
             "CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id, room_id)",
             "CREATE INDEX IF NOT EXISTS idx_room_bans_lookup ON room_bans(room_id, user_id)",
+            # Reels tab: filters wall_posts by media_type LIKE 'video/%' — this
+            # composite index lets SQLite scan only video rows before sorting.
+            "CREATE INDEX IF NOT EXISTS idx_wall_posts_mediatype_created ON wall_posts(media_type, created_at DESC)",
+            # Feed/explore follower join — speeds up the LEFT JOIN on followers
+            # used in get_feed_posts to find posts from followed users.
+            "CREATE INDEX IF NOT EXISTS idx_followers_following_follower ON followers(following_id, follower_id)",
         ):
             try:
                 con.execute(_idx)
