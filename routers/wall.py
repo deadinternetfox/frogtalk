@@ -64,6 +64,12 @@ class AddReactionRequest(BaseModel):
     emoji: str
 
 
+ALLOWED_WALL_REACTION_EMOJIS = {
+    "❤️", "👍", "😂", "😮", "😢", "🔥", "🐸", "👏", "💯", "✨",
+    "🎉", "💪", "😍",
+}
+
+
 class ToggleRepostRequest(BaseModel):
     quote: Optional[str] = None
 
@@ -350,6 +356,8 @@ async def add_post_reaction(request: Request, post_id: int, body: AddReactionReq
     """Add/toggle a reaction to a post."""
     if not body.emoji or len(body.emoji) > 8:
         return JSONResponse(status_code=400, content={"error": "Invalid emoji"})
+    if body.emoji not in ALLOWED_WALL_REACTION_EMOJIS:
+        return JSONResponse(status_code=400, content={"error": "Unsupported reaction"})
     
     post = db.get_wall_post(post_id)
     if not post:
@@ -397,18 +405,35 @@ async def add_post_reaction(request: Request, post_id: int, body: AddReactionReq
                     "unread": unread,
                 })
 
+        try:
+            db.insert_federation_outbox_event({
+                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+                "event_type": "social.reaction.changed",
+                "payload": {
+                    "actor_nickname": current_user.get("nickname") or "",
+                    "actor_avatar": current_user.get("avatar") or "",
+                    "owner_nickname": post.get("nickname") or "",
+                    "post_id": post_id,
+                    "emoji": body.emoji,
+                    "active": bool(added),
+                },
+            })
+        except Exception:
+            _log.debug("reaction federation emit failed", exc_info=True)
+
     return {"added": added, "reactions": reactions}
 
 
 @router.get("/posts/{post_id}/reactions/detail")
-async def get_post_reactions_detail(post_id: int, current_user: dict = Depends(get_current_user)):
+@limiter.limit("600/hour")
+async def get_post_reactions_detail(request: Request, post_id: int, current_user: dict = Depends(get_current_user)):
     """Get per-user reaction rows for the reaction detail modal."""
     post = db.get_wall_post(post_id)
     if not post:
         return JSONResponse(status_code=404, content={"error": "Post not found"})
     if post.get("user_id") and db.is_blocked_either_way(current_user["id"], post["user_id"]):
         return JSONResponse(status_code=404, content={"error": "Post not found"})
-    rows = db.get_post_reactions_detail(post_id)
+    rows = db.get_post_reactions_detail(post_id, limit=500)
     return {"reactions": rows, "viewer": current_user["nickname"]}
 
 

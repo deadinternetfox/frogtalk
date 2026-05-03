@@ -1752,6 +1752,67 @@ async def _handle_social_event(event: dict) -> None:
         except Exception:
             _log.debug("federated comment notif WS push failed", exc_info=True)
 
+    if event_type == "social.reaction.changed":
+        actor_nick = str(payload.get("actor_nickname") or "").strip()
+        owner_nick = str(payload.get("owner_nickname") or "").strip()
+        emoji = str(payload.get("emoji") or "").strip()
+        active = bool(payload.get("active"))
+        if not actor_nick or not owner_nick:
+            return
+        actor = _ensure_local_user_by_nickname(actor_nick)
+        owner = _ensure_local_user_by_nickname(owner_nick)
+        if not actor or not owner or actor["id"] == owner["id"]:
+            return
+
+        post_id = payload.get("post_id")
+        try:
+            post_id_int = int(post_id)
+        except Exception:
+            post_id_int = None
+        if post_id_int is not None and post_id_int <= 0:
+            post_id_int = None
+
+        if active:
+            notif_id = db.add_social_notification(
+                user_id=owner["id"],
+                actor_id=actor["id"],
+                kind="like",
+                post_id=post_id_int,
+                emoji=(emoji[:8] if emoji else None),
+            )
+            if notif_id is None:
+                return
+            unread = db.get_social_notification_unread_count(owner["id"])
+            try:
+                from ws_manager import manager
+                await manager.send_to_user(owner["id"], {
+                    "type": "social_notification",
+                    "event": "like",
+                    "id": notif_id,
+                    "actor": actor_nick,
+                    "actor_avatar": str(payload.get("actor_avatar") or actor.get("avatar") or ""),
+                    "post_id": post_id_int,
+                    "emoji": (emoji[:8] if emoji else None),
+                    "unread": unread,
+                })
+            except Exception:
+                _log.debug("federated reaction notif WS push failed", exc_info=True)
+        else:
+            removed = db.remove_social_like_notification(owner["id"], actor["id"], post_id_int)
+            if removed:
+                unread = db.get_social_notification_unread_count(owner["id"])
+                try:
+                    from ws_manager import manager
+                    await manager.send_to_user(owner["id"], {
+                        "type": "social_notification",
+                        "event": "unlike",
+                        "actor": actor_nick,
+                        "post_id": post_id_int,
+                        "unread": unread,
+                    })
+                except Exception:
+                    _log.debug("federated unlike notif WS push failed", exc_info=True)
+
 
 # ──────────────────────────────────────────────────────────────
 # Phase 6: Tor federation

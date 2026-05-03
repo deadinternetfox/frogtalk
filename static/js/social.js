@@ -3384,16 +3384,15 @@ const Social = (() => {
 
   async function _reelPickEmoji(postId, emoji, btn) {
     btn.closest('.reel-react-picker')?.remove();
-    const card = document.querySelector(`.reel-card[data-post-id="${postId}"]`);
+    const myNick = String(State?.user?.nickname || '');
     try {
       const res = await api(`/api/wall/posts/${postId}/reactions`, 'POST', { emoji });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        const reactions = data.reactions || [];
-        const heartReaction = reactions.find(r => r.emoji === '❤️');
-        const heartCount = heartReaction ? heartReaction.count : 0;
-        const likeCount = card?.querySelector('.reel-like-count');
-        if (likeCount) likeCount.textContent = String(heartCount);
+        const reactions = _normalizeReactions(data.reactions || []);
+        _updateReactionsInCaches(postId, reactions);
+        _updateAllPostReactionBars(postId, reactions, myNick);
+        _updateReelReactionUi(postId, reactions, myNick);
       }
     } catch {}
   }
@@ -4637,10 +4636,61 @@ const Social = (() => {
 
   // ── reaction rendering helpers ───────────────────────────────────────────
 
+  function _reactionUsersArray(value) {
+    if (Array.isArray(value)) return value.map(v => String(v || '').trim()).filter(Boolean);
+    return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+  }
+
+  function _normalizeReactions(reactions) {
+    if (!Array.isArray(reactions)) return [];
+    return reactions
+      .filter(r => r && r.emoji)
+      .map(r => ({
+        emoji: String(r.emoji),
+        count: Number(r.count || 0),
+        users: _reactionUsersArray(r.users),
+      }))
+      .sort((a, b) => (b.count - a.count) || a.emoji.localeCompare(b.emoji));
+  }
+
+  function _updateReactionsInCaches(postId, reactions) {
+    const pid = Number(postId);
+    const apply = (posts) => {
+      if (!Array.isArray(posts)) return;
+      posts.forEach(p => {
+        if (Number(p?.id) === pid) {
+          p.reactions = reactions;
+          p.reaction_count = reactions.reduce((n, r) => n + Number(r.count || 0), 0);
+          p.i_liked = !!reactions.find(r => r.emoji === '❤️' && r.users.includes(String(State?.user?.nickname || '')));
+        }
+      });
+    };
+    apply(_feedCache?.posts);
+    _exploreCache.forEach(entry => apply(entry?.posts));
+    _reelsCache.forEach(entry => apply(entry?.posts));
+    _musicCache.forEach(entry => apply(entry?.posts));
+    _profilePostsCache.forEach(entry => apply(entry?.posts));
+    _profileRepostsCache.forEach(entry => apply(entry?.posts));
+  }
+
+  function _updateReelReactionUi(postId, reactions, myNick) {
+    const card = document.querySelector(`.reel-card[data-post-id="${postId}"]`);
+    if (!card) return;
+    const total = reactions.reduce((s, r) => s + Number(r.count || 0), 0);
+    const heart = reactions.find(r => r.emoji === '❤️');
+    const heartCount = Number(heart?.count || 0);
+    const meHeart = !!heart?.users?.includes(myNick);
+    const likeBtn = card.querySelector('.reel-act-btn[title="Like"]');
+    const likeCountEl = card.querySelector('.reel-like-count');
+    if (likeCountEl) likeCountEl.textContent = String(heartCount);
+    if (likeBtn) likeBtn.classList.toggle('liked', meHeart);
+    card.dataset.reactionCount = String(total);
+  }
+
   function _renderReactionBar(reactions, myNick, postId) {
-    const total = reactions.reduce((s, r) => s + r.count, 0);
+    const total = reactions.reduce((s, r) => s + Number(r.count || 0), 0);
     const myReaction = reactions.find(r => {
-      const users = String(r.users || '').split(',').map(u => u.trim());
+      const users = _reactionUsersArray(r.users);
       return users.includes(myNick);
     });
     const myEmoji = myReaction ? myReaction.emoji : '';
@@ -4650,7 +4700,9 @@ const Social = (() => {
       ? `<button type="button" class="sf-rx-summary" onclick="Social.showReactionDetail(${postId})" aria-label="See reactions">` +
         `<span class="sf-rx-emojis">${topEmojis}</span><span class="sf-rx-total">${total}</span></button>`
       : '';
+    const listBtnHtml = `<button type="button" class="sf-rx-list" onclick="Social.showReactionDetail(${postId})" aria-label="Open reactions list">👥</button>`;
     return `<div class="sf-rx-bar">${summaryHtml}` +
+      `${listBtnHtml}` +
       `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" ` +
       `onclick="Social.showReactPicker(event,${postId})" aria-label="React">${myEmoji || '😊'}</button></div>`;
   }
@@ -4664,6 +4716,12 @@ const Social = (() => {
       tmp.innerHTML = _renderReactionBar(reactions, myNick, postId);
       bar.replaceWith(tmp.firstElementChild);
     }
+  }
+
+  function _updateAllPostReactionBars(postId, reactions, myNick) {
+    document.querySelectorAll(`.sf-post[data-post-id="${postId}"]`).forEach(el => {
+      _updatePostReactions(el, reactions, myNick);
+    });
   }
 
   function renderFeedPost(p) {
@@ -4701,10 +4759,6 @@ const Social = (() => {
         .trim();
     }
 
-    const otherReactions = reactions.filter(r => r.emoji !== '❤️');
-    const rxHtml = otherReactions.map(r =>
-      `<button class="sf-reaction" onclick="Social.reactPost(${p.id},'${esc(r.emoji)}')">${r.emoji} ${r.count}</button>`
-    ).join('');
     const postPrivacy = String(p.privacy || 'public').toLowerCase();
     const shareEnabled = Number(p.share_enabled ?? 1) === 1;
     const canAudienceShare = (postPrivacy === 'public' || postPrivacy === 'followers');
@@ -4793,7 +4847,10 @@ const Social = (() => {
     } catch {}
     // Close any open emoji picker
     document.querySelectorAll('.sf-react-picker').forEach(p => p.remove());
-    const postEl = document.querySelector(`.sf-post[data-post-id="${postId}"]`);
+    const eventPostEl = ev?.target?.closest?.('.sf-post[data-post-id]') || null;
+    const postEl = eventPostEl && Number(eventPostEl.dataset.postId) === Number(postId)
+      ? eventPostEl
+      : document.querySelector(`.sf-post[data-post-id="${postId}"]`);
     const myNick = State.user?.nickname || '';
     const addBtn = postEl?.querySelector('.sf-rx-add');
     if (addBtn) {
@@ -4804,10 +4861,18 @@ const Social = (() => {
       const res = await api(`/api/wall/posts/${postId}/reactions`, 'POST', { emoji });
       if (!res.ok) throw new Error('Failed to react');
       const data = await res.json();
-      _updatePostReactions(postEl, data.reactions || [], myNick);
-    } catch {
-      // Restore button on failure
-      if (addBtn) {
+      const reactions = _normalizeReactions(data.reactions || []);
+      _updateReactionsInCaches(postId, reactions);
+      _updateAllPostReactionBars(postId, reactions, myNick);
+      _updateReelReactionUi(postId, reactions, myNick);
+      const openDetail = document.querySelector('.sf-rx-detail-overlay[data-post-id]');
+      if (openDetail && Number(openDetail.dataset.postId) === Number(postId)) {
+        showReactionDetail(postId);
+      }
+    } catch (e) {
+      try { UI.showToast(e?.message || 'Could not update reaction', 'error'); } catch {}
+    } finally {
+      if (addBtn && addBtn.isConnected) {
         addBtn.disabled = false;
         addBtn.classList.remove('is-pending');
       }
@@ -4908,7 +4973,10 @@ const Social = (() => {
     const emojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏','💯','✨'];
     const picker = document.createElement('div');
     picker.className = 'sf-react-picker';
-    picker.innerHTML = emojis.map(e =>
+    const removeBtnHtml = myEmoji
+      ? `<button type="button" class="active" onclick="Social.reactPost(event, ${postId},${jsStr(myEmoji)})">Remove ${myEmoji}</button>`
+      : '';
+    picker.innerHTML = removeBtnHtml + emojis.map(e =>
       `<button type="button" class="${e === myEmoji ? 'active' : ''}" onclick="Social.reactPost(event, ${postId},'${e}')">${e}</button>`
     ).join('');
     // Attach after the reaction bar if present, otherwise after post-actions
@@ -4930,6 +4998,7 @@ const Social = (() => {
     document.querySelector('.sf-rx-detail-overlay')?.remove();
     const overlay = document.createElement('div');
     overlay.className = 'sf-rx-detail-overlay';
+    overlay.dataset.postId = String(postId);
     overlay.innerHTML = `
       <div class="sf-rx-detail-sheet">
         <div class="sf-rx-detail-header">
@@ -4958,11 +5027,13 @@ const Social = (() => {
         listEl.innerHTML = toShow.map(r => {
           const isMe = r.nickname === myNick;
           const av = r.avatar ? `<img src="${esc(r.avatar)}" alt="" loading="lazy" onerror="this.style.display='none'">` : `<div style="display:flex;align-items:center;justify-content:center;font-size:18px">🐸</div>`;
+          const when = timeAgo(r.created_at);
           return `<div class="sf-rx-detail-row${isMe ? ' is-me' : ''}">
             <div class="sf-rx-detail-avatar" onclick="Social.openProfile('${esc(r.nickname)}')">${av}</div>
             <span class="sf-rx-detail-nick" onclick="Social.openProfile('${esc(r.nickname)}')">${esc(r.nickname)}</span>
             <span class="sf-rx-detail-emoji">${r.emoji}</span>
-            ${isMe ? `<button class="sf-rx-detail-remove" onclick="Social.reactPost(event,${postId},'${r.emoji}');this.closest('.sf-rx-detail-overlay').remove()">Remove</button>` : ''}
+            <span class="sf-rx-detail-time">${esc(when)}</span>
+            ${isMe ? `<button class="sf-rx-detail-remove" onclick="Social.reactPost(event,${postId},'${r.emoji}')">Remove</button>` : ''}
           </div>`;
         }).join('');
       }

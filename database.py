@@ -4201,6 +4201,36 @@ def add_wall_reaction(post_id: int, user_id: int, emoji: str) -> bool:
             return True  # Added
 
 
+def set_wall_reaction(post_id: int, user_id: int, emoji: str, active: bool) -> bool:
+    """Set reaction state deterministically (non-toggle).
+
+    Returns True when a reaction is active after the operation, False when
+    removed/absent.
+    """
+    with _conn() as con:
+        existing = con.execute(
+            "SELECT id, emoji FROM wall_post_reactions WHERE post_id=? AND user_id=?",
+            (post_id, user_id),
+        ).fetchone()
+        if not active:
+            if existing:
+                con.execute("DELETE FROM wall_post_reactions WHERE id=?", (existing["id"],))
+            return False
+
+        if existing:
+            if existing["emoji"] != emoji:
+                con.execute(
+                    "UPDATE wall_post_reactions SET emoji=?, created_at=datetime('now') WHERE id=?",
+                    (emoji, existing["id"]),
+                )
+        else:
+            con.execute(
+                "INSERT INTO wall_post_reactions (post_id, user_id, emoji) VALUES (?, ?, ?)",
+                (post_id, user_id, emoji),
+            )
+        return True
+
+
 def toggle_wall_repost(post_id: int, user_id: int, quote_text: Optional[str] = None) -> bool:
     """Toggle/update a repost.
 
@@ -4259,7 +4289,7 @@ def has_wall_reposted(post_id: int, user_id: int) -> bool:
 
 
 def get_post_reactions(post_id: int) -> List[Dict]:
-    """Get reactions for a post."""
+    """Get aggregated reactions for a post."""
     with _conn() as con:
         rows = con.execute("""
             SELECT emoji, COUNT(*) as count,
@@ -4268,20 +4298,26 @@ def get_post_reactions(post_id: int) -> List[Dict]:
             JOIN users u ON wpr.user_id = u.id
             WHERE wpr.post_id=?
             GROUP BY emoji
+            ORDER BY count DESC, emoji ASC
         """, (post_id,)).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_post_reactions_detail(post_id: int) -> List[Dict]:
-    """Get per-user reaction rows for the reaction detail modal."""
+def get_post_reactions_detail(post_id: int, limit: int = 500) -> List[Dict]:
+    """Get per-user reaction rows for the reaction detail modal.
+
+    Bounded with a hard max to avoid large response payloads on viral posts.
+    """
+    safe_limit = max(1, min(int(limit or 500), 1000))
     with _conn() as con:
         rows = con.execute("""
             SELECT wpr.user_id, u.nickname, u.avatar, wpr.emoji, wpr.created_at
             FROM wall_post_reactions wpr
             JOIN users u ON wpr.user_id = u.id
             WHERE wpr.post_id=?
-            ORDER BY wpr.emoji, wpr.created_at
-        """, (post_id,)).fetchall()
+            ORDER BY wpr.created_at DESC
+            LIMIT ?
+        """, (post_id, safe_limit)).fetchall()
     return [dict(r) for r in rows]
 
 
