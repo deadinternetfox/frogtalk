@@ -4441,9 +4441,11 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 /* New post modal */
 #social-new-post{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:650;display:flex;align-items:center;justify-content:center}
 #social-new-post.hidden{display:none}
-.snp-box{background:#141414;border:1px solid #2a4a2a;border-radius:16px;padding:24px;width:100%;max-width:480px;margin:16px}
-.snp-box textarea{width:100%;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:10px;color:#e0e0e0;padding:12px;font-size:14px;resize:none;min-height:100px;outline:none}
+.snp-box{background:#141414;border:1px solid #2a4a2a;border-radius:16px;padding:20px;width:calc(100% - 32px);max-width:460px;margin:16px;box-sizing:border-box}
+.snp-box textarea{width:100%;box-sizing:border-box;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:10px;color:#e0e0e0;padding:12px;font-size:14px;resize:none;min-height:100px;outline:none}
 .snp-box textarea:focus{border-color:#4caf50}
+.snp-toolbar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.snp-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:10px}
 .sf-repost-context{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 12px 0;color:#8fbf8f;font-size:12px;font-weight:600}
 .sf-repost-icon{opacity:.9}
 .sf-repost-by{background:none;border:none;color:#9ed89e;font-size:12px;font-weight:700;cursor:pointer;padding:0}
@@ -7325,7 +7327,7 @@ window.ConnErr = (function(){
     <nav class="social-nav">
       <button class="social-nav-btn active" onclick="Social.switchTab('feed')" data-tab="feed">Feed</button>
       <button class="social-nav-btn" onclick="Social.switchTab('explore')" data-tab="explore">Explore</button>
-      <button class="social-nav-btn" onclick="Social.switchTab('reels')" data-tab="reels">🎞 Reels</button>
+      <button class="social-nav-btn" onclick="Social.switchTab('reels')" data-tab="reels">Reels</button>
       <button class="social-nav-btn" onclick="Social.switchTab('music')" data-tab="music">Music</button>
       <button class="social-nav-btn" onclick="Social.switchTab('profile')" data-tab="profile">My Profile</button>
       <button class="social-nav-bell social-nav-activity" onclick="Social.switchTab('activity')" data-tab="activity" title="Activity" aria-label="Activity">
@@ -7368,7 +7370,7 @@ window.ConnErr = (function(){
     <!-- hidden state holder — driven by the inline chip -->
     <input type="checkbox" id="snp-allow-comments" checked style="display:none">
     <input type="checkbox" id="snp-share-enabled" checked style="display:none">
-    <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
+    <div class="snp-toolbar">
       <label class="ft-compose-icon" title="Add photo/video">📎
         <input type="file" id="snp-media-input" accept="image/*,video/*" style="display:none" onchange="Social.handleNewPostMedia(this)">
       </label>
@@ -7376,7 +7378,8 @@ window.ConnErr = (function(){
       <button type="button" id="snp-priv-chip" class="ft-inline-chip" onclick="Social.cyclePostPrivacy()" title="Change audience">🌍 Public</button>
       <button type="button" id="snp-share-chip" class="ft-inline-chip on" onclick="Social.toggleShareLink()" title="Toggle share link">🔗 On</button>
       <button type="button" id="snp-comments-chip" class="ft-inline-chip on" onclick="Social.toggleAllowComments()" title="Toggle comments">💬 On</button>
-      <div style="flex:1"></div>
+    </div>
+    <div class="snp-actions">
       <button style="background:#1a1a1a;border:none;color:#888;padding:8px 16px;border-radius:8px;cursor:pointer" onclick="Social.closeNewPost()">Cancel</button>
       <button id="snp-submit-btn" style="background:#4caf50;border:none;color:#000;font-weight:600;padding:8px 20px;border-radius:8px;cursor:pointer" onclick="Social.submitNewPost()">Post</button>
     </div>
