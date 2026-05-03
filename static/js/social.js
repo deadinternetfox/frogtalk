@@ -1935,6 +1935,7 @@ const Social = (() => {
             if (entry.isIntersecting) {
               _reelsCurrentVideo = vid;
               vid.muted = _reelsMuted;
+              try { vid.currentTime = 0; } catch {}
               vid.play().catch(() => {});
               entry.target.classList.add('is-playing');
             } else {
@@ -1958,6 +1959,7 @@ const Social = (() => {
     if (first && firstCard) {
       _reelsCurrentVideo = first;
       first.muted = _reelsMuted;
+      try { first.currentTime = 0; } catch {}
       first.play().catch(() => {});
       firstCard.classList.add('is-playing');
     }
@@ -2001,10 +2003,12 @@ const Social = (() => {
       const video = card.querySelector('video');
       const poster = card.querySelector('.reel-video-poster');
       const prog = card.querySelector('.reel-progress > span');
+      const progWrap = card.querySelector('.reel-progress');
       if (!video) return;
       try { video.removeAttribute('controls'); } catch {}
       try { video.controls = false; } catch {}
       let posterDrawn = false;
+      let seeking = false;
 
       const drawPoster = () => {
         try {
@@ -2045,6 +2049,40 @@ const Social = (() => {
         prog.style.width = `${Math.min(100, Math.max(0, (video.currentTime / video.duration) * 100))}%`;
         if (!posterDrawn && video.currentTime > 0.03) drawPoster();
       });
+      const seekFromClientX = (clientX) => {
+        if (!progWrap || !Number.isFinite(video.duration) || video.duration <= 0) return;
+        const r = progWrap.getBoundingClientRect();
+        if (!r.width) return;
+        const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+        try { video.currentTime = ratio * video.duration; } catch {}
+      };
+      if (progWrap) {
+        progWrap.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          seeking = true;
+          try { progWrap.setPointerCapture(e.pointerId); } catch {}
+          seekFromClientX(e.clientX);
+        });
+        progWrap.addEventListener('pointermove', (e) => {
+          if (!seeking) return;
+          e.preventDefault();
+          seekFromClientX(e.clientX);
+        });
+        const stopSeek = (e) => {
+          if (!seeking) return;
+          seeking = false;
+          try { progWrap.releasePointerCapture(e.pointerId); } catch {}
+          seekFromClientX(e.clientX);
+        };
+        progWrap.addEventListener('pointerup', stopSeek);
+        progWrap.addEventListener('pointercancel', () => { seeking = false; });
+        progWrap.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          seekFromClientX(e.clientX);
+        });
+      }
       video.addEventListener('play', () => card.classList.add('is-playing'));
       video.addEventListener('pause', () => card.classList.remove('is-playing'));
       video.addEventListener('ended', () => {
@@ -2054,6 +2092,7 @@ const Social = (() => {
         const nv = nextCard.querySelector('video');
         if (!nv) return;
         nv.muted = _reelsMuted;
+        try { nv.currentTime = 0; } catch {}
         setTimeout(() => { nv.play().catch(() => {}); }, 220);
       });
       video.addEventListener('click', (e) => toggleReelPlayback(e, video));
