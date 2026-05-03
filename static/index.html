@@ -4457,7 +4457,9 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sf-rx-list{background:none;border:none;cursor:pointer;font-size:13px;padding:4px 7px;border-radius:8px;transition:background .15s;color:#8ba48b;line-height:1}
 .sf-rx-list:hover{background:#1a2e1a;color:#6fdc6f}
 /* Unified reaction panel (list + picker) */
-.sf-rx-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:3200;display:flex;align-items:flex-end;justify-content:center}
+/* Post detail opens at z-index 9999, so reaction surfaces launched from
+  inside that overlay must sit above it instead of underneath the modal. */
+.sf-rx-panel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.68);z-index:10020;display:flex;align-items:flex-end;justify-content:center}
 .sf-rx-panel{width:min(620px,100%);max-height:78vh;background:linear-gradient(180deg,#111916,#0b0f0c);border-radius:20px 20px 0 0;border:1px solid #1f2a21;border-bottom:none;display:flex;flex-direction:column;overflow:hidden}
 .sf-rx-panel-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;border-bottom:1px solid #1f2a21}
 .sf-rx-panel-title{font-size:15px;font-weight:700;color:#d7e9d9;letter-spacing:.2px}
@@ -4474,7 +4476,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sf-rx-picker-btn.active{border-color:#4caf50;background:#17361d;box-shadow:0 0 0 1px rgba(76,175,80,.26) inset}
 .sf-rx-picker-btn.remove{font-size:12px;color:#9fd3a5;padding:8px 10px;line-height:1.1}
 /* Reaction detail modal */
-.sf-rx-detail-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:3000;display:flex;align-items:flex-end;justify-content:center}
+.sf-rx-detail-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:10010;display:flex;align-items:flex-end;justify-content:center}
 .sf-rx-detail-sheet{background:#111;border-radius:20px 20px 0 0;width:100%;max-width:600px;max-height:72vh;display:flex;flex-direction:column;overflow:hidden}
 .sf-rx-detail-header{display:flex;align-items:center;padding:14px 16px 6px;gap:8px;border-bottom:1px solid #1a1a1a}
 .sf-rx-detail-tabs{display:flex;gap:6px;flex:1;overflow-x:auto;scrollbar-width:none}
