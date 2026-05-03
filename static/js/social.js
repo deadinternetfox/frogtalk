@@ -2295,18 +2295,14 @@ const Social = (() => {
       if (progWrap) {
         const snap = progWrap.closest('.reels-snap');
         let restoreSnapType = '';
-        let restoreOverflowY = '';
         const lockSnapScroll = () => {
           if (!snap) return;
           restoreSnapType = snap.style.scrollSnapType || '';
-          restoreOverflowY = snap.style.overflowY || '';
           snap.style.scrollSnapType = 'none';
-          snap.style.overflowY = 'hidden';
         };
         const unlockSnapScroll = () => {
           if (!snap) return;
           snap.style.scrollSnapType = restoreSnapType;
-          snap.style.overflowY = restoreOverflowY;
         };
 
         progWrap.addEventListener('pointerdown', (e) => {
