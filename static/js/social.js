@@ -23,6 +23,7 @@ const Social = (() => {
   let _profilePrefetchRic = 0;             // idle callback handle for profile subtab warming
   let _reelsDirectLaunchId = 0;          // set by openSharedReel to suppress scope-bar flash
   let _bgPrefetchRic = 0;                // handle for pending background cache-warm callback
+  const _socialApiTimeoutMs = 12000;     // fail-fast guard so tabs don't appear stuck forever
 
   // ── helpers ──────────────────────────────────────────────────────────────
   const esc = s => UI.escHtml(s);
@@ -32,17 +33,43 @@ const Social = (() => {
   // Encoding them as &quot; leaves valid HTML that decodes back to "foo"
   // before the JS engine parses the handler.
   const jsStr = s => JSON.stringify(String(s || '')).replace(/"/g, '&quot;');
+  function _jsonErrorResponse(status, error, extra = {}) {
+    return new Response(JSON.stringify({ error, ...extra }), {
+      status: Number(status) || 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  function _prefetchAllowed() {
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+    const c = (typeof navigator !== 'undefined' && navigator.connection) ? navigator.connection : null;
+    if (!c) return true;
+    if (c.saveData) return false;
+    const t = String(c.effectiveType || '').toLowerCase();
+    if (t === 'slow-2g' || t === '2g') return false;
+    return true;
+  }
+
   const api = async (path, method, body) => {
-    const res = await apiFetch(path, method, body);
+    let res;
+    try {
+      res = await Promise.race([
+        apiFetch(path, method, body),
+        new Promise(resolve => setTimeout(() => resolve(
+          _jsonErrorResponse(504, 'Request timed out')
+        ), _socialApiTimeoutMs)),
+      ]);
+    } catch {
+      return _jsonErrorResponse(503, 'Network unavailable');
+    }
     if (!res.ok) {
       // Try to parse JSON error, otherwise create a synthetic JSON response
       const clone = res.clone();
       try { await clone.json(); } catch {
         // Response isn't JSON — wrap the text in a JSON-compatible Response
         const text = await res.text();
-        return new Response(JSON.stringify({ error: text || 'Server error' }), {
-          status: res.status, headers: { 'Content-Type': 'application/json' }
-        });
+        return _jsonErrorResponse(res.status, text || 'Server error');
       }
     }
     return res;
@@ -341,6 +368,7 @@ const Social = (() => {
     }
     const nick = String(nickname || '').trim();
     if (!nick) return;
+    if (!_prefetchAllowed()) return;
 
     const run = async () => {
       _profilePrefetchRic = 0;
@@ -405,6 +433,7 @@ const Social = (() => {
 
   function _schedBgPrefetch(excludeTab) {
     _cancelBgPrefetch();
+    if (!_prefetchAllowed()) return;
     const cb = () => { _bgPrefetchRic = 0; _doBgPrefetch(excludeTab); };
     try {
       _bgPrefetchRic = requestIdleCallback(cb, { timeout: 6000 });
