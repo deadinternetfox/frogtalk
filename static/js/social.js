@@ -2047,7 +2047,7 @@ const Social = (() => {
             if (!vid) return;
             if (entry.isIntersecting) {
               if (_reelsIsSeekLocked()) return;
-              _reelsActivateCard(entry.target, { reset: true });
+              _reelsActivateCard(entry.target, { reset: false });
             } else {
               try { vid.pause(); } catch {}
               entry.target.classList.remove('is-playing');
@@ -2079,6 +2079,7 @@ const Social = (() => {
     const reset = opts.reset !== false;
     const seekReleaseGuard = card === _reelsSeekReleaseCard && Date.now() < _reelsSeekReleaseUntil;
     const seekLiveGuard = _reelsIsSeekLocked(card);
+    const userPausedThisCard = _reelsUserPausedCard === card;
     const shouldReset = (_reelsCurrentCard !== card) && reset && !seekReleaseGuard && !seekLiveGuard;
     document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
       if (c === card) return;
@@ -2098,8 +2099,12 @@ const Social = (() => {
     if (shouldReset) {
       try { v.currentTime = 0; } catch {}
     }
-    _reelsPlayVideo(card, v);
-    card.classList.add('is-playing');
+    if (!userPausedThisCard || opts.forcePlay) {
+      _reelsPlayVideo(card, v);
+      card.classList.add('is-playing');
+    } else {
+      card.classList.remove('is-playing');
+    }
   }
 
   function _reelsPlayVideo(card, video, attempt = 0) {
@@ -2145,7 +2150,7 @@ const Social = (() => {
     }
     if (!best) return;
     if (best !== _reelsCurrentCard) {
-      _reelsActivateCard(best, { reset: true });
+      _reelsActivateCard(best, { reset: false });
       return;
     }
     if (_reelsCurrentVideo && _reelsCurrentVideo.paused && _reelsUserPausedCard !== _reelsCurrentCard) {
@@ -2267,14 +2272,12 @@ const Social = (() => {
       }
       setTimeout(() => {
         if (revealed) return;
-        if (!hasRealFirstFrame()) firstCard.classList.add('no-poster');
         maybeReveal();
       }, 900);
     }, 3200);
     // Hard stop: never leave the loading gate indefinitely.
     setTimeout(() => {
       if (revealed) return;
-      if (!hasRealFirstFrame()) firstCard.classList.add('no-poster');
       reveal();
     }, 4600);
   }
@@ -2425,8 +2428,11 @@ const Social = (() => {
       }, 320);
       setTimeout(() => {
         if (!posterDrawn) {
-          card.classList.add('no-poster');
-          if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
+          const hasFrame = (video.readyState || 0) >= 2 || Number(video.currentTime || 0) > 0.03;
+          if (hasFrame) {
+            card.classList.add('no-poster');
+            if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
+          }
         }
       }, 2600);
 
@@ -2543,7 +2549,9 @@ const Social = (() => {
           if (typeof e.clientX !== 'number') return;
           e.preventDefault();
           e.stopPropagation();
+          _reelsBeginSeek(card);
           seekFromClientX(e.clientX);
+          _reelsEndSeek(card);
         });
 
         // Mobile fallback for browsers that don't deliver pointer events reliably.
