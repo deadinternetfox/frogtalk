@@ -1999,7 +1999,6 @@ const Social = (() => {
         try {
           // Reuse the pre-flighted request if it was for our own profile.
           const sr = _earlyStoriesReq ? await _earlyStoriesReq : await api('/api/social/stories');
-          const sr = await api('/api/social/stories');
           if (sr.ok) {
             const sd = await sr.json();
             const me = (sd.users || []).find(x => Number(x.user_id) === Number(u.id));
