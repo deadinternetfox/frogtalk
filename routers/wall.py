@@ -36,6 +36,7 @@ class CreatePostRequest(BaseModel):
     media_type: Optional[str] = None
     # public | followers | friends | private (default: private — only me)
     privacy: str = "private"
+    share_enabled: bool = True
     allow_comments: bool = True
     # Optional track metadata for music/* posts — surfaced on the FrogSocial
     # music card so the title renders instead of a generic "YouTube track".
@@ -50,6 +51,7 @@ class CreatePostRequest(BaseModel):
 class UpdatePostRequest(BaseModel):
     content: Optional[str] = None
     privacy: Optional[str] = None
+    share_enabled: Optional[bool] = None
     allow_comments: Optional[bool] = None
 
 
@@ -59,6 +61,10 @@ class AddCommentRequest(BaseModel):
 
 class AddReactionRequest(BaseModel):
     emoji: str
+
+
+class ToggleRepostRequest(BaseModel):
+    quote: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +129,7 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
         body.media_data,
         body.media_type,
         body.privacy,
+        1 if body.share_enabled else 0,
         1 if body.allow_comments else 0,
         (body.track_title or None),
         (body.track_room or None),
@@ -139,6 +146,7 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
                 "media_data": body.media_data,
                 "media_type": body.media_type,
                 "privacy": body.privacy,
+                "share_enabled": bool(body.share_enabled),
                 "allow_comments": bool(body.allow_comments),
                 "track_title": body.track_title,
                 "track_room": body.track_room,
@@ -152,6 +160,7 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
         "id": post_id,
         "content": body.content,
         "privacy": body.privacy,
+        "share_enabled": bool(body.share_enabled),
         "created_at": "just now"
     }
 
@@ -182,6 +191,8 @@ async def get_single_wall_post(post_id: int, current_user: dict = Depends(get_cu
     if not allowed:
         return JSONResponse(status_code=403, content={"error": "Not allowed to view this post"})
     post["reactions"] = db.get_post_reactions(post_id)
+    post["i_reposted"] = 1 if db.has_wall_reposted(post_id, viewer_id) else 0
+    post["repost_count"] = db.get_wall_repost_count(post_id)
     return post
 
 
@@ -269,6 +280,8 @@ async def update_wall_post(post_id: int, body: UpdatePostRequest, current_user: 
         if body.privacy not in ("public", "followers", "friends", "private"):
             return JSONResponse(status_code=400, content={"error": "Invalid privacy"})
         updates["privacy"] = body.privacy
+    if body.share_enabled is not None:
+        updates["share_enabled"] = 1 if body.share_enabled else 0
     if body.allow_comments is not None:
         updates["allow_comments"] = 1 if body.allow_comments else 0
     
@@ -286,6 +299,32 @@ async def delete_wall_post(post_id: int, current_user: dict = Depends(get_curren
     if db.delete_wall_post(post_id, current_user["id"]):
         return {"ok": True}
     return JSONResponse(status_code=404, content={"error": "Post not found or not yours"})
+
+
+@router.delete("/posts/{post_id}/media")
+async def delete_wall_post_media(post_id: int, current_user: dict = Depends(get_current_user)):
+    """Delete only the media attachment from a wall post.
+
+    For media-only posts, require deleting the entire post instead so we don't
+    leave an empty post shell behind.
+    """
+    post = db.get_wall_post(post_id)
+    if not post or int(post.get("user_id") or 0) != int(current_user["id"]):
+        return JSONResponse(status_code=404, content={"error": "Post not found or not yours"})
+    if not post.get("media_data"):
+        return JSONResponse(status_code=400, content={"error": "Post has no media"})
+
+    has_text = bool(str(post.get("content") or "").strip())
+    has_extra = bool(str(post.get("track_title") or "").strip() or str(post.get("track_room") or "").strip())
+    if not has_text and not has_extra:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "This is a media-only post. Delete the full post instead.", "code": "media_only_post"},
+        )
+
+    if db.clear_wall_post_media(post_id, current_user["id"]):
+        return {"ok": True}
+    return JSONResponse(status_code=400, content={"error": "Could not remove media"})
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +392,85 @@ async def get_post_reactions_list(post_id: int):
     """Get all reactions for a post."""
     reactions = db.get_post_reactions(post_id)
     return {"reactions": reactions}
+
+
+# ---------------------------------------------------------------------------
+# Reposts
+# ---------------------------------------------------------------------------
+
+@router.post("/posts/{post_id}/repost")
+@limiter.limit("180/hour")
+async def toggle_post_repost(
+    request: Request,
+    post_id: int,
+    body: Optional[ToggleRepostRequest] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Toggle repost on a wall post.
+
+    Repost is only allowed for posts that are share-enabled and visible to the
+    current viewer under existing privacy rules.
+    """
+    post = db.get_wall_post(post_id)
+    if not post:
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+
+    viewer_id = current_user["id"]
+    owner_id = int(post.get("user_id") or 0)
+    privacy = (post.get("privacy") or "public").lower()
+    share_enabled = bool(int(post.get("share_enabled") or 0))
+
+    if owner_id and db.is_blocked_either_way(viewer_id, owner_id):
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+    if not share_enabled:
+        return JSONResponse(status_code=403, content={"error": "Repost is disabled for this post"})
+    if privacy in ("friends", "private"):
+        return JSONResponse(status_code=403, content={"error": "This post cannot be reposted"})
+
+    allowed = (
+        privacy == "public"
+        or viewer_id == owner_id
+        or (privacy == "followers" and (db.is_following(viewer_id, owner_id) or db.are_friends(viewer_id, owner_id)))
+    )
+    if not allowed:
+        return JSONResponse(status_code=403, content={"error": "Not allowed to repost this post"})
+
+    quote = ((body.quote or "").strip() if body else "") or None
+    if quote and len(quote) > 1000:
+        return JSONResponse(status_code=400, content={"error": "Quote too long (max 1000 chars)"})
+
+    reposted = db.toggle_wall_repost(post_id, viewer_id, quote_text=quote)
+    repost_count = db.get_wall_repost_count(post_id)
+
+    if reposted and owner_id and owner_id != viewer_id:
+        try:
+            notif_id = db.add_social_notification(
+                user_id=owner_id,
+                actor_id=viewer_id,
+                kind="repost",
+                post_id=post_id,
+                preview=(quote[:140] if quote else None),
+            )
+            if notif_id is not None:
+                unread = db.get_social_notification_unread_count(owner_id)
+                await _push_social_notif(owner_id, {
+                    "type": "social_notification",
+                    "event": "repost",
+                    "id": notif_id,
+                    "actor": current_user["nickname"],
+                    "actor_avatar": current_user.get("avatar"),
+                    "post_id": post_id,
+                    "preview": (quote[:140] if quote else None),
+                    "unread": unread,
+                })
+        except Exception:
+            _log.debug("repost notif failed", exc_info=True)
+
+    return {
+        "ok": True,
+        "reposted": reposted,
+        "repost_count": repost_count,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -1491,10 +1491,10 @@ const Social = (() => {
         <!-- Tabs -->
         <div class="sp-tabs">
           <button class="sp-tab active" data-pt="wall" onclick="Social.switchProfileTab('wall',this)">📝 Wall</button>
+          <button class="sp-tab" data-pt="reels" onclick="Social.switchProfileTab('reels',this)">🎞 Reels</button>
           <button class="sp-tab" data-pt="music" onclick="Social.switchProfileTab('music',this)">🎵 Music</button>
           <button class="sp-tab" data-pt="channels" onclick="Social.switchProfileTab('channels',this)">📺 Channels</button>
           ${isSelf ? `<button class="sp-tab" data-pt="reposts" onclick="Social.switchProfileTab('reposts',this)">🔁 Reposts</button>` : ''}
-          <button class="sp-tab" data-pt="reels" onclick="Social.switchProfileTab('reels',this)">🎞 Reels</button>
           <button class="sp-tab" data-pt="media" onclick="Social.switchProfileTab('media',this)">🖼️ Media</button>
         </div>
 
@@ -1542,6 +1542,9 @@ const Social = (() => {
           return `
           <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
             ${thumb}
+            ${String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase()
+              ? `<button type="button" class="social-media-del-btn" title="Delete" aria-label="Delete media" onclick="event.stopPropagation();Social.promptDeletePostMedia(${p.id})">✕</button>`
+              : ''}
             ${isVideo ? `<span class="social-grid-video-ico">▶</span>` : ''}
             <div class="social-grid-overlay">
               <span>❤️ ${p.reaction_count || 0}</span>
@@ -1602,7 +1605,6 @@ const Social = (() => {
     const isSelf = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
     return `
       <div class="sp-media-toggle" style="display:flex;gap:8px;align-items:center;margin:0 0 12px 0;flex-wrap:wrap">
-        <span style="font-size:12px;opacity:.75">Media:</span>
         <button type="button" class="sp-action-btn ${isPublic ? 'primary' : 'secondary'} sp-media-toggle-btn"
           onclick="Social.switchProfileMediaMode('public',this)">🌍 Public</button>
         ${isSelf ? `<button type="button" class="sp-action-btn ${!isPublic ? 'primary' : 'secondary'} sp-media-toggle-btn"
@@ -1657,6 +1659,7 @@ const Social = (() => {
                 ? `<div class="social-media-audio-icon">🎵</div>`
                 : `<img src="/api/messages/media/${item.id}?thumb=1" alt="" loading="lazy" onerror="this.closest('.social-media-item')?.remove()">`
               }
+              <button type="button" class="social-media-del-btn" title="Delete" aria-label="Delete private media" onclick="event.stopPropagation();Social.promptDeletePrivateMedia(${item.id})">✕</button>
               <div class="social-media-info">
                 <span>#${esc(item.room_name)}</span>
                 <span>${timeAgo(item.created_at)}</span>
@@ -1697,6 +1700,9 @@ const Social = (() => {
         return `
           <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
             ${thumb}
+            ${String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase()
+              ? `<button type="button" class="social-media-del-btn" title="Delete" aria-label="Delete media" onclick="event.stopPropagation();Social.promptDeletePostMedia(${p.id})">✕</button>`
+              : ''}
             ${isVideo ? `<span class="social-grid-video-ico">▶</span>` : ''}
             <div class="social-grid-overlay">
               <span>❤️ ${p.reaction_count || 0}</span>
@@ -1872,11 +1878,39 @@ const Social = (() => {
       const res = await apiFetch(`/api/messages/media/${msgId}`);
       if (!res.ok) return;
       const data = await res.json();
-      if (data.media_type?.startsWith('image')) {
-        if (typeof openLightbox === 'function') openLightbox(data.media_data);
-      } else if (data.media_type?.startsWith('video')) {
-        if (typeof openLightbox === 'function') openLightbox(data.media_data);
+      const mt = String(data.media_type || '').toLowerCase();
+      const src = String(data.media_data || '');
+      if (!src) return;
+
+      // Prefer global lightbox when available for consistency.
+      if ((mt.startsWith('image/') || mt.startsWith('video/')) && typeof openLightbox === 'function') {
+        openLightbox(src);
+        return;
       }
+
+      // Fallback: reuse Social's detail overlay so private-media preview
+      // always works even if the global lightbox script is unavailable.
+      let overlay = document.getElementById('social-post-detail');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'social-post-detail';
+        overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
+        document.body.appendChild(overlay);
+      }
+
+      let body = '';
+      if (mt.startsWith('image/')) {
+        body = `<img src="${esc(src)}" alt="" style="width:100%;max-height:76vh;object-fit:contain;border-radius:10px;display:block">`;
+      } else if (mt.startsWith('video/')) {
+        body = `<video src="${esc(src)}" controls autoplay playsinline style="width:100%;max-height:76vh;border-radius:10px;background:#000;display:block"></video>`;
+      } else if (mt.startsWith('audio/')) {
+        body = `<div style="padding:20px 10px;text-align:center"><div style="font-size:34px;margin-bottom:12px">🎵</div><audio src="${esc(src)}" controls autoplay style="width:100%"></audio></div>`;
+      } else {
+        body = `<div style="padding:20px 10px;text-align:center;color:#aaa">Preview not available for this media type.</div>`;
+      }
+
+      overlay.innerHTML = `<div class="spd-inner"><button class="social-close-btn" onclick="Social.closePostDetail()" style="position:absolute;top:8px;right:8px;z-index:1">✕</button>${body}</div>`;
+      overlay.style.display = 'flex';
     } catch {}
   }
 
@@ -3021,6 +3055,142 @@ const Social = (() => {
     } catch {}
   }
 
+  async function deletePostDirect(postId) {
+    try {
+      await api(`/api/wall/posts/${postId}`, 'DELETE');
+      try { UI.showToast('Post deleted', 'success'); } catch {}
+      if (_currentTab === 'feed') loadFeed();
+      else if (_currentTab === 'explore') loadExplore();
+      else if (_currentTab === 'profile') loadProfile(_profileUser);
+    } catch (e) {
+      try { UI.showToast(e?.message || 'Could not delete post', 'error'); } catch {}
+      throw e;
+    }
+  }
+
+  async function deletePostMediaOnly(postId) {
+    try {
+      const res = await api(`/api/wall/posts/${postId}/media`, 'DELETE');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not delete media');
+      try { UI.showToast('Media removed from post', 'success'); } catch {}
+      if (_currentTab === 'profile') {
+        await loadProfileMediaCombined(_profileUser, 'public');
+      } else if (_currentTab === 'feed') {
+        await loadFeed();
+      } else if (_currentTab === 'explore') {
+        await loadExplore();
+      }
+    } catch (e) {
+      try { UI.showToast(e?.message || 'Could not delete media', 'error'); } catch {}
+      throw e;
+    }
+  }
+
+  async function promptDeletePrivateMedia(msgId) {
+    if (!msgId) return;
+    const items = [
+      {
+        icon: '🗑️',
+        label: 'Delete from Private Media and chat',
+        danger: true,
+        onclick: async () => {
+          try {
+            const r = await apiFetch(`/api/messages/${msgId}`, 'DELETE');
+            if (!r.ok) throw new Error('Could not delete media');
+            try { UI.showToast('Deleted from Private Media and original chat', 'success'); } catch {}
+            await loadProfileMediaCombined(_profileUser, 'private');
+          } catch (e) {
+            try { UI.showToast(e?.message || 'Could not delete media', 'error'); } catch {}
+          }
+        }
+      }
+    ];
+    if (typeof showActionSheet === 'function') {
+      showActionSheet('Delete this media from chat history too?', items);
+      return;
+    }
+    if (confirm('Delete this private media from chat history too?')) {
+      items[0].onclick();
+    }
+  }
+
+  async function promptDeletePostMedia(postId) {
+    if (!postId) return;
+    try {
+      const res = await api(`/api/wall/posts/${postId}`);
+      if (!res.ok) return;
+      const p = await res.json();
+      const mine = Number(p.user_id || 0) === Number(State.user?.id || 0);
+      if (!mine) {
+        try { UI.showToast('Only your own posts can be modified', 'info'); } catch {}
+        return;
+      }
+      const hasText = !!String(p.content || '').trim();
+      const hasExtra = !!String(p.track_title || '').trim() || !!String(p.track_room || '').trim() || !!String(p.track_mood || '').trim();
+      const canDeleteMediaOnly = hasText || hasExtra;
+      await openMediaDeleteDialog(p, canDeleteMediaOnly);
+    } catch {
+      try { UI.showToast('Could not load post', 'error'); } catch {}
+    }
+  }
+
+  async function openMediaDeleteDialog(post, canDeleteMediaOnly) {
+    let overlay = document.getElementById('social-post-detail');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'social-post-detail';
+      overlay.onclick = e => { if (e.target === overlay) overlay.style.display = 'none'; };
+      document.body.appendChild(overlay);
+    }
+
+    const mediaBtn = canDeleteMediaOnly
+      ? `<button type="button" class="modal-btn secondary" id="spmd-del-media-btn">Remove Media Only</button>`
+      : `<button type="button" class="modal-btn secondary" id="spmd-del-media-btn" disabled title="Media-only post: delete full post instead" style="opacity:.5;cursor:not-allowed">Remove Media Only</button>`;
+
+    overlay.innerHTML = `<div class="spd-inner">
+      <button class="social-close-btn" onclick="Social.closePostDetail()" style="position:absolute;top:8px;right:8px;z-index:1">✕</button>
+      <div style="margin:0 0 10px 0;font-size:13px;color:#9aa;line-height:1.45">
+        Choose how to delete this media.
+      </div>
+      ${renderFeedPost(post)}
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding-top:8px">
+        ${mediaBtn}
+        <button type="button" class="modal-btn primary" id="spmd-del-post-btn" style="background:#b3261e;color:#fff">Delete Full Post</button>
+      </div>
+    </div>`;
+    overlay.style.display = 'flex';
+
+    const mediaBtnEl = document.getElementById('spmd-del-media-btn');
+    const postBtnEl = document.getElementById('spmd-del-post-btn');
+    if (mediaBtnEl && canDeleteMediaOnly) {
+      mediaBtnEl.onclick = async () => {
+        mediaBtnEl.disabled = true;
+        postBtnEl.disabled = true;
+        try {
+          await deletePostMediaOnly(post.id);
+          closePostDetail();
+        } finally {
+          mediaBtnEl.disabled = false;
+          postBtnEl.disabled = false;
+        }
+      };
+    }
+    if (postBtnEl) {
+      postBtnEl.onclick = async () => {
+        postBtnEl.disabled = true;
+        if (mediaBtnEl) mediaBtnEl.disabled = true;
+        try {
+          await deletePostDirect(post.id);
+          closePostDetail();
+        } finally {
+          postBtnEl.disabled = false;
+          if (mediaBtnEl) mediaBtnEl.disabled = false;
+        }
+      };
+    }
+  }
+
   // Post "⋯" menu — shared for own posts (Delete) and others (Block / Report / Profile / DM)
   function openPostMenu(btn) {
     const nick = btn.dataset.nick;
@@ -4043,6 +4213,7 @@ const Social = (() => {
     shareProfile, profileShareUrl,
     sharePostUrl, postShareUrl,
     openPostMenu, blockUserFromSocial,
+    promptDeletePrivateMedia, promptDeletePostMedia,
     addFriendFromProfile, acceptFriendFromProfile,
     refreshProfileRelationship,
     openNewPost, closeNewPost, handleNewPostMedia, openNewPostCamera, clearNewPostMedia, submitNewPost,    applyFilter, updateFilter,

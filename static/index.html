@@ -4280,6 +4280,17 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .social-media-thumb{position:relative;aspect-ratio:1;overflow:hidden;cursor:pointer;background:#0a0a0a;display:flex;align-items:center;justify-content:center}
 .social-media-thumb img{width:100%;height:100%;object-fit:cover;transition:opacity .15s}
 .social-media-thumb:hover img{opacity:.75}
+.social-media-del-btn{
+  position:absolute;top:8px;right:8px;z-index:3;
+  width:28px;height:28px;border:none;border-radius:999px;
+  background:rgba(10,10,10,.62);color:#f0f0f0;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;line-height:1;backdrop-filter:blur(3px);
+  transition:background .16s ease,transform .16s ease,opacity .16s ease;
+  opacity:.92;
+}
+.social-media-del-btn:hover{background:rgba(179,38,30,.92);transform:scale(1.05)}
+.social-media-del-btn:active{transform:scale(.96)}
 .social-media-audio-icon{font-size:36px;opacity:.6}
 .social-media-info{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;padding:4px 8px;background:linear-gradient(transparent,rgba(0,0,0,.7));font-size:11px;color:#aaa}
 .social-media-wall-btn{width:100%;padding:7px 0;border:none;background:#1a1a1a;color:#4caf50;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
@@ -4433,6 +4444,20 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .snp-box{background:#141414;border:1px solid #2a4a2a;border-radius:16px;padding:24px;width:100%;max-width:480px;margin:16px}
 .snp-box textarea{width:100%;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:10px;color:#e0e0e0;padding:12px;font-size:14px;resize:none;min-height:100px;outline:none}
 .snp-box textarea:focus{border-color:#4caf50}
+.sf-repost-context{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 12px 0;color:#8fbf8f;font-size:12px;font-weight:600}
+.sf-repost-icon{opacity:.9}
+.sf-repost-by{background:none;border:none;color:#9ed89e;font-size:12px;font-weight:700;cursor:pointer;padding:0}
+.sf-repost-by:hover{text-decoration:underline}
+.sf-repost-word{opacity:.8}
+.sf-repost-quote{width:100%;margin-top:4px;padding:8px 10px;border-radius:10px;background:#111a11;border:1px solid #243924;color:#cde3cd;font-weight:500;line-height:1.45}
+
+/* Quote repost modal */
+#social-quote-repost{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:652;display:flex;align-items:center;justify-content:center}
+#social-quote-repost.hidden{display:none}
+.qrp-box{background:#141414;border:1px solid #2a4a2a;border-radius:16px;padding:18px;width:100%;max-width:520px;margin:16px}
+.qrp-box h3{margin:0 0 10px;color:#e0e0e0;font-size:16px}
+.qrp-box textarea{width:100%;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:10px;color:#e0e0e0;padding:12px;font-size:14px;resize:vertical;min-height:110px;outline:none}
+.qrp-box textarea:focus{border-color:#4caf50}
 /* Inline compose chips — subtle privacy / comments controls that live in the toolbar */
 .ft-compose-icon{cursor:pointer;color:#4caf50;font-size:20px;padding:6px;border-radius:8px;transition:background .15s}
 .ft-compose-icon:hover{background:#1a2a1a}
@@ -7209,16 +7234,34 @@ window.ConnErr = (function(){
     </div>
     <!-- hidden state holder — driven by the inline chip -->
     <input type="checkbox" id="snp-allow-comments" checked style="display:none">
+    <input type="checkbox" id="snp-share-enabled" checked style="display:none">
     <div style="display:flex;gap:8px;margin-top:14px;align-items:center">
       <label class="ft-compose-icon" title="Add photo/video">📎
         <input type="file" id="snp-media-input" accept="image/*,video/*" style="display:none" onchange="Social.handleNewPostMedia(this)">
       </label>
       <label class="ft-compose-icon" title="Take photo with filters" onclick="Social.openNewPostCamera()">📷</label>
       <button type="button" id="snp-priv-chip" class="ft-inline-chip" onclick="Social.cyclePostPrivacy()" title="Change audience">🌍 Public</button>
+      <button type="button" id="snp-share-chip" class="ft-inline-chip on" onclick="Social.toggleShareLink()" title="Toggle share link">🔗 On</button>
       <button type="button" id="snp-comments-chip" class="ft-inline-chip on" onclick="Social.toggleAllowComments()" title="Toggle comments">💬 On</button>
       <div style="flex:1"></div>
       <button style="background:#1a1a1a;border:none;color:#888;padding:8px 16px;border-radius:8px;cursor:pointer" onclick="Social.closeNewPost()">Cancel</button>
-      <button style="background:#4caf50;border:none;color:#000;font-weight:600;padding:8px 20px;border-radius:8px;cursor:pointer" onclick="Social.submitNewPost()">Post</button>
+      <button id="snp-submit-btn" style="background:#4caf50;border:none;color:#000;font-weight:600;padding:8px 20px;border-radius:8px;cursor:pointer" onclick="Social.submitNewPost()">Post</button>
+    </div>
+  </div>
+</div>
+
+<!-- Quote repost modal -->
+<div id="social-quote-repost" class="hidden" onclick="if(event.target===this)Social.closeQuoteRepost()">
+  <div class="qrp-box">
+    <h3 id="qrp-title">Quote repost</h3>
+    <textarea id="qrp-text" maxlength="1000" placeholder="Add your take on this post..."></textarea>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;color:#6f8f6f;font-size:12px">
+      <span>Up to 1000 characters</span>
+      <span id="qrp-count">Public quote</span>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button style="background:#1a1a1a;border:none;color:#888;padding:8px 14px;border-radius:8px;cursor:pointer" onclick="Social.closeQuoteRepost()">Cancel</button>
+      <button id="qrp-submit" style="background:#4caf50;border:none;color:#000;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer" onclick="Social.submitQuoteRepost()">Quote repost</button>
     </div>
   </div>
 </div>
@@ -7402,6 +7445,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/gifs.js?v=201"></script>
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=__APP_ASSET_VERSION__"></script>
+<!-- cache bump: social share button + story/profile list UX fixes -->
 <script src="/static/js/social.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>

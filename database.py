@@ -903,6 +903,8 @@ def _migrate():
             con.execute("ALTER TABLE wall_posts ADD COLUMN track_title TEXT")
         if wp_cols and "track_room" not in wp_cols:
             con.execute("ALTER TABLE wall_posts ADD COLUMN track_room TEXT")
+        if wp_cols and "share_enabled" not in wp_cols:
+            con.execute("ALTER TABLE wall_posts ADD COLUMN share_enabled INTEGER DEFAULT 1")
         # Mood label on shared tracks ("chill", "hype", "focus", …). Powers
         # the mood chips on the Music tab and the mood filter pills above
         # the feed so people can browse by vibe.
@@ -1314,6 +1316,7 @@ def _migrate():
             media_data     TEXT,
             media_type     TEXT,
             privacy        TEXT DEFAULT 'public',
+            share_enabled  INTEGER DEFAULT 1,
             allow_comments INTEGER DEFAULT 1,
             created_at     TEXT DEFAULT (datetime('now')),
             edited_at      TEXT,
@@ -1337,6 +1340,17 @@ def _migrate():
             user_id    INTEGER NOT NULL,
             content    TEXT NOT NULL,
             created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (post_id) REFERENCES wall_posts(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+
+        con.execute("""CREATE TABLE IF NOT EXISTS wall_reposts (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            post_id    INTEGER NOT NULL,
+            user_id    INTEGER NOT NULL,
+            quote_text TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(post_id, user_id),
             FOREIGN KEY (post_id) REFERENCES wall_posts(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
@@ -1521,6 +1535,8 @@ def _migrate():
             "CREATE INDEX IF NOT EXISTS idx_wall_posts_created ON wall_posts(created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_wall_post_reactions_post ON wall_post_reactions(post_id)",
             "CREATE INDEX IF NOT EXISTS idx_wall_comments_post ON wall_comments(post_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_wall_reposts_post ON wall_reposts(post_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_wall_reposts_user ON wall_reposts(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_stories_user_expires ON stories(user_id, expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_followers_follower ON followers(follower_id, following_id)",
@@ -3941,6 +3957,7 @@ def get_new_public_channels(limit: int = 10) -> List[Dict]:
 
 def create_wall_post(user_id: int, content: str, media_data: str = None,
                      media_type: str = None, privacy: str = 'public',
+                     share_enabled: int = 1,
                      allow_comments: int = 1,
                      track_title: str = None,
                      track_room: str = None,
@@ -3949,10 +3966,10 @@ def create_wall_post(user_id: int, content: str, media_data: str = None,
     with _conn() as con:
         cur = con.execute("""
             INSERT INTO wall_posts (user_id, content, media_data, media_type,
-                                   privacy, allow_comments,
+                                   privacy, share_enabled, allow_comments,
                                    track_title, track_room, track_mood)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (user_id, content, media_data, media_type, privacy, allow_comments,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, content, media_data, media_type, privacy, share_enabled, allow_comments,
               track_title, track_room, track_mood))
         return cur.lastrowid
 
@@ -3986,20 +4003,25 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
         else:
             privacy_filter = "wp.privacy = 'public'"
 
+        viewer_lookup_id = int(viewer_id or 0)
         rows = con.execute(f"""
-            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy,
+            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy, wp.share_enabled,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
                    (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
-                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
+                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count,
+                   (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) as repost_count,
+                   CASE WHEN ? > 0 THEN EXISTS(
+                       SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?
+                   ) ELSE 0 END AS i_reposted
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             WHERE wp.user_id=? AND {privacy_filter}
             ORDER BY wp.created_at DESC
             LIMIT ? OFFSET ?
-        """, (user_id, limit, offset)).fetchall()
+        """, (viewer_lookup_id, viewer_lookup_id, user_id, limit, offset)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -4019,7 +4041,8 @@ def get_wall_post(post_id: int) -> Optional[Dict]:
     """Get a single wall post."""
     with _conn() as con:
         row = con.execute("""
-            SELECT wp.*, u.nickname, u.avatar
+            SELECT wp.*, u.nickname, u.avatar,
+                   (SELECT COUNT(*) FROM wall_reposts wr WHERE wr.post_id=wp.id) AS repost_count
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             WHERE wp.id=?
@@ -4027,14 +4050,67 @@ def get_wall_post(post_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
+def get_user_reposts(user_id: int, viewer_id: int, limit: int = 30,
+                     offset: int = 0) -> List[Dict]:
+    """Get posts that a user has reposted. Respects privacy of original posts."""
+    with _conn() as con:
+        # Determine privacy filter based on viewer relationship
+        if viewer_id == user_id:
+            privacy_filter = "1=1"
+        elif viewer_id:
+            friend = con.execute("""
+                SELECT 1 FROM friends
+                WHERE ((user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?))
+                AND status='accepted'
+            """, (user_id, viewer_id, viewer_id, user_id)).fetchone()
+            follows = con.execute(
+                "SELECT 1 FROM followers WHERE follower_id=? AND following_id=?",
+                (viewer_id, user_id)
+            ).fetchone()
+            if friend:
+                privacy_filter = "wp.privacy IN ('public', 'followers', 'friends')"
+            elif follows:
+                privacy_filter = "wp.privacy IN ('public', 'followers')"
+            else:
+                privacy_filter = "wp.privacy = 'public'"
+        else:
+            privacy_filter = "wp.privacy = 'public'"
+
+        viewer_lookup_id = int(viewer_id or 0)
+        rows = con.execute(f"""
+            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy, wp.share_enabled,
+                   wp.allow_comments, wp.created_at, wp.edited_at,
+                   wp.track_title, wp.track_room, wp.track_mood,
+                   (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
+                   u.nickname, u.avatar,
+                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
+                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count,
+                   (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) as repost_count,
+                   CASE WHEN ? > 0 THEN EXISTS(
+                       SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?
+                   ) ELSE 0 END AS i_reposted
+            FROM wall_posts wp
+            JOIN users u ON wp.user_id = u.id
+            JOIN wall_reposts wr ON wr.post_id = wp.id
+            WHERE wr.user_id=? AND {privacy_filter}
+              AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
+              AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+            ORDER BY wr.created_at DESC
+            LIMIT ? OFFSET ?
+        """, (viewer_lookup_id, viewer_lookup_id, user_id, viewer_lookup_id, viewer_lookup_id, limit, offset)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def update_wall_post(post_id: int, user_id: int, content: str = None,
-                     privacy: str = None, allow_comments: int = None) -> bool:
+                     privacy: str = None, share_enabled: int = None, allow_comments: int = None) -> bool:
     """Update a wall post."""
     updates = {}
     if content is not None:
         updates['content'] = content
     if privacy is not None:
         updates['privacy'] = privacy
+    if share_enabled is not None:
+        updates['share_enabled'] = share_enabled
     if allow_comments is not None:
         updates['allow_comments'] = allow_comments
     if not updates:
@@ -4061,6 +4137,29 @@ def delete_wall_post(post_id: int, user_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def clear_wall_post_media(post_id: int, user_id: int) -> bool:
+    """Remove only media attachment from a wall post owned by user.
+
+    Leaves the post row/content intact and updates edited_at.
+    """
+    with _conn() as con:
+        cur = con.execute(
+            """
+            UPDATE wall_posts
+            SET media_data=NULL,
+                media_type=NULL,
+                track_title=NULL,
+                track_room=NULL,
+                track_mood=NULL,
+                edited_at=datetime('now')
+            WHERE id=? AND user_id=? AND media_data IS NOT NULL
+            """,
+            (post_id, user_id),
+        )
+        con.commit()
+        return cur.rowcount > 0
+
+
 def add_wall_reaction(post_id: int, user_id: int, emoji: str) -> bool:
     """Add or remove a reaction to a post (toggle)."""
     with _conn() as con:
@@ -4077,6 +4176,63 @@ def add_wall_reaction(post_id: int, user_id: int, emoji: str) -> bool:
                 VALUES (?, ?, ?)
             """, (post_id, user_id, emoji))
             return True  # Added
+
+
+def toggle_wall_repost(post_id: int, user_id: int, quote_text: Optional[str] = None) -> bool:
+    """Toggle/update a repost.
+
+    - No quote and existing repost => remove repost (returns False)
+    - Quote provided and existing repost => update quote + bump timestamp
+      (returns True)
+    - No existing repost => create one (returns True)
+    """
+    with _conn() as con:
+        existing = con.execute(
+            "SELECT id FROM wall_reposts WHERE post_id=? AND user_id=?",
+            (post_id, user_id),
+        ).fetchone()
+        normalized_quote = (quote_text or "").strip() or None
+        if existing:
+            if normalized_quote:
+                con.execute(
+                    """
+                    UPDATE wall_reposts
+                       SET quote_text=?, created_at=datetime('now')
+                     WHERE id=?
+                    """,
+                    (normalized_quote, existing["id"]),
+                )
+                return True
+            con.execute("DELETE FROM wall_reposts WHERE id=?", (existing["id"],))
+            return False
+        con.execute(
+            """
+            INSERT INTO wall_reposts (post_id, user_id, quote_text)
+            VALUES (?, ?, ?)
+            """,
+            (post_id, user_id, normalized_quote),
+        )
+        return True
+
+
+def get_wall_repost_count(post_id: int) -> int:
+    """Return repost count for a post."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COUNT(*) AS c FROM wall_reposts WHERE post_id=?",
+            (post_id,),
+        ).fetchone()
+    return int(row["c"]) if row else 0
+
+
+def has_wall_reposted(post_id: int, user_id: int) -> bool:
+    """True when user has reposted post_id."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM wall_reposts WHERE post_id=? AND user_id=? LIMIT 1",
+            (post_id, user_id),
+        ).fetchone()
+    return bool(row)
 
 
 def get_post_reactions(post_id: int) -> List[Dict]:
@@ -4532,25 +4688,35 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
     """Posts from users the current user follows + own posts, newest first.
 
     Optional `mood` narrows to music-tagged posts with matching `track_mood`.
-    When `lite` is True, `media_data` is omitted from the SELECT — callers
-    are expected to construct an on-demand URL using `has_media`/`media_type`,
-    avoiding multi-MB base64 inlining of every post in the response.
+    When `lite` is True, we include media_data for images/videos/music (all needed
+    for rendering). These are either small URLs or decoded on-demand.
     """
     mood = (mood or '').strip().lower()
+    # Include media_data for image/video (rendering) and music (URL references).
+    # These are either data URIs (decoded on-demand) or already URLs, so keep them.
     media_col = (
-        "CASE WHEN wp.media_type LIKE 'image/%' OR wp.media_type LIKE 'video/%' "
-        "THEN NULL ELSE wp.media_data END AS media_data"
+        "CASE WHEN wp.media_type LIKE 'image/%' OR wp.media_type LIKE 'video/%' OR wp.media_type LIKE 'music/%' "
+        "THEN wp.media_data ELSE NULL END AS media_data"
         if lite else "wp.media_data"
     )
+    fetch_limit = max(120, int(limit or 30) * 4 + int(offset or 0))
     with _conn() as con:
-        rows = con.execute(f"""
+        base_rows = con.execute(f"""
             SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy,
-                   wp.allow_comments, wp.created_at, wp.edited_at,
+                   wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
-                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
-                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
+                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) AS reaction_count,
+                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) AS comment_count,
+                   (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) AS repost_count,
+                   EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
+                   'post' AS feed_kind,
+                   wp.created_at AS feed_sort_at,
+                   NULL AS repost_by_user_id,
+                   NULL AS repost_by_nickname,
+                   NULL AS repost_by_avatar,
+                   NULL AS repost_quote
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             LEFT JOIN followers f ON f.following_id = wp.user_id AND f.follower_id = ?
@@ -4558,14 +4724,92 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
               AND wp.privacy IN ('public', 'followers', 'friends')
               AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
-                            AND (? = '' OR (
-                                        wp.media_type LIKE 'music/%'
-                                        AND lower(trim(coalesce(wp.track_mood,''))) = ?
-                            ))
+              AND (? = '' OR (
+                    wp.media_type LIKE 'music/%'
+                    AND lower(trim(coalesce(wp.track_mood,''))) = ?
+              ))
             ORDER BY wp.created_at DESC
-            LIMIT ? OFFSET ?
-                """, (user_id, user_id, user_id, user_id, mood, mood, limit, offset)).fetchall()
-    return [dict(r) for r in rows]
+            LIMIT ?
+        """, (user_id, user_id, user_id, user_id, user_id, mood, mood, fetch_limit)).fetchall()
+
+        repost_rows = con.execute(f"""
+            SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy,
+                   wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
+                   wp.track_title, wp.track_room, wp.track_mood,
+                   (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
+                   u.nickname, u.avatar,
+                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) AS reaction_count,
+                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) AS comment_count,
+                   (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) AS repost_count,
+                   EXISTS(SELECT 1 FROM wall_reposts wr2 WHERE wr2.post_id=wp.id AND wr2.user_id=?) AS i_reposted,
+                   'repost' AS feed_kind,
+                   wr.created_at AS feed_sort_at,
+                   wr.user_id AS repost_by_user_id,
+                   ru.nickname AS repost_by_nickname,
+                   ru.avatar AS repost_by_avatar,
+                   wr.quote_text AS repost_quote
+            FROM wall_reposts wr
+            JOIN wall_posts wp ON wp.id = wr.post_id
+            JOIN users u ON u.id = wp.user_id
+            JOIN users ru ON ru.id = wr.user_id
+            LEFT JOIN followers rf ON rf.following_id = wr.user_id AND rf.follower_id = ?
+            WHERE (rf.follower_id IS NOT NULL OR wr.user_id = ?)
+              AND wp.share_enabled = 1
+              AND wp.privacy IN ('public', 'followers')
+              AND ru.id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
+              AND ru.id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+              AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
+              AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+              AND (
+                    wp.privacy = 'public'
+                    OR wp.user_id = ?
+                    OR (
+                        wp.privacy = 'followers' AND (
+                            EXISTS(SELECT 1 FROM followers fx WHERE fx.follower_id=? AND fx.following_id=wp.user_id)
+                            OR EXISTS(
+                                SELECT 1 FROM friends fr
+                                WHERE ((fr.user_id=? AND fr.friend_id=wp.user_id)
+                                       OR (fr.user_id=wp.user_id AND fr.friend_id=?))
+                                  AND fr.status='accepted'
+                            )
+                        )
+                    )
+              )
+              AND (? = '' OR (
+                    wp.media_type LIKE 'music/%'
+                    AND lower(trim(coalesce(wp.track_mood,''))) = ?
+              ))
+            ORDER BY wr.created_at DESC
+            LIMIT ?
+        """, (
+            user_id,
+            user_id, user_id,
+            user_id, user_id, user_id, user_id,
+            user_id,
+            user_id,
+            user_id, user_id,
+            mood, mood,
+            fetch_limit,
+        )).fetchall()
+
+    merged: List[Dict] = []
+    best_by_post: Dict[int, Dict] = {}
+    for row in list(base_rows) + list(repost_rows):
+        d = dict(row)
+        pid = int(d.get("id") or 0)
+        ts = str(d.get("feed_sort_at") or d.get("created_at") or "")
+        existing = best_by_post.get(pid)
+        if not existing:
+            best_by_post[pid] = d
+            continue
+        existing_ts = str(existing.get("feed_sort_at") or existing.get("created_at") or "")
+        if ts > existing_ts or (ts == existing_ts and d.get("feed_kind") == "repost"):
+            best_by_post[pid] = d
+
+    merged = sorted(best_by_post.values(), key=lambda x: str(x.get("feed_sort_at") or x.get("created_at") or ""), reverse=True)
+    start = max(0, int(offset or 0))
+    end = start + max(1, int(limit or 30))
+    return merged[start:end]
 
 
 def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
@@ -4574,22 +4818,26 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
     """All public posts — discover new people. Supports trending/new/top sort.
 
     Optional `mood` narrows to music-tagged posts with matching `track_mood`.
-    When `lite` is True, `media_data` is omitted (see `get_feed_posts`).
+    When `lite` is True, we include media_data for images/videos/music (all needed
+    for rendering).
     """
     mood = (mood or '').strip().lower()
+    # Include media_data for image/video (rendering) and music (URL references).
+    # These are either data URIs (decoded on-demand) or already URLs, so keep them.
     media_col = (
-        "CASE WHEN wp.media_type LIKE 'image/%' OR wp.media_type LIKE 'video/%' "
-        "THEN NULL ELSE wp.media_data END AS media_data"
+        "CASE WHEN wp.media_type LIKE 'image/%' OR wp.media_type LIKE 'video/%' OR wp.media_type LIKE 'music/%' "
+        "THEN wp.media_data ELSE NULL END AS media_data"
         if lite else "wp.media_data"
     )
     with _conn() as con:
         if sort == 'top':
-            order = "(SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) DESC, wp.created_at DESC"
+            order = "((SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) + ((SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) * 2)) DESC, wp.created_at DESC"
         elif sort == 'new':
             order = "wp.created_at DESC"
         else:  # trending — mix of recency + engagement
             order = """(
                 (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) * 2 +
+                (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) * 2 +
                 (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) +
                 CASE WHEN wp.media_type IS NOT NULL AND wp.media_type != '' THEN 3 ELSE 0 END +
                 CASE WHEN julianday('now') - julianday(wp.created_at) < 1 THEN 10
@@ -4603,7 +4851,9 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
                    (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
-                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count
+                     (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count,
+                     (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) as repost_count,
+                     EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             WHERE wp.privacy = 'public'
@@ -4615,7 +4865,7 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
                             ))
             ORDER BY {order}
             LIMIT ? OFFSET ?
-                """, (viewer_id, viewer_id, mood, mood, limit, offset)).fetchall()
+                """, (viewer_id, viewer_id, viewer_id, mood, mood, limit, offset)).fetchall()
     return [dict(r) for r in rows]
 
 
