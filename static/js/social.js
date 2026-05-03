@@ -1911,6 +1911,8 @@ const Social = (() => {
   let _reelsScrollSnap = null;
   let _reelsSeekLockUntil = 0;
   let _reelsSeekCard = null;
+  let _reelsSeekReleaseUntil = 0;
+  let _reelsSeekReleaseCard = null;
   let _reelsUserPausedCard = null;
 
   function _reelsBeginSeek(card) {
@@ -1922,8 +1924,12 @@ const Social = (() => {
     _reelsSeekLockUntil = Math.max(_reelsSeekLockUntil, Date.now() + ms);
   }
 
-  function _reelsEndSeek() {
+  function _reelsEndSeek(card = null) {
     _reelsSeekLockUntil = Date.now() + 260;
+    if (card) {
+      _reelsSeekReleaseCard = card;
+      _reelsSeekReleaseUntil = Date.now() + 1400;
+    }
     setTimeout(() => {
       if (Date.now() > _reelsSeekLockUntil) _reelsSeekCard = null;
     }, 300);
@@ -2070,7 +2076,8 @@ const Social = (() => {
   function _reelsActivateCard(card, opts = {}) {
     if (!card || !card.classList.contains('reel-card')) return;
     const reset = opts.reset !== false;
-    const shouldReset = (_reelsCurrentCard !== card) && reset;
+    const seekReleaseGuard = card === _reelsSeekReleaseCard && Date.now() < _reelsSeekReleaseUntil;
+    const shouldReset = (_reelsCurrentCard !== card) && reset && !seekReleaseGuard;
     document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
       if (c === card) return;
       const v = c.querySelector('video');
@@ -2248,7 +2255,9 @@ const Social = (() => {
           if (p && typeof p.then === 'function') {
             p.then(() => {
               setTimeout(() => {
-                try { firstVideo.pause(); } catch {}
+                if (firstCard !== _reelsCurrentCard) {
+                  try { firstVideo.pause(); } catch {}
+                }
                 maybeReveal();
               }, 120);
             }).catch(() => {});
@@ -2427,6 +2436,7 @@ const Social = (() => {
         let restoreTouchAction = '';
         let snapLockTimer = 0;
         let wasPlayingBeforeSeek = false;
+        let ignoreClickUntil = 0;
         const clearLockTimer = () => {
           if (!snapLockTimer) return;
           try { clearTimeout(snapLockTimer); } catch {}
@@ -2484,20 +2494,22 @@ const Social = (() => {
           seeking = false;
           try { progWrap.releasePointerCapture(e.pointerId); } catch {}
           if (typeof e.clientX === 'number') seekFromClientX(e.clientX);
-          _reelsEndSeek();
+          _reelsEndSeek(card);
           unlockSnapScroll();
           if (wasPlayingBeforeSeek && video.paused) {
             _reelsPlayVideo(card, video);
           }
           wasPlayingBeforeSeek = false;
+          ignoreClickUntil = Date.now() + 420;
         };
         progWrap.addEventListener('pointerup', stopSeek);
         progWrap.addEventListener('pointercancel', () => {
           seeking = false;
-          _reelsEndSeek();
+          _reelsEndSeek(card);
           unlockSnapScroll();
           if (wasPlayingBeforeSeek && video.paused) _reelsPlayVideo(card, video);
           wasPlayingBeforeSeek = false;
+          ignoreClickUntil = Date.now() + 420;
         });
         // Fallback: keep scrubbing even if pointer leaves the progress bar.
         document.addEventListener('pointermove', (e) => {
@@ -2511,6 +2523,8 @@ const Social = (() => {
           stopSeek(e);
         }, { passive: true });
         progWrap.addEventListener('click', (e) => {
+          if (Date.now() < ignoreClickUntil) return;
+          if (typeof e.clientX !== 'number') return;
           e.preventDefault();
           e.stopPropagation();
           seekFromClientX(e.clientX);
@@ -2546,20 +2560,22 @@ const Social = (() => {
           const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
           touchSeeking = false;
           if (t) seekFromClientX(t.clientX);
-          _reelsEndSeek();
+          _reelsEndSeek(card);
           unlockSnapScroll();
           if (wasPlayingBeforeSeek && video.paused) {
             _reelsPlayVideo(card, video);
           }
           wasPlayingBeforeSeek = false;
+          ignoreClickUntil = Date.now() + 520;
         };
         progWrap.addEventListener('touchend', stopTouchSeek, { passive: true });
         progWrap.addEventListener('touchcancel', () => {
           touchSeeking = false;
-          _reelsEndSeek();
+          _reelsEndSeek(card);
           unlockSnapScroll();
           if (wasPlayingBeforeSeek && video.paused) _reelsPlayVideo(card, video);
           wasPlayingBeforeSeek = false;
+          ignoreClickUntil = Date.now() + 520;
         }, { passive: true });
         // Fallback: continue touch scrub while finger moves off element.
         document.addEventListener('touchmove', (e) => {
