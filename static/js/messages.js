@@ -36,10 +36,14 @@ const Messages = (() => {
       if (profilePath) return { type: 'profile', nickname: profilePath[1] };
       const postPath = path.match(/^\/p\/(\d+)\/?$/i);
       if (postPath) return { type: 'post', postId: Number(postPath[1]) };
+      const reelPath = path.match(/^\/r\/(\d+)\/?$/i);
+      if (reelPath) return { type: 'reel', postId: Number(reelPath[1]) };
       const qProfile = (parsed.searchParams.get('profile') || '').trim();
       if (/^[A-Za-z0-9_]{1,32}$/.test(qProfile)) return { type: 'profile', nickname: qProfile };
       const qPost = (parsed.searchParams.get('post') || parsed.searchParams.get('p') || '').trim();
       if (/^\d+$/.test(qPost)) return { type: 'post', postId: Number(qPost) };
+      const qReel = (parsed.searchParams.get('reel') || '').trim();
+      if (/^\d+$/.test(qReel)) return { type: 'reel', postId: Number(qReel) };
       return null;
     } catch {
       return null;
@@ -100,6 +104,10 @@ const Messages = (() => {
       if (social?.type === 'post') {
         return `<span class="social-post-card-placeholder" data-social-post="${social.postId}">` +
           `<span class="invite-card-loading">🐸 Loading post…</span></span>`;
+      }
+      if (social?.type === 'reel') {
+        return `<span class="social-reel-card-placeholder" data-social-reel="${social.postId}">` +
+          `<span class="invite-card-loading">🐸 Loading reel…</span></span>`;
       }
       return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${UI.escHtml(url)}">${url}</a>`;
     });
@@ -179,6 +187,42 @@ const Messages = (() => {
     }
   }
 
+  async function _loadSocialReelCard(msgId, postId) {
+    const msgEl = document.getElementById(`msg-${msgId}`);
+    if (!msgEl) return;
+    const placeholder = msgEl.querySelector(`.social-reel-card-placeholder[data-social-reel="${postId}"]`);
+    if (!placeholder) return;
+    try {
+      const res = await apiFetch(`/api/wall/posts/${postId}`);
+      if (!res.ok) {
+        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Reel unavailable</span>`;
+        return;
+      }
+      const p = await res.json();
+      const mediaType = String(p.media_type || '').toLowerCase();
+      if (!mediaType.startsWith('video/')) {
+        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`;
+        return;
+      }
+      const nick = UI.escHtml(p.nickname || 'frog');
+      let preview = String(p.content || '').trim();
+      if (!preview) preview = '🎬 Watch this reel in Frog Social';
+      const safePreview = UI.escHtml(preview.substring(0, 90));
+      const pid = Number(p.id || postId);
+      placeholder.outerHTML =
+        `<div class="share-card" data-social-reel="${pid}" onclick="Messages.openSocialReel(this.dataset.socialReel)">` +
+          `<div style="flex-shrink:0">${UI.avatarEl(p.avatar || null, p.nickname || 'frog', 42)}</div>` +
+          `<div class="share-card-info">` +
+            `<div class="share-card-label">Frog Social Reel</div>` +
+            `<div class="share-card-name">@${nick}</div>` +
+            `<div class="share-card-bio">${safePreview}</div>` +
+          `</div>` +
+        `</div>`;
+    } catch {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load reel</span>`;
+    }
+  }
+
   function _hydrateSpecialCards(msgId) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
@@ -193,6 +237,10 @@ const Messages = (() => {
     msgEl.querySelectorAll('.social-post-card-placeholder[data-social-post]').forEach(el => {
       const postId = Number(el.dataset.socialPost || '0');
       if (Number.isFinite(postId) && postId > 0) _loadSocialPostCard(msgId, postId);
+    });
+    msgEl.querySelectorAll('.social-reel-card-placeholder[data-social-reel]').forEach(el => {
+      const postId = Number(el.dataset.socialReel || '0');
+      if (Number.isFinite(postId) && postId > 0) _loadSocialReelCard(msgId, postId);
     });
   }
 
@@ -1448,6 +1496,27 @@ const Messages = (() => {
     try { window.location.href = `/app?post=${id}`; } catch {}
   }
 
+  function openSocialReel(postId) {
+    const id = Number(postId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    try {
+      if (typeof Social !== 'undefined') {
+        try { Social.open('reels'); } catch {}
+        setTimeout(() => {
+          try {
+            if (typeof Social.openSharedReel === 'function') Social.openSharedReel(id);
+            else if (typeof Social.switchTab === 'function') {
+              Social.switchTab('reels');
+              if (typeof Social.openPostComments === 'function') Social.openPostComments(id);
+            }
+          } catch {}
+        }, 60);
+        return;
+      }
+    } catch {}
+    try { window.location.href = `/?reel=${id}`; } catch {}
+  }
+
   async function deleteMsg(id) {
     const ok = await UI.confirm({
       title: 'Delete message',
@@ -2182,7 +2251,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

@@ -134,7 +134,119 @@ function _extractDMPreviewUrl(text) {
   if (!urls.length) return '';
   const first = urls[0] || '';
   if (/\/invite\/[A-Za-z0-9]{6,16}/.test(first)) return '';
+  if (_parseDMFrogSocialUrl(first)) return '';
   return first;
+}
+
+function _normalizeUrl(url) {
+  return String(url || '').replace(/&amp;/g, '&');
+}
+
+function _parseDMFrogSocialUrl(url) {
+  try {
+    const parsed = new URL(_normalizeUrl(url));
+    const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'localhost');
+    if (!hostOk) return null;
+    const path = parsed.pathname || '/';
+    const postPath = path.match(/^\/p\/(\d+)\/?$/i);
+    if (postPath) return { type: 'post', postId: Number(postPath[1]) };
+    const reelPath = path.match(/^\/r\/(\d+)\/?$/i);
+    if (reelPath) return { type: 'reel', postId: Number(reelPath[1]) };
+    const qPost = (parsed.searchParams.get('post') || parsed.searchParams.get('p') || '').trim();
+    if (/^\d+$/.test(qPost)) return { type: 'post', postId: Number(qPost) };
+    const qReel = (parsed.searchParams.get('reel') || '').trim();
+    if (/^\d+$/.test(qReel)) return { type: 'reel', postId: Number(qReel) };
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function _loadDMSocialPostCard(msgId, postId) {
+  const msgEl = document.getElementById(`msg-${msgId}`);
+  if (!msgEl) return;
+  const placeholder = msgEl.querySelector(`.dm-social-post-card-placeholder[data-social-post="${postId}"]`);
+  if (!placeholder) return;
+  try {
+    const res = await apiFetch(`/api/wall/posts/${postId}`);
+    if (!res.ok) {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`;
+      return;
+    }
+    const p = await res.json();
+    const nick = esc(p.nickname || 'frog');
+    const privacy = String(p.privacy || 'public').toLowerCase();
+    const label = privacy === 'public' ? 'Frog Social Post' : (privacy === 'followers' ? 'Followers Post' : 'Private Post');
+    let preview = String(p.content || '').trim();
+    if (!preview) {
+      if ((p.media_type || '').startsWith('image/')) preview = '📷 Photo post';
+      else if ((p.media_type || '').startsWith('video/')) preview = '🎬 Video post';
+      else if ((p.media_type || '').startsWith('music/')) preview = '🎵 Music post';
+      else preview = 'Open this post in Frog Social';
+    }
+    const safePreview = esc(preview.substring(0, 90));
+    const pid = Number(p.id || postId);
+    placeholder.outerHTML =
+      `<div class="share-card" data-social-post="${pid}" onclick="openDMSocialPost(this.dataset.socialPost)">` +
+        `<div style="flex-shrink:0">${UI.avatarEl(p.avatar || null, p.nickname || 'frog', 42)}</div>` +
+        `<div class="share-card-info">` +
+          `<div class="share-card-label">${esc(label)}</div>` +
+          `<div class="share-card-name">@${nick}</div>` +
+          `<div class="share-card-bio">${safePreview}</div>` +
+        `</div>` +
+      `</div>`;
+  } catch {
+    placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load post</span>`;
+  }
+}
+
+async function _loadDMSocialReelCard(msgId, postId) {
+  const msgEl = document.getElementById(`msg-${msgId}`);
+  if (!msgEl) return;
+  const placeholder = msgEl.querySelector(`.dm-social-reel-card-placeholder[data-social-reel="${postId}"]`);
+  if (!placeholder) return;
+  try {
+    const res = await apiFetch(`/api/wall/posts/${postId}`);
+    if (!res.ok) {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Reel unavailable</span>`;
+      return;
+    }
+    const p = await res.json();
+    const mediaType = String(p.media_type || '').toLowerCase();
+    if (!mediaType.startsWith('video/')) {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`;
+      return;
+    }
+    const nick = esc(p.nickname || 'frog');
+    let preview = String(p.content || '').trim();
+    if (!preview) preview = '🎬 Watch this reel in Frog Social';
+    const safePreview = esc(preview.substring(0, 90));
+    const pid = Number(p.id || postId);
+    placeholder.outerHTML =
+      `<div class="share-card" data-social-reel="${pid}" onclick="openDMSocialReel(this.dataset.socialReel)">` +
+        `<div style="flex-shrink:0">${UI.avatarEl(p.avatar || null, p.nickname || 'frog', 42)}</div>` +
+        `<div class="share-card-info">` +
+          `<div class="share-card-label">Frog Social Reel</div>` +
+          `<div class="share-card-name">@${nick}</div>` +
+          `<div class="share-card-bio">${safePreview}</div>` +
+        `</div>` +
+      `</div>`;
+  } catch {
+    placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load reel</span>`;
+  }
+}
+
+function _hydrateDMSocialCards(msgId) {
+  const msgEl = document.getElementById(`msg-${msgId}`);
+  if (!msgEl) return;
+  msgEl.querySelectorAll('.dm-social-post-card-placeholder[data-social-post]').forEach(el => {
+    const postId = Number(el.dataset.socialPost || '0');
+    if (Number.isFinite(postId) && postId > 0) _loadDMSocialPostCard(msgId, postId);
+  });
+  msgEl.querySelectorAll('.dm-social-reel-card-placeholder[data-social-reel]').forEach(el => {
+    const postId = Number(el.dataset.socialReel || '0');
+    if (Number.isFinite(postId) && postId > 0) _loadDMSocialReelCard(msgId, postId);
+  });
 }
 
 function _extractYouTubeVideoId(text) {
@@ -956,6 +1068,10 @@ function renderDMChat () {
     if (!u) return;
     setTimeout(() => _loadDMPreview(m.id, u), 90 + idx * 40);
   });
+  _dmMessages.slice(-20).forEach((m, idx) => {
+    if (!m?.id) return;
+    setTimeout(() => _hydrateDMSocialCards(m.id), 90 + idx * 25);
+  });
 
   // Scroll to bottom — with robust pinning for late-loading media
   const forceBottom = () => { area.scrollTop = area.scrollHeight; };
@@ -1175,7 +1291,18 @@ function renderDMMessage (m) {
       const isSelf = nick.toLowerCase() === STATE.user?.nickname?.toLowerCase();
       return `<span class="mention${isSelf ? ' mention-self' : ''}">@${nick}</span>`;
     });
-    contentHtml = contentHtml.replace(urlRe, url => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${esc(url)}">${url}</a>`);
+    contentHtml = contentHtml.replace(urlRe, url => {
+      const social = _parseDMFrogSocialUrl(url);
+      if (social?.type === 'post') {
+        return `<span class="dm-social-post-card-placeholder" data-social-post="${social.postId}">` +
+          `<span class="invite-card-loading">🐸 Loading post…</span></span>`;
+      }
+      if (social?.type === 'reel') {
+        return `<span class="dm-social-reel-card-placeholder" data-social-reel="${social.postId}">` +
+          `<span class="invite-card-loading">🐸 Loading reel…</span></span>`;
+      }
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${esc(url)}">${url}</a>`;
+    });
     if (typeof renderCustomEmojisInText === 'function') {
       contentHtml = renderCustomEmojisInText(contentHtml);
     }
@@ -1867,10 +1994,35 @@ function appendDMMessage (m) {
   if (mine || atBottom) _scrollDMToBottomStable();
   const previewUrl = _extractDMPreviewUrl(String(m.content || ''));
   if (previewUrl) setTimeout(() => _loadDMPreview(m.id, previewUrl), 180);
+  setTimeout(() => _hydrateDMSocialCards(m.id), 120);
   // Auto-load media for new real-time DM messages (skip view-once — those need explicit tap)
   if (m.has_media && m.id && _activeDM && !m.view_once) {
     setTimeout(() => loadDMMedia(m.id, _activeDM.id), 100);
   }
+}
+
+function openDMSocialPost(postId) {
+  const id = Number(postId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  try {
+    if (typeof Messages !== 'undefined' && typeof Messages.openSocialPost === 'function') {
+      Messages.openSocialPost(id);
+      return;
+    }
+  } catch {}
+  try { window.location.href = `/app?post=${id}`; } catch {}
+}
+
+function openDMSocialReel(postId) {
+  const id = Number(postId);
+  if (!Number.isFinite(id) || id <= 0) return;
+  try {
+    if (typeof Messages !== 'undefined' && typeof Messages.openSocialReel === 'function') {
+      Messages.openSocialReel(id);
+      return;
+    }
+  } catch {}
+  try { window.location.href = `/?reel=${id}`; } catch {}
 }
 
 /* ── Typing indicator ───────────────────────────────────────────────────────── */
