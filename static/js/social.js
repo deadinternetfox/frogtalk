@@ -2348,6 +2348,8 @@ const Social = (() => {
       video.addEventListener('loadedmetadata', () => {
         try {
           if (!Number.isFinite(video.duration) || video.duration <= 0.12) return;
+          // Do not offset the currently active reel; keep true autoplay start.
+          if (card === _reelsCurrentCard) return;
           if (video.currentTime > 0) return;
           video.currentTime = Math.min(0.12, Math.max(0.06, video.duration / 10));
         } catch {}
@@ -2356,6 +2358,11 @@ const Social = (() => {
         video.addEventListener('loadedmetadata', () => {
           // Force-decode a tiny first frame for the first visible reel.
           if (posterDrawn || !card.isConnected) return;
+          // If this card is already active/playing, don't pause it for decode.
+          if (card === _reelsCurrentCard || !video.paused) {
+            try { drawPoster(); } catch {}
+            return;
+          }
           const finish = () => {
             try { drawPoster(); } catch {}
             if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
@@ -2458,6 +2465,9 @@ const Social = (() => {
           seeking = true;
           _reelsBeginSeek(card);
           wasPlayingBeforeSeek = !video.paused;
+          if (wasPlayingBeforeSeek) {
+            try { video.pause(); } catch {}
+          }
           lockSnapScroll();
           try { progWrap.setPointerCapture(e.pointerId); } catch {}
           seekFromClientX(e.clientX);
@@ -2516,6 +2526,9 @@ const Social = (() => {
           touchSeeking = true;
           _reelsBeginSeek(card);
           wasPlayingBeforeSeek = !video.paused;
+          if (wasPlayingBeforeSeek) {
+            try { video.pause(); } catch {}
+          }
           lockSnapScroll();
           seekFromClientX(t.clientX);
         }, { passive: false });
