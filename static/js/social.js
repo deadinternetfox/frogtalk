@@ -637,13 +637,13 @@ const Social = (() => {
 
   function _exploreSkeletonHtml() {
     return `
-      <div class="explore-toolbar">
+      <div class="explore-toolbar is-skeleton" aria-hidden="true">
         <div class="explore-tabs">
-          <button class="explore-tab ${_exploreSort==='trending'?'active':''}">🔥 Trending</button>
-          <button class="explore-tab ${_exploreSort==='new'?'active':''}">🆕 New</button>
-          <button class="explore-tab ${_exploreSort==='top'?'active':''}">⭐ Top</button>
+          <span class="explore-tab is-skeleton-chip">🔥 Trending</span>
+          <span class="explore-tab is-skeleton-chip">🆕 New</span>
+          <span class="explore-tab is-skeleton-chip">⭐ Top</span>
         </div>
-        <button class="explore-refresh" title="Refresh" disabled>🔄</button>
+        <span class="explore-refresh is-skeleton-chip" title="Refresh">🔄</span>
       </div>
       <div class="social-grid" aria-hidden="true">
         ${Array.from({ length: 6 }).map(() => `<div class="social-grid-item" style="pointer-events:none"><div class="skel-block" style="height:100%;min-height:120px;border-radius:0"></div></div>`).join('')}
@@ -654,13 +654,13 @@ const Social = (() => {
 
   function _reelsSkeletonHtml(scope, sort) {
     return `
-      <div class="reels-scope-bar">
-        <button class="rsb-pill ${scope==='all'?'active':''}" disabled>🌐 All</button>
-        <button class="rsb-pill ${scope==='friends'?'active':''}" disabled>👥 Friends</button>
+      <div class="reels-scope-bar is-skeleton" aria-hidden="true">
+        <span class="rsb-pill is-skeleton-chip">🌐 All</span>
+        <span class="rsb-pill is-skeleton-chip">👥 Friends</span>
         <div class="rsb-sort">
-          <button class="rsb-sort-chip ${sort==='hot'?'active':''}" disabled>🔥 Hot</button>
-          <button class="rsb-sort-chip ${sort==='new'?'active':''}" disabled>🆕 New</button>
-          <button class="rsb-sort-chip ${sort==='top'?'active':''}" disabled>⭐ Top</button>
+          <span class="rsb-sort-chip is-skeleton-chip">🔥 Hot</span>
+          <span class="rsb-sort-chip is-skeleton-chip">🆕 New</span>
+          <span class="rsb-sort-chip is-skeleton-chip">⭐ Top</span>
         </div>
       </div>
       <div class="reels-stage">
@@ -677,20 +677,20 @@ const Social = (() => {
 
   function _musicSkeletonHtml(scope, sort) {
     return `
-      <div class="music-scope-bar">
-        <div class="msb-toggle" role="tablist" aria-label="Music feed scope">
-          <button class="msb-seg ${scope==='following'?'active':''}" role="tab" aria-selected="${scope==='following'}" disabled>
+      <div class="music-scope-bar is-skeleton" aria-hidden="true">
+        <div class="msb-toggle">
+          <span class="msb-seg is-skeleton-chip">
             <span class="msb-seg-ico">👥</span><span>Following</span>
-          </button>
-          <button class="msb-seg ${scope==='explore'?'active':''}" role="tab" aria-selected="${scope==='explore'}" disabled>
+          </span>
+          <span class="msb-seg is-skeleton-chip">
             <span class="msb-seg-ico">🌐</span><span>Explore</span>
-          </button>
+          </span>
         </div>
         ${scope==='explore' ? `
           <div class="msb-sort">
-            <button class="msb-sort-chip ${sort==='new'?'active':''}" disabled>🆕 New</button>
-            <button class="msb-sort-chip ${sort==='trending'?'active':''}" disabled>🔥 Trending</button>
-            <button class="msb-sort-chip ${sort==='top'?'active':''}" disabled>⭐ Top</button>
+            <span class="msb-sort-chip is-skeleton-chip">🆕 New</span>
+            <span class="msb-sort-chip is-skeleton-chip">🔥 Trending</span>
+            <span class="msb-sort-chip is-skeleton-chip">⭐ Top</span>
           </div>
         ` : ''}
       </div>
@@ -3870,6 +3870,7 @@ const Social = (() => {
   let _musicTabScope = 'following';
   // Sort for Explore scope only: 'new' | 'trending' | 'top'.
   let _musicTabSort = 'new';
+  let _musicTabLoadToken = 0;
 
   function filterMusicByMood(mood) {
     _musicTabMood = mood || '';
@@ -3914,6 +3915,7 @@ const Social = (() => {
     const content = document.getElementById('social-content');
     if (!content) return;
     const loadUi = _beginTabLoadUi('music', 'Loading music tab', 'Preparing music skeleton');
+    const loadToken = ++_musicTabLoadToken;
     content.innerHTML = _musicSkeletonHtml(_musicTabScope, _musicTabSort);
     try {
       // Scope-driven fetch:
@@ -3935,6 +3937,7 @@ const Social = (() => {
           fetchRes = await api(`/api/social/feed?lite=1&limit=100${moodQuery}`).catch(() => null);
         }
         const feedData = fetchRes && fetchRes.ok ? await fetchRes.json() : { posts: [] };
+        if (_currentTab !== 'music' || loadToken !== _musicTabLoadToken) return;
         const seen = new Set();
         all = [];
         for (const p of (feedData.posts || [])) {
@@ -3944,6 +3947,7 @@ const Social = (() => {
         }
         _musicCache.set(cacheKey, { ts: Date.now(), posts: all });
       }
+      if (_currentTab !== 'music' || loadToken !== _musicTabLoadToken) return;
       const isMusic = (p) => {
         const mt = (p.media_type || '').toLowerCase();
         if (mt.startsWith('music/')) return true;
@@ -3962,6 +3966,7 @@ const Social = (() => {
         ? musicPostsRaw
         : musicPostsRaw.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
       _musicTabPosts = musicPosts;
+      if (_currentTab !== 'music' || loadToken !== _musicTabLoadToken) return;
       _updateTabLoadUi(loadUi, 72, 'Rendering music tab', `${musicPosts.length} tracks ready`);
 
       const moodOrder = ['chill','hype','focus','party','late-night','morning','sad','romance'];

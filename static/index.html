@@ -3672,6 +3672,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .explore-tab.active{background:#4caf50;border-color:#4caf50;color:#fff}
 .explore-refresh{background:none;border:none;font-size:18px;cursor:pointer;margin-left:auto;padding:4px;transition:transform .3s}
 .explore-refresh:hover{transform:rotate(180deg)}
+.explore-toolbar.is-skeleton{pointer-events:none}
+.explore-toolbar.is-skeleton .is-skeleton-chip{
+  cursor:default;transform:none;box-shadow:none;outline:none;
+  color:#888;background:none;border-color:#333
+}
 
 /* Member search */
 .member-search-input{
@@ -4747,6 +4752,11 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   border-color:#8a4aba;color:#fff;
   box-shadow:0 2px 6px rgba(160,80,216,.25), inset 0 1px 0 rgba(255,255,255,.06)
 }
+.music-scope-bar.is-skeleton{pointer-events:none}
+.music-scope-bar.is-skeleton .is-skeleton-chip{
+  cursor:default;transform:none;box-shadow:none;outline:none;
+  color:#a9a1bb;background:#121018;border-color:#26222e
+}
 .msb-mood-select-wrap{
   --mood-dot:#7e57c2;
   display:inline-flex;align-items:center;gap:8px;
@@ -5027,6 +5037,11 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 .rsb-sort-chip.active{background:#1a3a1a;color:#4caf50}
 .rsb-sort-chip:hover:not(.active){color:#ccc}
+.reels-scope-bar.is-skeleton{pointer-events:none}
+.reels-scope-bar.is-skeleton .is-skeleton-chip{
+  cursor:default;filter:none;box-shadow:none;outline:none;
+  color:#868686;background:#181818
+}
 
 /* Snap scroll container */
 .reels-snap{
