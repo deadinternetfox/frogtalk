@@ -3,6 +3,7 @@ import base64
 import logging
 import time
 import uuid
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Query, Request, UploadFile, File, Form, Header
 from fastapi.responses import JSONResponse, Response
@@ -323,6 +324,7 @@ async def get_post_media(
     post_id: int,
     token: Optional[str] = Query(None),
     x_session_token: Optional[str] = Header(None, alias="X-Session-Token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
 ):
     """Lazy-load endpoint for wall-post media. Used by feed/explore in
     `lite=1` mode so each post body only carries this URL instead of the
@@ -336,6 +338,10 @@ async def get_post_media(
     else only `public`. Either-side block hides the media entirely.
     """
     session_token = (x_session_token or token or "").strip()
+    if not session_token and authorization:
+        auth = authorization.strip()
+        if auth.lower().startswith("bearer "):
+            session_token = auth[7:].strip()
     current_user = db.get_user_by_token(session_token) if session_token else None
     if not current_user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
@@ -377,6 +383,8 @@ async def get_post_media(
                     headers={
                         "Cache-Control": "private, max-age=86400, immutable",
                         "Content-Length": str(len(raw)),
+                        "X-Content-Type-Options": "nosniff",
+                        "Vary": "X-Session-Token, Authorization",
                     },
                 )
         except Exception:
@@ -386,11 +394,27 @@ async def get_post_media(
     # Fallback: media_data isn't a base64 data URI.
     # Return an HTTP redirect so <img>/<video src="/api/social/posts/{id}/media">
     # still resolves to actual media bytes instead of JSON.
+    target = str(media_data or "").strip()
+    if not target:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+
+    # Prevent unsafe redirect schemes. Allow same-origin absolute paths,
+    # and external http(s) links for legacy media URLs.
+    if target.startswith("/"):
+        safe_target = target
+    else:
+        parsed = urlparse(target)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+        safe_target = target
+
     return Response(
         status_code=302,
         headers={
-            "Location": str(media_data),
+            "Location": safe_target,
             "Cache-Control": "private, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+            "Vary": "X-Session-Token, Authorization",
         },
     )
 

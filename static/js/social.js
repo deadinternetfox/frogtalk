@@ -1335,56 +1335,51 @@ const Social = (() => {
     submitStoryFromTap();
   }
 
+  function _renderSuggestedUsers(users) {
+    const _seenSug = new Set();
+    const suggested = (users || []).filter(u => {
+      const k = (u.nickname || '').toLowerCase();
+      if (!k || _seenSug.has(k)) return false;
+      _seenSug.add(k);
+      return true;
+    });
+    if (!suggested.length) return '';
+    return `<div class="social-suggest-bar">
+      <div class="social-suggest-title">Suggested for you</div>
+      <div class="social-suggest-scroll">
+        ${suggested.map(u => {
+          const mc = Number(u.mutual_count || 0);
+          const mutualsList = (u.mutual_sample || '').split(',').map(s => s.trim()).filter(Boolean);
+          const metaHtml = mc > 0
+            ? `<div class="social-suggest-meta mut" title="Followed by ${mutualsList.map(esc).join(', ')}">
+                <span class="mut-dot">●</span> ${mutualsList.length ? 'Followed by @' + esc(mutualsList[0]) : ''}${mc > 1 ? ` <span class="mut-more">+${mc - 1}</span>` : ''}
+               </div>`
+            : `<div class="social-suggest-meta">${u.follower_count || 0} followers</div>`;
+          const reasonTag = mc > 0
+            ? `<span class="social-suggest-tag mut">${mc} mutual${mc === 1 ? '' : 's'}</span>`
+            : (Number(u.follower_count || 0) > 5 ? `<span class="social-suggest-tag pop">🔥 Popular</span>` : `<span class="social-suggest-tag new">✨ New</span>`);
+          return `<div class="social-suggest-card" onclick="Social.openProfile('${esc(u.nickname)}')">
+            ${reasonTag}
+            <div class="social-suggest-avatar">${UI.avatarEl(u.avatar, u.nickname, 56)}</div>
+            <div class="social-suggest-nick">${esc(u.nickname)}</div>
+            ${metaHtml}
+            <button class="social-follow-sm" onclick="event.stopPropagation();Social.toggleFollow('${esc(u.nickname)}',this)">Follow</button>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
   // ── FEED ────────────────────────────────────────────────────────────────
   async function loadFeed() {
     _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
     content.innerHTML = '<div class="social-loading">Loading feed…</div>';
     try {
-      const [feedRes, sugRes, storiesHtml] = await Promise.all([
-        api('/api/social/feed?lite=1'), api('/api/social/suggested'), loadStoriesBar()
-      ]);
+      const feedRes = await api('/api/social/feed?lite=1&limit=24');
       const feedData = await feedRes.json();
-      const sugData = await sugRes.json();
       const posts = feedData.posts || [];
-      // Dedupe suggested users by nickname (case-insensitive) — server can return dupes
-      const _seenSug = new Set();
-      const suggested = (sugData.users || []).filter(u => {
-        const k = (u.nickname || '').toLowerCase();
-        if (!k || _seenSug.has(k)) return false;
-        _seenSug.add(k);
-        return true;
-      });
-
-      let html = storiesHtml;
-
-      // suggested users bar
-      if (suggested.length > 0) {
-        html += `<div class="social-suggest-bar">
-          <div class="social-suggest-title">Suggested for you</div>
-          <div class="social-suggest-scroll">
-            ${suggested.map(u => {
-              const mc = Number(u.mutual_count || 0);
-              const mutualsList = (u.mutual_sample || '').split(',').map(s => s.trim()).filter(Boolean);
-              const metaHtml = mc > 0
-                ? `<div class="social-suggest-meta mut" title="Followed by ${mutualsList.map(esc).join(', ')}">
-                    <span class="mut-dot">●</span> ${mutualsList.length ? 'Followed by @' + esc(mutualsList[0]) : ''}${mc > 1 ? ` <span class="mut-more">+${mc - 1}</span>` : ''}
-                   </div>`
-                : `<div class="social-suggest-meta">${u.follower_count || 0} followers</div>`;
-              const reasonTag = mc > 0
-                ? `<span class="social-suggest-tag mut">${mc} mutual${mc === 1 ? '' : 's'}</span>`
-                : (Number(u.follower_count || 0) > 5 ? `<span class="social-suggest-tag pop">🔥 Popular</span>` : `<span class="social-suggest-tag new">✨ New</span>`);
-              return `<div class="social-suggest-card" onclick="Social.openProfile('${esc(u.nickname)}')">
-                ${reasonTag}
-                <div class="social-suggest-avatar">${UI.avatarEl(u.avatar, u.nickname, 56)}</div>
-                <div class="social-suggest-nick">${esc(u.nickname)}</div>
-                ${metaHtml}
-                <button class="social-follow-sm" onclick="event.stopPropagation();Social.toggleFollow('${esc(u.nickname)}',this)">Follow</button>
-              </div>`;
-            }).join('')}
-          </div>
-        </div>`;
-      }
+      let html = `<div id="social-feed-stories">${renderStoriesBar()}</div><div id="social-feed-suggest"></div>`;
 
       if (posts.length === 0) {
         html += `<div class="social-empty">
@@ -1397,6 +1392,23 @@ const Social = (() => {
       }
 
       content.innerHTML = html;
+
+      // Secondary sections (stories + suggestions) load after first paint.
+      loadStoriesBar().then((storiesHtml) => {
+        if (_currentTab !== 'feed') return;
+        const el = document.getElementById('social-feed-stories');
+        if (el) el.innerHTML = storiesHtml;
+      }).catch(() => {});
+
+      api('/api/social/suggested')
+        .then(r => r.json().catch(() => ({ users: [] })))
+        .then((sugData) => {
+          if (_currentTab !== 'feed') return;
+          const el = document.getElementById('social-feed-suggest');
+          if (!el) return;
+          el.innerHTML = _renderSuggestedUsers(sugData.users || []);
+        })
+        .catch(() => {});
     } catch {
       content.innerHTML = '<div class="social-empty">Could not load feed</div>';
     }
@@ -1411,14 +1423,9 @@ const Social = (() => {
     const content = document.getElementById('social-content');
     content.innerHTML = '<div class="social-loading">Discovering…</div>';
     try {
-      const [postsRes, channelsRes] = await Promise.all([
-        api(`/api/social/explore?lite=1&sort=${_exploreSort}`),
-        api('/api/directory/new')
-      ]);
+      const postsRes = await api(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`);
       const postsData = await postsRes.json();
-      const channelsData = await channelsRes.json().catch(() => ({ channels: [] }));
       const posts = postsData.posts || [];
-      const newChannels = channelsData.channels || [];
 
       // Sort tabs + refresh
       let html = `<div class="explore-toolbar">
@@ -1428,30 +1435,9 @@ const Social = (() => {
           <button class="explore-tab ${_exploreSort==='top'?'active':''}" onclick="Social.loadExplore('top')">⭐ Top</button>
         </div>
         <button class="explore-refresh" onclick="Social.loadExplore()" title="Refresh">🔄</button>
-      </div>`;
+      </div><div id="explore-channels-host"></div>`;
 
-      // New channels section
-      if (newChannels.length > 0) {
-        const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
-        html += `<div class="explore-channels-section">
-          <div class="explore-section-head">
-            <span class="explore-section-title">📺 New Channels</span>
-            <button class="explore-section-link" onclick="showChannelDirectory()">View all →</button>
-          </div>
-          <div class="explore-channels-scroll">${newChannels.slice(0, 8).map(ch => {
-            const iconHtml = ch.icon && ch.icon.startsWith('data:image')
-              ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
-              : esc(ch.icon || '💬');
-            return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
-              <div class="explore-channel-icon">${iconHtml}</div>
-              <div class="explore-channel-name">${esc(ch.name)}</div>
-              <div class="explore-channel-meta">${catIcons[ch.category]||''} ${ch.member_count || 0} members</div>
-            </div>`;
-          }).join('')}</div>
-        </div>`;
-      }
-
-      if (posts.length === 0 && newChannels.length === 0) {
+      if (posts.length === 0) {
         html += `<div class="social-empty">
           <div style="font-size:48px;margin-bottom:12px">🌍</div>
           <div style="font-size:16px;font-weight:600">Nothing to explore yet</div>
@@ -1492,6 +1478,34 @@ const Social = (() => {
       }
 
       content.innerHTML = html;
+
+      // Channels are secondary to post discovery; load them after paint.
+      api('/api/directory/new')
+        .then(r => r.json().catch(() => ({ channels: [] })))
+        .then((channelsData) => {
+          if (_currentTab !== 'explore') return;
+          const newChannels = channelsData.channels || [];
+          const host = document.getElementById('explore-channels-host');
+          if (!host || newChannels.length === 0) return;
+          const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
+          host.innerHTML = `<div class="explore-channels-section">
+            <div class="explore-section-head">
+              <span class="explore-section-title">📺 New Channels</span>
+              <button class="explore-section-link" onclick="showChannelDirectory()">View all →</button>
+            </div>
+            <div class="explore-channels-scroll">${newChannels.slice(0, 8).map(ch => {
+              const iconHtml = ch.icon && ch.icon.startsWith('data:image')
+                ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+                : esc(ch.icon || '💬');
+              return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
+                <div class="explore-channel-icon">${iconHtml}</div>
+                <div class="explore-channel-name">${esc(ch.name)}</div>
+                <div class="explore-channel-meta">${catIcons[ch.category]||''} ${ch.member_count || 0} members</div>
+              </div>`;
+            }).join('')}</div>
+          </div>`;
+        })
+        .catch(() => {});
     } catch {
       content.innerHTML = '<div class="social-empty">Could not load explore</div>';
     }
