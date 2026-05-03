@@ -2214,32 +2214,52 @@ const Social = (() => {
       revealed = true;
       _reelsRevealStage(loadToken);
     };
+    const hasRealFirstFrame = () => {
+      if (!firstCard?.isConnected || !firstVideo?.isConnected) return false;
+      if (firstCard.classList.contains('is-ready')) return true;
+      if (firstCard.classList.contains('is-playing') && Number(firstVideo.currentTime || 0) > 0.03) return true;
+      if (Number(firstVideo.currentTime || 0) > 0.06) return true;
+      return false;
+    };
     const maybeReveal = () => {
-      if (firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing')) {
+      if (hasRealFirstFrame()) {
         reveal();
       }
     };
     firstVideo.addEventListener('loadeddata', maybeReveal, { once: true });
     firstVideo.addEventListener('canplay', maybeReveal, { once: true });
     firstVideo.addEventListener('playing', maybeReveal, { once: true });
-    if (firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing')) {
+    if (hasRealFirstFrame()) {
       reveal();
       return;
     }
-    // Prefer waiting for ready/play before reveal to avoid grey pre-frame flashes.
+    // Prefer waiting for an actual frame before reveal to avoid grey pre-frame flashes.
     setTimeout(() => {
-      if (firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing') || (firstVideo.readyState >= 2)) {
+      if (hasRealFirstFrame()) {
         reveal();
       }
     }, 2200);
-    // Hard cap with guard: reveal only when decoder has at least metadata.
+    // Rescue path: try to decode one tiny frame before giving up.
     setTimeout(() => {
-      if (!firstCard.classList.contains('is-ready') && !firstCard.classList.contains('is-playing')) {
-        firstCard.classList.add('no-poster');
+      if (revealed) return;
+      if (!hasRealFirstFrame()) {
+        try {
+          const p = firstVideo.play?.();
+          if (p && typeof p.then === 'function') {
+            p.then(() => {
+              setTimeout(() => {
+                try { firstVideo.pause(); } catch {}
+                maybeReveal();
+              }, 120);
+            }).catch(() => {});
+          }
+        } catch {}
       }
-      if (firstVideo.readyState >= 1 || firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing')) {
+      setTimeout(() => {
+        if (revealed) return;
+        if (!hasRealFirstFrame()) firstCard.classList.add('no-poster');
         reveal();
-      }
+      }, 1100);
     }, 4200);
   }
 
@@ -2391,6 +2411,7 @@ const Social = (() => {
         if (!r.width) return;
         const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
         try { video.currentTime = ratio * video.duration; } catch {}
+        if (prog) prog.style.width = `${Math.round(ratio * 10000) / 100}%`;
       };
       if (progWrap) {
         const snap = progWrap.closest('.reels-snap');
@@ -2458,9 +2479,16 @@ const Social = (() => {
           if (wasPlayingBeforeSeek && video.paused) {
             _reelsPlayVideo(card, video);
           }
+          wasPlayingBeforeSeek = false;
         };
         progWrap.addEventListener('pointerup', stopSeek);
-        progWrap.addEventListener('pointercancel', () => { seeking = false; unlockSnapScroll(); });
+        progWrap.addEventListener('pointercancel', () => {
+          seeking = false;
+          _reelsEndSeek();
+          unlockSnapScroll();
+          if (wasPlayingBeforeSeek && video.paused) _reelsPlayVideo(card, video);
+          wasPlayingBeforeSeek = false;
+        });
         // Fallback: keep scrubbing even if pointer leaves the progress bar.
         document.addEventListener('pointermove', (e) => {
           if (!seeking) return;
@@ -2481,7 +2509,7 @@ const Social = (() => {
         // Mobile fallback for browsers that don't deliver pointer events reliably.
         let touchSeeking = false;
         progWrap.addEventListener('touchstart', (e) => {
-          const t = e.changedTouches && e.changedTouches[0];
+          const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
           if (!t) return;
           e.preventDefault();
           e.stopPropagation();
@@ -2493,7 +2521,7 @@ const Social = (() => {
         }, { passive: false });
         progWrap.addEventListener('touchmove', (e) => {
           if (!touchSeeking) return;
-          const t = e.changedTouches && e.changedTouches[0];
+          const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
           if (!t) return;
           e.preventDefault();
           armLockFailsafe();
@@ -2502,7 +2530,7 @@ const Social = (() => {
         }, { passive: false });
         const stopTouchSeek = (e) => {
           if (!touchSeeking) return;
-          const t = e.changedTouches && e.changedTouches[0];
+          const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]);
           touchSeeking = false;
           if (t) seekFromClientX(t.clientX);
           _reelsEndSeek();
@@ -2510,13 +2538,20 @@ const Social = (() => {
           if (wasPlayingBeforeSeek && video.paused) {
             _reelsPlayVideo(card, video);
           }
+          wasPlayingBeforeSeek = false;
         };
         progWrap.addEventListener('touchend', stopTouchSeek, { passive: true });
-        progWrap.addEventListener('touchcancel', () => { touchSeeking = false; unlockSnapScroll(); }, { passive: true });
+        progWrap.addEventListener('touchcancel', () => {
+          touchSeeking = false;
+          _reelsEndSeek();
+          unlockSnapScroll();
+          if (wasPlayingBeforeSeek && video.paused) _reelsPlayVideo(card, video);
+          wasPlayingBeforeSeek = false;
+        }, { passive: true });
         // Fallback: continue touch scrub while finger moves off element.
         document.addEventListener('touchmove', (e) => {
           if (!touchSeeking) return;
-          const t = e.changedTouches && e.changedTouches[0];
+          const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
           if (!t) return;
           e.preventDefault();
           armLockFailsafe();
