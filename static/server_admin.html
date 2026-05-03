@@ -244,6 +244,68 @@ body::after {
   font-size: 11px;
   line-height: 1.35;
 }
+.retention-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  border: 1px solid #2d4a3a;
+  background: rgba(9, 20, 13, 0.78);
+  color: #b6d7c3;
+  font-size: 11px;
+  padding: 5px 10px;
+}
+.status-pill::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6a8f78;
+}
+.status-pill.state-dirty {
+  border-color: rgba(255, 179, 71, 0.55);
+  color: #ffd7a6;
+}
+.status-pill.state-dirty::before {
+  background: #ffb347;
+}
+.status-pill.state-saving {
+  border-color: rgba(118, 201, 255, 0.45);
+  color: #d7f0ff;
+}
+.status-pill.state-saving::before {
+  background: #76c9ff;
+  animation: pulseDot 0.9s ease-in-out infinite;
+}
+.status-pill.state-saved {
+  border-color: rgba(86, 209, 109, 0.6);
+  color: #d8ffe0;
+}
+.status-pill.state-saved::before {
+  background: #56d16d;
+}
+.status-pill.state-error {
+  border-color: rgba(255, 106, 106, 0.6);
+  color: #ffd3d3;
+}
+.status-pill.state-error::before {
+  background: #ff6a6a;
+}
+.retention-last-saved {
+  color: #8fb59f;
+  font-size: 11px;
+}
+.btn.is-loading {
+  opacity: 0.86;
+  pointer-events: none;
+}
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -616,6 +678,13 @@ input, select {
   .form-row { grid-template-columns: 1fr; }
   .field-grid { grid-template-columns: 1fr; }
   .btn-grid { grid-template-columns: 1fr; }
+  .retention-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .retention-actions .btn {
+    width: 100%;
+  }
   #node-msg {
     min-height: 84px !important;
   }
@@ -693,6 +762,11 @@ input, select {
     box-shadow: 0 0 0 18px rgba(86, 209, 109, 0);
     border-color: #284635;
   }
+}
+@keyframes pulseDot {
+  0% { transform: scale(0.78); opacity: 0.55; }
+  50% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.78); opacity: 0.55; }
 }
 </style>
 </head>
@@ -789,7 +863,11 @@ input, select {
                   <div class="field-hint">Set to <b>0</b> to disable deletion. When enabled, stale channels are removed after this threshold.</div>
                 </div>
               </div>
-              <button class="btn" id="save-channel-retention-btn" style="width:100%;margin-top:10px;">Save Channel Timing</button>
+              <div class="retention-actions">
+                <button class="btn" id="save-channel-retention-btn" type="button">Save Channel Timing</button>
+                <span id="channel-retention-status" class="status-pill">No local changes</span>
+                <span id="channel-retention-last-saved" class="retention-last-saved">Last saved: --</span>
+              </div>
               <div class="inline-note">These settings apply only to this node. Federation peers enforce their own local retention policy.</div>
             </div>
 

@@ -26,11 +26,42 @@
   const channelActiveDays = document.getElementById('channel-active-days');
   const channelAutoDeleteDays = document.getElementById('channel-auto-delete-days');
   const saveChannelRetentionBtn = document.getElementById('save-channel-retention-btn');
+  const channelRetentionStatus = document.getElementById('channel-retention-status');
+  const channelRetentionLastSaved = document.getElementById('channel-retention-last-saved');
   let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
   let easterEggLoaded = false;
   let easterEggDirty = false;
   let frogTapCount = 0;
   let frogTapTimer = null;
+  let retentionBaseline = '';
+
+  function retentionSig() {
+    const d = Math.max(1, Number(channelActiveDays?.value || 30) || 30);
+    const a = Math.max(0, Number(channelAutoDeleteDays?.value || 0) || 0);
+    return `${d}:${a}`;
+  }
+
+  function setRetentionStatus(state, text) {
+    if (!channelRetentionStatus) return;
+    channelRetentionStatus.className = `status-pill state-${state}`;
+    channelRetentionStatus.textContent = text || '';
+  }
+
+  function setRetentionSavingState(isSaving) {
+    if (!saveChannelRetentionBtn) return;
+    saveChannelRetentionBtn.disabled = !!isSaving;
+    saveChannelRetentionBtn.classList.toggle('is-loading', !!isSaving);
+    saveChannelRetentionBtn.textContent = isSaving ? 'Saving Channel Timing…' : 'Save Channel Timing';
+  }
+
+  function refreshRetentionDirtyUi() {
+    const dirty = retentionSig() !== retentionBaseline;
+    if (dirty) {
+      setRetentionStatus('dirty', 'Unsaved local changes');
+    } else if (!channelRetentionStatus?.classList.contains('state-saved')) {
+      setRetentionStatus('saved', 'No local changes');
+    }
+  }
 
   function escHtml(value) {
     return String(value || '')
@@ -368,20 +399,37 @@
     const retention = payload || {};
     if (channelActiveDays) channelActiveDays.value = String(retention.directory_active_days ?? 30);
     if (channelAutoDeleteDays) channelAutoDeleteDays.value = String(retention.auto_delete_days ?? 0);
+    retentionBaseline = retentionSig();
+    setRetentionStatus('saved', 'Loaded from this node');
   }
 
   async function saveChannelRetention() {
     const directoryActiveDays = Math.max(1, Number(channelActiveDays?.value || 30) || 30);
     const autoDeleteDays = Math.max(0, Number(channelAutoDeleteDays?.value || 0) || 0);
-    const payload = await api('/api/server-admin/channel-retention', {
-      method: 'PUT',
-      body: JSON.stringify({
-        directory_active_days: directoryActiveDays,
-        auto_delete_days: autoDeleteDays,
-      }),
-    });
-    syncChannelRetention(payload.channel_retention || {});
-    setActionMessage('Channel timing saved on this node. Federation peers keep their own local timing.');
+    setRetentionSavingState(true);
+    setRetentionStatus('saving', 'Saving to this node…');
+    try {
+      const payload = await api('/api/server-admin/channel-retention', {
+        method: 'PUT',
+        body: JSON.stringify({
+          directory_active_days: directoryActiveDays,
+          auto_delete_days: autoDeleteDays,
+        }),
+      });
+      syncChannelRetention(payload.channel_retention || {});
+      retentionBaseline = retentionSig();
+      setRetentionStatus('saved', 'Saved on this node');
+      if (channelRetentionLastSaved) {
+        channelRetentionLastSaved.textContent = `Last saved: ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+      }
+      setActionMessage('Channel timing saved on this node. Federation peers keep their own local timing.');
+    } catch (e) {
+      setRetentionStatus('error', 'Save failed on this node');
+      setActionMessage(e.message, true);
+      throw e;
+    } finally {
+      setRetentionSavingState(false);
+    }
   }
 
   function renderStats(payload, pingMs) {
@@ -692,8 +740,10 @@
   document.getElementById('refresh-btn').addEventListener('click', () => refreshDashboard().catch((e) => setActionMessage(e.message, true)));
   document.getElementById('sync-dir-btn').addEventListener('click', () => runAction('sync'));
   saveChannelRetentionBtn?.addEventListener('click', () => {
-    saveChannelRetention().catch((e) => setActionMessage(e.message, true));
+    saveChannelRetention().catch(() => {});
   });
+  channelActiveDays?.addEventListener('input', refreshRetentionDirtyUi);
+  channelAutoDeleteDays?.addEventListener('input', refreshRetentionDirtyUi);
   frogTrigger?.addEventListener('click', handleFrogTap);
   easterEditor?.addEventListener('input', () => {
     easterEggDirty = true;
