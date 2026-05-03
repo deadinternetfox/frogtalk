@@ -1970,15 +1970,19 @@ const Social = (() => {
           <div class="reels-snap" id="reels-snap">${cards}</div>
         </div>`;
       const snap = document.getElementById('reels-snap');
-      if (snap) _initReelCards(snap);
+      if (snap) {
+        _initReelCards(snap);
+        _armReelsStageReveal(snap, loadToken);
+      }
 
-      // Wait briefly for first preview frame so we avoid the grey pre-play flash.
+      // Wait for first reel preview/playability before revealing cards to avoid grey pre-frame flashes.
       if (snap) await _waitForFirstReelPreview(snap);
       if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
-      const stage = document.getElementById('reels-stage');
-      if (stage) stage.classList.remove('is-loading');
       // Auto-play first visible reel
       _reelsAutoplayVisible();
+      if (snap) await _waitForFirstReelPlayable(snap);
+      if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
+      _reelsRevealStage(loadToken);
 
       // IntersectionObserver: pause/play as cards scroll into/out of view
       if (snap && window.IntersectionObserver) {
@@ -2117,6 +2121,57 @@ const Social = (() => {
     });
   }
 
+  function _waitForFirstReelPlayable(snap) {
+    return new Promise((resolve) => {
+      const firstCard = snap?.querySelector('.reel-card');
+      const firstVideo = firstCard?.querySelector?.('video');
+      if (!firstCard || !firstVideo) { resolve(); return; }
+      const readyNow = firstCard.classList.contains('is-playing') || firstVideo.readyState >= 2;
+      if (readyNow) { resolve(); return; }
+      const start = Date.now();
+      const tick = () => {
+        if (!firstCard.isConnected) { resolve(); return; }
+        if (firstCard.classList.contains('is-playing') || firstVideo.readyState >= 2) {
+          resolve();
+          return;
+        }
+        if (Date.now() - start > 2600) { resolve(); return; }
+        setTimeout(tick, 40);
+      };
+      tick();
+    });
+  }
+
+  function _reelsRevealStage(loadToken) {
+    if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
+    const stage = document.getElementById('reels-stage');
+    if (stage) stage.classList.remove('is-loading');
+  }
+
+  function _armReelsStageReveal(snap, loadToken) {
+    const firstCard = snap?.querySelector('.reel-card');
+    const firstVideo = firstCard?.querySelector?.('video');
+    if (!firstCard || !firstVideo) {
+      _reelsRevealStage(loadToken);
+      return;
+    }
+    let revealed = false;
+    const reveal = () => {
+      if (revealed) return;
+      revealed = true;
+      _reelsRevealStage(loadToken);
+    };
+    firstVideo.addEventListener('loadeddata', reveal, { once: true });
+    firstVideo.addEventListener('canplay', reveal, { once: true });
+    firstVideo.addEventListener('playing', reveal, { once: true });
+    if (firstVideo.readyState >= 2 || firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing')) {
+      reveal();
+      return;
+    }
+    // Keep loading from getting stuck over ready content.
+    setTimeout(reveal, 1200);
+  }
+
   function _reelsAdvanceFrom(card) {
     const snap = card?.closest?.('.reels-snap') || document.getElementById('reels-snap');
     if (!snap) return;
@@ -2207,10 +2262,10 @@ const Social = (() => {
       try { video.load(); } catch {}
       setTimeout(() => {
         if (!posterDrawn) {
-          card.classList.add('no-poster');
+          if ((video.readyState || 0) >= 2) card.classList.add('no-poster');
           if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
         }
-      }, 1500);
+      }, 2600);
 
       video.addEventListener('timeupdate', () => {
         if (!prog || !video.duration) return;

@@ -4972,13 +4972,16 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .reels-snap{
   display:flex;flex-direction:column;
   overflow-y:scroll;scroll-snap-type:y mandatory;
-  height:calc(100vh - 108px);        /* full-bleed below topbar+scopebar */
+  height:calc(100dvh - 108px - var(--safe-bottom));
+  max-height:calc(100dvh - 108px - var(--safe-bottom));
   scrollbar-width:none;-ms-overflow-style:none
 }
 .reels-snap::-webkit-scrollbar{display:none}
 .reels-stage{
   position:relative;
-  min-height:calc(100vh - 108px);
+  height:calc(100dvh - 108px - var(--safe-bottom));
+  min-height:calc(100dvh - 108px - var(--safe-bottom));
+  overflow:hidden;
 }
 .reels-stage-loading{
   position:absolute;
@@ -4987,10 +4990,11 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   display:flex;
   align-items:center;
   justify-content:center;
-  background:#060606;
+  background:radial-gradient(circle at 50% 30%, #0b1a12 0%, #060606 65%);
 }
 .reels-stage.is-loading .reels-snap{
   opacity:0;
+  visibility:hidden;
   pointer-events:none;
 }
 .reels-stage:not(.is-loading) .reels-stage-loading{display:none}
@@ -4999,7 +5003,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .reel-card{
   position:relative;flex:0 0 100%;scroll-snap-align:start;
   display:flex;align-items:center;justify-content:center;
-  background:#000;min-height:calc(100vh - 108px);overflow:hidden
+  background:#000;min-height:calc(100dvh - 108px - var(--safe-bottom));overflow:hidden
 }
 .reel-video-poster{
   position:absolute;inset:0;background:#070707 center/cover no-repeat;
@@ -5007,7 +5011,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   transition:opacity .2s ease;pointer-events:none
 }
 .reel-card video{
-  width:100%;height:100%;object-fit:contain;max-height:calc(100vh - 108px);
+  width:100%;height:100%;object-fit:contain;max-height:calc(100dvh - 108px - var(--safe-bottom));
   z-index:1;background:transparent;outline:none;
   transition:opacity .18s ease
 }
@@ -5055,7 +5059,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .reel-card.no-poster .reel-play-toggle{opacity:1}
 .reel-card.is-playing .reel-play-toggle{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.92)}
 .reel-progress{
-  position:absolute;left:10px;right:10px;bottom:8px;height:4px;border-radius:999px;
+  position:absolute;left:10px;right:10px;bottom:calc(8px + var(--safe-bottom));height:4px;border-radius:999px;
   background:rgba(255,255,255,.2);z-index:3;overflow:visible;cursor:pointer;touch-action:none
 }
 .reel-card.is-playing .reel-progress{
