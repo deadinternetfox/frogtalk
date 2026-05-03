@@ -4182,10 +4182,10 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 
 #social-load-banner{
-  position:absolute;
-  left:16px;
-  right:16px;
-  bottom:calc(66px + var(--safe-bottom));
+  position:fixed;
+  left:50%;
+  width:min(720px, calc(100vw - 28px - var(--safe-left) - var(--safe-right)));
+  bottom:calc(12px + var(--safe-bottom));
   z-index:11;
   pointer-events:none;
   border:1px solid rgba(95,171,121,.28);
@@ -4194,12 +4194,12 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   padding:9px 11px 10px;
   box-shadow:0 10px 24px rgba(0,0,0,.34),0 0 0 1px rgba(255,255,255,.03) inset;
   opacity:0;
-  transform:translateY(8px);
+  transform:translate(-50%,8px);
   transition:opacity .2s ease,transform .2s ease;
   backdrop-filter:blur(4px);
 }
-#social-load-banner.show{opacity:1;transform:translateY(0)}
-#social-load-banner.done{opacity:0;transform:translateY(6px)}
+#social-load-banner.show{opacity:1;transform:translate(-50%,0)}
+#social-load-banner.done{opacity:0;transform:translate(-50%,6px)}
 #social-load-banner .slb-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
 #social-load-banner .slb-title{font-size:12px;font-weight:600;color:#d5f3dc}
 #social-load-banner .slb-pct{font-size:12px;font-weight:700;color:#9be2ad;min-width:38px;text-align:right}
