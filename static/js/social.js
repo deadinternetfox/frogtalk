@@ -286,6 +286,12 @@ const Social = (() => {
       overlay.appendChild(el);
     }
     const pct = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+    const nextLabel = label || 'Loading';
+    const nextDetail = detail || 'Preparing content…';
+    const prevPct = Number(el.dataset.pct || -1);
+    const prevLabel = el.dataset.label || '';
+    const prevDetail = el.dataset.detail || '';
+    const changed = pct !== prevPct || nextLabel !== prevLabel || nextDetail !== prevDetail;
     el.dataset.tab = String(tab || '');
     el.classList.remove('done');
     el.classList.add('show');
@@ -293,10 +299,24 @@ const Social = (() => {
     const pctEl = el.querySelector('.slb-pct');
     const detailEl = el.querySelector('.slb-detail');
     const fillEl = el.querySelector('.slb-fill');
-    if (titleEl) titleEl.textContent = label || 'Loading';
+    if (titleEl) titleEl.textContent = nextLabel;
     if (pctEl) pctEl.textContent = `${pct}%`;
-    if (detailEl) detailEl.textContent = detail || 'Preparing content…';
+    if (detailEl) detailEl.textContent = nextDetail;
     if (fillEl) fillEl.style.width = `${pct}%`;
+    el.dataset.pct = String(pct);
+    el.dataset.label = nextLabel;
+    el.dataset.detail = nextDetail;
+
+    if (changed) {
+      el.classList.remove('step');
+      if (el._stepTimer) clearTimeout(el._stepTimer);
+      requestAnimationFrame(() => {
+        el.classList.add('step');
+        el._stepTimer = setTimeout(() => {
+          el.classList.remove('step');
+        }, 280);
+      });
+    }
   }
 
   function _beginTabLoadUi(tab, label, detail) {
@@ -2258,6 +2278,21 @@ const Social = (() => {
     const loadUi = _beginTabLoadUi('reels', 'Loading reels', 'Preparing reels shell');
     const loadToken = ++_reelsLoadToken;
     _teardownReels();
+    const smoothStepTimers = [];
+
+    const queueLoadStep = (delayMs, pct, label, detail) => {
+      const t = setTimeout(() => {
+        if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
+        _updateTabLoadUi(loadUi, pct, label, detail);
+      }, Math.max(0, Number(delayMs) || 0));
+      smoothStepTimers.push(t);
+    };
+
+    const clearQueuedSteps = () => {
+      while (smoothStepTimers.length) {
+        clearTimeout(smoothStepTimers.pop());
+      }
+    };
 
     const scope = _reelsScope;
     const sort  = _reelsSort;
@@ -2282,25 +2317,34 @@ const Social = (() => {
         <div class="reels-stage" id="reels-stage">
           <div class="reels-snap" id="reels-snap">${cachedCards}</div>
         </div>`;
+      _updateTabLoadUi(loadUi, 22, 'Loading reels shell', 'Reusing last reels view');
       _updateTabLoadUi(loadUi, 34, 'Loading reels', `Using ${cachedPosts.length} cached reels`);
       const snap = document.getElementById('reels-snap');
       if (snap) {
         _initReelCards(snap);
         _reelsAutoplayVisible();
+        _updateTabLoadUi(loadUi, 42, 'Preparing cached reels', 'Resuming reel playback');
       }
     } else {
       content.innerHTML = _reelsSkeletonHtml(scope, sort);
+      _updateTabLoadUi(loadUi, 18, 'Loading reels shell', 'Building reels layout');
     }
 
     try {
-      _updateTabLoadUi(loadUi, 52, 'Loading reels list', `Scope: ${scope}, sort: ${sort}`);
+      _updateTabLoadUi(loadUi, 44, 'Loading reels list', `Scope: ${scope}, sort: ${sort}`);
+      queueLoadStep(180, 49, 'Loading reels list', 'Connecting to reels service');
+      queueLoadStep(520, 55, 'Loading reels list', 'Downloading reel metadata');
+      queueLoadStep(980, 61, 'Loading reels list', 'Optimizing reel order');
       const res = await api(`/api/social/reels?scope=${scope}&sort=${sort}&limit=20`).catch(() => null);
+      clearQueuedSteps();
       if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
+      _updateTabLoadUi(loadUi, 68, 'Processing reels', 'Parsing response payload');
       const data = res && res.ok ? await res.json() : { posts: [] };
       const posts = data.posts || [];
       _reelsCache.set(cacheKey, { ts: Date.now(), posts });
 
       if (posts.length === 0) {
+        _updateTabLoadUi(loadUi, 78, 'Rendering reels', 'No reels found for this filter');
         content.innerHTML = scopeBar + `
           <div class="reels-empty">
             <div class="reels-empty-icon">🎞</div>
@@ -2309,6 +2353,7 @@ const Social = (() => {
               ? 'Reels posted, reposted, or liked by your friends will appear here.'
               : 'When people share videos they\'ll show up here. Be the first!'}</div>
           </div>`;
+        _updateTabLoadUi(loadUi, 92, 'Reels ready', 'Try another scope or sort to discover videos');
         return;
       }
 
@@ -2319,14 +2364,16 @@ const Social = (() => {
           <div class="social-loading reels-stage-loading">Preparing reel playback…</div>
           <div class="reels-snap" id="reels-snap">${cards}</div>
         </div>`;
+      _updateTabLoadUi(loadUi, 82, 'Preparing reels stage', 'Mounting reel cards');
       _animateSocialSwap(content);
       const snap = document.getElementById('reels-snap');
       if (snap) {
         _initReelCards(snap);
+        _updateTabLoadUi(loadUi, 88, 'Preparing reels stage', 'Binding playback controls');
         _armReelsStageReveal(snap, loadToken);
         // Start playback immediately so users transition from loading to motion fast.
         _reelsAutoplayVisible();
-        _updateTabLoadUi(loadUi, 90, 'Loading reel media', 'Priming first playable video');
+        _updateTabLoadUi(loadUi, 93, 'Loading reel media', 'Priming first playable video');
       }
 
       // IntersectionObserver: pause/play as cards scroll into/out of view
@@ -2358,10 +2405,13 @@ const Social = (() => {
         };
         snap._reelsOnScroll = onScroll;
         snap.addEventListener('scroll', onScroll, { passive: true });
+        _updateTabLoadUi(loadUi, 97, 'Finalizing reels', 'Snap controls ready');
       }
     } catch (e) {
+      clearQueuedSteps();
       content.innerHTML = scopeBar + `<div class="reels-empty"><div class="reels-empty-icon">⚠️</div><div class="reels-empty-title">Could not load reels</div></div>`;
     } finally {
+      clearQueuedSteps();
       _finishTabLoadUi(loadUi);
     }
   }

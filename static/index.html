@@ -4173,7 +4173,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   to{opacity:1;transform:translateY(0)}
 }
 @media (prefers-reduced-motion: reduce){
-  .social-loading::after,.social-loading.social-loading-fun,.social-content-enter,#social-load-banner .slb-fill{animation:none;transition:none}
+  .social-loading::after,.social-loading.social-loading-fun,.social-content-enter,#social-load-banner .slb-fill,#social-load-banner.step .slb-head,#social-load-banner.step .slb-detail,#social-load-banner.step .slb-track{animation:none;transition:none}
 }
 
 #social-load-banner{
@@ -4200,7 +4200,21 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 #social-load-banner .slb-pct{font-size:12px;font-weight:700;color:#9be2ad;min-width:38px;text-align:right}
 #social-load-banner .slb-detail{margin-top:3px;color:#90afa0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #social-load-banner .slb-track{margin-top:7px;height:5px;border-radius:999px;background:rgba(130,190,150,.18);overflow:hidden}
-#social-load-banner .slb-fill{display:block;height:100%;width:0;background:linear-gradient(90deg,#4caf50,#7ecb8e 55%,#94df9e);transition:width .2s ease}
+#social-load-banner .slb-fill{display:block;height:100%;width:0;background:linear-gradient(90deg,#4caf50,#7ecb8e 55%,#94df9e);transition:width .26s cubic-bezier(.22,.84,.31,1),box-shadow .24s ease;box-shadow:0 0 0 rgba(124,213,147,0)}
+#social-load-banner.step .slb-head{animation:slbStepUp .28s ease}
+#social-load-banner.step .slb-detail{animation:slbStepUp .28s ease}
+#social-load-banner.step .slb-track{animation:slbTrackGlow .28s ease}
+#social-load-banner.step .slb-fill{box-shadow:0 0 12px rgba(124,213,147,.34)}
+@keyframes slbStepUp{
+  0%{transform:translateY(2px);opacity:.82}
+  60%{transform:translateY(-2px);opacity:1}
+  100%{transform:translateY(0);opacity:1}
+}
+@keyframes slbTrackGlow{
+  0%{filter:brightness(1)}
+  60%{filter:brightness(1.14)}
+  100%{filter:brightness(1)}
+}
 .social-empty{text-align:center;padding:60px 20px;color:#e0e0e0}
 
 /* Stories bar */
