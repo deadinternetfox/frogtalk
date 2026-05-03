@@ -132,7 +132,7 @@ if [[ -n "$SITE_URL" ]]; then
 
   if [[ -n "${FROGTALK_INDEXNOW_KEY:-}" ]]; then
     INDEXNOW_PAYLOAD=$(cat <<JSON
-{"host":"$(echo "$SITE_URL" | sed -E 's#^https?://##')","key":"${FROGTALK_INDEXNOW_KEY}","keyLocation":"${SITE_URL}/${FROGTALK_INDEXNOW_KEY}.txt","urlList":["${SITE_URL}/","${SITE_URL}/app","${SITE_URL}/docs/api","${SITE_URL}/docs/node","${SITE_URL}/sitemap.xml","${SITE_URL}/llms.txt"]}
+{"host":"$(echo "$SITE_URL" | sed -E 's#^https?://##')","key":"${FROGTALK_INDEXNOW_KEY}","keyLocation":"${SITE_URL}/${FROGTALK_INDEXNOW_KEY}.txt","urlList":["${SITE_URL}/","${SITE_URL}/ios","${SITE_URL}/download/android","${SITE_URL}/docs/api","${SITE_URL}/docs/node","${SITE_URL}/sitemap.xml","${SITE_URL}/sitemap-static.xml","${SITE_URL}/sitemap-users.xml","${SITE_URL}/sitemap-rooms.xml","${SITE_URL}/llms.txt"]}
 JSON
 )
     HTTP_CODE=$(curl -sS --max-time 15 -o /tmp/indexnow.out -w '%{http_code}' \

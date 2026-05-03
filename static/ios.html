@@ -3,32 +3,34 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>FrogTalk for iOS - Coming Soon</title>
-<meta name="description" content="FrogTalk for iOS is coming soon. Get launch updates, see feature highlights, and share the upcoming App Store release.">
-<meta name="keywords" content="FrogTalk iOS, encrypted chat iPhone, secure messaging iOS, FrogTalk App Store">
+<title>FrogTalk for iPhone - Official iOS Launch Page</title>
+<meta name="description" content="FrogTalk for iPhone is coming soon. Follow the official iOS release page for TestFlight or App Store availability, privacy-first messaging features, and secure launch updates.">
+<meta name="keywords" content="FrogTalk iPhone, FrogTalk iOS, encrypted chat iPhone, secure messaging iOS, private messaging iPhone, FrogTalk App Store">
 <meta name="author" content="FrogTalk">
-<meta name="theme-color" content="#0f1720">
-<meta name="robots" content="index, follow, max-image-preview:large">
+<meta name="theme-color" content="#4caf50">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="format-detection" content="telephone=no">
 <link rel="canonical" href="https://frogtalk.xyz/ios">
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="FrogTalk">
 <meta property="og:locale" content="en_US">
 <meta property="og:url" content="https://frogtalk.xyz/ios">
-<meta property="og:title" content="FrogTalk for iOS - Coming Soon">
-<meta property="og:description" content="Private messaging, calls, and channels on iPhone. FrogTalk for iOS is in progress and launching soon.">
+<meta property="og:title" content="FrogTalk for iPhone - Official iOS Launch Page">
+<meta property="og:description" content="Private messaging, channels, and calls on iPhone. Follow the official FrogTalk iOS page for TestFlight and App Store release updates.">
 <meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta property="og:image:secure_url" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="FrogTalk iOS coming soon preview">
+<meta property="og:image:alt" content="FrogTalk iPhone launch page preview">
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="FrogTalk for iOS - Coming Soon">
-<meta name="twitter:description" content="Encrypted chat, channels, and calls on iPhone. Launch updates available.">
+<meta name="twitter:site" content="@frogtalk">
+<meta name="twitter:title" content="FrogTalk for iPhone - Official iOS Launch Page">
+<meta name="twitter:description" content="FrogTalk iPhone release updates, privacy-first messaging features, and the official future TestFlight or App Store link.">
 <meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
-<meta name="twitter:image:alt" content="FrogTalk iOS coming soon preview">
+<meta name="twitter:image:alt" content="FrogTalk iPhone launch page preview">
 
 <link rel="icon" href="/static/favicon.ico" sizes="any">
 <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
@@ -37,239 +39,438 @@
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "FrogTalk for iOS",
-  "applicationCategory": "CommunicationApplication",
-  "operatingSystem": "iOS",
-  "url": "https://frogtalk.xyz/ios",
-  "downloadUrl": "https://frogtalk.xyz/ios",
-  "publisher": {
-    "@type": "Organization",
-    "name": "FrogTalk"
-  },
-  "offers": {
-    "@type": "Offer",
-    "price": "0",
-    "priceCurrency": "USD",
-    "availability": "https://schema.org/PreOrder"
-  },
-  "description": "FrogTalk for iOS is an upcoming privacy-first messaging app with encrypted DMs, channels, and calling."
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "name": "FrogTalk for iPhone",
+      "url": "https://frogtalk.xyz/ios",
+      "description": "Official FrogTalk iPhone release page for upcoming TestFlight and App Store availability.",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "FrogTalk",
+        "url": "https://frogtalk.xyz/"
+      },
+      "primaryImageOfPage": "https://frogtalk.xyz/static/icons/og-image.png"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "FrogTalk for iOS",
+      "applicationCategory": "CommunicationApplication",
+      "operatingSystem": "iOS",
+      "url": "https://frogtalk.xyz/ios",
+      "downloadUrl": "https://frogtalk.xyz/ios",
+      "publisher": {
+        "@type": "Organization",
+        "name": "FrogTalk"
+      },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD",
+        "availability": "https://schema.org/PreOrder"
+      },
+      "description": "FrogTalk for iOS is an upcoming privacy-first messaging app with encrypted DMs, channels, calling, and a future App Store or TestFlight release."
+    }
+  ]
 }
 </script>
 
 <style>
 :root {
-  --bg: #070b12;
-  --bg-soft: #0d1421;
-  --card: #101a29;
-  --card-2: #142238;
-  --line: rgba(141, 176, 221, 0.22);
-  --text: #eef4ff;
-  --muted: #9cb0cf;
-  --accent: #62d9a2;
-  --accent-2: #6ab7ff;
-  --accent-3: #9f89ff;
-  --danger: #ff8e8e;
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --bg3: #21262d;
+  --border: #30363d;
+  --green: #4ade80;
+  --green-dim: #22c55e;
+  --green-dark: #16a34a;
+  --text: #e6edf3;
+  --text-muted: #7d8590;
+  --white: #ffffff;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; min-height: 100%; }
+html { scroll-behavior: smooth; }
 body {
-  font-family: "Inter", "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(900px 420px at 15% -10%, rgba(106, 183, 255, 0.2), transparent 58%),
-    radial-gradient(760px 360px at 90% -8%, rgba(98, 217, 162, 0.16), transparent 62%),
-    radial-gradient(820px 460px at 50% 120%, rgba(159, 137, 255, 0.14), transparent 65%),
-    linear-gradient(180deg, var(--bg-soft), var(--bg));
-  line-height: 1.55;
+    radial-gradient(ellipse 950px 640px at 50% 15%, rgba(74,222,128,.12) 0%, transparent 68%),
+    radial-gradient(ellipse 520px 420px at 10% 80%, rgba(74,222,128,.08) 0%, transparent 60%),
+    linear-gradient(180deg, #0d1117 0%, #0b0f14 100%);
+  line-height: 1.6;
+  overflow-x: hidden;
 }
 .shell {
-  max-width: 980px;
+  width: min(1120px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 26px 18px 40px;
+  padding: 28px 0 56px;
 }
 .top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   margin-bottom: 24px;
 }
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   color: var(--text);
   text-decoration: none;
   font-weight: 700;
+  letter-spacing: .01em;
 }
 .brand img {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.13);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.08);
 }
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(98, 217, 162, 0.42);
-  color: #d8ffef;
-  background: rgba(18, 43, 35, 0.46);
+  padding: 7px 12px;
+  border: 1px solid rgba(74,222,128,.28);
+  background: rgba(24, 50, 34, .6);
   border-radius: 999px;
-  padding: 6px 11px;
+  color: #a7f3c5;
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
 }
 .badge::before {
   content: "";
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 0 rgba(98, 217, 162, 0.6);
-  animation: pulse 1.2s ease-in-out infinite;
+  background: var(--green);
+  box-shadow: 0 0 0 0 rgba(74,222,128,.5);
+  animation: pulse 1.4s ease-in-out infinite;
 }
 .hero {
-  border: 1px solid var(--line);
-  border-radius: 22px;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, .8fr);
+  gap: 22px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 28px;
+  background: linear-gradient(180deg, rgba(22,27,34,.92), rgba(13,17,23,.96));
+  box-shadow: 0 20px 50px rgba(0,0,0,.32);
   overflow: hidden;
-  background: linear-gradient(160deg, rgba(17, 29, 46, 0.92), rgba(12, 20, 34, 0.9));
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255,255,255,0.03);
 }
-.hero-inner {
-  padding: 30px 24px 24px;
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 78% 20%, rgba(74,222,128,.15), transparent 28%),
+    radial-gradient(circle at 22% 85%, rgba(74,222,128,.10), transparent 24%);
+  pointer-events: none;
+}
+.hero-copy,
+.hero-visual { position: relative; z-index: 1; }
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(74,222,128,.1);
+  border: 1px solid rgba(74,222,128,.22);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }
 h1 {
-  margin: 0;
-  font-size: clamp(30px, 5vw, 52px);
-  line-height: 1.04;
-  letter-spacing: -0.02em;
+  margin: 16px 0 0;
+  font-size: clamp(2.3rem, 5vw, 4.4rem);
+  line-height: 1.02;
+  letter-spacing: -.03em;
+}
+.title-accent {
+  display: block;
+  background: linear-gradient(135deg, var(--white) 30%, var(--green) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 .subtitle {
-  margin-top: 12px;
-  color: var(--muted);
-  max-width: 740px;
-  font-size: clamp(15px, 1.9vw, 18px);
+  margin: 16px 0 0;
+  color: var(--text-muted);
+  max-width: 640px;
+  font-size: clamp(1rem, 1.8vw, 1.14rem);
 }
-.kpis {
-  margin-top: 20px;
+.hero-points {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
-.kpi {
-  border: 1px solid rgba(145, 174, 211, 0.2);
-  background: rgba(12, 21, 35, 0.6);
-  border-radius: 14px;
-  padding: 12px;
+.hero-points li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #c2cad3;
 }
-.kpi .num {
-  font-weight: 700;
-  font-size: 20px;
-}
-.kpi .lbl {
-  color: var(--muted);
-  font-size: 12px;
+.hero-points li::before {
+  content: "";
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  margin-top: 8px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--green), var(--green-dark));
+  box-shadow: 0 0 0 5px rgba(74,222,128,.08);
 }
 .actions {
-  margin-top: 20px;
+  margin-top: 22px;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
 }
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-height: 48px;
+  padding: 0 16px;
   border-radius: 12px;
   border: 1px solid transparent;
-  padding: 11px 14px;
+  font-weight: 700;
   text-decoration: none;
-  font-weight: 600;
-  color: var(--text);
-  transition: transform .16s ease, border-color .2s ease, background .2s ease;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, background .18s ease;
 }
-.btn:hover { transform: translateY(-1px); }
+.btn:hover { transform: translateY(-2px); }
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), #8af7c2);
-  color: #042111;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(34,197,94,.25);
+}
+.btn-primary:hover {
+  box-shadow: 0 14px 28px rgba(34,197,94,.35);
 }
 .btn-ghost {
-  border-color: rgba(150, 182, 220, 0.34);
-  background: rgba(14, 24, 39, 0.74);
+  color: var(--text);
+  border-color: var(--border);
+  background: rgba(255,255,255,.02);
 }
 .btn-ghost:hover {
-  border-color: rgba(106, 183, 255, 0.55);
-  background: rgba(20, 33, 52, 0.85);
+  border-color: rgba(74,222,128,.5);
+  color: var(--green);
 }
-.grid {
-  margin-top: 16px;
+.kpis {
+  margin-top: 22px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
-.card {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(16, 27, 43, 0.9), rgba(11, 19, 31, 0.84));
+.kpi {
   padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(74,222,128,.12);
+  background: linear-gradient(180deg, rgba(22,39,31,.9), rgba(16,25,22,.92));
 }
-.card h2 {
-  margin: 0 0 6px;
-  font-size: 18px;
+.kpi .num {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #d7fbe2;
+}
+.kpi .lbl {
+  margin-top: 4px;
+  color: #93a09b;
+  font-size: 13px;
+}
+.phone-card {
+  justify-self: end;
+  width: min(100%, 360px);
+  padding: 18px;
+  border-radius: 28px;
+  border: 1px solid rgba(74,222,128,.18);
+  background: linear-gradient(180deg, rgba(10,14,18,.96), rgba(21,28,25,.96));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 16px 40px rgba(0,0,0,.38);
+}
+.phone-notch {
+  width: 34%;
+  height: 20px;
+  margin: 0 auto 18px;
+  border-radius: 0 0 18px 18px;
+  background: #050607;
+}
+.phone-screen {
+  padding: 18px;
+  border-radius: 22px;
+  min-height: 430px;
+  background:
+    radial-gradient(circle at 70% 15%, rgba(74,222,128,.18), transparent 24%),
+    linear-gradient(180deg, #132019 0%, #10161c 45%, #0f1319 100%);
+  border: 1px solid rgba(255,255,255,.04);
+}
+.screen-chip {
+  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(74,222,128,.12);
+  border: 1px solid rgba(74,222,128,.2);
+  color: #9df0bc;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.screen-title {
+  margin: 14px 0 8px;
+  font-size: 1.6rem;
+  font-weight: 800;
+}
+.screen-copy {
+  color: #96a29f;
+  font-size: 14px;
+}
+.screen-list {
+  margin: 18px 0 0;
+  display: grid;
+  gap: 10px;
+}
+.screen-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.04);
+}
+.screen-row strong { display: block; font-size: 14px; }
+.screen-row span { color: #86938e; font-size: 12px; }
+.screen-pill {
+  color: #9df0bc;
+  font-size: 12px;
+  font-weight: 700;
+}
+.section {
+  margin-top: 18px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(22,27,34,.88), rgba(13,17,23,.94));
+}
+.section h2 {
+  margin: 0 0 8px;
+  font-size: 1.4rem;
+}
+.section-copy {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.card {
+  padding: 16px;
+  border: 1px solid rgba(74,222,128,.12);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(20,34,28,.86), rgba(16,23,27,.9));
+}
+.card h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
 }
 .card p {
   margin: 0;
-  color: var(--muted);
+  color: #9aa5a1;
   font-size: 14px;
 }
-.share {
-  margin-top: 16px;
-  border: 1px solid var(--line);
+.timeline {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.step {
+  padding: 16px;
   border-radius: 16px;
-  background: rgba(11, 18, 29, 0.8);
-  padding: 14px;
+  border: 1px solid rgba(255,255,255,.05);
+  background: rgba(255,255,255,.02);
+}
+.step-num {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(74,222,128,.12);
+  color: var(--green);
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+.step h3 { margin: 0 0 8px; font-size: 1rem; }
+.step p { margin: 0; color: var(--text-muted); font-size: 14px; }
+.share {
+  margin-top: 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(19,31,25,.88), rgba(13,17,23,.94));
 }
 .share-title {
-  margin: 0 0 10px;
-  font-size: 15px;
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+.share-copy {
+  margin: 0 0 14px;
+  color: var(--text-muted);
 }
 .share-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
 }
 .share-btn {
-  border: 1px solid rgba(144, 176, 212, 0.3);
-  background: rgba(17, 28, 45, 0.85);
-  color: #d7e8ff;
+  border: 1px solid rgba(74,222,128,.18);
+  background: rgba(255,255,255,.03);
+  color: #daf8e4;
   text-decoration: none;
   border-radius: 999px;
-  padding: 8px 11px;
+  padding: 10px 13px;
   font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
 .share-btn:hover {
-  border-color: rgba(106, 183, 255, 0.58);
-}
-.note {
-  margin-top: 12px;
-  color: var(--muted);
-  font-size: 12px;
+  border-color: rgba(74,222,128,.45);
+  color: var(--green);
 }
 .footer {
-  margin-top: 22px;
-  color: #8fa5c9;
-  font-size: 12px;
+  margin-top: 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
 }
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(98, 217, 162, 0.5); }
-  70% { box-shadow: 0 0 0 7px rgba(98, 217, 162, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(98, 217, 162, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(74,222,128,.42); }
+  70% { box-shadow: 0 0 0 7px rgba(74,222,128,0); }
+  100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); }
 }
-@media (max-width: 780px) {
-  .hero-inner { padding: 22px 16px 18px; }
-  .kpis, .grid { grid-template-columns: 1fr; }
+@media (max-width: 920px) {
+  .hero { grid-template-columns: 1fr; }
+  .phone-card { justify-self: stretch; width: 100%; }
+  .grid, .timeline, .kpis { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .shell { width: min(100vw - 24px, 1120px); padding-top: 18px; }
   .top { flex-direction: column; align-items: flex-start; }
+  .hero { padding: 20px; }
+  .phone-screen { min-height: 360px; }
   .actions .btn { width: 100%; }
 }
 </style>
@@ -284,49 +485,112 @@ h1 {
       <span class="badge">iOS launch in progress</span>
     </header>
 
-    <section class="hero">
-      <div class="hero-inner">
-        <h1>FrogTalk for iPhone is coming soon.</h1>
-        <p class="subtitle">Private DMs, channels, and calls are being prepared for iOS release. We are finishing launch polish so your first build is stable, fast, and secure.</p>
+    <section class="hero" aria-label="FrogTalk iPhone launch hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Official iPhone release page</span>
+        <h1>FrogTalk for iPhone <span class="title-accent">is on the way.</span></h1>
+        <p class="subtitle">The iOS build is being polished to match the privacy-first FrogTalk experience on Android and web: fast messaging, secure calls, channels, and a cleaner launch path through one official URL.</p>
 
-        <div class="kpis">
-          <article class="kpi"><div class="num">E2E</div><div class="lbl">Encrypted conversations</div></article>
-          <article class="kpi"><div class="num">Zero Ads</div><div class="lbl">No surveillance business model</div></article>
-          <article class="kpi"><div class="num">Cross-Node</div><div class="lbl">Federated FrogTalk network</div></article>
-        </div>
+        <ul class="hero-points">
+          <li>Use this page as the canonical iPhone release source. When TestFlight or the App Store link is ready, this URL will switch automatically.</li>
+          <li>The same FrogTalk principles carry over: privacy-first messaging, no ads, and a network that already works across public rooms and direct conversations.</li>
+          <li>Until iOS goes live, Android and web stay available right now for early users and communities.</li>
+        </ul>
 
         <div class="actions">
           <a class="btn btn-primary" href="/download/android">Get Android now</a>
           <a class="btn btn-ghost" href="/">Back to main site</a>
           <a class="btn btn-ghost" href="/docs/node">Read node docs</a>
         </div>
+
+        <div class="kpis">
+          <article class="kpi"><div class="num">E2E DMs</div><div class="lbl">Private conversations without ad-tech baggage</div></article>
+          <article class="kpi"><div class="num">Calls + Channels</div><div class="lbl">Messaging, communities, and media in one app</div></article>
+          <article class="kpi"><div class="num">Official URL</div><div class="lbl">One landing page for TestFlight and App Store updates</div></article>
+        </div>
+      </div>
+
+      <aside class="hero-visual">
+        <div class="phone-card" aria-hidden="true">
+          <div class="phone-notch"></div>
+          <div class="phone-screen">
+            <span class="screen-chip">FrogTalk iPhone</span>
+            <div class="screen-title">Launch status</div>
+            <p class="screen-copy">Stability, onboarding polish, and release packaging are being finalized before the first public iOS drop.</p>
+            <div class="screen-list">
+              <div class="screen-row">
+                <div><strong>Messaging core</strong><span>Private DMs and media flow</span></div>
+                <div class="screen-pill">Ready</div>
+              </div>
+              <div class="screen-row">
+                <div><strong>Release path</strong><span>Future TestFlight or App Store handoff</span></div>
+                <div class="screen-pill">Queued</div>
+              </div>
+              <div class="screen-row">
+                <div><strong>Official source</strong><span>https://frogtalk.xyz/ios</span></div>
+                <div class="screen-pill">Live</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section" aria-label="What to expect from FrogTalk iPhone">
+      <h2>What the iPhone release page is for</h2>
+      <p class="section-copy">This page does two jobs: it gives people a legitimate destination to bookmark and share today, and it lets search engines understand that FrogTalk has a real iOS destination even before the store listing exists.</p>
+      <div class="grid">
+        <article class="card">
+          <h3>Official release handoff</h3>
+          <p>The page already ranks as the canonical iPhone destination. When the real install link exists, the backend can redirect here without changing the public URL.</p>
+        </article>
+        <article class="card">
+          <h3>FrogTalk visual language</h3>
+          <p>The layout now uses the same dark surface, green accents, and product tone as the main FrogTalk site instead of the previous blue-heavy treatment.</p>
+        </article>
+        <article class="card">
+          <h3>Search-friendly launch page</h3>
+          <p>Metadata, canonical tags, and structured data help Bing, Yandex, and other engines understand the page before the App Store URL is live.</p>
+        </article>
       </div>
     </section>
 
-    <section class="grid" aria-label="iOS highlights">
-      <article class="card">
-        <h2>What to expect</h2>
-        <p>Native iOS experience for secure messaging, media sharing, and voice-ready communication with the same privacy principles as FrogTalk on other platforms.</p>
-      </article>
-      <article class="card">
-        <h2>How launch updates work</h2>
-        <p>This page is the official release status endpoint for iOS. When a TestFlight or App Store link is ready, this URL will switch automatically.</p>
-      </article>
+    <section class="section" aria-label="Launch sequence">
+      <h2>How the iOS launch will roll out</h2>
+      <p class="section-copy">The public path stays simple so users do not have to chase changing links.</p>
+      <div class="timeline">
+        <article class="step">
+          <div class="step-num">1</div>
+          <h3>This page stays stable</h3>
+          <p>Share or bookmark the public iPhone URL now. It remains the source of truth during pre-launch.</p>
+        </article>
+        <article class="step">
+          <div class="step-num">2</div>
+          <h3>Install link replaces holding page</h3>
+          <p>As soon as TestFlight or the App Store listing is approved, the backend can switch this route to the live destination.</p>
+        </article>
+        <article class="step">
+          <div class="step-num">3</div>
+          <h3>Search results keep the same URL</h3>
+          <p>That avoids splitting authority between multiple temporary pages and preserves a clean canonical path for crawlers.</p>
+        </article>
+      </div>
     </section>
 
     <section class="share" aria-label="Social share">
-      <h2 class="share-title">Share with friends</h2>
+      <h2 class="share-title">Share the official iPhone page</h2>
+      <p class="share-copy">If people are asking about iOS, send them here. It reduces fake links and consolidates search signals onto one release URL.</p>
       <div class="share-row" id="share-row"></div>
-      <p class="note">Sharing this page helps early users find the official iOS release source and avoids fake links.</p>
     </section>
 
-    <p class="footer">FrogTalk iOS page • Canonical: https://frogtalk.xyz/ios</p>
+    <p class="footer">FrogTalk iOS page · Canonical: https://frogtalk.xyz/ios</p>
   </main>
 
 <script>
 (() => {
-  const pageUrl = encodeURIComponent("https://frogtalk.xyz/ios");
-  const pageText = encodeURIComponent("FrogTalk for iOS is coming soon. Official launch page:");
+  const canonicalUrl = "https://frogtalk.xyz/ios";
+  const pageUrl = encodeURIComponent(canonicalUrl);
+  const pageText = encodeURIComponent("FrogTalk for iPhone is coming soon. Official launch page:");
   const buttons = [
     ["X", `https://twitter.com/intent/tweet?text=${pageText}&url=${pageUrl}`],
     ["Telegram", `https://t.me/share/url?url=${pageUrl}&text=${pageText}`],
@@ -351,7 +615,7 @@ h1 {
   copy.textContent = "Copy Link";
   copy.addEventListener("click", async () => {
     try {
-      await navigator.clipboard.writeText("https://frogtalk.xyz/ios");
+      await navigator.clipboard.writeText(canonicalUrl);
       copy.textContent = "Copied";
       setTimeout(() => { copy.textContent = "Copy Link"; }, 1200);
     } catch {

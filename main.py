@@ -1202,7 +1202,11 @@ async def serve_robots():
     body = (
         default_block
         + ai_block
-        + f"\nSitemap: {SITE_URL}/sitemap.xml\n"
+        + f"\nHost: {SITE_URL.replace('https://', '').replace('http://', '')}\n"
+        + f"Sitemap: {SITE_URL}/sitemap.xml\n"
+        + f"Sitemap: {SITE_URL}/sitemap-static.xml\n"
+        + f"Sitemap: {SITE_URL}/sitemap-users.xml\n"
+        + f"Sitemap: {SITE_URL}/sitemap-rooms.xml\n"
     )
     from fastapi.responses import Response
     return Response(content=body, media_type="text/plain; charset=utf-8")
