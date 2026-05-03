@@ -1207,6 +1207,7 @@ async def serve_robots():
         + f"Sitemap: {SITE_URL}/sitemap-static.xml\n"
         + f"Sitemap: {SITE_URL}/sitemap-users.xml\n"
         + f"Sitemap: {SITE_URL}/sitemap-rooms.xml\n"
+        + f"Sitemap: {SITE_URL}/sitemap-board.xml\n"
     )
     from fastapi.responses import Response
     return Response(content=body, media_type="text/plain; charset=utf-8")
@@ -1264,6 +1265,31 @@ def _sitemap_url(loc: str, lastmod: str = "", changefreq: str = "weekly", priori
     return "".join(parts)
 
 
+# Path to the imageboard's threads.json; configurable via env so dev/prod can differ
+BOARD_DATA_PATH = os.getenv(
+    "FROGTALK_BOARD_DATA_PATH",
+    "/opt/frogtalk/board/board_data/threads.json",
+)
+
+
+def _board_thread_urls(today: str) -> str:
+    """Return sitemap <url> blocks for all non-hidden board threads."""
+    import json as _json
+    try:
+        with open(BOARD_DATA_PATH, "r", encoding="utf-8") as _f:
+            threads = _json.load(_f)
+    except Exception as e:
+        print(f"[sitemap-board] could not read threads.json: {e}")
+        return ""
+    out = []
+    for t in threads:
+        tid = t.get("id")
+        if not tid or t.get("hidden"):
+            continue
+        out.append(_sitemap_url(f"{SITE_URL}/board?thread={_xml_escape(str(tid))}", today, "daily", "0.7"))
+    return "".join(out)
+
+
 @app.get("/sitemap.xml", include_in_schema=False)
 async def serve_sitemap_index():
     """Combined flat sitemap (static pages + user profiles + rooms)."""
@@ -1283,8 +1309,12 @@ async def serve_sitemap_index():
         ("/download/deb", "weekly", "0.7"),
         ("/download/windows", "weekly", "0.7"),
         ("/download/windows-zip", "weekly", "0.7"),
+        ("/board", "hourly", "0.8"),
     ]
     urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
+
+    # Board threads
+    urls += _board_thread_urls(today)
 
     # User profiles
     try:
@@ -1346,6 +1376,7 @@ async def serve_sitemap_static():
         ("/download/deb", "weekly", "0.7"),
         ("/download/windows", "weekly", "0.7"),
         ("/download/windows-zip", "weekly", "0.7"),
+        ("/board", "hourly", "0.8"),
     ]
     urls = "".join(_sitemap_url(SITE_URL + p, today, cf, pr) for p, cf, pr in pages)
     body = (
@@ -1415,6 +1446,21 @@ async def serve_sitemap_rooms():
         _sitemap_url(f"{SITE_URL}/c/{_xml_escape(r['name'])}", today, "weekly", "0.6")
         for r in rows if r["name"]
     )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + urls + '</urlset>'
+    )
+    return Response(content=body, media_type="application/xml; charset=utf-8")
+
+
+@app.get("/sitemap-board.xml", include_in_schema=False)
+async def serve_sitemap_board():
+    """Frog Channel imageboard: index page + individual thread URLs."""
+    from fastapi.responses import Response
+    today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
+    urls = _sitemap_url(f"{SITE_URL}/board", today, "hourly", "0.8")
+    urls += _board_thread_urls(today)
     body = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
