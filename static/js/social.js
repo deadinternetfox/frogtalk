@@ -1763,12 +1763,20 @@ const Social = (() => {
     }
     try {
       _updateTabLoadUi(loadUi, 42, 'Loading feed posts', 'Fetching latest posts');
-      const feedRes = await api('/api/social/feed?lite=1&limit=24');
+      // Fire all three requests in parallel — stories and suggested don't depend on feed data.
+      const feedReqPromise = api('/api/social/feed?lite=1&limit=24');
+      const storiesEarlyPromise = _withTimeout(loadStoriesBar());
+      const suggestedEarlyPromise = _withTimeout(
+        api('/api/social/suggested').then(r => r.json().catch(() => ({ users: [] })))
+      );
+      const feedRes = await feedReqPromise;
       const feedData = await feedRes.json();
       const posts = feedData.posts || [];
       _feedCache = { ts: Date.now(), posts };
       if (_currentTab !== 'feed') return;
       _updateTabLoadUi(loadUi, 62, 'Rendering feed', `${posts.length} posts`);
+      // If storiesEarlyPromise already resolved, _storyData is populated and
+      // _renderFeedContent will show the real stories bar on the first paint.
       _renderFeedContent(content, posts);
       _animateSocialSwap(content);
 
@@ -1786,7 +1794,7 @@ const Social = (() => {
       };
       refreshFeedSubresources();
 
-      const storiesPromise = _withTimeout(loadStoriesBar()).then((storiesHtml) => {
+      const storiesPromise = storiesEarlyPromise.then((storiesHtml) => {
         if (_currentTab !== 'feed') return;
         const el = document.getElementById('social-feed-stories');
         if (el && typeof storiesHtml === 'string') el.innerHTML = storiesHtml;
@@ -1795,16 +1803,12 @@ const Social = (() => {
         refreshFeedSubresources();
       });
 
-      const suggestedPromise = _withTimeout(
-        api('/api/social/suggested')
-          .then(r => r.json().catch(() => ({ users: [] })))
-          .then((sugData) => {
-            if (_currentTab !== 'feed') return;
-            const el = document.getElementById('social-feed-suggest');
-            if (!el) return;
-            el.innerHTML = _renderSuggestedUsers(sugData.users || []);
-          })
-      ).catch(() => {}).finally(() => {
+      const suggestedPromise = suggestedEarlyPromise.then((sugData) => {
+        if (!sugData || _currentTab !== 'feed') return;
+        const el = document.getElementById('social-feed-suggest');
+        if (!el) return;
+        el.innerHTML = _renderSuggestedUsers(sugData.users || []);
+      }).catch(() => {}).finally(() => {
         suggestDone = true;
         refreshFeedSubresources();
       });
@@ -1967,8 +1971,13 @@ const Social = (() => {
         </div>
         <div style="padding:16px">${skelList(3, 36)}</div>
       </div>`;
+    // Pre-flight the stories check for own profile in parallel with the profile API
+    // so the story ring status is ready by the time we need to render it.
+    const _selfNickGuess = String(nickname || '').toLowerCase();
+    const _isSelfGuess = State.user && _selfNickGuess === String(State.user.nickname || '').toLowerCase();
+    const _earlyStoriesReq = _isSelfGuess ? api('/api/social/stories').catch(() => null) : null;
     try {
-      const cacheKey = String(nickname || '').toLowerCase();
+      const cacheKey = _selfNickGuess;
       const cachedEntry = _profileCache.get(cacheKey);
       let u = null;
       if (_cacheFresh(cachedEntry) && cachedEntry.profile) {
@@ -1988,6 +1997,8 @@ const Social = (() => {
       if (u.is_self && (!u.story_status || !u.story_status.count)) {
         _updateTabLoadUi(loadUi, 66, 'Loading profile stories', 'Checking story ring status');
         try {
+          // Reuse the pre-flighted request if it was for our own profile.
+          const sr = _earlyStoriesReq ? await _earlyStoriesReq : await api('/api/social/stories');
           const sr = await api('/api/social/stories');
           if (sr.ok) {
             const sd = await sr.json();
@@ -2461,12 +2472,7 @@ const Social = (() => {
     const cachedPosts = _cacheFresh(cachedEntry) ? (cachedEntry.posts || []) : null;
     if (cachedPosts && cachedPosts.length) {
       const cachedCards = cachedPosts.map(p => _renderReelCard(p)).join('');
-      // For a direct reel launch, start the scope bar hidden so it fades in
-      // with the content rather than appearing immediately on a bare skeleton.
-      const initScopeBarHidden = directLaunchId
-        ? scopeBar.replace('<div class="reels-scope-bar">', '<div class="reels-scope-bar" style="opacity:0;transition:opacity .28s ease">')
-        : scopeBar;
-      content.innerHTML = initScopeBarHidden + `
+      content.innerHTML = scopeBar + `
         <div class="reels-stage" id="reels-stage">
           <div class="reels-snap" id="reels-snap">${cachedCards}</div>
         </div>`;
@@ -2477,22 +2483,9 @@ const Social = (() => {
         _initReelCards(snap);
         _reelsAutoplayVisible();
         _updateTabLoadUi(loadUi, 42, 'Preparing cached reels', 'Resuming reel playback');
-        if (directLaunchId) {
-          setTimeout(() => {
-            const bar = content.querySelector('.reels-scope-bar');
-            if (bar) bar.style.opacity = '1';
-          }, 180);
-        }
       }
     } else {
-      // For direct launch: skip the scope bar in the loading skeleton entirely.
-      content.innerHTML = directLaunchId
-        ? `<div class="reels-stage" id="reels-stage"><div class="reels-snap" aria-hidden="true">${
-            Array.from({ length: 3 }).map(() =>
-              `<div class="reel-card" style="pointer-events:none"><div class="skel-block" style="height:100%;border-radius:14px"></div></div>`
-            ).join('')
-          }</div></div>`
-        : _reelsSkeletonHtml(scope, sort);
+      content.innerHTML = _reelsSkeletonHtml(scope, sort);
       _updateTabLoadUi(loadUi, 18, 'Loading reels shell', 'Building reels layout');
     }
 
@@ -2530,16 +2523,6 @@ const Social = (() => {
           <div class="social-loading reels-stage-loading">Preparing reel playback…</div>
           <div class="reels-snap" id="reels-snap">${cards}</div>
         </div>`;
-      // For direct reel launch, fade the scope bar in with the content
-      // so there's no jarring jump from profile to the hot/new bar.
-      if (directLaunchId) {
-        const bar = content.querySelector('.reels-scope-bar');
-        if (bar) {
-          bar.style.opacity = '0';
-          bar.style.transition = 'opacity .3s ease';
-          requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.opacity = '1'; }));
-        }
-      }
       _updateTabLoadUi(loadUi, 82, 'Preparing reels stage', 'Mounting reel cards');
       _animateSocialSwap(content);
       const snap = document.getElementById('reels-snap');
@@ -6045,16 +6028,15 @@ const Social = (() => {
       _renderActivityList();
       const markBtn = document.getElementById('social-activity-mark');
       if (markBtn) markBtn.disabled = _activityUnread === 0;
-      // Auto-mark all visible as read on view
+      // Auto-mark all visible as read on view.
+      // Optimistic: update the UI immediately, fire the POST without blocking.
       if (_activityUnread > 0) {
-        try {
-          await api('/api/social/notifications/read', 'POST', { ids: null });
-          _activityUnread = 0;
-          _activityList = _activityList.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() }));
-          _setSidebarBadge(0);
-          _renderActivityList();
-          if (markBtn) markBtn.disabled = true;
-        } catch {}
+        _activityUnread = 0;
+        _activityList = _activityList.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() }));
+        _setSidebarBadge(0);
+        _renderActivityList();
+        if (markBtn) markBtn.disabled = true;
+        api('/api/social/notifications/read', 'POST', { ids: null }).catch(() => {});
       }
     } catch {
       const list = document.getElementById('social-activity-list');
