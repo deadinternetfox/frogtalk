@@ -4170,15 +4170,29 @@ def clear_wall_post_media(post_id: int, user_id: int) -> bool:
 
 
 def add_wall_reaction(post_id: int, user_id: int, emoji: str) -> bool:
-    """Add or remove a reaction to a post (toggle)."""
+    """Add or change a reaction to a post (one active reaction per user).
+
+    - Same emoji as current reaction → toggle off (remove), returns False.
+    - Different emoji → replace current reaction, returns True.
+    - No existing reaction → insert, returns True.
+    """
     with _conn() as con:
         existing = con.execute("""
-            SELECT id FROM wall_post_reactions
-            WHERE post_id=? AND user_id=? AND emoji=?
-        """, (post_id, user_id, emoji)).fetchone()
+            SELECT id, emoji FROM wall_post_reactions
+            WHERE post_id=? AND user_id=?
+        """, (post_id, user_id)).fetchone()
         if existing:
-            con.execute("DELETE FROM wall_post_reactions WHERE id=?", (existing['id'],))
-            return False  # Removed
+            if existing['emoji'] == emoji:
+                # Same emoji — toggle off
+                con.execute("DELETE FROM wall_post_reactions WHERE id=?", (existing['id'],))
+                return False  # Removed
+            else:
+                # Different emoji — change reaction in-place
+                con.execute(
+                    "UPDATE wall_post_reactions SET emoji=?, created_at=datetime('now') WHERE id=?",
+                    (emoji, existing['id'])
+                )
+                return True  # Changed
         else:
             con.execute("""
                 INSERT INTO wall_post_reactions (post_id, user_id, emoji)
@@ -4254,6 +4268,19 @@ def get_post_reactions(post_id: int) -> List[Dict]:
             JOIN users u ON wpr.user_id = u.id
             WHERE wpr.post_id=?
             GROUP BY emoji
+        """, (post_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_post_reactions_detail(post_id: int) -> List[Dict]:
+    """Get per-user reaction rows for the reaction detail modal."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT wpr.user_id, u.nickname, u.avatar, wpr.emoji, wpr.created_at
+            FROM wall_post_reactions wpr
+            JOIN users u ON wpr.user_id = u.id
+            WHERE wpr.post_id=?
+            ORDER BY wpr.emoji, wpr.created_at
         """, (post_id,)).fetchall()
     return [dict(r) for r in rows]
 

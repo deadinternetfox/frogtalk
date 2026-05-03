@@ -400,6 +400,18 @@ async def add_post_reaction(request: Request, post_id: int, body: AddReactionReq
     return {"added": added, "reactions": reactions}
 
 
+@router.get("/posts/{post_id}/reactions/detail")
+async def get_post_reactions_detail(post_id: int, current_user: dict = Depends(get_current_user)):
+    """Get per-user reaction rows for the reaction detail modal."""
+    post = db.get_wall_post(post_id)
+    if not post:
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+    if post.get("user_id") and db.is_blocked_either_way(current_user["id"], post["user_id"]):
+        return JSONResponse(status_code=404, content={"error": "Post not found"})
+    rows = db.get_post_reactions_detail(post_id)
+    return {"reactions": rows, "viewer": current_user["nickname"]}
+
+
 @router.get("/posts/{post_id}/reactions")
 async def get_post_reactions_list(post_id: int):
     """Get all reactions for a post."""
