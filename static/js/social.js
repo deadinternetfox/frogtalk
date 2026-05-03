@@ -2014,7 +2014,7 @@ const Social = (() => {
   function _reelsActivateCard(card, opts = {}) {
     if (!card || !card.classList.contains('reel-card')) return;
     const reset = opts.reset !== false;
-    const shouldReset = reset || _reelsCurrentCard !== card;
+    const shouldReset = (_reelsCurrentCard !== card) && reset;
     document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
       if (c === card) return;
       const v = c.querySelector('video');
@@ -2173,8 +2173,15 @@ const Social = (() => {
         reveal();
       }
     }, 2200);
-    // Hard cap to avoid loader getting stuck forever on bad/slow media.
-    setTimeout(reveal, 4200);
+    // Hard cap with guard: reveal only when decoder has at least metadata.
+    setTimeout(() => {
+      if (!firstCard.classList.contains('is-ready') && !firstCard.classList.contains('is-playing')) {
+        firstCard.classList.add('no-poster');
+      }
+      if (firstVideo.readyState >= 1 || firstCard.classList.contains('is-ready') || firstCard.classList.contains('is-playing')) {
+        reveal();
+      }
+    }, 4200);
   }
 
   function _reelsAdvanceFrom(card) {
