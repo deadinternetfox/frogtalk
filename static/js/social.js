@@ -3713,34 +3713,51 @@ const Social = (() => {
     document.getElementById('social-new-post').classList.add('hidden');
   }
 
+  // raw File object for video (avoid slow base64 pre-read; convert at submit time)
+  let _newPostFile = null;
+  let _newPostObjectUrl = null;
+
   function handleNewPostMedia(input) {
     const file = input.files[0];
     if (!file) return;
     if (file.size > 100 * 1024 * 1024) { UI.showToast('File too large (max 100MB)', 'error'); return; }
     const isVideo = file.type.startsWith('video/');
-    const reader = new FileReader();
-    reader.onload = e => {
-      _newPostMedia = e.target.result;
-      _newPostOrigMedia = e.target.result;
+
+    // Revoke any previous object URL
+    if (_newPostObjectUrl) { URL.revokeObjectURL(_newPostObjectUrl); _newPostObjectUrl = null; }
+    _newPostFile = null;
+
+    const img = document.getElementById('snp-media-img');
+    const vid = document.getElementById('snp-media-vid');
+    const filters = document.getElementById('snp-filters');
+    const preview = document.getElementById('snp-media-preview');
+
+    if (isVideo) {
+      // Instant preview — no FileReader needed
+      _newPostObjectUrl = URL.createObjectURL(file);
+      _newPostFile = file;
       _newPostMediaType = file.type;
-      _filterState = { brightness: 100, contrast: 100, saturate: 100 };
-      resetFilterUI();
-      const img = document.getElementById('snp-media-img');
-      const vid = document.getElementById('snp-media-vid');
-      const filters = document.getElementById('snp-filters');
-      const preview = document.getElementById('snp-media-preview');
-      if (isVideo) {
-        if (img) { img.style.display = 'none'; img.src = ''; }
-        if (vid) { vid.src = e.target.result; vid.style.display = 'block'; }
-        if (filters) filters.style.display = 'none';
-      } else {
+      _newPostMedia = '__video_file__'; // sentinel so submitNewPost knows media is ready
+      if (img) { img.style.display = 'none'; img.src = ''; }
+      if (vid) { vid.src = _newPostObjectUrl; vid.style.display = 'block'; }
+      if (filters) filters.style.display = 'none';
+      if (preview) preview.style.display = 'block';
+    } else {
+      // Image: read as data URL for preview + filter pipeline
+      const reader = new FileReader();
+      reader.onload = e => {
+        _newPostMedia = e.target.result;
+        _newPostOrigMedia = e.target.result;
+        _newPostMediaType = file.type;
+        _filterState = { brightness: 100, contrast: 100, saturate: 100 };
+        resetFilterUI();
         if (vid) { vid.style.display = 'none'; vid.src = ''; }
         if (img) { img.src = e.target.result; img.style.display = 'block'; }
         if (filters) filters.style.display = 'block';
-      }
-      if (preview) preview.style.display = 'block';
-    };
-    reader.readAsDataURL(file);
+        if (preview) preview.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    }
   }
 
   function openNewPostCamera() {
@@ -3765,6 +3782,8 @@ const Social = (() => {
     _newPostMedia = null;
     _newPostMediaType = null;
     _newPostOrigMedia = null;
+    _newPostFile = null;
+    if (_newPostObjectUrl) { URL.revokeObjectURL(_newPostObjectUrl); _newPostObjectUrl = null; }
     _filterState = { brightness: 100, contrast: 100, saturate: 100 };
     resetFilterUI();
     const img = document.getElementById('snp-media-img');
@@ -3900,7 +3919,7 @@ const Social = (() => {
   async function submitNewPost() {
     if (_newPostSubmitting) return;
     const text = document.getElementById('snp-text').value.trim();
-    if (!text && !_newPostMedia) return;
+    if (!text && !_newPostMedia && !_newPostFile) return;
     _newPostSubmitting = true;
     const postBtn = document.getElementById('snp-submit-btn');
     if (postBtn) {
@@ -3921,7 +3940,18 @@ const Social = (() => {
         share_enabled: shareEnabled,
         allow_comments: allowCmt,
       };
-      if (_newPostMedia && _newPostMediaType?.startsWith('image/') && _newPostOrigMedia) {
+      if (_newPostFile) {
+        // Video chosen via file picker — read to base64 now (show uploading state)
+        if (postBtn) { postBtn.textContent = 'Uploading…'; }
+        body.media_data = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = e => resolve(e.target.result);
+          r.onerror = () => reject(new Error('Could not read video file'));
+          r.readAsDataURL(_newPostFile);
+        });
+        body.media_type = _newPostFile.type;
+        if (postBtn) { postBtn.textContent = 'Posting…'; }
+      } else if (_newPostMedia && _newPostMediaType?.startsWith('image/') && _newPostOrigMedia) {
         body.media_data = await applyFilterToImage(_newPostOrigMedia);
         body.media_type = 'image/jpeg';
       } else if (_newPostMedia) {
@@ -3930,7 +3960,7 @@ const Social = (() => {
       }
       const res = await api('/api/wall/posts', 'POST', body);
       if (res.ok) {
-        const isVideo = _newPostMediaType?.startsWith('video/');
+        const isVideo = (_newPostFile?.type || _newPostMediaType || '').startsWith('video/');
         closeNewPost();
         UI.showToast('Posted!', 'success');
         if (isVideo) {
@@ -3944,7 +3974,7 @@ const Social = (() => {
         const data = await res.json();
         UI.showToast(data.error || 'Could not post', 'error');
       }
-    } catch { UI.showToast('Network error', 'error'); }
+    } catch (err) { UI.showToast(err?.message || 'Network error', 'error'); }
     finally {
       _newPostSubmitting = false;
       if (postBtn) {

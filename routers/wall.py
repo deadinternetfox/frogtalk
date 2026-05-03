@@ -27,7 +27,8 @@ async def _push_social_notif(recipient_id: int, payload: dict) -> None:
         _log.debug("social notif WS push failed", exc_info=True)
 
 MAX_POST_CONTENT = 5000
-MAX_MEDIA_BYTES = 10 * 1024 * 1024
+MAX_MEDIA_BYTES  = 10  * 1024 * 1024   # images
+MAX_VIDEO_BYTES  = 150 * 1024 * 1024   # videos (base64 of ~100 MB raw)
 
 
 class CreatePostRequest(BaseModel):
@@ -117,8 +118,12 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
     if len(body.content) > MAX_POST_CONTENT:
         return JSONResponse(status_code=400, content={"error": f"Post too long (max {MAX_POST_CONTENT} chars)"})
     
-    if body.media_data and len(body.media_data) > MAX_MEDIA_BYTES:
-        return JSONResponse(status_code=413, content={"error": "Media too large (max 10MB)"})
+    if body.media_data:
+        is_video = (body.media_type or '').startswith('video/')
+        limit = MAX_VIDEO_BYTES if is_video else MAX_MEDIA_BYTES
+        if len(body.media_data) > limit:
+            label = "100MB" if is_video else "10MB"
+            return JSONResponse(status_code=413, content={"error": f"Media too large (max {label})"})
     
     if body.privacy not in ("public", "followers", "friends", "private"):
         return JSONResponse(status_code=400, content={"error": "Invalid privacy setting"})
@@ -295,8 +300,9 @@ async def update_wall_post(post_id: int, body: UpdatePostRequest, current_user: 
 
 @router.delete("/posts/{post_id}")
 async def delete_wall_post(post_id: int, current_user: dict = Depends(get_current_user)):
-    """Delete a wall post."""
-    if db.delete_wall_post(post_id, current_user["id"]):
+    """Delete a wall post. Admins can delete any post."""
+    force = bool(current_user.get("is_admin"))
+    if db.delete_wall_post(post_id, current_user["id"], force=force):
         return {"ok": True}
     return JSONResponse(status_code=404, content={"error": "Post not found or not yours"})
 
