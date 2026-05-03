@@ -5015,7 +5015,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   z-index:1;background:transparent;outline:none;
   transition:opacity .18s ease
 }
-.reel-card:not(.is-ready):not(.is-playing) video{opacity:.28}
+.reel-card:not(.is-ready):not(.is-playing) video{opacity:0}
 .reel-card video::-webkit-media-controls,
 .reel-card video::-webkit-media-controls-start-playback-button,
 .reel-card video::-webkit-media-controls-overlay-play-button,
@@ -5066,8 +5066,8 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   background:rgba(255,255,255,.24);z-index:5;overflow:visible;cursor:pointer;touch-action:none
 }
 .reel-card.is-playing .reel-progress{
-  opacity:0;
-  pointer-events:none;
+  opacity:.96;
+  pointer-events:auto;
 }
 .reel-progress > span{
   display:block;height:8px;margin-top:3px;width:0%;background:linear-gradient(90deg,#6dffa0,#45c16d);

@@ -2412,7 +2412,7 @@ const Social = (() => {
       }, 320);
       setTimeout(() => {
         if (!posterDrawn) {
-          if ((video.readyState || 0) >= 2) card.classList.add('no-poster');
+          card.classList.add('no-poster');
           if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
         }
       }, 2600);
