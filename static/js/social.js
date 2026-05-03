@@ -6,6 +6,10 @@ const Social = (() => {
   let _currentTab = 'feed';     // feed | explore | profile
   let _profileUser = null;       // currently viewed profile nickname
   let _profileData = null;
+  let _feedCache = null;
+  const _exploreCache = new Map();
+  const _tabCacheTtlMs = 12000;
+  let _reelsLoadToken = 0;
 
   // ── helpers ──────────────────────────────────────────────────────────────
   const esc = s => UI.escHtml(s);
@@ -219,6 +223,10 @@ const Social = (() => {
     // Persistent "Now playing" strip lives outside the tab content —
     // make sure it's painted/hidden correctly after switching tabs.
     try { _applyMusicState(); } catch {}
+  }
+
+  function _cacheFresh(entry) {
+    return !!(entry && (Date.now() - Number(entry.ts || 0) < _tabCacheTtlMs));
   }
 
   // ── STORIES ──────────────────────────────────────────────────────────────
@@ -1371,144 +1379,178 @@ const Social = (() => {
   }
 
   // ── FEED ────────────────────────────────────────────────────────────────
-  async function loadFeed() {
+  function _renderFeedContent(content, posts) {
+    let html = `<div id="social-feed-stories">${renderStoriesBar()}</div><div id="social-feed-suggest"></div>`;
+
+    if (!posts.length) {
+      html += `<div class="social-empty">
+        <div style="font-size:48px;margin-bottom:12px">🐸</div>
+        <div style="font-size:16px;font-weight:600;margin-bottom:6px">Your feed is empty</div>
+        <div style="color:#888;font-size:14px">Follow people to see their posts here, or check out <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
+      </div>`;
+    } else {
+      html += `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
+    }
+
+    content.innerHTML = html;
+
+    // Secondary sections (stories + suggestions) load after first paint.
+    loadStoriesBar().then((storiesHtml) => {
+      if (_currentTab !== 'feed') return;
+      const el = document.getElementById('social-feed-stories');
+      if (el) el.innerHTML = storiesHtml;
+    }).catch(() => {});
+
+    api('/api/social/suggested')
+      .then(r => r.json().catch(() => ({ users: [] })))
+      .then((sugData) => {
+        if (_currentTab !== 'feed') return;
+        const el = document.getElementById('social-feed-suggest');
+        if (!el) return;
+        el.innerHTML = _renderSuggestedUsers(sugData.users || []);
+      })
+      .catch(() => {});
+  }
+
+  async function loadFeed(opts = {}) {
     _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
-    content.innerHTML = '<div class="social-loading">Loading feed…</div>';
+    if (!content) return;
+    const force = !!opts.force;
+    const cached = !force && _cacheFresh(_feedCache) ? (_feedCache.posts || []) : null;
+    if (cached) {
+      _renderFeedContent(content, cached);
+    } else {
+      content.innerHTML = '<div class="social-loading">Loading feed…</div>';
+    }
     try {
       const feedRes = await api('/api/social/feed?lite=1&limit=24');
       const feedData = await feedRes.json();
       const posts = feedData.posts || [];
-      let html = `<div id="social-feed-stories">${renderStoriesBar()}</div><div id="social-feed-suggest"></div>`;
-
-      if (posts.length === 0) {
-        html += `<div class="social-empty">
-          <div style="font-size:48px;margin-bottom:12px">🐸</div>
-          <div style="font-size:16px;font-weight:600;margin-bottom:6px">Your feed is empty</div>
-          <div style="color:#888;font-size:14px">Follow people to see their posts here, or check out <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
-        </div>`;
-      } else {
-        html += `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
-      }
-
-      content.innerHTML = html;
-
-      // Secondary sections (stories + suggestions) load after first paint.
-      loadStoriesBar().then((storiesHtml) => {
-        if (_currentTab !== 'feed') return;
-        const el = document.getElementById('social-feed-stories');
-        if (el) el.innerHTML = storiesHtml;
-      }).catch(() => {});
-
-      api('/api/social/suggested')
-        .then(r => r.json().catch(() => ({ users: [] })))
-        .then((sugData) => {
-          if (_currentTab !== 'feed') return;
-          const el = document.getElementById('social-feed-suggest');
-          if (!el) return;
-          el.innerHTML = _renderSuggestedUsers(sugData.users || []);
-        })
-        .catch(() => {});
+      _feedCache = { ts: Date.now(), posts };
+      if (_currentTab !== 'feed') return;
+      _renderFeedContent(content, posts);
     } catch {
-      content.innerHTML = '<div class="social-empty">Could not load feed</div>';
+      if (!cached && _currentTab === 'feed') {
+        content.innerHTML = '<div class="social-empty">Could not load feed</div>';
+      }
     }
   }
 
   // ── EXPLORE ─────────────────────────────────────────────────────────────
   let _exploreSort = 'trending';
 
-  async function loadExplore(sort) {
+  function _renderExploreContent(content, posts) {
+    let html = `<div class="explore-toolbar">
+      <div class="explore-tabs">
+        <button class="explore-tab ${_exploreSort==='trending'?'active':''}" onclick="Social.loadExplore('trending')">🔥 Trending</button>
+        <button class="explore-tab ${_exploreSort==='new'?'active':''}" onclick="Social.loadExplore('new')">🆕 New</button>
+        <button class="explore-tab ${_exploreSort==='top'?'active':''}" onclick="Social.loadExplore('top')">⭐ Top</button>
+      </div>
+      <button class="explore-refresh" onclick="Social.refreshExplore()" title="Refresh">🔄</button>
+    </div><div id="explore-channels-host"></div>`;
+
+    if (posts.length === 0) {
+      html += `<div class="social-empty">
+        <div style="font-size:48px;margin-bottom:12px">🌍</div>
+        <div style="font-size:16px;font-weight:600">Nothing to explore yet</div>
+        <div style="color:#888;font-size:14px;margin-top:6px">Be the first to post something!</div>
+      </div>`;
+      content.innerHTML = html;
+      return;
+    }
+
+    // grid of media posts + list of text posts.
+    // Only real images belong in the visual grid — video/music/link posts
+    // would render as broken 🖼 placeholders. They still appear in the
+    // text-post list below so nothing is hidden from Explore.
+    const isImage = (p) => {
+      const mt = String(p.media_type || '').toLowerCase();
+      if (mt.startsWith('image/')) return true;
+      // Legacy posts without media_type: sniff by extension.
+      if (!mt && /\.(jpe?g|png|gif|webp|avif|bmp)(\?|#|$)/i.test(String(p.media_data || ''))) return true;
+      return false;
+    };
+    const mediaPosts = posts.filter(isImage);
+    const textPosts = posts.filter(p => !isImage(p));
+
+    if (mediaPosts.length > 0) {
+      html += `<div class="social-grid">${mediaPosts.map(p => `
+        <div class="social-grid-item" onclick="Social.viewPostDetail(${p.id})">
+          <img src="${esc(p.media_data)}" alt="" loading="lazy"
+               onerror="this.closest('.social-grid-item')?.remove()">
+          <div class="social-grid-overlay">
+            <span>❤️ ${p.reaction_count || 0}</span>
+            <span>💬 ${p.comment_count || 0}</span>
+          </div>
+        </div>
+      `).join('')}</div>`;
+    }
+    if (textPosts.length > 0) {
+      html += `<div class="social-feed">${textPosts.map(p => renderFeedPost(p)).join('')}</div>`;
+    }
+
+    content.innerHTML = html;
+
+    // Channels are secondary to post discovery; load them after paint.
+    api('/api/directory/new')
+      .then(r => r.json().catch(() => ({ channels: [] })))
+      .then((channelsData) => {
+        if (_currentTab !== 'explore') return;
+        const newChannels = channelsData.channels || [];
+        const host = document.getElementById('explore-channels-host');
+        if (!host || newChannels.length === 0) return;
+        const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
+        host.innerHTML = `<div class="explore-channels-section">
+          <div class="explore-section-head">
+            <span class="explore-section-title">📺 New Channels</span>
+            <button class="explore-section-link" onclick="showChannelDirectory()">View all →</button>
+          </div>
+          <div class="explore-channels-scroll">${newChannels.slice(0, 8).map(ch => {
+            const iconHtml = ch.icon && ch.icon.startsWith('data:image')
+              ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+              : esc(ch.icon || '💬');
+            return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
+              <div class="explore-channel-icon">${iconHtml}</div>
+              <div class="explore-channel-name">${esc(ch.name)}</div>
+              <div class="explore-channel-meta">${catIcons[ch.category]||''} ${ch.member_count || 0} members</div>
+            </div>`;
+          }).join('')}</div>
+        </div>`;
+      })
+      .catch(() => {});
+  }
+
+  async function loadExplore(sort, opts = {}) {
     _ensureSocialVideoObserver();
     if (sort) _exploreSort = sort;
     const content = document.getElementById('social-content');
-    content.innerHTML = '<div class="social-loading">Discovering…</div>';
+    if (!content) return;
+    const force = !!opts.force;
+    const cacheKey = String(_exploreSort || 'trending');
+    const cachedEntry = !force ? _exploreCache.get(cacheKey) : null;
+    const cached = _cacheFresh(cachedEntry) ? (cachedEntry.posts || []) : null;
+    if (cached) {
+      _renderExploreContent(content, cached);
+    } else {
+      content.innerHTML = '<div class="social-loading">Discovering…</div>';
+    }
     try {
       const postsRes = await api(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`);
       const postsData = await postsRes.json();
       const posts = postsData.posts || [];
-
-      // Sort tabs + refresh
-      let html = `<div class="explore-toolbar">
-        <div class="explore-tabs">
-          <button class="explore-tab ${_exploreSort==='trending'?'active':''}" onclick="Social.loadExplore('trending')">🔥 Trending</button>
-          <button class="explore-tab ${_exploreSort==='new'?'active':''}" onclick="Social.loadExplore('new')">🆕 New</button>
-          <button class="explore-tab ${_exploreSort==='top'?'active':''}" onclick="Social.loadExplore('top')">⭐ Top</button>
-        </div>
-        <button class="explore-refresh" onclick="Social.loadExplore()" title="Refresh">🔄</button>
-      </div><div id="explore-channels-host"></div>`;
-
-      if (posts.length === 0) {
-        html += `<div class="social-empty">
-          <div style="font-size:48px;margin-bottom:12px">🌍</div>
-          <div style="font-size:16px;font-weight:600">Nothing to explore yet</div>
-          <div style="color:#888;font-size:14px;margin-top:6px">Be the first to post something!</div>
-        </div>`;
-        content.innerHTML = html;
-        return;
-      }
-
-      // grid of media posts + list of text posts.
-      // Only real images belong in the visual grid — video/music/link posts
-      // would render as broken 🖼 placeholders. They still appear in the
-      // text-post list below so nothing is hidden from Explore.
-      const isImage = (p) => {
-        const mt = String(p.media_type || '').toLowerCase();
-        if (mt.startsWith('image/')) return true;
-        // Legacy posts without media_type: sniff by extension.
-        if (!mt && /\.(jpe?g|png|gif|webp|avif|bmp)(\?|#|$)/i.test(String(p.media_data || ''))) return true;
-        return false;
-      };
-      const mediaPosts = posts.filter(isImage);
-      const textPosts = posts.filter(p => !isImage(p));
-
-      if (mediaPosts.length > 0) {
-        html += `<div class="social-grid">${mediaPosts.map(p => `
-          <div class="social-grid-item" onclick="Social.viewPostDetail(${p.id})">
-            <img src="${esc(p.media_data)}" alt="" loading="lazy"
-                 onerror="this.closest('.social-grid-item')?.remove()">
-            <div class="social-grid-overlay">
-              <span>❤️ ${p.reaction_count || 0}</span>
-              <span>💬 ${p.comment_count || 0}</span>
-            </div>
-          </div>
-        `).join('')}</div>`;
-      }
-      if (textPosts.length > 0) {
-        html += `<div class="social-feed">${textPosts.map(p => renderFeedPost(p)).join('')}</div>`;
-      }
-
-      content.innerHTML = html;
-
-      // Channels are secondary to post discovery; load them after paint.
-      api('/api/directory/new')
-        .then(r => r.json().catch(() => ({ channels: [] })))
-        .then((channelsData) => {
-          if (_currentTab !== 'explore') return;
-          const newChannels = channelsData.channels || [];
-          const host = document.getElementById('explore-channels-host');
-          if (!host || newChannels.length === 0) return;
-          const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
-          host.innerHTML = `<div class="explore-channels-section">
-            <div class="explore-section-head">
-              <span class="explore-section-title">📺 New Channels</span>
-              <button class="explore-section-link" onclick="showChannelDirectory()">View all →</button>
-            </div>
-            <div class="explore-channels-scroll">${newChannels.slice(0, 8).map(ch => {
-              const iconHtml = ch.icon && ch.icon.startsWith('data:image')
-                ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
-                : esc(ch.icon || '💬');
-              return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
-                <div class="explore-channel-icon">${iconHtml}</div>
-                <div class="explore-channel-name">${esc(ch.name)}</div>
-                <div class="explore-channel-meta">${catIcons[ch.category]||''} ${ch.member_count || 0} members</div>
-              </div>`;
-            }).join('')}</div>
-          </div>`;
-        })
-        .catch(() => {});
+      _exploreCache.set(cacheKey, { ts: Date.now(), posts });
+      if (_currentTab !== 'explore') return;
+      _renderExploreContent(content, posts);
     } catch {
-      content.innerHTML = '<div class="social-empty">Could not load explore</div>';
+      if (!cached && _currentTab === 'explore') {
+        content.innerHTML = '<div class="social-empty">Could not load explore</div>';
+      }
     }
+  }
+
+  function refreshExplore() {
+    return loadExplore(_exploreSort, { force: true });
   }
 
   // ── PROFILE ─────────────────────────────────────────────────────────────
@@ -1884,6 +1926,7 @@ const Social = (() => {
     _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
     if (!content) return;
+    const loadToken = ++_reelsLoadToken;
     _teardownReels();
 
     const scope = _reelsScope;
@@ -1904,6 +1947,7 @@ const Social = (() => {
 
     try {
       const res = await api(`/api/social/reels?scope=${scope}&sort=${sort}&limit=20`).catch(() => null);
+      if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
       const data = res && res.ok ? await res.json() : { posts: [] };
       const posts = data.posts || [];
 
@@ -1920,12 +1964,19 @@ const Social = (() => {
       }
 
       const cards = posts.map(p => _renderReelCard(p)).join('');
-      content.innerHTML = scopeBar + `<div class="reels-snap" id="reels-snap">${cards}</div>`;
+      content.innerHTML = scopeBar + `
+        <div class="reels-stage is-loading" id="reels-stage">
+          <div class="social-loading reels-stage-loading">Loading reels…</div>
+          <div class="reels-snap" id="reels-snap">${cards}</div>
+        </div>`;
       const snap = document.getElementById('reels-snap');
       if (snap) _initReelCards(snap);
 
       // Wait briefly for first preview frame so we avoid the grey pre-play flash.
       if (snap) await _waitForFirstReelPreview(snap);
+      if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
+      const stage = document.getElementById('reels-stage');
+      if (stage) stage.classList.remove('is-loading');
       // Auto-play first visible reel
       _reelsAutoplayVisible();
 
@@ -1983,8 +2034,30 @@ const Social = (() => {
     if (shouldReset) {
       try { v.currentTime = 0; } catch {}
     }
-    v.play().catch(() => {});
+    _reelsPlayVideo(card, v);
     card.classList.add('is-playing');
+  }
+
+  function _reelsPlayVideo(card, video, attempt = 0) {
+    if (!card || !video || card !== _reelsCurrentCard) return;
+    try { video.muted = _reelsMuted; } catch {}
+    const run = video.play?.();
+    if (!run || typeof run.catch !== 'function') {
+      card.classList.add('is-playing');
+      return;
+    }
+    run.then(() => {
+      card.classList.add('is-playing');
+    }).catch(() => {
+      if (card !== _reelsCurrentCard || attempt >= 6) return;
+      const retry = () => {
+        if (card !== _reelsCurrentCard) return;
+        setTimeout(() => _reelsPlayVideo(card, video, attempt + 1), 40);
+      };
+      video.addEventListener('loadeddata', retry, { once: true });
+      video.addEventListener('canplay', retry, { once: true });
+      setTimeout(() => _reelsPlayVideo(card, video, attempt + 1), 180);
+    });
   }
 
   function _reelsSyncActiveFromScroll(snap) {
@@ -2044,6 +2117,29 @@ const Social = (() => {
     });
   }
 
+  function _reelsAdvanceFrom(card) {
+    const snap = card?.closest?.('.reels-snap') || document.getElementById('reels-snap');
+    if (!snap) return;
+    const cards = Array.from(snap.querySelectorAll('.reel-card'));
+    if (!cards.length) return;
+    const idx = Math.max(0, cards.indexOf(card));
+    const next = cards[idx + 1] || cards[0] || null;
+    if (!next) return;
+    if (next === card) {
+      const v = card.querySelector('video');
+      if (v) {
+        try { v.currentTime = 0; } catch {}
+        _reelsPlayVideo(card, v);
+      }
+      return;
+    }
+    next.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(() => {
+      if (_currentTab !== 'reels') return;
+      _reelsActivateCard(next, { reset: true });
+    }, 220);
+  }
+
   function _teardownReels() {
     if (_reelsObserver) {
       try { _reelsObserver.disconnect(); } catch {}
@@ -2093,6 +2189,7 @@ const Social = (() => {
           card.classList.add('is-ready');
           card.classList.remove('no-poster');
           posterDrawn = true;
+          if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
         } catch {}
       };
 
@@ -2109,8 +2206,11 @@ const Social = (() => {
       }, { once: true });
       try { video.load(); } catch {}
       setTimeout(() => {
-        if (!posterDrawn) card.classList.add('no-poster');
-      }, 1800);
+        if (!posterDrawn) {
+          card.classList.add('no-poster');
+          if (_reelsCurrentCard === card && video.paused) _reelsPlayVideo(card, video);
+        }
+      }, 1500);
 
       video.addEventListener('timeupdate', () => {
         if (!prog || !video.duration) return;
@@ -2154,10 +2254,10 @@ const Social = (() => {
       video.addEventListener('play', () => card.classList.add('is-playing'));
       video.addEventListener('pause', () => card.classList.remove('is-playing'));
       video.addEventListener('ended', () => {
-        const nextCard = card.nextElementSibling;
-        if (!nextCard || !nextCard.classList.contains('reel-card')) return;
-        nextCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        setTimeout(() => { _reelsActivateCard(nextCard, { reset: true }); }, 220);
+        card.classList.remove('is-playing');
+        if (_currentTab !== 'reels') return;
+        if (_reelsCurrentCard && _reelsCurrentCard !== card) return;
+        _reelsAdvanceFrom(card);
       });
       video.addEventListener('click', (e) => toggleReelPlayback(e, video));
     });
@@ -2244,6 +2344,7 @@ const Social = (() => {
 
     return `
       <div class="reel-card" data-post-id="${post.id}">
+        <div class="reel-loading-layer"><span class="reel-loading-dot"></span></div>
         <div class="reel-video-poster"></div>
         <video src="${videoSrc}" loop playsinline preload="auto" muted></video>
         <button class="reel-play-toggle" title="Play or pause" onclick="Social.toggleReelPlayback(event,this.previousElementSibling)">▶</button>
@@ -5063,7 +5164,7 @@ const Social = (() => {
     openNewPost, closeNewPost, handleNewPostMedia, openNewPostCamera, clearNewPostMedia, submitNewPost,    applyFilter, updateFilter,
     setPostPrivacy, cyclePostPrivacy, toggleAllowComments, toggleShareLink,
     showFollowers, showFollowing, closeUserList, openProfileFromUserList, expandPost,
-    loadFeed, loadExplore, loadProfile, moveToWall, previewMedia,
+    loadFeed, loadExplore, refreshExplore, loadProfile, moveToWall, previewMedia,
     viewPostDetail, closePostDetail, openPostComments,
     viewStories, nextStory, prevStory, closeStoryViewer, openStoryProfileFromViewer,
     viewProfileStories,
