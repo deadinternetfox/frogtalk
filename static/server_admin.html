@@ -183,6 +183,67 @@ body::after {
   min-width: 0;
 }
 .section-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.section-sub {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.control-stack {
+  display: grid;
+  gap: 12px;
+}
+.control-group {
+  border: 1px solid #264334;
+  border-radius: 12px;
+  background: rgba(10, 22, 14, 0.72);
+  padding: 12px;
+}
+.control-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #9ec3ad;
+  margin: 0 0 8px;
+}
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.field {
+  min-width: 0;
+}
+.field > label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #cfe8d6;
+  margin-bottom: 6px;
+}
+.field-hint {
+  margin-top: 5px;
+  color: #88a998;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.btn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.btn-grid-1 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.inline-note {
+  margin-top: 8px;
+  color: #8fb59f;
+  font-size: 11px;
+  line-height: 1.35;
+}
 .table {
   width: 100%;
   border-collapse: collapse;
@@ -553,6 +614,8 @@ input, select {
   .grid { grid-template-columns: 1fr; }
   .grid-mini { grid-template-columns: 1fr; }
   .form-row { grid-template-columns: 1fr; }
+  .field-grid { grid-template-columns: 1fr; }
+  .btn-grid { grid-template-columns: 1fr; }
   #node-msg {
     min-height: 84px !important;
   }
@@ -703,34 +766,63 @@ input, select {
         <div class="panel">
           <div class="section-title">Server Controls</div>
 
-          <div style="margin-bottom:10px;">
-            <button class="btn" id="sync-dir-btn" style="width:100%">Sync Official Directory</button>
-          </div>
+          <p class="section-sub">Federation operations, channel retention policy, and moderation actions are managed from here.</p>
 
-          <div class="sub" style="margin-bottom:8px;">Directory visibility and inactive-channel cleanup are controlled here and replicated to the rest of the federation.</div>
-          <div class="form-row">
-            <input id="channel-active-days" type="number" min="1" max="3650" value="30" placeholder="Visible if active within (days)">
-            <input id="channel-auto-delete-days" type="number" min="0" max="3650" value="0" placeholder="Auto-delete after inactivity (0 = off)">
-          </div>
-          <div style="margin-bottom:10px;">
-            <button class="btn" id="save-channel-retention-btn" style="width:100%">Save Channel Timing</button>
-          </div>
+          <div class="control-stack">
+            <div class="control-group">
+              <div class="control-title">Federation Directory</div>
+              <button class="btn" id="sync-dir-btn" style="width:100%">Sync Official Directory</button>
+              <div class="inline-note">Pulls latest official node metadata and trust state from the directory source.</div>
+            </div>
 
-          <div class="form-row">
-            <input id="mod-nick" placeholder="Target nickname">
-            <input id="mod-duration" type="number" min="1" value="60" placeholder="Duration (mins)">
-          </div>
-          <input id="mod-reason" placeholder="Reason (optional)" style="margin-bottom:8px;">
+            <div class="control-group">
+              <div class="control-title">Channel Retention Policy</div>
+              <div class="field-grid">
+                <div class="field">
+                  <label for="channel-active-days">Directory Visibility Window (days)</label>
+                  <input id="channel-active-days" type="number" min="1" max="3650" value="30">
+                  <div class="field-hint">Public channels with no new messages beyond this age are hidden from directory/search/suggestions.</div>
+                </div>
+                <div class="field">
+                  <label for="channel-auto-delete-days">Inactive Auto-Delete (days)</label>
+                  <input id="channel-auto-delete-days" type="number" min="0" max="3650" value="0">
+                  <div class="field-hint">Set to <b>0</b> to disable deletion. When enabled, stale channels are removed after this threshold.</div>
+                </div>
+              </div>
+              <button class="btn" id="save-channel-retention-btn" style="width:100%;margin-top:10px;">Save Channel Timing</button>
+              <div class="inline-note">These settings replicate to federation peers through the server admin sync event pipeline.</div>
+            </div>
 
-          <div class="form-row">
-            <button class="btn" data-action="kick">Kick</button>
-            <button class="btn danger" data-action="ban">Ban</button>
+            <div class="control-group">
+              <div class="control-title">Moderation Actions</div>
+              <div class="field-grid" style="margin-bottom:8px;">
+                <div class="field">
+                  <label for="mod-nick">Target Nickname</label>
+                  <input id="mod-nick" placeholder="Nickname to moderate">
+                </div>
+                <div class="field">
+                  <label for="mod-duration">Duration (minutes)</label>
+                  <input id="mod-duration" type="number" min="1" value="60">
+                </div>
+              </div>
+              <div class="field" style="margin-bottom:8px;">
+                <label for="mod-reason">Reason</label>
+                <input id="mod-reason" placeholder="Optional moderation reason">
+              </div>
+
+              <div class="btn-grid">
+                <button class="btn" data-action="kick">Kick</button>
+                <button class="btn danger" data-action="ban">Ban</button>
+              </div>
+              <div class="btn-grid" style="margin-top:8px;">
+                <button class="btn" data-action="mute">Mute</button>
+                <button class="btn" data-action="unmute">Unmute</button>
+              </div>
+              <div class="btn-grid-1" style="margin-top:8px;">
+                <button class="btn" data-action="unban">Unban</button>
+              </div>
+            </div>
           </div>
-          <div class="form-row">
-            <button class="btn" data-action="mute">Mute</button>
-            <button class="btn" data-action="unmute">Unmute</button>
-          </div>
-          <button class="btn" data-action="unban" style="width:100%">Unban</button>
 
           <div id="action-msg" class="msg"></div>
         </div>
