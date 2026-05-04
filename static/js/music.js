@@ -140,6 +140,56 @@ const Music = (() => {
   function _autoNextEnabled() {
     try { return localStorage.getItem(_AUTONEXT_LS_KEY) !== '0'; } catch { return true; }
   }
+
+  // Owner / DJ toggle: when the channel queue runs dry, automatically
+  // submit a fresh track from the FrogSocial Discover algorithm so the
+  // music never stops. Off by default (opt-in) — only fires when the
+  // local user has can_control on the room. Per-room key so different
+  // rooms can have different policies.
+  const _AUTOFILL_LS_PREFIX = 'frogtalk:music:autofill:';
+  function _autoFillKey(room) { return _AUTOFILL_LS_PREFIX + (room || ''); }
+  function _autoFillEnabled(room) {
+    try { return localStorage.getItem(_autoFillKey(room)) === '1'; } catch { return false; }
+  }
+  function toggleAutoFill() {
+    if (!_room || !_state || !_state.can_control) return;
+    const next = !_autoFillEnabled(_room);
+    try { localStorage.setItem(_autoFillKey(_room), next ? '1' : '0'); } catch {}
+    try { UI.showToast && UI.showToast(next
+      ? 'Auto-fill on — Discover picks will keep #' + _room + ' going'
+      : 'Auto-fill off', 'info', 2000); } catch {}
+    try { _render(); } catch {}
+    if (next) { try { _maybeAutoFillEmptyQueue(); } catch {} }
+  }
+  let _autoFillLastAt = 0;
+  let _autoFillInFlight = false;
+  async function _maybeAutoFillEmptyQueue() {
+    if (!_room || !_state || !_state.can_control) return;
+    if (!_autoFillEnabled(_room)) return;
+    const q = _state.queue || [];
+    if (q.length > 0) return;          // something is still playing / queued
+    if (_autoFillInFlight) return;
+    const now = Date.now();
+    if ((now - _autoFillLastAt) < 8000) return;  // debounce churn
+    _autoFillLastAt = now;
+    _autoFillInFlight = true;
+    try {
+      const S = window.Social;
+      let next = null;
+      if (S && typeof S.getNextMusicTrack === 'function') {
+        try { next = S.getNextMusicTrack('', {}); } catch {}
+      }
+      if ((!next || !next.url) && S && typeof S.fetchDiscoverMusicTrack === 'function') {
+        try { next = await S.fetchDiscoverMusicTrack(''); } catch {}
+      }
+      if (next && next.url) {
+        try { UI.showToast && UI.showToast('Auto-fill: queued a Discover pick 🎵', 'info', 1800); } catch {}
+        try { await submit(next.url); } catch {}
+      }
+    } finally {
+      _autoFillInFlight = false;
+    }
+  }
   function _syncAutoNextButtons() {
     const on = _autoNextEnabled();
     const svg = on ? _AUTONEXT_ON_SVG : _AUTONEXT_OFF_SVG;
@@ -1237,6 +1287,7 @@ const Music = (() => {
         </div>
       </div>` : '';
 
+    const _afOn = _state.can_control && _autoFillEnabled(_room);
     const submitHtml = _state.can_submit ? `
       <div class="mp-submit">
         <button class="mp-btn primary mp-add-btn" onclick="Music.openAddModal()" title="Add a track to the queue">
@@ -1247,6 +1298,11 @@ const Music = (() => {
             <input type="checkbox" ${_state.dj_only ? 'checked' : ''} onchange="Music.toggleDJOnly()">
             <span class="mp-dj-track"><span class="mp-dj-knob"></span></span>
             <span class="mp-dj-label">${_state.dj_only ? '🎧 DJ-only' : '👥 Open'}</span>
+          </label>
+          <label class="mp-dj-toggle mp-autofill-toggle" title="${_afOn ? 'Auto-fill ON — when the queue empties, Discover picks a track' : 'Auto-fill OFF — queue will stop when empty'}">
+            <input type="checkbox" ${_afOn ? 'checked' : ''} onchange="Music.toggleAutoFill()">
+            <span class="mp-dj-track"><span class="mp-dj-knob"></span></span>
+            <span class="mp-dj-label">${_afOn ? '🪄 Auto-fill' : '🪄 Auto-fill'}</span>
           </label>` : ''}
       </div>` : `<div class="mp-empty" style="padding:8px">Only DJs may add tracks in this channel.</div>`;
 
@@ -1748,6 +1804,12 @@ const Music = (() => {
     _muted = false;
     _renderDock(track);
     _emitState();
+    // Critical: kick off the sync probe so the YT iframe's 'listening'
+    // handshake gets sent. Without this, onStateChange messages never
+    // come back and _maybeAutoAdvanceOnEnded() never fires when the
+    // solo track ends — auto-next would silently die. The probe is
+    // cheap (postMessage every 4s) and self-stops on pause/unmount.
+    try { _startSyncProbeIfNeeded(); } catch {}
     return true;
   }
 
@@ -2075,11 +2137,19 @@ const Music = (() => {
         _renderDock(cur);
         try { _syncPlayPauseButtons(); } catch {}
       } else {
-        // Queue emptied while minimized — clean up everything.
-        close();
+        // Queue emptied while minimized — give auto-fill a chance
+        // before tearing down. If the owner has the toggle on, we'll
+        // submit a Discover pick and the next ws event will rebuild.
+        try { await _maybeAutoFillEmptyQueue(); } catch {}
+        // Re-check: if auto-fill landed something the next ws event
+        // is already on its way. Either way close() is safe to skip
+        // if a new track is now in the queue.
+        const after = (_state && _state.queue && _state.queue[0]) || null;
+        if (!after) close();
       }
     } else {
       _render();
+      try { _maybeAutoFillEmptyQueue(); } catch {}
     }
   }
 
@@ -2123,6 +2193,7 @@ const Music = (() => {
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
            toggleAutoNext,
+           toggleAutoFill,
            _syncAutoNextButtons,
            openAddModal, closeAddModal, submitFromModal,
            openPlaylistModal, closePlaylistModal,
