@@ -825,16 +825,53 @@ async def receive_bridge_message(body: BridgeMessageRequest):
 
     media_type = None
     if body.media_url:
-        media_type = "image/jpeg"
-        lower = body.media_url.lower()
-        if lower.endswith(".gif"):
-            media_type = "image/gif"
-        elif lower.endswith(".webp"):
-            media_type = "image/webp"
-        elif lower.endswith(".png"):
-            media_type = "image/png"
-        elif lower.endswith(".mp4") or lower.endswith(".webm"):
-            media_type = "video/mp4"
+        mu = body.media_url.strip()
+        # Prefer the explicit MIME prefix on `data:` URLs — that's how
+        # bridges (Telegram voice notes, Discord uploads) deliver audio
+        # and video. Falling through to the URL-suffix sniffer below
+        # would mis-tag `data:audio/ogg;base64,…` as image/jpeg and the
+        # client would render a broken <img>.
+        if mu.lower().startswith("data:"):
+            try:
+                # data:<mime>[;params],<payload>
+                head = mu.split(",", 1)[0]  # "data:audio/ogg;base64"
+                mt = head[5:].split(";", 1)[0].strip().lower()
+                if "/" in mt:
+                    media_type = mt
+            except Exception:
+                pass
+        if not media_type:
+            lower = mu.lower()
+            # Strip query/fragment before suffix-matching so URLs like
+            # https://cdn/file.mp4?sig=… are still detected.
+            path_only = lower.split("?", 1)[0].split("#", 1)[0]
+            if path_only.endswith(".gif"):
+                media_type = "image/gif"
+            elif path_only.endswith(".webp"):
+                media_type = "image/webp"
+            elif path_only.endswith(".png"):
+                media_type = "image/png"
+            elif path_only.endswith(".jpg") or path_only.endswith(".jpeg"):
+                media_type = "image/jpeg"
+            elif path_only.endswith(".mp4") or path_only.endswith(".m4v"):
+                media_type = "video/mp4"
+            elif path_only.endswith(".webm"):
+                media_type = "video/webm"
+            elif path_only.endswith(".mov"):
+                media_type = "video/quicktime"
+            elif path_only.endswith(".ogg") or path_only.endswith(".oga") or path_only.endswith(".opus"):
+                media_type = "audio/ogg"
+            elif path_only.endswith(".mp3"):
+                media_type = "audio/mpeg"
+            elif path_only.endswith(".m4a") or path_only.endswith(".aac"):
+                media_type = "audio/mp4"
+            elif path_only.endswith(".wav"):
+                media_type = "audio/wav"
+            else:
+                # Last-resort default: only image/jpeg if no clue at all.
+                # Still better than nothing for HTTP CDN URLs without a
+                # recognized extension (Telegram thumbnails, etc.).
+                media_type = "image/jpeg"
 
     # Save to DB as a bridge message. user_id must reference a real user row
     # (FK constraint) — attribute to the bridge owner so history is preserved.
