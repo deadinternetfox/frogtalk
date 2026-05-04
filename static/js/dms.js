@@ -1144,17 +1144,27 @@ function renderDMChat () {
   }
   _dmMessages = _dmMessages.map(m => _normalizeDMMessage(m));
   area.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
-  // One-shot toast per DM session if any message body is still cipher-shaped
+  // One-shot dialog per DM session if any message body is still cipher-shaped
   // after every decrypt path. This is almost always the multi-device-rotation
-  // case; point the user at Encryption info → Reset keys.
+  // case; offer a direct jump to Encryption info → Reset keys.
   try {
     const cid = _activeDM?.id;
     if (cid && !_cannotDecryptToastShown.has(cid)) {
       const undec = _dmMessages.filter(m => typeof m?.content === 'string' && _looksEncryptedBlob(m.content)).length;
       if (undec > 0) {
         _cannotDecryptToastShown.add(cid);
-        if (typeof UI !== 'undefined' && UI.showToast) {
-          UI.showToast(`🔒 ${undec} message${undec===1?'':'s'} can't be decrypted on this device. Tap the lock → Reset keys to start fresh.`, 'info', 6500);
+        if (typeof UI !== 'undefined' && UI.notice) {
+          UI.notice({
+            icon: '🔒',
+            title: "Some messages can't be decrypted",
+            message: `${undec} message${undec===1?'':'s'} in this chat ${undec===1?'was':'were'} encrypted to a different device of yours and can't be read here.\n\nNew messages will work normally. To start fresh, open Encryption settings and reset your keys on this device.`,
+            primaryLabel: 'Got it',
+            actionLabel: 'Open encryption settings',
+          }).then(r => {
+            if (r === 'action' && typeof toggleEncryptionInfo === 'function') {
+              try { toggleEncryptionInfo(); } catch {}
+            }
+          });
         }
       }
     }

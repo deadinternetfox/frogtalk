@@ -763,7 +763,72 @@ const UI = (() => {
     });
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, handleSelfStatusClick, setNowPlayingEnabled };
+  // Single-action informational dialog with an optional secondary action
+  // (e.g. "Open encryption settings"). Returns a Promise that resolves to
+  // 'ok' (primary), 'action' (secondary), or 'dismiss' (Esc / backdrop).
+  function notice(opts) {
+    if (typeof opts === 'string') opts = { message: opts };
+    opts = opts || {};
+    const message      = String(opts.message || '');
+    const title        = opts.title != null ? String(opts.title) : '';
+    const icon         = opts.icon != null ? String(opts.icon) : '';
+    const primaryLabel = String(opts.primaryLabel || 'OK');
+    const actionLabel  = opts.actionLabel != null ? String(opts.actionLabel) : '';
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.style.cssText =
+        'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;' +
+        'justify-content:center;padding:16px;background:rgba(0,0,0,.55);' +
+        'backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);';
+      const titleHtml = title
+        ? `<div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;margin-bottom:10px;color:var(--text-color,#e8e8e8)">${
+            icon ? `<span style="font-size:20px;line-height:1">${escHtml(icon)}</span>` : ''
+          }<span>${escHtml(title)}</span></div>`
+        : '';
+      const actionBtn = actionLabel
+        ? `<button type="button" class="modal-btn primary" data-act="action" style="flex:1">${escHtml(actionLabel)}</button>`
+        : '';
+      overlay.innerHTML =
+        '<div class="modal-box" role="dialog" aria-modal="true" ' +
+        'style="max-width:min(440px,94vw);padding:20px 20px 16px;' +
+        'background:linear-gradient(180deg,' +
+          'color-mix(in srgb, var(--accent-color,#4caf50) 14%, var(--surface-color,#1e1e1e)) 0%,' +
+          'color-mix(in srgb, var(--accent-color,#4caf50) 8%,  var(--surface-color,#1e1e1e)) 100%);' +
+        'border:1px solid color-mix(in srgb, var(--accent-color,#4caf50) 30%, var(--border-color,#2a2a2a));' +
+        'border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.6);' +
+        'color:var(--text-color,#e8e8e8)">' +
+          titleHtml +
+          `<div style="font-size:14px;line-height:1.5;color:var(--text-color,#d6d6d6);white-space:pre-wrap;opacity:.95">${escHtml(message)}</div>` +
+          '<div style="display:flex;gap:8px;margin-top:18px">' +
+            actionBtn +
+            `<button type="button" class="modal-btn ${actionLabel ? 'secondary' : 'primary'}" data-act="ok" style="flex:${actionLabel ? '0 0 auto' : '1'};min-width:88px">${escHtml(primaryLabel)}</button>` +
+          '</div>' +
+        '</div>';
+      let done = false;
+      const cleanup = (val) => {
+        if (done) return; done = true;
+        document.removeEventListener('keydown', onKey, true);
+        try { overlay.remove(); } catch {}
+        resolve(val);
+      };
+      const onKey = (ev) => {
+        if (ev.key === 'Escape')     { ev.preventDefault(); cleanup('dismiss'); }
+        else if (ev.key === 'Enter') { ev.preventDefault(); cleanup('ok'); }
+      };
+      overlay.addEventListener('click', (ev) => {
+        if (ev.target === overlay) return cleanup('dismiss');
+        const act = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-act');
+        if (act === 'ok') cleanup('ok');
+        else if (act === 'action') cleanup('action');
+      });
+      document.addEventListener('keydown', onKey, true);
+      document.body.appendChild(overlay);
+      try { overlay.querySelector('[data-act="ok"]').focus(); } catch {}
+    });
+  }
+
+  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled };
 })();
 
 // ─── ChatVideo: themed inline video player for chat ──────────────────────────
@@ -3629,26 +3694,24 @@ function toggleEncryptionInfo() {
     const peer = (typeof _activeDM !== 'undefined' && _activeDM) ? _activeDM : null;
     const me = State?.user?.nickname || State?.nickname || '';
     const them = peer?.nickname || '';
-    if (!peer || !them || !me) {
-      UI.showToast('Open a DM to verify its encryption.', 'info');
-      return;
-    }
-    if (typeof Crypto === 'undefined' || !Crypto.fingerprint) {
+    if (typeof Crypto === 'undefined') {
       UI.showToast('🔒 AES-256-GCM end-to-end encryption.', 'success');
       return;
     }
     const slot = document.getElementById('enc-verify-emojis');
     const peerEl = document.getElementById('enc-verify-peer');
     const fpEl = document.getElementById('enc-device-fp');
-    if (peerEl) peerEl.textContent = '@' + them;
-    if (slot) slot.textContent = '· · · ·';
+    if (peerEl) peerEl.textContent = them ? '@' + them : 'this chat';
+    if (slot) slot.textContent = them ? '· · · ·' : '— — — —';
     if (fpEl) fpEl.textContent = '…';
     openModal('modal-encrypt-verify');
-    Crypto.fingerprint(me, them).then(emojis => {
-      if (slot) slot.textContent = emojis.join(' ');
-    }).catch(() => {
-      if (slot) slot.textContent = '—';
-    });
+    if (them && me && Crypto.fingerprint) {
+      Crypto.fingerprint(me, them).then(emojis => {
+        if (slot) slot.textContent = emojis.join(' ');
+      }).catch(() => {
+        if (slot) slot.textContent = '—';
+      });
+    }
     if (Crypto.publicKeyFingerprint) {
       Crypto.publicKeyFingerprint().then(fp => {
         if (fpEl) fpEl.textContent = fp || '—';
@@ -3657,7 +3720,7 @@ function toggleEncryptionInfo() {
       });
     }
   } catch (e) {
-    UI.showToast('Could not compute encryption fingerprint.', 'error');
+    UI.showToast('Could not open encryption settings.', 'error');
   }
 }
 

@@ -470,8 +470,18 @@ const App = {
           } catch {}
           if (serverPub && serverPub !== localPub) {
             try {
-              if (typeof UI !== 'undefined' && UI.showToast) {
-                UI.showToast('Another device was your active DM device. New messages will now arrive here — older messages may show 🔒 until that device sends again.', 'info', 6500);
+              if (typeof UI !== 'undefined' && UI.notice) {
+                UI.notice({
+                  icon: '🔄',
+                  title: 'This device is now active for DMs',
+                  message: "Another device of yours was the active DM device. New messages will arrive here from now on.\n\nOlder messages on your other device may show as \u201ccan't be decrypted\u201d here until that device sends a new message.",
+                  primaryLabel: 'Got it',
+                  actionLabel: 'Open encryption settings',
+                }).then(r => {
+                  if (r === 'action' && typeof toggleEncryptionInfo === 'function') {
+                    try { toggleEncryptionInfo(); } catch {}
+                  }
+                });
               }
             } catch {}
           }
