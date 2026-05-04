@@ -10,6 +10,7 @@ const UI = (() => {
   // the user's status_msg auto-mirrors the active mini-player track.
   // Tapping the status link then jumps to the source (channel or post).
   const _NOWPLAYING_LS_KEY = 'frogtalk:status:nowplaying';
+  const _NOWPLAYING_SAVED_LS_KEY = 'frogtalk:status:nowplaying:saved';
   let _nowPlayingActive = false;        // status currently shows a track
   let _nowPlayingLastTitle = '';        // last track title we pushed
   let _nowPlayingSavedMsg = null;       // user's manual msg before takeover
@@ -21,6 +22,22 @@ const UI = (() => {
       const v = localStorage.getItem(_NOWPLAYING_LS_KEY);
       return v !== '0';
     } catch { return true; }
+  }
+  // Persisted saved-msg helpers. We need this to survive reloads:
+  // otherwise if the user reloads while a 🎵 status was live and then
+  // unticks the toggle, _nowPlayingActive is false → nothing restores
+  // → the song title stays stuck as their status.
+  function _readSavedMsg() {
+    try {
+      const v = localStorage.getItem(_NOWPLAYING_SAVED_LS_KEY);
+      return v == null ? null : String(v);
+    } catch { return null; }
+  }
+  function _writeSavedMsg(v) {
+    try {
+      if (v == null) localStorage.removeItem(_NOWPLAYING_SAVED_LS_KEY);
+      else localStorage.setItem(_NOWPLAYING_SAVED_LS_KEY, String(v));
+    } catch {}
   }
 
   function escHtml(s) {
@@ -330,14 +347,24 @@ const UI = (() => {
   // Called on every music:statechange and once at boot.
   function _syncNowPlayingStatus() {
     if (!_nowPlayingEnabled() || !State?.user) {
-      // Toggle is off — release any takeover that was in effect.
-      if (_nowPlayingActive) {
+      // Toggle is off — release any takeover that was in effect, AND
+      // also recover from a stale 🎵 status that survived a page
+      // reload (in-memory _nowPlayingActive resets to false on reload,
+      // so without this branch the song title would stay forever).
+      const curMsg = String(State?.user?.status_msg || '');
+      const looksLikeMusic = curMsg.indexOf('🎵') === 0;
+      if (_nowPlayingActive || looksLikeMusic) {
         _nowPlayingActive = false;
-        const restore = _nowPlayingSavedMsg ?? '';
+        const persisted = _readSavedMsg();
+        const restore = (_nowPlayingSavedMsg != null) ? _nowPlayingSavedMsg
+                       : (persisted != null) ? persisted
+                       : '';
         _nowPlayingSavedMsg = null;
+        _writeSavedMsg(null);
         _nowPlayingLastTitle = '';
         const presence = (State?.user?.presence) || 'online';
-        _saveStatusSilent(presence, restore);
+        // Only PATCH if we'd actually be changing something.
+        if (restore !== curMsg) _saveStatusSilent(presence, restore);
       }
       return;
     }
@@ -356,21 +383,42 @@ const UI = (() => {
       const title = '🎵 ' + rawTitle;
       if (title === _nowPlayingLastTitle && _nowPlayingActive) return;
       // First time we take over the status: stash whatever the user had.
+      // Persist to localStorage so a reload mid-takeover doesn't lose it.
       if (!_nowPlayingActive) {
-        _nowPlayingSavedMsg = String(State.user.status_msg || '');
+        const prev = String(State.user.status_msg || '');
+        // Don't overwrite saved with another 🎵 string — that would
+        // happen if the takeover migrates to a new track and the
+        // previous status was already the old 🎵 title.
+        if (prev.indexOf('🎵') !== 0) {
+          _nowPlayingSavedMsg = prev;
+          _writeSavedMsg(prev);
+        } else if (_nowPlayingSavedMsg == null) {
+          // Reload mid-takeover: rehydrate from LS if present so a
+          // later untick still restores the right thing.
+          _nowPlayingSavedMsg = _readSavedMsg();
+        }
       }
       _nowPlayingActive = true;
       _nowPlayingLastTitle = title;
       const presence = (State?.user?.presence) || 'online';
       _saveStatusSilent(presence, title);
-    } else if (_nowPlayingActive) {
-      // Music stopped — restore the user's manual message.
+    } else if (_nowPlayingActive || String(State.user.status_msg || '').indexOf('🎵') === 0) {
+      // Music stopped — restore the user's manual message. Same
+      // reload-recovery branch as the toggle-off path: even if the
+      // in-memory takeover flag is false, a stuck 🎵 status from a
+      // previous session should be cleared.
       _nowPlayingActive = false;
       _nowPlayingLastTitle = '';
-      const restore = _nowPlayingSavedMsg ?? '';
+      const persisted = _readSavedMsg();
+      const restore = (_nowPlayingSavedMsg != null) ? _nowPlayingSavedMsg
+                     : (persisted != null) ? persisted
+                     : '';
       _nowPlayingSavedMsg = null;
+      _writeSavedMsg(null);
       const presence = (State?.user?.presence) || 'online';
-      _saveStatusSilent(presence, restore);
+      if (restore !== String(State.user.status_msg || '')) {
+        _saveStatusSilent(presence, restore);
+      }
     }
   }
 
