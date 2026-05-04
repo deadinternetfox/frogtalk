@@ -1533,6 +1533,23 @@ const Social = (() => {
       prev.has_unviewed = true;
       prev.idx = -1;
       _chatStoryByNick.set(key, prev);
+      // Direct DOM sweep — paint EVERY currently rendered avatar for
+      // this nickname right now, regardless of whether the cache has
+      // been refreshed. This guarantees the ring re-colors even if a
+      // subsequent /stories/active refresh races and overwrites the
+      // cache. The decorate loop also runs as belt-and-braces.
+      try {
+        const safeNick = String(nickname).replace(/"/g, '\\"');
+        const sel = `.msg-avatar[data-nick="${safeNick}"], [data-story-target][data-nick="${safeNick}"]`;
+        document.querySelectorAll(sel).forEach(el => {
+          const isBridged = !!(el.getAttribute('data-bridge') || '').trim();
+          if (isBridged) return; // never inherit native rings on bridged senders
+          el.classList.add('has-story');
+          el.classList.add('unviewed');
+          el.classList.remove('viewed');
+          el.dataset.storyUserid = String(prev.user_id || 0);
+        });
+      } catch {}
       try { decorateChatAvatars(document); } catch {}
     } catch {}
     // True up against the server in the background — covers cases where
