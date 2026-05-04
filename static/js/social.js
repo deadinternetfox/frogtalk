@@ -2789,7 +2789,7 @@ const Social = (() => {
     if (mediaPosts.length > 0) {
       html += `<div class="social-grid">${mediaPosts.map(p => `
         <div class="social-grid-item" onclick="Social.viewPostDetail(${p.id})">
-          <img src="${esc(p.media_data)}" alt="" loading="lazy"
+          <img src="${esc(_authMediaSrc(p.media_data))}" alt="" loading="lazy" decoding="async"
                onerror="this.closest('.social-grid-item')?.remove()">
           <div class="social-grid-overlay">
             <span>❤️ ${p.reaction_count || 0}</span>
