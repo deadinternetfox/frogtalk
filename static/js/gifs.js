@@ -7,6 +7,8 @@ const GIFs = (() => {
   let _searchTimeout = null;
   let _currentTab = 'gifs';  // 'gifs' or 'stickers'
   let _stickerPacks = [];
+  let _stickersById = new Map(); // sticker_id -> { image_data, name }
+  let _stickerGridDelegated = false;
   let _gifReqSeq = 0;
   let _gifAbortController = null;
 
@@ -594,22 +596,34 @@ const GIFs = (() => {
       }
       
       let html = '';
+      _stickersById.clear();
       for (const pack of _stickerPacks) {
         const packRes = await apiFetch(`/api/media/stickers/packs/${pack.id}`);
         if (packRes.ok) {
           const packData = await packRes.json();
           if (packData.stickers && packData.stickers.length > 0) {
             html += `<div class="sticker-pack-header">${UI.escHtml(pack.name)}</div>`;
-            html += packData.stickers.map(s => `
-              <div class="sticker-item" onclick="GIFs.sendSticker('${s.image_data}')" title="${UI.escHtml(s.name)}">
-                <img src="${s.image_data}" alt="${UI.escHtml(s.name)}" loading="lazy">
-              </div>
-            `).join('');
+            html += packData.stickers.map(s => {
+              _stickersById.set(String(s.id), { image_data: s.image_data, name: s.name });
+              return `
+              <div class="sticker-item" data-sticker-id="${UI.escHtml(String(s.id))}" title="${UI.escHtml(s.name)}">
+                <img src="${UI.escHtml(s.image_data)}" alt="${UI.escHtml(s.name)}" loading="lazy">
+              </div>`;
+            }).join('');
           }
         }
       }
       
       grid.innerHTML = html || '<div class="gif-empty">No stickers in your packs</div>';
+      if (!_stickerGridDelegated) {
+        grid.addEventListener('click', e => {
+          const item = e.target.closest('.sticker-item[data-sticker-id]');
+          if (!item) return;
+          const rec = _stickersById.get(String(item.dataset.stickerId || ''));
+          if (rec && rec.image_data) sendSticker(rec.image_data);
+        });
+        _stickerGridDelegated = true;
+      }
     } catch (e) {
       grid.innerHTML = '<div class="gif-empty">Failed to load stickers</div>';
     }

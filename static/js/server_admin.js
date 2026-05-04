@@ -507,8 +507,8 @@
     }
     onlineUsersBody.innerHTML = users.map(u => `
       <tr>
-        <td>${u.nickname || `#${u.user_id}`}</td>
-        <td>${u.connections || 0}</td>
+        <td>${escHtml(u.nickname || `#${u.user_id}`)}</td>
+        <td>${Number(u.connections) || 0}</td>
         <td>${u.is_admin ? 'admin' : 'user'}</td>
       </tr>
     `).join('');

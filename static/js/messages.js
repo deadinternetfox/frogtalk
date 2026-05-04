@@ -1118,10 +1118,14 @@ const Messages = (() => {
 
       State.messages[room].push(msg);
       
-      // Collect URLs for link previews (skip invite URLs — rendered as cards)
+      // Collect URLs for link previews (skip invite URLs — rendered as cards,
+      // and skip Frog Social profile/post/reel URLs — rendered as our own cards).
       const urls = (msg.content || '').match(urlRe);
-      if (urls && urls.length && !/\/invite\/[A-Za-z0-9]{6,16}/.test(urls[0])) {
-        linksToPreview.push({ id: msg.id, url: urls[0] });
+      if (urls && urls.length) {
+        const firstUrl = urls[0];
+        const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
+        const isSocial = !!_parseFrogSocialUrl(firstUrl);
+        if (!isInvite && !isSocial) linksToPreview.push({ id: msg.id, url: firstUrl });
       }
     });
 

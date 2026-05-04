@@ -125,6 +125,33 @@ const Music = (() => {
   // looks out of place next to the SVG skip icon.
   const _PLAY_SVG  = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M8 5v14l11-7z"/></svg>';
   const _PAUSE_SVG = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>';
+  // Auto-next ON: stylized ⏭ with a small loop indicator. OFF: same skip
+  // glyph dimmed with a strike. Kept as inline SVG so it sits next to the
+  // other dock controls without font-emoji weirdness.
+  const _AUTONEXT_ON_SVG  = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/><circle cx="20" cy="5" r="3" fill="#4caf50"/></svg>';
+  const _AUTONEXT_OFF_SVG = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;opacity:0.55"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/><path d="M3 21L21 3" stroke="#e74c3c" stroke-width="2" fill="none"/></svg>';
+  const _AUTONEXT_LS_KEY = 'frogtalk:music:autonext';
+  function _autoNextEnabled() {
+    try { return localStorage.getItem(_AUTONEXT_LS_KEY) !== '0'; } catch { return true; }
+  }
+  function _syncAutoNextButtons() {
+    const on = _autoNextEnabled();
+    const svg = on ? _AUTONEXT_ON_SVG : _AUTONEXT_OFF_SVG;
+    document.querySelectorAll('[data-autonext-btn]').forEach(b => {
+      b.dataset.on = on ? '1' : '0';
+      b.classList.toggle('on', on);
+      b.title = on ? 'Auto-next: on (click to disable)' : 'Auto-next: off (click to enable)';
+      b.setAttribute('aria-label', b.title);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.innerHTML = svg;
+    });
+  }
+  function toggleAutoNext(btn) {
+    const next = !_autoNextEnabled();
+    try { localStorage.setItem(_AUTONEXT_LS_KEY, next ? '1' : '0'); } catch {}
+    _syncAutoNextButtons();
+    try { UI.showToast && UI.showToast('Auto-next ' + (next ? 'on' : 'off'), 'info', 1500); } catch {}
+  }
 
   // Single source of truth for "is the player effectively paused right
   // now?". Combines user intent (_paused) with YouTube's reported state
@@ -1343,6 +1370,9 @@ const Music = (() => {
                 onclick="event.stopPropagation();Music.togglePause(this)">${_PAUSE_SVG}</button>
         ${canSkip ? `<button class="mmd-btn" title="Skip" aria-label="Skip"
                        onclick="event.stopPropagation();Music.skip()">${_SKIP_SVG}</button>` : ''}
+        <button class="mmd-btn mmd-autonext" data-autonext-btn data-on="${_autoNextEnabled() ? '1' : '0'}"
+                title="Auto-next" aria-label="Auto-next"
+                onclick="event.stopPropagation();Music.toggleAutoNext(this)">${_autoNextEnabled() ? _AUTONEXT_ON_SVG : _AUTONEXT_OFF_SVG}</button>
         <button class="mmd-btn mmd-close" title="Stop" aria-label="Stop"
                 onclick="event.stopPropagation();Music.close()">✕</button>
       </div>`;
@@ -1352,6 +1382,7 @@ const Music = (() => {
     // this the dock would always show "playing" on re-render even if YT
     // has auto-paused or the user backgrounded the app.
     try { _syncPlayPauseButtons(); } catch {}
+    try { _syncAutoNextButtons(); } catch {}
   }
 
   function _miniBarHtml(titleEsc, provider) {
@@ -1764,6 +1795,9 @@ const Music = (() => {
     if (!_state || !_state.can_control) return;
     if (q.length < 2) return;
     if ((cur.provider || '') !== 'youtube') return;
+    // YouTube-style toggle: when auto-next is off, let the track end
+    // and stay on it instead of skipping to the next queued item.
+    if (!_autoNextEnabled()) return;
 
     const key = `${_room}:${cur.id}`;
     const now = Date.now();
@@ -1887,6 +1921,7 @@ const Music = (() => {
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
+           toggleAutoNext,
            openAddModal, closeAddModal, submitFromModal,
            openPlaylistModal, closePlaylistModal,
            toggleCollapse,

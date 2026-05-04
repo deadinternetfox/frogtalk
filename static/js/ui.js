@@ -1023,7 +1023,7 @@ function fmtAv(avatar, nick, size) {
   if (s && (s.startsWith('data:') || s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/'))) {
     return `<img src="${UI.escHtml(s)}" alt="" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;vertical-align:middle;display:inline-block">`;
   }
-  if (s) return `<span style="font-size:${Math.round(size*0.9)}px;line-height:1;vertical-align:middle">${s}</span>`;
+  if (s) return `<span style="font-size:${Math.round(size*0.9)}px;line-height:1;vertical-align:middle">${UI.escHtml(s)}</span>`;
   const initial = (nick || '?')[0].toUpperCase();
   const colors = ['#1a3a1a', '#2a1a3a', '#3a1a1a', '#1a2a3a', '#3a2a1a'];
   const idx = (nick || '').charCodeAt(0) % colors.length || 0;
