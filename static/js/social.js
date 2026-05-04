@@ -1755,6 +1755,21 @@ const Social = (() => {
       _recomputeUserStorySeenState(user);
       _setProfileRingViewedStateForUser(user.nickname, !!user.has_unviewed);
       _rerenderStoriesBarInDom();
+      // Also flip the chat-avatar ring (channel + DM) from unviewed
+      // colored gradient to the viewed grey ring as soon as the user
+      // opens the story. Without this, going back to chat still shows
+      // the colored ring until the next /api/social/stories refresh.
+      try {
+        if (user.nickname) {
+          const key = String(user.nickname).toLowerCase();
+          const prev = _chatStoryByNick.get(key);
+          if (prev) {
+            prev.has_unviewed = !!user.has_unviewed;
+            _chatStoryByNick.set(key, prev);
+          }
+          decorateChatAvatars(document);
+        }
+      } catch {}
     }
 
     let viewer = document.getElementById('story-viewer');
