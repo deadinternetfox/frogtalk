@@ -56,10 +56,13 @@ const Social = (() => {
     return true;
   }
 
-  const api = async (path, method, body) => {
-    let res;
+  // Statuses where a single quick retry has a high chance of succeeding.
+  // Real 4xx (401/403/404 etc.) propagate immediately so callers can render
+  // the correct UI ("User not found", "Forbidden") instead of looping.
+  const _TRANSIENT_STATUSES = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
+  const _attemptApi = async (path, method, body) => {
     try {
-      res = await Promise.race([
+      return await Promise.race([
         apiFetch(path, method, body),
         new Promise(resolve => setTimeout(() => resolve(
           _jsonErrorResponse(504, 'Request timed out')
@@ -67,6 +70,22 @@ const Social = (() => {
       ]);
     } catch {
       return _jsonErrorResponse(503, 'Network unavailable');
+    }
+  };
+  const api = async (path, method, body) => {
+    let res = await _attemptApi(path, method, body);
+    // One automatic retry on transient failures so a brief CF/server hiccup
+    // doesn't get rendered as "User not found" / "No posts yet" forever.
+    if (!res.ok && _TRANSIENT_STATUSES.has(Number(res.status) || 0)) {
+      await new Promise(r => setTimeout(r, 350));
+      const retry = await _attemptApi(path, method, body);
+      // Only swap in the retry if it actually improved things — otherwise
+      // keep the original response so error semantics are preserved.
+      if (retry.ok || !_TRANSIENT_STATUSES.has(Number(retry.status) || 0)) {
+        res = retry;
+      } else {
+        res = retry;
+      }
     }
     if (!res.ok) {
       // Try to parse JSON error, otherwise create a synthetic JSON response
@@ -2253,7 +2272,26 @@ const Social = (() => {
       } else {
         _updateTabLoadUi(loadUi, 28, 'Downloading profile', `Fetching @${nickname}'s info…`);
         const res = await api('/api/social/profile/' + encodeURIComponent(nickname));
-        if (!res.ok) { content.innerHTML = '<div class="social-empty">User not found</div>'; return; }
+        if (!res.ok) {
+          // Only treat a clean 404 as "user doesn't exist". Transient failures
+          // (5xx / 429 / network / timeout) get a retry button instead of
+          // misreporting the user as missing.
+          const status = Number(res.status) || 0;
+          const safeNick = esc(String(nickname || ''));
+          if (status === 404) {
+            content.innerHTML = `<div class="social-empty">User @${safeNick} not found</div>`;
+          } else {
+            const label = status === 429 ? 'Slow down — too many requests'
+                        : status === 401 || status === 403 ? 'You don\u2019t have access to this profile'
+                        : 'Couldn\u2019t load profile';
+            content.innerHTML = `
+              <div class="social-empty" style="display:flex;flex-direction:column;align-items:center;gap:10px">
+                <div>${label}</div>
+                <button class="primary-btn" onclick="Social.openProfile('${safeNick}')">Retry</button>
+              </div>`;
+          }
+          return;
+        }
         u = await res.json();
         _profileCache.set(cacheKey, { ts: Date.now(), profile: u });
       }
