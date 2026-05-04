@@ -607,6 +607,173 @@ async def get_post_media(
     )
 
 
+# ── Server-side video thumbnail (poster) ───────────────────────────────
+# Browsers can't be trusted to render a representative <video> first
+# frame — most clips have a black/fade-in intro, and seeking via JS
+# requires downloading meaningful chunks of the file. We extract a
+# single mid-frame JPG with ffmpeg once and cache it on disk so every
+# subsequent request is a static-file send.
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+
+_THUMB_DIR = Path(os.environ.get("FROGTALK_DATA_DIR", "data")) / "thumbs"
+_THUMB_DIR.mkdir(parents=True, exist_ok=True)
+_FFMPEG_BIN = shutil.which("ffmpeg")
+
+
+def _thumb_path(post_id: int) -> Path:
+    return _THUMB_DIR / f"{int(post_id)}.jpg"
+
+
+def _generate_thumb_sync(post_id: int, raw_bytes: bytes) -> bool:
+    """Extract a JPG poster from raw video bytes. Returns True on success.
+    Tries seek positions 1.5s → 4.0s → 0.5s so a fade-in intro doesn't
+    leave us with a black thumbnail. Caps execution to ~6s wall time."""
+    if not _FFMPEG_BIN or not raw_bytes:
+        return False
+    out = _thumb_path(post_id)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tf:
+        tf.write(raw_bytes)
+        in_path = tf.name
+    try:
+        for ss in ("1.5", "4.0", "0.5", "0"):
+            tmp_out = out.with_suffix(f".part-{ss}.jpg")
+            try:
+                proc = subprocess.run(
+                    [
+                        _FFMPEG_BIN,
+                        "-y", "-loglevel", "error",
+                        "-ss", ss,
+                        "-i", in_path,
+                        "-frames:v", "1",
+                        "-vf", "scale='min(720,iw)':-2",
+                        "-q:v", "5",
+                        str(tmp_out),
+                    ],
+                    timeout=6.0,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                try: tmp_out.unlink()
+                except Exception: pass
+                continue
+            if proc.returncode == 0 and tmp_out.exists() and tmp_out.stat().st_size > 200:
+                try:
+                    tmp_out.replace(out)
+                except Exception:
+                    try: tmp_out.unlink()
+                    except Exception: pass
+                    continue
+                return True
+            try: tmp_out.unlink()
+            except Exception: pass
+        return False
+    finally:
+        try: os.unlink(in_path)
+        except Exception: pass
+
+
+@router.get("/posts/{post_id}/thumb")
+async def get_post_thumb(
+    post_id: int,
+    request: Request,
+    token: Optional[str] = Query(None),
+    x_session_token: Optional[str] = Header(None, alias="X-Session-Token"),
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+):
+    """Return a JPG poster for a video wall post. Generated once with
+    ffmpeg and cached at data/thumbs/{post_id}.jpg, so subsequent hits
+    are filesystem reads. Privacy mirrors get_post_media."""
+    session_token = (x_session_token or token or "").strip()
+    if not session_token and authorization:
+        auth = authorization.strip()
+        if auth.lower().startswith("bearer "):
+            session_token = auth[7:].strip()
+    if not session_token:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    cached = _thumb_path(post_id)
+    headers = {
+        "Cache-Control": "private, max-age=86400, immutable",
+        "Content-Type": "image/jpeg",
+        "X-Content-Type-Options": "nosniff",
+        "Vary": "X-Session-Token, Authorization",
+    }
+
+    def _serve_cached():
+        try:
+            data = cached.read_bytes()
+        except Exception:
+            return None
+        return Response(content=data, headers={**headers, "Content-Length": str(len(data))})
+
+    # Auth + privacy in worker thread so the event loop never touches SQLite.
+    def _resolve_owner_and_payload():
+        current_user = db.get_user_by_token(session_token)
+        if not current_user:
+            return ("unauth", None)
+        row = db.get_wall_post_media(post_id)
+        if not row or not row.get("media_data"):
+            return ("notfound", None)
+        media_type = (row.get("media_type") or "").lower()
+        if not media_type.startswith("video/"):
+            return ("notfound", None)
+        owner_id = int(row["user_id"])
+        viewer_id = int(current_user["id"])
+        privacy = (row.get("privacy") or "public").lower()
+        if owner_id != viewer_id:
+            if db.is_blocked_either_way(viewer_id, owner_id):
+                return ("notfound", None)
+            if privacy == "friends" and not db.are_friends(viewer_id, owner_id):
+                return ("forbidden", None)
+            if privacy == "followers" and not (
+                db.are_friends(viewer_id, owner_id) or db.is_following(viewer_id, owner_id)
+            ):
+                return ("forbidden", None)
+            if privacy not in ("public", "friends", "followers"):
+                return ("forbidden", None)
+        # Cache hit — no need to decode.
+        if cached.exists() and cached.stat().st_size > 200:
+            return ("cached", None)
+        media_data = row["media_data"]
+        if isinstance(media_data, str) and media_data.startswith("data:"):
+            try:
+                _, _, b64 = media_data.partition(",")
+                raw = base64.b64decode(b64, validate=False)
+            except Exception:
+                return ("decode_error", None)
+            return ("generate", raw)
+        return ("notfound", None)
+
+    kind, payload = await run_in_threadpool(_resolve_owner_and_payload)
+    if kind == "unauth":
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    if kind == "notfound":
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    if kind == "forbidden":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    if kind == "decode_error":
+        return JSONResponse(status_code=500, content={"error": "Decode failed"})
+    if kind == "cached":
+        resp = _serve_cached()
+        if resp is not None:
+            return resp
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    # kind == 'generate'
+    ok = await run_in_threadpool(_generate_thumb_sync, post_id, payload)
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "Thumb unavailable"})
+    resp = _serve_cached()
+    if resp is None:
+        return JSONResponse(status_code=404, content={"error": "Thumb unavailable"})
+    return resp
+
+
 @router.get("/profile/{nickname}/media")
 async def profile_media(
     nickname: str,

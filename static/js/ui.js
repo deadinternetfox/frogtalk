@@ -15,7 +15,12 @@ const UI = (() => {
   let _nowPlayingSavedMsg = null;       // user's manual msg before takeover
   let _nowPlayingPatchInflight = false; // crude debounce
   function _nowPlayingEnabled() {
-    try { return localStorage.getItem(_NOWPLAYING_LS_KEY) === '1'; } catch { return false; }
+    // Default ON — most users expect their status to mirror what they're
+    // listening to. Only an explicit '0' disables it.
+    try {
+      const v = localStorage.getItem(_NOWPLAYING_LS_KEY);
+      return v !== '0';
+    } catch { return true; }
   }
 
   function escHtml(s) {

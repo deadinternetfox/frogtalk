@@ -316,6 +316,22 @@ async def delete_wall_post(post_id: int, current_user: dict = Depends(get_curren
     """Delete a wall post. Admins can delete any post."""
     force = bool(current_user.get("is_admin"))
     if db.delete_wall_post(post_id, current_user["id"], force=force):
+        # Bust the social /feed and /explore micro-caches so the deleted
+        # post doesn't briefly resurface in the next 1.5s window.
+        try:
+            from routers import social as _social
+            _social._hot_cache.clear()
+        except Exception:
+            pass
+        # Drop the cached thumbnail so a re-uploaded video at the same
+        # post id wouldn't serve the old frame.
+        try:
+            from routers.social import _thumb_path
+            p = _thumb_path(post_id)
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
         return {"ok": True}
     return JSONResponse(status_code=404, content={"error": "Post not found or not yours"})
 

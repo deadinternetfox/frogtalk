@@ -207,6 +207,27 @@ const Social = (() => {
     }
   }
 
+  // Sibling of _authMediaSrc that rewrites a /media URL to its server-
+  // generated /thumb (a single mid-frame JPG cached on disk). Used as
+  // the <video poster="..."> attr so the browser shows a representative
+  // frame BEFORE any video bytes are downloaded — fixes "all reel
+  // previews are black" since the JS canvas-capture path was racing
+  // against an unreliable byte-range stream.
+  function _authMediaThumb(raw) {
+    const src = String(raw || '');
+    if (!src.startsWith('/api/social/posts/')) return '';
+    const token = String(State?.token || '');
+    try {
+      const u = new URL(src, window.location.origin);
+      // /api/social/posts/{id}/media → /api/social/posts/{id}/thumb
+      u.pathname = u.pathname.replace(/\/media$/, '/thumb');
+      if (token && !u.searchParams.get('token')) u.searchParams.set('token', token);
+      return `${u.pathname}${u.search}${u.hash}`;
+    } catch {
+      return '';
+    }
+  }
+
   let _socialVideoObserverStarted = false;
   let _socialVideoObserverInstance = null;
 
@@ -2991,7 +3012,7 @@ const Social = (() => {
         container.innerHTML = `<div class="social-grid">${mediaPosts.map(p => {
           const isVideo = p.media_type && p.media_type.startsWith('video/');
           const thumb = isVideo
-            ? `<video src="${esc(_authMediaSrc(p.media_data))}" muted preload="metadata"></video>`
+            ? `<video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" muted preload="metadata"></video>`
             : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
           return `
           <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
@@ -3167,7 +3188,7 @@ const Social = (() => {
       container.innerHTML = `${toggleHtml}<div class="social-grid">${mediaPosts.map(p => {
         const isVideo = p.media_type && p.media_type.startsWith('video/');
         const thumb = isVideo
-          ? `<video src="${esc(_authMediaSrc(p.media_data))}" muted preload="metadata"></video>`
+          ? `<video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" muted preload="metadata"></video>`
           : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
         return `
           <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
@@ -4285,7 +4306,7 @@ const Social = (() => {
       container.innerHTML = `<div class="social-grid">${posts.map(p => {
         return `
           <div class="social-grid-item is-video" onclick="Social.openSharedReel(${p.id})">
-            <video src="${esc(_authMediaSrc(p.media_data || ''))}" muted playsinline preload="auto"></video>
+            <video src="${esc(_authMediaSrc(p.media_data || ''))}" poster="${esc(_authMediaThumb(p.media_data || ''))}" muted playsinline preload="auto"></video>
             <span class="social-grid-video-ico">▶</span>
             <div class="social-grid-overlay">
               <span>❤️ ${p.reaction_count || 0}</span>
@@ -5681,6 +5702,31 @@ const Social = (() => {
     _profileRepostsCache.forEach(entry => apply(entry?.posts));
   }
 
+  // Strip a post from every in-memory cache after a delete. Without
+  // this a deleted post would resurrect every time the user navigated
+  // back to a cached tab — the cache TTL is 5 minutes and the network
+  // refetch only happens in the background, so the stale entry paints
+  // first. Also nukes any rendered DOM cards bearing that id.
+  function _purgePostFromCaches(postId) {
+    const pid = Number(postId);
+    if (!Number.isFinite(pid) || pid <= 0) return;
+    const filterOut = (posts) => Array.isArray(posts)
+      ? posts.filter(p => Number(p?.id) !== pid)
+      : posts;
+    if (_feedCache && Array.isArray(_feedCache.posts)) {
+      _feedCache.posts = filterOut(_feedCache.posts);
+    }
+    _exploreCache.forEach(entry => { if (entry) entry.posts = filterOut(entry.posts); });
+    _reelsCache.forEach(entry => { if (entry) entry.posts = filterOut(entry.posts); });
+    _musicCache.forEach(entry => { if (entry) entry.posts = filterOut(entry.posts); });
+    _profilePostsCache.forEach(entry => { if (entry) entry.posts = filterOut(entry.posts); });
+    try { _profileRepostsCache.forEach(entry => { if (entry) entry.posts = filterOut(entry.posts); }); } catch {}
+    try {
+      document.querySelectorAll(`.sf-post[data-post-id="${pid}"], .social-grid-item[data-post-id="${pid}"]`)
+        .forEach(el => el.remove());
+    } catch {}
+  }
+
   function _updateAllPostRepostBars(postId, newRepostCount, isReposted) {
     document.querySelectorAll(`.sf-post[data-post-id="${postId}"] [data-role="repost-toggle"]`).forEach(btn => {
       btn.classList.toggle('liked', !!isReposted);
@@ -5697,7 +5743,7 @@ const Social = (() => {
       if (p.media_type.startsWith('image/')) {
         mediaHtml = `<div class="sf-media"><img src="${esc(p.media_data)}" alt="" loading="lazy" decoding="async" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" onerror="this.closest('.sf-media')?.remove()"></div>`;
       } else if (p.media_type.startsWith('video/')) {
-        mediaHtml = `<div class="sf-media"><video src="${esc(_authMediaSrc(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
+        mediaHtml = `<div class="sf-media"><video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
       } else if (p.media_type.startsWith('music/')) {
         mediaHtml = _renderMusicCard(p);
         isMusicPost = true;
@@ -6174,6 +6220,7 @@ const Social = (() => {
     if (!confirm('Delete this post?')) return;
     try {
       await api(`/api/wall/posts/${postId}`, 'DELETE');
+      _purgePostFromCaches(postId);
       if (_currentTab === 'feed') loadFeed();
       else if (_currentTab === 'explore') loadExplore();
       else if (_currentTab === 'profile') loadProfile(_profileUser);
@@ -6183,6 +6230,7 @@ const Social = (() => {
   async function deletePostDirect(postId) {
     try {
       await api(`/api/wall/posts/${postId}`, 'DELETE');
+      _purgePostFromCaches(postId);
       try { UI.showToast('Post deleted', 'success'); } catch {}
       if (_currentTab === 'feed') loadFeed();
       else if (_currentTab === 'explore') loadExplore();

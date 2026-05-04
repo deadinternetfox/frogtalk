@@ -237,6 +237,23 @@ async def _start_telegram_bridge_nonblocking():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Bump anyio's default thread-pool from 40 → 200 tokens. FastAPI runs
+    # every sync dependency (e.g. get_current_user → SQLite session lookup)
+    # AND every run_in_threadpool() call against this pool. With 40 tokens
+    # a handful of concurrent /api/social/posts/{id}/media base64 decodes
+    # for multi-MB videos can pin the entire pool, so /auth/login and
+    # every other authenticated request queues behind them — looks like
+    # the whole server is hung when really we're just thread-starved.
+    # 200 is a safe ceiling: each worker thread is ~8 KiB stack + a single
+    # idle SQLite connection (cached thread-local), so even fully saturated
+    # we add at most ~2 MiB RSS and have plenty of headroom.
+    try:
+        import anyio
+        limiter = anyio.to_thread.current_default_thread_limiter()
+        limiter.total_tokens = 200
+        _log.info("anyio threadpool limiter raised to %d", int(limiter.total_tokens))
+    except Exception:
+        _log.exception("Failed to raise anyio threadpool limiter; using default")
     # Start background tasks
     tasks = [
         asyncio.create_task(cleanup_task()),
@@ -403,6 +420,19 @@ async def _security_headers(request: Request, call_next):
             "Strict-Transport-Security",
             "max-age=63072000; includeSubDomains; preload",
         )
+    # When the request arrives on a Tor hidden service (or the operator
+    # has opted the entire node into Tor mode), append a noindex header
+    # to every response so the .onion never gets cross-correlated with
+    # the clearnet host on Google/Bing/etc.
+    try:
+        host_hdr = (request.headers.get("host") or "").lower()
+        fwd_host = (request.headers.get("x-forwarded-host") or "").lower()
+        is_onion = host_hdr.endswith(".onion") or fwd_host.endswith(".onion")
+        is_tor_node = os.getenv("FROGTALK_TOR_MODE", "").strip() in ("1", "true", "yes", "on")
+        if is_onion or is_tor_node:
+            response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    except Exception:
+        pass
     return response
 
 app.include_router(auth.router, prefix="/api")
@@ -1325,7 +1355,31 @@ SITE_URL = os.getenv("FROGTALK_SITE_URL", "https://frogtalk.xyz").rstrip("/")
 
 
 @app.get("/robots.txt", include_in_schema=False)
-async def serve_robots():
+async def serve_robots(request: Request):
+    # Tor / onion mode: refuse all indexing so the hidden service URL
+    # doesn't end up cross-correlated with the clearnet host on
+    # Google/Bing/etc. We treat any of the following as "this request
+    # came in over a hidden service":
+    #   - FROGTALK_TOR_MODE=1 in env (operator opted the whole node in)
+    #   - the Host header is a .onion address
+    #   - the X-Forwarded-Host header is a .onion address (nginx proxy)
+    host_hdr = (request.headers.get("host") or "").lower()
+    fwd_host = (request.headers.get("x-forwarded-host") or "").lower()
+    is_onion = host_hdr.endswith(".onion") or fwd_host.endswith(".onion")
+    is_tor_node = os.getenv("FROGTALK_TOR_MODE", "").strip() in ("1", "true", "yes", "on")
+    if is_onion or is_tor_node:
+        from fastapi.responses import Response
+        body = (
+            "# Tor hidden service — no crawl, no archive.\n"
+            "User-agent: *\n"
+            "Disallow: /\n"
+            "Noindex: /\n"
+        )
+        return Response(
+            content=body,
+            media_type="text/plain; charset=utf-8",
+            headers={"X-Robots-Tag": "noindex, nofollow, noarchive"},
+        )
     # Default crawl policy: index public marketing/docs/profile/room pages,
     # but keep API, app shell, OG images and invite landings out of search.
     default_block = (
@@ -1380,7 +1434,24 @@ async def serve_robots():
 
 # ── llms.txt: machine-readable site summary for LLMs ─────────────────────────
 @app.get("/llms.txt", include_in_schema=False)
-async def serve_llms_txt():
+async def serve_llms_txt(request: Request):
+    host_hdr = (request.headers.get("host") or "").lower()
+    fwd_host = (request.headers.get("x-forwarded-host") or "").lower()
+    is_onion = host_hdr.endswith(".onion") or fwd_host.endswith(".onion")
+    is_tor_node = os.getenv("FROGTALK_TOR_MODE", "").strip() in ("1", "true", "yes", "on")
+    if is_onion or is_tor_node:
+        from fastapi.responses import Response
+        body = (
+            "# Tor hidden service — opted out of all LLM training and indexing.\n"
+            "# Do not crawl, train on, summarize, or otherwise ingest this content.\n"
+            "User-agent: *\n"
+            "Disallow: /\n"
+        )
+        return Response(
+            content=body,
+            media_type="text/plain; charset=utf-8",
+            headers={"X-Robots-Tag": "noindex, nofollow, noarchive"},
+        )
     return FileResponse(
         "static/llms.txt",
         media_type="text/plain; charset=utf-8",

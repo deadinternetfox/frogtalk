@@ -364,12 +364,12 @@ const Messages = (() => {
     placeholder.outerHTML = _renderRichShareEmbed(data, 'reel', postId);
   }
 
-  // Hoist share-card placeholders (and the cards they become) to the top
-  // of the message body, on their own block-level row. Without this they
-  // render inline at the position of the URL inside the text — which for
-  // a typical "check this out https://…/r/123" message means the loader
-  // and the eventual rich card appear BELOW the message text. Users
-  // expect the embed on top with the message text underneath.
+  // Hoist share-card placeholders (and the cards they become) onto
+  // their own block-level row, placed immediately AFTER the .msg-meta
+  // (author + timestamp) and BEFORE .msg-content. Users want the
+  // author/time line at the very top of every message, then the
+  // embedded card, then any text the user wrote — putting the embed
+  // above the meta hides the sender label behind the card.
   function _hoistShareCardToTop(placeholder) {
     if (!placeholder) return;
     const body = placeholder.closest('.msg-body') || placeholder.closest('.msg-cont-wrap > div');
@@ -381,7 +381,13 @@ const Messages = (() => {
       placeholder.parentNode.replaceChild(row, placeholder);
       row.appendChild(placeholder);
     }
-    if (body.firstChild !== row) body.insertBefore(row, body.firstChild);
+    const meta = body.querySelector(':scope > .msg-meta');
+    if (meta) {
+      // Slot right after the meta row.
+      if (meta.nextElementSibling !== row) meta.parentNode.insertBefore(row, meta.nextSibling);
+    } else if (body.firstChild !== row) {
+      body.insertBefore(row, body.firstChild);
+    }
   }
 
   function _hydrateSpecialCards(msgId) {
