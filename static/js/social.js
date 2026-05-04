@@ -2643,6 +2643,29 @@ const Social = (() => {
       }
       _ensureSelfProfileStoryRing();
     } catch {}
+    // Live story-ring update for the *self* avatar everywhere it shows
+    // up in chat (channel + DM message lists, currently-open chat
+    // profile modal). Optimistic: the by-nick cache gets a synthetic
+    // entry immediately so any decorated/observed avatar flips to the
+    // unviewed ring without a roundtrip; an authoritative refresh is
+    // also kicked so other clients' fresh /api/social/stories rebuild
+    // catches the new story when they get to it.
+    try {
+      const myNick = State.user?.nickname;
+      const myId = State.user?.id;
+      if (myNick) {
+        const key = String(myNick).toLowerCase();
+        const prev = _chatStoryByNick.get(key) || { count: 0, idx: -1 };
+        _chatStoryByNick.set(key, {
+          user_id: myId || prev.user_id || 0,
+          has_unviewed: true,
+          count: (prev.count || 0) + 1,
+          idx: prev.idx >= 0 ? prev.idx : -1,
+        });
+        decorateChatAvatars(document);
+      }
+    } catch {}
+    try { _refreshChatStoryCache(true); } catch {}
     _updateStoryUploadOverlay(100, 'Story posted');
     _hideStoryUploadRetryHint();
     _notifyAndroidStoryUpload(100, 'done');
