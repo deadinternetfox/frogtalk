@@ -204,10 +204,15 @@ async def profile_posts(
             return ("missing", None)
         if _private_blocked(user, viewer_id):
             return ("private", None)
-        posts = db.get_wall_posts(user["id"], viewer_id, limit, offset)
+        # Lite mode: image/video blobs are stripped at the SQL level and the
+        # client fetches each one lazily through /api/social/posts/{id}/media.
+        # Drops a 30-image wall response from MBs of base64 to KBs of JSON.
+        posts = db.get_wall_posts(user["id"], viewer_id, limit, offset, lite=True)
         rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
         for p in posts:
             p["reactions"] = rmap.get(p["id"], [])
+            if p.get("has_media") and not p.get("media_data"):
+                p["media_data"] = f"/api/social/posts/{p['id']}/media"
         return ("ok", posts)
 
     status, posts = await run_in_threadpool(_build)
@@ -234,10 +239,12 @@ async def profile_reposts(
             return ("missing", None)
         if _private_blocked(user, viewer_id):
             return ("private", None)
-        posts = db.get_user_reposts(user["id"], viewer_id, limit, offset)
+        posts = db.get_user_reposts(user["id"], viewer_id, limit, offset, lite=True)
         rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
         for p in posts:
             p["reactions"] = rmap.get(p["id"], [])
+            if p.get("has_media") and not p.get("media_data"):
+                p["media_data"] = f"/api/social/posts/{p['id']}/media"
         return ("ok", posts)
 
     status, posts = await run_in_threadpool(_build)

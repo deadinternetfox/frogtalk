@@ -4196,8 +4196,19 @@ def create_wall_post(user_id: int, content: str, media_data: str = None,
 
 
 def get_wall_posts(user_id: int, viewer_id: int = None,
-                   limit: int = 20, offset: int = 0) -> List[Dict]:
-    """Get wall posts for a user. Filter by privacy based on viewer."""
+                   limit: int = 20, offset: int = 0,
+                   lite: bool = False) -> List[Dict]:
+    """Get wall posts for a user. Filter by privacy based on viewer.
+
+    `lite=True` strips raw image/video base64 from the row (the client
+    will fetch each one lazily via /api/social/posts/{id}/media). Music
+    posts keep media_data because that's a URL reference, not a blob.
+    A 30-post wall of images drops from megabytes of JSON to kilobytes.
+    """
+    media_col = (
+        "CASE WHEN wp.media_type LIKE 'music/%' THEN wp.media_data ELSE NULL END AS media_data"
+        if lite else "wp.media_data"
+    )
     with _conn() as con:
         # Determine privacy filter
         if viewer_id == user_id:
@@ -4226,7 +4237,7 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
 
         viewer_lookup_id = int(viewer_id or 0)
         rows = con.execute(f"""
-            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy, wp.share_enabled,
+            SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy, wp.share_enabled,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
@@ -4272,8 +4283,15 @@ def get_wall_post(post_id: int) -> Optional[Dict]:
 
 
 def get_user_reposts(user_id: int, viewer_id: int, limit: int = 30,
-                     offset: int = 0) -> List[Dict]:
-    """Get posts that a user has reposted. Respects privacy of original posts."""
+                     offset: int = 0, lite: bool = False) -> List[Dict]:
+    """Get posts that a user has reposted. Respects privacy of original posts.
+
+    See get_wall_posts for `lite` semantics.
+    """
+    media_col = (
+        "CASE WHEN wp.media_type LIKE 'music/%' THEN wp.media_data ELSE NULL END AS media_data"
+        if lite else "wp.media_data"
+    )
     with _conn() as con:
         # Determine privacy filter based on viewer relationship
         if viewer_id == user_id:
@@ -4299,7 +4317,7 @@ def get_user_reposts(user_id: int, viewer_id: int, limit: int = 30,
 
         viewer_lookup_id = int(viewer_id or 0)
         rows = con.execute(f"""
-            SELECT wp.id, wp.user_id, wp.content, wp.media_data, wp.media_type, wp.privacy, wp.share_enabled,
+            SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy, wp.share_enabled,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
