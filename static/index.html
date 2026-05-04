@@ -4796,6 +4796,59 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .status-music-link .sml-label{opacity:0.78;font-weight:500;margin:0 4px 0 6px}
 .status-music-link .sml-track{color:#f0e4ff;font-weight:600}
 .status-music-link .sml-mood{opacity:0.7;font-weight:500;margin-left:6px}
+/* Chat mini-profile (#modal-user-info) header readability.
+   The banner can be any user-controlled gradient — including bright
+   pastels — which made the white nickname and the purple "Now playing"
+   pill nearly invisible on light banners. Add a bottom-anchored dark
+   scrim behind the text + a heavier text shadow on the name + a more
+   solid pill variant when nested inside the header. The scrim is a
+   pseudo-element so users' custom .profile-header background survives. */
+.profile-header{isolation:isolate}
+.profile-header::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;
+  height:62%;
+  background:linear-gradient(180deg,
+    rgba(0,0,0,0) 0%,
+    rgba(0,0,0,0.28) 35%,
+    rgba(0,0,0,0.62) 100%);
+  pointer-events:none;z-index:0;border-radius:inherit;
+}
+.profile-header > *{position:relative;z-index:1}
+.profile-header .userinfo-nick{
+  text-shadow:
+    0 1px 0 rgba(0,0,0,0.55),
+    0 2px 6px rgba(0,0,0,0.55),
+    0 0 18px rgba(0,0,0,0.45) !important;
+}
+#userinfo-status-msg{
+  display:inline-block;max-width:100%;
+  color:rgba(255,255,255,0.92);
+  text-shadow:0 1px 3px rgba(0,0,0,0.7);
+}
+/* Stronger pill in the chat-profile banner — readable on bright themes
+   while still feeling like the same component used elsewhere. */
+.profile-header .status-music-link{
+  background:linear-gradient(135deg,#3d2a66 0%,#4b3380 55%,#3a4a2e 100%);
+  border-color:rgba(186,160,235,0.85);
+  color:#f4ebff;
+  box-shadow:
+    0 1px 0 rgba(255,255,255,0.08) inset,
+    0 2px 8px rgba(0,0,0,0.45),
+    0 0 0 1px rgba(0,0,0,0.25);
+  padding:4px 12px 4px 10px;
+  font-size:12.5px;
+}
+.profile-header .status-music-link:hover{
+  background:linear-gradient(135deg,#4a3478 0%,#5a3f99 55%,#456036 100%);
+  border-color:rgba(206,180,255,0.95);
+  color:#fff;
+}
+.profile-header .status-music-link .sml-label{
+  color:rgba(244,235,255,0.78);
+}
+.profile-header .status-music-link .sml-track{
+  color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.45);
+}
 .sp-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .sp-tag{background:#1a2e1a;color:#4caf50;border-radius:12px;padding:4px 10px;font-size:12px}
 .sp-tabs{display:flex;border-bottom:1px solid #1a1a1a;padding:0 20px}
