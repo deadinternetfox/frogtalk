@@ -3804,29 +3804,6 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .social-toast .st-text b{color:#bff0d0}
 .social-toast .st-emoji{font-size:18px;flex-shrink:0}
 .social-close-btn{background:none;border:none;color:#888;font-size:22px;cursor:pointer;padding:4px 8px}
-/* Auto-next pill in the social topbar — mirrors the toggle inside the
-   mini-music dock so users can flip auto-advance without having to wait
-   for a track to start playing first. State is synced via the shared
-   [data-autonext-btn] selector by Music._syncAutoNextButtons(). */
-.social-topbar-autonext{
-  display:inline-flex;align-items:center;gap:6px;
-  padding:5px 10px;border-radius:999px;
-  background:#0d0d0d;border:1px solid #1f3a30;
-  color:#cfd8d3;font-size:12px;font-weight:600;
-  cursor:pointer;line-height:1;letter-spacing:.2px;
-  transition:background .15s ease,border-color .15s ease,color .15s ease,transform .1s ease;
-  flex-shrink:0;
-}
-.social-topbar-autonext:hover{background:#152722;border-color:#2c5448;color:#e8efe9}
-.social-topbar-autonext:active{transform:scale(.96)}
-.social-topbar-autonext.on{background:#0f2a1a;border-color:#2e6e44;color:#7ddc92}
-.social-topbar-autonext.on svg{filter:drop-shadow(0 0 4px rgba(76,175,80,.45))}
-.social-topbar-autonext[data-on="0"]{opacity:.78}
-.social-topbar-autonext .san-label{display:inline-block}
-@media(max-width:640px){
-  .social-topbar-autonext{padding:4px 8px;font-size:11px;gap:4px}
-  .social-topbar-autonext .san-label{display:none}
-}
 .social-close-btn:hover{color:#e0e0e0}
 .social-menu-btn{background:none;border:none;color:#4caf50;font-size:22px;cursor:pointer;padding:4px 10px;line-height:1;border-radius:6px;transition:background .15s}
 .social-menu-btn:hover{background:#1a3a1a}
@@ -4832,8 +4809,8 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
     display:grid;
     grid-template-columns:auto minmax(0,1fr) auto auto;
     grid-template-areas:
-      "menu title autonext close"
-      "nav nav nav nav";
+      "menu title close"
+      "nav nav nav";
     align-items:center;
     row-gap:7px;
     column-gap:8px;
@@ -4842,7 +4819,6 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   .social-topbar > .social-menu-btn{grid-area:menu}
   .social-topbar > .social-topbar-title-wrap{grid-area:title}
   .social-topbar > .social-nav{grid-area:nav}
-  .social-topbar > .social-topbar-autonext{grid-area:autonext}
   .social-topbar > .social-close-btn{grid-area:close}
   .social-nav{gap:1px;padding:2px;width:100%;justify-content:flex-start;min-width:0;overflow-x:auto;scrollbar-width:none}
   .social-nav::-webkit-scrollbar{display:none}
@@ -7808,14 +7784,6 @@ window.ConnErr = (function(){
         <span id="social-activity-nav-badge" class="social-nav-badge" style="display:none"></span>
       </button>
     </nav>
-    <button class="social-topbar-autonext" data-autonext-btn
-            onclick="event.stopPropagation();(window.Music&&Music.toggleAutoNext)&&Music.toggleAutoNext(this)"
-            title="Auto-next: on (click to disable)"
-            aria-label="Toggle music auto-next"
-            aria-pressed="true">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/><circle cx="20" cy="5" r="3" fill="#4caf50"/></svg>
-      <span class="san-label">Auto-next</span>
-    </button>
     <button class="social-close-btn" onclick="Social.close()" title="Close">✕</button>
   </div>
   <!-- Persistent "Now playing" strip — lives between topbar and content

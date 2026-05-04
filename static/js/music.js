@@ -1259,7 +1259,7 @@ const Music = (() => {
     if (wrap && wrap.dataset.curKey === curKey) {
       // Head unchanged — only refresh the meta + controls + queue sections.
       const meta = document.getElementById('mp-meta-wrap');
-      if (meta) meta.innerHTML = `${headerHtml}${nowRow}${queueHtml}${submitHtml}`;
+      if (meta) meta.innerHTML = `${headerHtml}${nowRow}${submitHtml}${queueHtml}`;
       // Re-paint badge with the cached drift (the node was just replaced).
       _renderSyncBadge();
       _startSyncProbeIfNeeded();
@@ -1284,8 +1284,8 @@ const Music = (() => {
       <div id="mp-meta-wrap">
         ${headerHtml}
         ${nowRow}
-        ${queueHtml}
         ${submitHtml}
+        ${queueHtml}
       </div>
     `;
     _emitState();
