@@ -4803,15 +4803,24 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
    off the right edge. The full pill still renders on chat mini-
    profile + FrogSocial profile. */
 .status-music-link-compact{
-  padding:2px 9px 2px 8px !important;
-  font-size:11.5px !important;
+  /* Tighter, smaller, MORE purple — drop the green tail entirely
+     so the pill reads as a pure music-color chip. Tiny breathing
+     room above so it isn't kissing the username's descender. */
+  margin-top:3px;
+  padding:1px 8px 1px 7px !important;
+  font-size:11px !important;
+  line-height:1.3 !important;
   gap:0;
-  max-width:160px;
+  max-width:150px;
+  background:linear-gradient(135deg,rgba(140,110,210,0.32) 0%,rgba(168,143,224,0.26) 60%,rgba(110,84,170,0.30)) !important;
+  border-color:rgba(186,160,235,0.55) !important;
+  color:#ead8ff !important;
 }
 .status-music-link-compact .sml-track{
   margin-left:5px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   max-width:100%;
+  color:#f4e9ff !important;
 }
 /* Chat mini-profile (#modal-user-info) header readability.
    The banner can be any user-controlled gradient — including bright
@@ -7502,12 +7511,12 @@ window.ConnErr = (function(){
 <div class="modal-overlay hidden" id="modal-user-info">
   <div class="modal user-profile-modal" style="max-width:500px;max-height:85vh;display:flex;flex-direction:column;padding:0;overflow-y:auto;overflow-x:hidden">
     <!-- Profile Header / Banner -->
-    <div class="profile-header" id="userinfo-header" style="position:relative;background:linear-gradient(135deg, #1a3a1a 0%, #0d1f0d 100%);padding:20px 20px 26px;min-height:200px">
+    <div class="profile-header" id="userinfo-header" style="position:relative;background:linear-gradient(135deg, #1a3a1a 0%, #0d1f0d 100%);padding:20px 20px 22px;min-height:185px">
       <button class="profile-close-btn" onclick="closeModal('modal-user-info')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5" title="Close">✕</button>
       <button class="profile-share-icon-btn" id="userinfo-share-btn" onclick="shareProfile()" title="Share profile" style="position:absolute;top:12px;right:52px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:15px;cursor:pointer;z-index:5;transition:background .15s,transform .12s">📤</button>
-      <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:16px;padding-top:48px">
+      <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:16px;padding-top:32px">
         <div class="profile-avatar-large" id="userinfo-avatar" style="width:90px;height:90px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4)">🐸</div>
-        <div style="flex:1;min-width:0;padding-bottom:6px;display:flex;flex-direction:column;gap:8px;align-items:flex-start">
+        <div style="flex:1;min-width:0;padding-bottom:6px;display:flex;flex-direction:column;gap:7px;align-items:flex-start">
           <div id="userinfo-name" class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3);cursor:pointer;max-width:100%" onclick="copyUserTag(this.textContent)" title="Click to copy @tag"></div>
           <div id="userinfo-status-msg" style="font-size:13px;color:rgba(255,255,255,0.7);display:block;max-width:100%;overflow:hidden;line-height:1.2"></div>
         </div>
