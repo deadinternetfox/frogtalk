@@ -6077,6 +6077,34 @@ def mark_outbox_event_sent(event_id: str, target_server_id: str) -> bool:
         return False
 
 
+def bulk_mark_outbox_events_sent(event_ids: list[str]) -> int:
+    """Mark many outbox events sent in a single SQL round-trip.
+
+    Used by the federation outbox processor to drain a batched delivery in
+    one write rather than N writes through the SQLite write lock. Returns
+    the number of rows updated.
+    """
+    if not event_ids:
+        return 0
+    try:
+        total = 0
+        with _conn() as con:
+            # Chunk to stay below SQLite's default 999-parameter limit.
+            for i in range(0, len(event_ids), 500):
+                chunk = event_ids[i:i + 500]
+                placeholders = ",".join("?" * len(chunk))
+                cur = con.execute(
+                    f"UPDATE federation_outbox_events "
+                    f"SET status='sent' WHERE event_id IN ({placeholders})",
+                    chunk,
+                )
+                total += cur.rowcount or 0
+            con.commit()
+        return total
+    except Exception:
+        return 0
+
+
 def list_federation_inbox_events(
     status: str = "pending",
     limit: int = 10,

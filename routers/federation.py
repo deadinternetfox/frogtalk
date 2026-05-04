@@ -1119,12 +1119,23 @@ def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
 
     if not targets:
         return local_server_id, targets, []
-    events = db.list_federation_outbox_events(status="pending", limit=10)
+    events = db.list_federation_outbox_events(status="pending", limit=50)
     return local_server_id, targets, events
 
 
 async def federation_outbox_processor() -> int:
-    """Push pending outbox events to known peers (best-effort). Returns events sent."""
+    """Push pending outbox events to known peers (best-effort).
+
+    Optimized:
+      • Batches up to BATCH_SIZE events into a single POST per peer (the
+        inbox endpoint already accepts an events list with idempotent dedup
+        on event_id, so batching is safe).
+      • Pushes to all peers in parallel via asyncio.gather so a slow Tor
+        peer cannot block the clearnet peer.
+      • Marks all events delivered in one bulk UPDATE.
+
+    Returns the number of events marked delivered this tick.
+    """
     fed_token = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
     if not fed_token:
         return 0
@@ -1138,68 +1149,71 @@ async def federation_outbox_processor() -> int:
     if not targets or not events:
         return 0
 
-    sent = 0
-    for row in events:
+    BATCH_SIZE = 25
+    batch = events[:BATCH_SIZE]
+    envelopes: list[dict] = []
+    for row in batch:
         event_id = str(row.get("event_id") or "")
-        event_type = str(row.get("event_type") or "")
-        payload = {}
+        if not event_id:
+            continue
+        payload: dict = {}
         raw_payload = row.get("payload_json")
         if isinstance(raw_payload, str) and raw_payload.strip():
             try:
                 payload = json.loads(raw_payload)
             except Exception:
                 payload = {}
-
-        envelope = {
+        envelopes.append({
             "event_id": event_id,
-            "event_type": event_type,
+            "event_type": str(row.get("event_type") or ""),
             "origin_server_id": local_server_id,
             "payload": payload,
-        }
-        body = json.dumps({"events": [envelope]}).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "FrogTalk-FederationPush/1.0",
-            "x-federation-token": fed_token,
-        }
+        })
 
-        delivered = False
-        for base in targets:
-            try:
-                raw = await asyncio.to_thread(
-                    _fetch_url_bytes,
-                    f"{base}/api/federation/events/inbox",
-                    timeout_s=4.5,
-                    method="POST",
-                    data=body,
-                    headers=headers,
-                )
-                # A successful HTTP exchange means the peer has the event —
-                # whether it was newly accepted OR rejected as a duplicate
-                # (idempotent dedup on event_id). Either outcome is final;
-                # without this, peer-side dedup keeps events pending forever
-                # and the outbox loop pegs CPU retrying old events.
-                try:
-                    reply = json.loads(raw.decode("utf-8", errors="replace") or "{}")
-                except Exception:
-                    reply = {}
-                if int(reply.get("accepted") or 0) > 0 or int(reply.get("rejected") or 0) > 0:
-                    delivered = True
-                else:
-                    # Empty/odd response but the request did not raise — peer
-                    # returned 2xx, treat as delivered to break stuck loops.
-                    delivered = True
-            except Exception:
-                continue
+    if not envelopes:
+        return 0
 
-        if delivered:
+    body = json.dumps({"events": envelopes}).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "FrogTalk-FederationPush/1.0",
+        "x-federation-token": fed_token,
+    }
+
+    async def _push(base: str) -> bool:
+        try:
+            raw = await asyncio.to_thread(
+                _fetch_url_bytes,
+                f"{base}/api/federation/events/inbox",
+                timeout_s=8.0,
+                method="POST",
+                data=body,
+                headers=headers,
+            )
+            # Any successful HTTP exchange means the peer has the batch
+            # (newly-accepted OR rejected as duplicate — both are final).
             try:
-                await asyncio.to_thread(db.mark_outbox_event_sent, event_id, "")
-                sent += 1
+                json.loads(raw.decode("utf-8", errors="replace") or "{}")
             except Exception:
                 pass
-    return sent
+            return True
+        except Exception:
+            return False
+
+    results = await asyncio.gather(*[_push(t) for t in targets])
+    if not any(results):
+        # Every peer is unreachable — leave events pending; outer loop's
+        # idle_sleep throttles retries automatically.
+        return 0
+
+    event_ids = [e["event_id"] for e in envelopes]
+    try:
+        await asyncio.to_thread(db.bulk_mark_outbox_events_sent, event_ids)
+    except Exception:
+        _log.exception("Bulk mark outbox sent error")
+        return 0
+    return len(event_ids)
 
 
 async def _handle_message_event(event: dict) -> None:
