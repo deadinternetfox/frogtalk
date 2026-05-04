@@ -3987,6 +3987,19 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
   }
   
   openModal('modal-user-info');
+  // Async data (bio, wall, music) lands after the modal is already open
+  // and can shift the layout enough that the browser auto-scrolls
+  // (e.g. to a focused button), leaving the banner clipped above the
+  // viewport. Pin the inner scroll container back to the top on the
+  // next two animation frames so the user always lands on the banner.
+  try {
+    const inner = document.querySelector('#modal-user-info .user-profile-modal');
+    if (inner) {
+      inner.scrollTop = 0;
+      requestAnimationFrame(() => { try { inner.scrollTop = 0; } catch {} });
+      setTimeout(() => { try { inner.scrollTop = 0; } catch {} }, 120);
+    }
+  } catch {}
 }
 
 // Load the current user's active channel bans (read-only) and render them

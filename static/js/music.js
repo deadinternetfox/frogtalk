@@ -1228,6 +1228,54 @@ const Music = (() => {
     const cur = q[0] || null;
     const upcoming = q.slice(1);
 
+    // Auto-advance grace window:
+    //
+    // When the playing track ends, _maybeAutoAdvanceOnEnded fires skip()
+    // on the server. Server pops the head; if auto-fill is enabled it
+    // then asks Discover for a fresh track and pushes it. Between those
+    // two server-side steps the queue is briefly empty, and the WS
+    // refresh that lands in that window would paint our big in-channel
+    // player as "🎵 Queue is empty" — tearing down the iframe and
+    // making the whole big-player UI vanish — even though the side dock
+    // still shows the previous (just-ended) track and the next one is
+    // about to land. Skip that empty re-render for up to 9s; the next
+    // WS event with the new head will rebuild the player normally.
+    const wrap0 = document.getElementById('mp-player-wrap');
+    const hadTrack = !!(wrap0 && wrap0.dataset.curKey);
+    if (!cur && hadTrack && _autoNextEnabled()) {
+      const since = Number(panel.dataset.emptySince || 0);
+      const now = Date.now();
+      if (!since) {
+        panel.dataset.emptySince = String(now);
+        // Refresh once after the grace window so we eventually fall back
+        // to the real "queue empty" UI if no track ever arrives.
+        setTimeout(() => {
+          try {
+            const p = $('music-panel');
+            if (!p) return;
+            const stillEmpty = !((_state && _state.queue && _state.queue[0]));
+            if (stillEmpty) {
+              delete p.dataset.emptySince;
+              _render();
+            }
+          } catch {}
+        }, 9500);
+        // Light meta update so the user sees something is happening
+        // instead of a frozen player.
+        const meta = document.getElementById('mp-meta-wrap');
+        if (meta) {
+          meta.innerHTML = `<div class="mp-empty" style="padding:14px">🎵 Advancing to the next track…</div>`;
+        }
+        return;
+      }
+      if (now - since < 9000) {
+        return; // keep the existing iframe + meta in place
+      }
+      delete panel.dataset.emptySince;
+    } else if (cur && panel.dataset.emptySince) {
+      delete panel.dataset.emptySince;
+    }
+
     // Radio sync: anchor this client to the server's "play head" so all
     // listeners agree on the timeline. Only reset when the head track
     // actually changes, otherwise repeated state refreshes would keep
