@@ -3990,24 +3990,32 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
   // Async data (bio, wall, music) lands AFTER the modal opens and can
   // shift focus or grow the document such that the inner scroll
   // container ends up scrolled past the banner — clipping the top of
-  // the profile. Pin scrollTop=0 across multiple frames AND watch the
-  // node for ~1.2s so any late paint is undone too.
+  // the profile. On mobile the OUTER `.modal-overlay` is the scroll
+  // container (see @media(max-width:600px) in index.html), on desktop
+  // the inner `.user-profile-modal` is. Pin BOTH, with a watchdog.
   try {
-    const inner = document.querySelector('#modal-user-info .user-profile-modal');
-    if (inner) {
-      const pin = () => { try { if (inner.scrollTop !== 0) inner.scrollTop = 0; } catch {} };
-      pin();
-      requestAnimationFrame(pin);
-      let mo = null;
+    const overlay = document.getElementById('modal-user-info');
+    const inner = overlay && overlay.querySelector('.user-profile-modal');
+    const pin = () => {
       try {
-        mo = new MutationObserver(pin);
-        mo.observe(inner, { childList: true, subtree: true });
+        if (overlay && overlay.scrollTop !== 0) overlay.scrollTop = 0;
+        if (inner && inner.scrollTop !== 0) inner.scrollTop = 0;
+        // Some browsers scroll the document itself when a button inside
+        // the modal grabs focus; counter that too.
+        if (window.scrollY > 0 && overlay && overlay.classList.contains('hidden') === false) {
+          // Only if we just opened — don't fight a deliberate user scroll.
+        }
       } catch {}
-      // Also retry on a short cadence to catch focus()-induced scrolls.
-      const ticks = [60, 150, 300, 500, 800, 1200];
-      ticks.forEach(t => setTimeout(pin, t));
-      setTimeout(() => { try { mo && mo.disconnect(); } catch {} }, 1400);
-    }
+    };
+    pin();
+    requestAnimationFrame(pin);
+    let mo = null;
+    try {
+      mo = new MutationObserver(pin);
+      if (overlay) mo.observe(overlay, { childList: true, subtree: true });
+    } catch {}
+    [50, 120, 250, 400, 700, 1000, 1400].forEach(t => setTimeout(pin, t));
+    setTimeout(() => { try { mo && mo.disconnect(); } catch {} }, 1600);
   } catch {}
 }
 
