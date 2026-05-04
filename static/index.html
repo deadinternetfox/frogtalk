@@ -1882,6 +1882,32 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   flex-shrink:0;margin-top:1px;cursor:pointer;overflow:hidden
 }
 .msg-avatar img{width:100%;height:100%;object-fit:cover}
+/* Story ring around chat avatars (channel + DM) when the sender has an
+   active FrogSocial story. Click is intercepted in social.js to open
+   the viewer in single-user mode. Sized 42x42 wrapper with a 2px gap
+   between the ring and the avatar so the 38px image isn't visually
+   shrunken. */
+.msg-avatar.has-story{
+  width:42px;height:42px;padding:2px;background:#353535;
+  isolation:isolate;cursor:pointer;
+  transition:transform .18s ease, filter .18s ease, box-shadow .24s ease;
+}
+.msg-avatar.has-story img,
+.msg-avatar.has-story svg,
+.msg-avatar.has-story > *{
+  width:100%;height:100%;border-radius:50%;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+  border:2px solid #090909;background:#141414;
+}
+.msg-avatar.has-story.unviewed{
+  background:conic-gradient(from 195deg,#ffdc80 0%,#ff9b3d 14%,#ff4f86 33%,#b33dff 50%,#5966ff 66%,#00d2a3 84%,#ffdc80 100%);
+  box-shadow:0 0 0 1px rgba(255,255,255,.1) inset,0 4px 14px rgba(209,66,133,.3),0 0 18px rgba(88,103,255,.22);
+}
+.msg-avatar.has-story.viewed{
+  background:linear-gradient(160deg,#6b6b6b,#4c4c4c 54%,#3c3c3c);
+  box-shadow:0 0 0 1px rgba(255,255,255,.08) inset,0 2px 6px rgba(0,0,0,.45);
+}
+.msg-avatar.has-story:hover{transform:scale(1.05);filter:saturate(1.06)}
 .msg-body{flex:1;min-width:0;padding-top:1px}
 .msg-meta{display:flex;align-items:baseline;gap:8px;margin-bottom:3px;line-height:1.2}
 .msg-author{font-size:14px;font-weight:600;cursor:pointer}

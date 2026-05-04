@@ -3910,31 +3910,28 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
         av0.classList.remove('has-story', 'unviewed', 'viewed');
         av0.onclick = null;
         av0.removeAttribute('title');
+        av0.setAttribute('data-userinfo-nick', nickname || '');
+        av0.removeAttribute('data-story-userid');
       }
     } catch {}
     // Story ring + click → open story viewer. Fetched in parallel with
     // the main profile data; story_status comes from /api/social/profile
-    // (count + has_unviewed). Skip for self — own avatar already opens
-    // the user's own profile via existing flow.
-    if (!isSelf) {
-      apiFetch('/api/social/profile/' + encodeURIComponent(nickname))
-        .then(r => r.json()).catch(() => null)
-        .then(sp => {
-          if (!sp || _userInfoTarget !== nickname) return;
-          const ss = sp.story_status || {};
-          const av = document.getElementById('userinfo-avatar');
-          if (!av || !ss.count) return;
-          av.classList.add('has-story', ss.has_unviewed ? 'unviewed' : 'viewed');
-          av.title = 'View stories';
-          av.onclick = () => {
-            try {
-              if (typeof Social !== 'undefined' && Social.viewProfileStories) {
-                Social.viewProfileStories(nickname, sp.id || userId || 0);
-              }
-            } catch {}
-          };
-        });
-    }
+    // (count + has_unviewed). Shown for self too so the user can see
+    // their own active story from the chat-profile modal.
+    apiFetch('/api/social/profile/' + encodeURIComponent(nickname))
+      .then(r => r.json()).catch(() => null)
+      .then(sp => {
+        if (!sp || _userInfoTarget !== nickname) return;
+        const ss = sp.story_status || {};
+        const av = document.getElementById('userinfo-avatar');
+        if (!av || !ss.count) return;
+        av.classList.add('has-story', ss.has_unviewed ? 'unviewed' : 'viewed');
+        av.title = 'View stories';
+        av.dataset.storyUserid = String(sp.id || userId || 0);
+        // Click handling is taken over by the global capture-phase
+        // delegate in social.js (single-user mode), so we don't bind
+        // a per-element onclick here.
+      });
     apiFetch('/api/users/profile/' + encodeURIComponent(nickname))
       .then(r => r.json())
       .then(u => {

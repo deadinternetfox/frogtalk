@@ -1193,7 +1193,7 @@ const Messages = (() => {
 
     if (isMutedAuthor) {
       return `<div class="msg-group is-muted-user" id="msg-${msg.id}" data-nick="${UI.escHtml(msg.nickname||'')}">
-        <div class="msg-avatar" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
+        <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
         <div class="msg-body">
           <div class="msg-meta">
             <span class="msg-author" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.escHtml(msg.nickname)}</span>
@@ -1215,7 +1215,7 @@ const Messages = (() => {
     }
 
     return `<div class="msg-group" id="msg-${msg.id}" data-nick="${UI.escHtml(msg.nickname||'')}">
-      <div class="msg-avatar" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
+      <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
       <div class="msg-body">
         <div class="msg-meta">
           <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(msg.nickname)}</span>
@@ -2875,7 +2875,7 @@ function _buildMsgHtml(msg, isCont) {
   const content = msg.content ? UI.escHtml(msg.content).replace(/https?:\/\/[^\s]+/g, url => `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#4caf50">${url}</a>`) : '';
   const avatar = UI.avatarEl(msg.avatar, msg.nickname, 38);
   return `<div class="msg-group" id="msg-${msg.id}">
-    <div class="msg-avatar">${avatar}</div>
+    <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}">${avatar}</div>
     <div class="msg-body">
       <div class="msg-meta">
         <span class="msg-author">${UI.escHtml(msg.nickname)}</span>

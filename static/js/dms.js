@@ -1348,7 +1348,7 @@ function renderDMMessage (m) {
   `;
 
   return `<div class="msg-group" id="msg-${m.id}" data-dmid="${m.id}">
-    <div class="msg-avatar">${UI.avatarEl(avatar, senderNick, 38)}</div>
+    <div class="msg-avatar" data-nick="${esc(senderNick||'')}">${UI.avatarEl(avatar, senderNick, 38)}</div>
     <div class="msg-body">
       <div class="msg-meta">
         <span class="msg-author" onclick="showUserInfo('${esc(senderNick)}',${m.sender_id||'null'})">${esc(senderNick)}</span>

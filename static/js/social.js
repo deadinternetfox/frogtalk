@@ -1445,7 +1445,144 @@ const Social = (() => {
   let _storyData = [];   // [{user_id, nickname, avatar, stories:[], has_unviewed}]
   let _storyViewIdx = 0; // index in current user's stories array
   let _storyUserIdx = 0; // index in _storyData
+  // When set, the story viewer treats the current user as the only target —
+  // tapping past the last story closes the viewer instead of advancing to
+  // the next user. Used when a story is opened from chat (avatar ring or
+  // chat-profile modal) — user expects "tap to see THIS person's story",
+  // not "drop into the social-feed reel for everyone".
+  let _storySingleUserMode = false;
   const _storyViewerCache = new Map();
+  // Lower-cased nickname → { user_id, has_unviewed, count, idx }. Built
+  // from _storyData any time the feed is loaded; consulted by chat
+  // avatar decorators so we can paint a ring around any sender who has
+  // an active story without re-fetching per-user.
+  const _chatStoryByNick = new Map();
+  function _rebuildChatStoryByNick() {
+    _chatStoryByNick.clear();
+    for (let i = 0; i < _storyData.length; i++) {
+      const u = _storyData[i];
+      if (!u || !u.nickname || !(u.stories || []).length) continue;
+      _chatStoryByNick.set(String(u.nickname).toLowerCase(), {
+        user_id: u.user_id, has_unviewed: !!u.has_unviewed,
+        count: u.stories.length, idx: i
+      });
+    }
+  }
+  let _chatStoryCacheLastFetch = 0;
+  let _chatStoryCacheInflight = null;
+  async function _refreshChatStoryCache(force) {
+    const now = Date.now();
+    if (!force && (now - _chatStoryCacheLastFetch) < 45000) return;
+    if (_chatStoryCacheInflight) return _chatStoryCacheInflight;
+    _chatStoryCacheInflight = (async () => {
+      try {
+        const res = await api('/api/social/stories');
+        if (!res || !res.ok) return;
+        const data = await res.json();
+        _storyData = data.users || [];
+        _rebuildChatStoryByNick();
+        _chatStoryCacheLastFetch = Date.now();
+        // Best-effort: re-decorate any visible chat avatars. Cheap when
+        // nothing matches; matters when a story just dropped while the
+        // user was already on a chat.
+        try { decorateChatAvatars(document); } catch {}
+      } catch {}
+      finally { _chatStoryCacheInflight = null; }
+    })();
+    return _chatStoryCacheInflight;
+  }
+  // Public lookup for chat renderers / chat-profile modal.
+  function getChatStoryStatus(nickname) {
+    if (!nickname) return null;
+    return _chatStoryByNick.get(String(nickname).toLowerCase()) || null;
+  }
+  // Sweep `.msg-avatar[data-nick]` (and any `[data-story-target]` opt-in
+  // host) inside `root`, painting the story ring class for senders who
+  // have an active story. Re-entry safe: a stale ring class is removed
+  // when the cache says they no longer have a story.
+  function decorateChatAvatars(root) {
+    try {
+      const host = root && root.querySelectorAll ? root : document;
+      const els = host.querySelectorAll('.msg-avatar[data-nick], [data-story-target][data-nick]');
+      for (let i = 0; i < els.length; i++) {
+        const el = els[i];
+        const nick = el.getAttribute('data-nick');
+        if (!nick) continue;
+        const st = getChatStoryStatus(nick);
+        if (st && st.count) {
+          el.classList.add('has-story');
+          el.classList.toggle('unviewed', !!st.has_unviewed);
+          el.classList.toggle('viewed', !st.has_unviewed);
+          el.dataset.storyUserid = String(st.user_id || 0);
+        } else if (el.classList.contains('has-story')) {
+          el.classList.remove('has-story', 'unviewed', 'viewed');
+          delete el.dataset.storyUserid;
+        }
+      }
+    } catch {}
+  }
+  // Capture-phase click handler — when the avatar carries .has-story we
+  // intercept the click before showUserInfo() fires and open the story
+  // viewer in single-user mode instead. Tapping the name/author still
+  // opens the profile because the listener filters on .msg-avatar/the
+  // userinfo avatar exclusively.
+  if (typeof document !== 'undefined' && !document._frogtalkChatStoryClickBound) {
+    document._frogtalkChatStoryClickBound = true;
+    document.addEventListener('click', (ev) => {
+      try {
+        const t = ev.target;
+        if (!t) return;
+        const av = t.closest && t.closest('.msg-avatar.has-story, #userinfo-avatar.has-story');
+        if (!av) return;
+        const nick = av.getAttribute('data-nick')
+          || av.getAttribute('data-userinfo-nick')
+          || '';
+        if (!nick) return;
+        const uid = Number(av.dataset.storyUserid || 0) || 0;
+        ev.stopPropagation();
+        ev.preventDefault();
+        try { viewProfileStories(nick, uid, { singleUser: true }); } catch {}
+      } catch {}
+    }, true);
+  }
+  // MutationObserver: when chat scrollers add new .msg-avatar nodes
+  // (live-arriving messages, scroll-back hydration, channel switches),
+  // decorate the new ones from the cache without every render path
+  // having to remember to call us.
+  if (typeof document !== 'undefined' && !document._frogtalkChatStoryObserver) {
+    try {
+      let _pendingDecorate = false;
+      const _kick = () => {
+        if (_pendingDecorate) return;
+        _pendingDecorate = true;
+        // requestIdleCallback if available, else microtask — keeps the
+        // sweep off the critical path of the message render itself.
+        const run = () => {
+          _pendingDecorate = false;
+          try { decorateChatAvatars(document); } catch {}
+        };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 200 });
+        else setTimeout(run, 0);
+      };
+      const obs = new MutationObserver((muts) => {
+        for (let i = 0; i < muts.length; i++) {
+          const added = muts[i].addedNodes;
+          if (!added || !added.length) continue;
+          for (let j = 0; j < added.length; j++) {
+            const n = added[j];
+            if (n && n.nodeType === 1 && (
+              n.matches && (n.matches('.msg-avatar[data-nick]') || n.querySelector('.msg-avatar[data-nick]'))
+            )) { _kick(); return; }
+          }
+        }
+      });
+      // body subtree is wide but the filter above bails fast on
+      // unrelated mutations; cost is dominated by message-render bursts
+      // which we want anyway.
+      obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+      document._frogtalkChatStoryObserver = obs;
+    } catch {}
+  }
   const _storyMediaCache = new Map(); // story_id -> { media_data, media_type }
   const _storyMediaInflight = new Map(); // story_id -> Promise
 
@@ -1484,6 +1621,9 @@ const Social = (() => {
       const data = await res.json();
       _storyData = data.users || [];
     } catch { _storyData = []; }
+    _rebuildChatStoryByNick();
+    _chatStoryCacheLastFetch = Date.now();
+    try { decorateChatAvatars(document); } catch {}
     return renderStoriesBar();
   }
 
@@ -1761,7 +1901,7 @@ const Social = (() => {
     if (_storyViewIdx < user.stories.length - 1) {
       _storyViewIdx++;
       showStoryViewer();
-    } else if (_storyUserIdx < _storyData.length - 1) {
+    } else if (!_storySingleUserMode && _storyUserIdx < _storyData.length - 1) {
       _storyUserIdx++;
       _storyViewIdx = 0;
       showStoryViewer();
@@ -1793,6 +1933,7 @@ const Social = (() => {
       // Clear the inner so the next open starts fresh (no stale video element).
       v.innerHTML = '';
     }
+    _storySingleUserMode = false;
     _rerenderStoriesBarInDom();
   }
 
@@ -7456,7 +7597,7 @@ const Social = (() => {
   // Open story viewer by nickname — used by the avatar ring on the profile page.
   // Loads a fresh stories feed if we don't already have this user's stories
   // cached, then hands off to viewStories.
-  async function viewProfileStories(nickname, userId) {
+  async function viewProfileStories(nickname, userId, opts) {
     try {
       // Populate _storyData if empty (profile is often opened without stories bar loaded)
       if (!_storyData.length) {
@@ -7464,12 +7605,14 @@ const Social = (() => {
           const res = await api('/api/social/stories');
           const data = await res.json();
           _storyData = data.users || [];
+          _rebuildChatStoryByNick();
         } catch {}
       }
       const idx = _storyData.findIndex(u =>
         (userId && u.user_id === userId) ||
         (nickname && u.nickname === nickname));
       if (idx < 0) return;
+      _storySingleUserMode = !!(opts && opts.singleUser);
       viewStories(idx);
     } catch {}
   }
@@ -7860,6 +8003,7 @@ const Social = (() => {
     viewPostDetail, closePostDetail, openPostComments,
     viewStories, nextStory, prevStory, closeStoryViewer, openStoryProfileFromViewer,
     viewProfileStories,
+    getChatStoryStatus, decorateChatAvatars, refreshChatStoryCache: _refreshChatStoryCache,
     openAddStory, closeAddStory, handleStoryMedia, openStoryCamera, submitStory, submitStoryFromTap, handleStoryShareTap, setStoryPrivacy, cycleStoryPrivacy,
     loadMusicTab, openMusicEmbed, promptMusicShare,
     playMusicInTab, toggleMusicCard, stopMusicInTab, _openNowPlaying,
@@ -7912,3 +8056,13 @@ const Social = (() => {
 // scripts, so without this line `window.Social` would be undefined even
 // though `Social` resolves fine in inline onclick= handlers.
 window.Social = Social;
+
+// Bootstrap the chat story-ring cache once shortly after load so any
+// already-rendered chat avatars get the ring as soon as the data is in.
+// Periodic refresh (~3 minutes) keeps it fresh without hammering the
+// endpoint; loadStoriesBar() also rebuilds it whenever the user opens
+// FrogSocial.
+try {
+  setTimeout(() => { try { Social.refreshChatStoryCache(true); } catch {} }, 1500);
+  setInterval(() => { try { Social.refreshChatStoryCache(true); } catch {} }, 180000);
+} catch {}
