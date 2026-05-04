@@ -285,6 +285,9 @@ const WS = (() => {
       // ── Story posted by anyone — refresh chat-avatar story rings live ──
       case 'story_posted': {
         try {
+          if (window._frogtalkStoryRingDebug) {
+            try { console.log('[story-ring] WS story_posted', data); } catch {}
+          }
           if (window.Social) {
             // Optimistic local update (instant ring flip) + background true-up.
             // Falls back to a plain force-refresh if the optimistic helper

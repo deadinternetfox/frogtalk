@@ -1515,6 +1515,7 @@ const Social = (() => {
   // refresh hasn't run yet and the user sees no live ring update.
   function _markUserStoryPostedLive(userId, nickname) {
     if (!nickname) return;
+    let painted = 0;
     try {
       const key = String(nickname).toLowerCase();
       const uid = Number(userId) || 0;
@@ -1532,13 +1533,20 @@ const Social = (() => {
       const uidStr = String(prev.user_id || 0);
       for (let i = 0; i < els.length; i++) {
         const el = els[i];
-        if (el.getAttribute('data-nick').toLowerCase() !== key) continue;
+        const dn = (el.getAttribute('data-nick') || '').toLowerCase();
+        if (dn !== key) continue;
         if ((el.getAttribute('data-bridge') || '').trim()) continue;
         el.classList.add('has-story', 'unviewed');
         el.classList.remove('viewed');
         el.dataset.storyUserid = uidStr;
+        painted++;
       }
-    } catch {}
+      if (window._frogtalkStoryRingDebug) {
+        try { console.log('[story-ring] markPosted', { nickname, userId, scanned: els.length, painted }); } catch {}
+      }
+    } catch (e) {
+      try { console.warn('[story-ring] markPosted error', e); } catch {}
+    }
     // True up against the server in the background — handles edge cases
     // where the broadcast diverges from this viewer's visibility (e.g.
     // followers-only post by someone the viewer doesn't follow).
@@ -8189,5 +8197,15 @@ window.Social = Social;
 // FrogSocial.
 try {
   setTimeout(() => { try { Social.refreshChatStoryCache(true); } catch {} }, 1500);
-  setInterval(() => { try { Social.refreshChatStoryCache(true); } catch {} }, 180000);
+  // Periodic refresh as a safety net for the live WS path. 60s is a
+  // reasonable upper bound on stale-ring time if a `story_posted`
+  // broadcast is ever missed (network glitch, brief reconnect, etc.).
+  setInterval(() => { try { Social.refreshChatStoryCache(true); } catch {} }, 60000);
+  // When the page becomes visible again (tab refocus, screen unlock),
+  // immediately refresh — covers cases where WS was suspended.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      try { Social.refreshChatStoryCache(true); } catch {}
+    }
+  });
 } catch {}
