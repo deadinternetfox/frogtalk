@@ -898,6 +898,24 @@ const Music = (() => {
       if (_paused) { _stopSyncProbe(); return; }
       const cur = _state && _state.queue && _state.queue[0];
       if (!cur) { _stopSyncProbe(); return; }
+
+      // Duration-overshoot fallback for auto-next. The YT iframe is
+      // supposed to fire onStateChange=0 (ended) when a track finishes,
+      // but on mobile and after lock-screen wake it sometimes never
+      // delivers that message — the track just stops, or YT autoplays
+      // the same track over from the beginning. Without this, the user
+      // sits on a dead mini-player despite auto-next being on. So once
+      // our local anchor says we're meaningfully past the known
+      // duration, force the auto-advance path. Dedupe inside
+      // _maybeAutoAdvanceOnEnded prevents this from double-firing.
+      if (_currentDurationSec > 0 && _anchorMs > 0) {
+        const expected = _expectedPosSec();
+        if (expected >= _currentDurationSec + 2) {
+          try { _maybeAutoAdvanceOnEnded(); } catch {}
+          return;
+        }
+      }
+
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       if (!frame || !frame.contentWindow) return;
 
