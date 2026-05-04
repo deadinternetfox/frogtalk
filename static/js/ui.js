@@ -3987,17 +3987,26 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
   }
   
   openModal('modal-user-info');
-  // Async data (bio, wall, music) lands after the modal is already open
-  // and can shift the layout enough that the browser auto-scrolls
-  // (e.g. to a focused button), leaving the banner clipped above the
-  // viewport. Pin the inner scroll container back to the top on the
-  // next two animation frames so the user always lands on the banner.
+  // Async data (bio, wall, music) lands AFTER the modal opens and can
+  // shift focus or grow the document such that the inner scroll
+  // container ends up scrolled past the banner — clipping the top of
+  // the profile. Pin scrollTop=0 across multiple frames AND watch the
+  // node for ~1.2s so any late paint is undone too.
   try {
     const inner = document.querySelector('#modal-user-info .user-profile-modal');
     if (inner) {
-      inner.scrollTop = 0;
-      requestAnimationFrame(() => { try { inner.scrollTop = 0; } catch {} });
-      setTimeout(() => { try { inner.scrollTop = 0; } catch {} }, 120);
+      const pin = () => { try { if (inner.scrollTop !== 0) inner.scrollTop = 0; } catch {} };
+      pin();
+      requestAnimationFrame(pin);
+      let mo = null;
+      try {
+        mo = new MutationObserver(pin);
+        mo.observe(inner, { childList: true, subtree: true });
+      } catch {}
+      // Also retry on a short cadence to catch focus()-induced scrolls.
+      const ticks = [60, 150, 300, 500, 800, 1200];
+      ticks.forEach(t => setTimeout(pin, t));
+      setTimeout(() => { try { mo && mo.disconnect(); } catch {} }, 1400);
     }
   } catch {}
 }
