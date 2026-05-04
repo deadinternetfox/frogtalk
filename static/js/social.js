@@ -1517,6 +1517,31 @@ const Social = (() => {
     if (!nickname) return null;
     return _chatStoryByNick.get(String(nickname).toLowerCase()) || null;
   }
+  // Optimistic: a `story_posted` WS broadcast arrived for `nickname`.
+  // We trust the broadcast (server already enforced visibility for the
+  // viewer's session before sending) and flip the chat-ring entry to
+  // unviewed immediately, *then* kick off a background fetch to true
+  // up the count. This avoids races where the periodic /stories/active
+  // refresh hasn't run yet and the user sees no live ring update.
+  function _markUserStoryPostedLive(userId, nickname) {
+    try {
+      if (!nickname) return;
+      const key = String(nickname).toLowerCase();
+      const prev = _chatStoryByNick.get(key) || { user_id: userId || 0, count: 0, idx: -1 };
+      prev.user_id = userId || prev.user_id || 0;
+      prev.count = (prev.count || 0) + 1;
+      prev.has_unviewed = true;
+      prev.idx = -1;
+      _chatStoryByNick.set(key, prev);
+      try { decorateChatAvatars(document); } catch {}
+    } catch {}
+    // True up against the server in the background — covers cases where
+    // the broadcast and the actual visibility decision diverge (e.g.
+    // followers-only stories where the viewer doesn't follow). If the
+    // server says count=0 / not visible, the cache will be cleared by
+    // the next refresh.
+    try { _refreshChatStoryCache(true); } catch {}
+  }
   // Sweep `.msg-avatar[data-nick]` (and any `[data-story-target]` opt-in
   // host) inside `root`, painting the story ring class for senders who
   // have an active story. Re-entry safe: a stale ring class is removed
@@ -8100,6 +8125,7 @@ const Social = (() => {
     viewStories, nextStory, prevStory, closeStoryViewer, openStoryProfileFromViewer,
     viewProfileStories,
     getChatStoryStatus, decorateChatAvatars, refreshChatStoryCache: _refreshChatStoryCache,
+    markUserStoryPostedLive: _markUserStoryPostedLive,
     openAddStory, closeAddStory, handleStoryMedia, openStoryCamera, submitStory, submitStoryFromTap, handleStoryShareTap, setStoryPrivacy, cycleStoryPrivacy,
     loadMusicTab, openMusicEmbed, promptMusicShare,
     playMusicInTab, toggleMusicCard, stopMusicInTab, _openNowPlaying,

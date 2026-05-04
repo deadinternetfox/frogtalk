@@ -285,8 +285,15 @@ const WS = (() => {
       // ── Story posted by anyone — refresh chat-avatar story rings live ──
       case 'story_posted': {
         try {
-          if (window.Social && typeof window.Social.refreshChatStoryCache === 'function') {
-            window.Social.refreshChatStoryCache(true);
+          if (window.Social) {
+            // Optimistic local update (instant ring flip) + background true-up.
+            // Falls back to a plain force-refresh if the optimistic helper
+            // isn't loaded yet (older social.js cached by the SW).
+            if (typeof window.Social.markUserStoryPostedLive === 'function') {
+              window.Social.markUserStoryPostedLive(data.user_id, data.nickname);
+            } else if (typeof window.Social.refreshChatStoryCache === 'function') {
+              window.Social.refreshChatStoryCache(true);
+            }
           }
         } catch {}
         break;
