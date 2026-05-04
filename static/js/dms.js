@@ -2279,6 +2279,15 @@ function showDisappearSettings() {
           <option value="604800">7 days</option>
           <option value="2592000">30 days</option>
         </select>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid #2a2a2a">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+            <input type="checkbox" id="dm-forwarding-disabled" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer" onchange="toggleDMForwarding(this.checked)">
+            <div>
+              <div style="font-weight:600;font-size:14px">📤 Disable Forwarding</div>
+              <div style="font-size:12px;color:#888">Messages in this DM cannot be forwarded elsewhere</div>
+            </div>
+          </label>
+        </div>
         <div class="modal-actions">
           <button class="modal-btn secondary" onclick="closeModal('modal-disappear')">Cancel</button>
           <button class="modal-btn danger" onclick="wipeDMMessages();closeModal('modal-disappear')">🗑️ Wipe All</button>
@@ -2291,38 +2300,10 @@ function showDisappearSettings() {
   
   // Set current value
   document.getElementById('disappear-select').value = _dmDisappearTimer.toString();
-  openModal('modal-disappear');
-}
-
-function showForwardingSettings() {
-  if (!_activeDM) return;
-  let modal = document.getElementById('modal-dm-forwarding');
-  if (!modal) {
-    modal = document.createElement('div');
-    modal.className = 'modal-overlay hidden';
-    modal.id = 'modal-dm-forwarding';
-    modal.innerHTML = `
-      <div class="modal" style="max-width:340px">
-        <div class="modal-title">📤 Forwarding</div>
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0">
-          <input type="checkbox" id="dm-forwarding-disabled" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer" onchange="toggleDMForwarding(this.checked)">
-          <div>
-            <div style="font-weight:600;font-size:14px">Disable forwarding</div>
-            <div style="font-size:12px;color:#888">Messages in this DM cannot be forwarded elsewhere. Applies to both participants.</div>
-          </div>
-        </label>
-        <div class="modal-actions">
-          <button class="modal-btn primary" onclick="closeModal('modal-dm-forwarding')">Done</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(modal);
-  }
   const fwdCb = document.getElementById('dm-forwarding-disabled');
   if (fwdCb) fwdCb.checked = !!(_activeDM && _activeDM.forwarding_disabled);
-  openModal('modal-dm-forwarding');
+  openModal('modal-disappear');
 }
-window.showForwardingSettings = showForwardingSettings;
 
 async function saveDisappearTimer() {
   if (!_activeDM) return;
