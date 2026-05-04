@@ -1194,12 +1194,6 @@ const Music = (() => {
           <button class="mp-act mp-act-share" onclick="Music.shareToWall()" title="Share this track to your FrogSocial wall">
             <span class="mp-act-ico">🐸</span><span class="mp-act-lbl">Share</span>
           </button>
-          <button class="mp-act mp-act-autonext" data-autonext-btn data-on="${_autoNextEnabled() ? '1' : '0'}"
-                  onclick="Music.toggleAutoNext(this)"
-                  title="Auto-next: when this track ends, automatically pick another. Click to toggle.">
-            <span class="mp-act-ico">${_autoNextEnabled() ? _AUTONEXT_ON_SVG : _AUTONEXT_OFF_SVG}</span>
-            <span class="mp-act-lbl">${_autoNextEnabled() ? 'Auto-next: on' : 'Auto-next: off'}</span>
-          </button>
           ${_state.can_control ? `<button class="mp-act mp-act-skip" onclick="Music.skip()" title="Skip to next track">
             <span class="mp-act-ico">${_SKIP_SVG}</span><span class="mp-act-lbl">Skip</span>
           </button>` : ''}

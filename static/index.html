@@ -1335,13 +1335,17 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
 #music-panel.collapsed .mp-header{padding-bottom:0}
 #music-panel.collapsed .mp-header-sub{display:none}
 body[data-music-collapsed] #messages-area{flex:1 1 auto}
-.mp-now{display:flex;gap:12px;align-items:center}
+.mp-now{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .mp-art{width:72px;height:72px;border-radius:6px;background:#2a1a3a center/cover no-repeat;flex-shrink:0;
   box-shadow:0 2px 10px rgba(200,130,255,0.25)}
-.mp-info{flex:1;min-width:0}
+.mp-info{flex:1 1 160px;min-width:0}
 .mp-title{font-size:14px;font-weight:700;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mp-sub{font-size:12px;color:#b090d0;margin-top:2px}
-.mp-ctrls{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.mp-ctrls{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
+@media(max-width:560px){
+  .mp-ctrls{flex-basis:100%;justify-content:flex-start;margin-top:2px}
+  .mp-ctrls .mp-act{flex:1 1 0;justify-content:center;min-width:0}
+}
 .mp-btn{
   background:linear-gradient(135deg,#3a2a5a,#4a2f6e);border:1px solid #5a3a8a;color:#e8d0ff;border-radius:14px;
   padding:3px 9px;font-size:10.5px;cursor:pointer;font-weight:600;line-height:1.4;
