@@ -7701,41 +7701,41 @@ const Social = (() => {
     o.style.display = 'none';
   }
 
-  // Open story viewer by nickname — used by the avatar ring on the profile page.
-  // Loads a fresh stories feed if we don't already have this user's stories
-  // cached, then hands off to viewStories.
+  // Open story viewer for a single user — used by chat-avatar rings,
+  // profile-page rings, and explore tiles.
+  //
+  // Always fetches fresh per-user stories when we have a user_id, so the
+  // viewer:
+  //   • includes any newly-posted story (no stale _storyData),
+  //   • has accurate `viewed` flags so we jump to the first unviewed,
+  //   • flips ring state correctly after viewing.
+  // Falls back to the global follow-gated /stories feed only when no
+  // user_id is supplied and the nickname isn't in the chat-ring cache.
   async function viewProfileStories(nickname, userId, opts) {
     try {
-      // Populate _storyData if empty (profile is often opened without stories bar loaded)
-      if (!_storyData.length) {
-        try {
-          const res = await api('/api/social/stories');
-          const data = await res.json();
-          _storyData = data.users || [];
-          // NOTE: do NOT _rebuildChatStoryByNick() here. _chatStoryByNick
-          // is populated from /stories/active (which includes public
-          // stories from users we don't follow); rebuilding from the
-          // follow-gated _storyData would wipe rings for those users.
-        } catch {}
+      // Resolve a user_id when only nickname was passed.
+      let lookupId = Number(userId) || 0;
+      if (!lookupId && nickname) {
+        const st = _chatStoryByNick.get(String(nickname).toLowerCase());
+        if (st && st.user_id) lookupId = Number(st.user_id) || 0;
       }
-      let idx = _storyData.findIndex(u =>
-        (userId && u.user_id === userId) ||
-        (nickname && u.nickname === nickname));
-      // Fallback: user has stories visible to us (e.g. public stories from
-      // someone we don't follow) but they're not in _storyData (which is
-      // follow-gated). Fetch their stories directly and append, so chat-tap
-      // can still open the viewer on non-followed posters.
-      if (idx < 0) {
+
+      let idx = -1;
+      if (lookupId) {
+        // Always fetch fresh: the per-user endpoint is cheap and avoids
+        // the stale-_storyData class of bugs (viewer opening on an
+        // already-seen story instead of the new one, ring stuck on
+        // unviewed after viewing, etc.).
         try {
-          const lookupId = userId || (() => {
-            const st = nickname ? _chatStoryByNick.get(String(nickname).toLowerCase()) : null;
-            return st && st.user_id ? st.user_id : null;
-          })();
-          if (lookupId) {
-            const res = await api(`/api/social/stories/user/${lookupId}`);
-            if (res && res.ok) {
-              const d = await res.json();
-              if (d && d.user && (d.user.stories || []).length) {
+          const res = await api(`/api/social/stories/user/${lookupId}`);
+          if (res && res.ok) {
+            const d = await res.json();
+            if (d && d.user && (d.user.stories || []).length) {
+              const existing = _storyData.findIndex(u => Number(u.user_id) === lookupId);
+              if (existing >= 0) {
+                _storyData[existing] = d.user;
+                idx = existing;
+              } else {
                 _storyData.push(d.user);
                 idx = _storyData.length - 1;
               }
@@ -7743,6 +7743,21 @@ const Social = (() => {
           }
         } catch {}
       }
+
+      // Fallback: legacy path — populate from /stories and index by nick.
+      if (idx < 0) {
+        if (!_storyData.length) {
+          try {
+            const res = await api('/api/social/stories');
+            const data = await res.json();
+            _storyData = data.users || [];
+          } catch {}
+        }
+        idx = _storyData.findIndex(u =>
+          (lookupId && Number(u.user_id) === lookupId) ||
+          (nickname && u.nickname === nickname));
+      }
+
       if (idx < 0) return;
       _storySingleUserMode = !!(opts && opts.singleUser);
       viewStories(idx);
