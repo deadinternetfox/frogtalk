@@ -4068,12 +4068,15 @@ async function loadUserWall(nickname) {
       let mediaHtml = '';
       if (p.media_data && p.media_type) {
         if (p.media_type.startsWith('image/')) {
-          mediaHtml = `<div style="margin:8px 0"><img loading="lazy" src="${esc(p.media_data)}" style="max-width:100%;border-radius:8px;cursor:pointer" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" alt="Post media"></div>`;
+          mediaHtml = `<div style="margin:8px 0"><img loading="lazy" decoding="async" src="${esc(p.media_data)}" style="max-width:100%;border-radius:8px;cursor:pointer" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" alt="Post media"></div>`;
         } else if (p.media_type.startsWith('video/')) {
-          // Use the server-generated mid-frame poster (cached JPG via
-          // ffmpeg at /api/social/posts/{id}/thumb) so videos show a
-          // representative frame instead of the default grey play-icon
-          // background. Also append #t=0.1 + playsinline muted as a
+          // Server-generated mid-frame poster (cached JPG via ffmpeg at
+          // /api/social/posts/{id}/thumb) replaces the default grey
+          // play-icon background. Because the poster fully covers the
+          // first-paint, switch preload to "none" so we don't kick off
+          // a byte-range fetch for every video on a 20-post wall —
+          // browser will start streaming only when the user actually
+          // hits play. #t=0.1 + playsinline muted are kept as a
           // fallback for clients where the poster fetch fails.
           const vurl = String(p.media_data || '');
           const vsrc = vurl + (vurl.indexOf('#') === -1 ? '#t=0.1' : '');
@@ -4087,7 +4090,7 @@ async function loadUserWall(nickname) {
               posterAttr = ` poster="${esc(u.pathname + u.search)}"`;
             }
           } catch {}
-          mediaHtml = `<div style="margin:8px 0"><video preload="metadata" playsinline muted${posterAttr} src="${esc(vsrc)}" controls style="max-width:100%;border-radius:8px;background:#000"></video></div>`;
+          mediaHtml = `<div style="margin:8px 0"><video preload="none" playsinline muted${posterAttr} src="${esc(vsrc)}" controls style="max-width:100%;border-radius:8px;background:#000"></video></div>`;
         } else if (p.media_type.startsWith('music/')) {
           // Music share — clickable card that hands off to FrogSocial's
           // mini-player so the song actually plays from the chat profile.
