@@ -1337,10 +1337,14 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
 body[data-music-collapsed] #messages-area{flex:1 1 auto}
 .mp-now{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .mp-art{width:72px;height:72px;border-radius:6px;background:#2a1a3a center/cover no-repeat;flex-shrink:0;
-  box-shadow:0 2px 10px rgba(200,130,255,0.25)}
+  box-shadow:0 2px 10px rgba(200,130,255,0.25);display:block;cursor:pointer;text-decoration:none}
+.mp-art:hover{box-shadow:0 2px 14px rgba(200,130,255,0.45)}
 .mp-info{flex:1 1 160px;min-width:0}
-.mp-title{font-size:14px;font-weight:700;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mp-title{font-size:14px;font-weight:700;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;text-decoration:none;cursor:pointer}
+a.mp-title:hover{color:#fff;text-decoration:underline}
 .mp-sub{font-size:12px;color:#b090d0;margin-top:2px}
+.mp-sub-nick{color:#d8b0ff;text-decoration:none;cursor:pointer;font-weight:600}
+.mp-sub-nick:hover{color:#fff;text-decoration:underline}
 .mp-ctrls{display:flex;gap:6px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
 @media(max-width:560px){
   .mp-ctrls{flex-basis:100%;justify-content:flex-start;margin-top:2px}
@@ -5576,6 +5580,8 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
 .sfmc-body{flex:1;min-width:0;padding:10px 14px;display:flex;flex-direction:column;gap:4px;justify-content:center}
 .sfmc-title{font-size:14.5px;font-weight:700;color:#e8e8e8;line-height:1.35;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sfmc-title a{color:inherit;text-decoration:none;cursor:pointer}
+.sfmc-title a:hover{color:#fff;text-decoration:underline}
 .sfmc-sub{font-size:12px;color:#888}
 .sfmc-sub .sfmc-room{color:#a88fe0;font-weight:600}
 .sfmc-sub .sfmc-link{color:#4caf50;text-decoration:none}
@@ -5651,8 +5657,12 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
 }
 .mtnp-title{
   font-size:14px;font-weight:700;color:#f0e4ff;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;
+  display:block;text-decoration:none;cursor:pointer
 }
+a.mtnp-title:hover{color:#fff;text-decoration:underline}
+.mtnp-sharer-link{color:#d8b0ff;text-decoration:none;font-weight:700;cursor:pointer}
+.mtnp-sharer-link:hover{color:#fff;text-decoration:underline}
 .mtnp-ctrls{display:flex;gap:6px;flex-shrink:0}
 .mtnp-btn{
   width:34px;height:34px;border-radius:10px;border:1px solid rgba(200,130,255,.35);

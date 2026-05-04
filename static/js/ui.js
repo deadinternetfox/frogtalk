@@ -94,13 +94,15 @@ const UI = (() => {
     const name = labels[p] || 'Online';
     // When the now-playing toggle is on AND a track is live, show a
     // music note + clickable affordance so the user can tap to open
-    // the source post / channel.
-    const np = _nowPlayingActive && msg ? '🎵 ' : '';
+    // the source post / channel. _syncNowPlayingStatus now writes the
+    // 🎵 prefix into status_msg itself, so don't double-prefix.
+    const hasNote = !!msg && msg.indexOf('🎵') === 0;
+    const np = (_nowPlayingActive && msg && !hasNote) ? '🎵 ' : '';
     el.innerHTML = msg
       ? `<span style="opacity:.9">${dot}</span> <span style="color:#bbb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;display:inline-block;vertical-align:bottom">${np}${escHtml(msg)}</span>`
       : `${dot} ${escHtml(name)}`;
     el.title = _nowPlayingActive
-      ? `${name} — 🎵 ${msg} (tap to open track · long-press to change status)`
+      ? `${name} — ${msg} (tap to open track · long-press to change status)`
       : (msg ? `${name} — ${msg} (click to change)` : `${name} (click to change)`);
     el.dataset.nowplaying = _nowPlayingActive ? '1' : '0';
     // Update the under-avatar status display
@@ -345,7 +347,13 @@ const UI = (() => {
     } catch {}
     const isLive = !!(cur && cur.active && cur.title);
     if (isLive) {
-      const title = String(cur.title || '').slice(0, 96);
+      // Prefix with the music note so remote clients can detect a
+      // now-playing status and render it as a clickable link to the
+      // user's profile (where their latest shared track is visible).
+      // Cap the title so the prefix never pushes the message over the
+      // 128-char status_msg limit.
+      const rawTitle = String(cur.title || '').slice(0, 90);
+      const title = '🎵 ' + rawTitle;
       if (title === _nowPlayingLastTitle && _nowPlayingActive) return;
       // First time we take over the status: stash whatever the user had.
       if (!_nowPlayingActive) {

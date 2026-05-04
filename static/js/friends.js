@@ -1,6 +1,23 @@
 /* ─── friends.js ──────────────────────────────────────────────────────────── */
 'use strict';
 
+// Render a friend's status_msg with the music-note prefix detected: when
+// a friend's status starts with "🎵 " (set automatically by the Now
+// Playing feature in ui.js) the line becomes a clickable link to that
+// friend's FrogSocial profile, where their latest shared track lives.
+function _renderStatusHtml (status_msg, nickname, fallbackLabel) {
+  const raw = String(status_msg || '').trim();
+  if (!raw) return esc(fallbackLabel || '');
+  if (raw.indexOf('🎵') === 0 && nickname) {
+    const safeNick = String(nickname).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return `<a href="javascript:void(0)" class="status-music-link"
+              onclick="event.stopPropagation();window.Social&&Social.openProfile&&Social.openProfile('${esc(safeNick)}')"
+              title="See @${esc(nickname)}'s profile for the source track"
+              style="color:#a88fe0;text-decoration:none;cursor:pointer">${esc(raw)}</a>`;
+  }
+  return esc(raw);
+}
+
 let _currentFriendTab = 'friends';
 let _pendingFriends    = [];
 let _allFriends        = [];
@@ -71,7 +88,7 @@ function renderFriendTab () {
       </div>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;font-size:14px;color:#e3f6ec">${esc(f.nickname)}</div>
-        <div style="font-size:12px;color:#9dc4b2">${esc(f.status_msg||presenceLabel(f.presence))}</div>
+        <div style="font-size:12px;color:#9dc4b2">${_renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))}</div>
       </div>
       <div style="display:flex;gap:4px">
         <button class="icon-btn" onclick="closeFriends();openDMWithNick('${esc(f.nickname)}')" title="Message">💬</button>
@@ -476,7 +493,7 @@ function renderFfpContent(tab) {
       </div>
       <div class="ffp-info">
         <div class="ffp-name">${esc(f.nickname)}</div>
-        <div class="ffp-status">${esc(f.status_msg || presenceLabel(f.presence))}</div>
+        <div class="ffp-status">${_renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))}</div>
       </div>
       <div class="ffp-actions" onclick="event.stopPropagation()">
         <button class="icon-btn" onclick="closeFriendsPanel();openDMWithNick('${esc(f.nickname)}')" title="Message">💬</button>

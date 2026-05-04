@@ -3072,7 +3072,21 @@ const Social = (() => {
               <span class="sp-stat sp-stat-link" onclick="Social.showFollowing('${esc(u.nickname)}')"><strong>${u.following_count}</strong> following</span>
             </div>
             ${u.bio ? `<div class="sp-bio">${esc(u.bio)}</div>` : ''}
-            ${u.status_msg || u.mood ? `<div class="sp-mood">${esc([u.status_msg, u.mood].filter(Boolean).join(' · '))}</div>` : ''}
+            ${u.status_msg || u.mood ? (() => {
+              const status = String(u.status_msg || '').trim();
+              const isMusic = status && status.indexOf('🎵') === 0;
+              const safeNick = esc(u.nickname || '').replace(/'/g, "\\'");
+              const combined = [status, u.mood].filter(Boolean).join(' · ');
+              if (isMusic) {
+                return `<div class="sp-mood">
+                  <a href="javascript:void(0)" class="sp-mood-music"
+                     onclick="Social.switchProfileTab('music', document.querySelector('.sp-tab[data-pt=&quot;music&quot;]'))"
+                     title="Open @${esc(u.nickname || '')}'s recent music"
+                     style="color:#a88fe0;text-decoration:none;cursor:pointer">${esc(combined)}</a>
+                </div>`;
+              }
+              return `<div class="sp-mood">${esc(combined)}</div>`;
+            })() : ''}
             ${u.tags?.length ? `<div class="sp-tags">${u.tags.map(t => `<span class="sp-tag">${esc(t)}</span>`).join('')}</div>` : ''}
           </div>
         </div>
@@ -4830,7 +4844,10 @@ const Social = (() => {
           <span class="sfmc-provider-chip" data-provider="${esc(t.provider)}">${chipIcon} ${esc(label)}</span>
         </div>
         <div class="sfmc-body">
-          <div class="sfmc-title" title="${esc(title)}">${esc(title)}</div>
+          <div class="sfmc-title" title="Open on ${esc(label)} ↗">
+            <a href="${esc(fullUrl)}" target="_blank" rel="noopener noreferrer"
+               onclick="event.stopPropagation();">${esc(title)}</a>
+          </div>
           <div class="sfmc-sub">
             ${roomHint ? `<span class="room-mention sfmc-room" data-room="${esc(roomHint)}" onclick="event.stopPropagation();if(window.Rooms&&Rooms.openChannelLink){Rooms.openChannelLink('${esc(roomHint).replace(/'/g,"\\'")}')}">#${esc(roomHint)}</span> · ` : ''}
             <a href="${esc(fullUrl)}" target="_blank" rel="noopener noreferrer" class="sfmc-link">Open on ${esc(label)} ↗</a>
@@ -5384,7 +5401,11 @@ const Social = (() => {
         const providerLabel = labelMap[cur.provider] || 'Music';
         const dotCls = cur.paused ? 'mtnp-dot paused' : 'mtnp-dot';
         const stateTxt = cur.paused ? 'Paused' : 'Playing now';
-        const sharerTxt = cur.sharer ? `shared by @${esc(cur.sharer)}` : '';
+        const sharerEsc = cur.sharer ? esc(cur.sharer) : '';
+        const sharerTxt = sharerEsc
+          ? `shared by <a class="mtnp-sharer-link" href="javascript:void(0)" onclick="event.stopPropagation();Social.openProfile('${sharerEsc.replace(/'/g,"\\'")}')" title="View @${sharerEsc}'s profile">@${sharerEsc}</a>`
+          : '';
+        const trackUrlEsc = esc(cur.url || '');
         const canPause = cur.provider === 'youtube' || cur.provider === 'soundcloud';
         const pauseBtn = canPause
           ? `<button class="mtnp-btn mtnp-pp" onclick="Social._toggleNowPlaying()"
@@ -5409,7 +5430,7 @@ const Social = (() => {
           <span class="${dotCls}"></span>
           <div class="mtnp-info">
             <div class="mtnp-state">${stateTxt}<span class="mtnp-prov" data-provider="${esc(cur.provider)}">${esc(providerLabel)}</span>${sharerTxt ? `<span class="mtnp-sharer">${sharerTxt}</span>` : ''}</div>
-            <div class="mtnp-title" title="${esc(cur.title || '')}">${esc(cur.title || 'Music')}</div>
+            <a class="mtnp-title" href="${trackUrlEsc}" target="_blank" rel="noopener noreferrer" title="Open on ${esc(providerLabel)} ↗">${esc(cur.title || 'Music')}</a>
           </div>
           <div class="mtnp-ctrls">
             ${pauseBtn}

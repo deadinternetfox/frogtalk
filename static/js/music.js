@@ -217,6 +217,28 @@ const Music = (() => {
         el.title = playing ? 'Pause' : 'Play';
         el.setAttribute('aria-label', el.title);
       });
+      // Also drive the FrogSocial persistent now-playing strip — it lives
+      // in social.js and only rebuilds on music:statechange events, so
+      // anything that nudges _paused in between (tab switches, YT
+      // auto-pause reconciled before the next emit) used to leave the
+      // strip's icon stale until something else re-emitted.
+      document.querySelectorAll('.mtnp-pp').forEach(el => {
+        el.dataset.playing = playing ? '1' : '0';
+        el.textContent = playing ? '⏸' : '▶';
+        el.title = playing ? 'Pause' : 'Resume';
+        el.setAttribute('aria-label', el.title);
+      });
+      document.querySelectorAll('.mtnp-dot').forEach(el => {
+        el.classList.toggle('paused', !playing);
+      });
+      // mtnp-state structure: text node + <span.mtnp-prov> + optional sharer.
+      // Replace only the leading text node so we don't blow away children.
+      document.querySelectorAll('.mtnp-state').forEach(el => {
+        const stateText = playing ? 'Playing now' : 'Paused';
+        if (el.firstChild && el.firstChild.nodeType === 3) {
+          el.firstChild.nodeValue = stateText;
+        }
+      });
     } catch { /* DOM may not be ready */ }
   }
 
@@ -360,11 +382,16 @@ const Music = (() => {
   function getCurrent() {
     const cur = _state && _state.queue && _state.queue[0];
     if (!cur) return { active: false };
+    // Use _currentEffectivePaused() so callers (FrogSocial top strip, mini
+    // dock re-renders, friends-list status text, etc.) see the real audio
+    // truth — if YT auto-paused in the background while the user was on
+    // another channel, _paused alone would still report "playing" and
+    // every UI consuming this snapshot would draw the wrong icon.
     return {
       active: true,
       soloMode: _soloMode,
       room: _room || '',
-      paused: _paused,
+      paused: _currentEffectivePaused(),
       provider: cur.provider,
       url: cur.url || '',
       video_id: cur.video_id || '',
@@ -1183,12 +1210,19 @@ const Music = (() => {
         </div>
       </div>`;
 
+    const _curUrlEsc = cur ? esc(cur.url || '') : '';
+    const _curSubmitterEsc = cur ? esc(cur.submitter_nick || '') : '';
     const nowRow = cur ? `
       <div class="mp-now">
-        <div class="mp-art" style="background-image:url('${esc(cur.thumbnail || '')}')"></div>
+        <a class="mp-art" href="${_curUrlEsc}" target="_blank" rel="noopener noreferrer"
+           title="Open on ${esc(cur.provider || 'source')}"
+           style="background-image:url('${esc(cur.thumbnail || '')}')"></a>
         <div class="mp-info">
-          <div class="mp-title">${esc(cur.title || cur.url)}</div>
-          <div class="mp-sub">Queued by ${esc(cur.submitter_nick || '?')} · ${esc(cur.provider)}</div>
+          <a class="mp-title" href="${_curUrlEsc}" target="_blank" rel="noopener noreferrer"
+             title="Open this track on ${esc(cur.provider || 'source')} ↗">${esc(cur.title || cur.url)}</a>
+          <div class="mp-sub">Queued by ${cur.submitter_nick
+            ? `<a class="mp-sub-nick" href="javascript:void(0)" onclick="event.stopPropagation();window.Social&&Social.openProfile&&Social.openProfile('${_curSubmitterEsc.replace(/'/g,"\\'")}')" title="View @${_curSubmitterEsc}'s profile">${_curSubmitterEsc}</a>`
+            : '?'} · ${esc(cur.provider)}</div>
         </div>
         <div class="mp-ctrls">
           <button class="mp-act mp-act-share" onclick="Music.shareToWall()" title="Share this track to your FrogSocial wall">
