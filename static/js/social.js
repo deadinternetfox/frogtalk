@@ -5419,6 +5419,14 @@ const Social = (() => {
           </div>`;
     }
     try { _syncReelsMusicInterlock(); } catch {}
+    // Reels overlay needs to know the strip is taking ~64-78px so the
+    // bottom-anchored author / share / stop controls don't render below
+    // the viewport. Toggle a marker class on #social-overlay; CSS uses
+    // it to shrink .reels-stage + .reel-card height accordingly.
+    try {
+      const ov = document.getElementById('social-overlay');
+      if (ov) ov.classList.toggle('has-nowplaying-strip', !!cur.active);
+    } catch {}
     // Make sure the freshly-rendered button reflects the live setting
     // and gets toggled whenever Music.toggleAutoNext() flips it.
     try { window.Music && Music._syncAutoNextButtons && Music._syncAutoNextButtons(); } catch {}

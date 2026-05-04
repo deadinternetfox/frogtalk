@@ -859,35 +859,42 @@ async def media_to_wall(msg_id: int, current_user: dict = Depends(get_current_us
 @router.get("/stories")
 async def get_stories(current_user: dict = Depends(get_current_user)):
     """Get stories feed grouped by user."""
-    # Note: cleanup is done in background task; do not block requests.
-    raw = db.get_stories_feed(current_user["id"])
-    # Group by user
-    grouped: dict = {}
-    for s in raw:
-        uid = s["user_id"]
-        if uid not in grouped:
-            grouped[uid] = {
-                "user_id": uid,
-                "nickname": s["nickname"],
-                "avatar": s.get("avatar"),
-                "stories": [],
-                "has_unviewed": False,
-            }
-        grouped[uid]["stories"].append({
-            "id": s["id"],
-            "has_media": bool(s.get("has_media")),
-            "media_data": s.get("media_data"),
-            "media_type": s["media_type"],
-            "caption": s.get("caption", ""),
-            "created_at": s["created_at"],
-            "viewed": bool(s["viewed"]),
-        })
-        if not s["viewed"]:
-            grouped[uid]["has_unviewed"] = True
-    # Put current user first, then unviewed, then viewed
-    users = list(grouped.values())
-    users.sort(key=lambda u: (u["user_id"] != current_user["id"], not u["has_unviewed"]))
-    return {"users": users}
+    # Sync DB call inside async def stalls the event loop. Threadpool +
+    # coalesce so a feed-tab open (which fires /stories alongside /feed,
+    # /suggested, etc.) doesn't queue behind itself when the user pings
+    # the tab repeatedly.
+    uid = current_user["id"]
+    key = f"stories:{uid}"
+
+    async def _build():
+        raw = await run_in_threadpool(db.get_stories_feed, uid)
+        grouped: dict = {}
+        for s in raw:
+            suid = s["user_id"]
+            if suid not in grouped:
+                grouped[suid] = {
+                    "user_id": suid,
+                    "nickname": s["nickname"],
+                    "avatar": s.get("avatar"),
+                    "stories": [],
+                    "has_unviewed": False,
+                }
+            grouped[suid]["stories"].append({
+                "id": s["id"],
+                "has_media": bool(s.get("has_media")),
+                "media_data": s.get("media_data"),
+                "media_type": s["media_type"],
+                "caption": s.get("caption", ""),
+                "created_at": s["created_at"],
+                "viewed": bool(s["viewed"]),
+            })
+            if not s["viewed"]:
+                grouped[suid]["has_unviewed"] = True
+        users = list(grouped.values())
+        users.sort(key=lambda u: (u["user_id"] != uid, not u["has_unviewed"]))
+        return {"users": users}
+
+    return await _coalesce_hot(key, _build)
 
 
 @router.post("/stories")
@@ -1076,9 +1083,22 @@ async def list_social_notifications(
     current_user: dict = Depends(get_current_user),
 ):
     """List recent like/comment/follow notifications for the current user."""
-    items = db.get_social_notifications(current_user["id"], limit=limit, offset=offset)
-    unread = db.get_social_notification_unread_count(current_user["id"])
-    return {"notifications": items, "unread": unread}
+    # Sync DB calls inside async def → threadpool. Coalesce per-user so
+    # a tab swap that fires /notifications + activity-bell badge poll at
+    # the same time only hits SQLite once.
+    uid = current_user["id"]
+    key = f"notifs:{uid}:{limit}:{offset}"
+
+    async def _build():
+        items = await run_in_threadpool(
+            db.get_social_notifications, uid, limit, offset
+        )
+        unread = await run_in_threadpool(
+            db.get_social_notification_unread_count, uid
+        )
+        return {"notifications": items, "unread": unread}
+
+    return await _coalesce_hot(key, _build)
 
 
 @router.get("/notifications/unread-count")
@@ -1086,7 +1106,16 @@ async def list_social_notifications(
 async def social_notifications_unread_count(
     request: Request, current_user: dict = Depends(get_current_user)
 ):
-    return {"unread": db.get_social_notification_unread_count(current_user["id"])}
+    uid = current_user["id"]
+    key = f"notifs_unread:{uid}"
+
+    async def _build():
+        unread = await run_in_threadpool(
+            db.get_social_notification_unread_count, uid
+        )
+        return {"unread": unread}
+
+    return await _coalesce_hot(key, _build)
 
 
 @router.post("/notifications/read")
