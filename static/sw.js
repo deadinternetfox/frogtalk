@@ -1,5 +1,5 @@
 /* FrogTalk Service Worker — caching + web push */
-const CACHE_NAME = 'frogtalk-v234';
+const CACHE_NAME = 'frogtalk-v236';
 const STATIC_ASSETS = [
   '/app',
   '/static/js/app.js',
@@ -26,11 +26,14 @@ self.addEventListener('install', event => {
   self.skipWaiting();
 });
 
-// ── Activate: delete ALL caches then claim clients ───────────────────────────
+// ── Activate: delete ONLY stale caches then claim clients ───────────────────
+// Previously this wiped every cache on activate, forcing every client to
+// re-download ~1MB of assets on each deploy. Now we keep the current
+// CACHE_NAME and only purge older versions.
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });

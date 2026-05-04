@@ -674,7 +674,17 @@ def _music_position_sec(room_name: str, current_track: dict | None) -> int:
     if not rec or rec[0] != tid:
         set_music_head_anchor(room_name, int(tid), now)
         return 0
-    return max(0, int(now - rec[1]))
+    elapsed = int(now - rec[1])
+    # Sanity cap. If the in-memory anchor for this head track has been
+    # advancing for more than 4h with nobody DJ'ing a skip (room idle,
+    # everyone offline, nobody pressed Resync), the position grows
+    # forever and clients that re-join see "Out of sync · 19669s". Reset
+    # the anchor to now so playback restarts cleanly from 0 instead of
+    # the client trying to seek to a phantom position deep into the past.
+    if elapsed > 4 * 3600:
+        set_music_head_anchor(room_name, int(tid), now)
+        return 0
+    return max(0, elapsed)
 
 
 @router.get("/{room_name}/queue")

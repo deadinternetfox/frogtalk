@@ -149,7 +149,18 @@ const Music = (() => {
       b.title = on ? 'Auto-next: on (click to disable)' : 'Auto-next: off (click to enable)';
       b.setAttribute('aria-label', b.title);
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      b.innerHTML = svg;
+      // Preserve a sibling <span class="san-label"> if present (topbar
+      // variant). Replace only the leading <svg>; if no svg child, fall
+      // back to setting innerHTML.
+      const existingSvg = b.querySelector(':scope > svg');
+      if (existingSvg) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = svg;
+        const newSvg = tmp.firstElementChild;
+        if (newSvg) existingSvg.replaceWith(newSvg);
+      } else {
+        b.innerHTML = svg;
+      }
     });
   }
   function toggleAutoNext(btn) {
@@ -389,10 +400,26 @@ const Music = (() => {
     return _muted;
   }
 
+  // Sanity ceiling for any single track's elapsed position. Protects
+  // every anchor path from a runaway server reading (process kept the
+  // _music_head_started anchor while everyone was offline, no one DJ'd
+  // a skip → position_sec grows forever, badge displays "19669s out of
+  // sync" forever and Resync is a no-op because we keep re-accepting
+  // the same bogus value). 4h covers every realistic music track and
+  // long DJ set we host without clipping legitimate playback.
+  const _MAX_TRACK_POS_SEC = 4 * 3600;
+
   function _setAnchor(track, serverPosSec) {
     if (!track) { _anchorMs = 0; _anchorTrackKey = ''; _userPaused = false; _currentDurationSec = 0; return; }
     const key = `${track.provider}:${track.video_id}`;
-    const incoming = Math.max(0, parseInt(serverPosSec || 0, 10) || 0);
+    let incoming = Math.max(0, parseInt(serverPosSec || 0, 10) || 0);
+    // Clamp obviously-impossible server readings (see _MAX_TRACK_POS_SEC).
+    // If the server kept advancing the anchor for a track that ended
+    // hours ago, treat it as "start of track" rather than seeding a
+    // 5-hours-ago anchor that makes Resync useless.
+    if (incoming > _MAX_TRACK_POS_SEC) incoming = 0;
+    // Also clamp against the known track duration if available.
+    if (_currentDurationSec > 0 && incoming > _currentDurationSec + 5) incoming = 0;
     // Track change clears the sticky user-pause flag — pausing song A and
     // then having the queue advance to song B should default to "playing".
     if (key !== _anchorTrackKey) { _userPaused = false; _currentDurationSec = 0; }
@@ -471,6 +498,18 @@ const Music = (() => {
   function _resync(force) {
     if (!_anchorMs) return;
     const pos = _expectedPosSec();
+    // Runaway anchor (e.g. server kept advancing position_sec for hours
+    // while nobody was in the room). Reset the anchor to "now" so the
+    // badge stops showing nonsense and the next state push from the
+    // server can re-seed properly. Also kick auto-advance in case the
+    // track really did end.
+    if (pos > _MAX_TRACK_POS_SEC) {
+      _anchorMs = Date.now();
+      _lastDriftSec = 0;
+      _renderSyncBadge();
+      try { _maybeAutoAdvanceOnEnded(); } catch {}
+      return;
+    }
     // Past end of track? Don't seek to a phantom position — fire
     // auto-advance and let the queue progress instead. This was the
     // 'Resync just sets you to end of video' bug: server's position_sec
@@ -705,6 +744,16 @@ const Music = (() => {
       state = 'warn';
       label = `⚠ Drifting · ${_lastDriftSec.toFixed(1)}s`;
       title = `You're ${_lastDriftSec.toFixed(2)}s off the room — click Resync`;
+    } else if (_lastDriftSec > 600) {
+      // Drift of >10 minutes is never a real listen-in-progress drift —
+      // it always means the server's anchor for this track is stale
+      // (track ended hours ago, nobody DJ'd a skip). Show an honest
+      // "stalled" badge instead of a meaningless 19000s number, and
+      // schedule a one-shot anchor reset so the next click of Resync
+      // can succeed.
+      state = 'bad';
+      label = '❗ Room stream stalled — Resync';
+      title = "This room's play head looks stuck. Click Resync to refresh, or pick another channel.";
     } else {
       state = 'bad';
       label = `❗ Out of sync · ${_lastDriftSec.toFixed(0)}s`;
@@ -2011,6 +2060,7 @@ const Music = (() => {
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,
            toggleAutoNext,
+           _syncAutoNextButtons,
            openAddModal, closeAddModal, submitFromModal,
            openPlaylistModal, closePlaylistModal,
            toggleCollapse,

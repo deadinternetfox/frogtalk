@@ -1,5 +1,7 @@
 """Link preview (Open Graph) scraper for rich embeds with YouTube support."""
 import re
+import time
+import asyncio
 import httpx
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
@@ -8,9 +10,51 @@ from deps import get_current_user
 
 router = APIRouter(prefix="/preview", tags=["preview"])
 
-# Cache previews in memory (simple TTL-less cache, max 500 entries)
-_cache = {}
-MAX_CACHE = 500
+# Cache previews in memory with a real TTL. Without TTL the cache used to
+# fill up and never refresh; without coalescing, 24 concurrent music-tab
+# tracks would each fire their own noembed.com fetch and saturate the
+# httpx connection pool, blocking the single uvicorn worker for seconds
+# at a time. _inflight maps url -> Future so concurrent requests for the
+# same url share one upstream fetch.
+_cache: dict = {}                # url -> (expires_ts, result_dict)
+_inflight: dict = {}             # url -> asyncio.Future
+MAX_CACHE = 1000
+CACHE_TTL = 6 * 3600             # 6h — link previews barely change
+
+# Shared httpx client. Keepalive + bounded pool so a flood of preview
+# requests can't open a new TCP connection per call.
+_http_client: Optional[httpx.AsyncClient] = None
+def _client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(5.0, connect=3.0),
+            follow_redirects=True,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            headers={'User-Agent': 'Mozilla/5.0 (compatible; FrogTalk/1.0; +https://frogtalk.xyz)'},
+        )
+    return _http_client
+
+
+def _cache_get(url: str):
+    entry = _cache.get(url)
+    if not entry:
+        return None
+    expires, value = entry
+    if expires < time.time():
+        _cache.pop(url, None)
+        return None
+    return value
+
+
+def _cache_put(url: str, value: dict):
+    if len(_cache) >= MAX_CACHE:
+        # evict oldest by insertion order
+        try:
+            _cache.pop(next(iter(_cache)))
+        except StopIteration:
+            pass
+    _cache[url] = (time.time() + CACHE_TTL, value)
 
 # Regex for OG meta tags
 OG_REGEX = re.compile(r'<meta\s+(?:property|name)=["\']og:([^"\']+)["\']\s+content=["\']([^"\']*)["\']', re.IGNORECASE)
@@ -56,10 +100,42 @@ def extract_spotify_info(url: str) -> Optional[tuple]:
 
 
 async def fetch_og_data(url: str) -> dict:
-    """Fetch and parse OG meta tags from a URL."""
-    if url in _cache:
-        return _cache[url]
-    
+    """Fetch and parse OG meta tags from a URL.
+
+    Coalesces concurrent calls for the same url into one upstream fetch
+    so a feed paint with 20+ identical preview requests doesn't fan out
+    to 20 noembed/origin fetches.
+    """
+    cached = _cache_get(url)
+    if cached is not None:
+        return cached
+
+    inflight = _inflight.get(url)
+    if inflight is not None:
+        try:
+            return await inflight
+        except Exception:
+            return {}
+
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future = loop.create_future()
+    _inflight[url] = fut
+    try:
+        result = await _do_fetch_og(url)
+        _cache_put(url, result)
+        if not fut.done():
+            fut.set_result(result)
+        return result
+    except Exception as e:
+        if not fut.done():
+            fut.set_exception(e)
+        return {}
+    finally:
+        _inflight.pop(url, None)
+
+
+async def _do_fetch_og(url: str) -> dict:
+    client = _client()
     # Check for YouTube
     yt_id = extract_youtube_id(url)
     if yt_id:
@@ -72,36 +148,35 @@ async def fetch_og_data(url: str) -> dict:
             "embed_url": f"https://www.youtube.com/embed/{yt_id}",
             "url": url,
         }
-        # Try to get actual title via noembed
+        # Try to get actual title via noembed (best-effort)
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                resp = await client.get(f"https://noembed.com/embed?url=https://youtube.com/watch?v={yt_id}")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    result["title"] = data.get("title", "YouTube Video")
-                    result["author"] = data.get("author_name", "")
-        except:
+            resp = await client.get(
+                f"https://noembed.com/embed?url=https://youtube.com/watch?v={yt_id}",
+                timeout=3.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                result["title"] = data.get("title", "YouTube Video")
+                result["author"] = data.get("author_name", "")
+        except Exception:
             pass
-        _cache[url] = result
         return result
-    
+
     # Check for Twitter/X
     tw_id = extract_twitter_id(url)
     if tw_id:
-        result = {
+        return {
             "type": "twitter",
             "tweet_id": tw_id,
             "site_name": "Twitter/X",
             "url": url,
         }
-        _cache[url] = result
-        return result
-    
+
     # Check for Spotify
     sp_info = extract_spotify_info(url)
     if sp_info:
         sp_type, sp_id = sp_info
-        result = {
+        return {
             "type": "spotify",
             "spotify_type": sp_type,
             "spotify_id": sp_id,
@@ -109,61 +184,50 @@ async def fetch_og_data(url: str) -> dict:
             "embed_url": f"https://open.spotify.com/embed/{sp_type}/{sp_id}",
             "url": url,
         }
-        _cache[url] = result
-        return result
-    
+
     # Standard OG fetch
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers={
-                'User-Agent': 'Mozilla/5.0 (compatible; FrogTalk/1.0; +https://frogtalk.xyz)'
-            })
-            if resp.status_code != 200:
-                return {}
-            
-            html = resp.text[:50000]  # Limit parsing to first 50KB
-            
-            # Extract OG tags
-            og = {"type": "link"}
-            for match in OG_REGEX.finditer(html):
-                key, value = match.groups()
-                og[key] = value.strip()
-            
-            # Fallback to standard title/description
-            if 'title' not in og:
-                title_match = TITLE_REGEX.search(html)
-                if title_match:
-                    og['title'] = title_match.group(1).strip()
-            
-            if 'description' not in og:
-                desc_match = DESC_REGEX.search(html)
-                if desc_match:
-                    og['description'] = desc_match.group(1).strip()
-            
-            # Try to get favicon
-            favicon_match = FAVICON_REGEX.search(html)
-            if favicon_match:
-                favicon = favicon_match.group(1)
-                # Make absolute URL if relative
-                if favicon.startswith('/'):
-                    from urllib.parse import urlparse
-                    parsed = urlparse(url)
-                    favicon = f"{parsed.scheme}://{parsed.netloc}{favicon}"
-                og['favicon'] = favicon
-            
-            # Set site name from URL if not present
-            if 'site_name' not in og:
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            return {}
+
+        html = resp.text[:50000]  # Limit parsing to first 50KB
+
+        # Extract OG tags
+        og = {"type": "link"}
+        for match in OG_REGEX.finditer(html):
+            key, value = match.groups()
+            og[key] = value.strip()
+
+        # Fallback to standard title/description
+        if 'title' not in og:
+            title_match = TITLE_REGEX.search(html)
+            if title_match:
+                og['title'] = title_match.group(1).strip()
+
+        if 'description' not in og:
+            desc_match = DESC_REGEX.search(html)
+            if desc_match:
+                og['description'] = desc_match.group(1).strip()
+
+        # Try to get favicon
+        favicon_match = FAVICON_REGEX.search(html)
+        if favicon_match:
+            favicon = favicon_match.group(1)
+            # Make absolute URL if relative
+            if favicon.startswith('/'):
                 from urllib.parse import urlparse
-                og['site_name'] = urlparse(url).netloc
-            
-            og['url'] = url
-            
-            # Cache result
-            if len(_cache) >= MAX_CACHE:
-                _cache.pop(next(iter(_cache)))  # Remove oldest
-            _cache[url] = og
-            
-            return og
+                parsed = urlparse(url)
+                favicon = f"{parsed.scheme}://{parsed.netloc}{favicon}"
+            og['favicon'] = favicon
+
+        # Set site name from URL if not present
+        if 'site_name' not in og:
+            from urllib.parse import urlparse
+            og['site_name'] = urlparse(url).netloc
+
+        og['url'] = url
+        return og
     except Exception:
         return {}
 

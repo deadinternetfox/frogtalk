@@ -581,6 +581,10 @@ const Social = (() => {
     // Paint the persistent "Now playing" strip immediately — it lives in
     // #social-overlay and must reflect current music state on open.
     try { _applyMusicState(); } catch {}
+    // Sync the topbar Auto-next pill (and the dock button if mounted) so
+    // its on/off state reflects the user's saved preference, not the
+    // hard-coded "ON" markup baked into the static HTML.
+    try { window.Music && Music._syncAutoNextButtons && Music._syncAutoNextButtons(); } catch {}
     if (_currentTab === 'profile') {
         loadProfile(_profileUser || State.user?.nickname);
     } else if (_currentTab === 'feed') {
