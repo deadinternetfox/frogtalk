@@ -2997,7 +2997,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 
 /* ─── Rich chat share embed (reel/post inline player) ──────────── */
 .chat-share-embed{
-  display:block;margin-top:8px;max-width:380px;
+  display:block;margin-top:8px;max-width:260px;
   background:linear-gradient(180deg,#163026 0%,#0f1f17 100%);
   border:1px solid #2f5548;border-left:4px solid #4caf50;
   border-radius:14px;overflow:hidden;cursor:pointer;
@@ -3034,13 +3034,13 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .chat-share-media{
   position:relative;background:#000;
   display:flex;align-items:center;justify-content:center;
-  max-height:520px;overflow:hidden
+  max-height:340px;overflow:hidden
 }
 .chat-share-image img{
-  display:block;width:100%;max-height:520px;object-fit:cover;
+  display:block;width:100%;max-height:340px;object-fit:cover;
 }
 .chat-share-video{
-  aspect-ratio:9/16;max-height:520px;
+  aspect-ratio:9/16;max-height:340px;
   background:linear-gradient(135deg,#0a1f14 0%,#08130d 100%);
 }
 /* Shimmer placeholder until the first video frame has been decoded.
@@ -3071,18 +3071,18 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 }
 .chat-share-play-overlay{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  width:64px;height:64px;
+  width:48px;height:48px;
   border-radius:50%;
   background:radial-gradient(circle at 35% 35%,rgba(76,175,80,.95),rgba(34,90,50,.95));
   border:2px solid rgba(255,255,255,.92);
   color:#fff;cursor:pointer;
   display:flex;align-items:center;justify-content:center;
-  box-shadow:0 6px 22px rgba(0,0,0,.55),0 0 0 6px rgba(76,175,80,.18);
+  box-shadow:0 6px 22px rgba(0,0,0,.55),0 0 0 5px rgba(76,175,80,.18);
   transition:opacity .18s ease,transform .15s ease,box-shadow .18s ease;
   pointer-events:auto;z-index:2;padding:0
 }
 .chat-share-play-icon{
-  font-size:22px;line-height:1;display:block;
+  font-size:17px;line-height:1;display:block;
   transform:translateX(2px) /* nudge ▶ to optical center */
 }
 .chat-share-play-overlay:hover{
