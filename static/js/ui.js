@@ -3859,7 +3859,23 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
       .then(u => {
         document.getElementById('userinfo-bio').textContent = u.bio || 'No bio set.';
         document.getElementById('userinfo-avatar').innerHTML = UI.avatarEl(u.avatar, u.nickname, 90);
-        if (smEl) smEl.textContent = [u.status_msg, u.mood].filter(Boolean).join(' · ');
+        if (smEl) {
+          const status = String(u.status_msg || '').trim();
+          const mood = String(u.mood || '').trim();
+          if (status && status.indexOf('🎵') === 0) {
+            // Music status — render as a polished pill linking to the
+            // user's Music tab on FrogSocial. Same look & label as the
+            // FrogSocial profile and the friends list.
+            const track = status.replace(/^🎵\s*/, '').trim() || 'a track';
+            const safeNick = String(u.nickname || nickname || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            const moodSuffix = mood ? ` <span class="sml-mood">· ${esc(mood)}</span>` : '';
+            smEl.innerHTML = `<a href="javascript:void(0)" class="status-music-link"
+                onclick="event.stopPropagation();window.Social&&Social.openProfileMusic&&Social.openProfileMusic('${esc(safeNick)}')"
+                title="Open @${esc(u.nickname || nickname)}'s music">🎵 <span class="sml-label">Now playing:</span> <span class="sml-track">${esc(track)}</span>${moodSuffix}</a>`;
+          } else {
+            smEl.textContent = [status, mood].filter(Boolean).join(' · ');
+          }
+        }
         applyProfileCustomCss(u.custom_css || '');
         if (tagsEl && Array.isArray(u.tags) && u.tags.length > 0) {
           tagsEl.innerHTML = u.tags.map(t =>

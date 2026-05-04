@@ -10,10 +10,14 @@ function _renderStatusHtml (status_msg, nickname, fallbackLabel) {
   if (!raw) return esc(fallbackLabel || '');
   if (raw.indexOf('🎵') === 0 && nickname) {
     const safeNick = String(nickname).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    // Strip the leading 🎵 and any trailing whitespace so we can
+    // render "🎵 Now playing: <track>" with proper spacing instead
+    // of just the raw status. This makes the line scan as a label,
+    // not a stray status string.
+    const track = raw.replace(/^🎵\s*/, '').trim() || 'a track';
     return `<a href="javascript:void(0)" class="status-music-link"
-              onclick="event.stopPropagation();window.Social&&Social.openProfile&&Social.openProfile('${esc(safeNick)}')"
-              title="See @${esc(nickname)}'s profile for the source track"
-              style="color:#a88fe0;text-decoration:none;cursor:pointer">${esc(raw)}</a>`;
+              onclick="event.stopPropagation();window.Social&&Social.openProfileMusic&&Social.openProfileMusic('${esc(safeNick)}')"
+              title="Open @${esc(nickname)}'s music">🎵 <span class="sml-label">Now playing:</span> <span class="sml-track">${esc(track)}</span></a>`;
   }
   return esc(raw);
 }

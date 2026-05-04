@@ -4768,6 +4768,31 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .sp-stat-link:hover{color:#4caf50}
 .sp-bio{font-size:14px;color:#ccc;line-height:1.5;margin-bottom:6px}
 .sp-mood{font-size:13px;color:#888;margin-bottom:6px}
+/* Polished pill for the music status line — used wherever a user's
+   status_msg starts with 🎵 (FrogSocial profile, chat profile, friends
+   list, friends popup). Same look so users learn that "🎵 ..." is
+   always a one-tap shortcut to that user's source track. */
+.status-music-link, .sp-mood-music{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:3px 10px 3px 8px;
+  background:linear-gradient(135deg,rgba(168,143,224,0.14),rgba(76,175,80,0.10));
+  border:1px solid rgba(168,143,224,0.32);
+  border-radius:999px;
+  color:#c9b6ee;font-weight:600;font-size:12.5px;line-height:1.35;
+  text-decoration:none;cursor:pointer;
+  transition:background .15s,border-color .15s,color .15s,transform .12s;
+  max-width:100%;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.status-music-link:hover, .sp-mood-music:hover{
+  background:linear-gradient(135deg,rgba(168,143,224,0.24),rgba(76,175,80,0.18));
+  border-color:rgba(168,143,224,0.55);
+  color:#e3d4ff;
+}
+.status-music-link:active, .sp-mood-music:active{transform:translateY(1px)}
+.status-music-link .sml-label{opacity:0.78;font-weight:500;margin:0 1px 0 2px}
+.status-music-link .sml-track{color:#e3d4ff;font-weight:600}
+.status-music-link .sml-mood{opacity:0.7;font-weight:500;margin-left:2px}
 .sp-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 .sp-tag{background:#1a2e1a;color:#4caf50;border-radius:12px;padding:4px 10px;font-size:12px}
 .sp-tabs{display:flex;border-bottom:1px solid #1a1a1a;padding:0 20px}

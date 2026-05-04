@@ -669,6 +669,26 @@ const Social = (() => {
     open('profile');
   }
 
+  // Open someone's profile and land directly on the Music tab. Used by
+  // the music-status link (🎵 prefix) wherever a friend's status is
+  // shown — chat profile, friends list, friends popup, mini status —
+  // so tapping the line takes the viewer straight to the source track
+  // instead of dumping them on the wall.
+  function openProfileMusic(nickname) {
+    openProfile(nickname);
+    // openProfile schedules an async render (fetch + DOM build). Give
+    // the wall-tab default time to mount, then flip to music. 80ms is
+    // longer than the synchronous path but short enough to feel
+    // instant; if the tab button isn't there yet (slow network) we
+    // retry once.
+    const flip = (tries) => {
+      const btn = document.querySelector('.sp-tab[data-pt="music"]');
+      if (btn) { try { switchProfileTab('music', btn); } catch {} return; }
+      if (tries > 0) setTimeout(() => flip(tries - 1), 120);
+    };
+    setTimeout(() => flip(6), 80);
+  }
+
   // ── navigation ──────────────────────────────────────────────────────────
   function renderNav() {
     const isOwnProfile = !_profileUser
@@ -3078,11 +3098,15 @@ const Social = (() => {
               const safeNick = esc(u.nickname || '').replace(/'/g, "\\'");
               const combined = [status, u.mood].filter(Boolean).join(' · ');
               if (isMusic) {
+                // Strip the leading 🎵 so we can compose the polished
+                // "🎵 Now playing: <track>" label ourselves. mood, if any,
+                // is appended after a separator so the dot still shows.
+                const track = status.replace(/^🎵\s*/, '').trim() || 'a track';
+                const moodSuffix = u.mood ? ` <span class="sml-mood">· ${esc(u.mood)}</span>` : '';
                 return `<div class="sp-mood">
-                  <a href="javascript:void(0)" class="sp-mood-music"
-                     onclick="Social.switchProfileTab('music', document.querySelector('.sp-tab[data-pt=&quot;music&quot;]'))"
-                     title="Open @${esc(u.nickname || '')}'s recent music"
-                     style="color:#a88fe0;text-decoration:none;cursor:pointer">${esc(combined)}</a>
+                  <a href="javascript:void(0)" class="sp-mood-music status-music-link"
+                     onclick="event.stopPropagation();Social.openProfileMusic('${safeNick}')"
+                     title="Open @${esc(u.nickname || '')}'s recent music">🎵 <span class="sml-label">Now playing:</span> <span class="sml-track">${esc(track)}</span>${moodSuffix}</a>
                 </div>`;
               }
               return `<div class="sp-mood">${esc(combined)}</div>`;
@@ -7815,7 +7839,7 @@ const Social = (() => {
   }
 
   return {
-    open, close, openProfile, switchTab, switchProfileTab,
+    open, close, openProfile, openProfileMusic, switchTab, switchProfileTab,
     switchProfileMediaMode, loadProfileMediaCombined,
     openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
     toggleFollow, reactPost, showReactPicker, showReactionDetail, toggleComments,
