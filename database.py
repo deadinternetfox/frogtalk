@@ -5088,10 +5088,14 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
     for rendering). These are either small URLs or decoded on-demand.
     """
     mood = (mood or '').strip().lower()
-    # Include media_data for image/video (rendering) and music (URL references).
-    # These are either data URIs (decoded on-demand) or already URLs, so keep them.
+    # In lite mode, only keep media_data for music posts — those are short
+    # URL references (~50 bytes). Image/video media_data is the full base64
+    # data URI (often 5–45 MB per row), which is what was making `lite=1`
+    # feed responses tens of megabytes. The router substitutes a lazy URL
+    # `/api/social/posts/{id}/media` whenever media_data is NULL, so the
+    # client lazy-loads images and videos on scroll instead of inlining.
     media_col = (
-        "CASE WHEN wp.media_type LIKE 'image/%' OR wp.media_type LIKE 'video/%' OR wp.media_type LIKE 'music/%' "
+        "CASE WHEN wp.media_type LIKE 'music/%' "
         "THEN wp.media_data ELSE NULL END AS media_data"
         if lite else "wp.media_data"
     )
@@ -5219,10 +5223,11 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
     When `friends_only` is True, filter to posts posted/reposted/reacted by accepted friends.
     """
     mood = (mood or '').strip().lower()
-    # Include media_data for image/video (rendering) and music (URL references).
-    # These are either data URIs (decoded on-demand) or already URLs, so keep them.
+    # In lite mode, only keep media_data for music posts (small URL refs).
+    # Image/video are NULLed so the router substitutes a lazy-load URL and
+    # the client only fetches the actual bytes on scroll. See get_feed_posts.
     media_col = (
-        "CASE WHEN wp.media_type LIKE 'image/%' OR wp.media_type LIKE 'video/%' OR wp.media_type LIKE 'music/%' "
+        "CASE WHEN wp.media_type LIKE 'music/%' "
         "THEN wp.media_data ELSE NULL END AS media_data"
         if lite else "wp.media_data"
     )
