@@ -4795,6 +4795,21 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   box-shadow:0 1px 0 rgba(186,160,235,0.18) inset, 0 0 0 1px rgba(168,143,224,0.18);
 }
 .status-music-link:active, .sp-mood-music:active{transform:translateY(1px)}
+/* Belt-and-braces: a global `a:hover{text-decoration:underline}` rule
+   lives elsewhere in this stylesheet and was still winning on some
+   states (visited, ::first-line cascades, etc). Pin every state of
+   the music link AND its inner spans to no underline. */
+a.status-music-link,
+a.status-music-link:link,
+a.status-music-link:visited,
+a.status-music-link:hover,
+a.status-music-link:focus,
+a.status-music-link:active,
+a.status-music-link *,
+a.status-music-link:hover *{
+  text-decoration:none !important;
+  text-decoration-line:none !important;
+}
 .status-music-link .sml-label{opacity:0.78;font-weight:500;margin:0 4px 0 6px}
 .status-music-link .sml-track{color:#f0e4ff;font-weight:600}
 .status-music-link .sml-mood{opacity:0.7;font-weight:500;margin-left:6px}
@@ -7512,21 +7527,29 @@ window.ConnErr = (function(){
 <!-- User Profile Modal (Social Media Style) -->
 <div class="modal-overlay hidden" id="modal-user-info">
   <div class="modal user-profile-modal" style="max-width:500px;max-height:85vh;display:flex;flex-direction:column;padding:0;overflow-y:auto;overflow-x:hidden">
-    <!-- Profile Header / Banner -->
-    <div class="profile-header" id="userinfo-header" style="position:relative;background:linear-gradient(135deg, #1a3a1a 0%, #0d1f0d 100%);padding:20px 20px 22px;min-height:200px">
+    <!-- Profile Header / Banner — banner-ONLY (avatar + name + status
+         live in .profile-body below, in the classic Twitter/Discord
+         pattern where the avatar overlaps the banner/body seam). This
+         avoids the prior bug where the avatar was clipped against the
+         banner top and the nickname was hidden behind it on banners
+         the user customized with their own image. -->
+    <div class="profile-header" id="userinfo-header" style="position:relative;background:linear-gradient(135deg, #1a3a1a 0%, #0d1f0d 100%);height:140px">
       <button class="profile-close-btn" onclick="closeModal('modal-user-info')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5" title="Close">✕</button>
       <button class="profile-share-icon-btn" id="userinfo-share-btn" onclick="shareProfile()" title="Share profile" style="position:absolute;top:12px;right:52px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:15px;cursor:pointer;z-index:5;transition:background .15s,transform .12s">📤</button>
-      <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:14px;padding-top:46px">
-        <div class="profile-avatar-large" id="userinfo-avatar" style="width:90px;height:90px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4)">🐸</div>
-        <div style="flex:1;min-width:0;padding-bottom:6px;display:flex;flex-direction:column;gap:7px;align-items:flex-start">
-          <div id="userinfo-name" class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3);cursor:pointer;max-width:100%" onclick="copyUserTag(this.textContent)" title="Click to copy @tag"></div>
-          <div id="userinfo-status-msg" style="font-size:13px;color:rgba(255,255,255,0.7);display:block;max-width:100%;overflow:hidden;line-height:1.2;margin-left:-2px"></div>
+    </div>
+
+    <!-- Profile Content -->
+    <div class="profile-body" style="padding:0 16px 16px;background:#111;position:relative">
+      <!-- Avatar straddles banner/body boundary: ~half above, half
+           below. The 4px #111 border matches the body bg so it cuts a
+           clean ring out of the banner above. -->
+      <div class="profile-identity-row" style="display:flex;align-items:flex-end;gap:14px;margin-top:-44px;margin-bottom:10px">
+        <div class="profile-avatar-large" id="userinfo-avatar" style="width:88px;height:88px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4);background:#1a3a1a;display:flex;align-items:center;justify-content:center">🐸</div>
+        <div style="flex:1;min-width:0;padding-bottom:6px;display:flex;flex-direction:column;gap:6px;align-items:flex-start">
+          <div id="userinfo-name" class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;max-width:100%" onclick="copyUserTag(this.textContent)" title="Click to copy @tag"></div>
+          <div id="userinfo-status-msg" style="font-size:13px;color:#9dc4b2;display:block;max-width:100%;overflow:hidden;line-height:1.2"></div>
         </div>
       </div>
-    </div>
-    
-    <!-- Profile Content -->
-    <div class="profile-body" style="padding:16px;background:#111">
       <!-- Primary Actions: Message + Call (camera can be toggled mid-call) -->
       <div class="profile-actions profile-actions-primary" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px">
         <button class="modal-btn primary" id="userinfo-dm-btn" onclick="dmUserInfo()" style="padding:10px 6px;font-size:13px">💬 Message</button>
