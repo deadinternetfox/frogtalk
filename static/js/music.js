@@ -226,6 +226,19 @@ const Music = (() => {
     try { localStorage.setItem(_AUTONEXT_LS_KEY, next ? '1' : '0'); } catch {}
     _syncAutoNextButtons();
     try { UI.showToast && UI.showToast('Auto-next ' + (next ? 'on' : 'off'), 'info', 1500); } catch {}
+    // If we just turned auto-next OFF while the big-player was sitting
+    // on the "🎵 Advancing to the next track…" grace placeholder (set
+    // by _render() when the head track ended and auto-advance fired
+    // skip server-side), clear that state and re-render immediately so
+    // the user sees the proper empty queue UI with Add Track + controls
+    // instead of a stuck "Advancing…" message.
+    try {
+      const panel = $('music-panel');
+      if (panel && panel.dataset.emptySince) {
+        delete panel.dataset.emptySince;
+      }
+      _render();
+    } catch {}
   }
 
   // Single source of truth for "is the player effectively paused right
@@ -243,7 +256,7 @@ const Music = (() => {
       // ▶ every time the user navigates between channels and FrogSocial
       // even though audio is still flowing. Trust _paused (user intent)
       // and only override when YT explicitly says "I am paused".
-      const ytKnowsPaused = isYouTube && _lastPlayerState === 2;
+      const ytKnowsPaused = isYouTube && (_lastPlayerState === 2 || _lastPlayerState === 0);
       return _paused || ytKnowsPaused;
     } catch { return _paused; }
   }
@@ -306,7 +319,7 @@ const Music = (() => {
       // 2) or unstarted (-1) but the user hasn't paused, the notification
       // should still show "play" — anything else lies to the user.
       const isYouTube = !!(cur && cur.provider === 'youtube');
-      const ytKnowsPaused = isYouTube && _lastPlayerState === 2;
+      const ytKnowsPaused = isYouTube && (_lastPlayerState === 2 || _lastPlayerState === 0);
       const effectivePaused = _paused || ytKnowsPaused;
       // Reflect the truth in the in-app buttons too — a YT auto-pause or a
       // background-forced pause needs to flip the side UI play/pause icon
@@ -1425,7 +1438,7 @@ const Music = (() => {
               aria-label="${_collapsed ? 'Expand player' : 'Minimize player'}"
               title="${_collapsed ? 'Expand player' : 'Minimize player to make chat bigger'}">
         ${_collapsed
-          ? '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M3 3h4M3 3v4M13 3h-4M13 3v4M3 13h4M3 13v-4M13 13h-4M13 13v-4"/></svg>'
+          ? '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 8h10M8 3v10"/></svg>'
           : '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 8h10"/></svg>'}
       </button>` : '';
 
@@ -1538,7 +1551,21 @@ const Music = (() => {
     const panel = $('music-panel');
     if (panel) panel.classList.toggle('collapsed', _collapsed);
     document.body.toggleAttribute('data-music-collapsed', _collapsed);
-    // Re-render the header so the button label/icon flip immediately.
+    // _render()'s curKey-unchanged early-return only refreshes
+    // mp-meta-wrap, leaving the size-toggle button (which lives inside
+    // mp-player-wrap) with stale icon + label. Update the button in
+    // place so the glyph flips even when the head track hasn't changed.
+    try {
+      const btn = panel && panel.querySelector('.mp-size-toggle');
+      if (btn) {
+        const expandSvg = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 8h10M8 3v10"/></svg>';
+        const minimizeSvg = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M3 8h10"/></svg>';
+        btn.innerHTML = _collapsed ? expandSvg : minimizeSvg;
+        btn.title = _collapsed ? 'Expand player' : 'Minimize player to make chat bigger';
+        btn.setAttribute('aria-label', _collapsed ? 'Expand player' : 'Minimize player');
+      }
+    } catch {}
+    // Re-render the rest so meta / queue layout adapt to the new height.
     _render();
   }
 
