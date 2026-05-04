@@ -3902,6 +3902,39 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
 
   // Load profile data
   if (userId) {
+    // Reset any leftover story-ring state from the previous open so
+    // we never show a stale ring while the new fetch is in flight.
+    try {
+      const av0 = document.getElementById('userinfo-avatar');
+      if (av0) {
+        av0.classList.remove('has-story', 'unviewed', 'viewed');
+        av0.onclick = null;
+        av0.removeAttribute('title');
+      }
+    } catch {}
+    // Story ring + click → open story viewer. Fetched in parallel with
+    // the main profile data; story_status comes from /api/social/profile
+    // (count + has_unviewed). Skip for self — own avatar already opens
+    // the user's own profile via existing flow.
+    if (!isSelf) {
+      apiFetch('/api/social/profile/' + encodeURIComponent(nickname))
+        .then(r => r.json()).catch(() => null)
+        .then(sp => {
+          if (!sp || _userInfoTarget !== nickname) return;
+          const ss = sp.story_status || {};
+          const av = document.getElementById('userinfo-avatar');
+          if (!av || !ss.count) return;
+          av.classList.add('has-story', ss.has_unviewed ? 'unviewed' : 'viewed');
+          av.title = 'View stories';
+          av.onclick = () => {
+            try {
+              if (typeof Social !== 'undefined' && Social.viewProfileStories) {
+                Social.viewProfileStories(nickname, sp.id || userId || 0);
+              }
+            } catch {}
+          };
+        });
+    }
     apiFetch('/api/users/profile/' + encodeURIComponent(nickname))
       .then(r => r.json())
       .then(u => {
