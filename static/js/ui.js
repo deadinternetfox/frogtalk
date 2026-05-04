@@ -4062,7 +4062,7 @@ async function loadUserWall(nickname) {
           const url = String(p.media_data || '');
           const title = String(p.track_title || '🎵 Track').replace(/'/g, "\\'");
           const provider = String(p.media_type || '').split('/')[1] || 'music';
-          mediaHtml = `<div style="margin:8px 0"><a href="javascript:void(0)" onclick="event.stopPropagation();window.Music&&Music.playSolo&&Music.playSolo({url:'${esc(url).replace(/'/g,"\\'")}', title:'${esc(title)}', postId:${p.id||'null'}})" style="display:inline-flex;align-items:center;gap:8px;background:#0f1a14;border:1px solid #2a3a2a;border-radius:8px;padding:8px 12px;color:#8bd48b;text-decoration:none;font-size:13px"><span>🎵</span><span>${esc(p.track_title || provider)}</span></a></div>`;
+          mediaHtml = `<div style="margin:8px 0"><a href="javascript:void(0)" onclick="event.stopPropagation();window.Music&&Music.playSolo&&Music.playSolo({url:'${esc(url).replace(/'/g,"\\'")}', title:'${esc(title)}', postId:${p.id||'null'}})" style="display:inline-flex;align-items:center;gap:8px;background:linear-gradient(135deg,rgba(75,51,128,0.22) 0%,rgba(61,42,102,0.18) 60%,rgba(76,175,80,0.10));border:1px solid rgba(186,160,235,0.42);border-radius:8px;padding:8px 12px;color:#e3d4ff;text-decoration:none;font-size:13px;box-shadow:0 1px 0 rgba(186,160,235,0.10) inset"><span style="opacity:.85">🎵</span><span style="color:#f0e4ff;font-weight:600">${esc(p.track_title || provider)}</span></a></div>`;
         }
       }
 
