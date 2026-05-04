@@ -4081,7 +4081,8 @@ async function loadUserWall(nickname) {
           // playsinline muted are kept as a fallback for clients
           // where the poster fetch fails.
           const vurl = String(p.media_data || '');
-          const tok  = String((window.State && State.token) || '');
+          let tok = '';
+          try { tok = String((typeof State !== 'undefined' && State && State.token) || ''); } catch {}
           let srcAttr    = vurl;
           let posterAttr = '';
           try {
