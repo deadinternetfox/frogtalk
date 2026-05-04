@@ -4070,7 +4070,14 @@ async function loadUserWall(nickname) {
         if (p.media_type.startsWith('image/')) {
           mediaHtml = `<div style="margin:8px 0"><img loading="lazy" src="${esc(p.media_data)}" style="max-width:100%;border-radius:8px;cursor:pointer" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" alt="Post media"></div>`;
         } else if (p.media_type.startsWith('video/')) {
-          mediaHtml = `<div style="margin:8px 0"><video preload="metadata" src="${esc(p.media_data)}" controls style="max-width:100%;border-radius:8px"></video></div>`;
+          // Append a #t=0.1 media fragment so browsers (incl. iOS
+          // Safari) seek to ~0.1s on metadata load and paint that as
+          // the poster frame instead of the default grey play-icon
+          // background. playsinline + muted are needed for iOS to
+          // actually decode the first frame without auto-playing.
+          const vurl = String(p.media_data || '');
+          const vsrc = vurl + (vurl.indexOf('#') === -1 ? '#t=0.1' : '');
+          mediaHtml = `<div style="margin:8px 0"><video preload="metadata" playsinline muted src="${esc(vsrc)}" controls style="max-width:100%;border-radius:8px;background:#000"></video></div>`;
         } else if (p.media_type.startsWith('music/')) {
           // Music share — clickable card that hands off to FrogSocial's
           // mini-player so the song actually plays from the chat profile.
