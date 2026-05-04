@@ -3639,18 +3639,51 @@ function toggleEncryptionInfo() {
     }
     const slot = document.getElementById('enc-verify-emojis');
     const peerEl = document.getElementById('enc-verify-peer');
+    const fpEl = document.getElementById('enc-device-fp');
     if (peerEl) peerEl.textContent = '@' + them;
     if (slot) slot.textContent = '· · · ·';
+    if (fpEl) fpEl.textContent = '…';
     openModal('modal-encrypt-verify');
     Crypto.fingerprint(me, them).then(emojis => {
       if (slot) slot.textContent = emojis.join(' ');
     }).catch(() => {
       if (slot) slot.textContent = '—';
     });
+    if (Crypto.publicKeyFingerprint) {
+      Crypto.publicKeyFingerprint().then(fp => {
+        if (fpEl) fpEl.textContent = fp || '—';
+      }).catch(() => {
+        if (fpEl) fpEl.textContent = '—';
+      });
+    }
   } catch (e) {
     UI.showToast('Could not compute encryption fingerprint.', 'error');
   }
 }
+
+async function resetEncryptionKeys() {
+  if (!window.confirm('Reset encryption keys on this device?\n\nThis generates a new key pair and republishes it. New DMs will work right away. Older messages encrypted with the previous key will become permanently unreadable on this device.')) return;
+  try {
+    if (typeof Crypto === 'undefined' || !Crypto.resetIdentityKey) {
+      UI.showToast('Crypto module not ready.', 'error');
+      return;
+    }
+    await Crypto.resetIdentityKey();
+    // Generate + publish a fresh key.
+    if (Crypto.getPublicKey) {
+      const pub = await Crypto.getPublicKey();
+      if (pub) {
+        try { await apiFetch('/api/users/pubkey', 'POST', { pub_key: pub, ecdh_pub_key: pub }); } catch {}
+      }
+    }
+    UI.showToast('Keys reset. Reloading…', 'success');
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    console.error('resetEncryptionKeys', e);
+    UI.showToast('Could not reset keys.', 'error');
+  }
+}
+window.resetEncryptionKeys = resetEncryptionKeys;
 
 async function copyEncVerifyEmojis() {
   const slot = document.getElementById('enc-verify-emojis');

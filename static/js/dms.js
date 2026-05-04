@@ -22,6 +22,7 @@ const _dmHistoryMeta = new Map();
 // channel to keep localStorage bounded.
 const _DM_PLAINTEXT_CACHE_PREFIX = 'frogtalk-dm-plain-v1:';
 const _DM_PLAINTEXT_CACHE_MAX = 500;
+const _cannotDecryptToastShown = new Set();
 function _dmPlainCacheKey(channelId) {
   return _DM_PLAINTEXT_CACHE_PREFIX + String(channelId || 0);
 }
@@ -401,11 +402,12 @@ function _renderDMPreview(msgId, preview) {
 
 
 
-async function _getDMSharedKey(peerId) {
+async function _getDMSharedKey(peerId, opts = {}) {
   const id = Number(peerId || 0);
   if (!id) return null;
-  if (_dmSharedKeyCache.has(id)) return _dmSharedKeyCache.get(id);
-  let peerPub = _dmPeerPubKeyCache.get(id) || null;
+  const force = !!opts.force;
+  if (!force && _dmSharedKeyCache.has(id)) return _dmSharedKeyCache.get(id);
+  let peerPub = (!force && _dmPeerPubKeyCache.get(id)) || null;
   if (!peerPub) {
     try {
       const r = await apiFetch(`/api/users/${id}/pubkey`);
@@ -427,6 +429,13 @@ async function _getDMSharedKey(peerId) {
   }
 }
 
+function _invalidateDMPeerKey(peerId) {
+  const id = Number(peerId || 0);
+  if (!id) return;
+  _dmSharedKeyCache.delete(id);
+  _dmPeerPubKeyCache.delete(id);
+}
+
 async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
   const raw = String(cipher || '');
   if (!raw) return '';
@@ -437,6 +446,18 @@ async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
     const key = await _getDMSharedKey(peerId);
     if (key && typeof Crypto !== 'undefined' && Crypto.decrypt) {
       const out = await Crypto.decrypt(raw, key);
+      if (out !== null) return out;
+    }
+  } catch {}
+
+  // Re-fetch the peer's pubkey once and retry. Covers the case where the
+  // peer logged in from another device and rotated their server pubkey
+  // mid-session: our cached shared key would otherwise stay stale forever.
+  try {
+    _invalidateDMPeerKey(peerId);
+    const key2 = await _getDMSharedKey(peerId, { force: true });
+    if (key2 && typeof Crypto !== 'undefined' && Crypto.decrypt) {
+      const out = await Crypto.decrypt(raw, key2);
       if (out !== null) return out;
     }
   } catch {}
@@ -1123,6 +1144,21 @@ function renderDMChat () {
   }
   _dmMessages = _dmMessages.map(m => _normalizeDMMessage(m));
   area.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
+  // One-shot toast per DM session if any message body is still cipher-shaped
+  // after every decrypt path. This is almost always the multi-device-rotation
+  // case; point the user at Encryption info → Reset keys.
+  try {
+    const cid = _activeDM?.id;
+    if (cid && !_cannotDecryptToastShown.has(cid)) {
+      const undec = _dmMessages.filter(m => typeof m?.content === 'string' && _looksEncryptedBlob(m.content)).length;
+      if (undec > 0) {
+        _cannotDecryptToastShown.add(cid);
+        if (typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast(`🔒 ${undec} message${undec===1?'':'s'} can't be decrypted on this device. Tap the lock → Reset keys to start fresh.`, 'info', 6500);
+        }
+      }
+    }
+  } catch {}
   // Attach reaction buttons
   area.querySelectorAll('.dm-react-btn').forEach(btn => {
     btn.addEventListener('click', e => {

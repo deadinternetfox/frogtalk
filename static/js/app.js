@@ -446,14 +446,40 @@ const App = {
     // Refresh blocked-users cache so rooms/DMs/feed filters take effect
     if (typeof refreshBlockedCache === 'function') refreshBlockedCache();
 
-    // Publish ECDH public key for E2E DM encryption
+    // Publish ECDH public key for E2E DM encryption.
+    // Single-device-at-a-time model: whichever browser logs in last becomes
+    // the active DM device. We detect this transition and warn the user so
+    // "🔒 Cannot decrypt on this device" is never silently surprising.
     if (typeof Crypto !== 'undefined' && Crypto.getPublicKey) {
       try {
-        const pubKey = await Crypto.getPublicKey();
-        if (pubKey) {
-          apiFetch('/api/users/pubkey', 'POST', { pub_key: pubKey, ecdh_pub_key: pubKey }).catch(() => {});
+        const localPub = await Crypto.getPublicKey();
+        if (localPub) {
+          // Compare to whatever the server currently has for us. If it's a
+          // different keypair, another device of ours was the active one;
+          // we're now taking over.
+          let serverPub = null;
+          try {
+            const myId = State?.user?.id;
+            if (myId) {
+              const r = await apiFetch('/api/users/' + myId + '/pubkey');
+              if (r.ok) {
+                const d = await r.json();
+                serverPub = d.ecdh_pub_key || d.pub_key || null;
+              }
+            }
+          } catch {}
+          if (serverPub && serverPub !== localPub) {
+            try {
+              if (typeof UI !== 'undefined' && UI.showToast) {
+                UI.showToast('Another device was your active DM device. New messages will now arrive here — older messages may show 🔒 until that device sends again.', 'info', 6500);
+              }
+            } catch {}
+          }
+          apiFetch('/api/users/pubkey', 'POST', { pub_key: localPub, ecdh_pub_key: localPub }).catch(() => {});
         }
-      } catch {}
+      } catch (e) {
+        console.error('[Crypto] Pubkey publish failed:', e);
+      }
     }
 
     // Recover pending story uploads (if app was closed during upload)

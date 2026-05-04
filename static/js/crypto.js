@@ -296,5 +296,20 @@ const Crypto = (() => {
       .map(i => PALETTE[i]);
   }
 
-  return { encrypt, decrypt, encryptPayload, decryptPayload, getRoomKey, getDMKey, fingerprint, getPublicKey, deriveShared, resetIdentityKey };
+  // Short fingerprint of THIS device's ECDH public key. Useful for showing
+  // "this device" identity in the encryption-info modal so users can tell
+  // multi-device situations apart.
+  async function publicKeyFingerprint() {
+    try {
+      const pair = await _loadOrCreateECDHPair();
+      const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
+      const enc = new TextEncoder();
+      const buf = await crypto.subtle.digest('SHA-256', enc.encode(JSON.stringify(jwk)));
+      const bytes = new Uint8Array(buf);
+      const hex = Array.from(bytes.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
+      return hex.toUpperCase().match(/.{1,4}/g).join(' ');
+    } catch { return ''; }
+  }
+
+  return { encrypt, decrypt, encryptPayload, decryptPayload, getRoomKey, getDMKey, fingerprint, getPublicKey, deriveShared, resetIdentityKey, publicKeyFingerprint };
 })();
