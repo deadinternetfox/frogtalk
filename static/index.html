@@ -7570,18 +7570,20 @@ window.ConnErr = (function(){
         <button class="modal-btn primary" id="userinfo-dm-btn" onclick="dmUserInfo()" style="padding:10px 6px;font-size:13px">💬 Message</button>
         <button class="modal-btn secondary" id="userinfo-voice-btn" onclick="callUserInfo('voice')" style="padding:10px 6px;font-size:13px">📞 Call</button>
       </div>
-      <!-- View Full Profile sits directly under the primary CTA so the
-           most-used escape hatch into FrogSocial is one row down from
-           the message/call pair, ahead of the more situational mute /
-           sounds toggles. -->
-      <div style="margin-bottom:8px">
-        <button class="modal-btn secondary" id="userinfo-social-btn" onclick="closeModal('modal-user-info');Social.openProfile(document.getElementById('userinfo-name').textContent)" style="width:100%;background:#1a3a1a;color:#4caf50;border:1px solid #2a4a2a;font-weight:600">🌐 View Full Profile</button>
+      <!-- Secondary Actions sit directly under Message/Call so the
+           three most-used per-relationship toggles (Friend, Sounds,
+           Mute) are reachable in one row before the View Full Profile
+           gateway. Equal-width 3-col grid keeps the row balanced on
+           both desktop and mobile. -->
+      <div class="profile-actions profile-actions-secondary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px">
+        <button class="modal-btn secondary" id="userinfo-friend-btn" onclick="friendActionUserInfo()" style="padding:9px 4px;font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">+ Friend</button>
+        <button class="modal-btn secondary" id="userinfo-sounds-btn" onclick="soundsUserInfo()" style="padding:9px 4px;font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none">🔔 Sounds</button>
+        <button class="modal-btn secondary" id="userinfo-mute-btn" onclick="muteUserInfo()" style="padding:9px 4px;font-size:12px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">🔕 Mute</button>
       </div>
-      <!-- Secondary Actions: Friend / Sounds / Mute (Share moved to header as icon) -->
-      <div class="profile-actions profile-actions-secondary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
-        <button class="modal-btn secondary" id="userinfo-friend-btn" onclick="friendActionUserInfo()" style="padding:9px 6px;font-size:12px">+ Friend</button>
-        <button class="modal-btn secondary" id="userinfo-sounds-btn" onclick="soundsUserInfo()" style="padding:9px 6px;font-size:12px;display:none">🔔 Sounds</button>
-        <button class="modal-btn secondary" id="userinfo-mute-btn" onclick="muteUserInfo()" style="padding:9px 6px;font-size:12px">🔕 Mute</button>
+      <!-- View Full Profile is the gateway into FrogSocial, kept full
+           width below the primary + secondary action rows. -->
+      <div style="margin-bottom:14px">
+        <button class="modal-btn secondary" id="userinfo-social-btn" onclick="closeModal('modal-user-info');Social.openProfile(document.getElementById('userinfo-name').textContent)" style="width:100%;background:#1a3a1a;color:#4caf50;border:1px solid #2a4a2a;font-weight:600">🌐 View Full Profile</button>
       </div>
       
       <!-- Bio Section -->
