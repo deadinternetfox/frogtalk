@@ -4572,7 +4572,10 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 .ft-video-play:hover{transform:translate(-50%,-50%) scale(1.06);background:#7ad491}
 .ft-video-host.is-playing .ft-video-play{opacity:0;pointer-events:none}
-.social-grid-item.is-video .ft-video-poster.ready{opacity:.45}
+.social-grid-item.is-video .ft-video-poster.ready{opacity:1}
+.social-grid-item.is-video video{opacity:0}
+.social-grid-item.is-video.is-playing video{opacity:1}
+.social-grid-item.is-video.is-playing .ft-video-poster{opacity:0}
 .ft-video-host video::-webkit-media-controls{display:none !important}
 .ft-video-host video::-webkit-media-controls-enclosure{display:none !important}
 .ft-video-host video::-webkit-media-controls-start-playback-button{display:none !important}

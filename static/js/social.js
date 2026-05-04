@@ -100,17 +100,28 @@ const Social = (() => {
   };
 
   async function _apiOkJson(path, fallback = {}, retryDelayMs = 220) {
-    let res = await api(path).catch(() => null);
-    if (!res || !res.ok) {
-      await new Promise(r => setTimeout(r, retryDelayMs));
+    // Resilient fetch helper. Browsers cap concurrent connections to ~6
+    // per origin; if a bunch of <video preload=auto> elements are
+    // holding sockets open, a single primary fetch can stall for several
+    // seconds. The original code bailed after a single 220 ms retry,
+    // which meant any sustained tab-pressure → "Retry" error UI. We now
+    // retry up to 3 times with growing backoff so transient queueing
+    // doesn't surface to the user.
+    const delays = [retryDelayMs, retryDelayMs * 3, retryDelayMs * 7];
+    let res = null;
+    for (let i = 0; i <= delays.length; i++) {
       res = await api(path).catch(() => null);
+      if (res && res.ok) return res.json().catch(() => fallback);
+      // 4xx (except 408/429) are not retryable.
+      const st = Number(res?.status || 0);
+      if (st && st >= 400 && st < 500 && st !== 408 && st !== 429) break;
+      if (i < delays.length) {
+        await new Promise(r => setTimeout(r, delays[i]));
+      }
     }
-    if (!res || !res.ok) {
-      const err = new Error('request_failed');
-      err.status = Number(res?.status || 0);
-      throw err;
-    }
-    return res.json().catch(() => fallback);
+    const err = new Error('request_failed');
+    err.status = Number(res?.status || 0);
+    throw err;
   }
 
   // Build a Frog-themed error-state block with a styled Retry button.
@@ -160,6 +171,31 @@ const Social = (() => {
   }
 
   let _socialVideoObserverStarted = false;
+
+  // Aggressive cleanup before we replace the innerHTML of a social
+  // container. Without this, the old <video> elements keep their open
+  // HTTP connections (browsers cap to ~6 per origin) and the GC may not
+  // tear them down for many seconds. After 10–15 tab switches the browser
+  // runs out of socket slots and every new /api/social/feed fetch stalls
+  // until one of the dead videos finally times out — symptom: "the more I
+  // use Frog Social the slower it gets, then everything fails to load
+  // with a Retry button". Always call this RIGHT BEFORE assigning
+  // innerHTML on a content host that may contain <video> or <img>.
+  function _disposeMediaIn(node) {
+    if (!node) return;
+    try {
+      node.querySelectorAll('video').forEach(v => {
+        try { v.pause(); } catch {}
+        try { v.removeAttribute('src'); v.load(); } catch {}
+      });
+    } catch {}
+    try {
+      node.querySelectorAll('img').forEach(im => {
+        try { im.removeAttribute('src'); } catch {}
+      });
+    } catch {}
+  }
+
   function _drawVideoPoster(video, posterEl) {
     try {
       if (!video || !posterEl || !video.videoWidth || !video.videoHeight) return;
@@ -540,49 +576,59 @@ const Social = (() => {
 
   async function _doBgPrefetch(excludeTab) {
     if (!State?.user) return;
-    // Each block is isolated so one network failure can't cancel the rest.
+    // Guard: never run a fan-out concurrently with itself. With 6 call
+    // sites (one per tab swap) it was easy for a slow user-network to
+    // stack 3-4 prefetch waves on top of the primary fetch and saturate
+    // the browser's 6-conn-per-origin pool \u2192 primary /feed stalls \u2192
+    // _apiOkJson trips its retries \u2192 user sees "Retry" UI for no reason.
+    if (_doBgPrefetch._busy) return;
+    _doBgPrefetch._busy = true;
     try {
-      if (excludeTab !== 'feed' && !_cacheFresh(_feedCache)) {
-        const r = await api('/api/social/feed?lite=1&limit=24').catch(() => null);
-        if (r && r.ok) {
-          const d = await r.json().catch(() => ({}));
-          if (Array.isArray(d.posts)) _feedCache = { ts: Date.now(), posts: d.posts };
+      try {
+        if (excludeTab !== 'feed' && !_cacheFresh(_feedCache)) {
+          const r = await api('/api/social/feed?lite=1&limit=24').catch(() => null);
+          if (r && r.ok) {
+            const d = await r.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) _feedCache = { ts: Date.now(), posts: d.posts };
+          }
         }
-      }
-    } catch {}
-    try {
-      const _expKey = _exploreSort || 'trending';
-      if (excludeTab !== 'explore' && !_cacheFresh(_exploreCache.get(_expKey))) {
-        const r = await api(`/api/social/explore?lite=1&sort=${encodeURIComponent(_expKey)}&limit=24`).catch(() => null);
-        if (r && r.ok) {
-          const d = await r.json().catch(() => ({}));
-          if (Array.isArray(d.posts)) _exploreCache.set(_expKey, { ts: Date.now(), posts: d.posts, channels: [] });
+      } catch {}
+      try {
+        const _expKey = _exploreSort || 'trending';
+        if (excludeTab !== 'explore' && !_cacheFresh(_exploreCache.get(_expKey))) {
+          const r = await api(`/api/social/explore?lite=1&sort=${encodeURIComponent(_expKey)}&limit=24`).catch(() => null);
+          if (r && r.ok) {
+            const d = await r.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) _exploreCache.set(_expKey, { ts: Date.now(), posts: d.posts, channels: [] });
+          }
         }
-      }
-    } catch {}
-    try {
-      const _rrKey = `${_reelsScope}:${_reelsSort}`;
-      if (excludeTab !== 'reels' && !_cacheFresh(_reelsCache.get(_rrKey))) {
-        const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12`).catch(() => null);
-        if (r && r.ok) {
-          const d = await r.json().catch(() => ({}));
-          if (Array.isArray(d.posts)) _reelsCache.set(_rrKey, { ts: Date.now(), posts: d.posts });
+      } catch {}
+      try {
+        const _rrKey = `${_reelsScope}:${_reelsSort}`;
+        if (excludeTab !== 'reels' && !_cacheFresh(_reelsCache.get(_rrKey))) {
+          const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12`).catch(() => null);
+          if (r && r.ok) {
+            const d = await r.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) _reelsCache.set(_rrKey, { ts: Date.now(), posts: d.posts });
+          }
         }
-      }
-    } catch {}
-    try {
-      const _mKey = `${_musicTabScope}:${_musicTabSort}:`;
-      if (excludeTab !== 'music' && !_cacheFresh(_musicCache.get(_mKey))) {
-        const url = _musicTabScope === 'explore'
-          ? `/api/social/explore?lite=1&limit=40&sort=${encodeURIComponent(_musicTabSort)}`
-          : '/api/social/feed?lite=1&limit=40';
-        const r = await api(url).catch(() => null);
-        if (r && r.ok) {
-          const d = await r.json().catch(() => ({}));
-          if (Array.isArray(d.posts)) _musicCache.set(_mKey, { ts: Date.now(), posts: d.posts });
+      } catch {}
+      try {
+        const _mKey = `${_musicTabScope}:${_musicTabSort}:`;
+        if (excludeTab !== 'music' && !_cacheFresh(_musicCache.get(_mKey))) {
+          const url = _musicTabScope === 'explore'
+            ? `/api/social/explore?lite=1&limit=40&sort=${encodeURIComponent(_musicTabSort)}`
+            : '/api/social/feed?lite=1&limit=40';
+          const r = await api(url).catch(() => null);
+          if (r && r.ok) {
+            const d = await r.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) _musicCache.set(_mKey, { ts: Date.now(), posts: d.posts });
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    } finally {
+      _doBgPrefetch._busy = false;
+    }
   }
 
   function _setTabLoadUi(tab, percent, label, detail) {
@@ -1991,6 +2037,7 @@ const Social = (() => {
       html += `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
     }
 
+    _disposeMediaIn(content);
     content.innerHTML = html;
   }
 
@@ -2126,6 +2173,7 @@ const Social = (() => {
         <div style="font-size:16px;font-weight:600">Nothing to explore yet</div>
         <div style="color:#888;font-size:14px;margin-top:6px">Be the first to post something!</div>
       </div>`;
+      _disposeMediaIn(content);
       content.innerHTML = html;
       return;
     }
@@ -2160,6 +2208,7 @@ const Social = (() => {
       html += `<div class="social-feed">${textPosts.map(p => renderFeedPost(p)).join('')}</div>`;
     }
 
+    _disposeMediaIn(content);
     content.innerHTML = html;
     const host = document.getElementById('explore-channels-host');
     if (!host || !channels.length) return;
@@ -3725,10 +3774,11 @@ const Social = (() => {
       }
 
       // Grid view for profile reels
+      _disposeMediaIn(container);
       container.innerHTML = `<div class="social-grid">${posts.map(p => {
         return `
           <div class="social-grid-item is-video" onclick="Social.openSharedReel(${p.id})">
-            <video src="${esc(_authMediaSrc(p.media_data || ''))}" muted preload="metadata"></video>
+            <video src="${esc(_authMediaSrc(p.media_data || ''))}" muted playsinline preload="auto"></video>
             <span class="social-grid-video-ico">▶</span>
             <div class="social-grid-overlay">
               <span>❤️ ${p.reaction_count || 0}</span>
@@ -3736,6 +3786,7 @@ const Social = (() => {
             </div>
           </div>`;
       }).join('')}</div>`;
+      try { _hydrateVideoThumbs(container); } catch {}
     } catch {
       if (!_isProfileTabLoadCurrent('reels', loadToken)) return;
       container.innerHTML = _socialErrorHTML('Could not load reels', "Social.switchProfileTab('reels')", { ico: '🎞️' });
