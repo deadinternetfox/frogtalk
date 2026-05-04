@@ -230,18 +230,26 @@ const Messages = (() => {
 
     let mediaHtml = '';
     if (isVideo && mediaUrl) {
-      // Append a tiny time fragment so browsers render the first frame as
-      // a poster while the video is paused (Chrome/Safari/Firefox honor
-      // #t=… on a video src and seek-decode that frame). Avoids the ugly
-      // grey "no source" panel until first play.
-      const posterSrc = /^data:/i.test(mediaUrl)
-        ? mediaUrl // data: URIs already carry the bytes; no fragment needed
-        : (mediaUrl + (mediaUrl.includes('#') ? '' : '#t=0.1'));
+      // Suppress the browser's giant default poster/play UI (Chrome on
+      // Android shows a huge ⭕▶ until a real frame is decoded). A
+      // transparent 1×1 GIF as `poster` keeps the area blank so our
+      // own shimmer + green play overlay are the only visible UI until
+      // the real first frame is decoded by the seek below.
+      const BLANK_POSTER = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+      // Force a tiny seek as soon as metadata is available — this makes
+      // the browser decode and paint the first frame so the video itself
+      // becomes the poster, working reliably across Chrome / Safari /
+      // Firefox where `#t=…` does not.
+      const onMeta = "try{this.currentTime=0.1}catch(e){}";
+      const onSeeked = "this.parentElement&&this.parentElement.classList.add('has-frame')";
       mediaHtml =
         `<div class="chat-share-media chat-share-video" data-pid="${pid}">` +
           `<video class="chat-share-video-el" preload="metadata" playsinline muted loop ` +
-                 `src="${UI.escHtml(posterSrc)}" ` +
-                 `onloadeddata="this.parentElement&&this.parentElement.classList.add('has-frame')" ` +
+                 `poster="${BLANK_POSTER}" ` +
+                 `src="${UI.escHtml(mediaUrl)}" ` +
+                 `onloadedmetadata="${onMeta}" ` +
+                 `onseeked="${onSeeked}" ` +
+                 `onloadeddata="${onSeeked}" ` +
                  `onclick="event.stopPropagation();Messages._toggleChatVideo(this)"></video>` +
           `<button class="chat-share-play-overlay" type="button" aria-label="Play"` +
                  ` onclick="event.stopPropagation();Messages._toggleChatVideo(this.previousElementSibling)">` +

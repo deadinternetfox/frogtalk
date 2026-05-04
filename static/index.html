@@ -2997,12 +2997,14 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 
 /* ─── Rich chat share embed (reel/post inline player) ──────────── */
 .chat-share-embed{
-  display:block;margin-top:8px;max-width:260px;
+  display:block;margin-top:8px;
+  width:100%;max-width:240px;
   background:linear-gradient(180deg,#163026 0%,#0f1f17 100%);
   border:1px solid #2f5548;border-left:4px solid #4caf50;
   border-radius:14px;overflow:hidden;cursor:pointer;
   box-shadow:0 4px 18px rgba(0,0,0,.4);
   transition:transform .12s ease,box-shadow .15s ease,border-color .15s ease;
+  text-decoration:none;
 }
 .chat-share-embed:hover{
   border-color:#4caf50;
@@ -3034,13 +3036,13 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .chat-share-media{
   position:relative;background:#000;
   display:flex;align-items:center;justify-content:center;
-  max-height:340px;overflow:hidden
+  max-height:300px;overflow:hidden
 }
 .chat-share-image img{
-  display:block;width:100%;max-height:340px;object-fit:cover;
+  display:block;width:100%;max-height:300px;object-fit:cover;
 }
 .chat-share-video{
-  aspect-ratio:9/16;max-height:340px;
+  aspect-ratio:9/16;max-height:300px;
   background:linear-gradient(135deg,#0a1f14 0%,#08130d 100%);
 }
 /* Shimmer placeholder until the first video frame has been decoded.
