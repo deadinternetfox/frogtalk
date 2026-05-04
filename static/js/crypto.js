@@ -9,6 +9,10 @@ const Crypto = (() => {
   // Key cache: roomKey -> CryptoKey
   const _keyCache = new Map();
   const _ecdhPairCache = new Map();
+  // In-flight pair loader keyed by identity scope, so concurrent callers
+  // (e.g. publishPubkey + first DM decrypt) share a single generate/import
+  // and never end up with two different keypairs racing into localStorage.
+  const _ecdhPairPending = new Map();
   const _payloadPrefix = 'ftenc:';
 
   function _bytesToBase64(bytes) {
@@ -46,7 +50,20 @@ const Crypto = (() => {
   async function _loadOrCreateECDHPair() {
     const scope = _getIdentityScope();
     if (_ecdhPairCache.has(scope)) return _ecdhPairCache.get(scope);
+    if (_ecdhPairPending.has(scope)) return _ecdhPairPending.get(scope);
 
+    const p = (async () => {
+      // Re-check inside the async closure in case another caller populated
+      // the cache between the outer guard and our scheduled microtask.
+      if (_ecdhPairCache.has(scope)) return _ecdhPairCache.get(scope);
+      return await _loadOrCreateECDHPairUnsafe(scope);
+    })();
+    _ecdhPairPending.set(scope, p);
+    try { return await p; }
+    finally { _ecdhPairPending.delete(scope); }
+  }
+
+  async function _loadOrCreateECDHPairUnsafe(scope) {
     const existingRaw = localStorage.getItem(_ecdhStorageKey(scope));
     if (existingRaw) {
       try {

@@ -13,6 +13,51 @@ const _dmSharedKeyCache = new Map();
 let _dmLoadReqSeq = 0;
 const _dmHistoryCache = new Map();
 const _dmHistoryMeta = new Map();
+
+// Persistent per-message plaintext cache. Once a message has been
+// successfully decrypted on this device we remember it so re-renders,
+// reloads and tab-restores stay readable even if the ECDH shared key
+// later becomes briefly unavailable (e.g. parallel race during cold
+// start). Keyed by channelId; value is {msgId: plaintext}. Capped per
+// channel to keep localStorage bounded.
+const _DM_PLAINTEXT_CACHE_PREFIX = 'frogtalk-dm-plain-v1:';
+const _DM_PLAINTEXT_CACHE_MAX = 500;
+function _dmPlainCacheKey(channelId) {
+  return _DM_PLAINTEXT_CACHE_PREFIX + String(channelId || 0);
+}
+function _readDMPlaintextCache(channelId) {
+  try {
+    const raw = localStorage.getItem(_dmPlainCacheKey(channelId));
+    if (!raw) return {};
+    const obj = JSON.parse(raw);
+    return (obj && typeof obj === 'object') ? obj : {};
+  } catch { return {}; }
+}
+function _writeDMPlaintextCache(channelId, map) {
+  try {
+    // Trim oldest by msg id if we exceed the cap.
+    const ids = Object.keys(map);
+    if (ids.length > _DM_PLAINTEXT_CACHE_MAX) {
+      ids.sort((a, b) => Number(a) - Number(b));
+      const drop = ids.slice(0, ids.length - _DM_PLAINTEXT_CACHE_MAX);
+      for (const k of drop) delete map[k];
+    }
+    localStorage.setItem(_dmPlainCacheKey(channelId), JSON.stringify(map));
+  } catch {}
+}
+function _rememberDMPlaintext(channelId, msgId, plaintext) {
+  if (!channelId || !msgId || typeof plaintext !== 'string' || !plaintext) return;
+  if (_looksEncryptedBlob(plaintext)) return;
+  const map = _readDMPlaintextCache(channelId);
+  if (map[msgId] === plaintext) return;
+  map[msgId] = plaintext;
+  _writeDMPlaintextCache(channelId, map);
+}
+function _recallDMPlaintext(channelId, msgId) {
+  if (!channelId || !msgId) return null;
+  const map = _readDMPlaintextCache(channelId);
+  return Object.prototype.hasOwnProperty.call(map, msgId) ? map[msgId] : null;
+}
 const _dmPreviewCache = {};
 
 function _normalizeDMMessage(message) {
@@ -739,7 +784,17 @@ async function openDMChannel (id, nickname, avatar) {
           if (_looksEncryptedBlob(m.content)) {
             try {
               const dec = await _decryptDMPreviewContent(m.content, peerUserId, _peerNk2);
-              if (dec && dec !== m.content) { m.content = dec; _changed = true; }
+              if (dec && dec !== m.content && !_looksEncryptedBlob(dec)) {
+                m.content = dec; _changed = true;
+                _rememberDMPlaintext(_activeDM.id, m.id, dec);
+              } else {
+                // Still cipher — try the per-device plaintext cache so we
+                // at least show history that was decrypted on this browser
+                // before. Avoids the alarming 🔒 across the whole feed when
+                // a single re-render happens before keys settle.
+                const cached = _recallDMPlaintext(_activeDM.id, m.id);
+                if (cached) { m.content = cached; _changed = true; }
+              }
             } catch {}
           }
           if (m.reply_content && typeof m.reply_content === 'string' && _looksEncryptedBlob(m.reply_content)) {
@@ -997,6 +1052,14 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     const next = _normalizeDMMessage(msg);
     if (next.content) {
       try { next.content = await _decryptDMPreviewContent(next.content, _peerUserId, _peerNick); } catch {}
+      // If decrypt didn't yield plaintext, fall back to per-device cache so
+      // history that was previously decrypted on this browser stays readable.
+      if (_looksEncryptedBlob(next.content)) {
+        const cached = _recallDMPlaintext(_reqRoomId, next.id);
+        if (cached) next.content = cached;
+      } else {
+        _rememberDMPlaintext(_reqRoomId, next.id, next.content);
+      }
     }
     if (next.reply_content) {
       try { next.reply_content = await _decryptDMPreviewContent(next.reply_content, _peerUserId, _peerNick); } catch {}
@@ -1320,7 +1383,7 @@ function renderDMMessage (m) {
       // of the misleading "Media" string. A re-decrypt happens on the next
       // render pass once the ECDH key derives (loadDMMessages / openDM
       // attach the peer pubkey → _dmSharedKeyCache populates).
-      contentHtml = '<em style="color:#888">\uD83D\uDD12 Encrypted message</em>';
+      contentHtml = '<em style="color:#888">\uD83D\uDD12 Cannot decrypt on this device</em>';
     } else if (m.has_media) {
       contentHtml = '<em style="color:#444">Media</em>';
     }
@@ -2216,15 +2279,6 @@ function showDisappearSettings() {
           <option value="604800">7 days</option>
           <option value="2592000">30 days</option>
         </select>
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid #2a2a2a">
-          <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-            <input type="checkbox" id="dm-forwarding-disabled" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer" onchange="toggleDMForwarding(this.checked)">
-            <div>
-              <div style="font-weight:600;font-size:14px">📤 Disable Forwarding</div>
-              <div style="font-size:12px;color:#888">Messages in this DM cannot be forwarded elsewhere</div>
-            </div>
-          </label>
-        </div>
         <div class="modal-actions">
           <button class="modal-btn secondary" onclick="closeModal('modal-disappear')">Cancel</button>
           <button class="modal-btn danger" onclick="wipeDMMessages();closeModal('modal-disappear')">🗑️ Wipe All</button>
@@ -2237,10 +2291,38 @@ function showDisappearSettings() {
   
   // Set current value
   document.getElementById('disappear-select').value = _dmDisappearTimer.toString();
-  const fwdCb = document.getElementById('dm-forwarding-disabled');
-  if (fwdCb) fwdCb.checked = !!(_activeDM && _activeDM.forwarding_disabled);
   openModal('modal-disappear');
 }
+
+function showForwardingSettings() {
+  if (!_activeDM) return;
+  let modal = document.getElementById('modal-dm-forwarding');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.className = 'modal-overlay hidden';
+    modal.id = 'modal-dm-forwarding';
+    modal.innerHTML = `
+      <div class="modal" style="max-width:340px">
+        <div class="modal-title">📤 Forwarding</div>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 0">
+          <input type="checkbox" id="dm-forwarding-disabled" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer" onchange="toggleDMForwarding(this.checked)">
+          <div>
+            <div style="font-weight:600;font-size:14px">Disable forwarding</div>
+            <div style="font-size:12px;color:#888">Messages in this DM cannot be forwarded elsewhere. Applies to both participants.</div>
+          </div>
+        </label>
+        <div class="modal-actions">
+          <button class="modal-btn primary" onclick="closeModal('modal-dm-forwarding')">Done</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  const fwdCb = document.getElementById('dm-forwarding-disabled');
+  if (fwdCb) fwdCb.checked = !!(_activeDM && _activeDM.forwarding_disabled);
+  openModal('modal-dm-forwarding');
+}
+window.showForwardingSettings = showForwardingSettings;
 
 async function saveDisappearTimer() {
   if (!_activeDM) return;
