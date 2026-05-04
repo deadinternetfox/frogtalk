@@ -3954,7 +3954,7 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
           const isFriend = typeof _allFriends !== 'undefined' && _allFriends.some(f => f.nickname === u.nickname);
           const isPending = typeof _pendingFriends !== 'undefined' && _pendingFriends.some(f => f.nickname === u.nickname);
           if (isFriend) {
-            friendBtn.textContent    = 'Unfriend';
+            friendBtn.textContent    = '− Unfriend';
             friendBtn.dataset.action = 'remove';
             friendBtn.style.display  = '';
           } else if (isPending) {
