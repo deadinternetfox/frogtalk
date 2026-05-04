@@ -1670,14 +1670,19 @@ const Music = (() => {
   //
   //   Music.playSolo({url, title, provider, thumbnail})
   //
-  // If the user is already in a real music channel, we refuse (the channel
-  // player is radio-synced and not safe to hijack) — caller should
-  // fall back to opening the embed modal or new tab.
+  // If the user is already in a real music channel, we silently detach
+  // from it (the channel keeps playing for everyone else — only this
+  // user's player is hijacked) and start solo playback of the clicked
+  // track. The user can hop back to the music channel from the sidebar
+  // any time and re-sync.
   function playSolo(opts) {
     opts = opts || {};
     if (_room && !_soloMode) {
-      try { UI.showToast('Already in a music channel — leave first to play here', 'info'); } catch {}
-      return false;
+      // Tear down the channel-mode UI/state without leaving the room
+      // server-side: close() resets _room/_state/_paused locally so the
+      // fresh solo render below starts from a clean slate. The channel
+      // continues for other users; this client just stopped following.
+      try { close(); } catch {}
     }
     const url = String(opts.url || '').trim();
     if (!url) return false;
