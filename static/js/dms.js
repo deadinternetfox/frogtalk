@@ -174,14 +174,21 @@ async function _loadDMSocialPostCard(msgId, postId) {
       return;
     }
     const p = await res.json();
+    // For music posts (and any other type the chat-side richer embed
+    // already handles), reuse Messages._renderRichShareEmbed so DMs get
+    // the inline music mini-player + purple styling for free.
+    const mediaType = String(p.media_type || '').toLowerCase();
+    if (mediaType.startsWith('music/') && typeof Messages !== 'undefined' && Messages._renderRichShareEmbed) {
+      placeholder.outerHTML = Messages._renderRichShareEmbed(p, 'post', Number(p.id || postId));
+      return;
+    }
     const nick = esc(p.nickname || 'frog');
     const privacy = String(p.privacy || 'public').toLowerCase();
     const label = privacy === 'public' ? 'Frog Social Post' : (privacy === 'followers' ? 'Followers Post' : 'Private Post');
     let preview = String(p.content || '').trim();
     if (!preview) {
-      if ((p.media_type || '').startsWith('image/')) preview = '📷 Photo post';
-      else if ((p.media_type || '').startsWith('video/')) preview = '🎬 Video post';
-      else if ((p.media_type || '').startsWith('music/')) preview = '🎵 Music post';
+      if (mediaType.startsWith('image/')) preview = '📷 Photo post';
+      else if (mediaType.startsWith('video/')) preview = '🎬 Video post';
       else preview = 'Open this post in Frog Social';
     }
     const safePreview = esc(preview.substring(0, 90));

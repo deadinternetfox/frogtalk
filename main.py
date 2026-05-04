@@ -1145,6 +1145,14 @@ def _public_share_post_payload(post: dict, kind: str) -> dict:
         elif media_type.startswith("image/"):
             # Reuse the OG proxy as a public image fetch (already public).
             media_url = f"/og/post/{pid}.img"
+        elif media_type.startswith("music/"):
+            # Music posts store the (already-public) provider URL directly
+            # in media_data (validated to be http/https in routers/wall.py).
+            # Surface it so chat can build an inline mini player without
+            # an authed wall lookup.
+            md = str(post.get("media_data") or "").strip()
+            if md.startswith(("http://", "https://")):
+                media_url = md
     return {
         "id": pid,
         "kind": kind,  # "post" or "reel"

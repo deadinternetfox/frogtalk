@@ -208,16 +208,64 @@ const Messages = (() => {
       `</div>`;
   }
 
+  // Build a provider-iframe src for a music-post URL. Returns null if
+  // the URL doesn't match a supported pattern. Mirrors the heuristics
+  // in routers/wall.py / static/js/music.js but runs entirely on the
+  // client so the inline player works for any music/* share — including
+  // ones served via /api/wall/posts where we never get a parsed
+  // provider/video_id back.
+  function _musicEmbedSrc(provider, url) {
+    if (!url || typeof url !== 'string') return null;
+    const u = url.trim();
+    const prov = String(provider || '').toLowerCase();
+    try {
+      // YouTube
+      if (prov === 'youtube' || /(?:youtube\.com|youtu\.be)/i.test(u)) {
+        let id = '';
+        const m1 = u.match(/[?&]v=([A-Za-z0-9_-]{6,})/);
+        const m2 = u.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/i);
+        const m3 = u.match(/youtube\.com\/embed\/([A-Za-z0-9_-]{6,})/i);
+        id = (m1 && m1[1]) || (m2 && m2[1]) || (m3 && m3[1]) || '';
+        if (!id) return null;
+        return { kind: 'youtube', src: `https://www.youtube.com/embed/${encodeURIComponent(id)}?enablejsapi=1` };
+      }
+      // Spotify — accept any open.spotify.com/{track,album,playlist,episode}/<id>
+      if (prov === 'spotify' || /open\.spotify\.com/i.test(u)) {
+        const m = u.match(/open\.spotify\.com\/(?:embed\/)?(track|album|playlist|episode|show)\/([A-Za-z0-9]{10,})/i);
+        if (!m) return null;
+        const type = m[1].toLowerCase();
+        const id = m[2];
+        return {
+          kind: 'spotify',
+          src: `https://open.spotify.com/embed/${encodeURIComponent(type)}/${encodeURIComponent(id)}?theme=0`,
+          height: type === 'track' ? 80 : 152,
+        };
+      }
+      // SoundCloud — needs the full URL passed to its widget
+      if (prov === 'soundcloud' || /soundcloud\.com/i.test(u)) {
+        return {
+          kind: 'soundcloud',
+          src: `https://w.soundcloud.com/player/?url=${encodeURIComponent(u)}&auto_play=false&show_artwork=true&visual=false&hide_related=true&color=%239b59ff`,
+          height: 120,
+        };
+      }
+    } catch {}
+    return null;
+  }
+
   function _renderRichShareEmbed(p, kind, postId) {
     const nick = UI.escHtml(p.nickname || 'frog');
     const mediaType = String(p.media_type || '').toLowerCase();
     const isVideo = mediaType.startsWith('video/');
     const isImage = mediaType.startsWith('image/');
     const isMusic = mediaType.startsWith('music/');
+    const provider = isMusic ? mediaType.slice('music/'.length) : '';
     const pid = Number(p.id || postId);
-    const label = kind === 'reel'
-      ? 'Frog Social Reel'
-      : (String(p.privacy || 'public').toLowerCase() === 'public' ? 'Frog Social Post' : (String(p.privacy).toLowerCase() === 'followers' ? 'Followers Post' : 'Private Post'));
+    const label = isMusic
+      ? 'Frog Social Music'
+      : (kind === 'reel'
+          ? 'Frog Social Reel'
+          : (String(p.privacy || 'public').toLowerCase() === 'public' ? 'Frog Social Post' : (String(p.privacy).toLowerCase() === 'followers' ? 'Followers Post' : 'Private Post')));
     let caption = String(p.content || '').trim();
     if (!caption) {
       if (isImage) caption = '📷 Photo post';
@@ -244,9 +292,43 @@ const Messages = (() => {
         mediaUrl = isVideo ? `/r/${pid}/media` : `/og/post/${pid}.img`;
       }
     }
+    // Music: media_url comes from /api/share/post (public) as the
+    // provider URL; fall back to media_data on the authed response.
+    let musicUrl = null;
+    if (isMusic) {
+      if (mediaUrl && /^https?:\/\//i.test(mediaUrl)) musicUrl = mediaUrl;
+      else if (typeof p.media_data === 'string' && /^https?:\/\//i.test(p.media_data)) musicUrl = p.media_data;
+    }
 
     let mediaHtml = '';
-    if (isVideo && mediaUrl) {
+    if (isMusic) {
+      const embed = _musicEmbedSrc(provider, musicUrl);
+      if (embed) {
+        const h = embed.kind === 'youtube' ? 0 /* aspect-driven */ : (embed.height || 120);
+        // YouTube renders responsive 16:9 via padding-bottom hack;
+        // Spotify/SoundCloud get a fixed height per provider.
+        if (embed.kind === 'youtube') {
+          mediaHtml =
+            `<div class="chat-share-media chat-share-music chat-share-music-yt"` +
+                 ` onclick="event.stopPropagation()">` +
+              `<div class="chat-share-music-yt-frame">` +
+                `<iframe src="${UI.escHtml(embed.src)}" loading="lazy"` +
+                       ` allow="autoplay; encrypted-media; picture-in-picture"` +
+                       ` allowfullscreen frameborder="0"></iframe>` +
+              `</div>` +
+            `</div>`;
+        } else {
+          mediaHtml =
+            `<div class="chat-share-media chat-share-music"` +
+                 ` onclick="event.stopPropagation()">` +
+              `<iframe src="${UI.escHtml(embed.src)}" loading="lazy"` +
+                     ` style="height:${h}px"` +
+                     ` allow="autoplay; clipboard-write; encrypted-media; picture-in-picture"` +
+                     ` frameborder="0"></iframe>` +
+            `</div>`;
+        }
+      }
+    } else if (isVideo && mediaUrl) {
       // Suppress the browser's giant default poster/play UI (Chrome on
       // Android shows a huge ⭕▶ until a real frame is decoded). A
       // transparent 1×1 GIF as `poster` keeps the area blank so our
@@ -280,19 +362,21 @@ const Messages = (() => {
         `</div>`;
     }
 
+    const cardCls = `chat-share-embed${isMusic ? ' is-music' : ''}`;
+    const footLabel = isMusic ? 'Open music post →' : 'Open in Frog Social →';
     return (
-      `<div class="chat-share-embed" data-share-${kind}="${pid}" onclick="${onclick}">` +
+      `<div class="${cardCls}" data-share-${kind}="${pid}" onclick="${onclick}">` +
         `<div class="chat-share-embed-head">` +
           `<div class="chat-share-embed-avatar">${avatar}</div>` +
           `<div class="chat-share-embed-meta">` +
             `<div class="chat-share-embed-label">${UI.escHtml(label)}</div>` +
             `<div class="chat-share-embed-name">@${nick}</div>` +
           `</div>` +
-          `<div class="chat-share-embed-logo" aria-hidden="true">🐸</div>` +
+          `<div class="chat-share-embed-logo" aria-hidden="true">${isMusic ? '🎵' : '🐸'}</div>` +
         `</div>` +
         (caption ? `<div class="chat-share-embed-caption">${safeCap}</div>` : '') +
         mediaHtml +
-        `<div class="chat-share-embed-foot">Open in Frog Social →</div>` +
+        `<div class="chat-share-embed-foot">${footLabel}</div>` +
       `</div>`
     );
   }
@@ -2449,7 +2533,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

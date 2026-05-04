@@ -3165,6 +3165,39 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   .chat-share-embed{max-width:100%}
 }
 
+/* ─── Music post variant — purple, with inline mini player ─────────────── */
+.chat-share-embed.is-music{
+  background:linear-gradient(180deg,#241638 0%,#150d22 100%);
+  border-color:#4a306d;
+  border-left-color:#9b59ff;
+  width:auto;max-width:420px;
+}
+.chat-share-embed.is-music:hover{
+  border-color:#b079ff;
+  box-shadow:0 6px 22px rgba(155,89,255,.25)
+}
+.chat-share-embed.is-music .chat-share-embed-label{color:#c9a8ff}
+.chat-share-embed.is-music .chat-share-embed-name{color:#efe5ff}
+.chat-share-embed.is-music .chat-share-embed-caption{color:#d8c9ee}
+.chat-share-embed.is-music .chat-share-embed-foot{
+  color:#c9a8ff;border-top-color:rgba(155,89,255,.18);
+  background:rgba(20,8,40,.32)
+}
+.chat-share-music{
+  background:#0c0518;display:block;max-height:none
+}
+.chat-share-music > iframe{
+  display:block;width:100%;border:0;background:#0c0518
+}
+/* YouTube responsive 16:9 wrapper */
+.chat-share-music-yt{padding:0;background:#000}
+.chat-share-music-yt-frame{
+  position:relative;padding-bottom:56.25%;height:0;overflow:hidden;width:100%
+}
+.chat-share-music-yt-frame > iframe{
+  position:absolute;inset:0;width:100%;height:100%;border:0
+}
+
 /* ─── Invite card ─────────────────────────────────────────────────────────── */
 .invite-card{
   display:block;margin-top:8px;max-width:420px;
