@@ -3959,30 +3959,46 @@ async function loadMyChannelBans() {
   } catch { section.style.display = 'none'; }
 }
 
-// Load wall posts for user profile
+// Load wall posts for user profile.
+// Uses the cached `/api/social/profile/{nick}/posts?lite=1` endpoint —
+// same one the FrogSocial full-profile uses — so the chat-side mini
+// profile gets the same fast path: image/video blobs are stripped at
+// the SQL level and the client lazy-loads each one through
+// /api/social/posts/{id}/media. The legacy /api/wall/users/{nick}
+// returned full base64 inline which made big walls take seconds.
 async function loadUserWall(nickname) {
   const wallEl = document.getElementById('userinfo-wall');
   if (!wallEl) return;
-  
+  // Snapshot the target so a slow response from a previous open doesn't
+  // overwrite the wall when the user has already opened a different profile.
+  const targetSnapshot = _userInfoTarget;
   try {
-    const res = await apiFetch(`/api/wall/users/${encodeURIComponent(nickname)}`);
+    const res = await apiFetch(`/api/social/profile/${encodeURIComponent(nickname)}/posts?lite=1&limit=20`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Could not load wall');
+    if (_userInfoTarget !== targetSnapshot) return;  // user navigated away
     const posts = data.posts || [];
-    
+
     if (posts.length === 0) {
       wallEl.innerHTML = '<div style="text-align:center;color:#666;font-size:13px;padding:20px 0">No posts yet.</div>';
       return;
     }
-    
+
     wallEl.innerHTML = posts.map(p => {
       // Media rendering
       let mediaHtml = '';
       if (p.media_data && p.media_type) {
         if (p.media_type.startsWith('image/')) {
-          mediaHtml = `<div style="margin:8px 0"><img src="${esc(p.media_data)}" style="max-width:100%;border-radius:8px;cursor:pointer" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" alt="Post media"></div>`;
+          mediaHtml = `<div style="margin:8px 0"><img loading="lazy" src="${esc(p.media_data)}" style="max-width:100%;border-radius:8px;cursor:pointer" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" alt="Post media"></div>`;
         } else if (p.media_type.startsWith('video/')) {
-          mediaHtml = `<div style="margin:8px 0"><video src="${esc(p.media_data)}" controls style="max-width:100%;border-radius:8px"></video></div>`;
+          mediaHtml = `<div style="margin:8px 0"><video preload="metadata" src="${esc(p.media_data)}" controls style="max-width:100%;border-radius:8px"></video></div>`;
+        } else if (p.media_type.startsWith('music/')) {
+          // Music share — clickable card that hands off to FrogSocial's
+          // mini-player so the song actually plays from the chat profile.
+          const url = String(p.media_data || '');
+          const title = String(p.track_title || '🎵 Track').replace(/'/g, "\\'");
+          const provider = String(p.media_type || '').split('/')[1] || 'music';
+          mediaHtml = `<div style="margin:8px 0"><a href="javascript:void(0)" onclick="event.stopPropagation();window.Music&&Music.playSolo&&Music.playSolo({url:'${esc(url).replace(/'/g,"\\'")}', title:'${esc(title)}', postId:${p.id||'null'}})" style="display:inline-flex;align-items:center;gap:8px;background:#0f1a14;border:1px solid #2a3a2a;border-radius:8px;padding:8px 12px;color:#8bd48b;text-decoration:none;font-size:13px"><span>🎵</span><span>${esc(p.track_title || provider)}</span></a></div>`;
         }
       }
 
@@ -4011,8 +4027,8 @@ async function loadUserWall(nickname) {
         + (totalReactions > 0
           ? `<button type="button" class="sf-rx-summary" onclick="showWallReactionDetail(${p.id})" aria-label="See reactions">`
               + `<span class="sf-rx-emojis">${topEmojis}</span><span class="sf-rx-total">${totalReactions}</span></button>`
+              + `<button type="button" class="sf-rx-list" onclick="showWallReactionDetail(${p.id})" aria-label="Open reactions list">👥</button>`
           : '')
-        + `<button type="button" class="sf-rx-list" onclick="showWallReactionDetail(${p.id})" aria-label="Open reactions list">👥</button>`
         + `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" onclick="showWallReactionPicker(${p.id})" aria-label="React">${myEmoji || '😊'}</button>`
         + `</div>`;
 
@@ -4021,6 +4037,12 @@ async function loadUserWall(nickname) {
       const commentsToggle = p.allow_comments !== 0
         ? `<button onclick="toggleWallComments(${p.id})" style="background:none;border:none;color:#888;cursor:pointer;font-size:12px;padding:4px 0">💬 ${commentCount} comment${commentCount !== 1 ? 's' : ''}</button>`
         : '';
+
+      const contentTrimmed = String(p.content || '').trim();
+      const hasBody = !!(contentTrimmed || mediaHtml);
+      const contentHtml = contentTrimmed
+        ? `<div style="font-size:14px;color:#ccc;line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(contentTrimmed)}</div>`
+        : (hasBody ? '' : `<div style="font-size:13px;color:#666;font-style:italic">(no content)</div>`);
 
       return `
       <div class="wall-post" data-post-id="${p.id}" style="background:#0d0d0d;border-radius:10px;padding:12px;border:1px solid #222">
@@ -4033,7 +4055,7 @@ async function loadUserWall(nickname) {
           ${p.user_id === State.user?.id ? 
             `<button onclick="deleteWallPost(${p.id})" style="background:none;border:none;color:#666;cursor:pointer;font-size:14px" title="Delete">🗑️</button>` : ''}
         </div>
-        <div style="font-size:14px;color:#ccc;line-height:1.5;white-space:pre-wrap;word-break:break-word">${esc(p.content)}</div>
+        ${contentHtml}
         ${mediaHtml}
         <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;align-items:center">${reactionBarHtml}</div>
         <div style="margin-top:6px;display:flex;align-items:center;gap:10px">${commentsToggle}</div>
