@@ -1791,6 +1791,12 @@ const Social = (() => {
     if (!viewer) {
       viewer = document.createElement('div');
       viewer.id = 'story-viewer';
+      // Tap-outside-to-close: click on the backdrop (the viewer element
+      // itself, not the inner content) dismisses the viewer. The inner
+      // .story-viewer-inner stops propagation via its own onclick=nextStory.
+      viewer.addEventListener('click', (e) => {
+        if (e.target === viewer) closeStoryViewer();
+      });
       document.body.appendChild(viewer);
     }
     // CRITICAL: cancel any pending auto-advance from a previous story
