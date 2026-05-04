@@ -2998,13 +2998,19 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 /* ─── Rich chat share embed (reel/post inline player) ──────────── */
 .chat-share-embed{
   display:block;margin-top:8px;
-  width:100%;max-width:240px;
+  width:fit-content;max-width:240px;
   background:linear-gradient(180deg,#163026 0%,#0f1f17 100%);
   border:1px solid #2f5548;border-left:4px solid #4caf50;
   border-radius:14px;overflow:hidden;cursor:pointer;
   box-shadow:0 4px 18px rgba(0,0,0,.4);
   transition:transform .12s ease,box-shadow .15s ease,border-color .15s ease;
   text-decoration:none;
+}
+/* Reel posts are vertical 9:16 — let the video drive the embed width
+   so we wrap the video tightly with no black side-bars. Other share
+   types (profile / image post) keep the wider 240px text card. */
+.chat-share-embed:has(.chat-share-video){
+  width:auto;
 }
 .chat-share-embed:hover{
   border-color:#4caf50;
@@ -3042,7 +3048,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   display:block;width:100%;max-height:300px;object-fit:cover;
 }
 .chat-share-video{
-  aspect-ratio:9/16;max-height:300px;
+  /* Reel = 9:16 portrait. Drive width from height (max-height *
+     9/16 ≈ 169px) so the wrapper hugs the video edges with no
+     black side-bars. */
+  height:300px;width:calc(300px * 9 / 16);
+  max-width:100%;
   background:linear-gradient(135deg,#0a1f14 0%,#08130d 100%);
 }
 /* Shimmer placeholder until the first video frame has been decoded.
