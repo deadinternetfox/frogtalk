@@ -1473,8 +1473,12 @@ const Social = (() => {
   async function _refreshChatStoryCache(force) {
     const now = Date.now();
     if (!force && (now - _chatStoryCacheLastFetch) < 45000) return;
-    if (_chatStoryCacheInflight) return _chatStoryCacheInflight;
-    _chatStoryCacheInflight = (async () => {
+    // Force=true callers (WS story_posted, post-upload optimistic) MUST
+    // not piggyback on an in-flight fetch that may have been issued
+    // before the new story committed — that would short-circuit the
+    // live-ring update with stale data. Run a fresh fetch instead.
+    if (!force && _chatStoryCacheInflight) return _chatStoryCacheInflight;
+    const fetchPromise = (async () => {
       try {
         // /stories/active returns ALL story owners visible to this viewer
         // (own + public + followers-only-if-following), not just the
@@ -1502,9 +1506,11 @@ const Social = (() => {
         _chatStoryCacheLastFetch = Date.now();
         try { decorateChatAvatars(document); } catch {}
       } catch {}
-      finally { _chatStoryCacheInflight = null; }
     })();
-    return _chatStoryCacheInflight;
+    if (!force) _chatStoryCacheInflight = fetchPromise;
+    try { await fetchPromise; }
+    finally { if (!force) _chatStoryCacheInflight = null; }
+    return fetchPromise;
   }
   // Public lookup for chat renderers / chat-profile modal.
   function getChatStoryStatus(nickname) {
@@ -7670,7 +7676,10 @@ const Social = (() => {
           const res = await api('/api/social/stories');
           const data = await res.json();
           _storyData = data.users || [];
-          _rebuildChatStoryByNick();
+          // NOTE: do NOT _rebuildChatStoryByNick() here. _chatStoryByNick
+          // is populated from /stories/active (which includes public
+          // stories from users we don't follow); rebuilding from the
+          // follow-gated _storyData would wipe rings for those users.
         } catch {}
       }
       let idx = _storyData.findIndex(u =>
@@ -7683,7 +7692,6 @@ const Social = (() => {
       if (idx < 0) {
         try {
           const lookupId = userId || (() => {
-            // No id known? Probe by-nick cache for the user_id.
             const st = nickname ? _chatStoryByNick.get(String(nickname).toLowerCase()) : null;
             return st && st.user_id ? st.user_id : null;
           })();
@@ -7693,7 +7701,6 @@ const Social = (() => {
               const d = await res.json();
               if (d && d.user && (d.user.stories || []).length) {
                 _storyData.push(d.user);
-                _rebuildChatStoryByNick();
                 idx = _storyData.length - 1;
               }
             }
