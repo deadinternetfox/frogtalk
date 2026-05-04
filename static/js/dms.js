@@ -2268,7 +2268,8 @@ function showDisappearSettings() {
     modal.id = 'modal-disappear';
     modal.innerHTML = `
       <div class="modal" style="max-width:320px">
-        <div class="modal-title">⏱️ Disappearing Messages</div>
+        <div class="modal-title">🔐 Privacy & Security</div>
+        <div style="font-size:12px;color:#888;margin:-6px 0 12px;text-transform:uppercase;letter-spacing:0.5px;font-weight:600">⏱️ Disappearing messages</div>
         <div style="font-size:13px;color:#888;margin-bottom:16px">
           Messages will be automatically deleted after the selected time.
         </div>

@@ -1448,7 +1448,7 @@ function openChatMoreMenu() {
     items.push({ icon: '👤', label: `View profile`,         onclick: () => showUserInfo(nick, uid) });
     items.push({ icon: '🔍', label: 'Search messages',       onclick: () => showSearchModal() });
     items.push({ icon: '📌', label: 'Pinned messages',       onclick: () => showPinnedMessages() });
-    items.push({ icon: '⏱️', label: 'Disappearing messages', onclick: () => showDisappearSettings() });
+    items.push({ icon: '🔐', label: 'Privacy & security',    onclick: () => showDisappearSettings() });
     items.push({ icon: '🔒', label: 'Encryption info',       onclick: () => toggleEncryptionInfo() });
     items.push({ icon: '🚫', label: `Block @${nick}`, danger: true, onclick: () => _blockDmPeer(nick) });
     showActionSheet(`@${nick}`, items);
