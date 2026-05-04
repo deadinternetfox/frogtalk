@@ -7502,14 +7502,14 @@ window.ConnErr = (function(){
 <div class="modal-overlay hidden" id="modal-user-info">
   <div class="modal user-profile-modal" style="max-width:500px;max-height:85vh;display:flex;flex-direction:column;padding:0;overflow-y:auto;overflow-x:hidden">
     <!-- Profile Header / Banner -->
-    <div class="profile-header" id="userinfo-header" style="position:relative;background:linear-gradient(135deg, #1a3a1a 0%, #0d1f0d 100%);padding:20px;min-height:140px">
+    <div class="profile-header" id="userinfo-header" style="position:relative;background:linear-gradient(135deg, #1a3a1a 0%, #0d1f0d 100%);padding:20px 20px 26px;min-height:200px">
       <button class="profile-close-btn" onclick="closeModal('modal-user-info')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5" title="Close">✕</button>
       <button class="profile-share-icon-btn" id="userinfo-share-btn" onclick="shareProfile()" title="Share profile" style="position:absolute;top:12px;right:52px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:15px;cursor:pointer;z-index:5;transition:background .15s,transform .12s">📤</button>
-      <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:16px;padding-top:40px">
+      <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:16px;padding-top:48px">
         <div class="profile-avatar-large" id="userinfo-avatar" style="width:90px;height:90px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4)">🐸</div>
-        <div style="flex:1;min-width:0;padding-bottom:4px">
-          <div id="userinfo-name" class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3);cursor:pointer" onclick="copyUserTag(this.textContent)" title="Click to copy @tag"></div>
-          <div id="userinfo-status-msg" style="font-size:13px;color:rgba(255,255,255,0.7);margin-top:2px;display:block;max-width:100%;overflow:hidden"></div>
+        <div style="flex:1;min-width:0;padding-bottom:6px;display:flex;flex-direction:column;gap:8px;align-items:flex-start">
+          <div id="userinfo-name" class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3);cursor:pointer;max-width:100%" onclick="copyUserTag(this.textContent)" title="Click to copy @tag"></div>
+          <div id="userinfo-status-msg" style="font-size:13px;color:rgba(255,255,255,0.7);display:block;max-width:100%;overflow:hidden;line-height:1.2"></div>
         </div>
       </div>
     </div>
@@ -7521,14 +7521,18 @@ window.ConnErr = (function(){
         <button class="modal-btn primary" id="userinfo-dm-btn" onclick="dmUserInfo()" style="padding:10px 6px;font-size:13px">💬 Message</button>
         <button class="modal-btn secondary" id="userinfo-voice-btn" onclick="callUserInfo('voice')" style="padding:10px 6px;font-size:13px">📞 Call</button>
       </div>
+      <!-- View Full Profile sits directly under the primary CTA so the
+           most-used escape hatch into FrogSocial is one row down from
+           the message/call pair, ahead of the more situational mute /
+           sounds toggles. -->
+      <div style="margin-bottom:8px">
+        <button class="modal-btn secondary" id="userinfo-social-btn" onclick="closeModal('modal-user-info');Social.openProfile(document.getElementById('userinfo-name').textContent)" style="width:100%;background:#1a3a1a;color:#4caf50;border:1px solid #2a4a2a;font-weight:600">🌐 View Full Profile</button>
+      </div>
       <!-- Secondary Actions: Friend / Sounds / Mute (Share moved to header as icon) -->
-      <div class="profile-actions profile-actions-secondary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px">
+      <div class="profile-actions profile-actions-secondary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
         <button class="modal-btn secondary" id="userinfo-friend-btn" onclick="friendActionUserInfo()" style="padding:9px 6px;font-size:12px">+ Friend</button>
         <button class="modal-btn secondary" id="userinfo-sounds-btn" onclick="soundsUserInfo()" style="padding:9px 6px;font-size:12px;display:none">🔔 Sounds</button>
         <button class="modal-btn secondary" id="userinfo-mute-btn" onclick="muteUserInfo()" style="padding:9px 6px;font-size:12px">🔕 Mute</button>
-      </div>
-      <div style="margin-bottom:14px">
-        <button class="modal-btn secondary" id="userinfo-social-btn" onclick="closeModal('modal-user-info');Social.openProfile(document.getElementById('userinfo-name').textContent)" style="width:100%;background:#1a3a1a;color:#4caf50;border:1px solid #2a4a2a;font-weight:600">🌐 View Full Profile</button>
       </div>
       
       <!-- Bio Section -->
