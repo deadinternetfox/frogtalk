@@ -1210,20 +1210,30 @@ const Music = (() => {
     // "Up next" preview: show only the immediate next track plus a
     // pill button that opens the full playlist modal. Keeps the inline
     // panel short on mobile where vertical real-estate is precious.
+    // The Playlist pill itself is always shown when something is
+    // playing so non-DJs can browse the (read-only) queue without
+    // hunting for a hidden button.
     const nextTrack = upcoming[0];
     const remaining = Math.max(0, upcoming.length - 1);
-    const queueHtml = nextTrack ? `
+    const playlistPillHtml = cur ? `
+      <button class="mp-playlist-btn" type="button" onclick="Music.openPlaylistModal()" title="View the full ${_state.dj_only ? 'DJ-only ' : ''}playlist">
+        <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M2 4h9v1.5H2zm0 3h9v1.5H2zm0 3h6v1.5H2zm9 .5l4 2.5-4 2.5z"/></svg>
+        <span class="mp-playlist-lbl">Playlist${upcoming.length ? ` · ${upcoming.length}` : ''}</span>
+      </button>` : '';
+    const queueHtml = cur ? `
       <div class="mp-upnext">
+        ${nextTrack ? `
         <div class="mp-upnext-row">
           <span class="mp-upnext-label">Up next</span>
           <div class="mp-upnext-art" style="background-image:url('${esc(nextTrack.thumbnail || '')}')"></div>
           <div class="mp-upnext-title" title="${esc(nextTrack.title || nextTrack.url)}">${esc(nextTrack.title || nextTrack.url)}</div>
           <span class="mp-upnext-sub">${esc(nextTrack.submitter_nick || '')}</span>
-        </div>
-        <button class="mp-playlist-btn" type="button" onclick="Music.openPlaylistModal()" title="View the full playlist">
-          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M2 4h9v1.5H2zm0 3h9v1.5H2zm0 3h6v1.5H2zm9 .5l4 2.5-4 2.5z"/></svg>
-          <span class="mp-playlist-lbl">Playlist${upcoming.length > 1 ? ` · ${upcoming.length}` : ''}</span>
-        </button>
+        </div>` : `
+        <div class="mp-upnext-row mp-upnext-empty">
+          <span class="mp-upnext-label">Up next</span>
+          <span class="mp-upnext-empty-msg">Nothing queued — ${_state.can_submit ? 'add a track to keep the music going' : 'waiting for a DJ to add one'}</span>
+        </div>`}
+        ${playlistPillHtml}
       </div>` : '';
 
     // Only rewrite the iframe when the head track actually changes —
@@ -1847,13 +1857,18 @@ const Music = (() => {
         </div>
       </div>` : '';
     const emptyHtml = upcoming.length ? '' :
-      `<div class="mp-pl-empty">Nothing queued yet — tap <b>Add Track</b> to drop the first one.</div>`;
+      (_state && _state.can_submit
+        ? `<div class="mp-pl-empty">Nothing queued yet — tap <b>Add Track</b> to drop the first one.</div>`
+        : `<div class="mp-pl-empty">Nothing queued yet. ${_state && _state.dj_only ? 'Only DJs can add tracks in this channel.' : 'Be the first to add one!'}</div>`);
     const canAdd = _state && _state.can_submit;
+    const headSubtitle = (_state && _state.dj_only)
+      ? `${upcoming.length ? `${upcoming.length} up next · ` : ''}🎧 DJ-only`
+      : (upcoming.length ? `${upcoming.length} up next` : 'Open queue');
     overlay.innerHTML = `
       <div class="mp-add-card mp-pl-card" role="dialog" aria-modal="true" aria-label="Playlist">
         <div class="mp-add-head">
           <span class="mp-add-head-ico">🎶</span>
-          <span class="mp-add-head-title">Playlist${upcoming.length ? ` · ${upcoming.length} up next` : ''}</span>
+          <span class="mp-add-head-title">Playlist · ${headSubtitle}</span>
           ${(_state && _state.can_control && upcoming.length)
             ? `<button class="mp-pl-clear" type="button" onclick="Music.clearQueue()" title="Clear all queued tracks">Clear all</button>` : ''}
           <button class="mp-add-close" type="button" onclick="Music.closePlaylistModal()" aria-label="Close">✕</button>
