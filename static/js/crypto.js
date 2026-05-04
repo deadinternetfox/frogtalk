@@ -85,8 +85,15 @@ const Crypto = (() => {
         const pair = { publicKey, privateKey };
         _ecdhPairCache.set(scope, pair);
         return pair;
-      } catch {
-        localStorage.removeItem(_ecdhStorageKey(scope));
+      } catch (e) {
+        // CRITICAL: do NOT silently delete the keypair on transient import
+        // failures. Doing so rotates the user's identity key and bricks
+        // every previously-encrypted DM to/from this device. Surface the
+        // error and refuse to generate a new one — the next page load
+        // (or a deliberate "reset encryption keys" action) can recover.
+        console.error('[Crypto] Failed to import existing ECDH pair; refusing to overwrite. Reload the page.', e);
+        try { window._frogtalkEcdhImportError = String(e?.message || e); } catch {}
+        throw new Error('ECDH keypair import failed; not regenerating to avoid losing history. Reload.');
       }
     }
 
@@ -100,6 +107,23 @@ const Crypto = (() => {
     localStorage.setItem(_ecdhStorageKey(scope), JSON.stringify({ publicJwk, privateJwk }));
     _ecdhPairCache.set(scope, pair);
     return pair;
+  }
+
+  // Deliberate, user-initiated key reset. Wipes the local ECDH keypair AND
+  // the per-message plaintext cache so the next call to getPublicKey()
+  // generates a fresh identity. Only call from a confirmed UI action.
+  async function resetIdentityKey() {
+    try {
+      const scope = _getIdentityScope();
+      _ecdhPairCache.delete(scope);
+      _ecdhPairPending.delete(scope);
+      localStorage.removeItem(_ecdhStorageKey(scope));
+      // Wipe DM plaintext caches — old ciphertext is no longer decryptable.
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('frogtalk-dm-plain-v1:')) localStorage.removeItem(k);
+      }
+    } catch {}
   }
 
   async function getPublicKey() {
@@ -272,5 +296,5 @@ const Crypto = (() => {
       .map(i => PALETTE[i]);
   }
 
-  return { encrypt, decrypt, encryptPayload, decryptPayload, getRoomKey, getDMKey, fingerprint, getPublicKey, deriveShared };
+  return { encrypt, decrypt, encryptPayload, decryptPayload, getRoomKey, getDMKey, fingerprint, getPublicKey, deriveShared, resetIdentityKey };
 })();
