@@ -617,6 +617,7 @@ const Social = (() => {
   // ── open / close ──────────────────────────────────────────────────────
   function open(tab) {
     _ensureReactionButtonDelegation();
+    _ensureNavHoverPrefetch();
     _currentTab = tab || 'feed';
     const overlay = document.getElementById('social-overlay');
     if (!overlay) return;
@@ -636,6 +637,11 @@ const Social = (() => {
     } else if (_currentTab === 'explore') {
         loadExplore();
     }
+    // Prime the OTHER tabs' caches the moment social opens, instead of
+    // waiting for the active tab to finish first. With server-side
+    // _coalesce_hot the cost is one cheap DB hit per tab; the payoff is
+    // an instant render on the next click.
+    _schedBgPrefetch(_currentTab);
   }
 
   function close() {
@@ -1090,6 +1096,86 @@ const Social = (() => {
     } finally {
       _doBgPrefetch._busy = false;
     }
+  }
+
+  // ── Hover/touch prefetch ─────────────────────────────────────────────
+  // Kick off the network fetch for a tab the moment the user moves
+  // toward the nav button — pointerenter on desktop, touchstart on
+  // mobile — so by the time `click` fires the cache is already warm
+  // and switchTab() takes the fast-path branch instead of showing a
+  // skeleton + spinner. Channel chat feels snappier because its data
+  // is already in memory; this is the closest social can get to that
+  // without a persistent socket.
+  let _navHoverPrefetchBound = false;
+  const _hoverPrefetchPending = new Set();
+
+  function _ensureNavHoverPrefetch() {
+    if (_navHoverPrefetchBound) return;
+    _navHoverPrefetchBound = true;
+    const handler = (ev) => {
+      const btn = ev.target?.closest?.('.social-nav-btn[data-tab]');
+      if (!btn) return;
+      const tab = String(btn.dataset.tab || '');
+      if (!tab || tab === _currentTab) return;
+      _prefetchTab(tab);
+    };
+    document.addEventListener('pointerenter', handler, { capture: true, passive: true });
+    document.addEventListener('touchstart', handler, { capture: true, passive: true });
+  }
+
+  function _prefetchTab(tab) {
+    if (!tab || _hoverPrefetchPending.has(tab)) return;
+    if (!State?.user) return;
+    // Tab already has fresh data → nothing to do.
+    if (tab === 'feed' && _cacheFresh(_feedCache)) return;
+    if (tab === 'explore' && _cacheFresh(_exploreCache.get(_exploreSort || 'trending'))) return;
+    if (tab === 'reels' && _cacheFresh(_reelsCache.get(`${_reelsScope}:${_reelsSort}`))) return;
+    if (tab === 'music' && _cacheFresh(_musicCache.get(`${_musicTabScope}:${_musicTabSort}:`))) return;
+
+    _hoverPrefetchPending.add(tab);
+    const done = () => _hoverPrefetchPending.delete(tab);
+
+    const fire = async () => {
+      try {
+        if (tab === 'feed') {
+          const r = await api('/api/social/feed?lite=1&limit=24').catch(() => null);
+          if (r && r.ok) {
+            const d = await r.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) _feedCache = { ts: Date.now(), posts: d.posts };
+          }
+        } else if (tab === 'explore') {
+          const sort = _exploreSort || 'trending';
+          const r = await api(`/api/social/explore?lite=1&sort=${encodeURIComponent(sort)}&limit=24`).catch(() => null);
+          if (r && r.ok) {
+            const d = await r.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) _cacheSet(_exploreCache, sort, { ts: Date.now(), posts: d.posts, channels: [] });
+          }
+        } else if (tab === 'reels') {
+          const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12`).catch(() => null);
+          if (r && r.ok) {
+            const d = await r.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) _cacheSet(_reelsCache, `${_reelsScope}:${_reelsSort}`, { ts: Date.now(), posts: d.posts });
+          }
+        } else if (tab === 'music') {
+          const url = _musicTabScope === 'explore'
+            ? `/api/social/explore?lite=1&limit=40&sort=${encodeURIComponent(_musicTabSort)}`
+            : '/api/social/feed?lite=1&limit=40';
+          const r = await api(url).catch(() => null);
+          if (r && r.ok) {
+            const d = await r.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) _cacheSet(_musicCache, `${_musicTabScope}:${_musicTabSort}:`, { ts: Date.now(), posts: d.posts });
+          }
+        } else if (tab === 'profile') {
+          const nick = _profileUser || State.user?.nickname;
+          if (nick) api(`/api/social/profile/${encodeURIComponent(nick)}`).catch(() => null);
+        }
+      } finally {
+        done();
+      }
+    };
+    // Tiny defer so the click handler fires immediately if the user is
+    // already mid-tap; the request itself is racing on a separate tick.
+    Promise.resolve().then(fire);
   }
 
   function _setTabLoadUi(tab, percent, label, detail) {
@@ -5304,6 +5390,17 @@ const Social = (() => {
           ? `<button class="mtnp-btn mtnp-pp" onclick="Social._toggleNowPlaying()"
                     title="${cur.paused ? 'Resume' : 'Pause'}">${cur.paused ? '▶' : '⏸'}</button>`
           : '';
+        // Auto-next toggle — was buried in the solo player + mini-dock
+        // only. Surfacing it on the persistent strip means anyone can
+        // turn auto-advance off without first opening the music tab.
+        // The button uses the same `data-autonext-btn` hook so
+        // Music._syncAutoNextButtons() keeps every instance in sync.
+        let _anOn = true;
+        try { _anOn = localStorage.getItem('frogtalk:music:autonext') !== '0'; } catch {}
+        const autoNextBtn = `<button class="mtnp-btn mtnp-autonext" data-autonext-btn data-on="${_anOn ? '1' : '0'}"
+                                     onclick="event.stopPropagation();Music.toggleAutoNext(this)"
+                                     title="${_anOn ? 'Auto-next: on (click to disable)' : 'Auto-next: off (click to enable)'}"
+                                     aria-label="Toggle auto-next">${_anOn ? '⏭' : '⏭̸'}</button>`;
         // Middle action: share this track to the viewer's FrogSocial wall.
         const shareBtn = `<button class="mtnp-btn mtnp-share" onclick="Music.shareToWall()"
                                   title="Share this track to your wall" aria-label="Share to wall">↗</button>`;
@@ -5316,11 +5413,15 @@ const Social = (() => {
           </div>
           <div class="mtnp-ctrls">
             ${pauseBtn}
+            ${autoNextBtn}
             ${shareBtn}
             <button class="mtnp-btn mtnp-stop" onclick="Music.close()" title="Stop">✕</button>
           </div>`;
     }
     try { _syncReelsMusicInterlock(); } catch {}
+    // Make sure the freshly-rendered button reflects the live setting
+    // and gets toggled whenever Music.toggleAutoNext() flips it.
+    try { window.Music && Music._syncAutoNextButtons && Music._syncAutoNextButtons(); } catch {}
   }
 
   function _toggleNowPlaying() {
