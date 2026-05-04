@@ -1736,6 +1736,18 @@ async def _handle_social_event(event: dict) -> None:
             str(payload.get("caption") or ""),
             privacy,
         )
+        # Notify locally connected clients so chat-avatar story rings
+        # update live for users on this node when the poster lives on
+        # a federated peer.
+        try:
+            from ws_manager import manager
+            await manager.broadcast_all({
+                "type": "story_posted",
+                "user_id": author["id"],
+                "nickname": author["nickname"],
+            })
+        except Exception:
+            pass
         return
 
     if event_type == "social.story.deleted":
