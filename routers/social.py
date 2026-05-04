@@ -1,4 +1,5 @@
 """Social feed, followers, explore — Instagram-style features."""
+import asyncio
 import base64
 import logging
 import time
@@ -19,6 +20,55 @@ from ws_manager import manager
 _log = logging.getLogger(__name__)
 limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/social", tags=["social"])
+
+
+# ── Request coalescing for hot read endpoints ────────────────────────────
+# The frontend can fire 6-8 identical /feed and /explore requests within
+# the same second (tab swap + bg-prefetch + retry ladders all overlap).
+# Each one bottoms out in run_in_threadpool → SQLite query, which queues
+# on anyio's 40-thread default pool and starves every other request on
+# the box for hundreds of milliseconds — users see the whole app "hang".
+#
+# Coalesce duplicate in-flight requests by (key) so 8 callers share one
+# DB hit, plus a tiny TTL cache to absorb back-to-back waves caused by
+# component re-renders. Per-user keys preserve correctness (blocks are
+# filtered viewer-side in SQL).
+_HOT_TTL = 1.5     # seconds — short enough to feel live, long enough to absorb a render storm
+_HOT_MAX = 256     # bound the cache so we don't leak memory under heavy traffic
+_hot_cache: dict[str, tuple[float, dict]] = {}
+_hot_inflight: dict[str, asyncio.Future] = {}
+
+
+async def _coalesce_hot(key: str, builder):
+    """Run `builder()` once per `key` even when many coroutines call us
+    concurrently with the same key. Caches the result for `_HOT_TTL` so
+    the next wave gets an instant hit. `builder` is an async callable."""
+    now = time.monotonic()
+    cached = _hot_cache.get(key)
+    if cached and (now - cached[0]) < _HOT_TTL:
+        return cached[1]
+    fut = _hot_inflight.get(key)
+    if fut is not None:
+        return await fut
+    loop = asyncio.get_running_loop()
+    fut = loop.create_future()
+    _hot_inflight[key] = fut
+    try:
+        result = await builder()
+        _hot_cache[key] = (now, result)
+        if len(_hot_cache) > _HOT_MAX:
+            # Evict the oldest half — cheap and bounded.
+            for k in sorted(_hot_cache, key=lambda k: _hot_cache[k][0])[: _HOT_MAX // 2]:
+                _hot_cache.pop(k, None)
+        if not fut.done():
+            fut.set_result(result)
+        return result
+    except Exception as e:
+        if not fut.done():
+            fut.set_exception(e)
+        raise
+    finally:
+        _hot_inflight.pop(key, None)
 
 
 async def _push_social_notif(recipient_id: int, payload: dict) -> None:
@@ -342,18 +392,20 @@ async def get_feed(
     to KBs and lets `loading="lazy"` only request what scrolls into view.
     """
     use_lite = bool(lite)
-    posts = await run_in_threadpool(
-        db.get_feed_posts, current_user["id"], limit, offset, mood, lite=use_lite
-    )
-    _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
-    for p in posts:
-        p["reactions"] = _rmap.get(p["id"], [])
-        # Only construct a lazy-load URL if media_data is missing.
-        # If database already returned media_data (e.g., for images/videos in lite mode),
-        # use it directly—the frontend will render it or fetch as needed.
-        if use_lite and p.get("has_media") and not p.get("media_data"):
-            p["media_data"] = f"/api/social/posts/{p['id']}/media"
-    return {"posts": posts}
+    key = f"feed:{current_user['id']}:{limit}:{offset}:{mood}:{int(use_lite)}"
+
+    async def _build():
+        posts = await run_in_threadpool(
+            db.get_feed_posts, current_user["id"], limit, offset, mood, lite=use_lite
+        )
+        _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
+        for p in posts:
+            p["reactions"] = _rmap.get(p["id"], [])
+            if use_lite and p.get("has_media") and not p.get("media_data"):
+                p["media_data"] = f"/api/social/posts/{p['id']}/media"
+        return {"posts": posts}
+
+    return await _coalesce_hot(key, _build)
 
 
 @router.get("/explore")
@@ -370,18 +422,20 @@ async def get_explore(
     See `get_feed` for the `lite` flag.
     """
     use_lite = bool(lite)
-    posts = await run_in_threadpool(
-        db.get_explore_posts, current_user["id"], limit, offset, sort, mood, lite=use_lite
-    )
-    _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
-    for p in posts:
-        p["reactions"] = _rmap.get(p["id"], [])
-        # Only construct a lazy-load URL if media_data is missing.
-        # If database already returned media_data (e.g., for images/videos in lite mode),
-        # use it directly—the frontend will render it or fetch as needed.
-        if use_lite and p.get("has_media") and not p.get("media_data"):
-            p["media_data"] = f"/api/social/posts/{p['id']}/media"
-    return {"posts": posts}
+    key = f"explore:{current_user['id']}:{limit}:{offset}:{sort}:{mood}:{int(use_lite)}"
+
+    async def _build():
+        posts = await run_in_threadpool(
+            db.get_explore_posts, current_user["id"], limit, offset, sort, mood, lite=use_lite
+        )
+        _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
+        for p in posts:
+            p["reactions"] = _rmap.get(p["id"], [])
+            if use_lite and p.get("has_media") and not p.get("media_data"):
+                p["media_data"] = f"/api/social/posts/{p['id']}/media"
+        return {"posts": posts}
+
+    return await _coalesce_hot(key, _build)
 
 
 @router.get("/suggested")

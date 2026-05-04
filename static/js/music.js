@@ -178,10 +178,14 @@ const Music = (() => {
     try {
       const cur = _state && _state.queue && _state.queue[0];
       const isYouTube = !!(cur && cur.provider === 'youtube');
-      const ytKnowsPaused = isYouTube
-        && _lastPlayerState !== null
-        && _lastPlayerState !== 1
-        && _lastPlayerState !== 3;
+      // Only YT state 2 = "paused" actually means paused. -1 (unstarted),
+      // 0 (ended), 3 (buffering), 5 (cued) are transient states during a
+      // tab swap or iframe remount where the user clearly intends to be
+      // playing — treating them as paused makes the dock button blink to
+      // ▶ every time the user navigates between channels and FrogSocial
+      // even though audio is still flowing. Trust _paused (user intent)
+      // and only override when YT explicitly says "I am paused".
+      const ytKnowsPaused = isYouTube && _lastPlayerState === 2;
       return _paused || ytKnowsPaused;
     } catch { return _paused; }
   }
@@ -222,10 +226,7 @@ const Music = (() => {
       // 2) or unstarted (-1) but the user hasn't paused, the notification
       // should still show "play" — anything else lies to the user.
       const isYouTube = !!(cur && cur.provider === 'youtube');
-      const ytKnowsPaused = isYouTube
-        && _lastPlayerState !== null
-        && _lastPlayerState !== 1   // 1 = playing
-        && _lastPlayerState !== 3;  // 3 = buffering (treat as playing-ish)
+      const ytKnowsPaused = isYouTube && _lastPlayerState === 2;
       const effectivePaused = _paused || ytKnowsPaused;
       // Reflect the truth in the in-app buttons too — a YT auto-pause or a
       // background-forced pause needs to flip the side UI play/pause icon
@@ -1244,7 +1245,7 @@ const Music = (() => {
     if (wrap && wrap.dataset.curKey === curKey) {
       // Head unchanged — only refresh the meta + controls + queue sections.
       const meta = document.getElementById('mp-meta-wrap');
-      if (meta) meta.innerHTML = `${headerHtml}${nowRow}${submitHtml}${queueHtml}`;
+      if (meta) meta.innerHTML = `${headerHtml}${nowRow}${queueHtml}${submitHtml}`;
       // Re-paint badge with the cached drift (the node was just replaced).
       _renderSyncBadge();
       _startSyncProbeIfNeeded();
@@ -1269,8 +1270,8 @@ const Music = (() => {
       <div id="mp-meta-wrap">
         ${headerHtml}
         ${nowRow}
-        ${submitHtml}
         ${queueHtml}
+        ${submitHtml}
       </div>
     `;
     _emitState();
