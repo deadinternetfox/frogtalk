@@ -30,6 +30,31 @@ const Social = (() => {
   let _reactionButtonDelegated = false;
   let _tabLoadUiPulseIndex = 0;
 
+  // ── Bounded cache helpers ────────────────────────────────────────────
+  // The original code used .set() directly on a long-lived Map for every
+  // distinct sort/scope key. Keys are user-controlled (e.g. {scope:sort}
+  // for reels, {nick} for profiles). Without an upper bound a long
+  // session — especially when the user clicks through many profiles —
+  // grows the Map unboundedly: each entry pins a posts[] which keeps a
+  // chain of media URLs / reaction arrays alive. After enough use the
+  // page heap gets large enough that GC pauses contribute to the
+  // "everything hangs" feel. Cap each Map at 24 entries; on overflow,
+  // drop the oldest (Map iteration is insertion-ordered).
+  const _CACHE_CAP = 24;
+  function _cacheSet(map, key, value) {
+    try {
+      if (map.has(key)) map.delete(key); // refresh insertion order
+      map.set(key, value);
+      while (map.size > _CACHE_CAP) {
+        const oldest = map.keys().next().value;
+        if (oldest === undefined) break;
+        map.delete(oldest);
+      }
+    } catch {
+      try { map.set(key, value); } catch {}
+    }
+  }
+
   // ── helpers ──────────────────────────────────────────────────────────────
   const esc = s => UI.escHtml(s);
   // Returns a JS string literal safe to embed in an HTML `onclick="..."`
@@ -171,6 +196,7 @@ const Social = (() => {
   }
 
   let _socialVideoObserverStarted = false;
+  let _socialVideoObserverInstance = null;
 
   // Aggressive cleanup before we replace the innerHTML of a social
   // container. Without this, the old <video> elements keep their open
@@ -219,6 +245,25 @@ const Social = (() => {
       const host = video.parentElement;
       if (!host) return;
       host.classList.add('ft-video-host');
+      const isGrid = host.classList.contains('social-grid-item') || host.closest('.social-grid-item') != null;
+
+      // Move src → data-mediasrc so the browser doesn't begin
+      // downloading until the tile actually scrolls into view. Without
+      // this, a single feed paint kicks off N parallel video downloads
+      // (preload=metadata still fetches a moov-atom range; preload=auto
+      // streams the whole file). With ~6 conn/origin those fights with
+      // primary /api/social/feed fetches → "feed loads slow / hangs".
+      try {
+        const cur = video.getAttribute('src') || '';
+        if (cur && !video.dataset.mediasrc) {
+          video.dataset.mediasrc = cur;
+          video.removeAttribute('src');
+          // Avoid an immediate empty-src error event blowing up the row.
+          video.preload = 'none';
+          try { video.load(); } catch {}
+        }
+      } catch {}
+
       let posterDrawn = false;
       if (!host.querySelector('.ft-video-poster')) {
         const poster = document.createElement('div');
@@ -239,6 +284,9 @@ const Social = (() => {
             try { video.removeAttribute('controls'); } catch {}
             try { video.controls = false; } catch {}
             try { video.muted = false; } catch {}
+            // Ensure src is bound before play (covers the rare case where
+            // the user taps before the IntersectionObserver fires).
+            _ftVideoBind(video);
             try { video.play().catch(() => {}); } catch {}
           };
           host.appendChild(play);
@@ -247,6 +295,7 @@ const Social = (() => {
             e.stopPropagation();
             if (video.paused) {
               host.classList.add('is-playing');
+              _ftVideoBind(video);
               video.play().catch(() => {});
             } else {
               video.pause();
@@ -256,21 +305,39 @@ const Social = (() => {
         const drawPoster = () => {
           if (posterDrawn) return;
           _drawVideoPoster(video, poster);
-          if (poster.classList.contains('ready')) posterDrawn = true;
+          if (poster.classList.contains('ready')) {
+            posterDrawn = true;
+            // Grid tiles only ever needed one canvas frame. Release the
+            // socket immediately so it doesn't sit there pinned for the
+            // life of the page (the grid never auto-plays).
+            if (isGrid) {
+              try { setTimeout(() => _ftVideoUnbind(video), 60); } catch {}
+            }
+          }
         };
         video.addEventListener('loadeddata', drawPoster, { once: true });
         video.addEventListener('canplay', drawPoster);
         video.addEventListener('seeked', drawPoster);
         video.addEventListener('loadedmetadata', () => {
           try {
-            if (!Number.isFinite(video.duration) || video.duration <= 0.12) return;
-            if (video.currentTime > 0) return;
-            video.currentTime = Math.min(0.12, Math.max(0.06, video.duration / 10));
+            if (!Number.isFinite(video.duration) || video.duration <= 0.2) return;
+            if (video.currentTime > 0.05) return;
+            // Grid tiles want a *representative* frame — many videos have
+            // 1–2 black/fade-in frames at t=0.06s and the resulting
+            // poster looks broken. Seek to ~30% (clamped 1–4 s) so the
+            // canvas snapshot is something the user actually recognizes.
+            // Feed videos keep the early seek so the "Play" overlay
+            // doesn't reveal a spoiler frame.
+            const dur = video.duration;
+            const target = isGrid
+              ? Math.min(4, Math.max(1, dur * 0.30))
+              : Math.min(0.12, Math.max(0.06, dur / 10));
+            video.currentTime = Math.min(target, Math.max(0, dur - 0.05));
           } catch {}
         }, { once: true });
-        try { video.preload = 'auto'; } catch {}
-        try { video.load(); } catch {}
-        setTimeout(drawPoster, 900);
+        // For grid tiles we only want a frame snapshot, not the whole
+        // file streaming. .ft-poster-only is sniffed in _ftVideoBind.
+        if (isGrid) video.classList.add('ft-poster-only');
       }
       video.addEventListener('play', () => host.classList.add('is-playing'));
       video.addEventListener('pause', () => host.classList.remove('is-playing'));
@@ -279,7 +346,81 @@ const Social = (() => {
         try { video.removeAttribute('controls'); } catch {}
         try { video.controls = false; } catch {}
       });
+      // Register with the lazy IntersectionObserver. It will bind src
+      // when the tile enters the viewport, and (for non-playing tiles)
+      // unbind when it scrolls offscreen so we reclaim the socket slot.
+      _ftLazyObserve(video);
     });
+  }
+
+  // ── Lazy video binding (IntersectionObserver) ──────────────────────
+  // Concurrency-limited: at most _FT_MAX_ACTIVE_VIDEOS simultaneously
+  // bound. Beyond that, queued tiles wait until one is unbound.
+  const _FT_MAX_ACTIVE_VIDEOS = 4;
+  const _ftActiveVideos = new Set();
+  const _ftPendingVideos = new Set();
+  let _ftLazyIO = null;
+  function _ftEnsureLazyIO() {
+    if (_ftLazyIO || typeof IntersectionObserver === 'undefined') return _ftLazyIO;
+    _ftLazyIO = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const v = e.target;
+        if (e.isIntersecting) {
+          _ftPendingVideos.add(v);
+          _ftPump();
+        } else {
+          _ftPendingVideos.delete(v);
+          // Don't unbind a video the user is actively watching.
+          if (!v.paused) continue;
+          _ftVideoUnbind(v);
+        }
+      }
+    }, { root: null, rootMargin: '120px', threshold: 0.01 });
+    return _ftLazyIO;
+  }
+  function _ftLazyObserve(video) {
+    const io = _ftEnsureLazyIO();
+    if (!io) { _ftVideoBind(video); return; }
+    try { io.observe(video); } catch {}
+  }
+  function _ftPump() {
+    if (_ftActiveVideos.size >= _FT_MAX_ACTIVE_VIDEOS) return;
+    for (const v of _ftPendingVideos) {
+      if (_ftActiveVideos.size >= _FT_MAX_ACTIVE_VIDEOS) break;
+      _ftPendingVideos.delete(v);
+      _ftVideoBind(v);
+    }
+  }
+  function _ftVideoBind(video) {
+    if (!video) return;
+    const src = video.dataset.mediasrc;
+    if (!src) return;
+    if (video.getAttribute('src')) {
+      _ftActiveVideos.add(video);
+      return;
+    }
+    try {
+      // Grid tiles need just enough to capture one frame. Feed videos
+      // stay on preload=metadata until the user clicks ▶ (then play()
+      // forces a real download).
+      video.preload = video.classList.contains('ft-poster-only') ? 'auto' : 'metadata';
+      video.setAttribute('src', src);
+      video.load();
+    } catch {}
+    _ftActiveVideos.add(video);
+  }
+  function _ftVideoUnbind(video) {
+    if (!video) return;
+    _ftActiveVideos.delete(video);
+    try {
+      if (video.getAttribute('src')) {
+        try { video.pause(); } catch {}
+        video.removeAttribute('src');
+        video.load();
+      }
+    } catch {}
+    // Refill the active slot.
+    _ftPump();
   }
 
   function _ensureSocialVideoObserver() {
@@ -287,6 +428,7 @@ const Social = (() => {
     _socialVideoObserverStarted = true;
     _hydrateVideoThumbs(document);
     if (typeof MutationObserver === 'undefined' || !document.body) return;
+    const overlay = document.getElementById('social-overlay') || document.body;
     const mo = new MutationObserver((muts) => {
       for (const m of muts) {
         for (const node of m.addedNodes) {
@@ -300,7 +442,12 @@ const Social = (() => {
         }
       }
     });
-    mo.observe(document.body, { childList: true, subtree: true });
+    // Scope the observer to the social overlay only — watching
+    // document.body fires for every reaction badge / DM pop / room
+    // update across the whole app, which is wasteful and (with
+    // subtree:true) walks the entire DOM on every mutation.
+    mo.observe(overlay, { childList: true, subtree: true });
+    _socialVideoObserverInstance = mo;
   }
 
   function timeAgo(iso) {
@@ -337,6 +484,17 @@ const Social = (() => {
   function close() {
     const overlay = document.getElementById('social-overlay');
     if (overlay) overlay.classList.add('hidden');
+    // Tear down all the long-lived observers / sockets so closing the
+    // social overlay actually frees memory + connection slots.
+    try { _socialVideoObserverInstance?.disconnect(); } catch {}
+    _socialVideoObserverInstance = null;
+    _socialVideoObserverStarted = false;
+    try { _ftLazyIO?.disconnect(); } catch {}
+    _ftLazyIO = null;
+    _ftPendingVideos.clear();
+    for (const v of Array.from(_ftActiveVideos)) { try { _ftVideoUnbind(v); } catch {} }
+    _ftActiveVideos.clear();
+    _cancelBgPrefetch();
   }
 
   function openProfile(nickname) {
@@ -442,7 +600,7 @@ const Social = (() => {
     }
     const data = await res.json().catch(() => ({ posts: [] }));
     const posts = data.posts || [];
-    _profilePostsCache.set(cacheKey, { ts: Date.now(), posts });
+    _cacheSet(_profilePostsCache, cacheKey, { ts: Date.now(), posts });
     return posts;
   }
 
@@ -489,7 +647,7 @@ const Social = (() => {
     }
     const data = await res.json().catch(() => ({ posts: [] }));
     const posts = data.posts || [];
-    _profileRepostsCache.set(cacheKey, { ts: Date.now(), posts });
+    _cacheSet(_profileRepostsCache, cacheKey, { ts: Date.now(), posts });
     return posts;
   }
 
@@ -512,7 +670,7 @@ const Social = (() => {
             .then(r => r && r.ok ? r.json().catch(() => ({ posts: [] })) : null)
             .then(data => {
               if (data && Array.isArray(data.posts)) {
-                _profilePostsCache.set(key, { ts: Date.now(), posts: data.posts });
+                _cacheSet(_profilePostsCache, key, { ts: Date.now(), posts: data.posts });
               }
             })
             .catch(() => null)
@@ -599,7 +757,7 @@ const Social = (() => {
           const r = await api(`/api/social/explore?lite=1&sort=${encodeURIComponent(_expKey)}&limit=24`).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
-            if (Array.isArray(d.posts)) _exploreCache.set(_expKey, { ts: Date.now(), posts: d.posts, channels: [] });
+            if (Array.isArray(d.posts)) _cacheSet(_exploreCache, _expKey, { ts: Date.now(), posts: d.posts, channels: [] });
           }
         }
       } catch {}
@@ -609,7 +767,7 @@ const Social = (() => {
           const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12`).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
-            if (Array.isArray(d.posts)) _reelsCache.set(_rrKey, { ts: Date.now(), posts: d.posts });
+            if (Array.isArray(d.posts)) _cacheSet(_reelsCache, _rrKey, { ts: Date.now(), posts: d.posts });
           }
         }
       } catch {}
@@ -622,7 +780,7 @@ const Social = (() => {
           const r = await api(url).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
-            if (Array.isArray(d.posts)) _musicCache.set(_mKey, { ts: Date.now(), posts: d.posts });
+            if (Array.isArray(d.posts)) _cacheSet(_musicCache, _mKey, { ts: Date.now(), posts: d.posts });
           }
         }
       } catch {}
@@ -2282,7 +2440,7 @@ const Social = (() => {
         channels = channelsData.channels || [];
       }
 
-      _exploreCache.set(cacheKey, { ts: Date.now(), posts, channels });
+      _cacheSet(_exploreCache, cacheKey, { ts: Date.now(), posts, channels });
       if (_currentTab !== 'explore') return;
       _updateTabLoadUi(loadUi, 88, 'Building explore view', `${posts.length} post${posts.length !== 1 ? 's' : ''} + ${channels.length} channel${channels.length !== 1 ? 's' : ''}`);
       _renderExploreContent(content, posts, channels);
@@ -2924,7 +3082,7 @@ const Social = (() => {
       _updateTabLoadUi(loadUi, 68, 'Processing reels', 'Parsing reel data…');
       const data = res && res.ok ? await res.json() : { posts: [] };
       const posts = data.posts || [];
-      _reelsCache.set(cacheKey, { ts: Date.now(), posts });
+      _cacheSet(_reelsCache, cacheKey, { ts: Date.now(), posts });
 
       if (posts.length === 0) {
         _updateTabLoadUi(loadUi, 78, 'Rendering reels', 'No reels found for this filter');
@@ -4337,7 +4495,7 @@ const Social = (() => {
           seen.add(p.id);
           all.push(p);
         }
-        _musicCache.set(cacheKey, { ts: Date.now(), posts: all });
+        _cacheSet(_musicCache, cacheKey, { ts: Date.now(), posts: all });
       }
       if (_currentTab !== 'music' || loadToken !== _musicTabLoadToken) return;
       const isMusic = (p) => {

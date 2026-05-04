@@ -104,6 +104,16 @@ async function apiFetch (url, method = 'GET', body = null) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
+  // Per-request timeout so a stalled socket (e.g. video downloads
+  // saturating the 6-conn pool) can't pin a /feed call forever and
+  // surface as a "loading…" hang. 25 s is far longer than any healthy
+  // API response yet shorter than the browser's default ~5 min idle.
+  let timer = null;
+  if (typeof AbortController !== 'undefined') {
+    const ac = new AbortController();
+    opts.signal = ac.signal;
+    timer = setTimeout(() => { try { ac.abort(); } catch {} }, 25000);
+  }
   try {
     const res = await fetch(url, opts);
     const _u = String(url || '');
@@ -137,6 +147,8 @@ async function apiFetch (url, method = 'GET', body = null) {
     // TypeError: Failed to fetch → network / server unreachable
     if (typeof ConnErr !== 'undefined') ConnErr.onNetFail();
     throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
