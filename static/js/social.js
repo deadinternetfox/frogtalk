@@ -113,6 +113,22 @@ const Social = (() => {
     return res.json().catch(() => fallback);
   }
 
+  // Build a Frog-themed error-state block with a styled Retry button.
+  // `retryExpr` is a JS expression (NOT a JS string) — we inject it raw
+  // into the onclick handler, so callers must construct it safely
+  // (e.g. with esc()/JSON.stringify of nicknames before interpolating).
+  function _socialErrorHTML(title, retryExpr, opts = {}) {
+    const sub = opts.sub || 'Check your connection and try again.';
+    const ico = opts.ico || '⚠️';
+    return `
+      <div class="social-empty-state">
+        <div class="ico" aria-hidden="true">${ico}</div>
+        <div class="ttl">${title}</div>
+        <div class="sub">${sub}</div>
+        <button class="social-retry-btn" onclick="${retryExpr}"><span class="ico">↻</span> Retry</button>
+      </div>`;
+  }
+
   function _ensureReactionButtonDelegation() {
     if (_reactionButtonDelegated) return;
     _reactionButtonDelegated = true;
@@ -2067,7 +2083,7 @@ const Social = (() => {
     } catch {
       clearQueuedSteps();
       if (!cached && _currentTab === 'feed') {
-        content.innerHTML = '<div class="social-empty">Could not load feed</div>';
+        content.innerHTML = _socialErrorHTML('Could not load feed', "Social.loadFeed({force:true})", { ico: '🐸', sub: 'Your connection blinked or the server is busy. Try again in a moment.' });
       }
     } finally {
       clearQueuedSteps();
@@ -2225,7 +2241,7 @@ const Social = (() => {
     } catch {
       clearQueuedSteps();
       if (!cached && _currentTab === 'explore') {
-        content.innerHTML = '<div class="social-empty">Could not load explore</div>';
+        content.innerHTML = _socialErrorHTML('Could not load explore', 'Social.refreshExplore()', { ico: '🔍', sub: 'Couldn\u2019t reach the explore feed. Try again.' });
       }
     } finally {
       clearQueuedSteps();
@@ -2284,11 +2300,10 @@ const Social = (() => {
             const label = status === 429 ? 'Slow down — too many requests'
                         : status === 401 || status === 403 ? 'You don\u2019t have access to this profile'
                         : 'Couldn\u2019t load profile';
-            content.innerHTML = `
-              <div class="social-empty" style="display:flex;flex-direction:column;align-items:center;gap:10px">
-                <div>${label}</div>
-                <button class="primary-btn" onclick="Social.openProfile('${safeNick}')">Retry</button>
-              </div>`;
+            const subCopy = status === 429 ? 'You\u2019re hitting the rate limit. Wait a few seconds, then try again.'
+                          : status === 401 || status === 403 ? 'This profile is private or restricted.'
+                          : 'The server didn\u2019t answer in time. Tap retry once it settles.';
+            content.innerHTML = _socialErrorHTML(label, `Social.openProfile('${safeNick}')`, { ico: '👤', sub: subCopy });
           }
           return;
         }
@@ -2416,7 +2431,8 @@ const Social = (() => {
       loadProfilePosts(nickname, 'wall', wallToken);
       _schedProfilePrefetch(nickname, isSelf);
     } catch {
-      content.innerHTML = '<div class="social-empty">Could not load profile</div>';
+      const _safeNick = esc(String(nickname || ''));
+      content.innerHTML = _socialErrorHTML('Could not load profile', `Social.openProfile('${_safeNick}')`, { ico: '👤' });
     } finally {
       _schedBgPrefetch('profile');
       _finishTabLoadUi(loadUi);
@@ -2501,7 +2517,8 @@ const Social = (() => {
       container.innerHTML = `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
     } catch {
       if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return;
-      container.innerHTML = '<div class="social-empty">Could not load posts</div>';
+      const _safeNick = esc(String(nickname || ''));
+      container.innerHTML = _socialErrorHTML('Could not load posts', `Social.openProfile('${_safeNick}')`, { ico: '📝' });
     }
   }
 
@@ -2601,7 +2618,7 @@ const Social = (() => {
         }).join('')}</div>`;
       } catch {
         if (!_isProfileTabLoadCurrent('media', loadToken)) return;
-        container.innerHTML = `${toggleHtml}<div class="social-empty">Could not load private media</div>`;
+        container.innerHTML = `${toggleHtml}` + _socialErrorHTML('Could not load private media', "Social.switchProfileTab('media')", { ico: '🔒' });
       }
       return;
     }
@@ -2643,7 +2660,8 @@ const Social = (() => {
       }).join('')}</div>`;
     } catch {
       if (!_isProfileTabLoadCurrent('media', loadToken)) return;
-      container.innerHTML = `${toggleHtml}<div class="social-empty">Could not load public media</div>`;
+      const _safeNick = esc(String(nickname || ''));
+      container.innerHTML = `${toggleHtml}` + _socialErrorHTML('Could not load public media', "Social.switchProfileTab('media')", { ico: '🌍' });
     }
   }
 
@@ -2925,7 +2943,7 @@ const Social = (() => {
       }
     } catch (e) {
       clearQueuedSteps();
-      content.innerHTML = scopeBar + `<div class="reels-empty"><div class="reels-empty-icon">⚠️</div><div class="reels-empty-title">Could not load reels</div></div>`;
+      content.innerHTML = scopeBar + _socialErrorHTML('Could not load reels', 'Social.loadReelsTab()', { ico: '🎞️', sub: 'Reels couldn\u2019t fetch. Tap retry to try again.' });
     } finally {
       clearQueuedSteps();
       _schedBgPrefetch('reels');
@@ -3720,7 +3738,7 @@ const Social = (() => {
       }).join('')}</div>`;
     } catch {
       if (!_isProfileTabLoadCurrent('reels', loadToken)) return;
-      container.innerHTML = `<div class="social-empty">Could not load reels</div>`;
+      container.innerHTML = _socialErrorHTML('Could not load reels', "Social.switchProfileTab('reels')", { ico: '🎞️' });
     }
   }
 
@@ -3746,7 +3764,7 @@ const Social = (() => {
       container.innerHTML = `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
     } catch {
       if (!_isProfileTabLoadCurrent('reposts', loadToken)) return;
-      container.innerHTML = '<div class="social-empty">Could not load reposts</div>';
+      container.innerHTML = _socialErrorHTML('Could not load reposts', "Social.switchProfileTab('reposts')", { ico: '🔁' });
     }
   }
 
@@ -3871,7 +3889,7 @@ const Social = (() => {
       }).join('')}</div>`;
     } catch {
       if (!_isProfileTabLoadCurrent('channels', loadToken)) return;
-      container.innerHTML = '<div class="social-empty">Could not load channels</div>';
+      container.innerHTML = _socialErrorHTML('Could not load channels', "Social.switchProfileTab('channels')", { ico: '💬' });
     }
   }
 
@@ -4402,7 +4420,7 @@ const Social = (() => {
       _applyMusicState();
     } catch {
       clearQueuedSteps();
-      content.innerHTML = '<div class="social-empty">Could not load music shares</div>';
+      content.innerHTML = _socialErrorHTML('Could not load music shares', "Social.loadMusicTab()", { ico: '🎵' });
     } finally {
       clearQueuedSteps();
       _schedBgPrefetch('music');
@@ -6686,7 +6704,7 @@ const Social = (() => {
       }
     } catch {
       const list = document.getElementById('social-activity-list');
-      if (list) list.innerHTML = `<div class="social-activity-empty"><div class="ring">⚠️</div><div class="ttl">Could not load activity</div><div class="sub">Check your connection and try again.</div><div class="actions"><button class="btn primary" onclick="Social.switchTab('activity')">Retry</button></div></div>`;
+      if (list) list.innerHTML = `<div class="social-activity-empty"><div class="ring">⚠️</div><div class="ttl">Could not load activity</div><div class="sub">Check your connection and try again.</div><div class="actions"><button class="social-retry-btn" onclick="Social.switchTab('activity')"><span class="ico">↻</span> Retry</button></div></div>`;
     } finally {
       _activityLoading = false;
       _schedBgPrefetch('activity');

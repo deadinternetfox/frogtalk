@@ -136,25 +136,42 @@ const Messages = (() => {
     return p;
   }
 
+  // Bounded timeout so a stalled fetch fails fast and the user sees the
+  // "unavailable" placeholder instead of an indefinite loader. The
+  // server-side endpoint is cheap; if it's not back in 8s something is
+  // wrong (offline / federated peer down / server backlogged).
+  function _withTimeout(ms = 8000) {
+    if (typeof AbortController === 'undefined') return { signal: undefined, cancel: () => {} };
+    const ctrl = new AbortController();
+    const t = setTimeout(() => { try { ctrl.abort(); } catch {} }, ms);
+    return { signal: ctrl.signal, cancel: () => { try { clearTimeout(t); } catch {} } };
+  }
+
   async function _publicGet(url) {
+    const tm = _withTimeout(8000);
     try {
-      const res = await fetch(url, { credentials: 'omit', cache: 'default' });
+      const res = await fetch(url, { credentials: 'omit', cache: 'default', signal: tm.signal });
       if (!res.ok) return { ok: false };
       const data = await res.json().catch(() => null);
       return data ? { ok: true, data } : { ok: false };
     } catch {
       return { ok: false };
+    } finally {
+      tm.cancel();
     }
   }
 
   async function _authedGet(url) {
+    const tm = _withTimeout(8000);
     try {
-      const res = await apiFetch(url);
+      const res = await apiFetch(url, { signal: tm.signal });
       if (!res.ok) return { ok: false };
       const data = await res.json().catch(() => null);
       return data ? { ok: true, data } : { ok: false };
     } catch {
       return { ok: false };
+    } finally {
+      tm.cancel();
     }
   }
 
@@ -347,9 +364,38 @@ const Messages = (() => {
     placeholder.outerHTML = _renderRichShareEmbed(data, 'reel', postId);
   }
 
+  // Hoist share-card placeholders (and the cards they become) to the top
+  // of the message body, on their own block-level row. Without this they
+  // render inline at the position of the URL inside the text — which for
+  // a typical "check this out https://…/r/123" message means the loader
+  // and the eventual rich card appear BELOW the message text. Users
+  // expect the embed on top with the message text underneath.
+  function _hoistShareCardToTop(placeholder) {
+    if (!placeholder) return;
+    const body = placeholder.closest('.msg-body') || placeholder.closest('.msg-cont-wrap > div');
+    if (!body) return;
+    let row = placeholder.parentElement;
+    if (!row || !row.classList || !row.classList.contains('msg-share-row')) {
+      row = document.createElement('div');
+      row.className = 'msg-share-row';
+      placeholder.parentNode.replaceChild(row, placeholder);
+      row.appendChild(placeholder);
+    }
+    if (body.firstChild !== row) body.insertBefore(row, body.firstChild);
+  }
+
   function _hydrateSpecialCards(msgId) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
+    // Hoist all share placeholders to the top of the body BEFORE kicking
+    // off async loads, so the in-flight loader (and the eventual card or
+    // failure state) always sit above the message text.
+    msgEl.querySelectorAll(
+      '.social-profile-card-placeholder[data-social-profile],' +
+      '.social-post-card-placeholder[data-social-post],' +
+      '.social-reel-card-placeholder[data-social-reel]'
+    ).forEach(_hoistShareCardToTop);
+
     msgEl.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
       const code = (el.dataset.inviteCode || '').trim();
       if (code) _loadInviteCard(msgId, code);

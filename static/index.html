@@ -3163,6 +3163,38 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 }
 @keyframes fadeInOut{0%,100%{opacity:.6}50%{opacity:1}}
 
+/* Block-level wrapper that hosts a share-card placeholder/embed at the
+   TOP of the message body (above the message text). Without this, the
+   placeholder span renders inline at the URL position so the loader and
+   eventual rich card appear BELOW the text — confusing UX. */
+.msg-share-row{display:block;margin:0 0 8px 0}
+.msg-share-row .chat-share-embed,
+.msg-share-row .invite-card,
+.msg-share-row .invite-card-loading,
+.msg-share-row .invite-card-invalid{margin-top:0}
+
+/* ─── Frog-themed retry button used on Frog Social error states ────── */
+.social-retry-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  margin:14px auto 0;
+  background:linear-gradient(180deg,#5bc764,#3f9e48);color:#062612;
+  border:none;border-radius:10px;
+  padding:9px 18px;font-size:13px;font-weight:700;
+  cursor:pointer;
+  box-shadow:0 6px 16px rgba(63,158,72,.3),inset 0 1px 0 rgba(255,255,255,.25);
+  transition:transform .12s ease,filter .18s ease,box-shadow .18s ease;
+}
+.social-retry-btn:hover{filter:brightness(1.07);box-shadow:0 8px 22px rgba(63,158,72,.42),inset 0 1px 0 rgba(255,255,255,.3)}
+.social-retry-btn:active{transform:scale(.97)}
+.social-retry-btn .ico{font-size:14px;line-height:1}
+.social-empty-state{
+  text-align:center;padding:50px 20px;color:#cdebd9;
+  display:flex;flex-direction:column;align-items:center;gap:4px
+}
+.social-empty-state .ico{font-size:34px;margin-bottom:6px;opacity:.85}
+.social-empty-state .ttl{font-size:16px;font-weight:700;color:#dff5e8}
+.social-empty-state .sub{font-size:13px;color:#9bbeae;max-width:340px;line-height:1.5}
+
 /* ─── Responsive: collapse panels on small screens ──────────── */
 @media(max-width:900px){
   #server-list{
