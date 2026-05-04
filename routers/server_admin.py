@@ -435,7 +435,7 @@ async def public_server_easter_egg():
 
 
 @router.post("/api/server-admin/login")
-async def server_webui_login(body: LoginBody, response: Response):
+async def server_webui_login(request: Request, body: LoginBody, response: Response):
     disabled = _require_enabled()
     if disabled:
         return disabled
@@ -452,11 +452,19 @@ async def server_webui_login(body: LoginBody, response: Response):
 
     token = secrets.token_urlsafe(32)
     _SESSIONS[token] = time.time() + _session_ttl_sec()
+    # Auto-enable Secure on https. The env override stays for local http
+    # development where setting Secure would prevent the cookie from being
+    # stored at all.
+    is_https = (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    )
+    cookie_secure = is_https or _is_true(os.getenv("FROGTALK_SERVER_WEBUI_COOKIE_SECURE", "0"))
     response.set_cookie(
         key=_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=_is_true(os.getenv("FROGTALK_SERVER_WEBUI_COOKIE_SECURE", "0")),
+        secure=cookie_secure,
         samesite="strict",
         max_age=_session_ttl_sec(),
         path="/",

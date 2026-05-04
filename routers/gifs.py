@@ -1,4 +1,5 @@
 """GIF search (via Tenor) and custom stickers routes."""
+import logging
 import os
 import httpx
 from fastapi import APIRouter, Depends, Query
@@ -10,9 +11,14 @@ import database as db
 from deps import get_current_user
 
 router = APIRouter(prefix="/media", tags=["media"])
+_log = logging.getLogger("frogtalk.gifs")
 
-# Tenor API - free, no key required for basic usage, or use their free key
-TENOR_API_KEY = os.getenv("TENOR_API_KEY", "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ")  # Public Google/Tenor key
+# Tenor API key — env-only. If unset, /media/gifs/* responds 503.
+# Do NOT ship a baked-in key: any default in source ends up rate-limited
+# or revoked once it leaks.
+TENOR_API_KEY = (os.getenv("TENOR_API_KEY") or "").strip()
+if not TENOR_API_KEY:
+    _log.warning("TENOR_API_KEY is not set — GIF search will return 503 until configured.")
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +31,8 @@ async def search_gifs(
     limit: int = Query(20, le=50)
 ):
     """Search for GIFs via Tenor API."""
+    if not TENOR_API_KEY:
+        return JSONResponse(status_code=503, content={"error": "GIF service not configured"})
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
@@ -68,6 +76,8 @@ async def search_gifs(
 @router.get("/gifs/trending")
 async def trending_gifs(limit: int = Query(20, le=50)):
     """Get trending GIFs."""
+    if not TENOR_API_KEY:
+        return JSONResponse(status_code=503, content={"error": "GIF service not configured"})
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(

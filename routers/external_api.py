@@ -375,9 +375,12 @@ async def create_webhook(
     body: WebhookConfig,
     auth: dict = Depends(require_api_key(["admin"]))
 ):
-    """Create a webhook (requires admin permission)."""
-    # TODO: Implement webhook storage and delivery
+    """Create a webhook (requires admin permission).
+
+    Storage + delivery not yet implemented; intentionally returns 501 so
+    callers see a stable contract instead of a silent success.
+    """
     return JSONResponse(
         status_code=501,
-        content={"error": "Webhooks coming soon"}
+        content={"error": "Webhooks not yet implemented"}
     )

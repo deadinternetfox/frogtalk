@@ -281,10 +281,31 @@ def init_db():
         """)
         # Note: default rooms are no longer auto-seeded. Users create their
         # own channels; new signups see an empty state or accept an invite.
-        # Seed admin user (change password via env var in production)
-        admin_pw = os.getenv("ADMIN_PASSWORD", "froggy123!!")
+        # Seed admin user. ADMIN_PASSWORD env is preferred. If unset on a
+        # fresh install we generate a random password instead of using a
+        # well-known default — operator must read it from the bootstrap
+        # file and set ADMIN_PASSWORD env afterwards.
         existing = con.execute("SELECT id FROM users WHERE nickname='admin'").fetchone()
         if not existing:
+            admin_pw = os.getenv("ADMIN_PASSWORD", "").strip()
+            if not admin_pw:
+                admin_pw = secrets.token_urlsafe(24)
+                try:
+                    boot_path = DB_PATH.parent / ".bootstrap_admin_password"
+                    boot_path.write_text(admin_pw + "\n", encoding="utf-8")
+                    try:
+                        os.chmod(boot_path, 0o600)
+                    except OSError:
+                        pass
+                    print(
+                        f"[DB] Seeded admin user with random password; "
+                        f"see {boot_path} (chmod 600). Set ADMIN_PASSWORD env and remove the file."
+                    )
+                except OSError as _e:
+                    print(
+                        f"[DB] Could not write bootstrap admin password file: {_e}. "
+                        f"Generated password (set in env immediately): {admin_pw}"
+                    )
             con.execute(
                 "INSERT INTO users (nickname, password_hash, is_admin) VALUES (?, ?, 1)",
                 ("admin", _bcrypt.hashpw(admin_pw.encode(), _bcrypt.gensalt()).decode())

@@ -1,9 +1,17 @@
 """FrogTalk - Secure Social Chat Platform."""
 import hashlib
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+
+_LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
+logging.basicConfig(
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+_log = logging.getLogger("frogtalk.main")
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -42,23 +50,27 @@ limiter = Limiter(key_func=get_remote_address)
 
 
 async def cleanup_task():
-    """Background task to clean up expiring content and inactive public rooms."""
+    """Background task to clean up expiring content and inactive public rooms.
+
+    DB calls are wrapped in `asyncio.to_thread` so the SQLite work never blocks
+    the single uvicorn event loop while the 60s tick runs.
+    """
     while True:
         await asyncio.sleep(60)  # Run every minute
         try:
-            deleted = cleanup_expired_dm_messages()
+            deleted = await asyncio.to_thread(cleanup_expired_dm_messages)
             if deleted > 0:
-                print(f"[Cleanup] Deleted {deleted} expired DM messages")
-            cleanup_expired_captchas()
+                _log.info("Cleanup deleted %d expired DM messages", deleted)
+            await asyncio.to_thread(cleanup_expired_captchas)
             try:
-                cleanup_expired_stories()
-            except Exception as _e:
-                print(f"[Cleanup] story cleanup error: {_e}")
+                await asyncio.to_thread(cleanup_expired_stories)
+            except Exception:
+                _log.exception("story cleanup error")
             try:
-                stale = cleanup_inactive_public_rooms()
+                stale = await asyncio.to_thread(cleanup_inactive_public_rooms)
                 deleted_rooms = int((stale or {}).get("deleted") or 0)
                 if deleted_rooms > 0:
-                    print(f"[Cleanup] Auto-deleted {deleted_rooms} inactive public rooms")
+                    _log.info("Auto-deleted %d inactive public rooms", deleted_rooms)
                     room_names = (stale or {}).get("rooms") or []
                     room_names = room_names if isinstance(room_names, list) else []
                     report = {
@@ -71,11 +83,11 @@ async def cleanup_task():
                     }
                     outbox = federation_mod.enqueue_server_event("server.channel_retention.pruned", report)
                     if not bool((outbox or {}).get("ok")):
-                        print(f"[Cleanup] Failed to enqueue prune report event: {(outbox or {}).get('error')}")
-            except Exception as _e:
-                print(f"[Cleanup] inactive room cleanup error: {_e}")
-        except Exception as e:
-            print(f"[Cleanup] Error: {e}")
+                        _log.warning("Failed to enqueue prune report event: %s", (outbox or {}).get("error"))
+            except Exception:
+                _log.exception("inactive room cleanup error")
+        except Exception:
+            _log.exception("Cleanup task error")
 
 
 async def official_directory_sync_task():
@@ -87,11 +99,11 @@ async def official_directory_sync_task():
         try:
             result = await federation_mod.sync_official_directory_once()
             if result.get("ok"):
-                print(f"[Federation] Official directory sync imported={result.get('imported', 0)} skipped={result.get('skipped', 0)}")
+                _log.info("Federation directory sync imported=%s skipped=%s", result.get("imported", 0), result.get("skipped", 0))
             elif result.get("error") != "directory_url_not_set":
-                print(f"[Federation] Official directory sync failed: {result.get('error')}")
-        except Exception as e:
-            print(f"[Federation] Sync task error: {e}")
+                _log.warning("Federation directory sync failed: %s", result.get("error"))
+        except Exception:
+            _log.exception("Federation sync task error")
 
 
 async def federation_inbox_processor_task():
@@ -106,8 +118,8 @@ async def federation_inbox_processor_task():
             delay = busy_sleep if processed else idle_sleep
         except asyncio.CancelledError:
             break
-        except Exception as e:
-            print(f"[Federation] Inbox processor error: {e}")
+        except Exception:
+            _log.exception("Federation inbox processor error")
             delay = idle_sleep
 
 
@@ -123,8 +135,8 @@ async def federation_outbox_processor_task():
             delay = busy_sleep if sent else idle_sleep
         except asyncio.CancelledError:
             break
-        except Exception as e:
-            print(f"[Federation] Outbox processor error: {e}")
+        except Exception:
+            _log.exception("Federation outbox processor error")
             delay = idle_sleep
 
 
@@ -143,13 +155,13 @@ async def federation_update_check_task():
                 timeout=20,
             )
             if not result.get("ok"):
-                print(f"[Federation] Update check failed: {result.get('error')}")
+                _log.warning("Federation update check failed: %s", result.get("error"))
             elif result.get("update_available"):
-                print("[Federation] Update available from main-site feed")
+                _log.info("Federation update available from main-site feed")
         except asyncio.TimeoutError:
-            print("[Federation] Update check task timed out; will retry next interval")
-        except Exception as e:
-            print(f"[Federation] Update check task error: {e}")
+            _log.warning("Federation update check task timed out; will retry next interval")
+        except Exception:
+            _log.exception("Federation update check task error")
 
 
 async def _run_boot_sync_nonblocking():
@@ -159,11 +171,11 @@ async def _run_boot_sync_nonblocking():
             federation_mod.sync_official_directory_once(), timeout=10
         )
         if boot_sync.get("ok"):
-            print(f"[Federation] Boot sync imported={boot_sync.get('imported', 0)} skipped={boot_sync.get('skipped', 0)}")
+            _log.info("Federation boot sync imported=%s skipped=%s", boot_sync.get("imported", 0), boot_sync.get("skipped", 0))
     except asyncio.TimeoutError:
-        print("[Federation] Boot sync timed out; continuing startup")
-    except Exception as e:
-        print(f"[Federation] Boot sync error: {e}")
+        _log.warning("Federation boot sync timed out; continuing startup")
+    except Exception:
+        _log.exception("Federation boot sync error")
 
 
 async def _start_discord_bridge_nonblocking():
@@ -172,9 +184,9 @@ async def _start_discord_bridge_nonblocking():
         from bridge_discord import start_discord_bridge
         await asyncio.wait_for(start_discord_bridge(), timeout=10)
     except asyncio.TimeoutError:
-        print("[Discord Bridge] Startup timed out; continuing without blocking")
-    except Exception as e:
-        print(f"[Discord Bridge] Could not start: {e}")
+        _log.warning("Discord bridge startup timed out; continuing without blocking")
+    except Exception:
+        _log.exception("Discord bridge could not start")
 
 
 async def _start_telegram_bridge_nonblocking():
@@ -183,9 +195,9 @@ async def _start_telegram_bridge_nonblocking():
         from bridge_telegram import start_telegram_bridge
         await asyncio.wait_for(start_telegram_bridge(), timeout=12)
     except asyncio.TimeoutError:
-        print("[Telegram Bridge] Startup timed out; continuing without blocking")
-    except Exception as e:
-        print(f"[Telegram Bridge] Could not start: {e}")
+        _log.warning("Telegram bridge startup timed out; continuing without blocking")
+    except Exception:
+        _log.exception("Telegram bridge could not start")
 
 
 @asynccontextmanager
@@ -307,8 +319,37 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # ── Security headers ────────────────────────────────────────────────────────
 # HSTS is conditional: only emitted on HTTPS requests so local http://
-# dev doesn't get pinned. CSP intentionally omitted this round (needs full
-# inline-script audit); track as follow-up.
+# dev doesn't get pinned.
+#
+# CSP is shipped REPORT-ONLY by default. Enforcing requires migrating every
+# inline `onclick=` attribute and inline <script>/<style> in static/index.html
+# to addEventListener / external files. Until then, report-only gives us
+# violation telemetry without breaking the live app. Set
+# FROGTALK_CSP_ENFORCE=1 to flip to enforcing once the audit is done.
+_CSP_DIRECTIVES = (
+    "default-src 'self'; "
+    # 'unsafe-inline' covers inline onclick=, inline <script>, inline event
+    # handlers; required until the inline-handler migration lands.
+    "script-src 'self' 'unsafe-inline' https://frogtalk.xyz; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com data:; "
+    "img-src 'self' data: blob: https:; "
+    "media-src 'self' data: blob: https:; "
+    # WebSockets to same origin + Tenor (gif preview) + tenor.googleapis.com.
+    "connect-src 'self' wss: https://tenor.googleapis.com https://media.tenor.com; "
+    "frame-ancestors 'self'; "
+    "base-uri 'self'; "
+    "form-action 'self'; "
+    "object-src 'none'; "
+    "worker-src 'self' blob:"
+)
+_CSP_HEADER_NAME = (
+    "Content-Security-Policy"
+    if os.getenv("FROGTALK_CSP_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "on")
+    else "Content-Security-Policy-Report-Only"
+)
+
+
 @app.middleware("http")
 async def _security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -321,6 +362,7 @@ async def _security_headers(request: Request, call_next):
         "Permissions-Policy",
         "geolocation=(self), microphone=(self), camera=(self), payment=(), usb=()",
     )
+    response.headers.setdefault(_CSP_HEADER_NAME, _CSP_DIRECTIVES)
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         response.headers.setdefault(
             "Strict-Transport-Security",
@@ -1279,7 +1321,7 @@ def _board_thread_urls(today: str) -> str:
         with open(BOARD_DATA_PATH, "r", encoding="utf-8") as _f:
             threads = _json.load(_f)
     except Exception as e:
-        print(f"[sitemap-board] could not read threads.json: {e}")
+        _log.warning("sitemap-board could not read threads.json: %s", e)
         return ""
     out = []
     for t in threads:
@@ -1332,7 +1374,7 @@ async def serve_sitemap_index():
             for r in user_rows if r["nickname"]
         )
     except Exception as e:
-        print(f"[sitemap] users query error: {e}")
+        _log.warning("sitemap users query error: %s", e)
 
     # Public rooms
     try:
@@ -1351,7 +1393,7 @@ async def serve_sitemap_index():
             for r in room_rows if r["name"]
         )
     except Exception as e:
-        print(f"[sitemap] rooms query error: {e}")
+        _log.warning("sitemap rooms query error: %s", e)
 
     body = (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -1408,7 +1450,7 @@ async def serve_sitemap_users():
                 "ORDER BY id DESC LIMIT 5000"
             ).fetchall()
     except Exception as e:
-        print(f"[sitemap-users] {e}")
+        _log.warning("sitemap-users error: %s", e)
     today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
     urls = "".join(
         _sitemap_url(f"{SITE_URL}/u/{_xml_escape(r['nickname'])}", today, "weekly", "0.6")
@@ -1440,7 +1482,7 @@ async def serve_sitemap_rooms():
                 "ORDER BY id DESC LIMIT 5000"
             ).fetchall()
     except Exception as e:
-        print(f"[sitemap-rooms] {e}")
+        _log.warning("sitemap-rooms error: %s", e)
     today = _sitemap_dt.utcnow().strftime("%Y-%m-%d")
     urls = "".join(
         _sitemap_url(f"{SITE_URL}/c/{_xml_escape(r['name'])}", today, "weekly", "0.6")
