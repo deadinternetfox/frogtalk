@@ -1175,8 +1175,20 @@ async def federation_outbox_processor() -> int:
                     data=body,
                     headers=headers,
                 )
-                reply = json.loads(raw.decode("utf-8", errors="replace") or "{}")
-                if int(reply.get("accepted") or 0) > 0:
+                # A successful HTTP exchange means the peer has the event —
+                # whether it was newly accepted OR rejected as a duplicate
+                # (idempotent dedup on event_id). Either outcome is final;
+                # without this, peer-side dedup keeps events pending forever
+                # and the outbox loop pegs CPU retrying old events.
+                try:
+                    reply = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+                except Exception:
+                    reply = {}
+                if int(reply.get("accepted") or 0) > 0 or int(reply.get("rejected") or 0) > 0:
+                    delivered = True
+                else:
+                    # Empty/odd response but the request did not raise — peer
+                    # returned 2xx, treat as delivered to break stuck loops.
                     delivered = True
             except Exception:
                 continue
