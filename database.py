@@ -3,6 +3,7 @@ import os
 import json
 import secrets
 import sqlite3
+import threading
 import uuid
 import time
 import hmac
@@ -22,7 +23,29 @@ DEFAULT_CHANNEL_DIRECTORY_ACTIVE_DAYS = 30
 DEFAULT_CHANNEL_AUTO_DELETE_DAYS = 0
 
 
+# ── Thread-local connection pool ──────────────────────────────────────
+# Previously _conn() opened a fresh sqlite3 connection AND ran 7 PRAGMA
+# statements on every call. A typical Frog Social profile load triggers
+# ~10 db.* calls, so that's 10 connect()s + 70 PRAGMA round-trips per
+# request, all on the asyncio event loop. Under contention from the
+# federation outbox writer + WS broadcasts that's enough to push
+# /api/ping past 8s.
+#
+# Each thread (the main event-loop thread plus every worker thread that
+# asyncio.to_thread spins up) now owns ONE long-lived connection that
+# is reused across requests. PRAGMAs run exactly once per thread.
+#
+# Drop-in safe: `with _conn() as con:` still works — sqlite3.Connection's
+# context-manager __exit__ only commits / rolls back, it never closes the
+# connection. So every existing call site keeps the same transactional
+# semantics; it just stops paying the connect-+-PRAGMA tax.
+_DB_LOCAL = threading.local()
+
+
 def _conn():
+    con = getattr(_DB_LOCAL, "con", None)
+    if con is not None:
+        return con
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     # 5s busy timeout avoids "database is locked" errors when multiple
     # short writes contend (WS broadcast + DM insert + presence update).
@@ -43,6 +66,7 @@ def _conn():
     con.execute("PRAGMA cache_size=-65536")
     con.execute("PRAGMA mmap_size=268435456")
     con.execute("PRAGMA foreign_keys=ON")
+    _DB_LOCAL.con = con
     return con
 
 

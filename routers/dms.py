@@ -4,6 +4,7 @@ import logging
 import time
 import uuid
 from fastapi import APIRouter, Depends, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
@@ -89,22 +90,25 @@ async def open_dm(request: Request, nickname: str, current_user: dict = Depends(
 
 @router.get("")
 async def list_dms(current_user: dict = Depends(get_current_user)):
-    channels = db.get_dm_channels(current_user["id"])
-    # Apply privacy: mask peer_last_read when peer has read receipts off,
-    # and mask other_last_seen when privacy forbids.
-    for ch in channels:
-        if not ch.get("other_show_read_receipts", 1):
-            ch["peer_last_read"] = 0
-        ls = ch.get("other_last_seen")
-        pref = ch.get("other_show_last_seen", "everyone") or "everyone"
-        if pref == "nobody":
-            ch["other_last_seen"] = None
-        elif pref == "friends":
-            if not db.are_friends(current_user["id"], ch["other_id"]):
+    viewer_id = current_user["id"]
+
+    def _build():
+        channels = db.get_dm_channels(viewer_id)
+        # Apply privacy: mask peer_last_read when peer has read receipts off,
+        # and mask other_last_seen when privacy forbids.
+        for ch in channels:
+            if not ch.get("other_show_read_receipts", 1):
+                ch["peer_last_read"] = 0
+            pref = ch.get("other_show_last_seen", "everyone") or "everyone"
+            if pref == "nobody":
                 ch["other_last_seen"] = None
-        # strip internal pref field
-        ch.pop("other_show_last_seen", None)
-    return {"channels": channels}
+            elif pref == "friends":
+                if not db.are_friends(viewer_id, ch["other_id"]):
+                    ch["other_last_seen"] = None
+            ch.pop("other_show_last_seen", None)
+        return channels
+
+    return {"channels": await run_in_threadpool(_build)}
 
 
 @router.post("/{channel_id}/read")
@@ -150,21 +154,27 @@ async def get_messages(channel_id: int, before: Optional[int] = None,
                        after: Optional[int] = None, limit: int = 50,
                        current_user: dict = Depends(get_current_user)):
     limit = min(limit, 100)
-    msgs, ok = db.get_dm_messages(channel_id, current_user["id"], limit, before, after)
+    viewer_id = current_user["id"]
+
+    def _build():
+        msgs, ok = db.get_dm_messages(channel_id, viewer_id, limit, before, after)
+        if not ok:
+            return (False, None)
+        msg_ids = [int(m.get("id") or 0) for m in msgs if m.get("id")]
+        try:
+            viewed_map = db.get_dm_view_once_viewed_map(msg_ids, viewer_id)
+        except Exception:
+            viewed_map = {}
+        for msg in msgs:
+            msg["channel_id"] = channel_id
+            msg["has_media"] = bool(msg.get("has_media"))
+            if msg.get("view_once"):
+                msg["viewed_by_me"] = 1 if viewed_map.get(int(msg.get("id") or 0)) else 0
+        return (True, msgs)
+
+    ok, msgs = await run_in_threadpool(_build)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Not a member of this channel"})
-    # Strip heavy media_data from history; clients fetch via /media endpoint
-    msg_ids = [int(m.get("id") or 0) for m in msgs if m.get("id")]
-    try:
-        viewed_map = db.get_dm_view_once_viewed_map(msg_ids, current_user["id"])
-    except Exception:
-        viewed_map = {}
-    for msg in msgs:
-        msg["channel_id"] = channel_id
-        # has_media is now returned directly from SQL as 0/1; coerce to bool.
-        msg["has_media"] = bool(msg.get("has_media"))
-        if msg.get("view_once"):
-            msg["viewed_by_me"] = 1 if viewed_map.get(int(msg.get("id") or 0)) else 0
     return {"messages": msgs}
 
 

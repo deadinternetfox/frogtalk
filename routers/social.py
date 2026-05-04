@@ -111,55 +111,66 @@ async def unfollow_user(nickname: str, current_user: dict = Depends(get_current_
 
 @router.get("/profile/{nickname}")
 async def social_profile(nickname: str, current_user: dict = Depends(get_current_user)):
-    """Full social profile with stats."""
-    user = db.get_user_profile(nickname)
-    if not user:
-        return JSONResponse(status_code=404, content={"error": "User not found"})
-    uid = user["id"]
-    is_self = current_user["id"] == uid
-    # Honor the owner's profile-public setting. If the profile is marked
-    # private and the viewer is neither the owner nor a friend, return a
-    # minimal response so the client can render a "This profile is private"
-    # screen instead of leaking posts / counts / channel info.
-    profile_public = bool(user.get("profile_public", 1))
-    is_friend = db.are_friends(current_user["id"], uid)
-    if not profile_public and not is_self and not is_friend:
+    """Full social profile with stats.
+
+    Hot path: hit on every Frog Social profile open. Bundles ~10 sequential
+    db calls into one threadpool hop so the asyncio event loop stays free
+    to serve other concurrent requests (DM polls, presence pings, WS
+    upgrades) while this profile is being assembled.
+    """
+    viewer_id = current_user["id"]
+
+    def _build():
+        user = db.get_user_profile(nickname)
+        if not user:
+            return None
+        uid = user["id"]
+        is_self = viewer_id == uid
+        profile_public = bool(user.get("profile_public", 1))
+        is_friend = is_self or db.are_friends(viewer_id, uid)
+        # Private profile to a non-friend viewer: emit minimal payload.
+        if not profile_public and not is_self and not is_friend:
+            return {
+                "id": uid,
+                "nickname": user["nickname"],
+                "avatar": user.get("avatar"),
+                "is_self": False,
+                "profile_public": False,
+                "private": True,
+                "friend_status": db.friend_request_status(viewer_id, uid),
+                "is_following": False,
+                "is_friend": False,
+            }
         return {
             "id": uid,
             "nickname": user["nickname"],
             "avatar": user.get("avatar"),
-            "is_self": False,
-            "profile_public": False,
-            "private": True,
-            "friend_status": db.friend_request_status(current_user["id"], uid),
-            "is_following": False,
-            "is_friend": False,
+            "banner": user.get("banner"),
+            "bio": user.get("bio", ""),
+            "status_msg": user.get("status_msg", ""),
+            "mood": user.get("mood", ""),
+            "presence": user.get("presence", "online"),
+            "custom_css": user.get("custom_css", ""),
+            "tags": user.get("tags", []),
+            "created_at": user.get("created_at"),
+            "is_admin": bool(user.get("is_admin")),
+            "profile_public": profile_public,
+            "private": False,
+            "post_count": db.get_post_count(uid),
+            "follower_count": db.get_follower_count(uid),
+            "following_count": db.get_following_count(uid),
+            "is_following": db.is_following(viewer_id, uid),
+            "is_friend": is_friend,
+            "friend_status": db.friend_request_status(viewer_id, uid),
+            "is_self": is_self,
+            "last_seen": db.get_privacy_last_seen(uid, viewer_id),
+            "story_status": db.user_active_story_status(uid, viewer_id),
         }
-    return {
-        "id": uid,
-        "nickname": user["nickname"],
-        "avatar": user.get("avatar"),
-        "banner": user.get("banner"),
-        "bio": user.get("bio", ""),
-        "status_msg": user.get("status_msg", ""),
-        "mood": user.get("mood", ""),
-        "presence": user.get("presence", "online"),
-        "custom_css": user.get("custom_css", ""),
-        "tags": user.get("tags", []),
-        "created_at": user.get("created_at"),
-        "is_admin": bool(user.get("is_admin")),
-        "profile_public": profile_public,
-        "private": False,
-        "post_count": db.get_post_count(uid),
-        "follower_count": db.get_follower_count(uid),
-        "following_count": db.get_following_count(uid),
-        "is_following": db.is_following(current_user["id"], uid),
-        "is_friend": is_friend,
-        "friend_status": db.friend_request_status(current_user["id"], uid),
-        "is_self": is_self,
-        "last_seen": db.get_privacy_last_seen(uid, current_user["id"]),
-        "story_status": db.user_active_story_status(uid, current_user["id"]),
-    }
+
+    out = await run_in_threadpool(_build)
+    if out is None:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    return out
 
 
 # ── helper: block non-friend access to a private profile ────────────────
@@ -185,15 +196,25 @@ async def profile_posts(
     offset: int = Query(0),
     current_user: dict = Depends(get_current_user),
 ):
-    user = db.get_user_by_nick(nickname)
-    if not user:
+    viewer_id = current_user["id"]
+
+    def _build():
+        user = db.get_user_by_nick(nickname)
+        if not user:
+            return ("missing", None)
+        if _private_blocked(user, viewer_id):
+            return ("private", None)
+        posts = db.get_wall_posts(user["id"], viewer_id, limit, offset)
+        rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
+        for p in posts:
+            p["reactions"] = rmap.get(p["id"], [])
+        return ("ok", posts)
+
+    status, posts = await run_in_threadpool(_build)
+    if status == "missing":
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    if _private_blocked(user, current_user["id"]):
+    if status == "private":
         return {"posts": [], "private": True}
-    posts = db.get_wall_posts(user["id"], current_user["id"], limit, offset)
-    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
-    for p in posts:
-        p["reactions"] = _rmap.get(p["id"], [])
     return {"posts": posts}
 
 
@@ -205,58 +226,97 @@ async def profile_reposts(
     current_user: dict = Depends(get_current_user),
 ):
     """Posts that this user has reposted. Visible only if viewer can see the profile."""
-    user = db.get_user_by_nick(nickname)
-    if not user:
+    viewer_id = current_user["id"]
+
+    def _build():
+        user = db.get_user_by_nick(nickname)
+        if not user:
+            return ("missing", None)
+        if _private_blocked(user, viewer_id):
+            return ("private", None)
+        posts = db.get_user_reposts(user["id"], viewer_id, limit, offset)
+        rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
+        for p in posts:
+            p["reactions"] = rmap.get(p["id"], [])
+        return ("ok", posts)
+
+    status, posts = await run_in_threadpool(_build)
+    if status == "missing":
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    if _private_blocked(user, current_user["id"]):
+    if status == "private":
         return {"posts": [], "private": True}
-    posts = db.get_user_reposts(user["id"], current_user["id"], limit, offset)
-    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
-    for p in posts:
-        p["reactions"] = _rmap.get(p["id"], [])
     return {"posts": posts}
 
 
 @router.get("/profile/{nickname}/followers")
 async def list_followers(nickname: str, current_user: dict = Depends(get_current_user)):
-    user = db.get_user_by_nick(nickname)
-    if not user:
+    viewer_id = current_user["id"]
+
+    def _build():
+        user = db.get_user_by_nick(nickname)
+        if not user:
+            return ("missing", None)
+        if _private_blocked(user, viewer_id):
+            return ("private", None)
+        followers = db.get_followers_list(user["id"])
+        for f in followers:
+            f["is_following"] = db.is_following(viewer_id, f["id"])
+        return ("ok", followers)
+
+    status, users = await run_in_threadpool(_build)
+    if status == "missing":
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    if _private_blocked(user, current_user["id"]):
+    if status == "private":
         return {"users": [], "private": True}
-    followers = db.get_followers_list(user["id"])
-    for f in followers:
-        f["is_following"] = db.is_following(current_user["id"], f["id"])
-    return {"users": followers}
+    return {"users": users}
 
 
 @router.get("/profile/{nickname}/channels")
 async def profile_channels(nickname: str, current_user: dict = Depends(get_current_user)):
     """Channels created/owned by this user."""
-    user = db.get_user_by_nick(nickname)
-    if not user:
+    viewer_id = current_user["id"]
+
+    def _build():
+        user = db.get_user_by_nick(nickname)
+        if not user:
+            return ("missing", None)
+        if _private_blocked(user, viewer_id):
+            return ("private", None)
+        if user.get("hide_active_channels") and user["id"] != viewer_id:
+            return ("hidden", None)
+        return ("ok", db.get_user_channels(user["id"]))
+
+    status, channels = await run_in_threadpool(_build)
+    if status == "missing":
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    if _private_blocked(user, current_user["id"]):
+    if status == "private":
         return {"channels": [], "private": True}
-    # Respect the owner's privacy toggle — if they've hidden their active
-    # channels from profile viewers, only they themselves see the list.
-    if (user.get("hide_active_channels") and user["id"] != current_user["id"]):
+    if status == "hidden":
         return {"channels": [], "hidden": True}
-    channels = db.get_user_channels(user["id"])
     return {"channels": channels}
 
 
 @router.get("/profile/{nickname}/following")
 async def list_following(nickname: str, current_user: dict = Depends(get_current_user)):
-    user = db.get_user_by_nick(nickname)
-    if not user:
+    viewer_id = current_user["id"]
+
+    def _build():
+        user = db.get_user_by_nick(nickname)
+        if not user:
+            return ("missing", None)
+        if _private_blocked(user, viewer_id):
+            return ("private", None)
+        following = db.get_following_list(user["id"])
+        for f in following:
+            f["is_following"] = db.is_following(viewer_id, f["id"])
+        return ("ok", following)
+
+    status, users = await run_in_threadpool(_build)
+    if status == "missing":
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    if _private_blocked(user, current_user["id"]):
+    if status == "private":
         return {"users": [], "private": True}
-    following = db.get_following_list(user["id"])
-    for f in following:
-        f["is_following"] = db.is_following(current_user["id"], f["id"])
-    return {"users": following}
+    return {"users": users}
 
 
 @router.get("/feed")
