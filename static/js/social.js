@@ -1452,22 +1452,12 @@ const Social = (() => {
   // not "drop into the social-feed reel for everyone".
   let _storySingleUserMode = false;
   const _storyViewerCache = new Map();
-  // Lower-cased nickname → { user_id, has_unviewed, count, idx }. Built
-  // from _storyData any time the feed is loaded; consulted by chat
-  // avatar decorators so we can paint a ring around any sender who has
-  // an active story without re-fetching per-user.
+  // Lower-cased nickname → { user_id, has_unviewed, count, idx:-1 }.
+  // Populated exclusively from /api/social/stories/active (which uses
+  // broader visibility than the follow-gated stories bar), so the chat
+  // ring lights up for any user whose story this viewer is allowed to
+  // open. Click-to-open looks up stories on demand by user_id.
   const _chatStoryByNick = new Map();
-  function _rebuildChatStoryByNick() {
-    _chatStoryByNick.clear();
-    for (let i = 0; i < _storyData.length; i++) {
-      const u = _storyData[i];
-      if (!u || !u.nickname || !(u.stories || []).length) continue;
-      _chatStoryByNick.set(String(u.nickname).toLowerCase(), {
-        user_id: u.user_id, has_unviewed: !!u.has_unviewed,
-        count: u.stories.length, idx: i
-      });
-    }
-  }
   let _chatStoryCacheLastFetch = 0;
   let _chatStoryCacheInflight = null;
   async function _refreshChatStoryCache(force) {
@@ -1524,39 +1514,34 @@ const Social = (() => {
   // up the count. This avoids races where the periodic /stories/active
   // refresh hasn't run yet and the user sees no live ring update.
   function _markUserStoryPostedLive(userId, nickname) {
+    if (!nickname) return;
     try {
-      if (!nickname) return;
       const key = String(nickname).toLowerCase();
-      const prev = _chatStoryByNick.get(key) || { user_id: userId || 0, count: 0, idx: -1 };
-      prev.user_id = userId || prev.user_id || 0;
+      const uid = Number(userId) || 0;
+      const prev = _chatStoryByNick.get(key) || { user_id: uid, count: 0, idx: -1 };
+      prev.user_id = uid || prev.user_id || 0;
       prev.count = (prev.count || 0) + 1;
       prev.has_unviewed = true;
       prev.idx = -1;
       _chatStoryByNick.set(key, prev);
-      // Direct DOM sweep — paint EVERY currently rendered avatar for
-      // this nickname right now, regardless of whether the cache has
-      // been refreshed. This guarantees the ring re-colors even if a
-      // subsequent /stories/active refresh races and overwrites the
-      // cache. The decorate loop also runs as belt-and-braces.
-      try {
-        const safeNick = String(nickname).replace(/"/g, '\\"');
-        const sel = `.msg-avatar[data-nick="${safeNick}"], [data-story-target][data-nick="${safeNick}"]`;
-        document.querySelectorAll(sel).forEach(el => {
-          const isBridged = !!(el.getAttribute('data-bridge') || '').trim();
-          if (isBridged) return; // never inherit native rings on bridged senders
-          el.classList.add('has-story');
-          el.classList.add('unviewed');
-          el.classList.remove('viewed');
-          el.dataset.storyUserid = String(prev.user_id || 0);
-        });
-      } catch {}
-      try { decorateChatAvatars(document); } catch {}
+      // Synchronous DOM repaint of every rendered avatar for this nick.
+      // Avoids any cache-repop race; bridged senders are skipped so a
+      // bridge user with the same nickname never inherits the ring.
+      const sel = '.msg-avatar[data-nick], [data-story-target][data-nick]';
+      const els = document.querySelectorAll(sel);
+      const uidStr = String(prev.user_id || 0);
+      for (let i = 0; i < els.length; i++) {
+        const el = els[i];
+        if (el.getAttribute('data-nick').toLowerCase() !== key) continue;
+        if ((el.getAttribute('data-bridge') || '').trim()) continue;
+        el.classList.add('has-story', 'unviewed');
+        el.classList.remove('viewed');
+        el.dataset.storyUserid = uidStr;
+      }
     } catch {}
-    // True up against the server in the background — covers cases where
-    // the broadcast and the actual visibility decision diverge (e.g.
-    // followers-only stories where the viewer doesn't follow). If the
-    // server says count=0 / not visible, the cache will be cleared by
-    // the next refresh.
+    // True up against the server in the background — handles edge cases
+    // where the broadcast diverges from this viewer's visibility (e.g.
+    // followers-only post by someone the viewer doesn't follow).
     try { _refreshChatStoryCache(true); } catch {}
   }
   // Sweep `.msg-avatar[data-nick]` (and any `[data-story-target]` opt-in
@@ -1690,9 +1675,10 @@ const Social = (() => {
       const data = await res.json();
       _storyData = data.users || [];
     } catch { _storyData = []; }
-    _rebuildChatStoryByNick();
-    _chatStoryCacheLastFetch = Date.now();
-    try { decorateChatAvatars(document); } catch {}
+    // Refresh the broader chat-ring cache (uses /stories/active so it
+    // includes public stories from non-followed users). Fire-and-forget;
+    // the stories-bar DOM doesn't depend on it.
+    try { _refreshChatStoryCache(true); } catch {}
     return renderStoriesBar();
   }
 
