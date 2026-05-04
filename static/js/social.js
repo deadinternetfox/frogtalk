@@ -833,11 +833,22 @@ const Social = (() => {
       const _expKey = _exploreSort || 'trending';
       if (excludeTab !== 'explore' && !_cacheFresh(_exploreCache.get(_expKey))) {
         jobs.push((async () => {
-          const r = await api(`/api/social/explore?lite=1&sort=${encodeURIComponent(_expKey)}&limit=24`).catch(() => null);
-          if (r && r.ok) {
-            const d = await r.json().catch(() => ({}));
-            if (Array.isArray(d.posts)) _cacheSet(_exploreCache, _expKey, { ts: Date.now(), posts: d.posts, channels: [] });
+          // Warm posts and channels in parallel so a cache-hit on the
+          // explore tab paints the channels strip too — not just posts.
+          const [postsRes, chRes] = await Promise.all([
+            api(`/api/social/explore?lite=1&sort=${encodeURIComponent(_expKey)}&limit=24`).catch(() => null),
+            api('/api/directory/new').catch(() => null),
+          ]);
+          let posts = null, channels = [];
+          if (postsRes && postsRes.ok) {
+            const d = await postsRes.json().catch(() => ({}));
+            if (Array.isArray(d.posts)) posts = d.posts;
           }
+          if (chRes && chRes.ok) {
+            const d = await chRes.json().catch(() => ({}));
+            if (Array.isArray(d.channels)) channels = d.channels;
+          }
+          if (posts) _cacheSet(_exploreCache, _expKey, { ts: Date.now(), posts, channels });
         })());
       }
     }
@@ -2566,20 +2577,47 @@ const Social = (() => {
       const postsData = await postsReq;
       clearQueuedSteps();
       const posts = postsData.posts || [];
-      _updateTabLoadUi(loadUi, 68, 'Loading channels', `${posts.length} post${posts.length !== 1 ? 's' : ''} received — fetching channels…`);
-
-      let channels = [];
-      const channelsRes = await channelsReq;
-      if (channelsRes && channelsRes.ok) {
-        const channelsData = await channelsRes.json().catch(() => ({ channels: [] }));
-        channels = channelsData.channels || [];
-      }
-
-      _cacheSet(_exploreCache, cacheKey, { ts: Date.now(), posts, channels });
+      // Paint posts immediately — don't block on /api/directory/new.
+      // Use cached channels if we have any so the strip doesn't flicker;
+      // the live channels response will patch in when it arrives.
       if (_currentTab !== 'explore') return;
-      _updateTabLoadUi(loadUi, 88, 'Building explore view', `${posts.length} post${posts.length !== 1 ? 's' : ''} + ${channels.length} channel${channels.length !== 1 ? 's' : ''}`);
-      _renderExploreContent(content, posts, channels);
+      const _initialChannels = Array.isArray(cachedChannels) ? cachedChannels : [];
+      _updateTabLoadUi(loadUi, 78, 'Building explore view', `${posts.length} post${posts.length !== 1 ? 's' : ''} ready`);
+      _renderExploreContent(content, posts, _initialChannels);
       _animateSocialSwap(content);
+      // Cache posts now; channels get folded in when the request resolves.
+      _cacheSet(_exploreCache, cacheKey, { ts: Date.now(), posts, channels: _initialChannels });
+
+      // Patch channels strip in async — same pattern as feed/stories.
+      (async () => {
+        const channelsRes = await channelsReq;
+        if (!channelsRes || !channelsRes.ok) return;
+        const channelsData = await channelsRes.json().catch(() => ({ channels: [] }));
+        const channels = channelsData.channels || [];
+        // Always update the cache, even if the user navigated away,
+        // so the next visit has a real channels list.
+        _cacheSet(_exploreCache, cacheKey, { ts: Date.now(), posts, channels });
+        if (_currentTab !== 'explore') return;
+        const host = document.getElementById('explore-channels-host');
+        if (!host || !channels.length) return;
+        const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
+        host.innerHTML = `<div class="explore-channels-section">
+          <div class="explore-section-head">
+            <span class="explore-section-title">📺 New Channels</span>
+            <button class="explore-section-link" onclick="showChannelDirectory()">View all →</button>
+          </div>
+          <div class="explore-channels-scroll">${channels.slice(0, 8).map(ch => {
+            const iconHtml = ch.icon && ch.icon.startsWith('data:image')
+              ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+              : esc(ch.icon || '💬');
+            return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
+              <div class="explore-channel-icon">${iconHtml}</div>
+              <div class="explore-channel-name">${esc(ch.name)}</div>
+              <div class="explore-channel-meta">${catIcons[ch.category]||''} ${ch.member_count || 0} members</div>
+            </div>`;
+          }).join('')}</div>
+        </div>`;
+      })().catch(() => {});
     } catch {
       clearQueuedSteps();
       if (!cached && _currentTab === 'explore') {

@@ -66,6 +66,13 @@ def _conn():
     con.execute("PRAGMA cache_size=-65536")
     con.execute("PRAGMA mmap_size=268435456")
     con.execute("PRAGMA foreign_keys=ON")
+    # Cap WAL physical size at 64 MiB. Without this the WAL can balloon
+    # to hundreds of MB when long-lived reader connections (e.g. async
+    # generators, slow http clients) prevent the auto-checkpoint from
+    # reclaiming pages — every subsequent transaction then has to walk
+    # the entire WAL, making the whole API feel slow. The limit only
+    # truncates *after* a successful checkpoint, so it's safe.
+    con.execute("PRAGMA journal_size_limit=67108864")
     _DB_LOCAL.con = con
     return con
 
@@ -6146,6 +6153,28 @@ def mark_outbox_events_failed(event_ids: list[str]) -> int:
         )
         con.commit()
         return int(cur.rowcount or 0)
+
+
+def wal_checkpoint_truncate() -> dict:
+    """Run a TRUNCATE checkpoint to reclaim the WAL file.
+
+    Auto-checkpoints are PASSIVE and silently no-op when any connection
+    is holding a read transaction on the un-checkpointed pages, which
+    happens constantly under load (FastAPI request handlers + async
+    generators). Without a periodic TRUNCATE call the WAL grows
+    unbounded and every transaction has to walk it, which presents as
+    "the whole app is slow" even though individual SQL statements are
+    fine. Returns the (busy, log_pages, checkpointed_pages) tuple.
+    """
+    with _conn() as con:
+        row = con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    if not row:
+        return {"busy": -1, "log": 0, "checkpointed": 0}
+    return {
+        "busy": int(row[0] or 0),
+        "log": int(row[1] or 0),
+        "checkpointed": int(row[2] or 0),
+    }
 
 
 def prune_federation_outbox(sent_max_age_days: int = 7,

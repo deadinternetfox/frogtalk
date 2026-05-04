@@ -43,7 +43,7 @@ from routers import federation as federation_mod
 from routers import server_admin as server_admin_mod
 
 import asyncio
-from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories, cleanup_inactive_public_rooms
+from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories, cleanup_inactive_public_rooms, wal_checkpoint_truncate
 
 from deps import client_ip
 limiter = Limiter(key_func=client_ip)
@@ -99,6 +99,29 @@ async def cleanup_task():
                 _log.exception("inactive room cleanup error")
         except Exception:
             _log.exception("Cleanup task error")
+
+
+async def wal_checkpoint_task():
+    """Periodically TRUNCATE-checkpoint the SQLite WAL.
+
+    SQLite's automatic checkpoints are PASSIVE and skip pages held by
+    any active reader, so under sustained load (long-lived async
+    generators, slow http clients) the WAL grows unbounded \u2014 we've
+    observed it hit ~400 MB, at which point every transaction has to
+    walk the whole file and the API feels uniformly slow. Running a
+    TRUNCATE checkpoint every few minutes keeps the WAL bounded.
+    """
+    interval = int(os.getenv("FROGTALK_WAL_CHECKPOINT_INTERVAL_SEC", "300"))
+    interval = max(60, interval)
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            r = await asyncio.to_thread(wal_checkpoint_truncate)
+            if r.get("busy"):
+                _log.info("WAL checkpoint busy=%s log=%s checkpointed=%s",
+                          r.get("busy"), r.get("log"), r.get("checkpointed"))
+        except Exception:
+            _log.exception("WAL checkpoint task error")
 
 
 async def official_directory_sync_task():
@@ -217,6 +240,7 @@ async def lifespan(app: FastAPI):
     # Start background tasks
     tasks = [
         asyncio.create_task(cleanup_task()),
+        asyncio.create_task(wal_checkpoint_task()),
         asyncio.create_task(official_directory_sync_task()),
         asyncio.create_task(federation_inbox_processor_task()),
         asyncio.create_task(federation_outbox_processor_task()),
