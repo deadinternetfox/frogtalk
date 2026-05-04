@@ -1072,7 +1072,12 @@ body{
 /* Music panel */
 #music-panel{
   display:none;flex-direction:column;background:linear-gradient(180deg,#1a0f2e 0%,#0f0a1f 100%);
-  border-bottom:1px solid #3a2a5a;padding:14px 16px;color:#e8e0ff;gap:10px;position:relative;overflow:hidden
+  border-bottom:1px solid #3a2a5a;padding:14px 16px;color:#e8e0ff;gap:10px;position:relative;overflow:hidden;
+  /* Allow the panel to give way to messages-area + typing-bar + input-area
+     when vertical space is tight (mobile, short viewports). Without this,
+     the iframe's fixed height pushes the composer below #main's clip line
+     and the user can't see the input. */
+  flex-shrink:1;min-height:0
 }
 #music-panel.active{display:flex}
 /* Minimized state: keep the iframe rendered at real size so audio keeps
@@ -1489,6 +1494,34 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
   transition:background .15s,border-color .15s,color .15s
 }
 .mp-add-actions .mp-btn:not(.primary):hover{background:#2a1a4a;border-color:#5a3a8a;color:#fff}
+/* Mobile: the music panel + chat-header + input-area can together exceed
+   the viewport on phones, and #main has overflow:hidden — so the bottom
+   of the panel (which holds the Add Track button) gets clipped off-screen
+   and worse, the message composer below the panel ends up below the fold.
+   Cap the panel to a fraction of the viewport so messages-area + typing-bar
+   + input-area always stay visible; let the panel scroll its own content
+   and pin .mp-submit so the Add Track button is always reachable. */
+@media (max-width:768px){
+  #music-panel:not(.mini):not(.collapsed){
+    max-height:42vh;
+    overflow-y:auto;
+    -webkit-overflow-scrolling:touch
+  }
+  /* Shrink the iframe on phones so the panel doesn't eat the screen even
+     before the cap kicks in. 16:9 of a phone-wide column is otherwise huge. */
+  #music-panel:not(.mini):not(.collapsed) .mp-frame,
+  #music-panel:not(.mini):not(.collapsed) #mp-player-wrap iframe{
+    max-height:32vh
+  }
+  #music-panel:not(.mini):not(.collapsed) .mp-submit{
+    position:sticky;bottom:0;z-index:2;
+    background:linear-gradient(180deg,rgba(26,15,46,0) 0%,rgba(15,10,31,.95) 28%,#0f0a1f 100%);
+    margin-top:8px;padding:10px 0 8px;
+    /* Bleed the gradient slightly past the panel's horizontal padding so
+       it visually anchors to the panel edges instead of leaving a gap. */
+    margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px
+  }
+}
 @media (max-width:480px){
   /* Push the Add Track card lower so it lands within thumb reach
      on tall phones — paddings the modal opens centered/lower-third

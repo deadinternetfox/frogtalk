@@ -445,14 +445,105 @@ def get_user_identity(user_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
-def create_session(user_id: int) -> str:
+def create_session(user_id: int, user_agent: str = "", ip_address: str = "") -> str:
     token = secrets.token_urlsafe(32)
     expires = (datetime.utcnow() + timedelta(days=30)).isoformat()
+    now = datetime.utcnow().isoformat()
     with _conn() as con:
-        con.execute("INSERT INTO sessions (token, user_id, expires_at) VALUES (?,?,?)",
-                    (token, user_id, expires))
+        con.execute(
+            "INSERT INTO sessions (token, user_id, expires_at, user_agent, ip_address, created_at, last_active) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (token, user_id, expires, (user_agent or "")[:512], (ip_address or "")[:64], now, now),
+        )
         con.commit()
     return token
+
+
+def touch_session(token: str) -> None:
+    if not token:
+        return
+    try:
+        with _conn() as con:
+            con.execute("UPDATE sessions SET last_active=? WHERE token=?", (datetime.utcnow().isoformat(), token))
+            con.commit()
+    except Exception:
+        pass
+
+
+def list_user_sessions(user_id: int, current_token: str = "") -> list:
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT token, user_agent, ip_address, created_at, last_active, expires_at, "
+            "country_code, country, city "
+            "FROM sessions WHERE user_id=? AND expires_at > datetime('now') "
+            "ORDER BY COALESCE(last_active, created_at) DESC",
+            (user_id,),
+        ).fetchall()
+    out = []
+    legacy_seen = False
+    for r in rows:
+        d = dict(r)
+        token = d.pop("token", "") or ""
+        d["id"] = token[:16]
+        d["is_current"] = bool(current_token and token == current_token)
+        # Pre-v300 sessions have no UA/IP. Don't drop them entirely (the user
+        # might have signed in on their phone before this build deployed) —
+        # but collapse them to a single "older session" row so the dialog
+        # doesn't list every stale token from the last few months.
+        if not d["is_current"] and not (d.get("user_agent") or d.get("ip_address")):
+            if legacy_seen:
+                continue
+            legacy_seen = True
+            d["legacy"] = True
+        out.append(d)
+    return out
+
+
+def delete_other_sessions(user_id: int, current_token: str) -> int:
+    """Revoke every session for the user except the caller's current one.
+    Returns the number of rows removed."""
+    if not current_token:
+        return 0
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM sessions WHERE user_id=? AND token<>?",
+            (user_id, current_token),
+        )
+        con.commit()
+        return cur.rowcount or 0
+
+
+def update_session_geo(token: str, country_code: str = "", country: str = "", city: str = "") -> None:
+    if not token:
+        return
+    try:
+        with _conn() as con:
+            con.execute(
+                "UPDATE sessions SET country_code=?, country=?, city=? WHERE token=?",
+                ((country_code or "")[:8], (country or "")[:96], (city or "")[:96], token),
+            )
+            con.commit()
+    except Exception:
+        pass
+
+
+def delete_session_by_short_id(user_id: int, short_id: str, except_token: str = "") -> bool:
+    short_id = (short_id or "").strip()
+    if not short_id or len(short_id) < 8:
+        return False
+    with _conn() as con:
+        if except_token:
+            cur = con.execute(
+                "DELETE FROM sessions WHERE user_id=? AND token LIKE ? AND token<>?",
+                (user_id, short_id + "%", except_token),
+            )
+        else:
+            cur = con.execute(
+                "DELETE FROM sessions WHERE user_id=? AND token LIKE ?",
+                (user_id, short_id + "%"),
+            )
+        con.commit()
+        return cur.rowcount > 0
 
 
 def delete_session(token: str):
@@ -905,6 +996,22 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN global_user_id TEXT")
         if "identity_pubkey" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN identity_pubkey TEXT")
+        # Sessions: per-device metadata so users can see/revoke other logins.
+        sess_cols = {r["name"] for r in con.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "user_agent" not in sess_cols:
+            con.execute("ALTER TABLE sessions ADD COLUMN user_agent TEXT")
+        if "ip_address" not in sess_cols:
+            con.execute("ALTER TABLE sessions ADD COLUMN ip_address TEXT")
+        if "created_at" not in sess_cols:
+            con.execute("ALTER TABLE sessions ADD COLUMN created_at TEXT")
+        if "last_active" not in sess_cols:
+            con.execute("ALTER TABLE sessions ADD COLUMN last_active TEXT")
+        if "country_code" not in sess_cols:
+            con.execute("ALTER TABLE sessions ADD COLUMN country_code TEXT")
+        if "country" not in sess_cols:
+            con.execute("ALTER TABLE sessions ADD COLUMN country TEXT")
+        if "city" not in sess_cols:
+            con.execute("ALTER TABLE sessions ADD COLUMN city TEXT")
         msg_cols = {r["name"] for r in con.execute("PRAGMA table_info(messages)").fetchall()}
         if "reply_to" not in msg_cols:
             con.execute("ALTER TABLE messages ADD COLUMN reply_to INTEGER")

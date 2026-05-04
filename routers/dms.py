@@ -281,7 +281,7 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
         "edited": False,
         "deleted": False,
         "reactions": {},
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.utcnow().isoformat() + "Z",
     }
     # Notify recipient via WS
     try:

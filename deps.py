@@ -75,11 +75,16 @@ def client_ip(request: Request) -> str:
     return get_remote_address(request)
 
 
-async def get_current_user(x_session_token: str = Header(None, alias="X-Session-Token")):
+async def get_current_user(request: Request = None, x_session_token: str = Header(None, alias="X-Session-Token")):
     if not x_session_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     cached = _token_cache_get(x_session_token)
     if cached is not None:
+        # Opportunistic backfill: if the session row predates v300 (no UA/IP),
+        # capture them now from this live request and kick off a geo lookup.
+        # Single-shot per token via the cache flag below.
+        if request is not None:
+            _maybe_backfill_session(request, x_session_token)
         return cached
     # Cache miss: run the sync DB lookup off the event loop so we never
     # block other requests on it.
@@ -88,11 +93,76 @@ async def get_current_user(x_session_token: str = Header(None, alias="X-Session-
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session")
     _token_cache_put(x_session_token, user)
+    if request is not None:
+        _maybe_backfill_session(request, x_session_token)
     return user
 
 
-async def get_admin_user(x_session_token: str = Header(None, alias="X-Session-Token")):
-    user = await get_current_user(x_session_token)
+# Tokens we've already attempted to backfill this process — keeps us from
+# re-running the SQLite + GeoIP path on every request from old clients.
+_backfilled: set[str] = set()
+
+
+def _maybe_backfill_session(request: Request, token: str) -> None:
+    if not token or token in _backfilled:
+        return
+    _backfilled.add(token)
+    try:
+        ua = (request.headers.get("user-agent") or "")[:512]
+    except Exception:
+        ua = ""
+    try:
+        ip = client_ip(request) or ""
+    except Exception:
+        ip = ""
+    if not (ua or ip):
+        return
+    try:
+        import asyncio as _asyncio
+
+        async def _do():
+            try:
+                from starlette.concurrency import run_in_threadpool as _rt
+                # Only patch rows that are currently empty so we don't clobber
+                # accurate metadata captured at login time.
+                def _patch():
+                    try:
+                        with db._conn() as con:
+                            con.execute(
+                                "UPDATE sessions SET user_agent=COALESCE(NULLIF(user_agent,''), ?), "
+                                "ip_address=COALESCE(NULLIF(ip_address,''), ?), last_active=datetime('now') "
+                                "WHERE token=?",
+                                (ua, ip, token),
+                            )
+                            con.commit()
+                    except Exception:
+                        pass
+                await _rt(_patch)
+                if ip:
+                    try:
+                        import geoip
+                        info = await _rt(geoip.lookup, ip)
+                        if info and (info.get("country_code") or info.get("country") or info.get("city")):
+                            await _rt(
+                                db.update_session_geo,
+                                token,
+                                info.get("country_code", ""),
+                                info.get("country", ""),
+                                info.get("city", ""),
+                            )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        _asyncio.create_task(_do())
+    except RuntimeError:
+        # No running loop (rare in FastAPI request path) — nothing to do.
+        pass
+
+
+async def get_admin_user(request: Request = None, x_session_token: str = Header(None, alias="X-Session-Token")):
+    user = await get_current_user(request, x_session_token)
     if not user.get("is_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user

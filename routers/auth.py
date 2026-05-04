@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from slowapi import Limiter
 
 import database as db
+import geoip
 from deps import get_current_user, client_ip
 from ws_manager import manager
 
@@ -39,6 +40,42 @@ def _norm_base(url: str) -> str:
     if not raw.startswith("http://") and not raw.startswith("https://"):
         raw = f"https://{raw}"
     return raw.rstrip("/")
+
+
+def _create_session_with_meta(request: Request, user_id: int) -> str:
+    """Wrap db.create_session: capture User-Agent + client IP, then kick off
+    a background GeoIP lookup so the session row picks up country/city for
+    the "active devices" UI without blocking login latency."""
+    ua = ""
+    ip = ""
+    try:
+        ua = (request.headers.get("user-agent") or "")[:512]
+    except Exception:
+        pass
+    try:
+        ip = client_ip(request) or ""
+    except Exception:
+        pass
+    token = db.create_session(user_id, user_agent=ua, ip_address=ip)
+    if ip:
+        async def _lookup_and_save():
+            try:
+                info = await asyncio.to_thread(geoip.lookup, ip)
+                if info and (info.get("country_code") or info.get("country") or info.get("city")):
+                    await asyncio.to_thread(
+                        db.update_session_geo,
+                        token,
+                        info.get("country_code", ""),
+                        info.get("country", ""),
+                        info.get("city", ""),
+                    )
+            except Exception:
+                _log.debug("geoip background lookup failed", exc_info=True)
+        try:
+            asyncio.create_task(_lookup_and_save())
+        except RuntimeError:
+            pass
+    return token
 
 
 def _post_json(url: str, body: dict, headers: dict | None = None, timeout: float = 3.5):
@@ -504,7 +541,7 @@ async def register(
             await _fanout_registration_to_peers(request, user_id, body.nickname, body.password)
         except Exception:
             _log.exception("register: peer fanout failed")
-    token = db.create_session(user_id)
+    token = _create_session_with_meta(request, user_id)
     return {"token": token, "nickname": body.nickname, "user_id": user_id, "is_admin": False}
 
 
@@ -529,7 +566,7 @@ async def login(request: Request, body: LoginRequest):
         if not boot:
             return JSONResponse(status_code=401, content={"error": "Invalid nickname or password"})
         user = boot["user"]
-    token = db.create_session(user["id"])
+    token = _create_session_with_meta(request, user["id"])
     return {
         "token": token,
         "nickname": user["nickname"],
@@ -572,7 +609,7 @@ async def login_with_federation_ticket(
     if not user:
         return JSONResponse(status_code=409, content={"error": "Could not provision account on this node"})
 
-    token = db.create_session(user["id"])
+    token = _create_session_with_meta(request, user["id"])
     return {
         "token": token,
         "nickname": user["nickname"],
@@ -635,6 +672,51 @@ async def logout(x_session_token: str = None, current_user: dict = Depends(get_c
     from fastapi import Header
     # Token comes through the dependency — delete it
     return {"ok": True}
+
+
+@router.get("/sessions")
+async def list_sessions(
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Return all active sessions for the current user with device + geo
+    metadata. Used by the "Active devices" UI on login + in settings.
+    """
+    rows = await asyncio.to_thread(db.list_user_sessions, current_user["id"], x_session_token or "")
+    return {"sessions": rows}
+
+
+@router.delete("/sessions/{short_id}")
+async def revoke_session(
+    short_id: str,
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Revoke another session of mine by its short id. Refuses to revoke the
+    caller's own session (use /logout for that)."""
+    short_id = (short_id or "").strip()
+    if not short_id:
+        return JSONResponse(status_code=400, content={"error": "session id required"})
+    # Don't let users brick the session they're currently authenticated with
+    # via this endpoint — that would be a confusing footgun.
+    if x_session_token and x_session_token.startswith(short_id):
+        return JSONResponse(status_code=400, content={"error": "Use /logout to end the current session"})
+    ok = await asyncio.to_thread(db.delete_session_by_short_id, current_user["id"], short_id, x_session_token or "")
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "Session not found"})
+    return {"ok": True}
+
+
+@router.post("/sessions/revoke-others")
+async def revoke_other_sessions(
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Log out every device except the caller's current session."""
+    if not x_session_token:
+        return JSONResponse(status_code=400, content={"error": "current session required"})
+    n = await asyncio.to_thread(db.delete_other_sessions, current_user["id"], x_session_token)
+    return {"ok": True, "removed": int(n or 0)}
 
 
 class NicknameChangeRequest(BaseModel):
@@ -969,7 +1051,7 @@ async def register_with_captcha(
             await _fanout_registration_to_peers(request, user_id, body.nickname, body.password)
         except Exception:
             _log.exception("register: peer fanout failed")
-    token = db.create_session(user_id)
+    token = _create_session_with_meta(request, user_id)
     return {"token": token, "nickname": body.nickname, "user_id": user_id, "is_admin": False}
 
 
@@ -1045,7 +1127,7 @@ async def recover_account(request: Request, body: RecoverAccountRequest):
         user = con.execute("SELECT nickname FROM users WHERE id=?", (user_id,)).fetchone()
     
     # Create new session
-    token = db.create_session(user_id)
+    token = _create_session_with_meta(request, user_id)
     
     return {
         "ok": True,

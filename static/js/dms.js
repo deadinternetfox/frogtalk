@@ -1157,8 +1157,8 @@ function renderDMChat () {
         if (typeof UI !== 'undefined' && UI.notice) {
           UI.notice({
             icon: '🔒',
-            title: `${undec} message${undec===1?'':'s'} can't be read here`,
-            message: `${undec===1?'This message was':'These messages were'} encrypted to another device of yours and can't be recovered on this one.\n\nNew messages in this chat will work normally.`,
+            title: `${undec} older message${undec===1?'':'s'} can't be read on this device`,
+            message: `You signed in on a new device, so FrogTalk issued fresh encryption keys here.\n\n${undec===1?'This message was':'These messages were'} encrypted to your previous device's keys and can't be unlocked from this one. They're still readable on the device that originally received them.\n\nNew messages in this chat will work normally going forward.`,
             primaryLabel: 'Got it',
             actionLabel: 'Learn more',
           }).then(r => {
@@ -1430,7 +1430,7 @@ function renderDMMessage (m) {
       // of the misleading "Media" string. A re-decrypt happens on the next
       // render pass once the ECDH key derives (loadDMMessages / openDM
       // attach the peer pubkey → _dmSharedKeyCache populates).
-      contentHtml = '<em style="color:#888">\uD83D\uDD12 Cannot decrypt on this device</em>';
+      contentHtml = '<em style="color:#888">\uD83D\uDD12 Older message — encrypted on a previous device</em>';
     } else if (m.has_media) {
       contentHtml = '<em style="color:#444">Media</em>';
     }

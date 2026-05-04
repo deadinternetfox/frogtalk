@@ -4926,8 +4926,9 @@ const Social = (() => {
     // URLs — themed link (green accent, no default blue)
     html = html.replace(/https?:\/\/[^\s<>"]+/g, url =>
       `<a href="${url}" target="_blank" rel="noopener noreferrer" class="sf-link">${url}</a>`);
-    // @mentions
-    html = html.replace(/@(\w+)/g, (match, nick) =>
+    // @mentions — match the full nickname charset (letters, digits, _, -)
+    // so hyphenated names highlight as one pill, not just the prefix.
+    html = html.replace(/@([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)/g, (match, nick) =>
       `<span class="sf-mention" onclick="Social.openProfile('${esc(nick)}')">@${esc(nick)}</span>`);
     // #channel refs → clickable pill that jumps to the channel (same flow
     // as in-channel #mentions: closes Social, auto-joins if public, shows

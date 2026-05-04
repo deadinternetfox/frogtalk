@@ -144,7 +144,7 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         "forwarded_from": (body.forwarded_from if fwd_meta else None),
         "edited": False,
         "reactions": {},
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.utcnow().isoformat() + "Z",
     }
     await manager.broadcast_room(room_name, broadcast_payload)
 

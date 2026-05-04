@@ -521,7 +521,11 @@ const Music = (() => {
     if (_currentDurationSec > 0 && incoming > _currentDurationSec + 5) incoming = 0;
     // Track change clears the sticky user-pause flag — pausing song A and
     // then having the queue advance to song B should default to "playing".
-    if (key !== _anchorTrackKey) { _userPaused = false; _currentDurationSec = 0; }
+    // Also clear _lastPlayerState so the duration-overshoot fallback waits
+    // until the freshly-mounted iframe actually reports state=1 — without
+    // this, a stale "1" from the previous track makes the next iframe
+    // auto-skip before it even gets a chance to start.
+    if (key !== _anchorTrackKey) { _userPaused = false; _currentDurationSec = 0; _lastPlayerState = null; }
 
     // Defensive: protect a healthy local clock from a stale/just-stamped
     // server reading. The server's _music_head_started is in-memory, and
@@ -921,7 +925,18 @@ const Music = (() => {
       // our local anchor says we're meaningfully past the known
       // duration, force the auto-advance path. Dedupe inside
       // _maybeAutoAdvanceOnEnded prevents this from double-firing.
-      if (_currentDurationSec > 0 && _anchorMs > 0) {
+      //
+      // BUT only when YT has confirmed the iframe is actually playing
+      // (state=1). On mobile, autoplay is blocked for fresh iframes
+      // until the user taps play. While the user is still tapping, our
+      // local _anchorMs keeps ticking and would race past the known
+      // duration even though no audio ever played — yanking the queue
+      // forward and skipping every track autonomously. The ended-event
+      // dedupe doesn't save us because the *id* changes each skip, so
+      // the loop runs unbounded. Gate on _lastPlayerState===1 so the
+      // overshoot fallback only kicks in for tracks that actually
+      // started playing at some point.
+      if (_currentDurationSec > 0 && _anchorMs > 0 && _lastPlayerState === 1) {
         const expected = _expectedPosSec();
         if (expected >= _currentDurationSec + 2) {
           try { _maybeAutoAdvanceOnEnded(); } catch {}

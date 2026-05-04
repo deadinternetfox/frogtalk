@@ -49,13 +49,32 @@ const UI = (() => {
       .replace(/'/g, '&#39;');
   }
 
+  // Server stores UTC but historically some payloads emit `2026-05-05T03:28:00`
+  // without a trailing `Z`. Per ECMA-262 such bare datetime strings are parsed
+  // as LOCAL time, while the same value appended with `Z` (or `+00:00` in the
+  // history endpoint) is parsed as UTC. That mismatch made identical UTC
+  // moments render with different local dates, spamming "Yesterday/Today"
+  // dividers between every message. Normalize: any ISO-shaped string with
+  // no timezone designator gets treated as UTC.
+  function _parseServerDate(iso) {
+    if (!iso) return new Date();
+    if (typeof iso !== 'string') return new Date(iso);
+    // Has timezone? (Z, +HH:MM, -HH:MM after the time portion)
+    if (/Z$|[+\-]\d{2}:?\d{2}$/.test(iso)) return new Date(iso);
+    // SQLite-style "YYYY-MM-DD HH:MM:SS" or naive ISO "YYYY-MM-DDTHH:MM:SS[.ffffff]"
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(iso)) {
+      return new Date(iso.replace(' ', 'T') + 'Z');
+    }
+    return new Date(iso);
+  }
+
   function formatTime(iso) {
-    const d = iso ? new Date(iso) : new Date();
+    const d = iso ? _parseServerDate(iso) : new Date();
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
   function formatDate(iso) {
-    const d = iso ? new Date(iso) : new Date();
+    const d = iso ? _parseServerDate(iso) : new Date();
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);

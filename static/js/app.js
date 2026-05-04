@@ -484,21 +484,16 @@ const App = {
             }
           }
         } catch {}
-        // Takeover: server has a different key than this device. Inform the
-        // user, then auto-reset to issue a fresh keypair from this device.
-        // (Simpler mental model: every time you log in elsewhere, the active
-        // device gets new keys.)
+        // Takeover: server has a different key than this device. Show the
+        // active-devices dialog (geo + browser), let the user log out the
+        // other device, then auto-reset our local keypair so we're the
+        // canonical DM device.
         if (serverPub && serverPub !== localPub) {
           try {
-            if (typeof UI !== 'undefined' && UI.notice) {
-              await UI.notice({
-                icon: '🔄',
-                title: 'Another device logged in',
-                message: "FrogTalk uses one encryption key per device.\n\nAnother device of yours was the active DM device. We'll generate fresh keys on this device now and start receiving new messages here.\n\nMessages already on your other device stay there — they can't be read on this device.",
-                primaryLabel: 'Continue',
-              });
+            if (typeof showActiveDevicesDialog === 'function') {
+              await showActiveDevicesDialog({ takeover: true });
             }
-          } catch {}
+          } catch (e) { console.warn('active devices dialog', e); }
           try {
             if (Crypto.resetIdentityKey) await Crypto.resetIdentityKey();
             localPub = await Crypto.getPublicKey();
@@ -812,3 +807,220 @@ const App = {
 
 // Boot on DOM ready
 document.addEventListener('DOMContentLoaded', () => App.init());
+
+// ===========================================================================
+// Active devices dialog — shown after login when other sessions exist.
+// Lists each other session with country flag, city, browser/OS, last-active
+// time, and a per-row "Log out" button. Returns once user clicks Continue.
+// ===========================================================================
+function _activeDev_codeToFlag(cc) {
+  cc = String(cc || '').toUpperCase();
+  if (cc.length !== 2 || !/^[A-Z]{2}$/.test(cc)) return '🌐';
+  return [...cc].map(c => String.fromCodePoint(0x1F1A5 + c.charCodeAt(0))).join('');
+}
+function _activeDev_parseUA(ua) {
+  ua = String(ua || '');
+  let browser = 'Unknown browser', os = 'Unknown OS';
+  if (/Edg\//.test(ua)) browser = 'Edge';
+  else if (/OPR\/|Opera/.test(ua)) browser = 'Opera';
+  else if (/Firefox\//.test(ua)) browser = 'Firefox';
+  else if (/Chrome\//.test(ua)) browser = 'Chrome';
+  else if (/Safari\//.test(ua)) browser = 'Safari';
+  if (/Windows NT/.test(ua)) os = 'Windows';
+  else if (/Mac OS X/.test(ua)) os = 'macOS';
+  else if (/Android/.test(ua)) os = 'Android';
+  else if (/iPhone|iPad|iOS/.test(ua)) os = 'iOS';
+  else if (/Linux/.test(ua)) os = 'Linux';
+  return browser + ' on ' + os;
+}
+function _activeDev_relTime(iso) {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!t || isNaN(t)) return '';
+  const diff = Math.max(0, (Date.now() - t) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff/60) + ' min ago';
+  if (diff < 86400) return Math.floor(diff/3600) + ' hr ago';
+  return Math.floor(diff/86400) + ' d ago';
+}
+function _activeDev_esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+async function showActiveDevicesDialog(opts) {
+  opts = opts || {};
+  let sessions = [];
+  try {
+    const r = await apiFetch('/api/auth/sessions');
+    if (r && r.ok) {
+      const d = await r.json();
+      sessions = (d.sessions || []).filter(s => !s.is_current);
+    }
+  } catch (e) { /* network — fall through, show takeover-only message */ }
+
+  return new Promise(resolve => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop ui-notice-backdrop active-devices-backdrop';
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;animation:adFade .18s ease-out;';
+
+    // Inject keyframes once
+    if (!document.getElementById('active-devices-anim')) {
+      const st = document.createElement('style');
+      st.id = 'active-devices-anim';
+      st.textContent = '@keyframes adFade{from{opacity:0}to{opacity:1}}@keyframes adPop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}';
+      document.head.appendChild(st);
+    }
+
+    const card = document.createElement('div');
+    // Match the app's signature green-tinted modal look (see index.html
+    // server-info / about modals): subtle dark-green vertical gradient with
+    // an accent-green border. This makes the active-devices dialog feel
+    // native to FrogTalk instead of a neutral grey popover.
+    card.style.cssText = 'background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%);color:var(--text-color,#e9ecf3);border:1px solid #3b6c59;border-radius:12px;max-width:540px;width:100%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 46px rgba(0,0,0,.58),inset 0 1px 0 rgba(255,255,255,.08),0 0 0 1px rgba(76,175,80,.1);overflow:hidden;font:14px/1.45 var(--font-family,system-ui),-apple-system,Segoe UI,Roboto,sans-serif;animation:adPop .22s cubic-bezier(.2,.7,.3,1);position:relative;';
+
+    const headerTitle = opts.takeover
+      ? 'Another device is signed in'
+      : 'Your active devices';
+    const headerNote = opts.takeover
+      ? "FrogTalk uses one encryption key per device. We'll switch DMs to this device after you continue. Don't recognise something below? Sign it out first."
+      : 'These devices are currently signed in to your account.';
+
+    let rowsHtml = '';
+    if (!sessions.length) {
+      rowsHtml = '<div style="padding:22px 18px;text-align:center;color:#a8c9b8;font-size:13px;">No other devices are signed in.</div>';
+    } else {
+      rowsHtml = sessions.map(s => {
+        const isLegacy = !!s.legacy;
+        const flag = isLegacy ? '📱' : _activeDev_codeToFlag(s.country_code);
+        const place = isLegacy
+          ? 'Sign in again on that device to refresh its details'
+          : ([s.city, s.country].filter(Boolean).join(', ') || (s.ip_address || 'Location unknown'));
+        const dev = isLegacy ? 'Older session (pre-update)' : _activeDev_parseUA(s.user_agent);
+        const last = _activeDev_relTime(s.last_active) || _activeDev_relTime(s.created_at);
+        const ip = (!isLegacy && s.ip_address) ? _activeDev_esc(s.ip_address) : '';
+        return `<div class="ad-row" data-id="${_activeDev_esc(s.id)}" style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(59,108,89,.35);transition:background .15s;">
+          <div style="font-size:24px;line-height:1;width:36px;text-align:center;flex-shrink:0;filter:${isLegacy?'grayscale(.4) opacity(.85)':'none'};">${flag}</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;color:#dff5e8;font-size:13.5px;">${_activeDev_esc(dev)}</div>
+            <div style="color:#a8c9b8;font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${_activeDev_esc(place)}${ip ? ' · ' + ip : ''}</div>
+            <div style="color:#7fa492;font-size:11px;margin-top:2px;opacity:.85;">${_activeDev_esc(last || 'unknown')}</div>
+          </div>
+          <button class="ad-revoke" type="button" style="background:rgba(15,30,24,.55);color:#b8d5c8;border:1px solid #2f594a;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;flex-shrink:0;transition:all .15s;">Sign out</button>
+        </div>`;
+      }).join('');
+    }
+
+    const footerActions = sessions.length > 1
+      ? `<button class="ad-revoke-all" type="button" style="background:rgba(15,30,24,.55);color:#b8d5c8;border:1px solid #2f594a;padding:9px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;margin-right:auto;transition:all .15s;">Sign out of all</button>`
+      : '';
+
+    card.innerHTML = `
+      <div style="height:3px;background:linear-gradient(90deg,transparent,#4caf50,transparent);opacity:.9;"></div>
+      <div style="padding:18px 20px 14px;border-bottom:1px solid rgba(59,108,89,.5);display:flex;gap:14px;align-items:flex-start;">
+        <div style="font-size:22px;line-height:1;flex-shrink:0;color:#7fd28a;">🔐</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:16px;font-weight:700;color:#dff5e8;letter-spacing:-.1px;">${_activeDev_esc(headerTitle)}</div>
+          <div style="color:#a8c9b8;font-size:13px;margin-top:6px;line-height:1.5;">${_activeDev_esc(headerNote)}</div>
+        </div>
+      </div>
+      <div class="ad-list" style="overflow:auto;flex:1;background:linear-gradient(180deg,rgba(13,29,23,.6),rgba(10,22,17,.6));">${rowsHtml}</div>
+      <div style="padding:14px 18px;border-top:1px solid rgba(59,108,89,.5);display:flex;justify-content:flex-end;gap:10px;align-items:center;background:linear-gradient(180deg,rgba(16,35,27,.55),rgba(13,29,23,.65));">
+        ${footerActions}
+        <button class="ad-continue" type="button" style="background:#4caf50;color:#0a1a0d;border:0;padding:9px 22px;border-radius:8px;font-size:13.5px;font-weight:700;cursor:pointer;letter-spacing:.2px;box-shadow:0 4px 14px rgba(76,175,80,.3);transition:all .15s;">Continue</button>
+      </div>`;
+
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+
+    function close() {
+      try { backdrop.remove(); } catch {}
+      resolve();
+    }
+    card.querySelector('.ad-continue').addEventListener('click', close);
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+    const escHandler = e => { if (e.key === 'Escape') { document.removeEventListener('keydown', escHandler); close(); } };
+    document.addEventListener('keydown', escHandler);
+
+    // Hover affordance for revoke buttons
+    card.querySelectorAll('.ad-revoke, .ad-revoke-all').forEach(b => {
+      b.addEventListener('mouseenter', () => {
+        b.style.background = 'rgba(255,90,95,.14)';
+        b.style.color = '#ff8b95';
+        b.style.borderColor = 'rgba(255,90,95,.5)';
+      });
+      b.addEventListener('mouseleave', () => {
+        if (b.dataset.done) return;
+        b.style.background = 'rgba(15,30,24,.55)';
+        b.style.color = '#b8d5c8';
+        b.style.borderColor = '#2f594a';
+      });
+    });
+
+    card.querySelectorAll('.ad-revoke').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('.ad-row');
+        const id = row && row.dataset.id;
+        if (!id) return;
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          const r = await apiFetch('/api/auth/sessions/' + encodeURIComponent(id), 'DELETE');
+          if (r && r.ok) {
+            row.style.opacity = '0.5';
+            btn.dataset.done = '1';
+            btn.textContent = 'Signed out';
+            btn.style.background = 'rgba(76,175,80,.12)';
+            btn.style.color = '#7fd28a';
+            btn.style.borderColor = 'rgba(76,175,80,.55)';
+          } else {
+            btn.disabled = false;
+            btn.textContent = 'Sign out';
+            if (typeof UI !== 'undefined' && UI.showToast) {
+              UI.showToast('Could not sign out that device.', 'error', 3000);
+            }
+          }
+        } catch (e) {
+          btn.disabled = false;
+          btn.textContent = 'Sign out';
+        }
+      });
+    });
+
+    const allBtn = card.querySelector('.ad-revoke-all');
+    if (allBtn) {
+      allBtn.addEventListener('click', async () => {
+        allBtn.disabled = true;
+        const orig = allBtn.textContent;
+        allBtn.textContent = 'Signing out…';
+        try {
+          const r = await apiFetch('/api/auth/sessions/revoke-others', 'POST');
+          if (r && r.ok) {
+            card.querySelectorAll('.ad-row').forEach(row => {
+              row.style.opacity = '0.5';
+              const b = row.querySelector('.ad-revoke');
+              if (b) {
+                b.dataset.done = '1';
+                b.disabled = true;
+                b.textContent = 'Signed out';
+                b.style.color = '#7fd28a';
+                b.style.borderColor = 'rgba(76,175,80,.55)';
+              }
+            });
+            allBtn.textContent = 'All signed out';
+            allBtn.style.color = '#7fd28a';
+            allBtn.style.borderColor = 'rgba(76,175,80,.55)';
+          } else {
+            allBtn.disabled = false;
+            allBtn.textContent = orig;
+          }
+        } catch (e) {
+          allBtn.disabled = false;
+          allBtn.textContent = orig;
+        }
+      });
+    }
+  });
+}
+window.showActiveDevicesDialog = showActiveDevicesDialog;

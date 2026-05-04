@@ -953,7 +953,7 @@ async def receive_bridge_message(body: BridgeMessageRequest):
         "media_type": media_type,
         "edited": False,
         "reactions": {},
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.utcnow().isoformat() + "Z",
         "bridge": True,
         "platform": platform,
         "bridge_platform": platform,

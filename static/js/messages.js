@@ -72,8 +72,12 @@ const Messages = (() => {
     const urlRe = /https?:\/\/[^\s<>"]+/g;
     let escaped = UI.escHtml(text);
     
-    // Highlight @mentions
-    escaped = escaped.replace(/@(\w+)/g, (match, nick) => {
+    // Highlight @mentions. Server NICKNAME_RE allows letters, digits,
+    // underscore and hyphen, so `\w` (no `-`) would truncate names like
+    // "foo-bar" at the hyphen and only highlight "@foo". Match the full
+    // valid charset, but don't start or end with `-` so trailing dashes
+    // and stray hyphens after a mention aren't swallowed.
+    escaped = escaped.replace(/@([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)/g, (match, nick) => {
       const isSelf = nick.toLowerCase() === State.user?.nickname?.toLowerCase();
       return `<span class="mention${isSelf ? ' mention-self' : ''}">@${nick}</span>`;
     });

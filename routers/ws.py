@@ -221,7 +221,7 @@ async def websocket_endpoint(
                 "edited": False,
                 "deleted": False,
                 "reactions": {},
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": datetime.utcnow().isoformat() + "Z",
             }
             await manager.send_to_user(caller_id, payload)
             if callee_id != caller_id:
@@ -359,7 +359,7 @@ async def websocket_endpoint(
                     "reply_content": reply_content,
                     "edited": False,
                     "reactions": {},
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
                 }
                 # Strip heavy media_data from broadcast; clients lazy-load via REST
                 broadcast_payload = dict(payload)
@@ -512,7 +512,7 @@ async def websocket_endpoint(
                     "edited": False,
                     "deleted": False,
                     "reactions": {},
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": datetime.utcnow().isoformat() + "Z",
                     "client_nonce": data.get("client_nonce"),
                 }
                 # Strip heavy media_data from WS payload; clients lazy-load via REST
