@@ -793,10 +793,13 @@ const Social = (() => {
     _cancelBgPrefetch();
     if (!_prefetchAllowed()) return;
     const cb = () => { _bgPrefetchRic = 0; _doBgPrefetch(excludeTab); };
+    // Tighter deadline (was 6 s) so other tabs are warm by the time the
+    // user reaches for the nav. The fan-out itself runs in parallel
+    // (see _doBgPrefetch), so the work is small.
     try {
-      _bgPrefetchRic = requestIdleCallback(cb, { timeout: 6000 });
+      _bgPrefetchRic = requestIdleCallback(cb, { timeout: 1500 });
     } catch {
-      _bgPrefetchRic = setTimeout(cb, 1800);
+      _bgPrefetchRic = setTimeout(cb, 400);
     }
   }
 
@@ -809,39 +812,51 @@ const Social = (() => {
     // _apiOkJson trips its retries \u2192 user sees "Retry" UI for no reason.
     if (_doBgPrefetch._busy) return;
     _doBgPrefetch._busy = true;
-    try {
-      try {
-        if (excludeTab !== 'feed' && !_cacheFresh(_feedCache)) {
-          const r = await api('/api/social/feed?lite=1&limit=24').catch(() => null);
-          if (r && r.ok) {
-            const d = await r.json().catch(() => ({}));
-            if (Array.isArray(d.posts)) _feedCache = { ts: Date.now(), posts: d.posts };
-          }
+    // Fan out the 4 cache-warm fetches in parallel. They were
+    // sequential awaits before, which on a 200 ms RTT meant the last
+    // tab (music) wasn't warm for ~800 ms after the primary load —
+    // long enough for the user to beat the prefetch and see a
+    // skeleton. The browser's 6-conn budget can absorb 4 concurrent
+    // small requests easily; the _busy guard above still prevents
+    // overlapping waves.
+    const jobs = [];
+    if (excludeTab !== 'feed' && !_cacheFresh(_feedCache)) {
+      jobs.push((async () => {
+        const r = await api('/api/social/feed?lite=1&limit=24').catch(() => null);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => ({}));
+          if (Array.isArray(d.posts)) _feedCache = { ts: Date.now(), posts: d.posts };
         }
-      } catch {}
-      try {
-        const _expKey = _exploreSort || 'trending';
-        if (excludeTab !== 'explore' && !_cacheFresh(_exploreCache.get(_expKey))) {
+      })());
+    }
+    {
+      const _expKey = _exploreSort || 'trending';
+      if (excludeTab !== 'explore' && !_cacheFresh(_exploreCache.get(_expKey))) {
+        jobs.push((async () => {
           const r = await api(`/api/social/explore?lite=1&sort=${encodeURIComponent(_expKey)}&limit=24`).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
             if (Array.isArray(d.posts)) _cacheSet(_exploreCache, _expKey, { ts: Date.now(), posts: d.posts, channels: [] });
           }
-        }
-      } catch {}
-      try {
-        const _rrKey = `${_reelsScope}:${_reelsSort}`;
-        if (excludeTab !== 'reels' && !_cacheFresh(_reelsCache.get(_rrKey))) {
+        })());
+      }
+    }
+    {
+      const _rrKey = `${_reelsScope}:${_reelsSort}`;
+      if (excludeTab !== 'reels' && !_cacheFresh(_reelsCache.get(_rrKey))) {
+        jobs.push((async () => {
           const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12`).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
             if (Array.isArray(d.posts)) _cacheSet(_reelsCache, _rrKey, { ts: Date.now(), posts: d.posts });
           }
-        }
-      } catch {}
-      try {
-        const _mKey = `${_musicTabScope}:${_musicTabSort}:`;
-        if (excludeTab !== 'music' && !_cacheFresh(_musicCache.get(_mKey))) {
+        })());
+      }
+    }
+    {
+      const _mKey = `${_musicTabScope}:${_musicTabSort}:`;
+      if (excludeTab !== 'music' && !_cacheFresh(_musicCache.get(_mKey))) {
+        jobs.push((async () => {
           const url = _musicTabScope === 'explore'
             ? `/api/social/explore?lite=1&limit=40&sort=${encodeURIComponent(_musicTabSort)}`
             : '/api/social/feed?lite=1&limit=40';
@@ -850,8 +865,23 @@ const Social = (() => {
             const d = await r.json().catch(() => ({}));
             if (Array.isArray(d.posts)) _cacheSet(_musicCache, _mKey, { ts: Date.now(), posts: d.posts });
           }
+        })());
+      }
+    }
+    // Suggested-users strip is also rendered on feed but cached
+    // separately; warming it removes the only remaining network hop
+    // when the user re-enters feed.
+    if (excludeTab !== 'feed' && !_cacheFresh(_suggestedCache)) {
+      jobs.push((async () => {
+        const r = await api('/api/social/suggested').catch(() => null);
+        if (r && r.ok) {
+          const d = await r.json().catch(() => ({}));
+          if (Array.isArray(d.users)) _suggestedCache = { ts: Date.now(), users: d.users };
         }
-      } catch {}
+      })());
+    }
+    try {
+      await Promise.allSettled(jobs);
     } finally {
       _doBgPrefetch._busy = false;
     }
