@@ -5474,12 +5474,31 @@ const Social = (() => {
   }
 
   // ── interactions ────────────────────────────────────────────────────────
+  // Drop stale profile-cache entries so the next loadProfile() refetches.
+  // Without this, after a follow/friend action the cached profile is
+  // returned (still showing is_following:false) and the button reverts.
+  function _invalidateProfileCache(nickname) {
+    try {
+      const k = String(nickname || '').toLowerCase();
+      if (k) _profileCache.delete(k);
+      const me = String(State?.user?.nickname || '').toLowerCase();
+      if (me) _profileCache.delete(me);
+    } catch {}
+  }
+
   async function toggleFollow(nickname, btn) {
     const isFollowing = btn?.textContent?.trim() === 'Following' || btn?.textContent?.trim() === 'Unfollow';
     const method = isFollowing ? 'DELETE' : 'POST';
+    if (btn) btn.disabled = true;
     try {
       const res = await api('/api/social/follow/' + encodeURIComponent(nickname), method);
-      const data = await res.json();
+      if (!res.ok) {
+        UI?.showToast?.('Could not update follow', 'error');
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      // Invalidate the cached profile so any later open/refresh sees fresh state.
+      _invalidateProfileCache(nickname);
       if (btn) {
         if (data.following) {
           btn.textContent = 'Following';
@@ -5491,12 +5510,21 @@ const Social = (() => {
           btn.classList.add('primary');
         }
       }
-      // Update follower count on profile if visible
-      const fcEl = document.querySelector('.sp-stats strong');
-      if (_currentTab === 'profile' && _profileUser === nickname) {
-        loadProfile(nickname); // reload profile stats
+      // Patch follower count in-place rather than reloading the whole profile.
+      // Reloading would (a) flash a skeleton over working UI and (b) historically
+      // returned the stale cached profile, undoing this very button update.
+      if (_currentTab === 'profile' && _profileUser === nickname && typeof data.follower_count === 'number') {
+        try {
+          const stats = document.querySelectorAll('.sp-stats .sp-stat strong');
+          // [posts, followers, following]
+          if (stats[1]) stats[1].textContent = String(data.follower_count);
+        } catch {}
       }
-    } catch {}
+    } catch {
+      UI?.showToast?.('Network error', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function reactPost(ev, postId, emoji) {
@@ -6245,7 +6273,9 @@ const Social = (() => {
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     const r = await apiFetch('/api/friends/request/' + encodeURIComponent(nickname), 'POST');
     if (r.ok) {
-      if (btn) { btn.textContent = 'Requested'; }
+      // Persist the new friend_status across navigations.
+      _invalidateProfileCache(nickname);
+      if (btn) { btn.textContent = 'Requested'; btn.disabled = true; }
       UI.showToast('Friend request sent to ' + nickname, 'success');
     } else {
       if (btn) { btn.disabled = false; btn.textContent = '+ Add Friend'; }
@@ -6258,10 +6288,11 @@ const Social = (() => {
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     const r = await apiFetch('/api/friends/accept/' + encodeURIComponent(nickname), 'POST');
     if (r.ok) {
+      // Drop cache before reload — otherwise loadProfile() returns stale
+      // friend_status='received' and re-renders the Accept button.
+      _invalidateProfileCache(nickname);
       if (btn) { btn.textContent = 'Friends ✓'; }
       UI.showToast(nickname + ' is now your friend! 🐸', 'success');
-      // Re-render profile actions/stats immediately so stale "Add Friend"
-      // buttons do not linger after accepting.
       try {
         if (_currentTab === 'profile' && _profileUser === nickname) {
           await loadProfile(nickname);
