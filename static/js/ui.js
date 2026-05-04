@@ -3947,23 +3947,29 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
           }
         }
         
-        // Friend button state
+        // Friend button state — always visible (non-self), label flips
+        // between Add Friend / ✓ Accept / ✕ Unfriend so the secondary
+        // action row stays a clean 3-up grid alongside Sounds + Mute.
         if (friendBtn && !isSelf) {
           const isFriend = typeof _allFriends !== 'undefined' && _allFriends.some(f => f.nickname === u.nickname);
           const isPending = typeof _pendingFriends !== 'undefined' && _pendingFriends.some(f => f.nickname === u.nickname);
           if (isFriend) {
-            friendBtn.style.display = 'none';
+            friendBtn.textContent    = '✕ Unfriend';
+            friendBtn.dataset.action = 'remove';
+            friendBtn.style.display  = '';
           } else if (isPending) {
-            friendBtn.textContent   = '✓ Accept';
+            friendBtn.textContent    = '✓ Accept';
             friendBtn.dataset.action = 'accept';
-            friendBtn.style.display = '';
+            friendBtn.style.display  = '';
           } else {
-            friendBtn.textContent   = '+ Add Friend';
+            friendBtn.textContent    = '+ Add Friend';
             friendBtn.dataset.action = 'add';
-            friendBtn.style.display = '';
+            friendBtn.style.display  = '';
           }
-          // Keep the Sounds button in sync with live friend status
-          if (soundsBtn) soundsBtn.style.display = isFriend ? '' : 'none';
+          // Sounds button stays visible for any non-self user — the
+          // per-user sound map is keyed by nickname, no friendship
+          // required to set a custom alert sound.
+          if (soundsBtn) soundsBtn.style.display = '';
         }
       })
       .catch(() => {

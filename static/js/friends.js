@@ -232,8 +232,15 @@ function friendActionUserInfo () {
   const nick = document.getElementById('userinfo-name').dataset.nick;
   const btn  = document.getElementById('userinfo-friend-btn');
   if (!nick) return;
-  if (btn.dataset.action === 'accept') {
+  const action = btn && btn.dataset.action;
+  if (action === 'accept') {
     acceptFriend(nick).then(() => closeModal('modal-user-info'));
+  } else if (action === 'remove') {
+    // Already friends → unfriend. removeFriend() shows its own confirm
+    // dialog and closes the modal so the user lands back on the chat.
+    removeFriend(nick, btn).then(() => {
+      try { closeModal('modal-user-info'); } catch {}
+    });
   } else {
     sendFriendReq(nick, btn);
   }
