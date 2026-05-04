@@ -42,6 +42,12 @@ const Music = (() => {
   let _msHandlersBound = false;
   let _autoAdvanceLastKey = '';
   let _autoAdvanceLastAt = 0;
+  // Last duration (seconds) the YouTube/SoundCloud iframe reported via
+  // infoDelivery. Used to clamp Resync seeks so we never request a
+  // position past the end of the video (which YT silently honours,
+  // leaving the player stuck on the last frame). Reset on every
+  // head-track change.
+  let _currentDurationSec = 0;
 
   // Live radio-sync probe state. We poll the iframe's actual play head
   // every ~4s while the panel is visible and audio is playing, and update
@@ -384,12 +390,12 @@ const Music = (() => {
   }
 
   function _setAnchor(track, serverPosSec) {
-    if (!track) { _anchorMs = 0; _anchorTrackKey = ''; _userPaused = false; return; }
+    if (!track) { _anchorMs = 0; _anchorTrackKey = ''; _userPaused = false; _currentDurationSec = 0; return; }
     const key = `${track.provider}:${track.video_id}`;
     const incoming = Math.max(0, parseInt(serverPosSec || 0, 10) || 0);
     // Track change clears the sticky user-pause flag — pausing song A and
     // then having the queue advance to song B should default to "playing".
-    if (key !== _anchorTrackKey) _userPaused = false;
+    if (key !== _anchorTrackKey) { _userPaused = false; _currentDurationSec = 0; }
 
     // Defensive: protect a healthy local clock from a stale/just-stamped
     // server reading. The server's _music_head_started is in-memory, and
@@ -465,7 +471,21 @@ const Music = (() => {
   function _resync(force) {
     if (!_anchorMs) return;
     const pos = _expectedPosSec();
-    const ok = _seekIframe(pos);
+    // Past end of track? Don't seek to a phantom position — fire
+    // auto-advance and let the queue progress instead. This was the
+    // 'Resync just sets you to end of video' bug: server's position_sec
+    // kept growing when nobody DJ'd a skip, so Resync sent seekTo(huge)
+    // and YT clamped to the final frame.
+    if (_currentDurationSec > 0 && pos >= _currentDurationSec - 2) {
+      try { _maybeAutoAdvanceOnEnded(); } catch {}
+      return;
+    }
+    // Clamp seek to a safe offset before the end so a near-end Resync
+    // doesn't accidentally trigger YT's own end-of-video screen.
+    const safePos = (_currentDurationSec > 0)
+      ? Math.min(pos, Math.max(0, _currentDurationSec - 3))
+      : pos;
+    const ok = _seekIframe(safePos);
     if (!ok && force) {
       // Provider without seek support (Spotify) — hard reload the iframe at
       // the current expected offset. Disruptive, so only on explicit user
@@ -475,7 +495,7 @@ const Music = (() => {
       const wrap = document.getElementById('mp-player-wrap');
       if (!wrap) return;
       if (cur.provider === 'spotify') {
-        wrap.innerHTML = `<iframe class="mp-frame" src="https://open.spotify.com/embed/${esc(cur.video_id)}?t=${pos}" allow="autoplay; clipboard-write; encrypted-media" allowfullscreen></iframe>`;
+        wrap.innerHTML = `<iframe class="mp-frame" src="https://open.spotify.com/embed/${esc(cur.video_id)}?t=${safePos}" allow="autoplay; clipboard-write; encrypted-media" allowfullscreen></iframe>`;
       }
     }
   }
@@ -552,6 +572,14 @@ const Music = (() => {
             && typeof parsed.info.playerState === 'number') {
           const ps = parsed.info.playerState;
           _lastPlayerState = ps;
+          // Capture duration whenever YT volunteers it. Different YT
+          // builds send it on different infoDelivery messages; keep
+          // the latest non-zero reading.
+          if (typeof parsed.info.duration === 'number'
+              && parsed.info.duration > 0
+              && Math.abs(parsed.info.duration - _currentDurationSec) > 0.5) {
+            _currentDurationSec = parsed.info.duration;
+          }
           if (ps === 1 && _paused) {
             _paused = false;
             _lastEmitHash = '';
@@ -1794,17 +1822,20 @@ const Music = (() => {
 
   async function skip() {
     const expectedTrackId = (arguments.length > 0) ? arguments[0] : null;
+    const isAuto = !!(arguments.length > 1 && arguments[1] && arguments[1].auto);
     if (!_room) return;
-    const body = (Number.isInteger(expectedTrackId) && expectedTrackId > 0)
-      ? { expected_track_id: expectedTrackId }
-      : null;
+    const body = {};
+    if (Number.isInteger(expectedTrackId) && expectedTrackId > 0) {
+      body.expected_track_id = expectedTrackId;
+    }
+    if (isAuto) body.auto = true;
     const res = await fetch(`/api/rooms/${encodeURIComponent(_room)}/queue/skip`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Session-Token': State.token,
       },
-      body: JSON.stringify(body || {}),
+      body: JSON.stringify(body),
     });
     if (res.ok) { _state = await _fetchState(_room); _render(); }
   }
@@ -1843,12 +1874,12 @@ const Music = (() => {
     }
 
     if (!_room) return;
-    if (!_state || !_state.can_control) return;
-    // Room mode: even if q.length<2 (only the current track left), still
-    // call skip() so the server can either pull from its queue or end
-    // the session cleanly. Previously we bailed here, which is why
-    // channels got 'stuck at end of playlist'.
-    skip(parseInt(cur.id, 10) || null).catch(() => {});
+    // Listeners (non-DJs) can also auto-advance now — server validates
+    // expected_track_id + min-played-seconds to prevent abuse. Without
+    // this, a music channel where the DJ has left or where the only
+    // member is a listener would get stuck on the last played track
+    // and Resync would seek past the end of the video.
+    skip(parseInt(cur.id, 10) || null, { auto: true }).catch(() => {});
   }
 
   async function clearQueue() {

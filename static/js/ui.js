@@ -5,6 +5,18 @@
 const UI = (() => {
   let _typingTimers = {};
   let _toastTimeout = null;
+  // ── "Now Playing" status ───────────────────────────────────────────
+  // When enabled (toggle in the status picker, persisted to localStorage)
+  // the user's status_msg auto-mirrors the active mini-player track.
+  // Tapping the status link then jumps to the source (channel or post).
+  const _NOWPLAYING_LS_KEY = 'frogtalk:status:nowplaying';
+  let _nowPlayingActive = false;        // status currently shows a track
+  let _nowPlayingLastTitle = '';        // last track title we pushed
+  let _nowPlayingSavedMsg = null;       // user's manual msg before takeover
+  let _nowPlayingPatchInflight = false; // crude debounce
+  function _nowPlayingEnabled() {
+    try { return localStorage.getItem(_NOWPLAYING_LS_KEY) === '1'; } catch { return false; }
+  }
 
   function escHtml(s) {
     return String(s || '')
@@ -75,15 +87,24 @@ const UI = (() => {
     const labels = { online: 'Online', away: 'Away', dnd: 'Do Not Disturb', invisible: 'Invisible' };
     const dot = dots[p] || '🟢';
     const name = labels[p] || 'Online';
+    // When the now-playing toggle is on AND a track is live, show a
+    // music note + clickable affordance so the user can tap to open
+    // the source post / channel.
+    const np = _nowPlayingActive && msg ? '🎵 ' : '';
     el.innerHTML = msg
-      ? `<span style="opacity:.9">${dot}</span> <span style="color:#bbb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;display:inline-block;vertical-align:bottom">${escHtml(msg)}</span>`
+      ? `<span style="opacity:.9">${dot}</span> <span style="color:#bbb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;display:inline-block;vertical-align:bottom">${np}${escHtml(msg)}</span>`
       : `${dot} ${escHtml(name)}`;
-    el.title = msg ? `${name} — ${msg} (click to change)` : `${name} (click to change)`;
+    el.title = _nowPlayingActive
+      ? `${name} — 🎵 ${msg} (tap to open track · long-press to change status)`
+      : (msg ? `${name} — ${msg} (click to change)` : `${name} (click to change)`);
+    el.dataset.nowplaying = _nowPlayingActive ? '1' : '0';
     // Update the under-avatar status display
     const disp = document.getElementById('self-status-display');
     if (disp) {
-      disp.textContent = msg ? `${dot} ${msg}` : `${dot} ${name}`;
+      disp.textContent = msg ? `${dot} ${np}${msg}` : `${dot} ${name}`;
       disp.style.color = msg ? '#b2dfc3' : '#7ecfa3';
+      disp.style.cursor = _nowPlayingActive ? 'pointer' : '';
+      disp.title = _nowPlayingActive ? 'Tap to open the playing track' : '';
     }
     renderSelfQuickStatus();
   }
@@ -172,6 +193,11 @@ const UI = (() => {
       <div style="font-size:11px;color:#a3e8c0;font-weight:800;letter-spacing:.6px;text-transform:uppercase;margin-bottom:7px">Status message</div>
       <input id="sp-msg" type="text" maxlength="128" placeholder="What are you up to?"
         style="width:100%;background:#0f2219;border:1px solid #4a8068;border-radius:9px;padding:9px 11px;color:#e8f8ee;font-size:13px;outline:none;box-sizing:border-box">
+      <button id="sp-nowplaying" type="button" title="Mirror your active mini-player track as your status. Tap your status to jump back to the source."
+        style="margin-top:9px;display:flex;align-items:center;gap:9px;width:100%;padding:9px 11px;border-radius:9px;background:linear-gradient(180deg,#182e25,#13261f);border:1px solid #355f4f;color:#deefe7;font-size:12.5px;cursor:pointer;text-align:left;box-sizing:border-box">
+        <span id="sp-np-icon" style="display:inline-flex;width:18px;height:18px;align-items:center;justify-content:center;font-size:13px">✕</span>
+        <span style="flex:1">🎵 Show now-playing as status</span>
+      </button>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button id="sp-clear" style="flex:1;background:#1a3c2d;border:1px solid #3d6a58;color:#a8ccb8;padding:10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600">Clear</button>
         <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#5abf65,#48aa52);border:1px solid #65c870;color:#041704;font-weight:800;padding:10px;border-radius:9px;cursor:pointer;font-size:13px">Save</button>
@@ -213,6 +239,24 @@ const UI = (() => {
     });
     pop.dataset.pendingPresence = curP;
     pop.querySelector('#sp-msg').value = State.user.status_msg || '';
+    // Now-playing toggle reflects current LS state and flips it on click.
+    const npBtn = pop.querySelector('#sp-nowplaying');
+    const npIcon = pop.querySelector('#sp-np-icon');
+    function _renderNpBtn() {
+      const on = _nowPlayingEnabled();
+      npIcon.textContent = on ? '✓' : '✕';
+      npBtn.style.background = on
+        ? 'linear-gradient(180deg,#214438,#1a372d)'
+        : 'linear-gradient(180deg,#182e25,#13261f)';
+      npBtn.style.borderColor = on ? '#66c596' : '#355f4f';
+      npBtn.style.color       = on ? '#9ce2be' : '#deefe7';
+    }
+    _renderNpBtn();
+    npBtn.onclick = () => {
+      const next = !_nowPlayingEnabled();
+      setNowPlayingEnabled(next);
+      _renderNpBtn();
+    };
     // Close immediately, save in background — no blocking lag
     pop.querySelector('#sp-clear').onclick = () => {
       const presence = pop.dataset.pendingPresence || State?.user?.presence || 'online';
@@ -253,6 +297,124 @@ const UI = (() => {
       renderSelfStatus();
       toast('Status updated', 'success');
     } catch { toast('Could not save status', 'error'); }
+  }
+
+  // Quietly push a status_msg without toasting (used by the now-playing
+  // auto-mirror so we don't spam the user every track change).
+  async function _saveStatusSilent(presence, status_msg) {
+    if (_nowPlayingPatchInflight) return;
+    _nowPlayingPatchInflight = true;
+    try {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+        body: JSON.stringify({ presence, status_msg })
+      });
+      if (!res.ok) return;
+      State.user.presence = presence;
+      State.user.status_msg = status_msg;
+      renderSelfStatus();
+    } catch {} finally {
+      _nowPlayingPatchInflight = false;
+    }
+  }
+
+  // Sync the user's status_msg to whatever's playing in the mini-player.
+  // Called on every music:statechange and once at boot.
+  function _syncNowPlayingStatus() {
+    if (!_nowPlayingEnabled() || !State?.user) {
+      // Toggle is off — release any takeover that was in effect.
+      if (_nowPlayingActive) {
+        _nowPlayingActive = false;
+        const restore = _nowPlayingSavedMsg ?? '';
+        _nowPlayingSavedMsg = null;
+        _nowPlayingLastTitle = '';
+        const presence = (State?.user?.presence) || 'online';
+        _saveStatusSilent(presence, restore);
+      }
+      return;
+    }
+    let cur = null;
+    try {
+      cur = (window.Music && typeof Music.getCurrent === 'function') ? Music.getCurrent() : null;
+    } catch {}
+    const isLive = !!(cur && cur.active && cur.title);
+    if (isLive) {
+      const title = String(cur.title || '').slice(0, 96);
+      if (title === _nowPlayingLastTitle && _nowPlayingActive) return;
+      // First time we take over the status: stash whatever the user had.
+      if (!_nowPlayingActive) {
+        _nowPlayingSavedMsg = String(State.user.status_msg || '');
+      }
+      _nowPlayingActive = true;
+      _nowPlayingLastTitle = title;
+      const presence = (State?.user?.presence) || 'online';
+      _saveStatusSilent(presence, title);
+    } else if (_nowPlayingActive) {
+      // Music stopped — restore the user's manual message.
+      _nowPlayingActive = false;
+      _nowPlayingLastTitle = '';
+      const restore = _nowPlayingSavedMsg ?? '';
+      _nowPlayingSavedMsg = null;
+      const presence = (State?.user?.presence) || 'online';
+      _saveStatusSilent(presence, restore);
+    }
+  }
+
+  // Toggle from the status picker. Enabling it grabs the active track
+  // immediately; disabling restores the user's previous msg.
+  function setNowPlayingEnabled(on) {
+    try { localStorage.setItem(_NOWPLAYING_LS_KEY, on ? '1' : '0'); } catch {}
+    _syncNowPlayingStatus();
+    try { toast(on ? 'Now Playing status: on' : 'Now Playing status: off', 'success'); } catch {}
+  }
+
+  // Click handler for the status pill / under-avatar status when the
+  // status reflects a live track. Falls back to opening the picker so
+  // the user isn't trapped without a way to change presence.
+  function handleSelfStatusClick(ev) {
+    if (_nowPlayingActive) {
+      try { ev?.stopPropagation?.(); } catch {}
+      try {
+        if (window.Music && typeof Music.expand === 'function') {
+          Music.expand();
+          return;
+        }
+      } catch {}
+    }
+    openStatusPicker(ev);
+  }
+
+  // Wire one-time listeners for music state changes and DOM clicks on
+  // the under-avatar status display (the pill already has its own
+  // onclick attribute in HTML, which we re-route in handleSelfStatusClick).
+  let _nowPlayingWired = false;
+  function _wireNowPlaying() {
+    if (_nowPlayingWired) return;
+    _nowPlayingWired = true;
+    document.addEventListener('music:statechange', () => {
+      try { _syncNowPlayingStatus(); } catch {}
+    });
+    const disp = document.getElementById('self-status-display');
+    if (disp) {
+      disp.addEventListener('click', (ev) => {
+        if (_nowPlayingActive) handleSelfStatusClick(ev);
+      });
+    }
+    // Re-route the pill's existing onclick through our handler so the
+    // "open source" behaviour also works there.
+    const pill = document.getElementById('self-status');
+    if (pill) {
+      pill.setAttribute('onclick', 'UI.handleSelfStatusClick(event)');
+    }
+    // Initial sync in case music was already playing when the page loaded.
+    setTimeout(() => { try { _syncNowPlayingStatus(); } catch {} }, 600);
+  }
+  // Defer until DOM exists.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _wireNowPlaying);
+  } else {
+    _wireNowPlaying();
   }
 
   function showTyping(nickname) {
@@ -540,7 +702,7 @@ const UI = (() => {
     });
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm };
+  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, handleSelfStatusClick, setNowPlayingEnabled };
 })();
 
 // ─── ChatVideo: themed inline video player for chat ──────────────────────────

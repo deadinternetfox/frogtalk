@@ -102,6 +102,12 @@ class ReorderRoomsRequest(BaseModel):
 
 class MusicSkipRequest(BaseModel):
     expected_track_id: Optional[int] = None
+    # Set by clients when a track ends naturally (YouTube state 0). Lets
+    # any room member request advancement, not just DJs/mods, so radio-style
+    # playlists actually progress when the DJ is offline / a listener is
+    # the only one watching. Server still validates expected_track_id and
+    # a minimum-played-seconds threshold to prevent skip spam.
+    auto: Optional[bool] = False
 
 
 @router.post("/reorder")
@@ -826,7 +832,8 @@ async def music_skip(room_name: str,
                      current_user: dict = Depends(get_current_user)):
     """Mark the current head track as played, advancing the queue."""
     is_admin = bool(current_user.get("is_admin"))
-    if not _can_control(room_name, current_user["id"], is_admin):
+    is_auto = bool(body and body.auto)
+    if not is_auto and not _can_control(room_name, current_user["id"], is_admin):
         return JSONResponse(status_code=403, content={"error": "Only DJs or mods can skip"})
     current = db.music_get_current(room_name)
     # Optional stale guard for client-side auto-advance: only skip when the
@@ -841,6 +848,17 @@ async def music_skip(room_name: str,
         current_id = int(current["id"]) if current else None
         if current_id != expected_id:
             return {"ok": False, "stale": True, "skipped": None}
+    # Auto-advance from a listener requires:
+    #   1) expected_track_id supplied (so we know the report is about the
+    #      track they were actually watching, not a stale tab)
+    #   2) the head track has been playing for at least 10 seconds (anti-spam:
+    #      a malicious client can't mash this endpoint to nuke the queue)
+    if is_auto:
+        if expected_id is None or current is None:
+            return {"ok": False, "stale": True, "skipped": None}
+        played_sec = _music_position_sec(room_name, current)
+        if played_sec < 10:
+            return {"ok": False, "too_early": True, "skipped": None}
     if current:
         db.music_mark_played(current["id"], room_name)
     next_current = db.music_get_current(room_name)
