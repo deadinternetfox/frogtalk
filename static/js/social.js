@@ -234,19 +234,49 @@ const Social = (() => {
     } catch {}
   }
 
+  // Returns true if the poster was drawn (with a non-black frame),
+  // false if the call should be retried later. A returned `true` also
+  // sets the .ready class on posterEl. We sample a 16-pixel grid of
+  // the captured frame and bail if average luma is sub-12 (effectively
+  // black) so seek-to-30% on a video with a fade-in doesn't lock in a
+  // black thumbnail forever.
   function _drawVideoPoster(video, posterEl) {
     try {
-      if (!video || !posterEl || !video.videoWidth || !video.videoHeight) return;
+      if (!video || !posterEl || !video.videoWidth || !video.videoHeight) return false;
       const c = document.createElement('canvas');
       const maxW = 720;
       c.width = Math.min(video.videoWidth, maxW);
       c.height = Math.max(1, Math.round(c.width * (video.videoHeight / video.videoWidth)));
       const ctx = c.getContext('2d');
-      if (!ctx) return;
+      if (!ctx) return false;
       ctx.drawImage(video, 0, 0, c.width, c.height);
+      // Sample a small grid to detect an all-black frame. We only do
+      // this for grid tiles (caller passes opts.detectBlack=true);
+      // feed posters can stay as-is to avoid extra work.
+      try {
+        const sx = Math.max(1, Math.floor(c.width / 5));
+        const sy = Math.max(1, Math.floor(c.height / 5));
+        let lumaSum = 0; let n = 0;
+        for (let y = sy; y < c.height; y += sy) {
+          for (let x = sx; x < c.width; x += sx) {
+            const px = ctx.getImageData(x, y, 1, 1).data;
+            // Rec.601 luma
+            lumaSum += 0.299 * px[0] + 0.587 * px[1] + 0.114 * px[2];
+            n++;
+          }
+        }
+        const avgLuma = n ? lumaSum / n : 0;
+        if (avgLuma < 12) {
+          // Frame is essentially black — leave the poster un-set so the
+          // outer fn can try seeking to a different position.
+          return false;
+        }
+      } catch {}
       posterEl.style.backgroundImage = `url(${c.toDataURL('image/jpeg', 0.74)})`;
       posterEl.classList.add('ready');
+      return true;
     } catch {}
+    return false;
   }
 
   function _hydrateVideoThumbs(scope) {
@@ -321,11 +351,19 @@ const Social = (() => {
             }
           });
         }
+        // Grid tiles try a sequence of seek positions until we get a
+        // non-black frame. The classic failure mode was: video has a
+        // 1–2 second fade-in, our seek to 30% lands inside the fade,
+        // _drawVideoPoster captures pure black, the tile never updates.
+        // Now: if drawPoster reports the frame was too dark, advance to
+        // the next candidate (50%, 70%, 10%, last 0.1s) and try again.
+        const _gridSeekFractions = [0.30, 0.50, 0.70, 0.10, 0.92];
+        let _seekIdx = 0;
         const drawPoster = () => {
           if (posterDrawn) return;
           if (!allowEarlyDraw) return; // grid: wait for `seeked`
-          _drawVideoPoster(video, poster);
-          if (poster.classList.contains('ready')) {
+          const ok = _drawVideoPoster(video, poster);
+          if (ok) {
             posterDrawn = true;
             // Grid tiles only ever needed one canvas frame. Release the
             // socket immediately so it doesn't sit there pinned for the
@@ -333,6 +371,22 @@ const Social = (() => {
             if (isGrid) {
               try { setTimeout(() => _ftVideoUnbind(video), 60); } catch {}
             }
+            return;
+          }
+          // Grid + frame too dark + we have another seek candidate →
+          // advance and let the next `seeked` event re-enter drawPoster.
+          if (isGrid && _seekIdx < _gridSeekFractions.length - 1) {
+            _seekIdx += 1;
+            try {
+              const dur = Number(video.duration);
+              if (Number.isFinite(dur) && dur > 0.2) {
+                const f = _gridSeekFractions[_seekIdx];
+                video.currentTime = Math.min(
+                  Math.max(0.05, dur * f),
+                  Math.max(0.05, dur - 0.05)
+                );
+              }
+            } catch {}
           }
         };
         video.addEventListener('loadeddata', drawPoster, { once: true });
@@ -345,7 +399,7 @@ const Social = (() => {
           drawPoster();
         });
         if (isGrid) {
-          // Safety net: if the mid-frame seek never lands within 1.2 s
+          // Safety net: if the mid-frame seek never lands within 2.5 s
           // (e.g. zero-duration clip, codec quirks, decode failure)
           // fall back to whatever frame the decoder has buffered so the
           // tile isn't permanently a black square.
@@ -353,7 +407,7 @@ const Social = (() => {
             if (posterDrawn) return;
             allowEarlyDraw = true;
             drawPoster();
-          }, 1200);
+          }, 2500);
         }
         video.addEventListener('loadedmetadata', () => {
           try {
