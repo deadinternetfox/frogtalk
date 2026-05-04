@@ -2451,6 +2451,21 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   display:flex;align-items:center;justify-content:center;z-index:500
 }
 .modal-overlay.hidden{display:none}
+/* User-profile (chat mini-profile) modal: when wall posts / music
+   load in, the modal grows taller than the viewport. With the
+   overlay's default align-items:center, that overflow splits evenly
+   above + below — clipping the banner off the top. Anchor it to the
+   top and let the overlay itself scroll. */
+#modal-user-info{
+  align-items:flex-start !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  padding:24px 16px !important;
+}
+#modal-user-info .user-profile-modal{
+  margin:0 auto !important;
+  max-height:none !important;
+}
 /* The FrogSocial overlay sits at z-index 600, so any modal opened from
    inside it (music-share, post-detail triggers, etc.) needs to float
    above 600 or it becomes invisible/un-clickable. */
@@ -7526,7 +7541,7 @@ window.ConnErr = (function(){
 
 <!-- User Profile Modal (Social Media Style) -->
 <div class="modal-overlay hidden" id="modal-user-info">
-  <div class="modal user-profile-modal" style="max-width:500px;max-height:85vh;display:flex;flex-direction:column;padding:0;overflow-y:auto;overflow-x:hidden">
+  <div class="modal user-profile-modal" style="max-width:500px;display:flex;flex-direction:column;padding:0;overflow:visible">
     <!-- Profile Header / Banner — banner-ONLY (avatar + name + status
          live in .profile-body below, in the classic Twitter/Discord
          pattern where the avatar overlaps the banner/body seam). This

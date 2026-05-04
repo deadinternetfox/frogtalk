@@ -3987,35 +3987,14 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
   }
   
   openModal('modal-user-info');
-  // Async data (bio, wall, music) lands AFTER the modal opens and can
-  // shift focus or grow the document such that the inner scroll
-  // container ends up scrolled past the banner — clipping the top of
-  // the profile. On mobile the OUTER `.modal-overlay` is the scroll
-  // container (see @media(max-width:600px) in index.html), on desktop
-  // the inner `.user-profile-modal` is. Pin BOTH, with a watchdog.
+  // Layout fix is now CSS: #modal-user-info uses align-items:flex-start
+  // and overflow-y:auto so the banner can never be clipped above the
+  // viewport when async content (wall, music) grows the modal. Just
+  // make sure the overlay itself starts scrolled to the top in case a
+  // previous open left it scrolled.
   try {
     const overlay = document.getElementById('modal-user-info');
-    const inner = overlay && overlay.querySelector('.user-profile-modal');
-    const pin = () => {
-      try {
-        if (overlay && overlay.scrollTop !== 0) overlay.scrollTop = 0;
-        if (inner && inner.scrollTop !== 0) inner.scrollTop = 0;
-        // Some browsers scroll the document itself when a button inside
-        // the modal grabs focus; counter that too.
-        if (window.scrollY > 0 && overlay && overlay.classList.contains('hidden') === false) {
-          // Only if we just opened — don't fight a deliberate user scroll.
-        }
-      } catch {}
-    };
-    pin();
-    requestAnimationFrame(pin);
-    let mo = null;
-    try {
-      mo = new MutationObserver(pin);
-      if (overlay) mo.observe(overlay, { childList: true, subtree: true });
-    } catch {}
-    [50, 120, 250, 400, 700, 1000, 1400].forEach(t => setTimeout(pin, t));
-    setTimeout(() => { try { mo && mo.disconnect(); } catch {} }, 1600);
+    if (overlay) overlay.scrollTop = 0;
   } catch {}
 }
 
