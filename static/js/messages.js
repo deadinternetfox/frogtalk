@@ -119,34 +119,172 @@ const Messages = (() => {
     return escaped;
   }
 
+  // ── Share card loaders ───────────────────────────────────────────────
+  // Strategy: try the PUBLIC /api/share/* endpoint first (cacheable, no
+  // auth, works for share-enabled public profiles/posts/reels). Fall back
+  // to the AUTH'd wall/social endpoints for private content the viewer is
+  // allowed to see (friends/followers). All loaders dedupe per-postId so
+  // the same shared link in 10 messages only fetches once.
+  const _shareInfoCache = new Map(); // key → Promise<{ok,data,kind}>
+
+  function _shareFetchOnce(key, fn) {
+    if (_shareInfoCache.has(key)) return _shareInfoCache.get(key);
+    const p = fn().catch(() => ({ ok: false }));
+    _shareInfoCache.set(key, p);
+    // Expire after 2min so deleted/edited posts eventually re-fetch.
+    setTimeout(() => { try { _shareInfoCache.delete(key); } catch {} }, 120000);
+    return p;
+  }
+
+  async function _publicGet(url) {
+    try {
+      const res = await fetch(url, { credentials: 'omit', cache: 'default' });
+      if (!res.ok) return { ok: false };
+      const data = await res.json().catch(() => null);
+      return data ? { ok: true, data } : { ok: false };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  async function _authedGet(url) {
+    try {
+      const res = await apiFetch(url);
+      if (!res.ok) return { ok: false };
+      const data = await res.json().catch(() => null);
+      return data ? { ok: true, data } : { ok: false };
+    } catch {
+      return { ok: false };
+    }
+  }
+
   async function _loadSocialProfileCard(msgId, nickname) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
     const placeholder = msgEl.querySelector(`.social-profile-card-placeholder[data-social-profile="${nickname}"]`);
     if (!placeholder) return;
-    try {
-      const res = await apiFetch(`/api/social/profile/${encodeURIComponent(nickname)}`);
-      if (!res.ok) {
-        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Profile unavailable</span>`;
-        return;
-      }
-      const d = await res.json();
-      const nick = UI.escHtml(d.nickname || nickname);
-      const subtitle = d.private
-        ? 'Private profile'
-        : UI.escHtml((d.bio || d.status_msg || 'Open in Frog Social').substring(0, 80));
-      placeholder.outerHTML =
-        `<div class="share-card" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
-          `<div style="flex-shrink:0">${UI.avatarEl(d.avatar || null, d.nickname || nickname, 42)}</div>` +
-          `<div class="share-card-info">` +
-            `<div class="share-card-label">Frog Social Profile</div>` +
-            `<div class="share-card-name">@${nick}</div>` +
-            `<div class="share-card-bio">${subtitle}</div>` +
-          `</div>` +
-        `</div>`;
-    } catch {
-      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load profile</span>`;
+    const key = `profile:${nickname.toLowerCase()}`;
+    const result = await _shareFetchOnce(key, async () => {
+      // Public first — works for any profile_public=1 user
+      const pub = await _publicGet(`/api/share/profile/${encodeURIComponent(nickname)}`);
+      if (pub.ok) return pub;
+      // Fall back to the authed social endpoint for friends/private profiles
+      return await _authedGet(`/api/social/profile/${encodeURIComponent(nickname)}`);
+    });
+    if (!result.ok) {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Profile unavailable</span>`;
+      return;
     }
+    const d = result.data || {};
+    const nick = UI.escHtml(d.nickname || nickname);
+    const subtitle = d.private
+      ? 'Private profile'
+      : UI.escHtml(String(d.bio || d.status_msg || 'Open in Frog Social').substring(0, 80));
+    placeholder.outerHTML =
+      `<div class="share-card" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
+        `<div style="flex-shrink:0">${UI.avatarEl(d.avatar || null, d.nickname || nickname, 42)}</div>` +
+        `<div class="share-card-info">` +
+          `<div class="share-card-label">Frog Social Profile</div>` +
+          `<div class="share-card-name">@${nick}</div>` +
+          `<div class="share-card-bio">${subtitle}</div>` +
+        `</div>` +
+      `</div>`;
+  }
+
+  function _renderRichShareEmbed(p, kind, postId) {
+    const nick = UI.escHtml(p.nickname || 'frog');
+    const mediaType = String(p.media_type || '').toLowerCase();
+    const isVideo = mediaType.startsWith('video/');
+    const isImage = mediaType.startsWith('image/');
+    const isMusic = mediaType.startsWith('music/');
+    const pid = Number(p.id || postId);
+    const label = kind === 'reel'
+      ? 'Frog Social Reel'
+      : (String(p.privacy || 'public').toLowerCase() === 'public' ? 'Frog Social Post' : (String(p.privacy).toLowerCase() === 'followers' ? 'Followers Post' : 'Private Post'));
+    let caption = String(p.content || '').trim();
+    if (!caption) {
+      if (isImage) caption = '📷 Photo post';
+      else if (isVideo) caption = kind === 'reel' ? '🎬 Watch this reel' : '🎬 Video post';
+      else if (isMusic) caption = '🎵 Music post';
+      else caption = 'Open in Frog Social';
+    }
+    const safeCap = UI.escHtml(caption.substring(0, 220));
+    const avatar = UI.avatarEl(p.avatar || null, p.nickname || 'frog', 32);
+    const onclick = kind === 'reel'
+      ? `Messages.openSocialReel(${pid})`
+      : `Messages.openSocialPost(${pid})`;
+
+    // Pick a public media URL (works for share-enabled public posts only).
+    // For authed responses without a public URL, fall back to the inline
+    // data: URI returned in the post payload.
+    let mediaUrl = p.media_url || null;
+    if (!mediaUrl && (isVideo || isImage)) {
+      if (typeof p.media_data === 'string' && p.media_data.startsWith('data:')) {
+        mediaUrl = p.media_data;
+      } else if (typeof p.media_data === 'string' && /^https?:\/\//i.test(p.media_data)) {
+        mediaUrl = p.media_data;
+      } else {
+        mediaUrl = isVideo ? `/r/${pid}/media` : `/og/post/${pid}.img`;
+      }
+    }
+
+    let mediaHtml = '';
+    if (isVideo && mediaUrl) {
+      mediaHtml =
+        `<div class="chat-share-media chat-share-video" data-pid="${pid}">` +
+          `<video class="chat-share-video-el" preload="metadata" playsinline muted loop ` +
+                 `src="${UI.escHtml(mediaUrl)}" ` +
+                 `onclick="event.stopPropagation();Messages._toggleChatVideo(this)"></video>` +
+          `<button class="chat-share-play-overlay" type="button" aria-label="Play"` +
+                 ` onclick="event.stopPropagation();Messages._toggleChatVideo(this.previousElementSibling)">▶</button>` +
+        `</div>`;
+    } else if (isImage && mediaUrl) {
+      mediaHtml =
+        `<div class="chat-share-media chat-share-image">` +
+          `<img loading="lazy" decoding="async" src="${UI.escHtml(mediaUrl)}" alt="">` +
+        `</div>`;
+    }
+
+    return (
+      `<div class="chat-share-embed" data-share-${kind}="${pid}" onclick="${onclick}">` +
+        `<div class="chat-share-embed-head">` +
+          `<div class="chat-share-embed-avatar">${avatar}</div>` +
+          `<div class="chat-share-embed-meta">` +
+            `<div class="chat-share-embed-label">${UI.escHtml(label)}</div>` +
+            `<div class="chat-share-embed-name">@${nick}</div>` +
+          `</div>` +
+          `<div class="chat-share-embed-logo" aria-hidden="true">🐸</div>` +
+        `</div>` +
+        (caption ? `<div class="chat-share-embed-caption">${safeCap}</div>` : '') +
+        mediaHtml +
+        `<div class="chat-share-embed-foot">Open in Frog Social →</div>` +
+      `</div>`
+    );
+  }
+
+  // Toggle play/pause on inline chat video. Pauses any other inline
+  // videos so we don't end up with 5 reels playing at once.
+  function _toggleChatVideo(videoEl) {
+    if (!videoEl) return;
+    try {
+      if (videoEl.paused) {
+        document.querySelectorAll('.chat-share-video-el').forEach(v => {
+          if (v !== videoEl) { try { v.pause(); } catch {} }
+        });
+        const wrap = videoEl.closest('.chat-share-video');
+        if (wrap) wrap.classList.add('is-playing');
+        // Best effort: try with sound, fall back to muted if blocked.
+        videoEl.muted = false;
+        videoEl.play().catch(() => {
+          videoEl.muted = true;
+          videoEl.play().catch(() => {});
+        });
+      } else {
+        videoEl.pause();
+        const wrap = videoEl.closest('.chat-share-video');
+        if (wrap) wrap.classList.remove('is-playing');
+      }
+    } catch {}
   }
 
   async function _loadSocialPostCard(msgId, postId) {
@@ -154,37 +292,17 @@ const Messages = (() => {
     if (!msgEl) return;
     const placeholder = msgEl.querySelector(`.social-post-card-placeholder[data-social-post="${postId}"]`);
     if (!placeholder) return;
-    try {
-      const res = await apiFetch(`/api/wall/posts/${postId}`);
-      if (!res.ok) {
-        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`;
-        return;
-      }
-      const p = await res.json();
-      const nick = UI.escHtml(p.nickname || 'frog');
-      const privacy = String(p.privacy || 'public').toLowerCase();
-      const label = privacy === 'public' ? 'Frog Social Post' : (privacy === 'followers' ? 'Followers Post' : 'Private Post');
-      let preview = String(p.content || '').trim();
-      if (!preview) {
-        if ((p.media_type || '').startsWith('image/')) preview = '📷 Photo post';
-        else if ((p.media_type || '').startsWith('video/')) preview = '🎬 Video post';
-        else if ((p.media_type || '').startsWith('music/')) preview = '🎵 Music post';
-        else preview = 'Open this post in Frog Social';
-      }
-      const safePreview = UI.escHtml(preview.substring(0, 90));
-      const pid = Number(p.id || postId);
-      placeholder.outerHTML =
-        `<div class="share-card" data-social-post="${pid}" onclick="Messages.openSocialPost(this.dataset.socialPost)">` +
-          `<div style="flex-shrink:0">${UI.avatarEl(p.avatar || null, p.nickname || 'frog', 42)}</div>` +
-          `<div class="share-card-info">` +
-            `<div class="share-card-label">${UI.escHtml(label)}</div>` +
-            `<div class="share-card-name">@${nick}</div>` +
-            `<div class="share-card-bio">${safePreview}</div>` +
-          `</div>` +
-        `</div>`;
-    } catch {
-      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load post</span>`;
+    const key = `post:${postId}`;
+    const result = await _shareFetchOnce(key, async () => {
+      const pub = await _publicGet(`/api/share/post/${encodeURIComponent(postId)}`);
+      if (pub.ok) return pub;
+      return await _authedGet(`/api/wall/posts/${encodeURIComponent(postId)}`);
+    });
+    if (!result.ok) {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`;
+      return;
     }
+    placeholder.outerHTML = _renderRichShareEmbed(result.data || {}, 'post', postId);
   }
 
   async function _loadSocialReelCard(msgId, postId) {
@@ -192,35 +310,23 @@ const Messages = (() => {
     if (!msgEl) return;
     const placeholder = msgEl.querySelector(`.social-reel-card-placeholder[data-social-reel="${postId}"]`);
     if (!placeholder) return;
-    try {
-      const res = await apiFetch(`/api/wall/posts/${postId}`);
-      if (!res.ok) {
-        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Reel unavailable</span>`;
-        return;
-      }
-      const p = await res.json();
-      const mediaType = String(p.media_type || '').toLowerCase();
-      if (!mediaType.startsWith('video/')) {
-        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`;
-        return;
-      }
-      const nick = UI.escHtml(p.nickname || 'frog');
-      let preview = String(p.content || '').trim();
-      if (!preview) preview = '🎬 Watch this reel in Frog Social';
-      const safePreview = UI.escHtml(preview.substring(0, 90));
-      const pid = Number(p.id || postId);
-      placeholder.outerHTML =
-        `<div class="share-card" data-social-reel="${pid}" onclick="Messages.openSocialReel(this.dataset.socialReel)">` +
-          `<div style="flex-shrink:0">${UI.avatarEl(p.avatar || null, p.nickname || 'frog', 42)}</div>` +
-          `<div class="share-card-info">` +
-            `<div class="share-card-label">Frog Social Reel</div>` +
-            `<div class="share-card-name">@${nick}</div>` +
-            `<div class="share-card-bio">${safePreview}</div>` +
-          `</div>` +
-        `</div>`;
-    } catch {
-      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load reel</span>`;
+    const key = `reel:${postId}`;
+    const result = await _shareFetchOnce(key, async () => {
+      const pub = await _publicGet(`/api/share/reel/${encodeURIComponent(postId)}`);
+      if (pub.ok) return pub;
+      return await _authedGet(`/api/wall/posts/${encodeURIComponent(postId)}`);
+    });
+    if (!result.ok) {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Reel unavailable</span>`;
+      return;
     }
+    const data = result.data || {};
+    const mt = String(data.media_type || '').toLowerCase();
+    if (!mt.startsWith('video/')) {
+      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`;
+      return;
+    }
+    placeholder.outerHTML = _renderRichShareEmbed(data, 'reel', postId);
   }
 
   function _hydrateSpecialCards(msgId) {
@@ -2149,7 +2255,7 @@ const Messages = (() => {
     const start = (e) => {
       // Ignore taps on interactive elements
       const tgt = e.target;
-      if (tgt.closest('a,button,input,textarea,.msg-media,.msg-reply-quote,.reaction-pill,.spoiler-wrap,.link-preview,.yt-embed,.spotify-embed,.share-card,.mention,.room-mention,.msg-avatar,.msg-author')) return;
+      if (tgt.closest('a,button,input,textarea,.msg-media,.msg-reply-quote,.reaction-pill,.spoiler-wrap,.link-preview,.yt-embed,.spotify-embed,.share-card,.chat-share-embed,.mention,.room-mention,.msg-avatar,.msg-author')) return;
       const t = e.touches ? e.touches[0] : e;
       startX = t.clientX; startY = t.clientY;
       clearTimeout(timer);
@@ -2255,7 +2361,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

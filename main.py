@@ -1059,6 +1059,94 @@ async def api_ping():
     return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
 
 
+# ── Public share-info JSON endpoints ─────────────────────────────────────
+# Used by chat (DMs/channels) to render rich link cards for FrogTalk share
+# URLs without requiring follow/friend privacy checks. Only return data
+# for public + share_enabled posts/profiles. Heavily cacheable.
+
+def _public_share_post_payload(post: dict, kind: str) -> dict:
+    """Build a public-safe JSON payload for a share-enabled public post.
+
+    Strips sensitive fields (full media data, private flags). Includes a
+    public media URL when applicable so chat clients can play video inline.
+    """
+    pid = int(post.get("id") or 0)
+    media_type = str(post.get("media_type") or "").lower()
+    has_media = bool(post.get("media_data"))
+    media_url = None
+    if has_media:
+        if media_type.startswith("video/"):
+            media_url = f"/r/{pid}/media"
+        elif media_type.startswith("image/"):
+            # Reuse the OG proxy as a public image fetch (already public).
+            media_url = f"/og/post/{pid}.img"
+    return {
+        "id": pid,
+        "kind": kind,  # "post" or "reel"
+        "nickname": post.get("nickname") or "frog",
+        "avatar": post.get("avatar") or None,
+        "content": (post.get("content") or "")[:280],
+        "media_type": media_type or None,
+        "has_media": has_media,
+        "media_url": media_url,
+        "created_at": post.get("created_at"),
+    }
+
+
+@app.get("/api/share/post/{post_id}")
+async def share_post_info(post_id: int):
+    """Public JSON for a share-enabled public post. 404 otherwise."""
+    from fastapi.responses import JSONResponse
+    import database as db
+    post = db.get_wall_post(post_id)
+    if (not post
+            or (post.get("privacy") or "public") != "public"
+            or int(post.get("share_enabled", 1) or 0) != 1):
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return JSONResponse(
+        _public_share_post_payload(post, "post"),
+        headers={"Cache-Control": "public, max-age=120"},
+    )
+
+
+@app.get("/api/share/reel/{post_id}")
+async def share_reel_info(post_id: int):
+    """Public JSON for a share-enabled public reel. 404 if not a public video."""
+    from fastapi.responses import JSONResponse
+    import database as db
+    post = db.get_wall_post(post_id)
+    if (not post
+            or (post.get("privacy") or "public") != "public"
+            or int(post.get("share_enabled", 1) or 0) != 1
+            or not str(post.get("media_type") or "").lower().startswith("video/")):
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return JSONResponse(
+        _public_share_post_payload(post, "reel"),
+        headers={"Cache-Control": "public, max-age=120"},
+    )
+
+
+@app.get("/api/share/profile/{nickname}")
+async def share_profile_info(nickname: str):
+    """Public JSON for a profile that opted into a public profile page."""
+    from fastapi.responses import JSONResponse
+    import database as db
+    user = db.get_user_profile(nickname)
+    if not user or not bool(user.get("profile_public", 1)):
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    avatar = user.get("avatar") or None
+    # Strip private fields; only expose what the OG/share page already shows.
+    return JSONResponse(
+        {
+            "nickname": user.get("nickname") or nickname,
+            "avatar": avatar,
+            "bio": (user.get("bio") or "")[:200],
+            "status_msg": (user.get("status_msg") or "")[:120],
+        },
+        headers={"Cache-Control": "public, max-age=120"},
+    )
+
+
 def _decode_data_url_to_bytes(data_url: str):
     """Convert a data:image/...;base64,... URL into (bytes, mime).
 
