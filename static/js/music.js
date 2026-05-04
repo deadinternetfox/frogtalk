@@ -1202,16 +1202,27 @@ const Music = (() => {
     // Treat legacy 'voice' channels as music
     const isMusic = channelType === 'music' || channelType === 'voice';
     if (!isMusic) {
-      // If we already have a live track for some room, shrink into a mini
-      // persistent player instead of tearing down — user wanted music to
-      // keep playing while they browse other channels.
-      if (_room && _state && (_state.queue || []).length) {
+      // If we already have a live track — either a room channel or a
+      // solo (FrogSocial) play — shrink into a mini persistent player
+      // instead of tearing down. The user wanted music to keep playing
+      // (and the dock to stay visible in the sidebar) while they browse
+      // other channels / DMs / Social.
+      const hasLive = (_room || _soloMode) && _state && (_state.queue || []).length;
+      if (hasLive) {
         const cur = _state.queue[0];
         panel.classList.remove('active');
         panel.classList.add('mini');
         panel.style.display = 'flex';
         _renderMini(cur);
         _renderDock(cur);
+        // Make sure the body flag is set so the sidebar dock CSS
+        // (`body[data-music-mini="1"] #music-mini-dock{display:flex}`)
+        // actually shows the dock. Without this, switching from a music
+        // channel directly into a non-music room could leave the
+        // attribute unset and the dock invisible despite the iframe
+        // still playing in the background.
+        document.body.setAttribute('data-music-mini', '1');
+        document.body.setAttribute('data-music', '1');
         // Defensive: any path that pushes fresh HTML for the dock or
         // mini bar resets data-playing="1" / textContent="⏸". Re-sync
         // from effective state so the button reflects YT's actual
