@@ -4854,6 +4854,15 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
     0 0 0 1px rgba(0,0,0,0.25);
   padding:4px 12px 4px 10px;
   font-size:12.5px;
+  /* Hard-cap to the available row width so a long track title can
+     never punch out past the modal frame on desktop. The flex parent
+     uses min-width:0 so flex shrinking actually works; the inner
+     .sml-track gets the ellipsis. */
+  max-width:100%;min-width:0;
+}
+.profile-header .status-music-link .sml-track{
+  min-width:0;flex:0 1 auto;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .profile-header .status-music-link:hover{
   background:linear-gradient(135deg,#4a3478 0%,#5a3f99 55%,#456036 100%);
@@ -7491,7 +7500,7 @@ window.ConnErr = (function(){
 
 <!-- User Profile Modal (Social Media Style) -->
 <div class="modal-overlay hidden" id="modal-user-info">
-  <div class="modal user-profile-modal" style="max-width:500px;max-height:85vh;display:flex;flex-direction:column;padding:0;overflow:hidden">
+  <div class="modal user-profile-modal" style="max-width:500px;max-height:85vh;display:flex;flex-direction:column;padding:0;overflow-y:auto;overflow-x:hidden">
     <!-- Profile Header / Banner -->
     <div class="profile-header" id="userinfo-header" style="position:relative;background:linear-gradient(135deg, #1a3a1a 0%, #0d1f0d 100%);padding:20px;min-height:140px">
       <button class="profile-close-btn" onclick="closeModal('modal-user-info')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5" title="Close">✕</button>
@@ -7500,13 +7509,13 @@ window.ConnErr = (function(){
         <div class="profile-avatar-large" id="userinfo-avatar" style="width:90px;height:90px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4)">🐸</div>
         <div style="flex:1;min-width:0;padding-bottom:4px">
           <div id="userinfo-name" class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3);cursor:pointer" onclick="copyUserTag(this.textContent)" title="Click to copy @tag"></div>
-          <div id="userinfo-status-msg" style="font-size:13px;color:rgba(255,255,255,0.7);margin-top:2px"></div>
+          <div id="userinfo-status-msg" style="font-size:13px;color:rgba(255,255,255,0.7);margin-top:2px;display:block;max-width:100%;overflow:hidden"></div>
         </div>
       </div>
     </div>
     
     <!-- Profile Content -->
-    <div class="profile-body" style="flex:1;overflow-y:auto;padding:16px;background:#111">
+    <div class="profile-body" style="padding:16px;background:#111">
       <!-- Primary Actions: Message + Call (camera can be toggled mid-call) -->
       <div class="profile-actions profile-actions-primary" style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:8px">
         <button class="modal-btn primary" id="userinfo-dm-btn" onclick="dmUserInfo()" style="padding:10px 6px;font-size:13px">💬 Message</button>
