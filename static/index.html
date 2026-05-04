@@ -1500,12 +1500,15 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
    and worse, the message composer below the panel ends up below the fold.
    Cap the panel to a fraction of the viewport so messages-area + typing-bar
    + input-area always stay visible; let the panel scroll its own content
-   and pin .mp-submit so the Add Track button is always reachable. */
+   so Add Track and toggles flow naturally at the end (no sticky overlay). */
 @media (max-width:768px){
   #music-panel:not(.mini):not(.collapsed){
     max-height:42vh;
     overflow-y:auto;
-    -webkit-overflow-scrolling:touch
+    -webkit-overflow-scrolling:touch;
+    /* Tighten internal padding so the composer sits right under the panel
+       with no blank gap. */
+    padding-bottom:8px
   }
   /* Shrink the iframe on phones so the panel doesn't eat the screen even
      before the cap kicks in. 16:9 of a phone-wide column is otherwise huge. */
@@ -1513,13 +1516,9 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
   #music-panel:not(.mini):not(.collapsed) #mp-player-wrap iframe{
     max-height:32vh
   }
+  /* Add Track + toggles scroll with the rest of the panel — no sticky bar. */
   #music-panel:not(.mini):not(.collapsed) .mp-submit{
-    position:sticky;bottom:0;z-index:2;
-    background:linear-gradient(180deg,rgba(26,15,46,0) 0%,rgba(15,10,31,.95) 28%,#0f0a1f 100%);
-    margin-top:8px;padding:10px 0 8px;
-    /* Bleed the gradient slightly past the panel's horizontal padding so
-       it visually anchors to the panel edges instead of leaving a gap. */
-    margin-left:-16px;margin-right:-16px;padding-left:16px;padding-right:16px
+    margin-top:6px;padding:0
   }
 }
 @media (max-width:480px){
