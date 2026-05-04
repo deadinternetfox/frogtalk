@@ -1425,6 +1425,17 @@ const Messages = (() => {
           pendingEl.removeAttribute('data-own');
           pendingEl.removeAttribute('data-nonce');
           pendingEl.id = `msg-${msg.id}`;
+          // The pending render may have already hoisted a share-card row
+          // (.msg-share-row with the loaded embed) ABOVE .msg-content. We
+          // are about to rebuild .msg-content's innerHTML which produces a
+          // fresh placeholder inside the text — without removing the old
+          // hoisted row first, _hydrateSpecialCards will hoist the new
+          // placeholder above the old row and we end up rendering the
+          // social embed TWICE (https://… post link in chat).
+          try {
+            const body = pendingEl.querySelector('.msg-body') || pendingEl;
+            body.querySelectorAll(':scope > .msg-share-row').forEach(r => r.remove());
+          } catch {}
           const contentEl = pendingEl.querySelector('.msg-content');
           if (contentEl) contentEl.innerHTML = _formatContent(msg.content || '');
           const timeEl = pendingEl.querySelector('.msg-time');
@@ -1522,6 +1533,13 @@ const Messages = (() => {
   function updateEdited(id, content, room) {
     const el = document.getElementById(`msg-${id}`);
     if (!el) return;
+    // Strip any previously hoisted share-card rows so editing a message
+    // that contains a /p/<id> link doesn't double up the embed (see
+    // pending-replace path for the same fix).
+    try {
+      const body = el.querySelector('.msg-body') || el;
+      body.querySelectorAll(':scope > .msg-share-row').forEach(r => r.remove());
+    } catch {}
     const contentEl = el.querySelector('.msg-content');
     if (contentEl) contentEl.innerHTML = _formatContent(content);
     const meta = el.querySelector('.msg-meta');

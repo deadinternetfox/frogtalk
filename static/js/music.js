@@ -1856,9 +1856,9 @@ const Music = (() => {
     _autoAdvanceLastAt = now;
 
     // Solo (FrogSocial) playback: ask Social for the next track in the
-    // music feed. If Social hasn't loaded its music tab yet or the
-    // recommender returns nothing, just stop — we can't fabricate
-    // a track from thin air.
+    // music feed. If Social hasn't loaded its music tab yet or its cache
+    // is exhausted, fall back to the public discover endpoint so the
+    // mini-player keeps the music going instead of dying silently.
     if (_soloMode) {
       try {
         const next = (window.Social && typeof Social.getNextMusicTrack === 'function')
@@ -1868,6 +1868,21 @@ const Music = (() => {
           // Tear down current solo track first so playSolo's
           // "already in a music channel" guard doesn't get confused.
           playSolo(next);
+          return;
+        }
+        // Async discover fallback. We don't await this branch with the
+        // outer function (which is sync) — fire-and-forget. Worst case,
+        // a small playback gap; best case, the next track lands.
+        if (window.Social && typeof Social.fetchDiscoverMusicTrack === 'function') {
+          Social.fetchDiscoverMusicTrack(cur.url).then(d => {
+            if (!d || !d.url || d.url === cur.url) return;
+            // Make sure the user hasn't manually started something else
+            // in the meantime.
+            const head = (_state && _state.queue && _state.queue[0]) || null;
+            if (!head || head.url !== cur.url) return;
+            try { UI.showToast('Auto-next: discover pick 🎵', 'info'); } catch {}
+            playSolo(d);
+          }).catch(() => {});
         }
       } catch {}
       return;

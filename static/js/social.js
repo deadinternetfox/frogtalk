@@ -365,6 +365,15 @@ const Social = (() => {
           const ok = _drawVideoPoster(video, poster);
           if (ok) {
             posterDrawn = true;
+            // Flag the tile so CSS can fade out the loading shimmer and
+            // fade in the corner play badge. Without this the grid
+            // tile looks broken (plain black + tiny grey ▶) while the
+            // browser is still decoding enough of the MP4 to draw a
+            // representative frame.
+            try {
+              const tile = host.closest('.social-grid-item') || host;
+              tile.classList.add('ft-poster-ready');
+            } catch {}
             // Grid tiles only ever needed one canvas frame. Release the
             // socket immediately so it doesn't sit there pinned for the
             // life of the page (the grid never auto-plays).
@@ -407,6 +416,15 @@ const Social = (() => {
             if (posterDrawn) return;
             allowEarlyDraw = true;
             drawPoster();
+            // If even the safety-net draw failed (codec/decode issue),
+            // give up the shimmer anyway so the tile doesn't pulse
+            // forever — the corner ▶ badge then signals "this is video".
+            if (!posterDrawn) {
+              try {
+                const tile = host.closest('.social-grid-item') || host;
+                tile.classList.add('ft-poster-ready');
+              } catch {}
+            }
           }, 2500);
         }
         video.addEventListener('loadedmetadata', () => {
@@ -575,6 +593,9 @@ const Social = (() => {
   function close() {
     const overlay = document.getElementById('social-overlay');
     if (overlay) overlay.classList.add('hidden');
+    // Drop the foreign-profile ghost nav button so reopening Social
+    // doesn't flash a stale "@them" tab from the previous session.
+    try { document.getElementById('social-nav-profile-ghost')?.remove(); } catch {}
     // Tear down all the long-lived observers / sockets so closing the
     // social overlay actually frees memory + connection slots.
     try { _socialVideoObserverInstance?.disconnect(); } catch {}
@@ -596,9 +617,74 @@ const Social = (() => {
 
   // ── navigation ──────────────────────────────────────────────────────────
   function renderNav() {
+    const isOwnProfile = !_profileUser
+      || !State.user?.nickname
+      || String(_profileUser).toLowerCase() === String(State.user.nickname).toLowerCase();
+    const viewingOther = (_currentTab === 'profile' && !isOwnProfile);
+
     document.querySelectorAll('.social-nav-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.tab === _currentTab);
+      let isActive = b.dataset.tab === _currentTab;
+      // Don't highlight the "My Profile" button when we're viewing
+      // someone else's profile — the ghost button below owns the
+      // highlight in that case so the nav reads "you are looking at @them".
+      if (viewingOther && b.dataset.tab === 'profile') isActive = false;
+      b.classList.toggle('active', isActive);
     });
+
+    _renderProfileGhostNav(viewingOther);
+  }
+
+  // Ephemeral nav button shown next to "My Profile" while viewing
+  // another user's profile. Removed automatically when:
+  //   • user switches to any other tab,
+  //   • user navigates back to their own profile,
+  //   • the social overlay is closed.
+  // Clicking the ghost is a no-op (we're already on it); the ✕ on
+  // the ghost button (or any other tab) closes the foreign profile by
+  // jumping back to the user's own profile.
+  function _renderProfileGhostNav(show) {
+    const nav = document.querySelector('.social-nav');
+    if (!nav) return;
+    let ghost = document.getElementById('social-nav-profile-ghost');
+    if (!show) {
+      if (ghost) ghost.remove();
+      return;
+    }
+    const nick = String(_profileUser || '').trim();
+    if (!nick) { if (ghost) ghost.remove(); return; }
+    if (!ghost) {
+      ghost = document.createElement('button');
+      ghost.id = 'social-nav-profile-ghost';
+      ghost.className = 'social-nav-btn social-nav-btn-ghost active';
+      // Insert immediately AFTER the "My Profile" button so the layout
+      // reads: Feed · Explore · Reels · Music · My Profile · @them · 🔔
+      const myBtn = nav.querySelector('[data-tab="profile"]');
+      if (myBtn && myBtn.nextSibling) nav.insertBefore(ghost, myBtn.nextSibling);
+      else nav.appendChild(ghost);
+    }
+    // Update label and bind handlers every time so the username stays in
+    // sync if the user clicks through to another profile from the
+    // currently viewed one.
+    const safe = nick.replace(/[^A-Za-z0-9_-]/g, '');
+    ghost.dataset.tab = '__ghost_profile__';
+    ghost.title = `Viewing @${safe} — click ✕ to return to your profile`;
+    ghost.innerHTML =
+      `<span style="display:inline-flex;align-items:center;gap:6px">` +
+        `<span style="opacity:.85">@</span>` +
+        `<span>${safe.replace(/[<>&"']/g, '')}</span>` +
+        `<span class="ghost-x" style="margin-left:4px;opacity:.7;font-weight:700" aria-label="Close foreign profile">✕</span>` +
+      `</span>`;
+    ghost.onclick = (ev) => {
+      const x = ev.target && ev.target.closest && ev.target.closest('.ghost-x');
+      if (x) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        // Jump back to own profile — switchTab() resets _profileUser.
+        switchTab('profile');
+        return;
+      }
+      // Clicking the body of the ghost is a no-op (we're already there).
+    };
   }
 
   function switchTab(tab) {
@@ -5013,6 +5099,65 @@ const Social = (() => {
     return null;
   }
 
+  // Async fallback used by the mini-player when the cached Music-tab feed
+  // is empty / exhausted: pull a page of public discover posts and pick
+  // a music track the user hasn't heard this session. Network-bound; the
+  // mini-player calls this only after the synchronous getNextMusicTrack
+  // returns null. Returns null on failure rather than throwing so the
+  // caller can fall back to "stop" cleanly.
+  async function fetchDiscoverMusicTrack(currentUrl) {
+    try {
+      _autoNextSeen = _autoNextSeen || new Set();
+      if (currentUrl) _autoNextSeen.add(String(currentUrl));
+      const isMusicMt = (mt) => {
+        const s = String(mt || '').toLowerCase();
+        if (s.startsWith('music/')) return true;
+        return false;
+      };
+      const isMusicUrl = (u) =>
+        /youtube\.com|youtu\.be|open\.spotify\.com|soundcloud\.com/i.test(String(u || ''));
+      // Try a couple of sort modes so a quiet "trending" window still
+      // produces *something* to play.
+      const sorts = ['trending', 'new'];
+      for (const sort of sorts) {
+        let res;
+        try {
+          res = await apiFetch(`/api/social/explore?limit=50&sort=${encodeURIComponent(sort)}&lite=1`);
+        } catch { continue; }
+        if (!res || !res.ok) continue;
+        let body = null;
+        try { body = await res.json(); } catch {}
+        const list = (body && Array.isArray(body.posts)) ? body.posts : [];
+        for (const p of list) {
+          const mt = String(p.media_type || '').toLowerCase();
+          const url = String(p.media_data || '').trim();
+          if (!url) continue;
+          if (!(isMusicMt(mt) || isMusicUrl(url))) continue;
+          if (_autoNextSeen.has(url)) continue;
+          // Don't bounce back to the very track that just finished even
+          // if the user hasn't otherwise heard it this session.
+          if (currentUrl && url === String(currentUrl)) continue;
+          const provider = mt.startsWith('music/')
+            ? mt.split('/')[1] || ''
+            : (isMusicUrl(url) ? '' : '');
+          const t = _parseMusicTrack(url, provider);
+          const title = String(p.track_title || '').trim()
+            || _prettyMusicFallbackTitle(url, t.provider || provider);
+          _autoNextSeen.add(url);
+          return {
+            url,
+            provider: t.provider || provider,
+            title,
+            sharer: p.nickname || p.author_nick || p.author || '',
+            thumbnail: t.thumb || '',
+            postId: p.id || null,
+          };
+        }
+      }
+    } catch {}
+    return null;
+  }
+
   // Switch to Social → Music tab and scroll the named post into view.
   // Used by the mini-player when the user taps the dock to "open source".
   function scrollToMusicPost(postId) {
@@ -7483,7 +7628,7 @@ const Social = (() => {
     openAddStory, closeAddStory, handleStoryMedia, openStoryCamera, submitStory, submitStoryFromTap, handleStoryShareTap, setStoryPrivacy, cycleStoryPrivacy,
     loadMusicTab, openMusicEmbed, promptMusicShare,
     playMusicInTab, toggleMusicCard, stopMusicInTab, _openNowPlaying,
-    getNextMusicTrack, scrollToMusicPost,
+    getNextMusicTrack, fetchDiscoverMusicTrack, scrollToMusicPost,
     _toggleNowPlaying, filterMusicByMood, filterMusicByMoodSelect,
     switchMusicScope, switchMusicSort,
     openMusicShareModal, closeMusicShareModal,

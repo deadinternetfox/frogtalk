@@ -4576,6 +4576,27 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .social-grid-item.is-video video{opacity:0}
 .social-grid-item.is-video.is-playing video{opacity:1}
 .social-grid-item.is-video.is-playing .ft-video-poster{opacity:0}
+/* Loading shimmer for profile-reel grid tiles before the first
+   frame is decoded into a poster. Without this the user sees a
+   plain black square + corner play badge for ~1–2 s while the
+   browser fetches enough of the MP4 to seek to 30%. */
+.social-grid-item.is-video:not(.ft-poster-ready)::before{
+  content:"";position:absolute;inset:0;z-index:0;
+  background:
+    linear-gradient(120deg,#161616 0%,#1f2a22 40%,#162018 60%,#161616 100%);
+  background-size:240% 100%;
+  animation:ft-grid-shimmer 1.4s linear infinite;
+  pointer-events:none;
+}
+@keyframes ft-grid-shimmer{
+  0%{background-position:120% 0}
+  100%{background-position:-120% 0}
+}
+/* Center play hint (small, subtle) only after poster is ready, so the
+   tile communicates "this is a playable video" without looking broken
+   while the preview is still loading. */
+.social-grid-item.is-video .social-grid-video-ico{opacity:0;transition:opacity .2s ease}
+.social-grid-item.is-video.ft-poster-ready .social-grid-video-ico{opacity:1}
 .ft-video-host video::-webkit-media-controls{display:none !important}
 .ft-video-host video::-webkit-media-controls-enclosure{display:none !important}
 .ft-video-host video::-webkit-media-controls-start-playback-button{display:none !important}
