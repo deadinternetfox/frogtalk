@@ -4270,11 +4270,41 @@ def get_wall_post_media(post_id: int) -> Optional[Dict]:
 
 
 def get_wall_post(post_id: int) -> Optional[Dict]:
-    """Get a single wall post."""
+    """Get a single wall post (full row including media_data)."""
+    # Use the materialized `wp.repost_count` column instead of a correlated
+    # subquery — counters are kept in sync by triggers (see _ensure_schema).
     with _conn() as con:
         row = con.execute("""
-            SELECT wp.*, u.nickname, u.avatar,
-                   (SELECT COUNT(*) FROM wall_reposts wr WHERE wr.post_id=wp.id) AS repost_count
+            SELECT wp.*, u.nickname, u.avatar
+            FROM wall_posts wp
+            JOIN users u ON wp.user_id = u.id
+            WHERE wp.id=?
+        """, (post_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def get_wall_post_meta(post_id: int) -> Optional[Dict]:
+    """Lean fetch for permission/privacy/notification gating that does NOT
+    pull the multi-MB `media_data` column.
+
+    The hot reaction/comment/repost POST handlers used to call
+    `get_wall_post`, which executes `SELECT wp.*` — that includes
+    `media_data`. With even a single 45 MB video post, every "like" by any
+    user pulled 45 MB through SQLite into Python on the event loop just to
+    read `user_id` and `privacy`. This helper returns everything the
+    handlers actually use and exposes a `has_media` flag for the rare case
+    a caller needs to know media exists without loading it.
+    """
+    with _conn() as con:
+        row = con.execute("""
+            SELECT wp.id, wp.user_id, wp.content, wp.media_type, wp.privacy,
+                   wp.share_enabled, wp.allow_comments, wp.created_at,
+                   wp.edited_at, wp.track_title, wp.track_room,
+                   COALESCE(wp.reaction_count, 0) AS reaction_count,
+                   COALESCE(wp.comment_count, 0)  AS comment_count,
+                   COALESCE(wp.repost_count, 0)   AS repost_count,
+                   (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
+                   u.nickname, u.avatar
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             WHERE wp.id=?
@@ -5013,13 +5043,19 @@ def _calculate_post_score(context: str = 'explore', post_alias: str = 'wp') -> s
 
     The same primitive signals are shared across Explore/Reels/Music, with only
     context-specific weights changing. Callers append their own DESC/tiebreaker.
+
+    PERFORMANCE: Uses the materialized counter columns on wall_posts
+    (reaction_count, repost_count, comment_count) instead of correlated
+    COUNT(*) subqueries. Previously every candidate row triggered 4
+    sub-SELECTs against wall_post_reactions/wall_reposts/wall_comments
+    BEFORE the LIMIT was applied, which made Explore/Reels ranking O(N*4)
+    on the whole public-post set. With materialized columns the ranking
+    expression collapses to plain arithmetic on already-loaded columns.
     """
     alias = str(post_alias or 'wp')
-    reactions = f"(SELECT COUNT(*) FROM wall_post_reactions WHERE post_id={alias}.id)"
-    likes = f"(SELECT COUNT(*) FROM wall_post_reactions WHERE post_id={alias}.id AND emoji='❤️')"
-    other_reactions = f"(SELECT COUNT(*) FROM wall_post_reactions WHERE post_id={alias}.id AND emoji!='❤️')"
-    reposts = f"(SELECT COUNT(*) FROM wall_reposts WHERE post_id={alias}.id)"
-    comments = f"(SELECT COUNT(*) FROM wall_comments WHERE post_id={alias}.id)"
+    reactions = f"COALESCE({alias}.reaction_count, 0)"
+    reposts = f"COALESCE({alias}.repost_count, 0)"
+    comments = f"COALESCE({alias}.comment_count, 0)"
     media_bonus = f"CASE WHEN {alias}.media_type IS NOT NULL AND {alias}.media_type != '' THEN 3 ELSE 0 END"
     recency = (
         f"CASE WHEN julianday('now') - julianday({alias}.created_at) < 1 THEN 10 "
@@ -5029,9 +5065,10 @@ def _calculate_post_score(context: str = 'explore', post_alias: str = 'wp') -> s
     if context == 'explore_top':
         return f"({reactions} + ({reposts} * 2))"
     if context == 'reels_top':
-        return likes
+        # Heart-vs-other split is not materialized; reaction_count is a fine proxy.
+        return reactions
     if context == 'reels_hot':
-        return f"(({likes} * 3) + {other_reactions} + ({reposts} * 2) + {comments} + {recency})"
+        return f"(({reactions} * 3) + ({reposts} * 2) + {comments} + {recency})"
     return f"(({reactions} * 2) + ({reposts} * 2) + {comments} + {media_bonus} + {recency})"
 
 
@@ -6038,8 +6075,41 @@ def list_build_manifests(platform: str | None = None) -> list[dict]:
 # Phase 5: Federation replication
 # ──────────────────────────────────────────────────────────────
 
+# Hard cap on a single outbox event payload. Anything above this is almost
+# certainly a media blob that will 413 on peers — and even if it didn't, every
+# read would thrash SQLite's page cache via overflow pages, slowing every other
+# query on the box. Peers can lazily fetch media via the per-post media URL.
+_FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES = 256 * 1024  # 256 KB
+
+
+def _strip_media_from_outbox_payload(payload: dict) -> dict:
+    """Drop heavy media_data fields. Leave a flag so peers know to refetch."""
+    if not isinstance(payload, dict):
+        return payload or {}
+    out = dict(payload)
+    if "media_data" in out and out.get("media_data"):
+        out["media_data"] = None
+        out["media_omitted"] = True
+    return out
+
+
 def insert_federation_outbox_event(event: dict) -> bool:
-    """Add event to federation outbox for delivery to peers."""
+    """Add event to federation outbox for delivery to peers.
+
+    Enforces a hard payload-size cap. If the serialized payload exceeds
+    ``_FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES`` we first try stripping
+    ``media_data`` and re-serializing; if still too large, we skip the
+    event entirely (return False) rather than enqueue an event that
+    will infinitely 413-loop and trash the page cache.
+    """
+    payload = event.get("payload") or {}
+    payload_json = json.dumps(payload)
+    if len(payload_json) > _FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES:
+        stripped = _strip_media_from_outbox_payload(payload)
+        payload_json = json.dumps(stripped)
+        if len(payload_json) > _FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES:
+            # Even with media stripped this event is too big — drop it.
+            return False
     try:
         with _conn() as con:
             con.execute(
@@ -6052,13 +6122,62 @@ def insert_federation_outbox_event(event: dict) -> bool:
                     event.get("event_id"),
                     "",  # Broadcast to all servers
                     event.get("event_type"),
-                    json.dumps(event.get("payload") or {}),
+                    payload_json,
                 ),
             )
             con.commit()
         return True
     except sqlite3.IntegrityError:
         return False
+
+
+def mark_outbox_events_failed(event_ids: list[str]) -> int:
+    """Bulk-mark a list of outbox events as ``failed`` so the push worker
+    stops retrying them. Returns the number of rows updated."""
+    ids = [str(e) for e in (event_ids or []) if e]
+    if not ids:
+        return 0
+    with _conn() as con:
+        placeholders = ",".join("?" for _ in ids)
+        cur = con.execute(
+            f"UPDATE federation_outbox_events SET status='failed' "
+            f"WHERE status='pending' AND event_id IN ({placeholders})",
+            ids,
+        )
+        con.commit()
+        return int(cur.rowcount or 0)
+
+
+def prune_federation_outbox(sent_max_age_days: int = 7,
+                            failed_max_age_days: int = 30) -> dict:
+    """Delete delivered/failed outbox events past their retention window.
+
+    Also marks any currently-pending events whose payload exceeds the
+    insert-time cap as ``failed`` (these were inserted before the cap
+    existed and would otherwise loop forever).
+    """
+    with _conn() as con:
+        cur1 = con.execute(
+            "DELETE FROM federation_outbox_events "
+            "WHERE status='sent' AND created_at < datetime('now', ?)",
+            (f"-{int(sent_max_age_days)} days",),
+        )
+        cur2 = con.execute(
+            "DELETE FROM federation_outbox_events "
+            "WHERE status='failed' AND created_at < datetime('now', ?)",
+            (f"-{int(failed_max_age_days)} days",),
+        )
+        cur3 = con.execute(
+            "UPDATE federation_outbox_events SET status='failed' "
+            "WHERE status='pending' AND LENGTH(payload_json) > ?",
+            (_FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES,),
+        )
+        con.commit()
+    return {
+        "sent_deleted": int(cur1.rowcount or 0),
+        "failed_deleted": int(cur2.rowcount or 0),
+        "oversized_failed": int(cur3.rowcount or 0),
+    }
 
 
 def list_federation_outbox_events(

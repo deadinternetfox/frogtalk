@@ -67,6 +67,17 @@ async def cleanup_task():
             except Exception:
                 _log.exception("story cleanup error")
             try:
+                # Trim sent / failed / oversized federation outbox rows so the
+                # push worker isn't dragged down by hundreds of MB of dead
+                # payload_json (those overflow pages would otherwise evict
+                # SQLite's page cache and slow every other query).
+                from database import prune_federation_outbox
+                pruned = await asyncio.to_thread(prune_federation_outbox)
+                if any(int(v or 0) for v in (pruned or {}).values()):
+                    _log.info("Federation outbox prune: %s", pruned)
+            except Exception:
+                _log.exception("federation outbox prune error")
+            try:
                 stale = await asyncio.to_thread(cleanup_inactive_public_rooms)
                 deleted_rooms = int((stale or {}).get("deleted") or 0)
                 if deleted_rooms > 0:

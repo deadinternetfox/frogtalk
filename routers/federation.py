@@ -1181,7 +1181,14 @@ async def federation_outbox_processor() -> int:
         "x-federation-token": fed_token,
     }
 
-    async def _push(base: str) -> bool:
+    async def _push(base: str) -> tuple[bool, bool]:
+        """Returns (delivered, payload_too_large).
+
+        ``payload_too_large`` lets the caller mark the batch as ``failed``
+        in the outbox so we stop infinitely retrying media-bloated events
+        that no peer will ever accept. (Page cache thrash from those
+        retries was the dominant cause of social slowness.)
+        """
         try:
             raw = await asyncio.to_thread(
                 _fetch_url_bytes,
@@ -1197,17 +1204,39 @@ async def federation_outbox_processor() -> int:
                 json.loads(raw.decode("utf-8", errors="replace") or "{}")
             except Exception:
                 pass
-            return True
+            return True, False
+        except httpx.HTTPStatusError as e:  # Tor path
+            status = getattr(e.response, "status_code", 0)
+            return False, status == 413
+        except urllib.error.HTTPError as e:  # clearnet path
+            return False, getattr(e, "code", 0) == 413
         except Exception:
-            return False
+            return False, False
 
     results = await asyncio.gather(*[_push(t) for t in targets])
-    if not any(results):
+    delivered_anywhere = any(ok for ok, _ in results)
+    too_large_everywhere = bool(results) and all(too_big for _, too_big in results)
+
+    event_ids = [e["event_id"] for e in envelopes]
+
+    if too_large_everywhere and not delivered_anywhere:
+        # Every peer rejected this batch as too large. Stop retrying it
+        # forever — mark the batch failed so it stops thrashing the DB.
+        try:
+            await asyncio.to_thread(db.mark_outbox_events_failed, event_ids)
+            _log.warning(
+                "Outbox batch (%d events) marked failed: all peers returned 413.",
+                len(event_ids),
+            )
+        except Exception:
+            _log.exception("mark_outbox_events_failed error")
+        return 0
+
+    if not delivered_anywhere:
         # Every peer is unreachable — leave events pending; outer loop's
         # idle_sleep throttles retries automatically.
         return 0
 
-    event_ids = [e["event_id"] for e in envelopes]
     try:
         await asyncio.to_thread(db.bulk_mark_outbox_events_sent, event_ids)
     except Exception:

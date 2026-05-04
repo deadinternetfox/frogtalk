@@ -414,109 +414,126 @@ async def get_post_media(
         auth = authorization.strip()
         if auth.lower().startswith("bearer "):
             session_token = auth[7:].strip()
-    current_user = db.get_user_by_token(session_token) if session_token else None
-    if not current_user:
+    if not session_token:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
-    row = db.get_wall_post_media(post_id)
-    if not row or not row.get("media_data"):
+    range_header = (request.headers.get("range") or "").strip()
+
+    # Run the entire heavy path (auth lookup → privacy gating → multi-MB
+    # SQLite read → base64 decode → range slicing) in a worker thread so
+    # the event loop stays free. Previously a single 45MB video being
+    # scrolled in Reels would freeze every other request on the box for
+    # hundreds of milliseconds while base64.b64decode chewed through it.
+    def _resolve_media():
+        current_user = db.get_user_by_token(session_token)
+        if not current_user:
+            return ("unauth", None)
+
+        row = db.get_wall_post_media(post_id)
+        if not row or not row.get("media_data"):
+            return ("notfound", None)
+        owner_id = int(row["user_id"])
+        viewer_id = int(current_user["id"])
+        privacy = (row.get("privacy") or "public").lower()
+        if owner_id != viewer_id:
+            if db.is_blocked_either_way(viewer_id, owner_id):
+                return ("notfound", None)
+            if privacy == "friends":
+                if not db.are_friends(viewer_id, owner_id):
+                    return ("forbidden", None)
+            elif privacy == "followers":
+                if not (db.are_friends(viewer_id, owner_id) or db.is_following(viewer_id, owner_id)):
+                    return ("forbidden", None)
+            elif privacy != "public":
+                return ("forbidden", None)
+
+        media_data = row["media_data"]
+        media_type = row.get("media_type") or "application/octet-stream"
+
+        if isinstance(media_data, str) and media_data.startswith("data:"):
+            try:
+                header, _, b64 = media_data.partition(",")
+                if ";base64" in header:
+                    raw = base64.b64decode(b64, validate=False)
+                    ct = header[5:].split(";", 1)[0] or media_type
+                    return ("bytes", {"raw": raw, "ct": ct})
+            except Exception:
+                _log.debug("post media decode failed pid=%s", post_id, exc_info=True)
+                return ("decode_error", None)
+
+        # Fallback: not a data URI — defer to redirect path on the event loop.
+        return ("redirect", {"target": str(media_data or "").strip()})
+
+    kind, payload = await run_in_threadpool(_resolve_media)
+    if kind == "unauth":
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    if kind == "notfound":
         return JSONResponse(status_code=404, content={"error": "Not found"})
-    owner_id = int(row["user_id"])
-    viewer_id = int(current_user["id"])
-    privacy = (row.get("privacy") or "public").lower()
-    if owner_id != viewer_id:
-        if db.is_blocked_either_way(viewer_id, owner_id):
-            return JSONResponse(status_code=404, content={"error": "Not found"})
-        if privacy == "friends":
-            if not db.are_friends(viewer_id, owner_id):
-                return JSONResponse(status_code=403, content={"error": "Forbidden"})
-        elif privacy == "followers":
-            if not (db.are_friends(viewer_id, owner_id) or db.is_following(viewer_id, owner_id)):
-                return JSONResponse(status_code=403, content={"error": "Forbidden"})
-        elif privacy != "public":
-            return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    if kind == "forbidden":
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    if kind == "decode_error":
+        return JSONResponse(status_code=500, content={"error": "Decode failed"})
 
-    media_data = row["media_data"]
-    media_type = row.get("media_type") or "application/octet-stream"
+    if kind == "bytes":
+        raw = payload["raw"]
+        ct = payload["ct"]
+        total = len(raw)
+        base_headers = {
+            "Cache-Control": "private, max-age=86400, immutable",
+            "Accept-Ranges": "bytes",
+            "X-Content-Type-Options": "nosniff",
+            "Vary": "X-Session-Token, Authorization",
+        }
+        if range_header.lower().startswith("bytes=") and total > 0:
+            try:
+                spec = range_header[6:].split(",", 1)[0].strip()
+                start_s, end_s = spec.split("-", 1)
+                if start_s == "":
+                    suffix = int(end_s)
+                    if suffix <= 0:
+                        raise ValueError("invalid suffix range")
+                    start = max(total - suffix, 0)
+                    end = total - 1
+                else:
+                    start = int(start_s)
+                    end = int(end_s) if end_s else (total - 1)
 
-    # If stored as a data URI, decode to raw bytes so the browser can
-    # cache + range-request properly. Anything else (e.g. a /api/... URL
-    # stored on the row) is returned as a redirect to that location.
-    if isinstance(media_data, str) and media_data.startswith("data:"):
-        try:
-            header, _, b64 = media_data.partition(",")
-            # header looks like "data:image/jpeg;base64"
-            if ";base64" in header:
-                raw = base64.b64decode(b64, validate=False)
-                ct = header[5:].split(";", 1)[0] or media_type
-                total = len(raw)
-                base_headers = {
-                    "Cache-Control": "private, max-age=86400, immutable",
-                    "Accept-Ranges": "bytes",
-                    "X-Content-Type-Options": "nosniff",
-                    "Vary": "X-Session-Token, Authorization",
-                }
-                range_header = (request.headers.get("range") or "").strip()
-                if range_header.lower().startswith("bytes=") and total > 0:
-                    try:
-                        spec = range_header[6:].split(",", 1)[0].strip()
-                        start_s, end_s = spec.split("-", 1)
-                        if start_s == "":
-                            # Suffix range: bytes=-N
-                            suffix = int(end_s)
-                            if suffix <= 0:
-                                raise ValueError("invalid suffix range")
-                            start = max(total - suffix, 0)
-                            end = total - 1
-                        else:
-                            start = int(start_s)
-                            end = int(end_s) if end_s else (total - 1)
+                if start < 0 or end < start:
+                    raise ValueError("invalid range bounds")
+                if start >= total:
+                    return Response(
+                        status_code=416,
+                        headers={
+                            **base_headers,
+                            "Content-Range": f"bytes */{total}",
+                            "Content-Length": "0",
+                        },
+                    )
 
-                        if start < 0 or end < start:
-                            raise ValueError("invalid range bounds")
-                        if start >= total:
-                            return Response(
-                                status_code=416,
-                                headers={
-                                    **base_headers,
-                                    "Content-Range": f"bytes */{total}",
-                                    "Content-Length": "0",
-                                },
-                            )
-
-                        end = min(end, total - 1)
-                        chunk = raw[start:end + 1]
-                        return Response(
-                            content=chunk,
-                            status_code=206,
-                            media_type=ct,
-                            headers={
-                                **base_headers,
-                                "Content-Range": f"bytes {start}-{end}/{total}",
-                                "Content-Length": str(len(chunk)),
-                            },
-                        )
-                    except Exception:
-                        # Malformed Range header; serve full content.
-                        pass
+                end = min(end, total - 1)
+                chunk = raw[start:end + 1]
                 return Response(
-                    content=raw,
+                    content=chunk,
+                    status_code=206,
                     media_type=ct,
-                    headers={**base_headers, "Content-Length": str(total)},
+                    headers={
+                        **base_headers,
+                        "Content-Range": f"bytes {start}-{end}/{total}",
+                        "Content-Length": str(len(chunk)),
+                    },
                 )
-        except Exception:
-            _log.debug("post media decode failed pid=%s", post_id, exc_info=True)
-            return JSONResponse(status_code=500, content={"error": "Decode failed"})
+            except Exception:
+                pass
+        return Response(
+            content=raw,
+            media_type=ct,
+            headers={**base_headers, "Content-Length": str(total)},
+        )
 
-    # Fallback: media_data isn't a base64 data URI.
-    # Return an HTTP redirect so <img>/<video src="/api/social/posts/{id}/media">
-    # still resolves to actual media bytes instead of JSON.
-    target = str(media_data or "").strip()
+    # Fallback redirect path.
+    target = (payload or {}).get("target") or ""
     if not target:
         return JSONResponse(status_code=404, content={"error": "Not found"})
-
-    # Prevent unsafe redirect schemes. Allow same-origin absolute paths,
-    # and external http(s) links for legacy media URLs.
     if target.startswith("/"):
         safe_target = target
     else:

@@ -209,7 +209,8 @@ async def get_single_wall_post(post_id: int, current_user: dict = Depends(get_cu
         return JSONResponse(status_code=403, content={"error": "Not allowed to view this post"})
     post["reactions"] = db.get_post_reactions(post_id)
     post["i_reposted"] = 1 if db.has_wall_reposted(post_id, viewer_id) else 0
-    post["repost_count"] = db.get_wall_repost_count(post_id)
+    # repost_count is already populated by get_wall_post via the
+    # materialized counter column on wall_posts.
     return post
 
 
@@ -326,10 +327,12 @@ async def delete_wall_post_media(post_id: int, current_user: dict = Depends(get_
     For media-only posts, require deleting the entire post instead so we don't
     leave an empty post shell behind.
     """
-    post = db.get_wall_post(post_id)
+    # Use the lean meta fetch (no multi-MB media_data) — we only need to
+    # check ownership + the has_media flag.
+    post = db.get_wall_post_meta(post_id)
     if not post or int(post.get("user_id") or 0) != int(current_user["id"]):
         return JSONResponse(status_code=404, content={"error": "Post not found or not yours"})
-    if not post.get("media_data"):
+    if not post.get("has_media"):
         return JSONResponse(status_code=400, content={"error": "Post has no media"})
 
     has_text = bool(str(post.get("content") or "").strip())
@@ -358,7 +361,9 @@ async def add_post_reaction(request: Request, post_id: int, body: AddReactionReq
     if body.emoji not in ALLOWED_WALL_REACTION_EMOJIS:
         return JSONResponse(status_code=400, content={"error": "Unsupported reaction"})
     
-    post = db.get_wall_post(post_id)
+    # Lean meta fetch — pulling the full row (with media_data) used to
+    # drag a 45 MB video blob through the event loop on every like.
+    post = db.get_wall_post_meta(post_id)
     if not post:
         return JSONResponse(status_code=404, content={"error": "Post not found"})
     if post.get("user_id") and db.is_blocked_either_way(current_user["id"], post["user_id"]):
@@ -427,7 +432,7 @@ async def add_post_reaction(request: Request, post_id: int, body: AddReactionReq
 @limiter.limit("600/hour")
 async def get_post_reactions_detail(request: Request, post_id: int, current_user: dict = Depends(get_current_user)):
     """Get per-user reaction rows for the reaction detail modal."""
-    post = db.get_wall_post(post_id)
+    post = db.get_wall_post_meta(post_id)
     if not post:
         return JSONResponse(status_code=404, content={"error": "Post not found"})
     if post.get("user_id") and db.is_blocked_either_way(current_user["id"], post["user_id"]):
@@ -460,7 +465,7 @@ async def toggle_post_repost(
     Repost is only allowed for posts that are share-enabled and visible to the
     current viewer under existing privacy rules.
     """
-    post = db.get_wall_post(post_id)
+    post = db.get_wall_post_meta(post_id)
     if not post:
         return JSONResponse(status_code=404, content={"error": "Post not found"})
 
@@ -545,7 +550,7 @@ async def toggle_post_repost(
 async def get_post_comments(post_id: int, limit: int = Query(50, le=100),
                             current_user: dict = Depends(get_current_user)):
     """Get comments for a post."""
-    post = db.get_wall_post(post_id)
+    post = db.get_wall_post_meta(post_id)
     if not post:
         return JSONResponse(status_code=404, content={"error": "Post not found"})
 
@@ -564,7 +569,7 @@ async def add_post_comment(request: Request, post_id: int, body: AddCommentReque
         return JSONResponse(status_code=400, content={"error": "Comment too long (max 1000 chars)"})
 
     # Block guard: author blocked commenter (or vice versa) => hide post
-    post = db.get_wall_post(post_id)
+    post = db.get_wall_post_meta(post_id)
     if not post:
         return JSONResponse(status_code=404, content={"error": "Post not found"})
     if post.get("user_id") and db.is_blocked_either_way(current_user["id"], post["user_id"]):
@@ -651,7 +656,7 @@ async def vote_wall_comment(
     """
     if body.value not in (-1, 0, 1):
         return JSONResponse(status_code=400, content={"error": "Invalid vote value"})
-    post = db.get_wall_post(post_id)
+    post = db.get_wall_post_meta(post_id)
     if not post:
         return JSONResponse(status_code=404, content={"error": "Post not found"})
     author_id = post.get("user_id")

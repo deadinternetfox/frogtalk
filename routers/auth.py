@@ -511,7 +511,12 @@ async def register(
 @router.post("/login")
 @limiter.limit("20/hour")
 async def login(request: Request, body: LoginRequest):
-    user = db.verify_user(body.nickname, body.password)
+    # bcrypt.checkpw is CPU-bound (50–300 ms). Running it directly inside an
+    # async route blocks the single uvicorn event loop for that whole window,
+    # which is what made the very first /api/auth/me + /api/auth/login feel
+    # like the server was "hanging" right after page load. Push it into a
+    # worker thread so other requests keep flowing while bcrypt runs.
+    user = await asyncio.to_thread(db.verify_user, body.nickname, body.password)
     if not user:
         # Optional federated bootstrap: if credentials are valid on a known
         # peer server, create the local account/profile so server switches feel
