@@ -691,7 +691,7 @@ async def poll_loop():
     """Long-poll Telegram for updates."""
     global _offset, _running
     _running = True
-    print("[Telegram Bridge] poll loop active — waiting for /claim commands and messages.")
+    log.info("poll loop active — waiting for /claim commands and messages.")
 
     # allowed_updates must explicitly include "my_chat_member" to receive
     # promotion-to-admin / removal events. Telegram omits these by default.
@@ -707,10 +707,10 @@ async def poll_loop():
                 _offset = u["update_id"] + 1
                 try:
                     await process_update(u)
-                except Exception as e:
-                    print(f"[Telegram Bridge] process_update error: {e}")
+                except Exception:
+                    log.exception("process_update error")
         except Exception as e:
-            print(f"[Telegram Bridge] poll error (retrying in 5s): {type(e).__name__}: {e!r}")
+            log.warning("poll error (retrying in 5s): %s: %r", type(e).__name__, e)
             await asyncio.sleep(5)
 
 
@@ -745,9 +745,7 @@ async def start_telegram_bridge():
     global TELEGRAM_TOKEN, _bot_id, _bot_privacy_on
     TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not TELEGRAM_TOKEN:
-        # Visible on the uvicorn console even without logging.basicConfig —
-        # the previous log.info() was hidden under FastAPI's default config.
-        print("[Telegram Bridge] TELEGRAM_BOT_TOKEN not set — /claim CODE disabled.")
+        log.warning("TELEGRAM_BOT_TOKEN not set — /claim CODE disabled.")
         return
 
     load_bridges()
@@ -755,7 +753,7 @@ async def start_telegram_bridge():
     # Verify bot — failure here means a wrong/revoked token, make it loud.
     me = await tg_request("getMe")
     if not me.get("ok"):
-        print(f"[Telegram Bridge] getMe failed: {me} — bridge NOT started.")
+        log.error("getMe failed: %s — bridge NOT started.", me)
         return
     result = me["result"]
     uname = result.get("username", "")
@@ -764,10 +762,9 @@ async def start_telegram_bridge():
     # sees everything). We only need to nag users to promote the bot to
     # admin when this flag is False.
     _bot_privacy_on = not bool(result.get("can_read_all_group_messages"))
-    print(
-        f"[Telegram Bridge] started — polling as @{uname} (id={_bot_id}), "
-        f"privacy_mode={'on' if _bot_privacy_on else 'off'}, "
-        f"{len(_bridges)} linked chat(s)."
+    log.info(
+        "started — polling as @%s (id=%d), privacy_mode=%s, %d linked chat(s).",
+        uname, _bot_id, "on" if _bot_privacy_on else "off", len(_bridges),
     )
     if uname and not os.environ.get("TELEGRAM_BOT_USERNAME"):
         os.environ["TELEGRAM_BOT_USERNAME"] = uname

@@ -9,15 +9,14 @@ from fastapi import APIRouter, Depends, Request, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
 from ws_manager import manager
 
 _log = logging.getLogger(__name__)
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/friends", tags=["friends"])
 users_router = APIRouter(prefix="/users", tags=["users_ext"])
 
@@ -107,7 +106,8 @@ def _emit_profile_update(user_id: int) -> None:
 # ── Friends ──────────────────────────────────────────────────────────────────
 
 @users_router.get("/search")
-async def search_users(q: str = "", current_user: dict = Depends(get_current_user)):
+@limiter.limit("120/hour")
+async def search_users(request: Request, q: str = "", current_user: dict = Depends(get_current_user)):
     if not q or len(q) < 1:
         return {"users": []}
     results = db.search_users(q, limit=20, requester_id=current_user["id"])

@@ -8,15 +8,14 @@ from fastapi import APIRouter, Request, Depends, Path, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
 from ws_manager import manager
 
 router = APIRouter(prefix="/messages", tags=["messages"])
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 _log = logging.getLogger(__name__)
 
 MAX_MEDIA_BYTES = 20 * 1024 * 1024  # 20 MB
@@ -338,7 +337,9 @@ async def mark_viewed(msg_id: int, current_user: dict = Depends(get_current_user
 
 
 @router.get("/search/global")
+@limiter.limit("120/hour")
 async def search_all(
+    request: Request,
     q: str = Query(..., min_length=1, max_length=100),
     limit: int = Query(50, le=100),
     current_user: dict = Depends(get_current_user),
@@ -351,7 +352,9 @@ async def search_all(
 
 
 @router.get("/{room_name}/search")
+@limiter.limit("240/hour")
 async def search_messages(
+    request: Request,
     room_name: str,
     q: str = Query(..., min_length=1, max_length=100),
     limit: int = Query(50, le=100),

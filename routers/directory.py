@@ -3,14 +3,13 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from typing import Optional, List
 import json
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
 
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/directory", tags=["directory"])
 
 
@@ -44,7 +43,9 @@ async def browse_public_channels(
 
 
 @router.get("/channels/search")
+@limiter.limit("120/hour")
 async def search_public_channels(
+    request: Request,
     q: str = Query(..., min_length=1),
     limit: int = Query(20, le=50)
 ):
@@ -106,7 +107,9 @@ async def get_suggested_channels(current_user: dict = Depends(get_current_user))
 
 
 @router.get("/users/search")
+@limiter.limit("120/hour")
 async def search_users_directory(
+    request: Request,
     q: str = Query(..., min_length=1),
     limit: int = Query(20, le=50),
     current_user: dict = Depends(get_current_user)

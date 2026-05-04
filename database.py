@@ -1565,6 +1565,64 @@ def _migrate():
         if fed_srv_cols and "transport_preference" not in fed_srv_cols:
             con.execute("ALTER TABLE federation_servers ADD COLUMN transport_preference TEXT DEFAULT 'auto'")
 
+        # ── Denormalized engagement counters on wall_posts ──
+        # The /feed, /explore and /reels endpoints used to evaluate three
+        # correlated subqueries per row (reactions/comments/reposts COUNT(*))
+        # × ~120 candidate rows = up to 360 sub-selects per page. Materializing
+        # the counts on wall_posts and maintaining them via triggers turns each
+        # row into a single column read.
+        wall_cols = {r["name"] for r in con.execute("PRAGMA table_info(wall_posts)").fetchall()}
+        _newly_added_counters: list[str] = []
+        for _col in ("reaction_count", "comment_count", "repost_count"):
+            if _col not in wall_cols:
+                con.execute(f"ALTER TABLE wall_posts ADD COLUMN {_col} INTEGER DEFAULT 0")
+                _newly_added_counters.append(_col)
+
+        # Backfill once for any newly-added column (idempotent — runs only on
+        # the first server start that introduced the column).
+        if "reaction_count" in _newly_added_counters:
+            con.execute(
+                "UPDATE wall_posts SET reaction_count = COALESCE(("
+                "SELECT COUNT(*) FROM wall_post_reactions WHERE post_id = wall_posts.id), 0)"
+            )
+        if "comment_count" in _newly_added_counters:
+            con.execute(
+                "UPDATE wall_posts SET comment_count = COALESCE(("
+                "SELECT COUNT(*) FROM wall_comments WHERE post_id = wall_posts.id), 0)"
+            )
+        if "repost_count" in _newly_added_counters:
+            con.execute(
+                "UPDATE wall_posts SET repost_count = COALESCE(("
+                "SELECT COUNT(*) FROM wall_reposts WHERE post_id = wall_posts.id), 0)"
+            )
+
+        # Triggers keep the counters in sync within the same transaction as
+        # the INSERT/DELETE — race-free, no application-level coupling.
+        for _trig in (
+            "CREATE TRIGGER IF NOT EXISTS tr_wall_post_reactions_ai "
+            "AFTER INSERT ON wall_post_reactions BEGIN "
+            "UPDATE wall_posts SET reaction_count = reaction_count + 1 WHERE id = NEW.post_id; END",
+            "CREATE TRIGGER IF NOT EXISTS tr_wall_post_reactions_ad "
+            "AFTER DELETE ON wall_post_reactions BEGIN "
+            "UPDATE wall_posts SET reaction_count = MAX(0, reaction_count - 1) WHERE id = OLD.post_id; END",
+            "CREATE TRIGGER IF NOT EXISTS tr_wall_comments_ai "
+            "AFTER INSERT ON wall_comments BEGIN "
+            "UPDATE wall_posts SET comment_count = comment_count + 1 WHERE id = NEW.post_id; END",
+            "CREATE TRIGGER IF NOT EXISTS tr_wall_comments_ad "
+            "AFTER DELETE ON wall_comments BEGIN "
+            "UPDATE wall_posts SET comment_count = MAX(0, comment_count - 1) WHERE id = OLD.post_id; END",
+            "CREATE TRIGGER IF NOT EXISTS tr_wall_reposts_ai "
+            "AFTER INSERT ON wall_reposts BEGIN "
+            "UPDATE wall_posts SET repost_count = repost_count + 1 WHERE id = NEW.post_id; END",
+            "CREATE TRIGGER IF NOT EXISTS tr_wall_reposts_ad "
+            "AFTER DELETE ON wall_reposts BEGIN "
+            "UPDATE wall_posts SET repost_count = MAX(0, repost_count - 1) WHERE id = OLD.post_id; END",
+        ):
+            try:
+                con.execute(_trig)
+            except Exception:
+                pass
+
         # ── Performance indexes for social/wall/stories/friends hot paths ──
         for _idx in (
             "CREATE INDEX IF NOT EXISTS idx_wall_posts_user_created ON wall_posts(user_id, created_at DESC)",
@@ -1573,6 +1631,11 @@ def _migrate():
             "CREATE INDEX IF NOT EXISTS idx_wall_comments_post ON wall_comments(post_id, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_wall_reposts_post ON wall_reposts(post_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_wall_reposts_user ON wall_reposts(user_id, created_at DESC)",
+            # Composite index optimizes the per-row EXISTS check used to
+            # populate `i_reposted` in feed/explore/reels queries.
+            "CREATE INDEX IF NOT EXISTS idx_wall_reposts_post_user ON wall_reposts(post_id, user_id)",
+            # Reaction lookups by reactor (reels-friends scope EXISTS check).
+            "CREATE INDEX IF NOT EXISTS idx_wall_post_reactions_user_post ON wall_post_reactions(user_id, post_id)",
             "CREATE INDEX IF NOT EXISTS idx_stories_user_expires ON stories(user_id, expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_stories_expires ON stories(expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_followers_follower ON followers(follower_id, following_id)",
@@ -4144,9 +4207,9 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
-                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
-                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count,
-                   (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) as repost_count,
+                   wp.reaction_count as reaction_count,
+                   wp.comment_count as comment_count,
+                   wp.repost_count as repost_count,
                    CASE WHEN ? > 0 THEN EXISTS(
                        SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?
                    ) ELSE 0 END AS i_reposted
@@ -4217,9 +4280,9 @@ def get_user_reposts(user_id: int, viewer_id: int, limit: int = 30,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
-                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
-                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count,
-                   (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) as repost_count,
+                   wp.reaction_count as reaction_count,
+                   wp.comment_count as comment_count,
+                   wp.repost_count as repost_count,
                    CASE WHEN ? > 0 THEN EXISTS(
                        SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?
                    ) ELSE 0 END AS i_reposted
@@ -4456,20 +4519,40 @@ def get_post_reactions_bulk(post_ids: List[int]) -> Dict[int, List[Dict]]:
         return {}
     out: Dict[int, List[Dict]] = {pid: [] for pid in post_ids}
     placeholders = ",".join("?" for _ in post_ids)
+    # Cap users per (post,emoji) bucket so a viral post with thousands of
+    # reactions can't return a 100KB GROUP_CONCAT string. The frontend only
+    # uses the first ~10 names for the tooltip preview anyway.
+    USERS_PER_EMOJI_CAP = 32
     with _conn() as con:
         rows = con.execute(f"""
-            SELECT wpr.post_id AS post_id, wpr.emoji AS emoji,
-                   COUNT(*) AS count,
-                   GROUP_CONCAT(u.nickname) AS users
-            FROM wall_post_reactions wpr
-            JOIN users u ON wpr.user_id = u.id
-            WHERE wpr.post_id IN ({placeholders})
-            GROUP BY wpr.post_id, wpr.emoji
+            SELECT post_id, emoji, GROUP_CONCAT(nickname) AS users
+            FROM (
+                SELECT wpr.post_id AS post_id, wpr.emoji AS emoji,
+                       u.nickname AS nickname,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY wpr.post_id, wpr.emoji
+                           ORDER BY wpr.created_at DESC
+                       ) AS rn
+                FROM wall_post_reactions wpr
+                JOIN users u ON wpr.user_id = u.id
+                WHERE wpr.post_id IN ({placeholders})
+            )
+            WHERE rn <= ?
+            GROUP BY post_id, emoji
+        """, list(post_ids) + [USERS_PER_EMOJI_CAP]).fetchall()
+        # Get true totals so the count stays accurate even when names are capped.
+        total_rows = con.execute(f"""
+            SELECT post_id, emoji, COUNT(*) AS total
+            FROM wall_post_reactions
+            WHERE post_id IN ({placeholders})
+            GROUP BY post_id, emoji
         """, list(post_ids)).fetchall()
+    totals = {(int(r["post_id"]), r["emoji"]): int(r["total"]) for r in total_rows}
     for r in rows:
+        key = (int(r["post_id"]), r["emoji"])
         out.setdefault(r["post_id"], []).append({
             "emoji": r["emoji"],
-            "count": r["count"],
+            "count": totals.get(key, 0),
             "users": r["users"],
         })
     return out
@@ -4934,9 +5017,9 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
-                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) AS reaction_count,
-                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) AS comment_count,
-                   (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) AS repost_count,
+                   wp.reaction_count AS reaction_count,
+                   wp.comment_count AS comment_count,
+                   wp.repost_count AS repost_count,
                    EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
                    'post' AS feed_kind,
                    wp.created_at AS feed_sort_at,
@@ -4965,9 +5048,9 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
-                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) AS reaction_count,
-                   (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) AS comment_count,
-                   (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) AS repost_count,
+                   wp.reaction_count AS reaction_count,
+                   wp.comment_count AS comment_count,
+                   wp.repost_count AS repost_count,
                    EXISTS(SELECT 1 FROM wall_reposts wr2 WHERE wr2.post_id=wp.id AND wr2.user_id=?) AS i_reposted,
                    'repost' AS feed_kind,
                    wr.created_at AS feed_sort_at,
@@ -5070,9 +5153,9 @@ def get_explore_posts(viewer_id: int, limit: int = 30, offset: int = 0,
                    wp.track_title, wp.track_room, wp.track_mood,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar,
-                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) as reaction_count,
-                     (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) as comment_count,
-                     (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) as repost_count,
+                   wp.reaction_count as reaction_count,
+                     wp.comment_count as comment_count,
+                     wp.repost_count as repost_count,
                      EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
@@ -6187,60 +6270,54 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
             order = f"{_calculate_post_score('reels_hot')} DESC, wp.created_at DESC"
 
         if scope == "friends":
+            # Pre-fetch the viewer's accepted-friend ID set once so the SQL
+            # below doesn't re-evaluate the same `(SELECT CASE WHEN f.user_id=?
+            # THEN f.friend_id ELSE f.user_id END FROM friends f ...)` subquery
+            # twelve times. Empty set → trivially empty result.
+            friend_ids = [
+                int(r[0]) for r in con.execute(
+                    "SELECT CASE WHEN user_id=? THEN friend_id ELSE user_id END "
+                    "FROM friends WHERE (user_id=? OR friend_id=?) AND status='accepted'",
+                    (viewer_id, viewer_id, viewer_id),
+                ).fetchall()
+            ]
+            if not friend_ids:
+                return []
+            # Safe inline literal: ints only, validated above.
+            fids_csv = ",".join(str(i) for i in friend_ids)
+            in_friends = f"IN ({fids_csv})"
             rows = con.execute(f"""
                   SELECT DISTINCT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
                       wp.privacy, wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
                        wp.track_title, wp.track_room, wp.track_mood,
                        1 AS has_media,
                        u.nickname, u.avatar,
-                       (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) AS reaction_count,
+                       wp.reaction_count AS reaction_count,
                        (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji='❤️') AS like_count,
-                       (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) AS comment_count,
-                       (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) AS repost_count,
+                       wp.comment_count AS comment_count,
+                       wp.repost_count AS repost_count,
                        EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
                        -- source info: who in your friend list triggered this reel
                        (SELECT u2.nickname FROM users u2 WHERE u2.id = (
                            SELECT CASE
-                               WHEN wp.user_id IN (
-                                   SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                                   FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                               ) THEN wp.user_id
+                               WHEN wp.user_id {in_friends} THEN wp.user_id
                                WHEN EXISTS(SELECT 1 FROM wall_reposts wr2
-                                   WHERE wr2.post_id=wp.id AND wr2.user_id IN (
-                                       SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                                       FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                                   )) THEN (SELECT wr2.user_id FROM wall_reposts wr2
-                                       WHERE wr2.post_id=wp.id AND wr2.user_id IN (
-                                           SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                                           FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                                       ) LIMIT 1)
+                                   WHERE wr2.post_id=wp.id AND wr2.user_id {in_friends})
+                                   THEN (SELECT wr2.user_id FROM wall_reposts wr2
+                                       WHERE wr2.post_id=wp.id AND wr2.user_id {in_friends} LIMIT 1)
                                ELSE (SELECT wpr2.user_id FROM wall_post_reactions wpr2
-                                   WHERE wpr2.post_id=wp.id AND wpr2.user_id IN (
-                                       SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                                       FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                                   ) LIMIT 1)
+                                   WHERE wpr2.post_id=wp.id AND wpr2.user_id {in_friends} LIMIT 1)
                            END
                        )) AS friend_actor_nick,
                        (SELECT u3.avatar FROM users u3 WHERE u3.id = (
                            SELECT CASE
-                               WHEN wp.user_id IN (
-                                   SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                                   FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                               ) THEN wp.user_id
+                               WHEN wp.user_id {in_friends} THEN wp.user_id
                                WHEN EXISTS(SELECT 1 FROM wall_reposts wr3
-                                   WHERE wr3.post_id=wp.id AND wr3.user_id IN (
-                                       SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                                       FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                                   )) THEN (SELECT wr3.user_id FROM wall_reposts wr3
-                                       WHERE wr3.post_id=wp.id AND wr3.user_id IN (
-                                           SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                                           FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                                       ) LIMIT 1)
+                                   WHERE wr3.post_id=wp.id AND wr3.user_id {in_friends})
+                                   THEN (SELECT wr3.user_id FROM wall_reposts wr3
+                                       WHERE wr3.post_id=wp.id AND wr3.user_id {in_friends} LIMIT 1)
                                ELSE (SELECT wpr3.user_id FROM wall_post_reactions wpr3
-                                   WHERE wpr3.post_id=wp.id AND wpr3.user_id IN (
-                                       SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                                       FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                                   ) LIMIT 1)
+                                   WHERE wpr3.post_id=wp.id AND wpr3.user_id {in_friends} LIMIT 1)
                            END
                        )) AS friend_actor_avatar
                 FROM wall_posts wp
@@ -6282,37 +6359,18 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                   )
                   AND (
                       -- friend posted it
-                      wp.user_id IN (
-                          SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                          FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                      )
+                      wp.user_id {in_friends}
                       OR
                       -- friend reposted it
-                      EXISTS (SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id IN (
-                          SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                          FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                      ))
+                      EXISTS (SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id {in_friends})
                       OR
                       -- friend reacted/liked it
-                      EXISTS (SELECT 1 FROM wall_post_reactions wpr WHERE wpr.post_id=wp.id AND wpr.user_id IN (
-                          SELECT CASE WHEN f.user_id=? THEN f.friend_id ELSE f.user_id END
-                          FROM friends f WHERE (f.user_id=? OR f.friend_id=?) AND f.status='accepted'
-                      ))
+                      EXISTS (SELECT 1 FROM wall_post_reactions wpr WHERE wpr.post_id=wp.id AND wpr.user_id {in_friends})
                   )
                 ORDER BY {order}
                 LIMIT ? OFFSET ?
             """, (
                 viewer_id,
-                # friend_actor_nick subquery
-                viewer_id, viewer_id, viewer_id,
-                viewer_id, viewer_id, viewer_id,
-                viewer_id, viewer_id, viewer_id,
-                viewer_id, viewer_id, viewer_id,
-                # friend_actor_avatar subquery
-                viewer_id, viewer_id, viewer_id,
-                viewer_id, viewer_id, viewer_id,
-                viewer_id, viewer_id, viewer_id,
-                viewer_id, viewer_id, viewer_id,
                 # block filters
                 viewer_id, viewer_id,
                 # visibility rules for viewer
@@ -6320,10 +6378,6 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                 viewer_id, viewer_id,
                 viewer_id, viewer_id,
                 viewer_id,
-                # AND clause friend checks
-                viewer_id, viewer_id, viewer_id,
-                viewer_id, viewer_id, viewer_id,
-                viewer_id, viewer_id, viewer_id,
                 limit, offset,
             )).fetchall()
         else:  # all public
@@ -6333,10 +6387,10 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                        wp.track_title, wp.track_room, wp.track_mood,
                        1 AS has_media,
                        u.nickname, u.avatar,
-                       (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id) AS reaction_count,
+                       wp.reaction_count AS reaction_count,
                        (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji='❤️') AS like_count,
-                       (SELECT COUNT(*) FROM wall_comments WHERE post_id=wp.id) AS comment_count,
-                       (SELECT COUNT(*) FROM wall_reposts WHERE post_id=wp.id) AS repost_count,
+                       wp.comment_count AS comment_count,
+                       wp.repost_count AS repost_count,
                        EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
                        NULL AS friend_actor_nick,
                        NULL AS friend_actor_avatar

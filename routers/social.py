@@ -6,18 +6,18 @@ import uuid
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Query, Request, UploadFile, File, Form, Header
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
 from ws_manager import manager
 
 _log = logging.getLogger(__name__)
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/social", tags=["social"])
 
 
@@ -275,8 +275,10 @@ async def get_feed(
     to KBs and lets `loading="lazy"` only request what scrolls into view.
     """
     use_lite = bool(lite)
-    posts = db.get_feed_posts(current_user["id"], limit, offset, mood, lite=use_lite)
-    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
+    posts = await run_in_threadpool(
+        db.get_feed_posts, current_user["id"], limit, offset, mood, lite=use_lite
+    )
+    _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
     for p in posts:
         p["reactions"] = _rmap.get(p["id"], [])
         # Only construct a lazy-load URL if media_data is missing.
@@ -301,8 +303,10 @@ async def get_explore(
     See `get_feed` for the `lite` flag.
     """
     use_lite = bool(lite)
-    posts = db.get_explore_posts(current_user["id"], limit, offset, sort, mood, lite=use_lite)
-    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
+    posts = await run_in_threadpool(
+        db.get_explore_posts, current_user["id"], limit, offset, sort, mood, lite=use_lite
+    )
+    _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
     for p in posts:
         p["reactions"] = _rmap.get(p["id"], [])
         # Only construct a lazy-load URL if media_data is missing.
@@ -718,9 +722,11 @@ async def get_reels(
         scope = "all"
     if sort not in ("hot", "new", "top"):
         sort = "hot"
-    posts = db.get_reels_posts(current_user["id"], scope=scope, sort=sort,
-                               limit=limit, offset=offset)
-    _rmap = db.get_post_reactions_bulk([p["id"] for p in posts])
+    posts = await run_in_threadpool(
+        db.get_reels_posts, current_user["id"], scope=scope, sort=sort,
+        limit=limit, offset=offset,
+    )
+    _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
     for p in posts:
         # Serve media lazily through the authenticated media endpoint so we
         # never ship multi-MB base64 blobs in the reels listing payload.

@@ -7,15 +7,14 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
 from ws_manager import manager
 
 _log = logging.getLogger(__name__)
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/wall", tags=["wall"])
 
 

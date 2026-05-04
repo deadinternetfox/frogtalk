@@ -1013,8 +1013,8 @@ async def federation_inbox_processor() -> int:
         events = await asyncio.to_thread(
             db.list_federation_inbox_events, "pending", 20
         )
-    except Exception as e:
-        print(f"[Federation] Inbox processor list error: {e}")
+    except Exception:
+        _log.exception("Inbox processor list error")
         return 0
 
     processed = 0
@@ -1054,8 +1054,8 @@ async def federation_inbox_processor() -> int:
 
             await asyncio.to_thread(db.mark_federation_inbox_event, event_id, "applied")
             processed += 1
-        except Exception as e:
-            print(f"[Federation] Inbox event {event_id} error: {e}")
+        except Exception:
+            _log.exception("Inbox event %s error", event_id)
             try:
                 await asyncio.to_thread(db.mark_federation_inbox_event, event_id, "failed")
             except Exception:
@@ -1131,8 +1131,8 @@ async def federation_outbox_processor() -> int:
 
     try:
         local_server_id, targets, events = await asyncio.to_thread(_outbox_collect_targets_sync)
-    except Exception as e:
-        print(f"[Federation] Outbox collect error: {e}")
+    except Exception:
+        _log.exception("Outbox collect error")
         return 0
 
     if not targets or not events:

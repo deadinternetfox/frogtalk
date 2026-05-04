@@ -8,15 +8,14 @@ from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 from typing import Optional
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
 from ws_manager import voice_manager
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 
 ROOM_NAME_RE = re.compile(r"^[a-z0-9_\-]{1,32}$")
 

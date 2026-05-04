@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -11,18 +12,19 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+
+_log = logging.getLogger(__name__)
 from fastapi import APIRouter, Request, Depends, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
 from ws_manager import manager
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 
 NICKNAME_RE = re.compile(r"^[a-zA-Z0-9_\-]{2,32}$")
 
@@ -496,12 +498,12 @@ async def register(
             },
         })
     except Exception:
-        pass
+        _log.exception("register: federation outbox insert failed")
     if (x_federation_relay or "").strip() != "1":
         try:
             await _fanout_registration_to_peers(request, user_id, body.nickname, body.password)
         except Exception:
-            pass
+            _log.exception("register: peer fanout failed")
     token = db.create_session(user_id)
     return {"token": token, "nickname": body.nickname, "user_id": user_id, "is_admin": False}
 
@@ -534,6 +536,7 @@ async def login(request: Request, body: LoginRequest):
 
 
 @router.post("/federation-ticket")
+@limiter.limit("60/hour")
 async def create_federation_ticket(
     request: Request,
     body: FederationTicketRequest,
@@ -955,12 +958,12 @@ async def register_with_captcha(
             },
         })
     except Exception:
-        pass
+        _log.exception("register: federation outbox insert failed")
     if (x_federation_relay or "").strip() != "1":
         try:
             await _fanout_registration_to_peers(request, user_id, body.nickname, body.password)
         except Exception:
-            pass
+            _log.exception("register: peer fanout failed")
     token = db.create_session(user_id)
     return {"token": token, "nickname": body.nickname, "user_id": user_id, "is_admin": False}
 
