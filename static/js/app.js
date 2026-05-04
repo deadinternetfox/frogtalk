@@ -448,47 +448,54 @@ const App = {
 
     // Publish ECDH public key for E2E DM encryption.
     // Single-device-at-a-time model: whichever browser logs in last becomes
-    // the active DM device. We detect this transition and warn the user so
-    // "🔒 Cannot decrypt on this device" is never silently surprising.
+    // the active DM device. We compare local pubkey to whatever the server
+    // currently has — if it differs, another device of ours was active;
+    // we're now taking over. Republishing makes new DMs work here
+    // automatically; we only inform the user (no action required).
     if (typeof Crypto !== 'undefined' && Crypto.getPublicKey) {
+      let localPub = null;
       try {
-        const localPub = await Crypto.getPublicKey();
-        if (localPub) {
-          // Compare to whatever the server currently has for us. If it's a
-          // different keypair, another device of ours was the active one;
-          // we're now taking over.
-          let serverPub = null;
+        localPub = await Crypto.getPublicKey();
+      } catch (e) {
+        // Local keypair is genuinely corrupted/unloadable. Auto-reset so
+        // the user isn't stuck — this is the one case where reset actually
+        // fixes things, since there are no recoverable messages tied to
+        // an unreadable key anyway.
+        console.warn('[Crypto] getPublicKey failed, auto-resetting:', e);
+        try {
+          if (Crypto.resetIdentityKey) await Crypto.resetIdentityKey();
+          localPub = await Crypto.getPublicKey();
+          if (typeof UI !== 'undefined' && UI.showToast) {
+            UI.showToast('🔑 Encryption keys were reset (previous keys were unreadable).', 'info', 5000);
+          }
+        } catch (e2) {
+          console.error('[Crypto] Auto-reset failed:', e2);
+        }
+      }
+      if (localPub) {
+        let serverPub = null;
+        try {
+          const myId = State?.user?.id;
+          if (myId) {
+            const r = await apiFetch('/api/users/' + myId + '/pubkey');
+            if (r.ok) {
+              const d = await r.json();
+              serverPub = d.ecdh_pub_key || d.pub_key || null;
+            }
+          }
+        } catch {}
+        // Republish first so new messages work immediately on this device.
+        apiFetch('/api/users/pubkey', 'POST', { pub_key: localPub, ecdh_pub_key: localPub }).catch(() => {});
+        // Only surface a takeover toast if the server had a different key
+        // (i.e. another device of ours was active). New DMs already work
+        // — nothing for the user to do.
+        if (serverPub && serverPub !== localPub) {
           try {
-            const myId = State?.user?.id;
-            if (myId) {
-              const r = await apiFetch('/api/users/' + myId + '/pubkey');
-              if (r.ok) {
-                const d = await r.json();
-                serverPub = d.ecdh_pub_key || d.pub_key || null;
-              }
+            if (typeof UI !== 'undefined' && UI.showToast) {
+              UI.showToast("🔄 This device is now active for DMs. New messages will arrive here.", 'info', 5000);
             }
           } catch {}
-          if (serverPub && serverPub !== localPub) {
-            try {
-              if (typeof UI !== 'undefined' && UI.notice) {
-                UI.notice({
-                  icon: '🔄',
-                  title: 'This device is now active for DMs',
-                  message: "Another device of yours was the active DM device. New messages will arrive here from now on.\n\nOlder messages on your other device may show as \u201ccan't be decrypted\u201d here until that device sends a new message.",
-                  primaryLabel: 'Got it',
-                  actionLabel: 'Open encryption settings',
-                }).then(r => {
-                  if (r === 'action' && typeof toggleEncryptionInfo === 'function') {
-                    try { toggleEncryptionInfo(); } catch {}
-                  }
-                });
-              }
-            } catch {}
-          }
-          apiFetch('/api/users/pubkey', 'POST', { pub_key: localPub, ecdh_pub_key: localPub }).catch(() => {});
         }
-      } catch (e) {
-        console.error('[Crypto] Pubkey publish failed:', e);
       }
     }
 

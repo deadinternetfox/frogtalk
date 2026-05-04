@@ -3725,7 +3725,16 @@ function toggleEncryptionInfo() {
 }
 
 async function resetEncryptionKeys() {
-  if (!window.confirm('Reset encryption keys on this device?\n\nThis generates a new key pair and republishes it. New DMs will work right away. Older messages encrypted with the previous key will become permanently unreadable on this device.')) return;
+  const ok = (typeof UI !== 'undefined' && UI.confirm)
+    ? await UI.confirm({
+        title: 'Reset encryption keys?',
+        message: 'Generates a new keypair and republishes it. New DMs will work right away.\n\nOnly use this if encryption seems broken on this device. It will not recover messages that already show as unreadable — those were encrypted to a key we no longer have.',
+        confirmLabel: 'Reset keys',
+        cancelLabel: 'Cancel',
+        danger: true,
+      })
+    : window.confirm('Reset encryption keys on this device?');
+  if (!ok) return;
   try {
     if (typeof Crypto === 'undefined' || !Crypto.resetIdentityKey) {
       UI.showToast('Crypto module not ready.', 'error');

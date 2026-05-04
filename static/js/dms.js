@@ -1145,8 +1145,9 @@ function renderDMChat () {
   _dmMessages = _dmMessages.map(m => _normalizeDMMessage(m));
   area.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
   // One-shot dialog per DM session if any message body is still cipher-shaped
-  // after every decrypt path. This is almost always the multi-device-rotation
-  // case; offer a direct jump to Encryption info → Reset keys.
+  // after every decrypt path. These messages were encrypted to another
+  // device's key and can't be recovered here — reset won't help. Be honest
+  // about it; offer a "Learn more" path into the encryption modal.
   try {
     const cid = _activeDM?.id;
     if (cid && !_cannotDecryptToastShown.has(cid)) {
@@ -1156,10 +1157,10 @@ function renderDMChat () {
         if (typeof UI !== 'undefined' && UI.notice) {
           UI.notice({
             icon: '🔒',
-            title: "Some messages can't be decrypted",
-            message: `${undec} message${undec===1?'':'s'} in this chat ${undec===1?'was':'were'} encrypted to a different device of yours and can't be read here.\n\nNew messages will work normally. To start fresh, open Encryption settings and reset your keys on this device.`,
+            title: `${undec} message${undec===1?'':'s'} can't be read here`,
+            message: `${undec===1?'This message was':'These messages were'} encrypted to another device of yours and can't be recovered on this one.\n\nNew messages in this chat will work normally.`,
             primaryLabel: 'Got it',
-            actionLabel: 'Open encryption settings',
+            actionLabel: 'Learn more',
           }).then(r => {
             if (r === 'action' && typeof toggleEncryptionInfo === 'function') {
               try { toggleEncryptionInfo(); } catch {}
