@@ -5627,6 +5627,58 @@ def create_story(user_id: int, media_data: str, media_type: str, caption: str = 
         return cur.lastrowid
 
 
+def get_active_story_owners(viewer_id: int) -> List[Dict]:
+    """Return all users with active stories visible to `viewer_id`, lightweight.
+
+    Visibility rules (broader than get_stories_feed which is follow-gated for
+    the stories *bar*): own stories always; public stories from anyone;
+    followers-only stories only when the viewer follows the author. This
+    powers chat-avatar story rings, where we want a ring to appear for any
+    user whose story this viewer is allowed to open — including users they
+    don't follow but who post public stories.
+
+    Returns: [{user_id, nickname, avatar, count, has_unviewed}]
+    """
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT s.user_id,
+                   u.nickname,
+                   u.avatar,
+                   COALESCE(s.privacy,'public') AS privacy,
+                   EXISTS(SELECT 1 FROM story_views sv
+                          WHERE sv.story_id=s.id AND sv.user_id=?) AS viewed,
+                   EXISTS(SELECT 1 FROM followers f
+                          WHERE f.follower_id=? AND f.following_id=s.user_id) AS follows
+            FROM stories s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.expires_at > datetime('now')
+        """, (viewer_id, viewer_id)).fetchall()
+    by_user: Dict[int, Dict] = {}
+    for r in rows:
+        owner = r["user_id"]
+        privacy = r["privacy"]
+        # Visibility filter: own → always; public → always; followers → only if follows.
+        if owner != viewer_id:
+            if privacy == "followers" and not r["follows"]:
+                continue
+            if privacy not in ("public", "followers"):
+                continue
+        bucket = by_user.get(owner)
+        if not bucket:
+            bucket = {
+                "user_id": owner,
+                "nickname": r["nickname"],
+                "avatar": r["avatar"],
+                "count": 0,
+                "has_unviewed": 0,
+            }
+            by_user[owner] = bucket
+        bucket["count"] += 1
+        if not r["viewed"]:
+            bucket["has_unviewed"] = 1
+    return list(by_user.values())
+
+
 def get_stories_feed(viewer_id: int) -> List[Dict]:
     """Get active stories the viewer is allowed to see (+ own), grouped by user.
 
@@ -5679,7 +5731,11 @@ def user_active_story_status(owner_id: int, viewer_id: int) -> Dict[str, int]:
         """, (viewer_id, owner_id)).fetchall()
     if not rows:
         return {"count": 0, "has_unviewed": 0}
-    # Filter by privacy unless the viewer is the owner
+    # Filter by privacy unless the viewer is the owner.
+    # Public stories are visible to anyone; followers-only stories require
+    # a follow relationship. Without this, public stories of non-followed
+    # users would be hidden — which is wrong, since the same stories show
+    # up in /stories/active.
     if viewer_id == owner_id:
         visible = rows
     else:
@@ -5689,11 +5745,9 @@ def user_active_story_status(owner_id: int, viewer_id: int) -> Dict[str, int]:
                 (viewer_id, owner_id)).fetchone()
         visible = []
         for r in rows:
-            if not follows:
-                continue
             if r["privacy"] == "public":
                 visible.append(r)
-            elif r["privacy"] == "followers":
+            elif r["privacy"] == "followers" and follows:
                 visible.append(r)
     if not visible:
         return {"count": 0, "has_unviewed": 0}
@@ -5701,6 +5755,40 @@ def user_active_story_status(owner_id: int, viewer_id: int) -> Dict[str, int]:
         "count": len(visible),
         "has_unviewed": 1 if any(not r["viewed"] for r in visible) else 0,
     }
+
+
+def get_user_stories(owner_id: int, viewer_id: int) -> List[Dict]:
+    """Return the active stories of `owner_id` that `viewer_id` is allowed to see.
+
+    Mirrors `get_stories_feed` shape but for a single user, with no follow
+    requirement for public stories. Used when viewers tap a chat avatar of
+    a user they don't follow but who has posted public stories.
+    """
+    with _conn() as con:
+        follows_row = con.execute(
+            "SELECT 1 FROM followers WHERE follower_id=? AND following_id=?",
+            (viewer_id, owner_id)).fetchone()
+        follows = bool(follows_row)
+        rows = con.execute("""
+            SELECT s.id, s.user_id, s.media_type, s.caption, s.created_at,
+                   (s.media_type IS NOT NULL AND s.media_type != '') AS has_media,
+                   COALESCE(s.privacy,'public') AS privacy,
+                   u.nickname, u.avatar,
+                   EXISTS(SELECT 1 FROM story_views sv WHERE sv.story_id=s.id AND sv.user_id=?) AS viewed
+            FROM stories s
+            JOIN users u ON s.user_id = u.id
+            WHERE s.user_id = ? AND s.expires_at > datetime('now')
+            ORDER BY s.created_at
+        """, (viewer_id, owner_id)).fetchall()
+    out: List[Dict] = []
+    for r in rows:
+        if owner_id != viewer_id:
+            if r["privacy"] == "followers" and not follows:
+                continue
+            if r["privacy"] not in ("public", "followers"):
+                continue
+        out.append(dict(r))
+    return out
 
 
 def delete_story(story_id: int, user_id: int) -> bool:

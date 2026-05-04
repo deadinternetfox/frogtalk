@@ -1476,15 +1476,30 @@ const Social = (() => {
     if (_chatStoryCacheInflight) return _chatStoryCacheInflight;
     _chatStoryCacheInflight = (async () => {
       try {
-        const res = await api('/api/social/stories');
+        // /stories/active returns ALL story owners visible to this viewer
+        // (own + public + followers-only-if-following), not just the
+        // follow-gated stories-bar feed. We MUST use this endpoint so
+        // public stories from non-followed users still light up rings
+        // on their chat avatars.
+        const res = await api('/api/social/stories/active');
         if (!res || !res.ok) return;
         const data = await res.json();
-        _storyData = data.users || [];
-        _rebuildChatStoryByNick();
+        const users = data.users || [];
+        _chatStoryByNick.clear();
+        for (let i = 0; i < users.length; i++) {
+          const u = users[i];
+          if (!u || !u.nickname || !(u.count > 0)) continue;
+          _chatStoryByNick.set(String(u.nickname).toLowerCase(), {
+            user_id: u.user_id,
+            has_unviewed: !!u.has_unviewed,
+            count: u.count,
+            // No idx — chat-tap path looks up the user lazily via
+            // viewProfileStories(nickname, userId), which loads the
+            // owner's stories directly.
+            idx: -1,
+          });
+        }
         _chatStoryCacheLastFetch = Date.now();
-        // Best-effort: re-decorate any visible chat avatars. Cheap when
-        // nothing matches; matters when a story just dropped while the
-        // user was already on a chat.
         try { decorateChatAvatars(document); } catch {}
       } catch {}
       finally { _chatStoryCacheInflight = null; }
@@ -7652,9 +7667,33 @@ const Social = (() => {
           _rebuildChatStoryByNick();
         } catch {}
       }
-      const idx = _storyData.findIndex(u =>
+      let idx = _storyData.findIndex(u =>
         (userId && u.user_id === userId) ||
         (nickname && u.nickname === nickname));
+      // Fallback: user has stories visible to us (e.g. public stories from
+      // someone we don't follow) but they're not in _storyData (which is
+      // follow-gated). Fetch their stories directly and append, so chat-tap
+      // can still open the viewer on non-followed posters.
+      if (idx < 0) {
+        try {
+          const lookupId = userId || (() => {
+            // No id known? Probe by-nick cache for the user_id.
+            const st = nickname ? _chatStoryByNick.get(String(nickname).toLowerCase()) : null;
+            return st && st.user_id ? st.user_id : null;
+          })();
+          if (lookupId) {
+            const res = await api(`/api/social/stories/user/${lookupId}`);
+            if (res && res.ok) {
+              const d = await res.json();
+              if (d && d.user && (d.user.stories || []).length) {
+                _storyData.push(d.user);
+                _rebuildChatStoryByNick();
+                idx = _storyData.length - 1;
+              }
+            }
+          }
+        } catch {}
+      }
       if (idx < 0) return;
       _storySingleUserMode = !!(opts && opts.singleUser);
       viewStories(idx);

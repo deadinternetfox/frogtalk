@@ -890,6 +890,52 @@ async def get_stories(current_user: dict = Depends(get_current_user)):
     return {"users": users}
 
 
+@router.get("/stories/active")
+async def get_active_story_owners(current_user: dict = Depends(get_current_user)):
+    """Lightweight list of users with active stories visible to the viewer.
+
+    Used by the chat-avatar story-ring decorator. Unlike `/stories`, this
+    includes public stories from users the viewer does NOT follow, so the
+    colored ring shows up on any chat avatar whose story the viewer is
+    allowed to open. No media payload — just nickname/user_id/count/
+    has_unviewed per owner.
+    """
+    return {"users": db.get_active_story_owners(current_user["id"])}
+
+
+@router.get("/stories/user/{user_id}")
+async def get_user_stories(user_id: int, current_user: dict = Depends(get_current_user)):
+    """Return one user's active stories visible to the viewer.
+
+    Mirrors a single entry of `/stories` for users not in the viewer's
+    follow-gated feed (e.g. tapping a public-story poster's avatar in
+    chat). Same payload shape as one element of `users` from `/stories`.
+    """
+    raw = db.get_user_stories(user_id, current_user["id"])
+    if not raw:
+        return {"user": None}
+    first = raw[0]
+    user = {
+        "user_id": first["user_id"],
+        "nickname": first["nickname"],
+        "avatar": first.get("avatar"),
+        "stories": [],
+        "has_unviewed": False,
+    }
+    for s in raw:
+        user["stories"].append({
+            "id": s["id"],
+            "has_media": bool(s.get("has_media")),
+            "media_type": s["media_type"],
+            "caption": s.get("caption", ""),
+            "created_at": s["created_at"],
+            "viewed": bool(s["viewed"]),
+        })
+        if not s["viewed"]:
+            user["has_unviewed"] = True
+    return {"user": user}
+
+
 @router.post("/stories")
 @limiter.limit("30/hour")
 async def create_story(request: Request, body: CreateStoryRequest, current_user: dict = Depends(get_current_user)):
