@@ -4796,6 +4796,23 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .status-music-link .sml-label{opacity:0.78;font-weight:500;margin:0 4px 0 6px}
 .status-music-link .sml-track{color:#f0e4ff;font-weight:600}
 .status-music-link .sml-mood{opacity:0.7;font-weight:500;margin-left:6px}
+/* Compact pill variant for the friends list row, where horizontal
+   space is tight (avatar + name + 4 action icons compete with the
+   status). Drop the "Now playing:" label, shrink padding/font, and
+   hard-cap the title at ~14ch so it never bumps the action icons
+   off the right edge. The full pill still renders on chat mini-
+   profile + FrogSocial profile. */
+.status-music-link-compact{
+  padding:2px 9px 2px 8px !important;
+  font-size:11.5px !important;
+  gap:0;
+  max-width:160px;
+}
+.status-music-link-compact .sml-track{
+  margin-left:5px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  max-width:100%;
+}
 /* Chat mini-profile (#modal-user-info) header readability.
    The banner can be any user-controlled gradient — including bright
    pastels — which made the white nickname and the purple "Now playing"
