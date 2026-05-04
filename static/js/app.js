@@ -484,17 +484,31 @@ const App = {
             }
           }
         } catch {}
-        // Republish first so new messages work immediately on this device.
-        apiFetch('/api/users/pubkey', 'POST', { pub_key: localPub, ecdh_pub_key: localPub }).catch(() => {});
-        // Only surface a takeover toast if the server had a different key
-        // (i.e. another device of ours was active). New DMs already work
-        // — nothing for the user to do.
+        // Takeover: server has a different key than this device. Inform the
+        // user, then auto-reset to issue a fresh keypair from this device.
+        // (Simpler mental model: every time you log in elsewhere, the active
+        // device gets new keys.)
         if (serverPub && serverPub !== localPub) {
           try {
-            if (typeof UI !== 'undefined' && UI.showToast) {
-              UI.showToast("🔄 This device is now active for DMs. New messages will arrive here.", 'info', 5000);
+            if (typeof UI !== 'undefined' && UI.notice) {
+              await UI.notice({
+                icon: '🔄',
+                title: 'Another device logged in',
+                message: "FrogTalk uses one encryption key per device.\n\nAnother device of yours was the active DM device. We'll generate fresh keys on this device now and start receiving new messages here.\n\nMessages already on your other device stay there — they can't be read on this device.",
+                primaryLabel: 'Continue',
+              });
             }
           } catch {}
+          try {
+            if (Crypto.resetIdentityKey) await Crypto.resetIdentityKey();
+            localPub = await Crypto.getPublicKey();
+          } catch (e) {
+            console.error('[Crypto] Takeover reset failed:', e);
+          }
+        }
+        // Publish (or republish) this device's pubkey so new DMs land here.
+        if (localPub) {
+          apiFetch('/api/users/pubkey', 'POST', { pub_key: localPub, ecdh_pub_key: localPub }).catch(() => {});
         }
       }
     }
