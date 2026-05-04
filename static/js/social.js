@@ -38,6 +38,12 @@ const Social = (() => {
   let _profilePrefetchRic = 0;             // idle callback handle for profile subtab warming
   let _reelsDirectLaunchId = 0;          // set by openSharedReel to suppress scope-bar flash
   let _bgPrefetchRic = 0;                // handle for pending background cache-warm callback
+  // Bumped on every successful switchTab() so an abandoned load can
+  // bail out of its retry loop. A tab swap mid-flight used to leave
+  // _apiOkJson hammering up to 4 attempts (~3.5 s of network usage) at
+  // an endpoint whose result we'd already discard, fan-out-stalling the
+  // browser's 6-conn pool and stacking threadpool tokens server-side.
+  let _mainTabLoadGen = 0;
   const _socialApiTimeoutMs = 12000;     // fail-fast guard so tabs don't appear stuck forever
   let _reactionButtonDelegated = false;
   let _tabLoadUiPulseIndex = 0;
@@ -136,7 +142,7 @@ const Social = (() => {
     return res;
   };
 
-  async function _apiOkJson(path, fallback = {}, retryDelayMs = 220) {
+  async function _apiOkJson(path, fallback = {}, retryDelayMs = 220, opts = {}) {
     // Resilient fetch helper. Browsers cap concurrent connections to ~6
     // per origin; if a bunch of <video preload=auto> elements are
     // holding sockets open, a single primary fetch can stall for several
@@ -144,14 +150,31 @@ const Social = (() => {
     // which meant any sustained tab-pressure → "Retry" error UI. We now
     // retry up to 3 times with growing backoff so transient queueing
     // doesn't surface to the user.
+    //
+    // `opts.isStale` (optional () => bool): if it returns true between
+    // attempts, abort the retry loop. Used by tab loaders so a fast
+    // music↔feed switch immediately stops paying for the abandoned
+    // tab's retries instead of holding sockets + threadpool tokens for
+    // up to ~3.5 s after the user moved on.
     const delays = [retryDelayMs, retryDelayMs * 3, retryDelayMs * 7];
+    const isStale = typeof opts.isStale === 'function' ? opts.isStale : null;
     let res = null;
     for (let i = 0; i <= delays.length; i++) {
+      if (isStale && isStale()) {
+        const err = new Error('request_stale');
+        err.stale = true;
+        throw err;
+      }
       res = await api(path).catch(() => null);
       if (res && res.ok) return res.json().catch(() => fallback);
       // 4xx (except 408/429) are not retryable.
       const st = Number(res?.status || 0);
       if (st && st >= 400 && st < 500 && st !== 408 && st !== 429) break;
+      if (isStale && isStale()) {
+        const err = new Error('request_stale');
+        err.stale = true;
+        throw err;
+      }
       if (i < delays.length) {
         await new Promise(r => setTimeout(r, delays[i]));
       }
@@ -723,6 +746,12 @@ const Social = (() => {
     }
     if (_currentTab === 'reels' && tab !== 'reels') _teardownReels();
     _currentTab = tab;
+    // Bump the load-gen and cancel any in-flight background prefetch
+    // wave so the previous tab's _apiOkJson retry loops + prefetch
+    // fan-out drop out instead of holding sockets + threadpool tokens
+    // for several seconds after the user moved on.
+    _mainTabLoadGen += 1;
+    _cancelBgPrefetch();
     try { _syncReelsMusicInterlock(); } catch {}
     // "My Profile" in the top nav should always jump to the logged-in
     // user's own profile — even if we were just viewing someone else.
@@ -2506,6 +2535,10 @@ const Social = (() => {
     };
     let paintedFeed = false;
     const force = !!opts.force;
+    // Capture the load generation so retries inside _apiOkJson abort
+    // immediately if the user switches away mid-flight.
+    const _myGen = _mainTabLoadGen;
+    const _isStale = () => _mainTabLoadGen !== _myGen;
     const feedUsable = !force && _cacheUsable(_feedCache) ? (_feedCache.posts || []) : null;
     if (feedUsable) {
       _updateTabLoadUi(loadUi, 32, 'Feed (cached) — refreshing…', `${feedUsable.length} posts ready`);
@@ -2527,10 +2560,10 @@ const Social = (() => {
       // Fake-progress timers removed — server responds in 5-30 ms; the
       // queued steps only created perceived latency on tab swaps.
       // Fire all three requests in parallel — stories and suggested don't depend on feed data.
-      const feedReqPromise = _apiOkJson('/api/social/feed?lite=1&limit=24', { posts: [] });
+      const feedReqPromise = _apiOkJson('/api/social/feed?lite=1&limit=24', { posts: [] }, 220, { isStale: _isStale });
       const storiesEarlyPromise = _withTimeout(loadStoriesBar());
       const suggestedEarlyPromise = _withTimeout(
-        _apiOkJson('/api/social/suggested', { users: [] }).catch(() => ({ users: [] }))
+        _apiOkJson('/api/social/suggested', { users: [] }, 220, { isStale: _isStale }).catch(() => ({ users: [] }))
       );
       _updateTabLoadUi(loadUi, 44, 'Downloading feed', 'Receiving latest posts from server…');
       const feedData = await feedReqPromise;
@@ -2735,7 +2768,9 @@ const Social = (() => {
     try {
       _updateTabLoadUi(loadUi, 30, 'Connecting to server', `Sending ${_exploreSort} explore request…`);
       // Fake-progress timers removed — see loadFeed.
-      const postsReq = _apiOkJson(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`, { posts: [] });
+      const _myGen = _mainTabLoadGen;
+      const _isStale = () => _mainTabLoadGen !== _myGen;
+      const postsReq = _apiOkJson(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`, { posts: [] }, 220, { isStale: _isStale });
       const channelsReq = api('/api/directory/new').catch(() => null);
 
       _updateTabLoadUi(loadUi, 46, 'Downloading posts', `Fetching ${_exploreSort} ranked posts…`);
@@ -4859,11 +4894,13 @@ const Social = (() => {
         _updateTabLoadUi(loadUi, 32, 'Connecting to server', `Fetching ${_musicTabScope === 'explore' ? 'all public' : 'your'} shared tracks…`);
         _updateTabLoadUi(loadUi, 46, 'Downloading tracks', _musicTabScope === 'explore' ? `Explore · ${_musicTabSort} — receiving posts…` : 'Feed — receiving your posts…');
         // Fake-progress timers removed — see loadFeed.
+        const _musicMyGen = _mainTabLoadGen;
+        const _musicIsStale = () => _mainTabLoadGen !== _musicMyGen || loadToken !== _musicTabLoadToken;
         let feedData;
         if (_musicTabScope === 'explore') {
-          feedData = await _apiOkJson(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`, { posts: [] });
+          feedData = await _apiOkJson(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`, { posts: [] }, 220, { isStale: _musicIsStale });
         } else {
-          feedData = await _apiOkJson(`/api/social/feed?lite=1&limit=100${moodQuery}`, { posts: [] });
+          feedData = await _apiOkJson(`/api/social/feed?lite=1&limit=100${moodQuery}`, { posts: [] }, 220, { isStale: _musicIsStale });
         }
         clearQueuedSteps();
         if (_currentTab !== 'music' || loadToken !== _musicTabLoadToken) return;

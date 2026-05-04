@@ -167,8 +167,12 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
     db calls into one threadpool hop so the asyncio event loop stays free
     to serve other concurrent requests (DM polls, presence pings, WS
     upgrades) while this profile is being assembled.
+
+    Coalesced per (viewer, nickname) for `_HOT_TTL` so rapid tab swaps
+    that hit the same profile collapse to one DB hit instead of N.
     """
     viewer_id = current_user["id"]
+    _coalesce_key = f"profile:{viewer_id}:{nickname}"
 
     def _build():
         user = db.get_user_profile(nickname)
@@ -217,7 +221,10 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
             "story_status": db.user_active_story_status(uid, viewer_id),
         }
 
-    out = await run_in_threadpool(_build)
+    async def _coalesced():
+        return await run_in_threadpool(_build)
+
+    out = await _coalesce_hot(_coalesce_key, _coalesced)
     if out is None:
         return JSONResponse(status_code=404, content={"error": "User not found"})
     return out
@@ -440,8 +447,22 @@ async def get_explore(
 
 @router.get("/suggested")
 async def suggested_users(current_user: dict = Depends(get_current_user)):
-    """Users you might want to follow."""
-    return {"users": db.get_suggested_users(current_user["id"])}
+    """Users you might want to follow.
+
+    Was a sync DB call inside `async def` — that blocks the asyncio loop
+    for the whole query, so a tab-switch storm (feed prefetch + suggested
+    fan-out + reels + music) could stall every other request on the box.
+    Now threadpooled and coalesced per-user behind `_coalesce_hot` so
+    rapid re-renders share one DB hit.
+    """
+    uid = current_user["id"]
+    key = f"suggested:{uid}"
+
+    async def _build():
+        users = await run_in_threadpool(db.get_suggested_users, uid)
+        return {"users": users}
+
+    return await _coalesce_hot(key, _build)
 
 
 @router.get("/posts/{post_id}/media")
@@ -1027,17 +1048,23 @@ async def get_reels(
         scope = "all"
     if sort not in ("hot", "new", "top"):
         sort = "hot"
-    posts = await run_in_threadpool(
-        db.get_reels_posts, current_user["id"], scope=scope, sort=sort,
-        limit=limit, offset=offset,
-    )
-    _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
-    for p in posts:
-        # Serve media lazily through the authenticated media endpoint so we
-        # never ship multi-MB base64 blobs in the reels listing payload.
-        p["media_data"] = f"/api/social/posts/{p['id']}/media"
-        p["reactions"] = _rmap.get(p["id"], [])
-    return {"posts": posts}
+    uid = current_user["id"]
+    key = f"reels:{uid}:{scope}:{sort}:{limit}:{offset}"
+
+    async def _build():
+        posts = await run_in_threadpool(
+            db.get_reels_posts, uid, scope=scope, sort=sort,
+            limit=limit, offset=offset,
+        )
+        _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
+        for p in posts:
+            # Serve media lazily through the authenticated media endpoint so we
+            # never ship multi-MB base64 blobs in the reels listing payload.
+            p["media_data"] = f"/api/social/posts/{p['id']}/media"
+            p["reactions"] = _rmap.get(p["id"], [])
+        return {"posts": posts}
+
+    return await _coalesce_hot(key, _build)
 
 
 @router.get("/notifications")
