@@ -230,13 +230,23 @@ const Messages = (() => {
 
     let mediaHtml = '';
     if (isVideo && mediaUrl) {
+      // Append a tiny time fragment so browsers render the first frame as
+      // a poster while the video is paused (Chrome/Safari/Firefox honor
+      // #t=… on a video src and seek-decode that frame). Avoids the ugly
+      // grey "no source" panel until first play.
+      const posterSrc = /^data:/i.test(mediaUrl)
+        ? mediaUrl // data: URIs already carry the bytes; no fragment needed
+        : (mediaUrl + (mediaUrl.includes('#') ? '' : '#t=0.1'));
       mediaHtml =
         `<div class="chat-share-media chat-share-video" data-pid="${pid}">` +
           `<video class="chat-share-video-el" preload="metadata" playsinline muted loop ` +
-                 `src="${UI.escHtml(mediaUrl)}" ` +
+                 `src="${UI.escHtml(posterSrc)}" ` +
+                 `onloadeddata="this.parentElement&&this.parentElement.classList.add('has-frame')" ` +
                  `onclick="event.stopPropagation();Messages._toggleChatVideo(this)"></video>` +
           `<button class="chat-share-play-overlay" type="button" aria-label="Play"` +
-                 ` onclick="event.stopPropagation();Messages._toggleChatVideo(this.previousElementSibling)">▶</button>` +
+                 ` onclick="event.stopPropagation();Messages._toggleChatVideo(this.previousElementSibling)">` +
+            `<span class="chat-share-play-icon">▶</span>` +
+          `</button>` +
         `</div>`;
     } else if (isImage && mediaUrl) {
       mediaHtml =
