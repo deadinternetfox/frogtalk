@@ -7,8 +7,20 @@ const Social = (() => {
   let _profileUser = null;       // currently viewed profile nickname
   let _profileData = null;
   let _feedCache = null;
+  // Suggested-users payload cache so the feed fast-path can rebuild the
+  // suggest strip without hitting the network again.
+  let _suggestedCache = null;
   const _exploreCache = new Map();
-  const _tabCacheTtlMs = 20000;
+  // Cache TTL was 20s, which meant any tab the user revisited > 20s
+  // after the last load showed a skeleton instead of the cached content
+  // — the very thing we cached. We now treat all cached entries as
+  // "valid for instant paint" and only use the TTL to decide whether
+  // to re-fetch in the background. 5 minutes is plenty for a session.
+  const _tabCacheTtlMs = 300000; // 5 min
+  // Hard floor on how stale we'll display — in practice everything
+  // lives in the LRU map until evicted, so this is just a sanity bound
+  // for very long-idle tabs (e.g. user left the app open overnight).
+  const _tabCacheStaleCapMs = 24 * 60 * 60 * 1000; // 24 h
   let _activityCache = null;
   const _reelsCache = new Map();
   const _musicCache = new Map();
@@ -265,6 +277,13 @@ const Social = (() => {
       } catch {}
 
       let posterDrawn = false;
+      // Grid tiles want a *mid-frame* poster, not the t=0 black/intro
+      // frame. The browser fires `loadeddata` and `canplay` while
+      // currentTime is still 0 — if we draw on those, we lock in a
+      // black canvas and then unbind, so the subsequent seek to 30%
+      // never gets to render. Gate early draws on grid tiles until the
+      // `seeked` event confirms we actually moved past the intro.
+      let allowEarlyDraw = !isGrid;
       if (!host.querySelector('.ft-video-poster')) {
         const poster = document.createElement('div');
         poster.className = 'ft-video-poster';
@@ -304,6 +323,7 @@ const Social = (() => {
         }
         const drawPoster = () => {
           if (posterDrawn) return;
+          if (!allowEarlyDraw) return; // grid: wait for `seeked`
           _drawVideoPoster(video, poster);
           if (poster.classList.contains('ready')) {
             posterDrawn = true;
@@ -317,7 +337,24 @@ const Social = (() => {
         };
         video.addEventListener('loadeddata', drawPoster, { once: true });
         video.addEventListener('canplay', drawPoster);
-        video.addEventListener('seeked', drawPoster);
+        video.addEventListener('seeked', () => {
+          // Once we've actually seeked into the file, allow the poster
+          // capture (and trigger it now). Subsequent `seeked` events
+          // are no-ops because `posterDrawn` will be true.
+          allowEarlyDraw = true;
+          drawPoster();
+        });
+        if (isGrid) {
+          // Safety net: if the mid-frame seek never lands within 1.2 s
+          // (e.g. zero-duration clip, codec quirks, decode failure)
+          // fall back to whatever frame the decoder has buffered so the
+          // tile isn't permanently a black square.
+          setTimeout(() => {
+            if (posterDrawn) return;
+            allowEarlyDraw = true;
+            drawPoster();
+          }, 1200);
+        }
         video.addEventListener('loadedmetadata', () => {
           try {
             if (!Number.isFinite(video.duration) || video.duration <= 0.2) return;
@@ -511,6 +548,14 @@ const Social = (() => {
   }
 
   function switchTab(tab) {
+    // Same-tab clicks were re-running the full load pipeline (and
+    // re-painting cards, re-binding observers, kicking another bg
+    // prefetch). Treat them as a no-op so taps on the active nav button
+    // never feel "slow".
+    if (_currentTab === tab && tab !== 'profile') {
+      renderNav();
+      return;
+    }
     if (_currentTab === 'reels' && tab !== 'reels') _teardownReels();
     _currentTab = tab;
     try { _syncReelsMusicInterlock(); } catch {}
@@ -531,6 +576,29 @@ const Social = (() => {
 
   function _cacheFresh(entry) {
     return !!(entry && (Date.now() - Number(entry.ts || 0) < _tabCacheTtlMs));
+  }
+
+  // True if we have *any* usable cached entry to render instantly,
+  // even if it's older than the freshness TTL. Used by the
+  // stale-while-revalidate paint path so the user never sees a
+  // skeleton when we already have content in memory.
+  function _cacheUsable(entry) {
+    return !!(entry && (Date.now() - Number(entry.ts || 0) < _tabCacheStaleCapMs));
+  }
+
+  // ── In-flight load registry ──────────────────────────────────────────
+  // Switching tabs while a fetch is in flight used to abort the paint
+  // (`if (_currentTab !== 'feed') return`) and the next tab visit would
+  // happily start the SAME fetch over again. Coalesce so re-entering a
+  // tab that already has a load running just attaches to it.
+  const _tabLoadInflight = Object.create(null);
+  function _runOnceForTab(tab, fn) {
+    if (_tabLoadInflight[tab]) return _tabLoadInflight[tab];
+    const p = Promise.resolve()
+      .then(fn)
+      .finally(() => { delete _tabLoadInflight[tab]; });
+    _tabLoadInflight[tab] = p;
+    return p;
   }
 
   function _socialLoadingHtml(label = 'Loading…', tone = 'default', variant = '') {
@@ -2203,6 +2271,21 @@ const Social = (() => {
     _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
     if (!content) return;
+    // Fast-path: fresh cache + already-warm stories/suggested → paint
+    // and bail out, no banner, no network. Re-opening feed within the
+    // 5-min TTL feels instant.
+    {
+      const _force = !!opts.force;
+      if (!_force && _cacheFresh(_feedCache) && Array.isArray(_feedCache.posts)) {
+        const _storiesHtml = (_storyData && _storyData.length) ? renderStoriesBar() : '';
+        const _sugHtml = (_suggestedCache && _cacheFresh(_suggestedCache))
+          ? _renderSuggestedUsers(_suggestedCache.users || [])
+          : '';
+        _renderFeedContent(content, _feedCache.posts || [], { storiesHtml: _storiesHtml, suggestedHtml: _sugHtml });
+        _schedBgPrefetch('feed');
+        return;
+      }
+    }
     const loadUi = _beginTabLoadUi('feed', 'Opening feed', 'Checking cache…');
     const smoothStepTimers = [];
     const queueLoadStep = (delayMs, pct, label, detail) => {
@@ -2217,21 +2300,26 @@ const Social = (() => {
     };
     let paintedFeed = false;
     const force = !!opts.force;
-    const cached = !force && _cacheFresh(_feedCache) ? (_feedCache.posts || []) : null;
-    if (cached) {
-      _updateTabLoadUi(loadUi, 32, 'Feed loaded from cache', `${cached.length} posts ready`);
-      _renderFeedContent(content, cached);
+    const feedUsable = !force && _cacheUsable(_feedCache) ? (_feedCache.posts || []) : null;
+    if (feedUsable) {
+      _updateTabLoadUi(loadUi, 32, 'Feed (cached) — refreshing…', `${feedUsable.length} posts ready`);
+      _renderFeedContent(content, feedUsable);
       paintedFeed = true;
+      // NOTE: we deliberately do NOT short-circuit the fetch path here.
+      // Suggested-users + stories are sub-resources patched onto the
+      // rendered feed via subsequent api calls, so the network round-trip
+      // is needed to restore them after a stale-cache paint. The server
+      // path is 5-30 ms; the perceived-slowness fix lives in (a) skipping
+      // the skeleton when we have any usable cache, and (b) dropping the
+      // fake-progress queueLoadStep timers below.
     } else {
       _updateTabLoadUi(loadUi, 12, 'Opening feed', 'No cache — building layout…');
       content.innerHTML = _feedSkeletonHtml();
     }
     try {
       _updateTabLoadUi(loadUi, 28, 'Connecting to server', 'Sending feed request…');
-      queueLoadStep(240, 34, 'Connecting to server', 'Negotiating feed session…');
-      queueLoadStep(620, 40, 'Downloading feed', 'Receiving post payloads…');
-      queueLoadStep(1080, 46, 'Downloading feed', 'Decoding feed timeline…');
-      queueLoadStep(1680, 52, 'Processing feed', 'Preparing cards and reactions…');
+      // Fake-progress timers removed — server responds in 5-30 ms; the
+      // queued steps only created perceived latency on tab swaps.
       // Fire all three requests in parallel — stories and suggested don't depend on feed data.
       const feedReqPromise = _apiOkJson('/api/social/feed?lite=1&limit=24', { posts: [] });
       const storiesEarlyPromise = _withTimeout(loadStoriesBar());
@@ -2276,6 +2364,9 @@ const Social = (() => {
 
       const suggestedPromise = suggestedEarlyPromise.then((sugData) => {
         if (!sugData || _currentTab !== 'feed') return;
+        if (Array.isArray(sugData.users)) {
+          _suggestedCache = { ts: Date.now(), users: sugData.users };
+        }
         const el = document.getElementById('social-feed-suggest');
         if (!el) return;
         el.innerHTML = _renderSuggestedUsers(sugData.users || []);
@@ -2287,7 +2378,7 @@ const Social = (() => {
       await Promise.allSettled([storiesPromise, suggestedPromise]);
     } catch {
       clearQueuedSteps();
-      if (!cached && _currentTab === 'feed') {
+      if (!feedUsable && _currentTab === 'feed') {
         content.innerHTML = _socialErrorHTML('Could not load feed', "Social.loadFeed({force:true})", { ico: '🐸', sub: 'Your connection blinked or the server is busy. Try again in a moment.' });
       }
     } finally {
@@ -2394,6 +2485,17 @@ const Social = (() => {
     if (sort) _exploreSort = sort;
     const content = document.getElementById('social-content');
     if (!content) return;
+    // Fast-path: fresh cache → instant paint, no banner, no network.
+    {
+      const _force = !!opts.force;
+      const _key = String(_exploreSort || 'trending');
+      const _entry = !_force ? _exploreCache.get(_key) : null;
+      if (_entry && _cacheFresh(_entry) && Array.isArray(_entry.posts)) {
+        _renderExploreContent(content, _entry.posts || [], _entry.channels || []);
+        _schedBgPrefetch('explore');
+        return;
+      }
+    }
     const loadUi = _beginTabLoadUi('explore', 'Opening explore', `Checking ${_exploreSort} cache…`);
     const smoothStepTimers = [];
     const queueLoadStep = (delayMs, pct, label, detail) => {
@@ -2409,21 +2511,24 @@ const Social = (() => {
     const force = !!opts.force;
     const cacheKey = String(_exploreSort || 'trending');
     const cachedEntry = !force ? _exploreCache.get(cacheKey) : null;
-    const cached = _cacheFresh(cachedEntry) ? (cachedEntry.posts || []) : null;
-    const cachedChannels = _cacheFresh(cachedEntry) ? (cachedEntry.channels || []) : [];
+    const exploreFresh = _cacheFresh(cachedEntry);
+    const cached = _cacheUsable(cachedEntry) ? (cachedEntry.posts || []) : null;
+    const cachedChannels = _cacheUsable(cachedEntry) ? (cachedEntry.channels || []) : [];
     if (cached) {
-      _updateTabLoadUi(loadUi, 30, 'Explore loaded from cache', `${cached.length} ${_exploreSort} posts ready`);
+      _updateTabLoadUi(loadUi, exploreFresh ? 96 : 30, exploreFresh ? 'Explore ready' : 'Explore (cached) — refreshing…', `${cached.length} ${_exploreSort} posts ready`);
       _renderExploreContent(content, cached, cachedChannels);
+      if (exploreFresh) {
+        _finishTabLoadUi(loadUi);
+        _schedBgPrefetch('explore');
+        return;
+      }
     } else {
       _updateTabLoadUi(loadUi, 12, 'Opening explore', 'No cache — building layout…');
       content.innerHTML = _exploreSkeletonHtml();
     }
     try {
       _updateTabLoadUi(loadUi, 30, 'Connecting to server', `Sending ${_exploreSort} explore request…`);
-      queueLoadStep(220, 36, 'Connecting to server', 'Negotiating explore request…');
-      queueLoadStep(620, 42, 'Downloading posts', `Downloading ${_exploreSort} results…`);
-      queueLoadStep(1080, 50, 'Downloading posts', 'Processing ranking payload…');
-      queueLoadStep(1620, 58, 'Processing posts', 'Preparing cards and media metadata…');
+      // Fake-progress timers removed — see loadFeed.
       const postsReq = _apiOkJson(`/api/social/explore?lite=1&sort=${_exploreSort}&limit=24`, { posts: [] });
       const channelsReq = api('/api/directory/new').catch(() => null);
 
@@ -3015,6 +3120,34 @@ const Social = (() => {
     _ensureSocialVideoObserver();
     const content = document.getElementById('social-content');
     if (!content) return;
+    // Fast-path: fresh cache for current scope/sort → paint cached reels,
+    // re-init observers, skip the banner and network.
+    {
+      const _scope = _reelsScope, _sort = _reelsSort;
+      const _entry = _reelsCache.get(`${_scope}:${_sort}`);
+      if (_entry && _cacheFresh(_entry) && Array.isArray(_entry.posts) && _entry.posts.length) {
+        _teardownReels();
+        const cards = _entry.posts.map(p => _renderReelCard(p)).join('');
+        const scopeBar = `
+          <div class="reels-scope-bar">
+            <button class="rsb-pill ${_scope==='all'?'active':''}" onclick="Social.switchReelsScope('all')">🌐 All</button>
+            <button class="rsb-pill ${_scope==='friends'?'active':''}" onclick="Social.switchReelsScope('friends')">👥 Friends</button>
+            <div class="rsb-sort">
+              <button class="rsb-sort-chip ${_sort==='hot'?'active':''}" onclick="Social.switchReelsSort('hot')">🔥 Hot</button>
+              <button class="rsb-sort-chip ${_sort==='new'?'active':''}" onclick="Social.switchReelsSort('new')">🆕 New</button>
+              <button class="rsb-sort-chip ${_sort==='top'?'active':''}" onclick="Social.switchReelsSort('top')">⭐ Top</button>
+            </div>
+          </div>`;
+        content.innerHTML = scopeBar + `
+          <div class="reels-stage" id="reels-stage">
+            <div class="reels-snap" id="reels-snap">${cards}</div>
+          </div>`;
+        const snap = document.getElementById('reels-snap');
+        if (snap) { _initReelCards(snap); _reelsAutoplayVisible(); }
+        _schedBgPrefetch('reels');
+        return;
+      }
+    }
     const loadUi = _beginTabLoadUi('reels', 'Opening reels', 'Checking reel cache…');
     const loadToken = ++_reelsLoadToken;
     const directLaunchId = _reelsDirectLaunchId;
@@ -3052,19 +3185,25 @@ const Social = (() => {
 
     const cacheKey = `${scope}:${sort}`;
     const cachedEntry = _reelsCache.get(cacheKey);
-    const cachedPosts = _cacheFresh(cachedEntry) ? (cachedEntry.posts || []) : null;
+    const reelsFresh = _cacheFresh(cachedEntry);
+    const cachedPosts = _cacheUsable(cachedEntry) ? (cachedEntry.posts || []) : null;
     if (cachedPosts && cachedPosts.length) {
       const cachedCards = cachedPosts.map(p => _renderReelCard(p)).join('');
       content.innerHTML = scopeBar + `
         <div class="reels-stage" id="reels-stage">
           <div class="reels-snap" id="reels-snap">${cachedCards}</div>
         </div>`;
-      _updateTabLoadUi(loadUi, 22, 'Reels loaded from cache', `${cachedPosts.length} reel${cachedPosts.length !== 1 ? 's' : ''} ready`);
+      _updateTabLoadUi(loadUi, reelsFresh ? 96 : 22, reelsFresh ? 'Reels ready' : 'Reels (cached) — refreshing…', `${cachedPosts.length} reel${cachedPosts.length !== 1 ? 's' : ''} ready`);
       const snap = document.getElementById('reels-snap');
       if (snap) {
         _initReelCards(snap);
         _reelsAutoplayVisible();
-        _updateTabLoadUi(loadUi, 38, 'Resuming cached reels', 'Restoring reel playback…');
+        if (!reelsFresh) _updateTabLoadUi(loadUi, 38, 'Resuming cached reels', 'Restoring reel playback…');
+      }
+      if (reelsFresh) {
+        _finishTabLoadUi(loadUi);
+        _schedBgPrefetch('reels');
+        return;
       }
     } else {
       content.innerHTML = _reelsSkeletonHtml(scope, sort);
@@ -3073,9 +3212,7 @@ const Social = (() => {
 
     try {
       _updateTabLoadUi(loadUi, 42, 'Downloading reels', `${scope === 'friends' ? 'Friends' : 'All'} reels · ${sort} order`);
-      queueLoadStep(200, 50, 'Downloading reels', 'Connecting to reels service…');
-      queueLoadStep(540, 58, 'Downloading reels', 'Receiving reel metadata…');
-      queueLoadStep(1000, 64, 'Downloading reels', 'Optimising reel order…');
+      // Fake-progress timers removed — see loadFeed.
       const res = await api(`/api/social/reels?scope=${scope}&sort=${sort}&limit=20`).catch(() => null);
       clearQueuedSteps();
       if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
@@ -4448,7 +4585,12 @@ const Social = (() => {
   async function loadMusicTab() {
     const content = document.getElementById('social-content');
     if (!content) return;
-    const loadUi = _beginTabLoadUi('music', 'Opening music tab', 'Checking music cache…');
+    // Skip the load banner entirely when we have a fresh cache for the
+    // current scope/sort/mood. Banner-then-render felt like an
+    // unnecessary flash on the way back to the tab.
+    const _mKey = `${_musicTabScope}:${_musicTabSort}:${_musicTabMood || ''}`;
+    const _mFresh = _cacheFresh(_musicCache.get(_mKey));
+    const loadUi = _mFresh ? -1 : _beginTabLoadUi('music', 'Opening music tab', 'Checking music cache…');
     const smoothStepTimers = [];
     const queueLoadStep = (delayMs, pct, label, detail) => {
       const t = setTimeout(() => {
@@ -4461,25 +4603,26 @@ const Social = (() => {
       while (smoothStepTimers.length) clearTimeout(smoothStepTimers.pop());
     };
     const loadToken = ++_musicTabLoadToken;
-    content.innerHTML = _musicSkeletonHtml(_musicTabScope, _musicTabSort);
+    const moodQuery = _musicTabMood ? `&mood=${encodeURIComponent(_musicTabMood)}` : '';
+    const cacheKey = `${_musicTabScope}:${_musicTabSort}:${_musicTabMood || ''}`;
+    const cachedEntry = _musicCache.get(cacheKey);
+    const musicFresh = _cacheFresh(cachedEntry);
+    const musicUsable = _cacheUsable(cachedEntry) && Array.isArray(cachedEntry.posts);
+    // Only show the skeleton when there's nothing usable to display.
+    // With usable cache we paint the cached layout below before any
+    // network round-trip — stale-while-revalidate.
+    if (!musicUsable) {
+      content.innerHTML = _musicSkeletonHtml(_musicTabScope, _musicTabSort);
+    }
     try {
-      // Scope-driven fetch:
-      //   following → own + followed posts (via /feed)
-      //   explore   → all public posts (via /explore, sortable)
-      const moodQuery = _musicTabMood ? `&mood=${encodeURIComponent(_musicTabMood)}` : '';
-      const cacheKey = `${_musicTabScope}:${_musicTabSort}:${_musicTabMood || ''}`;
-      const cachedEntry = _musicCache.get(cacheKey);
       let all = null;
-      if (_cacheFresh(cachedEntry) && Array.isArray(cachedEntry.posts)) {
+      if (musicUsable) {
         all = cachedEntry.posts;
-        _updateTabLoadUi(loadUi, 38, 'Music loaded from cache', `${all.length} track${all.length !== 1 ? 's' : ''} from cache`);
+        _updateTabLoadUi(loadUi, musicFresh ? 96 : 38, musicFresh ? 'Music ready' : 'Music (cached) — refreshing…', `${all.length} track${all.length !== 1 ? 's' : ''} from cache`);
       } else {
         _updateTabLoadUi(loadUi, 32, 'Connecting to server', `Fetching ${_musicTabScope === 'explore' ? 'all public' : 'your'} shared tracks…`);
         _updateTabLoadUi(loadUi, 46, 'Downloading tracks', _musicTabScope === 'explore' ? `Explore · ${_musicTabSort} — receiving posts…` : 'Feed — receiving your posts…');
-        queueLoadStep(220, 40, 'Connecting to server', 'Negotiating music feed request…');
-        queueLoadStep(620, 48, 'Downloading tracks', 'Receiving track posts and metadata…');
-        queueLoadStep(1080, 54, 'Downloading tracks', 'Parsing music sources…');
-        queueLoadStep(1640, 60, 'Processing tracks', 'Preparing playlist candidates…');
+        // Fake-progress timers removed — see loadFeed.
         let feedData;
         if (_musicTabScope === 'explore') {
           feedData = await _apiOkJson(`/api/social/explore?lite=1&limit=100&sort=${encodeURIComponent(_musicTabSort)}${moodQuery}`, { posts: [] });
