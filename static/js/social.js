@@ -1508,7 +1508,13 @@ const Social = (() => {
         const el = els[i];
         const nick = el.getAttribute('data-nick');
         if (!nick) continue;
-        const st = getChatStoryStatus(nick);
+        // SECURITY: bridged messages (Discord/Telegram/etc.) carry the
+        // sender's *external* display name in `data-nick`. A bridge user
+        // who happens to share a nickname with a real FrogTalk account
+        // must NEVER inherit that account's story ring — they are not
+        // the same person. data-bridge is empty for native messages.
+        const isBridged = !!(el.getAttribute('data-bridge') || '').trim();
+        const st = !isBridged ? getChatStoryStatus(nick) : null;
         if (st && st.count) {
           el.classList.add('has-story');
           el.classList.toggle('unviewed', !!st.has_unviewed);
