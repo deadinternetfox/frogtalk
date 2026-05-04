@@ -1475,12 +1475,18 @@ const Music = (() => {
 
   function expand() {
     // Solo (FrogSocial) playback: bring the user back to the Social Music tab
-    // instead of switching channels.
+    // and, if we know the source post, scroll to it.
     if (_soloMode) {
       try {
+        const cur = _state && _state.queue && _state.queue[0];
+        const postId = cur && cur.post_id;
         if (typeof Social !== 'undefined') {
           if (typeof Social.open === 'function') Social.open();
-          if (typeof Social.switchTab === 'function') Social.switchTab('music');
+          if (postId && typeof Social.scrollToMusicPost === 'function') {
+            Social.scrollToMusicPost(postId);
+          } else if (typeof Social.switchTab === 'function') {
+            Social.switchTab('music');
+          }
         }
       } catch {}
       return;
@@ -1565,6 +1571,10 @@ const Music = (() => {
       title: opts.title || 'Music',
       thumbnail: thumb,
       sharer: String(opts.sharer || '').trim(),
+      // Optional source-post id so the dock can scroll back to it
+      // and so a third-party 'recommend next' can prefer the same author.
+      post_id: (opts.postId != null && Number.isFinite(Number(opts.postId)))
+        ? Number(opts.postId) : null,
     };
     // Stash a fake channel state so _renderMini / togglePause / _resync all
     // operate normally. can_control is false so the dock hides the skip btn.
@@ -1791,20 +1801,42 @@ const Music = (() => {
   function _maybeAutoAdvanceOnEnded() {
     const q = (_state && _state.queue) || [];
     const cur = q[0];
-    if (!_room || !cur) return;
-    if (!_state || !_state.can_control) return;
-    if (q.length < 2) return;
-    if ((cur.provider || '') !== 'youtube') return;
+    if (!cur) return;
     // YouTube-style toggle: when auto-next is off, let the track end
     // and stay on it instead of skipping to the next queued item.
     if (!_autoNextEnabled()) return;
+    if ((cur.provider || '') !== 'youtube') return;
 
-    const key = `${_room}:${cur.id}`;
+    const key = `${_room || 'solo'}:${cur.id || cur.url || ''}`;
     const now = Date.now();
     if (key === _autoAdvanceLastKey && (now - _autoAdvanceLastAt) < 6000) return;
     _autoAdvanceLastKey = key;
     _autoAdvanceLastAt = now;
 
+    // Solo (FrogSocial) playback: ask Social for the next track in the
+    // music feed. If Social hasn't loaded its music tab yet or the
+    // recommender returns nothing, just stop — we can't fabricate
+    // a track from thin air.
+    if (_soloMode) {
+      try {
+        const next = (window.Social && typeof Social.getNextMusicTrack === 'function')
+          ? Social.getNextMusicTrack(cur.url, { provider: cur.provider })
+          : null;
+        if (next && next.url && next.url !== cur.url) {
+          // Tear down current solo track first so playSolo's
+          // "already in a music channel" guard doesn't get confused.
+          playSolo(next);
+        }
+      } catch {}
+      return;
+    }
+
+    if (!_room) return;
+    if (!_state || !_state.can_control) return;
+    // Room mode: even if q.length<2 (only the current track left), still
+    // call skip() so the server can either pull from its queue or end
+    // the session cleanly. Previously we bailed here, which is why
+    // channels got 'stuck at end of playlist'.
     skip(parseInt(cur.id, 10) || null).catch(() => {});
   }
 

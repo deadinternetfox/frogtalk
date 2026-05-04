@@ -4571,7 +4571,7 @@ const Social = (() => {
     // Tapping the cover always routes through the unified Music mini-player,
     // regardless of which tab the card is shown in. If the track is already
     // live, it toggles pause; otherwise it starts solo playback.
-    const toggleArgs = `${jsStr(fullUrl)},${jsStr(t.provider)},${jsStr(title)},${jsStr(sharer)}`;
+    const toggleArgs = `${jsStr(fullUrl)},${jsStr(t.provider)},${jsStr(title)},${jsStr(sharer)},${jsStr(String(p.id || ''))}`;
     const coverAction = `Social.toggleMusicCard(${toggleArgs})`;
     // Ask Music whether this exact url is already the active track so we
     // can render the right icon on first paint (before any state event).
@@ -4657,6 +4657,9 @@ const Social = (() => {
   // Cache of last-rendered music posts so playMusicInTab can look up
   // track metadata without re-parsing.
   let _musicTabPosts = [];
+  // Per-session set of music URLs already auto-served by the recommender,
+  // used to avoid loops when the cached feed is short.
+  let _autoNextSeen = new Set();
   // Currently selected mood filter on the Music tab ('' = all moods).
   let _musicTabMood = '';
   // Scope of the music feed: 'following' = own + followed, 'explore' = all public.
@@ -4906,7 +4909,7 @@ const Social = (() => {
   // module — same mini-player / mini-dock that music channels use.
   // If the clicked track is ALREADY the live mini-player track, toggle
   // pause/resume instead of restarting it.
-  function toggleMusicCard(url, provider, title, sharer) {
+  function toggleMusicCard(url, provider, title, sharer, postId) {
     const theUrl = url || '';
     if (!theUrl) return;
     const M = window.Music;
@@ -4923,11 +4926,15 @@ const Social = (() => {
         return;
       }
     } catch {}
+    const pidNum = postId != null && String(postId).length
+      ? (Number.isFinite(Number(postId)) ? Number(postId) : null)
+      : null;
     const ok = M.playSolo({
       url: theUrl,
       title: title || 'Music',
       provider: provider || '',
       sharer: sharer || '',
+      postId: pidNum,
     });
     if (!ok) return;
     _applyMusicState();
@@ -4936,7 +4943,102 @@ const Social = (() => {
   // Back-compat: older markup calls Social.playMusicInTab(embed, provider, title, url, sharer, ...)
   function playMusicInTab(embed, provider, title, url, sharer /*, roomHint */) {
     void embed;
-    toggleMusicCard(url || '', provider || '', title || '', sharer || '');
+    toggleMusicCard(url || '', provider || '', title || '', sharer || '', '');
+  }
+
+  // Recommender hook called by the Music module when a solo (FrogSocial)
+  // track ends and auto-next is on. Returns { url, provider, title,
+  // sharer, postId, thumbnail } or null if there's nothing to play.
+  //
+  // Strategy:
+  //  1. Walk the cached _musicTabPosts (the user's last-loaded music feed)
+  //     and pick the next entry after currentUrl that we haven't already
+  //     served this session. Wraps to the start so a short feed keeps
+  //     playing.
+  //  2. If the cache is empty (user never opened the Music tab), bail.
+  //     The mini-player will simply stop, which matches what users expect
+  //     when nothing was queued.
+  function getNextMusicTrack(currentUrl /*, opts */) {
+    try {
+      const list = Array.isArray(_musicTabPosts) ? _musicTabPosts : [];
+      if (!list.length) return null;
+      _autoNextSeen = _autoNextSeen || new Set();
+      if (currentUrl) _autoNextSeen.add(String(currentUrl));
+      // Find the index of the current track so we walk forward from it.
+      let startIdx = 0;
+      const curIdx = list.findIndex(p => String(p.media_data || '') === String(currentUrl || ''));
+      if (curIdx >= 0) startIdx = curIdx + 1;
+      const len = list.length;
+      for (let off = 0; off < len; off++) {
+        const p = list[(startIdx + off) % len];
+        const url = String(p.media_data || '').trim();
+        if (!url) continue;
+        if (_autoNextSeen.has(url)) continue;
+        const provider = (p.media_type || '').split('/')[1] || '';
+        const t = _parseMusicTrack(url, provider);
+        const title = String(p.track_title || '').trim()
+          || _prettyMusicFallbackTitle(url, provider);
+        _autoNextSeen.add(url);
+        return {
+          url,
+          provider: t.provider || provider,
+          title,
+          sharer: p.nickname || p.author_nick || p.author || '',
+          thumbnail: t.thumb || '',
+          postId: p.id || null,
+        };
+      }
+      // Every track in the cached feed has played — reset the seen set
+      // and pick the first one (so a small feed keeps looping rather than
+      // dying silently). Skip the URL we just played so we don't restart it.
+      _autoNextSeen = new Set(currentUrl ? [String(currentUrl)] : []);
+      for (const p of list) {
+        const url = String(p.media_data || '').trim();
+        if (!url || url === String(currentUrl || '')) continue;
+        const provider = (p.media_type || '').split('/')[1] || '';
+        const t = _parseMusicTrack(url, provider);
+        const title = String(p.track_title || '').trim()
+          || _prettyMusicFallbackTitle(url, provider);
+        _autoNextSeen.add(url);
+        return {
+          url,
+          provider: t.provider || provider,
+          title,
+          sharer: p.nickname || p.author_nick || p.author || '',
+          thumbnail: t.thumb || '',
+          postId: p.id || null,
+        };
+      }
+    } catch {}
+    return null;
+  }
+
+  // Switch to Social → Music tab and scroll the named post into view.
+  // Used by the mini-player when the user taps the dock to "open source".
+  function scrollToMusicPost(postId) {
+    if (!postId) return;
+    try {
+      if (typeof switchTab === 'function') switchTab('music');
+    } catch {}
+    const pid = String(postId);
+    const tryScroll = (attempt) => {
+      const el = document.querySelector(`.sf-post[data-post-id="${pid}"]`)
+        || document.querySelector(`[data-post-id="${pid}"]`);
+      if (el) {
+        try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { el.scrollIntoView(); }
+        el.classList.add('sf-post-flash');
+        setTimeout(() => { try { el.classList.remove('sf-post-flash'); } catch {} }, 1600);
+        return true;
+      }
+      return false;
+    };
+    // The Music tab may still be loading — retry a few times.
+    if (tryScroll(0)) return;
+    let n = 0;
+    const iv = setInterval(() => {
+      n++;
+      if (tryScroll(n) || n > 20) clearInterval(iv);
+    }, 250);
   }
 
   // Paints is-playing / is-paused classes + status text on every visible
@@ -7381,6 +7483,7 @@ const Social = (() => {
     openAddStory, closeAddStory, handleStoryMedia, openStoryCamera, submitStory, submitStoryFromTap, handleStoryShareTap, setStoryPrivacy, cycleStoryPrivacy,
     loadMusicTab, openMusicEmbed, promptMusicShare,
     playMusicInTab, toggleMusicCard, stopMusicInTab, _openNowPlaying,
+    getNextMusicTrack, scrollToMusicPost,
     _toggleNowPlaying, filterMusicByMood, filterMusicByMoodSelect,
     switchMusicScope, switchMusicSort,
     openMusicShareModal, closeMusicShareModal,
