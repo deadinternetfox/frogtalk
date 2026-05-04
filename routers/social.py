@@ -914,6 +914,14 @@ async def create_story(request: Request, body: CreateStoryRequest, current_user:
         })
     except Exception:
         pass
+    try:
+        await manager.broadcast_all({
+            "type": "story_posted",
+            "user_id": current_user["id"],
+            "nickname": current_user["nickname"],
+        })
+    except Exception:
+        pass
     return {"ok": True, "id": story_id, "privacy": privacy}
 
 
@@ -953,6 +961,14 @@ async def create_story_upload(
                 "caption": caption or "",
                 "privacy": safe_privacy,
             },
+        })
+    except Exception:
+        pass
+    try:
+        await manager.broadcast_all({
+            "type": "story_posted",
+            "user_id": current_user["id"],
+            "nickname": current_user["nickname"],
         })
     except Exception:
         pass

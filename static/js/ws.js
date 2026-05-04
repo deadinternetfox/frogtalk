@@ -282,6 +282,15 @@ const WS = (() => {
         } catch {}
         break;
       }
+      // ── Story posted by anyone — refresh chat-avatar story rings live ──
+      case 'story_posted': {
+        try {
+          if (window.Social && typeof window.Social.refreshChatStoryCache === 'function') {
+            window.Social.refreshChatStoryCache(true);
+          }
+        } catch {}
+        break;
+      }
       // ── DM events ────────────────────────────────
       case 'dm_message': {
         if (typeof handleWSDMMessage === 'function') handleWSDMMessage(data);
