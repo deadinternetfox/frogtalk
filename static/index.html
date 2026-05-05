@@ -1102,7 +1102,7 @@ body{
    slides in/out together with the sidebar — identical UX to desktop. */
 #music-mini-dock{
   display:none;position:relative;flex-shrink:0;
-  margin:8px 10px 10px;padding:10px;gap:10px;align-items:center;
+  margin:8px 10px 10px;padding:10px;gap:12px;align-items:center;
   background:linear-gradient(135deg,#1a0f2e 0%,#140826 55%,#1f0a34 100%);
   border:1px solid #3a2a5a;border-radius:12px;
   box-shadow:0 4px 18px rgba(0,0,0,0.4),0 0 0 1px rgba(160,80,216,0.08) inset;
@@ -1150,18 +1150,17 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
 .mmd-sub .mmd-room:hover{text-decoration:underline}
 .mmd-sub .mmd-live-dot{
   display:inline-block;width:6px;height:6px;border-radius:50%;flex-shrink:0;
-  background:#8a3aba;box-shadow:0 0 6px rgba(160,80,216,0.9);
+  background:#c89bff;
+  box-shadow:0 0 8px rgba(200,130,255,.95),0 0 14px rgba(160,80,216,.6);
   animation:mmdPulse 1.6s ease-in-out infinite;
-  /* Own a fixed slot so the 1.4× pulse never visually crashes into the
-     checkbox sitting on the line below — the scaled glow stays within
-     the dot's allotted box. */
+  position:relative;z-index:3;
   margin:1px 1px
 }
 @keyframes mmdPulse{
   0%,100%{transform:scale(1);opacity:1}
-  50%    {transform:scale(1.3);opacity:.6}
+  50%    {transform:scale(1.25);opacity:.7}
 }
-.mmd-ctrls{display:flex;gap:2px;flex-shrink:0}
+.mmd-ctrls{display:flex;gap:4px;flex-shrink:0;margin-left:6px}
 .mmd-btn{
   background:transparent;border:0;color:#e8d0ff;cursor:pointer;
   width:30px;height:30px;font-size:14px;line-height:1;
@@ -6023,17 +6022,21 @@ a.mtnp-title:hover{color:#fff;text-decoration:underline}
 .mp-an-check input:focus-visible + .mp-an-box{outline:2px solid #c89bff;outline-offset:2px}
 /* mini-dock variant — sits as a third compact line under title/sub.
    Indented + spaced so the live-dot's pulse on the sub line above never
-   bleeds into the tick box. */
+   bleeds into the tick box. Smaller text + tick than the top strip so the
+   dock stays compact on the sidebar. */
 .mp-an-check--dock{
   margin-top:6px;
   padding-left:10px;
-  font-size:10.5px;color:#a888c8;
+  font-size:9.5px;color:#a888c8;
   border-top:1px dashed rgba(200,130,255,.16);
-  padding-top:5px
+  padding-top:5px;
+  gap:5px
 }
 .mp-an-check--dock .mp-an-lbl{
-  text-transform:uppercase;letter-spacing:.5px
+  text-transform:uppercase;letter-spacing:.45px;font-weight:700
 }
+.mp-an-check--dock .mp-an-box{width:11px;height:11px;border-radius:3px;border-width:1.25px}
+.mp-an-check--dock .mp-an-box::after{left:2.5px;top:0;width:3.5px;height:7px;border-width:0 1.5px 1.5px 0}
 /* mtnp variant — appears under the track title on the persistent strip */
 .mp-an-check--mtnp{margin-top:2px;font-size:10.5px}
 .mp-an-check--mtnp .mp-an-lbl{

@@ -1723,7 +1723,13 @@ const Music = (() => {
   function togglePause(btn) {
     const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
     if (!frame || !frame.contentWindow) return;
-    const playing = btn.dataset.playing !== '0';
+    // Source of truth: the canonical effective state (combines user
+    // intent + YT-reported state). Trusting btn.dataset.playing alone
+    // breaks if a button was just rendered before _syncPlayPauseButtons
+    // ran, or if YT auto-paused in the background — you'd press the
+    // ⏸ icon and the code would think you wanted to pause again.
+    const effectivelyPaused = _currentEffectivePaused();
+    const playing = !effectivelyPaused;       // currently playing?
     const src = frame.src || '';
     try {
       if (src.includes('youtube.com')) {
@@ -1748,10 +1754,12 @@ const Music = (() => {
     // Don't auto-catch-up on un-pause. The iframe resumes from where
     // the user paused it — that's the expected behaviour. Resync is
     // a separate explicit action.
-    btn.dataset.playing = nowPlaying ? '1' : '0';
-    btn.innerHTML = nowPlaying ? _PAUSE_SVG : _PLAY_SVG;
-    btn.title = nowPlaying ? 'Pause' : 'Play';
-    btn.setAttribute('aria-label', btn.title);
+    if (btn) {
+      btn.dataset.playing = nowPlaying ? '1' : '0';
+      btn.innerHTML = nowPlaying ? _PAUSE_SVG : _PLAY_SVG;
+      btn.title = nowPlaying ? 'Pause' : 'Play';
+      btn.setAttribute('aria-label', btn.title);
+    }
     // Optimistically prime YT's reported state so the next _emitState()
     // doesn't fall back to the stale value. Without this, after pressing
     // Play the dock button would flicker right back to ▶ because
