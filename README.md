@@ -10,18 +10,6 @@
 
 <div align="center">
 
-```
-              .--.        .--.
-             ( oo|        |oo )
-              \__/         \__/
-            .-"""-.       .-"""-.
-           /       \     /       \
-          | F R O G | _ |  T A L K |
-           \       /     \       /
-            '-...-'       '-...-'
-                  ribbit ✦ ribbit
-```
-
 # 🐸 FrogTalk
 
 **A federated, end-to-end encrypted chat platform.**
