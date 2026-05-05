@@ -1531,9 +1531,18 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
   #music-panel:not(.mini):not(.collapsed) #mp-player-wrap iframe{
     max-height:32vh
   }
-  /* Add Track + toggles scroll with the rest of the panel — no sticky bar. */
+  /* Add Track + toggles stay pinned to the bottom of the panel so the
+     primary action never scrolls off-screen on phones (the panel itself
+     scrolls under it). Without this, an empty-queue room shows the
+     header + idle message, and the Add Track row sits below the 42vh
+     clip line — invisible until the user realizes they can scroll the
+     panel internally. */
   #music-panel:not(.mini):not(.collapsed) .mp-submit{
-    margin-top:6px;padding:0
+    position:sticky;bottom:0;z-index:2;
+    margin:6px -16px 0;padding:8px 16px;
+    background:linear-gradient(180deg,rgba(15,10,31,0) 0%,#0f0a1f 35%,#0f0a1f 100%);
+    border-top:1px solid rgba(160,80,216,.18);
+    justify-content:center
   }
 }
 @media (max-width:480px){
