@@ -297,6 +297,30 @@ async def delete_message(msg_id: int, current_user: dict = Depends(get_current_u
     return {"ok": True}
 
 
+@router.post("/{msg_id}/preview-suppress")
+async def suppress_preview(msg_id: int, current_user: dict = Depends(get_current_user)):
+    """Discord-style \"X\" on link preview.
+
+    Author-only (admins also allowed). Marks the message so every client in
+    the room hides the rich unfurl card. The original URL stays as plain text.
+    """
+    ok = db.set_message_preview_suppressed(
+        msg_id, current_user["id"], bool(current_user.get("is_admin"))
+    )
+    if not ok:
+        return JSONResponse(status_code=403, content={"error": "Cannot suppress this preview"})
+    try:
+        msg = db.get_message(msg_id) if hasattr(db, "get_message") else None
+        room_name = (msg or {}).get("room_name")
+        if room_name:
+            await manager.broadcast_room(room_name, {
+                "type": "preview_suppress", "id": msg_id, "room": room_name,
+            })
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 @router.post("/{msg_id}/react")
 @limiter.limit("60/minute")
 async def toggle_reaction(request: Request, msg_id: int, body: ReactionRequest,

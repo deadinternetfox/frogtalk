@@ -566,8 +566,41 @@ const Messages = (() => {
     }
   }
 
+  // Discord-style "X" — author dismisses the embed for everyone.
+  // Sends a small POST then optimistically removes the embed; the
+  // resulting WS broadcast also calls applyPreviewSuppress() for every
+  // other client (and for this one if WS races us, applyPreviewSuppress
+  // is idempotent because the embed is already gone).
+  async function suppressPreview(msgId) {
+    try {
+      const res = await apiFetch(`/api/messages/${msgId}/preview-suppress`, { method: 'POST' });
+      if (!res.ok) return;
+    } catch { return; }
+    applyPreviewSuppress(msgId);
+  }
+
+  function applyPreviewSuppress(msgId) {
+    // Update cached state across all rooms so a re-render (e.g. switching
+    // back to the room) doesn't resurrect the embed.
+    try {
+      Object.values(State.messages || {}).forEach(arr => {
+        if (!Array.isArray(arr)) return;
+        const m = arr.find(x => x && +x.id === +msgId);
+        if (m) m.preview_suppressed = 1;
+      });
+    } catch {}
+    const msgEl = document.getElementById(`msg-${msgId}`);
+    if (!msgEl) return;
+    msgEl.querySelectorAll('.link-preview, .yt-embed, .spotify-embed').forEach(el => el.remove());
+  }
+
   // Fetch and render link preview
   async function _loadLinkPreview(msgId, url) {
+    // Author-suppressed embeds: don't even fetch.
+    try {
+      const cached = (State.messages[State.currentRoom] || []).find(m => m && +m.id === +msgId);
+      if (cached && cached.preview_suppressed) return;
+    } catch {}
     if (_previewCache[url] !== undefined) {
       if (_previewCache[url]) _renderPreview(msgId, _previewCache[url]);
       return;
@@ -660,6 +693,35 @@ const Messages = (() => {
     }
     
     body.insertAdjacentHTML('beforeend', html);
+
+    // Discord-style "X" to suppress the embed (author-only). Re-rendering an
+    // existing dismiss button is harmless because we early-return at the top
+    // when an embed is already present.
+    try {
+      const cached = (State.messages[State.currentRoom] || []).find(m => m && +m.id === +msgId);
+      const isOwn = cached && State.user && cached.nickname === State.user.nickname;
+      if (isOwn) {
+        const newEmbed = body.querySelector(':scope > .link-preview:last-child, :scope > .yt-embed:last-child, :scope > .spotify-embed:last-child');
+        if (newEmbed && !newEmbed.querySelector('.preview-suppress-btn')) {
+          // Make sure the button positions against the embed, not the page.
+          if (getComputedStyle(newEmbed).position === 'static') {
+            newEmbed.style.position = 'relative';
+          }
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'preview-suppress-btn';
+          btn.title = 'Remove preview';
+          btn.setAttribute('aria-label', 'Remove preview');
+          btn.textContent = '\u00d7';
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            suppressPreview(msgId);
+          });
+          newEmbed.appendChild(btn);
+        }
+      }
+    } catch {}
 
     // Embeds load asynchronously (iframes, og:image, favicons), so the
     // message bubble grows in size *after* it has been appended. If the
@@ -1389,7 +1451,7 @@ const Messages = (() => {
         const firstUrl = urls[0];
         const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
         const isSocial = !!_parseFrogSocialUrl(firstUrl);
-        if (!isInvite && !isSocial) linksToPreview.push({ id: msg.id, url: firstUrl });
+        if (!isInvite && !isSocial && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: firstUrl });
       }
     });
 
@@ -1541,7 +1603,7 @@ const Messages = (() => {
             const firstUrl = urls[0];
             const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
             const isSocial = !!_parseFrogSocialUrl(firstUrl);
-            if (!isInvite && !isSocial) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
+            if (!isInvite && !isSocial && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
           }
           setTimeout(() => _hydrateSpecialCards(msg.id), 100);
           const cached = State.messages[room] || [];
@@ -1619,7 +1681,7 @@ const Messages = (() => {
       const firstUrl = urls[0];
       const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
       const isSocial = !!_parseFrogSocialUrl(firstUrl);
-      if (!isInvite && !isSocial) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 200);
+      if (!isInvite && !isSocial && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 200);
     }
     setTimeout(() => _hydrateSpecialCards(msg.id), 200);
   }
@@ -2537,7 +2599,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

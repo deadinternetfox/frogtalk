@@ -323,9 +323,39 @@ function _extractYouTubeVideoId(text) {
   return '';
 }
 
+// Discord-style "X" — sender dismisses the embed for both sides.
+async function suppressDMPreview(msgId) {
+  const ch = _activeDM;
+  if (!ch || !msgId) return;
+  try {
+    const res = await apiFetch(
+      `/api/dms/${ch.id}/messages/${msgId}/preview-suppress`,
+      { method: 'POST' }
+    );
+    if (!res.ok) return;
+  } catch { return; }
+  applyDMPreviewSuppress(msgId);
+}
+
+function applyDMPreviewSuppress(msgId) {
+  try {
+    const m = (_dmMessages || []).find(x => x && +x.id === +msgId);
+    if (m) m.preview_suppressed = 1;
+  } catch {}
+  const msgEl = document.getElementById(`msg-${msgId}`);
+  if (!msgEl) return;
+  msgEl.querySelectorAll('.link-preview, .yt-embed, .spotify-embed').forEach(el => el.remove());
+}
+window.suppressDMPreview = suppressDMPreview;
+window.applyDMPreviewSuppress = applyDMPreviewSuppress;
+
 async function _loadDMPreview(msgId, url) {
   if (!msgId || !url) return;
-  if (_dmPreviewCache[url] !== undefined) {
+  // Author-suppressed: don't fetch.
+  try {
+    const cached = (_dmMessages || []).find(m => m && +m.id === +msgId);
+    if (cached && cached.preview_suppressed) return;
+  } catch {}  if (_dmPreviewCache[url] !== undefined) {
     if (_dmPreviewCache[url]) _renderDMPreview(msgId, _dmPreviewCache[url]);
     return;
   }
@@ -393,6 +423,37 @@ function _renderDMPreview(msgId, preview) {
   }
 
   body.insertAdjacentHTML('beforeend', html);
+
+  // Discord-style "X" — sender-only.
+  try {
+    const cached = (_dmMessages || []).find(m => m && +m.id === +msgId);
+    const myId = STATE.user?.id;
+    const myNick = STATE.user?.nickname;
+    const isOwn = cached && (
+      (cached.sender_id != null && myId != null && +cached.sender_id === +myId) ||
+      (!!cached.sender_nick && !!myNick && cached.sender_nick === myNick)
+    );
+    if (isOwn) {
+      const newEmbed = body.querySelector(':scope > .link-preview:last-child, :scope > .yt-embed:last-child, :scope > .spotify-embed:last-child');
+      if (newEmbed && !newEmbed.querySelector('.preview-suppress-btn')) {
+        if (getComputedStyle(newEmbed).position === 'static') {
+          newEmbed.style.position = 'relative';
+        }
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'preview-suppress-btn';
+        btn.title = 'Remove preview';
+        btn.setAttribute('aria-label', 'Remove preview');
+        btn.textContent = '\u00d7';
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          suppressDMPreview(msgId);
+        });
+        newEmbed.appendChild(btn);
+      }
+    }
+  } catch {}
 
   const area = document.getElementById('messages-area');
   if (area && (area.scrollHeight - area.scrollTop - area.clientHeight) < 140) {
@@ -1181,6 +1242,7 @@ function renderDMChat () {
 
   // DM link previews/embeds (YouTube/Spotify/cards), including forwarded links.
   _dmMessages.slice(-8).forEach((m, idx) => {
+    if (m && m.preview_suppressed) return;
     const u = _extractDMPreviewUrl(String(m?.content || ''));
     if (!u) return;
     setTimeout(() => _loadDMPreview(m.id, u), 90 + idx * 40);
@@ -2110,7 +2172,7 @@ function appendDMMessage (m) {
   area.appendChild(el);
   if (mine || atBottom) _scrollDMToBottomStable();
   const previewUrl = _extractDMPreviewUrl(String(m.content || ''));
-  if (previewUrl) setTimeout(() => _loadDMPreview(m.id, previewUrl), 180);
+  if (previewUrl && !m.preview_suppressed) setTimeout(() => _loadDMPreview(m.id, previewUrl), 180);
   setTimeout(() => _hydrateDMSocialCards(m.id), 120);
   // Auto-load media for new real-time DM messages (skip view-once — those need explicit tap)
   if (m.has_media && m.id && _activeDM && !m.view_once) {

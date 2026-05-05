@@ -176,6 +176,14 @@ const WS = (() => {
         Messages.removeMessage(data.id);
         break;
       }
+      case 'preview_suppress': {
+        try { Messages.applyPreviewSuppress?.(data.id); } catch {}
+        break;
+      }
+      case 'dm_preview_suppress': {
+        try { window.applyDMPreviewSuppress?.(data.id); } catch {}
+        break;
+      }
       case 'reaction': {
         Messages.updateReactions(data.id, data.reactions);
         break;

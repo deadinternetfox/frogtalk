@@ -758,6 +758,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
+                          COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
@@ -775,6 +776,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
+                          COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
@@ -840,6 +842,24 @@ def delete_message(msg_id: int, user_id: int, is_admin: bool, is_room_owner: boo
         if not is_admin and not is_room_owner and row["user_id"] != user_id:
             return False
         con.execute("DELETE FROM messages WHERE id=?", (msg_id,))
+        con.commit()
+    return True
+
+
+def set_message_preview_suppressed(msg_id: int, user_id: int, is_admin: bool = False) -> bool:
+    """Mark a room message's link preview as suppressed (Discord-style X).
+
+    Only the message author may suppress their own preview. Global admins are
+    also allowed for moderation. Returns True on success, False if the caller
+    is not authorised or the message no longer exists.
+    """
+    with _conn() as con:
+        row = con.execute("SELECT user_id FROM messages WHERE id=?", (msg_id,)).fetchone()
+        if not row:
+            return False
+        if not is_admin and row["user_id"] != user_id:
+            return False
+        con.execute("UPDATE messages SET preview_suppressed=1 WHERE id=?", (msg_id,))
         con.commit()
     return True
 
@@ -1039,6 +1059,12 @@ def _migrate():
         # the tab empties as the user promotes tracks/photos.
         if "posted_to_wall" not in msg_cols:
             con.execute("ALTER TABLE messages ADD COLUMN posted_to_wall INTEGER DEFAULT 0")
+        # Author-suppressed link preview (Discord-style "X" on own embed).
+        # When set, clients skip rendering the rich link unfurl card for this
+        # message for everyone in the room. The original URL stays visible as
+        # a plain hyperlink — only the embed is hidden.
+        if "preview_suppressed" not in msg_cols:
+            con.execute("ALTER TABLE messages ADD COLUMN preview_suppressed INTEGER DEFAULT 0")
         # Per-bridge direction: 'both' (default), 'in' (only remote→FrogTalk),
         # or 'out' (only FrogTalk→remote). Lets an owner use a channel as a
         # one-way announcement feed in either direction.
@@ -1120,6 +1146,8 @@ def _migrate():
             con.execute("ALTER TABLE dm_messages ADD COLUMN media_blur INTEGER DEFAULT 0")
         if "view_once" not in dm_msg_cols:
             con.execute("ALTER TABLE dm_messages ADD COLUMN view_once INTEGER DEFAULT 0")
+        if "preview_suppressed" not in dm_msg_cols:
+            con.execute("ALTER TABLE dm_messages ADD COLUMN preview_suppressed INTEGER DEFAULT 0")
         con.execute("""
             CREATE TABLE IF NOT EXISTS dm_view_once_views (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2620,6 +2648,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
+                       COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id > ? AND dm.deleted=0
@@ -2632,6 +2661,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
+                       COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id < ? AND dm.deleted=0
@@ -2644,6 +2674,7 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.media_type, dm.media_name, dm.reply_to, dm.edited,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
+                       COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.deleted=0
@@ -2697,6 +2728,24 @@ def delete_dm_message(msg_id: int, user_id: int) -> bool:
         con.execute("UPDATE dm_messages SET deleted=1, content='[deleted]' WHERE id=?", (msg_id,))
         con.commit()
     return True
+
+
+def set_dm_preview_suppressed(msg_id: int, user_id: int) -> Optional[int]:
+    """Mark a DM message's link preview as suppressed.
+
+    Only the original sender may suppress their own preview. Returns the
+    channel_id on success (so the caller can route a WS broadcast), or None
+    if not authorised / not found.
+    """
+    with _conn() as con:
+        row = con.execute(
+            "SELECT sender_id, channel_id FROM dm_messages WHERE id=?", (msg_id,)
+        ).fetchone()
+        if not row or row["sender_id"] != user_id:
+            return None
+        con.execute("UPDATE dm_messages SET preview_suppressed=1 WHERE id=?", (msg_id,))
+        con.commit()
+        return int(row["channel_id"])
 
 
 # ---------------------------------------------------------------------------

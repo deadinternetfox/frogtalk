@@ -6262,6 +6262,23 @@ body.mini-embedded .auth-title { font-size:20px; margin-bottom:2px; }
 body.mini-embedded .auth-subtitle { font-size:11px; margin-bottom:12px; }
 body.mini-embedded .auth-box { padding:22px 24px 18px; }
 body.mini-embedded .auth-tabs { margin-bottom:14px; }
+
+/* ── Discord-style "X" to dismiss a link preview (author-only) ── */
+.preview-suppress-btn{
+  position:absolute;top:6px;right:6px;
+  width:22px;height:22px;line-height:18px;text-align:center;
+  padding:0;margin:0;border:none;border-radius:50%;
+  background:rgba(0,0,0,.55);color:#dff5e8;
+  font-size:16px;font-weight:600;cursor:pointer;
+  opacity:0;transition:opacity .12s ease, background .12s ease;
+  z-index:2;
+}
+.link-preview:hover > .preview-suppress-btn,
+.yt-embed:hover > .preview-suppress-btn,
+.spotify-embed:hover > .preview-suppress-btn,
+.preview-suppress-btn:focus,
+.preview-suppress-btn:hover{ opacity:1; }
+.preview-suppress-btn:hover{ background:rgba(220,38,38,.85); }
 </style>
 
 <!-- ═══════════════════════════ BOOT SPLASH ══════════════════════ -->

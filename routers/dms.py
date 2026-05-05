@@ -394,6 +394,34 @@ async def react(channel_id: int, msg_id: int, body: dict,
     return {"reactions": counts}
 
 
+@router.post("/{channel_id}/messages/{msg_id}/preview-suppress")
+async def suppress_dm_preview(channel_id: int, msg_id: int,
+                              current_user: dict = Depends(get_current_user)):
+    """Discord-style \"X\" on a DM link preview. Sender-only."""
+    cid = db.set_dm_preview_suppressed(msg_id, current_user["id"])
+    if cid is None:
+        return JSONResponse(status_code=403, content={"error": "Cannot suppress this preview"})
+    # Notify both sides so the embed disappears for the recipient too.
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?", (cid,)
+            ).fetchone()
+        if ch:
+            peer_id = ch["user_b"] if ch["user_a"] == current_user["id"] else ch["user_a"]
+            payload = {
+                "type": "dm_preview_suppress",
+                "id": msg_id,
+                "channel_id": cid,
+            }
+            if peer_id and peer_id != current_user["id"]:
+                await manager.send_to_user(peer_id, payload)
+            await manager.send_to_user(current_user["id"], payload)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 # ─── Disappearing messages ────────────────────────────────────────────────────
 
 class DisappearTimerBody(BaseModel):
