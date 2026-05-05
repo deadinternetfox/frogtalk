@@ -3649,10 +3649,9 @@ const Social = (() => {
   // Last-known scroll position + timestamp for velocity-aware activation.
   let _reelsLastScrollTop = 0;
   let _reelsLastScrollT = 0;
-  // 'play' = next activated reel auto-plays. 'paused' = next reel stays
-  // paused (carries over the user's last manual pause/play decision so
-  // scrolling preserves intent like TikTok/IG).
-  let _reelsPlayMode = 'play';
+  // (Removed in v320: previously held a global 'play'/'paused' mode that
+  // persisted across cards. Reels now use only per-card pause via
+  // _reelsUserPausedCard so every new card autoplays.)
     let _reelsAutoPausedMusic = false;
     let _reelsAutoPausedMusicUrl = '';
     let _reelsMusicInterlockBusy = false;
