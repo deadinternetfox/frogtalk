@@ -6621,6 +6621,18 @@ const Social = (() => {
       }
       _updateRepostsInCaches(postId, data.repost_count || 0, data.reposted);
       _updateAllPostRepostBars(postId, data.repost_count || 0, data.reposted);
+      // Invalidate the current user's reposts-tab cache so the next visit
+      // (or in-progress profile view) refetches and shows the just-reposted
+      // post. Without this the cached empty/stale list would paint first.
+      try {
+        const myNick = String(State?.user?.nickname || '').toLowerCase();
+        if (myNick) _profileRepostsCache.delete(myNick);
+        // If the reposts tab is currently visible for self, refresh it now.
+        if (_currentTab === 'profile' && _profileActiveTab === 'reposts'
+            && String(_profileUser || '').toLowerCase() === myNick) {
+          loadProfileReposts(_profileUser, ++_profileTabLoadToken);
+        }
+      } catch {}
       try {
         UI.showToast(data.reposted ? (payload.quote ? 'Quote reposted' : 'Reposted') : 'Repost removed', 'success');
       } catch {}
