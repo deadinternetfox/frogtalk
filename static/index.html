@@ -1542,14 +1542,16 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
     max-height:32vh
   }
   /* Add Track + toggles: never let the flex column collapse this row,
-     and keep it pinned to the bottom of the panel when scrolling. */
+     and keep it pinned to the bottom of the panel when scrolling. The
+     row aligns to the right edge so the primary Add Track button sits
+     flush with the right side of the message composer below. */
   #music-panel:not(.mini):not(.collapsed) .mp-submit{
     position:sticky;bottom:0;z-index:2;
     flex-shrink:0;
     margin:6px -16px 0;padding:8px 16px;
     background:linear-gradient(180deg,rgba(15,10,31,0) 0%,#0f0a1f 35%,#0f0a1f 100%);
     border-top:1px solid rgba(160,80,216,.18);
-    justify-content:center
+    justify-content:flex-end
   }
 }
 @media (max-width:480px){
