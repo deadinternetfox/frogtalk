@@ -4003,52 +4003,73 @@ const Social = (() => {
         _updateTabLoadUi(loadUi, 93, 'Loading reel media', 'Priming first playable video');
       }
 
-      // ── Activation: a single IntersectionObserver is the source of
-      // truth for "which reel is active". We track each card's last
-      // intersectionRatio and on every callback pick the most-visible
-      // card; if that card crosses the activation threshold we activate
-      // it. This replaces the older scroll+rAF+scrollend+IO combo which
-      // had three systems racing each other and caused the
-      // "video paused after scroll" / "pause button does nothing"
-      // regressions. Industry-standard pattern (TikTok / Reels / Shorts).
+      // ── Activation: scroll-driven "which card is centered?" check.
+      // The IntersectionObserver only handles the "card is fully off
+      // screen → mute+pause" cleanup. Activation itself runs on every
+      // scroll event (rAF-throttled) + on scrollend / settle, because
+      // IO threshold callbacks alone proved unreliable: if a snap settle
+      // lands between two thresholds the IO never fires, so the new
+      // card never activates and you see the old paused frame.
       if (snap && window.IntersectionObserver) {
-        const ACTIVATION_THRESHOLD = 0.7;  // card must be ≥70% visible
-        const ratios = new WeakMap();
-        const pickAndActivate = () => {
-          if (_reelsIsSeekLocked()) return;
-          const cards = snap.querySelectorAll('.reel-card');
-          let best = null;
-          let bestRatio = 0;
-          cards.forEach(c => {
-            const r = ratios.get(c) || 0;
-            if (r > bestRatio) { bestRatio = r; best = c; }
-          });
-          if (!best || bestRatio < ACTIVATION_THRESHOLD) return;
-          if (best === _reelsCurrentCard) return;
-          // New active card. Always autoplay scrolled-into cards — a
-          // tap-pause never persists across cards (clears in activate).
-          _reelsActivateCard(best, { reset: false, forcePlay: true });
-        };
         _reelsObserver = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
-            ratios.set(entry.target, entry.intersectionRatio);
-            if (entry.intersectionRatio < 0.4 && entry.target !== _reelsCurrentCard) {
-              // Card scrolled mostly off-screen and isn't the active one
-              // — make sure it's silent. Active card is owned by the
-              // activation path; only the activation transition pauses it.
-              const v = entry.target.querySelector('video');
-              if (v && !v.paused) { try { v.muted = true; v.pause(); } catch {} }
-              entry.target.classList.remove('is-playing');
-            }
+            if (entry.intersectionRatio >= 0.1) return;
+            if (entry.target === _reelsCurrentCard) return;
+            const v = entry.target.querySelector('video');
+            if (v && !v.paused) { try { v.muted = true; v.pause(); } catch {} }
+            entry.target.classList.remove('is-playing');
           });
-          pickAndActivate();
-        }, { root: snap, threshold: [0, 0.25, 0.5, 0.7, 0.9, 1.0] });
+        }, { root: snap, threshold: [0, 0.1] });
         snap.querySelectorAll('.reel-card').forEach(card => _reelsObserver.observe(card));
         snap._reelsObserveCard = (card) => { try { _reelsObserver.observe(card); } catch {} };
       }
 
       if (snap) {
         _reelsScrollSnap = snap;
+        const pickCenteredCard = () => {
+          const cards = snap.querySelectorAll('.reel-card');
+          if (!cards.length) return null;
+          const rRoot = snap.getBoundingClientRect();
+          const center = rRoot.top + rRoot.height / 2;
+          let best = null;
+          let bestDist = Infinity;
+          cards.forEach(c => {
+            const r = c.getBoundingClientRect();
+            const cy = r.top + r.height / 2;
+            const d = Math.abs(cy - center);
+            if (d < bestDist) { bestDist = d; best = c; }
+          });
+          // Only activate if the centered card is reasonably close to
+          // the viewport center (≤ 30% of root height) — prevents
+          // mid-fling activation flicker.
+          if (best && bestDist <= rRoot.height * 0.3) return best;
+          return null;
+        };
+        const tryActivate = () => {
+          if (_reelsIsSeekLocked()) return;
+          const c = pickCenteredCard();
+          if (!c || c === _reelsCurrentCard) return;
+          _reelsActivateCard(c, { reset: false, forcePlay: true });
+        };
+        let scrollRaf = 0;
+        let settleTimer = 0;
+        const onScroll = () => {
+          if (scrollRaf) return;
+          scrollRaf = requestAnimationFrame(() => {
+            scrollRaf = 0;
+            tryActivate();
+          });
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = setTimeout(() => { settleTimer = 0; tryActivate(); }, 140);
+        };
+        const onScrollEnd = () => {
+          if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
+          tryActivate();
+        };
+        snap._reelsOnScroll = onScroll;
+        snap._reelsOnScrollEnd = onScrollEnd;
+        snap.addEventListener('scroll', onScroll, { passive: true });
+        snap.addEventListener('scrollend', onScrollEnd, { passive: true });
         _updateTabLoadUi(loadUi, 97, 'Finalizing reels', 'Snap controls ready');
       }
     } catch (e) {
@@ -4350,6 +4371,14 @@ const Social = (() => {
       _reelsObserver = null;
     }
     const snap = _reelsScrollSnap || document.getElementById('reels-snap');
+    if (snap && snap._reelsOnScroll) {
+      try { snap.removeEventListener('scroll', snap._reelsOnScroll); } catch {}
+      try { delete snap._reelsOnScroll; } catch {}
+    }
+    if (snap && snap._reelsOnScrollEnd) {
+      try { snap.removeEventListener('scrollend', snap._reelsOnScrollEnd); } catch {}
+      try { delete snap._reelsOnScrollEnd; } catch {}
+    }
     if (snap) _reelsDetachGestureLimiter(snap);
     _reelsScrollSnap = null;
     document.querySelectorAll('.reels-snap video').forEach(v => {
