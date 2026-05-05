@@ -5961,24 +5961,26 @@ a.mtnp-title:hover{color:#fff;text-decoration:underline}
 .mtnp-btn{
   width:34px;height:34px;border-radius:10px;border:1px solid rgba(200,130,255,.35);
   background:rgba(0,0,0,.35);color:#e8d5ff;font-size:15px;line-height:1;
-  cursor:pointer;transition:background .15s,transform .15s,border-color .15s
+  cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:background .15s,transform .12s,border-color .15s,box-shadow .15s
 }
 .mtnp-btn:hover{background:rgba(200,130,255,.25);border-color:#c89bff;transform:translateY(-1px)}
-.mtnp-btn.mtnp-pp{background:linear-gradient(135deg,#a050d8,#7a3ac0);border-color:#b070e0;color:#fff;font-size:14px}
-.mtnp-btn.mtnp-pp:hover{background:linear-gradient(135deg,#b560e8,#8a4ad0)}
+.mtnp-btn:active{transform:scale(.9)}
+.mtnp-btn.mtnp-pp{background:linear-gradient(135deg,#a050d8,#7a3ac0);border-color:#b070e0;color:#fff;font-size:14px;box-shadow:0 2px 8px rgba(160,80,216,.35)}
+.mtnp-btn.mtnp-pp:hover{background:linear-gradient(135deg,#b560e8,#8a4ad0);box-shadow:0 4px 14px rgba(200,130,255,.45)}
 .mtnp-btn.mtnp-stop:hover{border-color:#ff6677;color:#ff8899;background:rgba(255,90,110,.18)}
-/* Skip-to-next inline action — same purple family as mtnp-pp but a touch
-   lighter so the row reads pause / next / share / stop left to right
-   without the eye snagging on a foreign accent colour. */
+/* Skip-to-next inline action — matches the side dock's mmd-play purple
+   gradient so the top strip and sidebar feel like one player. */
 .mtnp-btn.mtnp-skip{
-  background:linear-gradient(135deg,#7a3ac0,#5a2a8a);border-color:#a070d8;color:#fff;
-  font-size:15px;
-  box-shadow:0 2px 8px rgba(160,80,216,.28)
+  background:linear-gradient(135deg,#8a3aba,#5a2a8a);border-color:#b070e0;color:#fff;
+  box-shadow:0 2px 8px rgba(160,80,216,.35)
 }
 .mtnp-btn.mtnp-skip:hover{
-  background:linear-gradient(135deg,#9050d8,#6a3aaa);border-color:#c89bff;
-  box-shadow:0 4px 14px rgba(200,130,255,.38)
+  background:linear-gradient(135deg,#a050d8,#6a3aaa);border-color:#c89bff;
+  box-shadow:0 4px 14px rgba(200,130,255,.45)
 }
+.mtnp-btn.mtnp-skip svg{display:block}
 .mtnp-btn.mtnp-share:hover{border-color:#c89bff;color:#fff;background:rgba(160,80,216,.22)}
 /* ── Polished auto-next checkbox (mini-dock + FrogSocial strip) ─────── */
 .mp-an-check{

@@ -5932,7 +5932,7 @@ const Social = (() => {
         // so the user can hop tracks from the persistent strip without
         // opening the music tab.
         const skipBtn = `<button class="mtnp-btn mtnp-skip" onclick="event.stopPropagation();Music.skipNext()"
-                                  title="Next track" aria-label="Next track">⏭</button>`;
+                                  title="Next track" aria-label="Next track"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/></svg></button>`;
         // Auto-next toggle — polished checkbox style, lives on a second
         // row beneath the title so the top button row stays clean. The
         // `data-autonext-check` hook lets Music._syncAutoNextButtons()
