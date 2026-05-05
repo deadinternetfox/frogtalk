@@ -138,7 +138,7 @@ const UI = (() => {
       ? `<span style="opacity:.9">${dot}</span> <span style="color:#bbb;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;display:inline-block;vertical-align:bottom">${np}${escHtml(msg)}</span>`
       : `${dot} ${escHtml(name)}`;
     el.title = _nowPlayingActive
-      ? `${name} — ${msg} (tap to open track · long-press to change status)`
+      ? `${name} — ${msg} (click to change status · long-press to open the track)`
       : (msg ? `${name} — ${msg} (click to change)` : `${name} (click to change)`);
     el.dataset.nowplaying = _nowPlayingActive ? '1' : '0';
     // Update the under-avatar status display
@@ -449,20 +449,21 @@ const UI = (() => {
     try { toast(on ? 'Now Playing status: on' : 'Now Playing status: off', 'success'); } catch {}
   }
 
-  // Click handler for the status pill / under-avatar status when the
-  // status reflects a live track. Falls back to opening the picker so
-  // the user isn't trapped without a way to change presence.
+  // Click handler for the status pill / under-avatar status. Always
+  // opens the status picker so the user is never trapped without a way
+  // to edit their status — previously, when now-playing was active the
+  // click hijacked to Music.expand() and there was no path back to the
+  // picker. Long-press still jumps to the track for the old shortcut.
   function handleSelfStatusClick(ev) {
-    if (_nowPlayingActive) {
-      try { ev?.stopPropagation?.(); } catch {}
-      try {
-        if (window.Music && typeof Music.expand === 'function') {
-          Music.expand();
-          return;
-        }
-      } catch {}
-    }
+    try { ev?.stopPropagation?.(); } catch {}
     openStatusPicker(ev);
+  }
+  function _openNowPlayingTrack() {
+    try {
+      if (_nowPlayingActive && window.Music && typeof Music.expand === 'function') {
+        Music.expand();
+      }
+    } catch {}
   }
 
   // Wire one-time listeners for music state changes and DOM clicks on
@@ -486,6 +487,14 @@ const UI = (() => {
     const pill = document.getElementById('self-status');
     if (pill) {
       pill.setAttribute('onclick', 'UI.handleSelfStatusClick(event)');
+      // Long-press on the pill jumps to the now-playing track when one
+      // is live. Click stays on the picker so the user can always edit
+      // their status text without the music hijacking the tap.
+      try { bindLongPress(pill, _openNowPlayingTrack); } catch {}
+    }
+    // Long-press on the under-avatar display does the same.
+    if (disp) {
+      try { bindLongPress(disp, _openNowPlayingTrack); } catch {}
     }
     // Initial sync in case music was already playing when the page loaded.
     setTimeout(() => { try { _syncNowPlayingStatus(); } catch {} }, 600);
