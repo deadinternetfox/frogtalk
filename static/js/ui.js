@@ -793,42 +793,70 @@ const UI = (() => {
     const icon         = opts.icon != null ? String(opts.icon) : '';
     const primaryLabel = String(opts.primaryLabel || 'OK');
     const actionLabel  = opts.actionLabel != null ? String(opts.actionLabel) : '';
+    // Inject one-shot stylesheet for notice animations + the inline
+    // "Learn more" link styling. Idempotent.
+    if (!document.getElementById('ui-notice-style')) {
+      const st = document.createElement('style');
+      st.id = 'ui-notice-style';
+      st.textContent =
+        '@keyframes uiNoticeOverlayIn{from{opacity:0}to{opacity:1}}' +
+        '@keyframes uiNoticeBoxIn{from{opacity:0;transform:translateY(8px) scale(.97)}to{opacity:1;transform:none}}' +
+        '@keyframes uiNoticeBoxOut{to{opacity:0;transform:translateY(4px) scale(.98)}}' +
+        '@keyframes uiNoticeIconPulse{0%{transform:scale(1)}50%{transform:scale(1.08)}100%{transform:scale(1)}}' +
+        '.ui-notice-overlay{animation:uiNoticeOverlayIn .18s ease-out both}' +
+        '.ui-notice-overlay.ui-notice-closing{animation:uiNoticeOverlayIn .14s ease-in reverse both}' +
+        '.ui-notice-box{animation:uiNoticeBoxIn .22s cubic-bezier(.2,.9,.3,1.1) both}' +
+        '.ui-notice-overlay.ui-notice-closing .ui-notice-box{animation:uiNoticeBoxOut .14s ease-in both}' +
+        '.ui-notice-icon{animation:uiNoticeIconPulse 1.6s ease-in-out 1}' +
+        '.ui-notice-primary{transition:transform .12s ease, box-shadow .18s ease, filter .18s ease;will-change:transform}' +
+        '.ui-notice-primary:hover{filter:brightness(1.06);box-shadow:0 6px 18px color-mix(in srgb, var(--accent-color,#4caf50) 35%, transparent)}' +
+        '.ui-notice-primary:active{transform:translateY(1px) scale(.99)}' +
+        '.ui-notice-link{display:inline-flex;align-items:center;gap:4px;background:none;border:0;padding:6px 8px;margin:0;cursor:pointer;font:inherit;font-size:13px;font-weight:500;color:var(--accent-color,#4caf50);text-decoration:none;border-radius:6px;transition:background .15s ease, color .15s ease}' +
+        '.ui-notice-link::after{content:"\u203A";display:inline-block;font-size:15px;line-height:1;transform:translateX(0);transition:transform .18s ease}' +
+        '.ui-notice-link:hover{background:color-mix(in srgb, var(--accent-color,#4caf50) 12%, transparent);color:color-mix(in srgb, var(--accent-color,#4caf50) 85%, white)}' +
+        '.ui-notice-link:hover::after{transform:translateX(3px)}' +
+        '.ui-notice-link:focus-visible{outline:2px solid var(--accent-color,#4caf50);outline-offset:2px}';
+      document.head.appendChild(st);
+    }
     return new Promise((resolve) => {
       const overlay = document.createElement('div');
-      overlay.className = 'modal-overlay';
+      overlay.className = 'modal-overlay ui-notice-overlay';
       overlay.style.cssText =
         'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;' +
         'justify-content:center;padding:16px;background:rgba(0,0,0,.55);' +
-        'backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);';
+        'backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);';
       const titleHtml = title
-        ? `<div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;margin-bottom:10px;color:var(--text-color,#e8e8e8)">${
-            icon ? `<span style="font-size:20px;line-height:1">${escHtml(icon)}</span>` : ''
+        ? `<div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;margin-bottom:10px;color:var(--text-color,#e8e8e8);letter-spacing:.1px">${
+            icon ? `<span class="ui-notice-icon" style="font-size:22px;line-height:1;display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:50%;background:color-mix(in srgb, var(--accent-color,#4caf50) 22%, transparent);box-shadow:0 0 0 1px color-mix(in srgb, var(--accent-color,#4caf50) 30%, transparent)">${escHtml(icon)}</span>` : ''
           }<span>${escHtml(title)}</span></div>`
         : '';
-      const actionBtn = actionLabel
-        ? `<button type="button" class="modal-btn primary" data-act="action" style="flex:1">${escHtml(actionLabel)}</button>`
+      const linkHtml = actionLabel
+        ? `<div style="display:flex;justify-content:center;margin-top:10px"><button type="button" class="ui-notice-link" data-act="action">${escHtml(actionLabel)}</button></div>`
         : '';
       overlay.innerHTML =
-        '<div class="modal-box" role="dialog" aria-modal="true" ' +
-        'style="max-width:min(440px,94vw);padding:20px 20px 16px;' +
+        '<div class="modal-box ui-notice-box" role="dialog" aria-modal="true" ' +
+        'style="max-width:min(440px,94vw);padding:22px 22px 18px;' +
         'background:linear-gradient(180deg,' +
           'color-mix(in srgb, var(--accent-color,#4caf50) 14%, var(--surface-color,#1e1e1e)) 0%,' +
-          'color-mix(in srgb, var(--accent-color,#4caf50) 8%,  var(--surface-color,#1e1e1e)) 100%);' +
-        'border:1px solid color-mix(in srgb, var(--accent-color,#4caf50) 30%, var(--border-color,#2a2a2a));' +
-        'border-radius:12px;box-shadow:0 16px 48px rgba(0,0,0,.6);' +
+          'color-mix(in srgb, var(--accent-color,#4caf50) 6%,  var(--surface-color,#1e1e1e)) 100%);' +
+        'border:1px solid color-mix(in srgb, var(--accent-color,#4caf50) 28%, var(--border-color,#2a2a2a));' +
+        'border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.02) inset;' +
         'color:var(--text-color,#e8e8e8)">' +
           titleHtml +
-          `<div style="font-size:14px;line-height:1.5;color:var(--text-color,#d6d6d6);white-space:pre-wrap;opacity:.95">${escHtml(message)}</div>` +
-          '<div style="display:flex;gap:8px;margin-top:18px">' +
-            actionBtn +
-            `<button type="button" class="modal-btn ${actionLabel ? 'secondary' : 'primary'}" data-act="ok" style="flex:${actionLabel ? '0 0 auto' : '1'};min-width:88px">${escHtml(primaryLabel)}</button>` +
+          `<div style="font-size:14px;line-height:1.55;color:var(--text-color,#d6d6d6);white-space:pre-wrap;opacity:.95">${escHtml(message)}</div>` +
+          '<div style="margin-top:20px">' +
+            `<button type="button" class="modal-btn primary ui-notice-primary" data-act="ok" style="display:block;width:100%;padding:12px 16px;font-weight:600;font-size:15px;border-radius:10px">${escHtml(primaryLabel)}</button>` +
           '</div>' +
+          linkHtml +
         '</div>';
       let done = false;
       const cleanup = (val) => {
         if (done) return; done = true;
         document.removeEventListener('keydown', onKey, true);
-        try { overlay.remove(); } catch {}
+        try {
+          overlay.classList.add('ui-notice-closing');
+          setTimeout(() => { try { overlay.remove(); } catch {} }, 150);
+        } catch { try { overlay.remove(); } catch {} }
         resolve(val);
       };
       const onKey = (ev) => {
@@ -837,7 +865,8 @@ const UI = (() => {
       };
       overlay.addEventListener('click', (ev) => {
         if (ev.target === overlay) return cleanup('dismiss');
-        const act = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-act');
+        const t = ev.target && ev.target.closest && ev.target.closest('[data-act]');
+        const act = t && t.getAttribute('data-act');
         if (act === 'ok') cleanup('ok');
         else if (act === 'action') cleanup('action');
       });
