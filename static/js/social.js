@@ -3649,6 +3649,11 @@ const Social = (() => {
   // Last-known scroll position + timestamp for velocity-aware activation.
   let _reelsLastScrollTop = 0;
   let _reelsLastScrollT = 0;
+  // Timestamp of the last `scroll` event the snap container fired. Used by
+  // the tap detector to reject "ghost taps" — a small flick on mobile
+  // fires touchend BEFORE momentum scroll has produced a scrollTop delta,
+  // which would otherwise be mis-detected as a tap.
+  let _reelsLastScrollEventT = 0;
   // (Removed in v320: previously held a global 'play'/'paused' mode that
   // persisted across cards. Reels now use only per-card pause via
   // _reelsUserPausedCard so every new card autoplays.)
@@ -4032,6 +4037,7 @@ const Social = (() => {
         _reelsScrollSnap = snap;
         let settleTimer = 0;
         const onScroll = () => {
+          _reelsLastScrollEventT = Date.now();
           if (_reelsScrollRaf) return;
           _reelsScrollRaf = requestAnimationFrame(() => {
             _reelsScrollRaf = 0;
@@ -4117,6 +4123,35 @@ const Social = (() => {
     } else {
       try { v.pause(); } catch {}
       card.classList.remove('is-playing');
+    }
+    // Warm the next 2 cards so they start playback instantly when the
+    // user scrolls. Distant cards stay on preload="metadata" to keep
+    // bandwidth reasonable.
+    _reelsPreloadNeighbours(card);
+  }
+
+  function _reelsPreloadNeighbours(card) {
+    if (!card) return;
+    const NEIGHBOURS = 2;
+    let next = card.nextElementSibling;
+    let promoted = 0;
+    while (next && promoted < NEIGHBOURS) {
+      if (next.classList && next.classList.contains('reel-card')) {
+        const nv = next.querySelector('video');
+        if (nv && nv.preload !== 'auto') {
+          try { nv.preload = 'auto'; nv.load?.(); } catch {}
+        }
+        promoted++;
+      }
+      next = next.nextElementSibling;
+    }
+    // Also warm the previous card so swiping back is instant.
+    const prev = card.previousElementSibling;
+    if (prev && prev.classList && prev.classList.contains('reel-card')) {
+      const pv = prev.querySelector('video');
+      if (pv && pv.preload !== 'auto') {
+        try { pv.preload = 'auto'; pv.load?.(); } catch {}
+      }
     }
   }
 
@@ -4741,29 +4776,30 @@ const Social = (() => {
   }
 
   // Single delegated tap-vs-scroll detector for the entire reels stage.
-  // A gesture toggles playback ONLY if:
+  // A gesture toggles playback ONLY if ALL of these hold:
   //   - it began on a video element (not a button/control overlay)
   //   - the snap container did not scroll during the gesture
+  //   - no scroll event fired between gesture start and ~120ms after end
+  //     (catches mobile momentum scroll: touchend fires before scrollTop
+  //     has actually moved, so we wait one snap-frame before deciding)
   //   - the pointer never travelled more than TAP_MAX_MOVE px
-  //   - it lasted less than TAP_MAX_TIME ms
+  //   - the gesture lasted less than TAP_MAX_TIME ms
   // Any of those failing means it was a scroll/drag/long-press → no toggle.
   function _bindReelsTapGesture(snap) {
     if (!snap || snap._reelsTapBound) return;
     snap._reelsTapBound = true;
-    const TAP_MAX_MOVE = 12;
-    const TAP_MAX_TIME = 320;
-    const SCROLL_TOLERANCE = 2; // px — sub-pixel jitter on snap settle
+    const TAP_MAX_MOVE = 10;
+    const TAP_MAX_TIME = 280;
+    const SCROLL_TOLERANCE = 2;       // px — sub-pixel jitter on snap settle
+    const POST_SCROLL_GUARD_MS = 120; // wait for momentum scroll to commit
 
-    let g = null; // active gesture state
+    let g = null;
     const reset = () => { g = null; };
 
     const onDown = (e) => {
       const targetVid = e.target && e.target.closest && e.target.closest('.reel-card video');
       if (!targetVid) { g = null; return; }
-      // Bail if the touch started over an interactive overlay (buttons,
-      // links, comment input, mute button, etc.) — those have their own
-      // handlers and must not be hijacked by tap-to-pause.
-      if (e.target.closest('button, a, input, textarea, .reel-actions, .reel-comments, .reel-progress, .reel-react-picker, .reel-share-menu')) {
+      if (e.target.closest('button, a, input, textarea, .reel-actions, .reel-comments, .reel-progress, .reel-react-picker, .reel-share-menu, .reel-author, .reel-react-emoji, .reel-mute-btn, .reel-play-toggle')) {
         g = null;
         return;
       }
@@ -4774,6 +4810,7 @@ const Social = (() => {
         y: p.clientY || 0,
         t: Date.now(),
         startScrollTop: snap.scrollTop,
+        startScrollEventT: _reelsLastScrollEventT,
         moved: false,
       };
     };
@@ -4784,16 +4821,24 @@ const Social = (() => {
       const dy = Math.abs((p.clientY || 0) - g.y);
       if (dx > TAP_MAX_MOVE || dy > TAP_MAX_MOVE) g.moved = true;
     };
+    const finalizeTap = (cur, ev) => {
+      if (cur.moved) return;
+      if (Date.now() - cur.t > TAP_MAX_TIME + POST_SCROLL_GUARD_MS) return;
+      // A scroll event fired anywhere in the gesture window → was a scroll.
+      if (_reelsLastScrollEventT > cur.startScrollEventT) return;
+      if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
+      // Only ever toggle the currently active card (never one that has
+      // since scrolled out of frame).
+      const target = _reelsCurrentVideo || cur.video;
+      toggleReelPlayback(ev, target);
+    };
     const onUp = (e) => {
       const cur = g; g = null;
       if (!cur) return;
-      if (cur.moved) return;
-      if (Date.now() - cur.t > TAP_MAX_TIME) return;
-      if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
-      // Only toggle the *currently active* card — never the one the touch
-      // technically started on (which may have scrolled out of frame).
-      const target = _reelsCurrentVideo || cur.video;
-      toggleReelPlayback(e, target);
+      // Defer the decision one momentum-frame so we can detect a scroll
+      // event that lands AFTER touchend (common on Chrome Android +
+      // desktop trackpad fling).
+      setTimeout(() => finalizeTap(cur, e), POST_SCROLL_GUARD_MS);
     };
 
     snap.addEventListener('touchstart', onDown, { passive: true });
@@ -4909,7 +4954,7 @@ const Social = (() => {
       <div class="reel-card" data-post-id="${post.id}">
         <div class="reel-loading-layer"><span class="reel-loading-spinner"></span></div>
         <div class="reel-video-poster"></div>
-        <video src="${videoSrc}" playsinline preload="auto" muted></video>
+        <video src="${videoSrc}" playsinline preload="metadata" muted></video>
         <button class="reel-play-toggle" title="Play or pause" onclick="Social.toggleReelPlayback(event,this.previousElementSibling)">▶</button>
         <div class="reel-progress"><span></span></div>
         <div class="reel-overlay-top"></div>
