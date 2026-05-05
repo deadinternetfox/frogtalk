@@ -160,9 +160,32 @@ async def invite_landing_page(code: str):
         html = """<!DOCTYPE html>
 <html><head><title>Invalid Invite - FrogTalk</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
-.card{background:#1a1a1a;padding:40px;border-radius:16px;text-align:center;max-width:400px}
-h1{color:#4caf50}a{color:#4caf50}</style>
+<meta name="theme-color" content="#4caf50">
+<link rel="icon" href="/static/favicon.ico">
+<style>
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:
+    radial-gradient(70% 45% at 50% 0%, rgba(127,210,167,.12), transparent 72%),
+    radial-gradient(60% 40% at 50% 100%, rgba(46,138,74,.10), transparent 75%),
+    linear-gradient(135deg,#0d0d0d,#0d1611);
+  display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}
+.card{position:relative;background:linear-gradient(180deg,#173027 0%,#13271f 56%,#0f1f17 100%);
+  border:1px solid #3b6c59;border-radius:18px;padding:36px 32px;width:100%;max-width:400px;text-align:center;
+  box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(127,210,167,.06),inset 0 1px 0 rgba(255,255,255,.04)}
+.card::after{content:"";position:absolute;left:18px;right:18px;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(127,210,167,.5),transparent);pointer-events:none}
+h1{font-size:24px;font-weight:800;margin:0 0 10px;
+  background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+p{color:#bcd6c8;margin:0 0 18px;font-size:14px;line-height:1.45}
+a{display:inline-block;padding:11px 20px;border-radius:10px;text-decoration:none;font-weight:600;
+  background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3e8c43 100%);
+  color:#fff;border:1px solid #6cd870;text-shadow:0 1px 2px rgba(0,0,0,.25);
+  box-shadow:0 6px 18px rgba(76,175,80,.35),inset 0 1px 0 rgba(255,255,255,.18)}
+a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
+</style>
 </head><body><div class="card">
 <h1>🐸 Invalid Invite</h1>
 <p>This invite link is invalid or has expired.</p>
@@ -184,8 +207,9 @@ h1{color:#4caf50}a{color:#4caf50}</style>
     if is_img:
         icon_html = (
             f'<img src="{_html_mod.escape(raw_icon, quote=True)}" alt="" '
-            f'style="width:96px;height:96px;border-radius:20px;object-fit:cover;'
-            f'display:block;margin:0 auto 16px;box-shadow:0 4px 16px rgba(0,0,0,.4)">'
+            f'style="width:96px;height:96px;border-radius:22px;object-fit:cover;'
+            f'display:block;margin:0 auto 14px;'
+            f'box-shadow:0 6px 18px rgba(0,0,0,.45),0 0 0 1px rgba(127,210,167,.15)">'
         )
         # For Discord/Telegram previews: data: URLs aren't scrapable, so route
         # through /og/invite/{code}.img which decodes the base64 server-side.
@@ -247,26 +271,91 @@ h1{color:#4caf50}a{color:#4caf50}</style>
 <link rel="icon" href="/static/favicon.ico">
 
 <style>
-body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}}
-.card{{background:#1a1a1a;padding:40px;border-radius:16px;text-align:center;max-width:400px;border:1px solid #2a2a2a}}
-.icon{{font-size:64px;margin-bottom:16px}}
-h1{{color:#4caf50;margin:0 0 8px}}
-.desc{{color:#888;margin-bottom:24px}}
-.invited-by{{color:#666;font-size:13px;margin-bottom:24px}}
-.btn{{display:block;width:100%;padding:14px;margin:8px 0;border:none;border-radius:8px;font-size:16px;cursor:pointer;text-decoration:none;box-sizing:border-box}}
-.btn-primary{{background:#4caf50;color:#fff;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.25)}}
-.btn-secondary{{background:#2a2a2a;color:#e0e0e0}}
-.btn:hover{{opacity:0.9}}
+:root{{
+  --bg:#0d0d0d;
+  --accent:#4caf50;
+  --accent-soft:#7fd2a7;
+  --text:#dff5e8;
+  --muted:#9bb3a4;
+}}
+*{{box-sizing:border-box}}
+html,body{{height:100%}}
+body{{
+  margin:0;color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:
+    radial-gradient(70% 45% at 50% 0%, rgba(127,210,167,.12), transparent 72%),
+    radial-gradient(60% 40% at 50% 100%, rgba(46,138,74,.10), transparent 75%),
+    linear-gradient(135deg,#0d0d0d,#0d1611);
+  display:flex;justify-content:center;align-items:center;min-height:100vh;
+  padding:20px;
+}}
+.card{{
+  position:relative;
+  background:linear-gradient(180deg,#173027 0%,#13271f 56%,#0f1f17 100%);
+  border:1px solid #3b6c59;border-radius:18px;
+  padding:36px 32px 30px;width:100%;max-width:420px;
+  box-shadow:
+    0 24px 64px rgba(0,0,0,.55),
+    0 0 0 1px rgba(127,210,167,.06),
+    inset 0 1px 0 rgba(255,255,255,.04);
+  text-align:center;
+}}
+.card::after{{
+  content:"";position:absolute;left:18px;right:18px;top:0;height:1px;
+  background:linear-gradient(90deg, transparent, rgba(127,210,167,.5), transparent);
+  pointer-events:none;
+}}
+.icon{{
+  font-size:64px;margin:0 0 14px;line-height:1;
+  filter:drop-shadow(0 4px 12px rgba(76,175,80,.35));
+}}
+h1{{
+  font-size:26px;font-weight:800;margin:0 0 6px;letter-spacing:-.01em;
+  background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}}
+.desc{{color:#bcd6c8;margin:0 0 14px;font-size:14px;line-height:1.45}}
+.invited-by{{color:var(--muted);font-size:13px;margin:0 0 22px}}
+.invited-by b{{color:#cfeadb;font-weight:600}}
+.btn{{
+  display:block;width:100%;padding:13px 16px;margin:10px 0;
+  border:1px solid transparent;border-radius:10px;
+  font-size:15px;font-weight:600;cursor:pointer;text-decoration:none;
+  text-align:center;transition:transform .08s ease, box-shadow .15s ease, background .15s ease;
+}}
+.btn-primary{{
+  background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3e8c43 100%);
+  border-color:#6cd870;color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,.25);
+  box-shadow:0 6px 18px rgba(76,175,80,.35),inset 0 1px 0 rgba(255,255,255,.18);
+}}
+.btn-primary:hover{{
+  background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%);
+  box-shadow:0 8px 22px rgba(76,175,80,.45),inset 0 1px 0 rgba(255,255,255,.22);
+  transform:translateY(-1px);
+}}
+.btn-secondary{{
+  background:rgba(127,210,167,.06);
+  border-color:rgba(127,210,167,.25);
+  color:#dff5e8;
+}}
+.btn-secondary:hover{{
+  background:rgba(127,210,167,.12);
+  border-color:rgba(127,210,167,.4);
+}}
+.note{{color:#7e9b8c;font-size:12px;margin:14px 0 0}}
+.note b{{color:#bfe0ce;font-weight:600}}
 </style>
 </head><body>
 <div class="card">
 {icon_html}
 <h1>#{room_name_safe}</h1>
 <p class="desc">{room_desc_safe}</p>
-<p class="invited-by">Invited by {created_by_safe}</p>
+<p class="invited-by">Invited by <b>{created_by_safe}</b></p>
 <a id="btn-primary" href="/app?invite={code}" class="btn btn-primary">Join</a>
 <a id="btn-secondary" href="/app?invite={code}&amp;register=1" class="btn btn-secondary">Create a new account</a>
-<p id="note" style="color:#555;font-size:12px;margin-top:14px;margin-bottom:0">You'll join <b>#{room_name_safe}</b> after signing in.</p>
+<p id="note" class="note">You'll join <b>#{room_name_safe}</b> after signing in.</p>
 </div>
 <script>
 // Upgrade the CTAs based on whether the visitor is already signed in.

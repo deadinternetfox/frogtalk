@@ -294,7 +294,12 @@ body[data-theme="dark"] .modal-btn.primary:active{
 .auth-btn{background:var(--accent-color) !important}
 .auth-tab.active{background:var(--accent-dim) !important;color:var(--accent-color) !important}
 #auth-overlay{background:linear-gradient(135deg,var(--bg-color),color-mix(in srgb, var(--accent-color) 10%, var(--bg-color))) !important}
-.auth-box{background:var(--surface-color) !important;border-color:var(--accent-dim) !important}
+/* Keep the auth box on its native green gradient even with the dark theme
+   override; the surface-color override made it look like a flat Discord card. */
+.auth-box{
+  background:linear-gradient(180deg,#173027 0%,#13271f 56%,#0f1f17 100%) !important;
+  border-color:#3b6c59 !important
+}
 .auth-input{background:var(--bg-color) !important;border-color:var(--border-color) !important;color:var(--text-color) !important}
 .auth-input:focus{border-color:var(--accent-color) !important}
 .auth-title{color:var(--accent-color) !important}
