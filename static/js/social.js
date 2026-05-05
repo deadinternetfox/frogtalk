@@ -3625,7 +3625,6 @@ const Social = (() => {
   let _reelsCurrentVideo = null; // currently playing video element
   let _reelsCurrentCard = null;
   let _reelsObserver = null;
-  let _reelsScrollRaf = 0;
   let _reelsScrollSnap = null;
   let _reelsSeekLockUntil = 0;
   let _reelsSeekCard = null;
@@ -3646,17 +3645,6 @@ const Social = (() => {
   let _reelsGestureLockUntil = 0;
   let _reelsWheelAccum = 0;
   let _reelsWheelResetTimer = 0;
-  // Last-known scroll position + timestamp for velocity-aware activation.
-  let _reelsLastScrollTop = 0;
-  let _reelsLastScrollT = 0;
-  // Timestamp of the last `scroll` event the snap container fired. Used by
-  // the tap detector to reject "ghost taps" — a small flick on mobile
-  // fires touchend BEFORE momentum scroll has produced a scrollTop delta,
-  // which would otherwise be mis-detected as a tap.
-  let _reelsLastScrollEventT = 0;
-  // (Removed in v320: previously held a global 'play'/'paused' mode that
-  // persisted across cards. Reels now use only per-card pause via
-  // _reelsUserPausedCard so every new card autoplays.)
     let _reelsAutoPausedMusic = false;
     let _reelsAutoPausedMusicUrl = '';
     let _reelsMusicInterlockBusy = false;
@@ -4362,27 +4350,13 @@ const Social = (() => {
       _reelsObserver = null;
     }
     const snap = _reelsScrollSnap || document.getElementById('reels-snap');
-    if (snap && snap._reelsOnScroll) {
-      try { snap.removeEventListener('scroll', snap._reelsOnScroll); } catch {}
-      try { delete snap._reelsOnScroll; } catch {}
-    }
-    if (snap && snap._reelsOnScrollEnd) {
-      try { snap.removeEventListener('scrollend', snap._reelsOnScrollEnd); } catch {}
-      try { delete snap._reelsOnScrollEnd; } catch {}
-    }
     if (snap) _reelsDetachGestureLimiter(snap);
     _reelsScrollSnap = null;
-    if (_reelsScrollRaf) {
-      try { cancelAnimationFrame(_reelsScrollRaf); } catch {}
-      _reelsScrollRaf = 0;
-    }
     document.querySelectorAll('.reels-snap video').forEach(v => {
       try { v.pause(); } catch {}
     });
     _reelsCurrentVideo = null;
     _reelsCurrentCard = null;
-    _reelsLastScrollTop = 0;
-    _reelsLastScrollT = 0;
     _reelsWheelAccum = 0;
   }
 
