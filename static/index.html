@@ -1517,13 +1517,23 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
    + input-area always stay visible; let the panel scroll its own content
    so Add Track and toggles flow naturally at the end (no sticky overlay). */
 @media (max-width:768px){
-  #music-panel:not(.mini):not(.collapsed){
+  /* Cap + scroll only when an iframe is actually playing (16:9 of a
+     phone-wide column would otherwise eat the whole screen). When the
+     queue is empty there's no iframe, so the panel can — and must —
+     grow naturally to fit header + Add Track row, otherwise the
+     parent flex column squashes it and the bottom (Add Track) gets
+     clipped behind the composer. */
+  #music-panel:not(.mini):not(.collapsed):has(.mp-frame){
     max-height:42vh;
     overflow-y:auto;
     -webkit-overflow-scrolling:touch;
-    /* Tighten internal padding so the composer sits right under the panel
-       with no blank gap. */
     padding-bottom:8px
+  }
+  #music-panel:not(.mini):not(.collapsed):not(:has(.mp-frame)){
+    /* Empty queue: don't let #main's flex column shrink us below
+       the natural height of header + empty-message + submit row. */
+    flex-shrink:0;
+    overflow:visible
   }
   /* Shrink the iframe on phones so the panel doesn't eat the screen even
      before the cap kicks in. 16:9 of a phone-wide column is otherwise huge. */
@@ -1531,14 +1541,11 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
   #music-panel:not(.mini):not(.collapsed) #mp-player-wrap iframe{
     max-height:32vh
   }
-  /* Add Track + toggles stay pinned to the bottom of the panel so the
-     primary action never scrolls off-screen on phones (the panel itself
-     scrolls under it). Without this, an empty-queue room shows the
-     header + idle message, and the Add Track row sits below the 42vh
-     clip line — invisible until the user realizes they can scroll the
-     panel internally. */
+  /* Add Track + toggles: never let the flex column collapse this row,
+     and keep it pinned to the bottom of the panel when scrolling. */
   #music-panel:not(.mini):not(.collapsed) .mp-submit{
     position:sticky;bottom:0;z-index:2;
+    flex-shrink:0;
     margin:6px -16px 0;padding:8px 16px;
     background:linear-gradient(180deg,rgba(15,10,31,0) 0%,#0f0a1f 35%,#0f0a1f 100%);
     border-top:1px solid rgba(160,80,216,.18);
