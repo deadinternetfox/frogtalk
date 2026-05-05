@@ -4101,10 +4101,10 @@ const Social = (() => {
     if (shouldReset) {
       try { v.currentTime = 0; } catch {}
     }
-    // Honour persistent user intent: if they paused the previous reel,
-    // don't auto-play this one either (TikTok-style: tap-to-pause sticks).
-    const userWantsPlay = _reelsPlayMode === 'play' || opts.forcePlay;
-    if (userWantsPlay && !userPausedThisCard) {
+    // Per-card pause is the only thing that suppresses autoplay. New
+    // cards (or cards the user hasn't tapped to pause) always auto-play.
+    // No global pause-mode — a tap-pause sticks to that card only.
+    if (!userPausedThisCard || opts.forcePlay) {
       _reelsPlayVideo(card, v, 0, gen);
       card.classList.add('is-playing');
     } else {
@@ -4188,11 +4188,9 @@ const Social = (() => {
       return;
     }
     if (best !== _reelsCurrentCard) {
-      // Manual scroll to a new card resets the persistent pause-mode:
-      // user clearly wants to watch the new reel even if they had paused
-      // a previous one. Per-card pause (_reelsUserPausedCard) is also
-      // cleared when the card changes inside _reelsActivateCard.
-      _reelsPlayMode = 'play';
+      // Manual scroll to a new card always autoplays it. Per-card pause
+      // (_reelsUserPausedCard) is cleared inside _reelsActivateCard when
+      // the active card changes.
       _reelsActivateCard(best, { reset: false });
       return;
     }
@@ -4208,9 +4206,7 @@ const Social = (() => {
       }
       c.classList.remove('is-playing');
     });
-    // Honour user's last play/pause intent. If they paused, don't quietly
-    // resume on scroll-settle.
-    if (_reelsPlayMode === 'paused') return;
+    // Resume this card unless the user explicitly tap-paused THIS card.
     if (_reelsCurrentVideo && _reelsCurrentVideo.paused && _reelsUserPausedCard !== _reelsCurrentCard) {
       const gen = _reelsActivateGen;
       _reelsCurrentVideo.play().then(() => {
@@ -4723,7 +4719,45 @@ const Social = (() => {
         if (_reelsCurrentCard && _reelsCurrentCard !== card) return;
         _reelsAdvanceFrom(card);
       });
-      video.addEventListener('click', (e) => toggleReelPlayback(e, video));
+      // Tap-vs-drag detection. A bare `click` listener fires on iOS even
+      // after a vertical drag (because the snap container scrolls but the
+      // tapped video element still receives the synthesized click), which
+      // caused reels to randomly pause while the user was scrolling.
+      // Track pointerdown position + time and only toggle playback when
+      // the gesture stayed within a small radius for a short duration.
+      let _tapStartX = 0, _tapStartY = 0, _tapStartT = 0, _tapValid = false;
+      const TAP_MAX_MOVE = 10;   // px
+      const TAP_MAX_TIME = 350;  // ms
+      const onDown = (e) => {
+        const p = (e.touches && e.touches[0]) || e;
+        _tapStartX = p.clientX || 0;
+        _tapStartY = p.clientY || 0;
+        _tapStartT = Date.now();
+        _tapValid = true;
+      };
+      const onMove = (e) => {
+        if (!_tapValid) return;
+        const p = (e.touches && e.touches[0]) || e;
+        const dx = Math.abs((p.clientX || 0) - _tapStartX);
+        const dy = Math.abs((p.clientY || 0) - _tapStartY);
+        if (dx > TAP_MAX_MOVE || dy > TAP_MAX_MOVE) _tapValid = false;
+      };
+      const onUp = (e) => {
+        if (!_tapValid) return;
+        _tapValid = false;
+        if (Date.now() - _tapStartT > TAP_MAX_TIME) return;
+        toggleReelPlayback(e, video);
+      };
+      const onCancel = () => { _tapValid = false; };
+      video.addEventListener('touchstart', onDown, { passive: true });
+      video.addEventListener('touchmove',  onMove, { passive: true });
+      video.addEventListener('touchend',   onUp,   { passive: false });
+      video.addEventListener('touchcancel', onCancel, { passive: true });
+      video.addEventListener('mousedown', onDown);
+      video.addEventListener('mousemove', onMove);
+      video.addEventListener('mouseup',   onUp);
+      // Suppress synthesized click so iOS can't slip a stray pause through.
+      video.addEventListener('click', (e) => { try { e.preventDefault(); e.stopPropagation(); } catch {} });
     });
   }
 
@@ -4736,11 +4770,9 @@ const Social = (() => {
     const card = video.closest('.reel-card');
     if (video.paused) {
       if (card && _reelsUserPausedCard === card) _reelsUserPausedCard = null;
-      _reelsPlayMode = 'play';
       video.play().catch(() => {});
     } else {
       if (card) _reelsUserPausedCard = card;
-      _reelsPlayMode = 'paused';
       video.pause();
     }
   }
