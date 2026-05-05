@@ -1,15 +1,56 @@
-# FrogTalk
+<!--
+       _____             _____     _ _
+      |  ___| __ ___    |_   _|_ _| | | __
+      | |_ | '__/ _ \  _  | |/ _` | | |/ /
+      |  _|| | | (_) || |_| | (_| | |   <
+      |_|  |_|  \___/  \___/ \__,_|_|_|\_\
 
-<p align="center">
-  <a href="https://frogtalk.xyz"><strong>🌐 frogtalk.xyz</strong></a> &nbsp;·&nbsp;
-  <a href="https://frogtalk.xyz/docs/node">Node Docs</a> &nbsp;·&nbsp;
-  <a href="https://frogtalk.xyz/docs/api">API Docs</a>
-</p>
+      A federated, end-to-end encrypted chat platform
+-->
 
-<p align="center">
-  A <strong>federated, end-to-end encrypted</strong> chat platform.<br>
-  Self-host your own node and join the network — or run it completely standalone.
-</p>
+<div align="center">
+
+```
+              .--.        .--.
+             ( oo|        |oo )
+              \__/         \__/
+            .-"""-.       .-"""-.
+           /       \     /       \
+          | F R O G | _ |  T A L K |
+           \       /     \       /
+            '-...-'       '-...-'
+                  ribbit ✦ ribbit
+```
+
+# 🐸 FrogTalk
+
+**A federated, end-to-end encrypted chat platform.**
+Self-host your own node and join the swamp — or run it completely standalone.
+
+[![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?include_prereleases&label=release&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
+[![License](https://img.shields.io/github/license/deadinternetfox/frogtalk?color=4caf50)](LICENSE)
+[![Docker](https://img.shields.io/badge/ghcr.io-frogtalk-4caf50?logo=docker&logoColor=white)](https://github.com/deadinternetfox/frogtalk/pkgs/container/frogtalk)
+[![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
+
+[🌐 frogtalk.net](https://frogtalk.net) ·
+[📥 Downloads](https://github.com/deadinternetfox/frogtalk/releases/latest) ·
+[📚 Node Docs](https://frogtalk.xyz/docs/node) ·
+[🔌 API Docs](https://frogtalk.xyz/docs/api)
+
+</div>
+
+---
+
+## ✨ Why FrogTalk?
+
+> **Your chat, your server, your keys.** No company in the middle, no plaintext on disk, no telemetry tax.
+
+- 🔐 **Real E2E** — AES-256-GCM in the browser. The server stores ciphertext and nothing else.
+- 🌐 **Federated** — your node talks to other nodes; users, profiles, posts, rooms and DMs replicate across the swamp.
+- 🧅 **Tor-native** — flip a flag and your node lives behind a `.onion`; clearnet IP never leaks.
+- 📱 **Everywhere** — Web, Android (APK), iOS (TestFlight), Windows portable, Linux AppImage / `.deb`, and Electron desktop.
+- 🎵 **More than chat** — DMs, group calls (WebRTC), reels, friend wall, music rooms (YT/Spotify/SoundCloud), imageboard, GIF picker, custom emojis.
+- 🛠 **Full API** — REST + WebSocket for bots, bridges and custom clients. Discord and Telegram bridges ship in-tree.
 
 ---
 
