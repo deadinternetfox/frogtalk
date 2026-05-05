@@ -4015,63 +4015,52 @@ const Social = (() => {
         _updateTabLoadUi(loadUi, 93, 'Loading reel media', 'Priming first playable video');
       }
 
-      // IntersectionObserver: pause cards as they leave the viewport.
-      // Activation is driven exclusively by the scroll / scrollend handler
-      // (with a velocity guard) to avoid mid-fling card-flicker where
-      // every intermediate card briefly takes over playback.
+      // ── Activation: a single IntersectionObserver is the source of
+      // truth for "which reel is active". We track each card's last
+      // intersectionRatio and on every callback pick the most-visible
+      // card; if that card crosses the activation threshold we activate
+      // it. This replaces the older scroll+rAF+scrollend+IO combo which
+      // had three systems racing each other and caused the
+      // "video paused after scroll" / "pause button does nothing"
+      // regressions. Industry-standard pattern (TikTok / Reels / Shorts).
       if (snap && window.IntersectionObserver) {
+        const ACTIVATION_THRESHOLD = 0.7;  // card must be ≥70% visible
+        const ratios = new WeakMap();
+        const pickAndActivate = () => {
+          if (_reelsIsSeekLocked()) return;
+          const cards = snap.querySelectorAll('.reel-card');
+          let best = null;
+          let bestRatio = 0;
+          cards.forEach(c => {
+            const r = ratios.get(c) || 0;
+            if (r > bestRatio) { bestRatio = r; best = c; }
+          });
+          if (!best || bestRatio < ACTIVATION_THRESHOLD) return;
+          if (best === _reelsCurrentCard) return;
+          // New active card. Always autoplay scrolled-into cards — a
+          // tap-pause never persists across cards (clears in activate).
+          _reelsActivateCard(best, { reset: false, forcePlay: true });
+        };
         _reelsObserver = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
-            if (entry.isIntersecting) return;
-            // Never pause the currently-active card via the IO. During
-            // momentum / snap settle the active card can briefly dip
-            // below the threshold, and pausing it here is exactly the
-            // "video paused after manual scroll" symptom — let the
-            // scroll-driven activate path own the active card.
-            if (entry.target === _reelsCurrentCard) return;
-            const vid = entry.target.querySelector('video');
-            if (!vid) return;
-            try { vid.muted = true; } catch {}
-            try { vid.pause(); } catch {}
-            entry.target.classList.remove('is-playing');
+            ratios.set(entry.target, entry.intersectionRatio);
+            if (entry.intersectionRatio < 0.4 && entry.target !== _reelsCurrentCard) {
+              // Card scrolled mostly off-screen and isn't the active one
+              // — make sure it's silent. Active card is owned by the
+              // activation path; only the activation transition pauses it.
+              const v = entry.target.querySelector('video');
+              if (v && !v.paused) { try { v.muted = true; v.pause(); } catch {} }
+              entry.target.classList.remove('is-playing');
+            }
           });
-        }, { root: snap, threshold: 0.6 });
+          pickAndActivate();
+        }, { root: snap, threshold: [0, 0.25, 0.5, 0.7, 0.9, 1.0] });
         snap.querySelectorAll('.reel-card').forEach(card => _reelsObserver.observe(card));
+        snap._reelsObserveCard = (card) => { try { _reelsObserver.observe(card); } catch {} };
       }
 
       if (snap) {
         _reelsScrollSnap = snap;
-        let settleTimer = 0;
-        const onScroll = () => {
-          _reelsLastScrollEventT = Date.now();
-          if (_reelsScrollRaf) return;
-          _reelsScrollRaf = requestAnimationFrame(() => {
-            _reelsScrollRaf = 0;
-            _reelsSyncActiveFromScroll(snap);
-          });
-          // Fallback for browsers (Safari/iOS) where `scrollend` never
-          // fires after a finger scroll: schedule a settle re-sync ~160ms
-          // after the last scroll event. Ensures the new reel auto-plays
-          // even when user scrolled into it manually.
-          if (settleTimer) clearTimeout(settleTimer);
-          settleTimer = setTimeout(() => {
-            settleTimer = 0;
-            _reelsLastScrollT = 0; // force low-velocity branch
-            _reelsSyncActiveFromScroll(snap);
-          }, 160);
-        };
-        snap._reelsOnScroll = onScroll;
-        snap.addEventListener('scroll', onScroll, { passive: true });
-        // `scrollend` fires once the snap settles — perfect moment to
-        // re-sync the active reel even if rAF-driven onScroll missed the
-        // final landing position (common with momentum scrolling on iOS).
-        const onScrollEnd = () => {
-          if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
-          _reelsLastScrollT = 0;
-          _reelsSyncActiveFromScroll(snap);
-        };
-        snap._reelsOnScrollEnd = onScrollEnd;
-        snap.addEventListener('scrollend', onScrollEnd, { passive: true });
         _updateTabLoadUi(loadUi, 97, 'Finalizing reels', 'Snap controls ready');
       }
     } catch (e) {
@@ -4196,82 +4185,11 @@ const Social = (() => {
     });
   }
 
-  function _reelsSyncActiveFromScroll(snap) {
-    if (!snap) return;
-    if (_reelsIsSeekLocked()) return;
-    const cards = Array.from(snap.querySelectorAll('.reel-card'));
-    if (!cards.length) return;
-    // Velocity check: avoid swapping the active reel mid-fling — that
-    // causes the "next reel plays the wrong card" symptom where every
-    // card flashes into playback for a frame as it crosses the center.
-    const now = Date.now();
-    const dt = Math.max(1, now - _reelsLastScrollT);
-    const velocity = Math.abs(snap.scrollTop - _reelsLastScrollTop) / dt; // px/ms
-    _reelsLastScrollTop = snap.scrollTop;
-    _reelsLastScrollT = now;
-    const rootRect = snap.getBoundingClientRect();
-    const centerY = rootRect.top + (rootRect.height / 2);
-    let best = null;
-    let bestDist = Infinity;
-    for (const card of cards) {
-      const r = card.getBoundingClientRect();
-      const c = r.top + (r.height / 2);
-      const d = Math.abs(c - centerY);
-      if (d < bestDist) {
-        bestDist = d;
-        best = card;
-      }
-    }
-    if (!best) return;
-    // While scrolling fast, just pause every non-target card and wait for
-    // the scroll to settle (rAF / scrollend will call us again with low
-    // velocity). Critical for "auto plays a reel I didn't actually scroll
-    // to" — that was the IO + rAF activating intermediate cards.
-    if (velocity > 0.6) {
-      cards.forEach(c => {
-        if (c === best) return;
-        const v = c.querySelector('video');
-        if (v) {
-          try { v.muted = true; } catch {}
-          if (!v.paused) { try { v.pause(); } catch {} }
-        }
-        c.classList.remove('is-playing');
-      });
-      return;
-    }
-    if (best !== _reelsCurrentCard) {
-      // Manual scroll to a new card always autoplays it. Clear any
-      // lingering per-card user-pause state and force play — explicit
-      // user request: "all new scrolled cards autoplay".
-      _reelsUserPausedCard = null;
-      _reelsActivateCard(best, { reset: false, forcePlay: true });
-      return;
-    }
-    // Reaffirming the same card. Defensively pause + mute any *other*
-    // video that somehow ended up playing (e.g. a slow play() promise
-    // that resolved late, or a stale retry firing during fast scroll).
-    // Single-source-of-truth: only _reelsCurrentVideo should be playing.
-    cards.forEach(c => {
-      if (c === best) return;
-      const v = c.querySelector('video');
-      if (v) {
-        try { v.muted = true; } catch {}
-        if (!v.paused) { try { v.pause(); } catch {} }
-      }
-      c.classList.remove('is-playing');
-    });
-    // Resume this card unless the user explicitly tap-paused THIS card.
-    if (_reelsCurrentVideo && _reelsCurrentVideo.paused && _reelsUserPausedCard !== _reelsCurrentCard) {
-      const gen = _reelsActivateGen;
-      _reelsCurrentVideo.play().then(() => {
-        if (gen !== _reelsActivateGen) {
-          try { _reelsCurrentVideo && _reelsCurrentVideo.pause(); } catch {}
-          return;
-        }
-        _reelsCurrentCard?.classList.add('is-playing');
-      }).catch(() => {});
-    }
-  }
+  // (_reelsSyncActiveFromScroll removed: activation is now driven by the
+  // IntersectionObserver in loadReelsTab. The IO callback fires on every
+  // visibility change, picks the most-visible card from a WeakMap of
+  // ratios, and activates it once it crosses the 70% threshold. No
+  // scroll/rAF/scrollend handlers needed.)
 
   function _reelsAutoplayVisible() {
     const snap = document.getElementById('reels-snap');
@@ -4471,6 +4389,11 @@ const Social = (() => {
   function _initReelCards(snap) {
     _syncReelMuteUi(snap);
     _reelsAttachGestureLimiter(snap);
+    // Make sure every (re-)rendered card is observed by the activation
+    // IntersectionObserver. Cheap to call on existing observed targets.
+    if (snap._reelsObserveCard) {
+      snap.querySelectorAll('.reel-card').forEach(c => snap._reelsObserveCard(c));
+    }
     if (_reelsScrubController) { try { _reelsScrubController.abort(); } catch {} }
     const scrubAbort = new AbortController();
     _reelsScrubController = scrubAbort;
@@ -4773,112 +4696,21 @@ const Social = (() => {
         if (_reelsCurrentCard && _reelsCurrentCard !== card) return;
         _reelsAdvanceFrom(card);
       });
-      // Per-video click is suppressed; tap detection is delegated to the
-      // snap container in _bindReelsTapGesture (see below) so we can use
-      // scrollTop-delta as the authoritative "did this gesture scroll?"
-      // signal — far more reliable than a position-slop heuristic.
-      video.addEventListener('click', (e) => { try { e.preventDefault(); e.stopPropagation(); } catch {} });
+      // Tap on video toggles play/pause for THIS card. Browsers natively
+      // suppress `click` when a touch turns into a scroll (built-in
+      // movement slop), so a click here is by definition a real tap —
+      // no custom touch-vs-scroll detector needed (every previous
+      // attempt at one created its own regressions).
+      video.addEventListener('click', (e) => {
+        try { e.preventDefault(); e.stopPropagation(); } catch {}
+        toggleReelPlayback(e, video);
+      });
     });
-    _bindReelsTapGesture(snap);
   }
 
-  // Single delegated tap-vs-scroll detector for the entire reels stage.
-  // Fires immediately on touchend (no defer → no double-tap merging) and
-  // toggles playback ONLY if ALL of these hold:
-  //   - gesture began on a video element (not a button/control overlay)
-  //   - pointer moved less than TAP_MAX_MOVE px
-  //   - gesture lasted less than TAP_MAX_TIME ms
-  //   - snap container did not scroll during the gesture (scrollTop and
-  //     scroll-event timestamp both unchanged from gesture start)
-  // On a scroll-snap container, any meaningful scroll fires `scroll`
-  // events during touchmove, so checking those signals at touchend is
-  // sufficient — no post-end deferral needed.
-  function _bindReelsTapGesture(snap) {
-    if (!snap || snap._reelsTapBound) return;
-    snap._reelsTapBound = true;
-    const TAP_MAX_MOVE = 10;
-    const TAP_MAX_TIME = 280;
-    const SCROLL_TOLERANCE = 8;       // px — snap settle / re-correct can drift a few px after a tap
-    const POST_SCROLL_GUARD_MS = 120; // wait for momentum scroll to commit
-
-    let g = null;
-    let pendingFinalize = null;       // { cur, ev, timer } — coalesce rapid taps
-    const reset = () => { g = null; };
-
-    const onDown = (e) => {
-      const targetVid = e.target && e.target.closest && e.target.closest('.reel-card video');
-      if (!targetVid) { g = null; return; }
-      if (e.target.closest('button, a, input, textarea, .reel-actions, .reel-comments, .reel-progress, .reel-react-picker, .reel-share-menu, .reel-author, .reel-react-emoji, .reel-mute-btn, .reel-play-toggle')) {
-        g = null;
-        return;
-      }
-      // If a previous tap is still waiting on its momentum-guard timer
-      // and the user has tapped again, flush that pending tap NOW so it
-      // doesn't overlap with this new gesture (which previously caused
-      // "I have to tap twice" — first tap finalized after second tap
-      // already ran, net result was pause→play→pause = appears no-op).
-      if (pendingFinalize) {
-        const p = pendingFinalize;
-        pendingFinalize = null;
-        try { clearTimeout(p.timer); } catch {}
-        try { finalizeTap(p.cur, p.ev); } catch {}
-      }
-      const p = (e.touches && e.touches[0]) || e;
-      g = {
-        video: targetVid,
-        x: p.clientX || 0,
-        y: p.clientY || 0,
-        t: Date.now(),
-        startScrollTop: snap.scrollTop,
-        startScrollEventT: _reelsLastScrollEventT,
-        moved: false,
-      };
-    };
-    const onMove = (e) => {
-      if (!g) return;
-      const p = (e.touches && e.touches[0]) || e;
-      const dx = Math.abs((p.clientX || 0) - g.x);
-      const dy = Math.abs((p.clientY || 0) - g.y);
-      if (dx > TAP_MAX_MOVE || dy > TAP_MAX_MOVE) g.moved = true;
-    };
-    const finalizeTap = (cur, ev) => {
-      if (cur.moved) return;
-      if (Date.now() - cur.t > TAP_MAX_TIME + POST_SCROLL_GUARD_MS) return;
-      // Use scrollTop delta as the only "did the user actually scroll?"
-      // signal. The previous _reelsLastScrollEventT comparison was too
-      // strict — a scroll-snap container fires a `scroll` event during
-      // its own settle/re-correction after a tap, which falsely vetoed
-      // legitimate single-tap pauses ("pause button doesn't work").
-      if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
-      // Only ever toggle the currently active card (never one that has
-      // since scrolled out of frame).
-      const target = _reelsCurrentVideo || cur.video;
-      toggleReelPlayback(ev, target);
-    };
-    const onUp = (e) => {
-      const cur = g; g = null;
-      if (!cur) return;
-      // Defer the decision one momentum-frame so we can detect a scroll
-      // event that lands AFTER touchend (common on Chrome Android +
-      // desktop trackpad fling). Tracked in `pendingFinalize` so a
-      // follow-up tap can pre-empt it (see onDown).
-      const slot = { cur, ev: e, timer: null };
-      slot.timer = setTimeout(() => {
-        if (pendingFinalize === slot) pendingFinalize = null;
-        finalizeTap(cur, e);
-      }, POST_SCROLL_GUARD_MS);
-      pendingFinalize = slot;
-    };
-
-    snap.addEventListener('touchstart', onDown, { passive: true });
-    snap.addEventListener('touchmove',  onMove, { passive: true });
-    snap.addEventListener('touchend',   onUp,   { passive: true });
-    snap.addEventListener('touchcancel', reset, { passive: true });
-    snap.addEventListener('mousedown', onDown);
-    snap.addEventListener('mousemove', onMove);
-    snap.addEventListener('mouseup',   onUp);
-    snap.addEventListener('mouseleave', reset);
-  }
+  // (Tap detection is now a plain `click` listener on each video — see
+  // _initReelCards. Browsers suppress click on touch-scrolls natively,
+  // which is more reliable than any custom touch-vs-scroll heuristic.)
 
   function toggleReelPlayback(ev, video) {
     try {
