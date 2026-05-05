@@ -1527,13 +1527,14 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
     max-height:42vh;
     overflow-y:auto;
     -webkit-overflow-scrolling:touch;
-    padding-bottom:8px
+    padding-bottom:0
   }
   #music-panel:not(.mini):not(.collapsed):not(:has(.mp-frame)){
     /* Empty queue: don't let #main's flex column shrink us below
        the natural height of header + empty-message + submit row. */
     flex-shrink:0;
-    overflow:visible
+    overflow:visible;
+    padding-bottom:0
   }
   /* Shrink the iframe on phones so the panel doesn't eat the screen even
      before the cap kicks in. 16:9 of a phone-wide column is otherwise huge. */
@@ -1541,18 +1542,20 @@ a.mp-title:hover{color:#fff;text-decoration:underline}
   #music-panel:not(.mini):not(.collapsed) #mp-player-wrap iframe{
     max-height:32vh
   }
-  /* Add Track + toggles: never let the flex column collapse this row,
-     and keep it pinned to the bottom of the panel when scrolling. The
-     row aligns to the right edge so the primary Add Track button sits
-     flush with the right side of the message composer below. */
+  /* Add Track + toggles: stick to the very bottom edge of the panel so
+     the row sits flush against the message composer (no padding gap),
+     right-aligned with the composer's send button. */
   #music-panel:not(.mini):not(.collapsed) .mp-submit{
     position:sticky;bottom:0;z-index:2;
     flex-shrink:0;
-    margin:6px -16px 0;padding:8px 16px;
+    margin:6px -16px 0;padding:6px 12px;
     background:linear-gradient(180deg,rgba(15,10,31,0) 0%,#0f0a1f 35%,#0f0a1f 100%);
     border-top:1px solid rgba(160,80,216,.18);
     justify-content:flex-end
   }
+  /* Collapse the gap between music panel and the input area below it. */
+  #music-panel + #typing-bar,
+  #music-panel + #input-area{margin-top:0}
 }
 @media (max-width:480px){
   /* Push the Add Track card lower so it lands within thumb reach
