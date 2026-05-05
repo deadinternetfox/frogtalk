@@ -5877,12 +5877,30 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
 
 /* ─── "Now playing" strip at the top of the Music tab ────────────────── */
 .mt-nowplaying{
+  position:relative;
   display:flex;align-items:center;gap:12px;
-  margin:8px 14px 10px;padding:10px 14px;border-radius:12px;
-  background:linear-gradient(135deg,rgba(160,80,216,.18),rgba(76,175,80,.10));
-  border:1px solid rgba(200,130,255,.35);
-  box-shadow:0 4px 18px rgba(200,130,255,.15);
-  animation:mtnpIn .22s ease-out
+  margin:8px 14px 10px;padding:11px 14px;border-radius:14px;
+  background:linear-gradient(135deg,rgba(160,80,216,.22),rgba(90,42,138,.18) 60%,rgba(160,80,216,.12));
+  border:1px solid rgba(200,130,255,.42);
+  box-shadow:
+    0 6px 22px rgba(160,80,216,.22),
+    0 0 0 1px rgba(200,130,255,.08) inset,
+    0 1px 0 rgba(255,255,255,.06) inset;
+  animation:mtnpIn .26s cubic-bezier(.2,.9,.3,1.15);
+  overflow:hidden
+}
+.mt-nowplaying::before{
+  content:"";position:absolute;inset:-40%;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(circle at 18% 20%, rgba(200,130,255,.22), transparent 45%),
+    radial-gradient(circle at 82% 70%, rgba(140,70,200,.20), transparent 55%);
+  animation:mtnpGlow 16s ease-in-out infinite alternate;filter:blur(22px)
+}
+.mt-nowplaying > *{position:relative;z-index:1}
+@keyframes mtnpGlow{
+  0%  {transform:translate(0,0) rotate(0deg)}
+  50% {transform:translate(3%,-3%) rotate(7deg)}
+  100%{transform:translate(-3%,3%) rotate(-6deg)}
 }
 /* The hidden attribute must win over display:flex */
 .mt-nowplaying[hidden]{display:none !important}
@@ -5890,11 +5908,11 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
    rides along on every tab (Feed / Explore / Music / Profile). */
 .mt-nowplaying-persist{
   margin:8px 14px 0;
-  backdrop-filter:blur(8px);
-  -webkit-backdrop-filter:blur(8px);
-  background:linear-gradient(135deg,rgba(40,20,60,.92),rgba(20,40,30,.92))
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  background:linear-gradient(135deg,rgba(40,18,68,.92),rgba(28,12,52,.92) 60%,rgba(46,20,76,.92))
 }
-@keyframes mtnpIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes mtnpIn{from{opacity:0;transform:translateY(-6px) scale(.98)}to{opacity:1;transform:none}}
 .mtnp-dot{
   width:10px;height:10px;border-radius:50%;flex-shrink:0;
   background:#c89bff;box-shadow:0 0 0 0 rgba(200,155,255,.55);
@@ -5909,13 +5927,17 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
   70% {box-shadow:0 0 0 10px rgba(200,155,255,0)}
   100%{box-shadow:0 0 0 0 rgba(200,155,255,0)}
 }
-.mtnp-info{flex:1;min-width:0}
+.mtnp-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
 .mtnp-state{
   font-size:10.5px;font-weight:800;letter-spacing:.5px;
-  text-transform:uppercase;color:#c89bff;display:flex;align-items:center;gap:8px
+  text-transform:uppercase;color:#c89bff;
+  display:flex;align-items:center;gap:8px;flex-wrap:nowrap;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0
 }
+.mtnp-state > *{flex-shrink:0}
 .mtnp-prov{
-  font-size:9.5px;padding:1px 7px;border-radius:999px;
+  font-size:9.5px;padding:1px 7px;border-radius:999px;line-height:1.5;
   background:rgba(0,0,0,.4);color:#e8d5ff;letter-spacing:.3px
 }
 .mtnp-prov[data-provider="youtube"]{background:rgba(255,0,0,.6);color:#fff}
@@ -5923,12 +5945,14 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
 .mtnp-prov[data-provider="soundcloud"]{background:rgba(255,85,0,.65);color:#fff}
 .mtnp-sharer{
   font-size:10.5px;font-weight:600;color:#b59ad0;
-  text-transform:none;letter-spacing:.2px
+  text-transform:none;letter-spacing:.2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  min-width:0;flex-shrink:1
 }
 .mtnp-title{
-  font-size:14px;font-weight:700;color:#f0e4ff;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;
-  display:block;text-decoration:none;cursor:pointer
+  font-size:14.5px;font-weight:700;color:#f0e4ff;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  display:block;text-decoration:none;cursor:pointer;line-height:1.35
 }
 a.mtnp-title:hover{color:#fff;text-decoration:underline}
 .mtnp-sharer-link{color:#d8b0ff;text-decoration:none;font-weight:700;cursor:pointer}
@@ -5943,17 +5967,19 @@ a.mtnp-title:hover{color:#fff;text-decoration:underline}
 .mtnp-btn.mtnp-pp{background:linear-gradient(135deg,#a050d8,#7a3ac0);border-color:#b070e0;color:#fff;font-size:14px}
 .mtnp-btn.mtnp-pp:hover{background:linear-gradient(135deg,#b560e8,#8a4ad0)}
 .mtnp-btn.mtnp-stop:hover{border-color:#ff6677;color:#ff8899;background:rgba(255,90,110,.18)}
-.mtnp-btn.mtnp-autonext{padding:0;display:inline-flex;align-items:center;justify-content:center}
-.mtnp-btn.mtnp-autonext svg{width:16px;height:16px}
-.mtnp-btn.mtnp-autonext.on{border-color:#4caf50;color:#9be59b}
-.mtnp-btn.mtnp-autonext:not(.on){opacity:.7}
-/* Skip-to-next inline action (matches mtnp-pp accent intensity but in a
-   cooler hue so the row reads pause / next / share / stop left to right). */
+/* Skip-to-next inline action — same purple family as mtnp-pp but a touch
+   lighter so the row reads pause / next / share / stop left to right
+   without the eye snagging on a foreign accent colour. */
 .mtnp-btn.mtnp-skip{
-  background:linear-gradient(135deg,#3a5fd8,#2a45a8);border-color:#5a7af0;color:#fff;
-  font-size:15px
+  background:linear-gradient(135deg,#7a3ac0,#5a2a8a);border-color:#a070d8;color:#fff;
+  font-size:15px;
+  box-shadow:0 2px 8px rgba(160,80,216,.28)
 }
-.mtnp-btn.mtnp-skip:hover{background:linear-gradient(135deg,#4a70e8,#3555c0);border-color:#6a8aff}
+.mtnp-btn.mtnp-skip:hover{
+  background:linear-gradient(135deg,#9050d8,#6a3aaa);border-color:#c89bff;
+  box-shadow:0 4px 14px rgba(200,130,255,.38)
+}
+.mtnp-btn.mtnp-share:hover{border-color:#c89bff;color:#fff;background:rgba(160,80,216,.22)}
 /* ── Polished auto-next checkbox (mini-dock + FrogSocial strip) ─────── */
 .mp-an-check{
   display:inline-flex;align-items:center;gap:6px;cursor:pointer;
@@ -5978,26 +6004,29 @@ a.mtnp-title:hover{color:#fff;text-decoration:underline}
   transform:rotate(45deg) scale(0);transform-origin:center;
   transition:transform .14s cubic-bezier(.2,1.4,.4,1)
 }
-.mp-an-check.on{color:#cff0d5}
+.mp-an-check.on{color:#e8d5ff}
 .mp-an-check.on .mp-an-box{
-  background:linear-gradient(135deg,#4caf50,#2f8a3a);
-  border-color:#6cd078;
-  box-shadow:0 0 0 3px rgba(76,175,80,.12),0 1px 4px rgba(76,175,80,.35)
+  background:linear-gradient(135deg,#a050d8,#6a2aa8);
+  border-color:#c89bff;
+  box-shadow:0 0 0 3px rgba(160,80,216,.16),0 1px 6px rgba(160,80,216,.45)
 }
 .mp-an-check.on .mp-an-box::after{transform:rotate(45deg) scale(1)}
+.mp-an-check:hover{color:#e8d5ff}
 .mp-an-check:hover .mp-an-box{border-color:#c89bff}
-.mp-an-check.on:hover .mp-an-box{border-color:#9be59b}
+.mp-an-check.on:hover .mp-an-box{border-color:#d8b0ff;box-shadow:0 0 0 3px rgba(200,130,255,.22),0 2px 8px rgba(200,130,255,.5)}
 .mp-an-check input:focus-visible + .mp-an-box{outline:2px solid #c89bff;outline-offset:2px}
 /* mini-dock variant — sits as a third compact line under title/sub */
-.mp-an-check--dock{margin-top:2px;font-size:10.5px;color:#a888c8}
+.mp-an-check--dock{margin-top:3px;font-size:10.5px;color:#a888c8}
 .mp-an-check--dock .mp-an-lbl{
   text-transform:uppercase;letter-spacing:.5px
 }
 /* mtnp variant — appears under the track title on the persistent strip */
-.mp-an-check--mtnp{margin-top:4px;font-size:10.5px}
+.mp-an-check--mtnp{margin-top:2px;font-size:10.5px}
 .mp-an-check--mtnp .mp-an-lbl{
   text-transform:uppercase;letter-spacing:.5px
 }
+.mp-an-check--mtnp .mp-an-box{width:13px;height:13px;border-radius:4px}
+.mp-an-check--mtnp .mp-an-box::after{left:3px;top:0;width:4px;height:8px}
 @media(max-width:500px){
   .mt-nowplaying{margin:6px 10px 8px;padding:9px 12px;gap:10px}
   .mtnp-title{font-size:13px}
