@@ -592,6 +592,8 @@ const Messages = (() => {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
     msgEl.querySelectorAll('.link-preview, .yt-embed, .spotify-embed').forEach(el => el.remove());
+    // Drop the X-button wrapper too — it has no embed left to decorate.
+    msgEl.querySelectorAll('.preview-wrap').forEach(el => el.remove());
   }
 
   // Fetch and render link preview
@@ -694,31 +696,51 @@ const Messages = (() => {
     
     body.insertAdjacentHTML('beforeend', html);
 
-    // Discord-style "X" to suppress the embed (author-only). Re-rendering an
-    // existing dismiss button is harmless because we early-return at the top
-    // when an embed is already present.
+    // Discord-style "X" to suppress the embed.
+    //
+    // Subtle: the standard preview is an <a target="_blank"> so a child
+    // <button> click would race the anchor's navigation (mousedown/click
+    // default action triggers _blank window in some browsers BEFORE our
+    // preventDefault runs). To make the X bulletproof we wrap the freshly
+    // inserted embed in a sibling-positioned div and append the button
+    // *outside* the anchor — no e.preventDefault gymnastics needed.
+    //
+    // We also walk every cached room (not just State.currentRoom) so a
+    // race between appendMessage's State.messages.push and this code can't
+    // hide the button.
     try {
-      const cached = (State.messages[State.currentRoom] || []).find(m => m && +m.id === +msgId);
+      let cached = null;
+      for (const arr of Object.values(State.messages || {})) {
+        if (Array.isArray(arr)) {
+          const m = arr.find(x => x && +x.id === +msgId);
+          if (m) { cached = m; break; }
+        }
+      }
       const isOwn = cached && State.user && cached.nickname === State.user.nickname;
       if (isOwn) {
         const newEmbed = body.querySelector(':scope > .link-preview:last-child, :scope > .yt-embed:last-child, :scope > .spotify-embed:last-child');
-        if (newEmbed && !newEmbed.querySelector('.preview-suppress-btn')) {
-          // Make sure the button positions against the embed, not the page.
-          if (getComputedStyle(newEmbed).position === 'static') {
-            newEmbed.style.position = 'relative';
-          }
+        if (newEmbed && !newEmbed.parentElement?.classList.contains('preview-wrap')) {
+          const wrap = document.createElement('div');
+          wrap.className = 'preview-wrap';
+          newEmbed.parentNode.insertBefore(wrap, newEmbed);
+          wrap.appendChild(newEmbed);
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'preview-suppress-btn';
           btn.title = 'Remove preview';
           btn.setAttribute('aria-label', 'Remove preview');
           btn.textContent = '\u00d7';
-          btn.addEventListener('click', (e) => {
+          // Catch BOTH pointerdown (some browsers navigate on it for
+          // target=_blank anchors) and click. Either path triggers the
+          // suppress flow.
+          const trigger = (e) => {
             e.preventDefault();
             e.stopPropagation();
             suppressPreview(msgId);
-          });
-          newEmbed.appendChild(btn);
+          };
+          btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+          btn.addEventListener('click', trigger);
+          wrap.appendChild(btn);
         }
       }
     } catch {}

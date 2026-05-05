@@ -345,6 +345,7 @@ function applyDMPreviewSuppress(msgId) {
   const msgEl = document.getElementById(`msg-${msgId}`);
   if (!msgEl) return;
   msgEl.querySelectorAll('.link-preview, .yt-embed, .spotify-embed').forEach(el => el.remove());
+  msgEl.querySelectorAll('.preview-wrap').forEach(el => el.remove());
 }
 window.suppressDMPreview = suppressDMPreview;
 window.applyDMPreviewSuppress = applyDMPreviewSuppress;
@@ -424,7 +425,9 @@ function _renderDMPreview(msgId, preview) {
 
   body.insertAdjacentHTML('beforeend', html);
 
-  // Discord-style "X" — sender-only.
+  // Discord-style "X" — sender-only. Wrap in a sibling div so the X is
+  // OUTSIDE the <a target="_blank"> embed, otherwise some browsers
+  // navigate on pointerdown before our preventDefault fires.
   try {
     const cached = (_dmMessages || []).find(m => m && +m.id === +msgId);
     const myId = STATE.user?.id;
@@ -435,22 +438,24 @@ function _renderDMPreview(msgId, preview) {
     );
     if (isOwn) {
       const newEmbed = body.querySelector(':scope > .link-preview:last-child, :scope > .yt-embed:last-child, :scope > .spotify-embed:last-child');
-      if (newEmbed && !newEmbed.querySelector('.preview-suppress-btn')) {
-        if (getComputedStyle(newEmbed).position === 'static') {
-          newEmbed.style.position = 'relative';
-        }
+      if (newEmbed && !newEmbed.parentElement?.classList.contains('preview-wrap')) {
+        const wrap = document.createElement('div');
+        wrap.className = 'preview-wrap';
+        newEmbed.parentNode.insertBefore(wrap, newEmbed);
+        wrap.appendChild(newEmbed);
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'preview-suppress-btn';
         btn.title = 'Remove preview';
         btn.setAttribute('aria-label', 'Remove preview');
         btn.textContent = '\u00d7';
+        btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
           suppressDMPreview(msgId);
         });
-        newEmbed.appendChild(btn);
+        wrap.appendChild(btn);
       }
     }
   } catch {}

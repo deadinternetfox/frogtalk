@@ -6264,21 +6264,32 @@ body.mini-embedded .auth-box { padding:22px 24px 18px; }
 body.mini-embedded .auth-tabs { margin-bottom:14px; }
 
 /* ── Discord-style "X" to dismiss a link preview (author-only) ── */
+.preview-wrap{
+  position:relative;
+  display:block;
+  max-width:480px;
+  margin-top:0;
+}
+.preview-wrap > .link-preview,
+.preview-wrap > .yt-embed,
+.preview-wrap > .spotify-embed{ margin-top:8px; }
 .preview-suppress-btn{
-  position:absolute;top:6px;right:6px;
+  position:absolute;top:14px;right:6px;
   width:22px;height:22px;line-height:18px;text-align:center;
   padding:0;margin:0;border:none;border-radius:50%;
-  background:rgba(0,0,0,.55);color:#dff5e8;
+  background:rgba(0,0,0,.7);color:#fff;
   font-size:16px;font-weight:600;cursor:pointer;
   opacity:0;transition:opacity .12s ease, background .12s ease;
-  z-index:2;
+  z-index:5;
 }
-.link-preview:hover > .preview-suppress-btn,
-.yt-embed:hover > .preview-suppress-btn,
-.spotify-embed:hover > .preview-suppress-btn,
+.preview-wrap:hover > .preview-suppress-btn,
 .preview-suppress-btn:focus,
 .preview-suppress-btn:hover{ opacity:1; }
-.preview-suppress-btn:hover{ background:rgba(220,38,38,.85); }
+.preview-suppress-btn:hover{ background:rgba(220,38,38,.95); }
+/* Always-visible on touch devices (no hover) */
+@media (hover:none){
+  .preview-suppress-btn{ opacity:.85; }
+}
 </style>
 
 <!-- ═══════════════════════════ BOOT SPLASH ══════════════════════ -->
