@@ -1581,7 +1581,7 @@ async def serve_robots(request: Request):
         "User-agent: *\n"
         "Allow: /\n"
         "Disallow: /api/\n"
-        "Disallow: /app\n"
+        "Disallow: /app$\n"
         "Disallow: /app/\n"
         "Disallow: /og/\n"
         "Disallow: /invite/\n"
