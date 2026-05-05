@@ -859,10 +859,27 @@ async def serve_post_landing(post_id: int):
         html = (
             "<!DOCTYPE html><html><head><title>Post not found — FrogTalk</title>"
             "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
-            "<style>body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui;"
-            "display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}"
-            ".card{background:#1a1a1a;padding:40px;border-radius:16px;text-align:center;max-width:430px}"
-            "h1{color:#4caf50}a{color:#4caf50}</style></head>"
+            "<meta name=theme-color content=\"#4caf50\">"
+            "<link rel=icon href=\"/static/favicon.ico\">"
+            "<style>*{box-sizing:border-box}html,body{height:100%}"
+            "body{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;"
+            "background:radial-gradient(70% 45% at 50% 0%,rgba(127,210,167,.12),transparent 72%),"
+            "radial-gradient(60% 40% at 50% 100%,rgba(46,138,74,.10),transparent 75%),"
+            "linear-gradient(135deg,#0d0d0d,#0d1611);"
+            "display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}"
+            ".card{position:relative;background:linear-gradient(180deg,#173027 0%,#13271f 56%,#0f1f17 100%);"
+            "border:1px solid #3b6c59;border-radius:18px;padding:36px 32px;width:100%;max-width:430px;text-align:center;"
+            "box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(127,210,167,.06),inset 0 1px 0 rgba(255,255,255,.04)}"
+            ".card::after{content:\"\";position:absolute;left:18px;right:18px;top:0;height:1px;"
+            "background:linear-gradient(90deg,transparent,rgba(127,210,167,.5),transparent);pointer-events:none}"
+            "h1{font-size:24px;font-weight:800;margin:0 0 10px;"
+            "background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);"
+            "-webkit-background-clip:text;background-clip:text;color:transparent}"
+            "p{color:#bcd6c8;margin:0 0 18px;font-size:14px;line-height:1.45}"
+            "a{display:inline-block;padding:11px 20px;border-radius:10px;text-decoration:none;font-weight:600;"
+            "background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3e8c43 100%);color:#fff;border:1px solid #6cd870;"
+            "text-shadow:0 1px 2px rgba(0,0,0,.25);box-shadow:0 6px 18px rgba(76,175,80,.35),inset 0 1px 0 rgba(255,255,255,.18)}"
+            "a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}</style></head>"
             "<body><div class=card><h1>🐸 Post not found</h1>"
             "<p>This post is unavailable or not public.</p>"
             "<a href=\"/app\">Go to FrogTalk</a></div></body></html>"
@@ -925,19 +942,42 @@ async def serve_post_landing(post_id: int):
 <meta name=\"twitter:image:alt\" content=\"Post by @{_og_escape(nick)} on FrogTalk\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
-body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
- display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}}
-.card{{background:#1a1a1a;padding:22px;border-radius:20px;max-width:520px;width:100%;border:1px solid #2a4a2a;box-shadow:0 20px 60px rgba(0,0,0,0.5)}}
+*{{box-sizing:border-box}}
+html,body{{height:100%}}
+body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  background:
+    radial-gradient(70% 45% at 50% 0%, rgba(127,210,167,.12), transparent 72%),
+    radial-gradient(60% 40% at 50% 100%, rgba(46,138,74,.10), transparent 75%),
+    linear-gradient(135deg,#0d0d0d,#0d1611);
+  display:flex;justify-content:center;align-items:flex-start;min-height:100vh;padding:32px 20px}}
+.card{{position:relative;background:linear-gradient(180deg,#173027 0%,#13271f 56%,#0f1f17 100%);
+  border:1px solid #3b6c59;border-radius:20px;padding:22px;max-width:540px;width:100%;
+  box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(127,210,167,.06),inset 0 1px 0 rgba(255,255,255,.04)}}
+.card::after{{content:"";position:absolute;left:18px;right:18px;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(127,210,167,.5),transparent);pointer-events:none}}
 .author{{display:flex;align-items:center;gap:10px;margin-bottom:14px}}
-.author-avatar{{width:44px;height:44px;border-radius:50%;object-fit:cover;border:2px solid #4caf50;background:#1f1f1f}}
-.author-fallback{{display:flex;align-items:center;justify-content:center;font-size:22px}}
-.author-name{{color:#4caf50;font-weight:700}}
-.caption{{white-space:pre-wrap;line-height:1.5;color:#ddd;margin-bottom:14px;word-wrap:break-word}}
-.post-media{{width:100%;max-height:70vh;object-fit:contain;border-radius:14px;border:1px solid #2a2a2a;background:#111}}
-.actions{{display:flex;gap:10px;margin-top:16px}}
-.btn{{display:block;flex:1;text-align:center;padding:13px;border-radius:10px;text-decoration:none;font-weight:600}}
-.btn-primary{{background:#4caf50;color:#000}}
-.btn-secondary{{background:#2a2a2a;color:#e0e0e0;border:1px solid #3a3a3a}}
+.author-avatar{{width:44px;height:44px;border-radius:50%;object-fit:cover;
+  border:2px solid rgba(127,210,167,.55);background:#0f1f17;
+  box-shadow:0 4px 12px rgba(0,0,0,.4)}}
+.author-fallback{{display:flex;align-items:center;justify-content:center;font-size:22px;color:#bff0d0}}
+.author-name{{font-weight:700;letter-spacing:-.01em;
+  background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);
+  -webkit-background-clip:text;background-clip:text;color:transparent}}
+.caption{{white-space:pre-wrap;line-height:1.5;color:#dff5e8;margin-bottom:14px;word-wrap:break-word;font-size:15px}}
+.post-media{{width:100%;max-height:70vh;object-fit:contain;border-radius:14px;
+  border:1px solid rgba(127,210,167,.18);background:#0a1410;
+  box-shadow:0 10px 32px rgba(0,0,0,.45)}}
+.actions{{display:flex;gap:10px;margin-top:18px}}
+.btn{{display:block;flex:1;text-align:center;padding:13px 16px;border-radius:10px;
+  text-decoration:none;font-weight:600;font-size:15px;border:1px solid transparent;
+  transition:transform .08s ease, box-shadow .15s ease, background .15s ease}}
+.btn-primary{{background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3e8c43 100%);
+  border-color:#6cd870;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.25);
+  box-shadow:0 6px 18px rgba(76,175,80,.35),inset 0 1px 0 rgba(255,255,255,.18)}}
+.btn-primary:hover{{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%);
+  box-shadow:0 8px 22px rgba(76,175,80,.45),inset 0 1px 0 rgba(255,255,255,.22);transform:translateY(-1px)}}
+.btn-secondary{{background:rgba(127,210,167,.06);border-color:rgba(127,210,167,.25);color:#dff5e8}}
+.btn-secondary:hover{{background:rgba(127,210,167,.12);border-color:rgba(127,210,167,.4)}}
 </style></head><body>
 <div class=\"card\">
   <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
@@ -1027,10 +1067,27 @@ async def serve_reel_landing(post_id: int):
         html = (
             "<!DOCTYPE html><html><head><title>Reel not found — FrogTalk</title>"
             "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
-            "<style>body{background:#0f0f0f;color:#e0e0e0;font-family:system-ui;"
-            "display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}"
-            ".card{background:#1a1a1a;padding:40px;border-radius:16px;text-align:center;max-width:430px}"
-            "h1{color:#4caf50}a{color:#4caf50}</style></head>"
+            "<meta name=theme-color content=\"#4caf50\">"
+            "<link rel=icon href=\"/static/favicon.ico\">"
+            "<style>*{box-sizing:border-box}html,body{height:100%}"
+            "body{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;"
+            "background:radial-gradient(70% 45% at 50% 0%,rgba(127,210,167,.12),transparent 72%),"
+            "radial-gradient(60% 40% at 50% 100%,rgba(46,138,74,.10),transparent 75%),"
+            "linear-gradient(135deg,#0d0d0d,#0d1611);"
+            "display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}"
+            ".card{position:relative;background:linear-gradient(180deg,#173027 0%,#13271f 56%,#0f1f17 100%);"
+            "border:1px solid #3b6c59;border-radius:18px;padding:36px 32px;width:100%;max-width:430px;text-align:center;"
+            "box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(127,210,167,.06),inset 0 1px 0 rgba(255,255,255,.04)}"
+            ".card::after{content:\"\";position:absolute;left:18px;right:18px;top:0;height:1px;"
+            "background:linear-gradient(90deg,transparent,rgba(127,210,167,.5),transparent);pointer-events:none}"
+            "h1{font-size:24px;font-weight:800;margin:0 0 10px;"
+            "background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);"
+            "-webkit-background-clip:text;background-clip:text;color:transparent}"
+            "p{color:#bcd6c8;margin:0 0 18px;font-size:14px;line-height:1.45}"
+            "a{display:inline-block;padding:11px 20px;border-radius:10px;text-decoration:none;font-weight:600;"
+            "background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3e8c43 100%);color:#fff;border:1px solid #6cd870;"
+            "text-shadow:0 1px 2px rgba(0,0,0,.25);box-shadow:0 6px 18px rgba(76,175,80,.35),inset 0 1px 0 rgba(255,255,255,.18)}"
+            "a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}</style></head>"
             "<body><div class=card><h1>🐸 Reel not found</h1>"
             "<p>This reel is unavailable or not public.</p>"
             "<a href=\"/app\">Go to FrogTalk</a></div></body></html>"
@@ -1081,20 +1138,44 @@ async def serve_reel_landing(post_id: int):
 <meta name=\"twitter:image:alt\" content=\"Reel by @{_og_escape(nick)} on FrogTalk\">
 <meta name=\"theme-color\" content=\"#4caf50\">
 <style>
-body{{background:#0f0f0f;color:#e0e0e0;font-family:system-ui,-apple-system,sans-serif;
- display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}}
-.card{{background:#1a1a1a;padding:20px;border-radius:20px;max-width:540px;width:100%;border:1px solid #2a4a2a;box-shadow:0 20px 60px rgba(0,0,0,0.5)}}
-.join-banner{{background:linear-gradient(135deg,#203726,#16241a);border:1px solid #33563c;color:#cfe7d6;padding:10px 12px;border-radius:12px;font-size:13px;margin-bottom:14px}}
+*{{box-sizing:border-box}}
+html,body{{height:100%}}
+body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  background:
+    radial-gradient(70% 45% at 50% 0%, rgba(127,210,167,.12), transparent 72%),
+    radial-gradient(60% 40% at 50% 100%, rgba(46,138,74,.10), transparent 75%),
+    linear-gradient(135deg,#0d0d0d,#0d1611);
+  display:flex;justify-content:center;align-items:flex-start;min-height:100vh;padding:32px 20px}}
+.card{{position:relative;background:linear-gradient(180deg,#173027 0%,#13271f 56%,#0f1f17 100%);
+  border:1px solid #3b6c59;border-radius:20px;padding:20px;max-width:540px;width:100%;
+  box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(127,210,167,.06),inset 0 1px 0 rgba(255,255,255,.04)}}
+.card::after{{content:"";position:absolute;left:18px;right:18px;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(127,210,167,.5),transparent);pointer-events:none}}
+.join-banner{{background:linear-gradient(135deg,rgba(127,210,167,.12),rgba(46,138,74,.08));
+  border:1px solid rgba(127,210,167,.3);color:#cfeadb;padding:10px 14px;border-radius:12px;font-size:13px;margin-bottom:14px;line-height:1.4}}
 .author{{display:flex;align-items:center;gap:10px;margin-bottom:12px}}
-.author-avatar{{width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #4caf50;background:#1f1f1f}}
-.author-fallback{{display:flex;align-items:center;justify-content:center;font-size:20px}}
-.author-name{{color:#4caf50;font-weight:700}}
-.caption{{white-space:pre-wrap;line-height:1.5;color:#ddd;margin-bottom:12px;word-wrap:break-word}}
-.reel-video{{width:100%;max-height:76vh;object-fit:contain;border-radius:14px;border:1px solid #2a2a2a;background:#111}}
-.actions{{display:flex;gap:10px;margin-top:14px}}
-.btn{{display:block;flex:1;text-align:center;padding:13px;border-radius:10px;text-decoration:none;font-weight:600}}
-.btn-primary{{background:#4caf50;color:#000}}
-.btn-secondary{{background:#2a2a2a;color:#e0e0e0;border:1px solid #3a3a3a}}
+.author-avatar{{width:42px;height:42px;border-radius:50%;object-fit:cover;
+  border:2px solid rgba(127,210,167,.55);background:#0f1f17;
+  box-shadow:0 4px 12px rgba(0,0,0,.4)}}
+.author-fallback{{display:flex;align-items:center;justify-content:center;font-size:20px;color:#bff0d0}}
+.author-name{{font-weight:700;letter-spacing:-.01em;
+  background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);
+  -webkit-background-clip:text;background-clip:text;color:transparent}}
+.caption{{white-space:pre-wrap;line-height:1.5;color:#dff5e8;margin-bottom:12px;word-wrap:break-word;font-size:15px}}
+.reel-video{{width:100%;max-height:76vh;object-fit:contain;border-radius:14px;
+  border:1px solid rgba(127,210,167,.18);background:#0a1410;
+  box-shadow:0 10px 32px rgba(0,0,0,.45)}}
+.actions{{display:flex;gap:10px;margin-top:16px}}
+.btn{{display:block;flex:1;text-align:center;padding:13px 16px;border-radius:10px;
+  text-decoration:none;font-weight:600;font-size:15px;border:1px solid transparent;
+  transition:transform .08s ease, box-shadow .15s ease, background .15s ease}}
+.btn-primary{{background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3e8c43 100%);
+  border-color:#6cd870;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.25);
+  box-shadow:0 6px 18px rgba(76,175,80,.35),inset 0 1px 0 rgba(255,255,255,.18)}}
+.btn-primary:hover{{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%);
+  box-shadow:0 8px 22px rgba(76,175,80,.45),inset 0 1px 0 rgba(255,255,255,.22);transform:translateY(-1px)}}
+.btn-secondary{{background:rgba(127,210,167,.06);border-color:rgba(127,210,167,.25);color:#dff5e8}}
+.btn-secondary:hover{{background:rgba(127,210,167,.12);border-color:rgba(127,210,167,.4)}}
 </style></head><body>
 <div class=\"card\">
   <div class=\"join-banner\">Watching as guest. Join FrogTalk to like, comment, repost, and chat with friends.</div>
