@@ -291,7 +291,7 @@ const Social = (() => {
       const maxW = 720;
       c.width = Math.min(video.videoWidth, maxW);
       c.height = Math.max(1, Math.round(c.width * (video.videoHeight / video.videoWidth)));
-      const ctx = c.getContext('2d');
+      const ctx = c.getContext('2d', { willReadFrequently: true });
       if (!ctx) return false;
       ctx.drawImage(video, 0, 0, c.width, c.height);
       // Sample a small grid to detect an all-black frame. We only do
@@ -301,11 +301,15 @@ const Social = (() => {
         const sx = Math.max(1, Math.floor(c.width / 5));
         const sy = Math.max(1, Math.floor(c.height / 5));
         let lumaSum = 0; let n = 0;
+        // One readback of the full sampled region beats 16 single-px
+        // getImageData calls (each forces a GPU→CPU sync). Pull the
+        // pixels once and walk the grid in JS.
+        const img = ctx.getImageData(0, 0, c.width, c.height).data;
         for (let y = sy; y < c.height; y += sy) {
           for (let x = sx; x < c.width; x += sx) {
-            const px = ctx.getImageData(x, y, 1, 1).data;
+            const i = (y * c.width + x) * 4;
             // Rec.601 luma
-            lumaSum += 0.299 * px[0] + 0.587 * px[1] + 0.114 * px[2];
+            lumaSum += 0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2];
             n++;
           }
         }
