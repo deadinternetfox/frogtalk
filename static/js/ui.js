@@ -251,6 +251,10 @@ const UI = (() => {
       const statusAnchor = document.getElementById('self-status');
       const clickedAnchor = !!(statusAnchor && statusAnchor.contains(e.target));
       if (!pop.contains(e.target) && !clickedAnchor) {
+        // Blur the input first so the on-screen keyboard collapses
+        // before we tear the popover down — otherwise the keyboard
+        // can stay up briefly while focus moves to body.
+        try { pop.querySelector('#sp-msg')?.blur(); } catch {}
         pop.remove();
         document.removeEventListener('click', _spClose);
       }
@@ -321,12 +325,14 @@ const UI = (() => {
       if (_nowPlayingActive) {
         // Leave the live music status untouched; just clear baseline.
         renderSelfStatus();
+        try { pop.querySelector('#sp-msg')?.blur(); } catch {}
         pop.remove();
         return;
       }
       State.user.presence = presence;
       State.user.status_msg = '';
       renderSelfStatus();
+      try { pop.querySelector('#sp-msg')?.blur(); } catch {}
       pop.remove();
       _saveStatus(presence, '');
     };
@@ -346,12 +352,14 @@ const UI = (() => {
           renderSelfStatus();
           _saveStatus(presence, State.user.status_msg || '');
         }
+        try { pop.querySelector('#sp-msg')?.blur(); } catch {}
         pop.remove();
         return;
       }
       State.user.presence = presence;
       State.user.status_msg = msg;
       renderSelfStatus();
+      try { pop.querySelector('#sp-msg')?.blur(); } catch {}
       pop.remove();
       _saveStatus(presence, msg);
     };
@@ -362,6 +370,67 @@ const UI = (() => {
     const popH = pop.offsetHeight || 300;
     pop.style.left = Math.max(8, Math.min(window.innerWidth - 330, r.left)) + 'px';
     pop.style.top  = Math.max(8, r.top - popH - 8) + 'px';
+
+    // ── Mobile keyboard polish ────────────────────────────────────────
+    // On phones the on-screen keyboard covers the bottom half of the
+    // viewport. The status pill lives at the bottom of the sidebar, so
+    // by default the popover ends up underneath the keyboard and the
+    // input box can't be seen while typing. We:
+    //  - Detect mobile / coarse pointer.
+    //  - Reposition the popover so its bottom sits just above the
+    //    visualViewport bottom (which shrinks when the keyboard opens).
+    //  - Re-run on visualViewport resize/scroll.
+    //  - Pressing Enter blurs the input (closes the keyboard).
+    //  - Tapping outside closes the keyboard before tearing down.
+    const isMobile = window.matchMedia &&
+      (window.matchMedia('(max-width:600px)').matches ||
+       window.matchMedia('(pointer:coarse)').matches);
+    const msgInput = pop.querySelector('#sp-msg');
+    if (isMobile) {
+      // Stretch a bit wider on tiny screens
+      pop.style.width = 'min(360px, calc(100vw - 16px))';
+      pop.style.left = Math.max(8, Math.round((window.innerWidth - pop.offsetWidth) / 2)) + 'px';
+
+      const reflow = () => {
+        const vv = window.visualViewport;
+        const vh = vv ? vv.height : window.innerHeight;
+        const vTop = vv ? vv.offsetTop : 0;
+        const ph = pop.offsetHeight || popH;
+        // Sit 10px above the keyboard / bottom of the visible viewport.
+        let top = vTop + vh - ph - 10;
+        // Don't crash through the top either.
+        if (top < vTop + 8) top = vTop + 8;
+        pop.style.top = top + 'px';
+        pop.style.left = Math.max(8, Math.round((window.innerWidth - pop.offsetWidth) / 2)) + 'px';
+      };
+      reflow();
+      const vv = window.visualViewport;
+      if (vv) {
+        vv.addEventListener('resize', reflow);
+        vv.addEventListener('scroll', reflow);
+        // Clean up listeners when the popover is removed.
+        const obs = new MutationObserver(() => {
+          if (!document.body.contains(pop)) {
+            try { vv.removeEventListener('resize', reflow); } catch {}
+            try { vv.removeEventListener('scroll', reflow); } catch {}
+            obs.disconnect();
+          }
+        });
+        obs.observe(document.body, { childList: true });
+      }
+      // Auto-focus the input so the keyboard rises immediately, and let
+      // Enter blur it (closes the keyboard) instead of submitting a form.
+      setTimeout(() => { try { msgInput.focus({ preventScroll: true }); } catch {} }, 80);
+    }
+    if (msgInput) {
+      msgInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          try { msgInput.blur(); } catch {}
+          try { pop.querySelector('#sp-save').click(); } catch {}
+        }
+      });
+    }
   }
 
   async function _saveStatus(presence, status_msg) {
