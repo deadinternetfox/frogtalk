@@ -914,6 +914,70 @@ async def serve_post_landing(post_id: int):
         media_html = f"<img class=\"post-media\" src=\"{_og_escape(media_data)}\" alt=\"Post media\">"
     elif media_type.startswith("video/") and media_data:
         media_html = f"<video class=\"post-media\" controls playsinline preload=\"metadata\" src=\"{_og_escape(media_data)}\"></video>"
+    elif media_type.startswith("music/") and media_data:
+        # Music share posts: embed the same provider-specific player the
+        # social feed uses so guests can listen without leaving the page.
+        # media_type is "music/<provider>", media_data is the track URL.
+        import re as _re
+        provider = media_type.split("/", 1)[1] if "/" in media_type else ""
+        embed_url = ""
+        thumb_url = ""
+        if provider == "youtube":
+            m = _re.search(r"(?:youtube\.com/(?:watch\?v=|shorts/|embed/|v/)|youtu\.be/)([A-Za-z0-9_-]{6,})", media_data)
+            if not m:
+                m = _re.search(r"[?&]v=([A-Za-z0-9_-]{6,})", media_data)
+            if m:
+                vid = m.group(1)
+                embed_url = f"https://www.youtube-nocookie.com/embed/{vid}"
+                thumb_url = f"https://img.youtube.com/vi/{vid}/hqdefault.jpg"
+                # Upgrade OG image to the YouTube thumbnail so the
+                # share preview shows the actual track artwork.
+                og_image = thumb_url
+                og_image_type = "image/jpeg"
+        elif provider == "spotify":
+            m = _re.search(r"open\.spotify\.com/(track|playlist|album|episode)/([A-Za-z0-9]+)", media_data)
+            if m:
+                embed_url = f"https://open.spotify.com/embed/{m.group(1)}/{m.group(2)}"
+        elif provider == "soundcloud" and "soundcloud.com" in media_data:
+            from urllib.parse import quote as _q
+            embed_url = (
+                "https://w.soundcloud.com/player/?url="
+                + _q(media_data, safe="")
+                + "&color=%234caf50&auto_play=false&hide_related=true&show_comments=false&show_user=true"
+            )
+        if embed_url:
+            # Spotify embeds use 152px height for compact track player; SoundCloud
+            # widget is 166px; YouTube needs a 16:9 wrapper. Frame everything
+            # consistently inside the same green-bordered card so it matches
+            # the rest of the surface.
+            if provider == "youtube":
+                media_html = (
+                    f"<div class=\"music-embed music-embed-yt\">"
+                    f"<iframe src=\"{_og_escape(embed_url)}\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" allowfullscreen loading=\"lazy\" referrerpolicy=\"strict-origin-when-cross-origin\"></iframe>"
+                    f"</div>"
+                )
+            elif provider == "spotify":
+                media_html = (
+                    f"<iframe class=\"music-embed music-embed-sp\" src=\"{_og_escape(embed_url)}\" "
+                    f"allow=\"autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture\" "
+                    f"loading=\"lazy\" referrerpolicy=\"strict-origin-when-cross-origin\"></iframe>"
+                )
+            else:  # soundcloud
+                media_html = (
+                    f"<iframe class=\"music-embed music-embed-sc\" src=\"{_og_escape(embed_url)}\" "
+                    f"allow=\"autoplay\" loading=\"lazy\" "
+                    f"referrerpolicy=\"strict-origin-when-cross-origin\"></iframe>"
+                )
+        else:
+            # Unknown / unparseable music link — render a styled link card so
+            # guests still see something tappable.
+            media_html = (
+                f"<a class=\"music-link-fallback\" href=\"{_og_escape(media_data)}\" "
+                f"target=\"_blank\" rel=\"noopener noreferrer\">"
+                f"<span class=\"music-icon\">\U0001F3B5</span>"
+                f"<span class=\"music-link-text\">Open track</span>"
+                f"</a>"
+            )
 
     html = f"""<!DOCTYPE html>
 <html><head>
@@ -967,6 +1031,29 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 .post-media{{width:100%;max-height:70vh;object-fit:contain;border-radius:14px;
   border:1px solid rgba(127,210,167,.18);background:#0a1410;
   box-shadow:0 10px 32px rgba(0,0,0,.45)}}
+/* Music share embeds — match the post-media frame so YouTube/Spotify/
+   SoundCloud all sit in the same green-rimmed card. */
+.music-embed{{display:block;width:100%;border:1px solid rgba(127,210,167,.18);
+  border-radius:14px;background:#0a1410;box-shadow:0 10px 32px rgba(0,0,0,.45);overflow:hidden}}
+.music-embed-yt{{position:relative;padding-top:56.25%;height:0}}
+.music-embed-yt iframe{{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}}
+.music-embed-sp{{height:152px}}
+.music-embed-sc{{height:166px}}
+.music-link-fallback{{display:flex;align-items:center;gap:10px;padding:14px 16px;
+  background:linear-gradient(135deg,rgba(127,210,167,.08),rgba(46,138,74,.04));
+  border:1px solid rgba(127,210,167,.25);border-radius:14px;color:#dff5e8;
+  text-decoration:none;font-weight:600;transition:background .15s ease,border-color .15s ease}}
+.music-link-fallback:hover{{background:linear-gradient(135deg,rgba(127,210,167,.14),rgba(46,138,74,.08));
+  border-color:rgba(127,210,167,.4)}}
+.music-icon{{font-size:22px;line-height:1;filter:drop-shadow(0 2px 6px rgba(76,175,80,.4))}}
+.guest-banner{{display:flex;align-items:center;gap:10px;
+  background:linear-gradient(135deg,rgba(127,210,167,.12),rgba(46,138,74,.06));
+  border:1px solid rgba(127,210,167,.3);color:#cfeadb;
+  padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.4;margin-bottom:14px}}
+.guest-banner .gb-dot{{width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  background:radial-gradient(circle at 30% 30%,#bff0d0,#4caf50);
+  box-shadow:0 0 0 2px rgba(127,210,167,.18),0 0 12px rgba(76,175,80,.4)}}
+.guest-banner b{{color:#dff5e8;font-weight:700}}
 .actions{{display:flex;gap:10px;margin-top:18px}}
 .btn{{display:block;flex:1;text-align:center;padding:13px 16px;border-radius:10px;
   text-decoration:none;font-weight:600;font-size:15px;border:1px solid transparent;
@@ -980,6 +1067,7 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 .btn-secondary:hover{{background:rgba(127,210,167,.12);border-color:rgba(127,210,167,.4)}}
 </style></head><body>
 <div class=\"card\">
+  <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Viewing as guest \u2014 <b>join FrogTalk</b> to like, comment and reply.</span></div>
   <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   {media_html}
@@ -1151,8 +1239,14 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
   box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(127,210,167,.06),inset 0 1px 0 rgba(255,255,255,.04)}}
 .card::after{{content:"";position:absolute;left:18px;right:18px;top:0;height:1px;
   background:linear-gradient(90deg,transparent,rgba(127,210,167,.5),transparent);pointer-events:none}}
-.join-banner{{background:linear-gradient(135deg,rgba(127,210,167,.12),rgba(46,138,74,.08));
-  border:1px solid rgba(127,210,167,.3);color:#cfeadb;padding:10px 14px;border-radius:12px;font-size:13px;margin-bottom:14px;line-height:1.4}}
+.guest-banner{{display:flex;align-items:center;gap:10px;
+  background:linear-gradient(135deg,rgba(127,210,167,.12),rgba(46,138,74,.06));
+  border:1px solid rgba(127,210,167,.3);color:#cfeadb;
+  padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.4;margin-bottom:14px}}
+.guest-banner .gb-dot{{width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  background:radial-gradient(circle at 30% 30%,#bff0d0,#4caf50);
+  box-shadow:0 0 0 2px rgba(127,210,167,.18),0 0 12px rgba(76,175,80,.4)}}
+.guest-banner b{{color:#dff5e8;font-weight:700}}
 .author{{display:flex;align-items:center;gap:10px;margin-bottom:12px}}
 .author-avatar{{width:42px;height:42px;border-radius:50%;object-fit:cover;
   border:2px solid rgba(127,210,167,.55);background:#0f1f17;
@@ -1178,7 +1272,7 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 .btn-secondary:hover{{background:rgba(127,210,167,.12);border-color:rgba(127,210,167,.4)}}
 </style></head><body>
 <div class=\"card\">
-  <div class=\"join-banner\">Watching as guest. Join FrogTalk to like, comment, repost, and chat with friends.</div>
+  <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Watching as guest \u2014 <b>join FrogTalk</b> to like, comment, repost and chat with friends.</span></div>
   <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   <video class=\"reel-video\" controls playsinline preload=\"metadata\" src=\"/r/{post_id}/media\"></video>
