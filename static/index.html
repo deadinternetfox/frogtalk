@@ -1136,14 +1136,15 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
   content:"🎵";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   font-size:20px;color:#c89eff
 }
-.mmd-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.mmd-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .mmd-title{
-  font-size:12.5px;font-weight:700;color:#f0e4ff;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3
+  font-size:11.5px;font-weight:700;color:#f0e4ff;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;
+  margin-top:-1px
 }
 .mmd-sub{
-  font-size:10.5px;color:#b090d0;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;
+  font-size:10px;color:#b090d0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;
   display:flex;align-items:center;gap:6px
 }
 .mmd-sub .mmd-room{color:#e8b5ff;font-weight:600;cursor:pointer}
@@ -1160,7 +1161,7 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
   0%,100%{transform:scale(1);opacity:1}
   50%    {transform:scale(1.25);opacity:.7}
 }
-.mmd-ctrls{display:flex;gap:4px;flex-shrink:0;margin-left:6px}
+.mmd-ctrls{display:flex;gap:4px;flex-shrink:0;margin-left:10px}
 .mmd-btn{
   background:transparent;border:0;color:#e8d0ff;cursor:pointer;
   width:30px;height:30px;font-size:14px;line-height:1;
@@ -6021,22 +6022,21 @@ a.mtnp-title:hover{color:#fff;text-decoration:underline}
 .mp-an-check.on:hover .mp-an-box{border-color:#d8b0ff;box-shadow:0 0 0 3px rgba(200,130,255,.22),0 2px 8px rgba(200,130,255,.5)}
 .mp-an-check input:focus-visible + .mp-an-box{outline:2px solid #c89bff;outline-offset:2px}
 /* mini-dock variant — sits as a third compact line under title/sub.
-   Indented + spaced so the live-dot's pulse on the sub line above never
-   bleeds into the tick box. Smaller text + tick than the top strip so the
-   dock stays compact on the sidebar. */
+   Pulled left to align with the title baseline (no extra indent) and
+   sized down so it tucks under the title without competing with it. */
 .mp-an-check--dock{
-  margin-top:6px;
-  padding-left:10px;
-  font-size:9.5px;color:#a888c8;
+  margin-top:5px;
+  padding-left:0;
+  font-size:9px;color:#a888c8;
   border-top:1px dashed rgba(200,130,255,.16);
-  padding-top:5px;
-  gap:5px
+  padding-top:4px;
+  gap:4px
 }
 .mp-an-check--dock .mp-an-lbl{
-  text-transform:uppercase;letter-spacing:.45px;font-weight:700
+  text-transform:uppercase;letter-spacing:.4px;font-weight:700
 }
-.mp-an-check--dock .mp-an-box{width:11px;height:11px;border-radius:3px;border-width:1.25px}
-.mp-an-check--dock .mp-an-box::after{left:2.5px;top:0;width:3.5px;height:7px;border-width:0 1.5px 1.5px 0}
+.mp-an-check--dock .mp-an-box{width:10px;height:10px;border-radius:3px;border-width:1.25px}
+.mp-an-check--dock .mp-an-box::after{left:2px;top:0;width:3px;height:6px;border-width:0 1.25px 1.25px 0}
 /* mtnp variant — appears under the track title on the persistent strip */
 .mp-an-check--mtnp{margin-top:2px;font-size:10.5px}
 .mp-an-check--mtnp .mp-an-lbl{
