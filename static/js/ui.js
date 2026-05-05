@@ -4100,9 +4100,20 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
             const track = status.replace(/^🎵\s*/, '').trim() || 'a track';
             const safeNick = String(u.nickname || nickname || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
             const moodSuffix = mood ? ` <span class="sml-mood">· ${esc(mood)}</span>` : '';
+            // For SELF, the pill shouldn't hijack the click — route to
+            // the status/profile editor so the user can actually update
+            // their own status text from here.
+            const selfNick = (window.State && State.user && State.user.nickname) || '';
+            const isSelf = selfNick && String(u.nickname || nickname || '').toLowerCase() === String(selfNick).toLowerCase();
+            const clickAttr = isSelf
+              ? `event.stopPropagation();if(typeof showProfile==='function')showProfile();`
+              : `event.stopPropagation();window.Social&&Social.openProfileMusic&&Social.openProfileMusic('${esc(safeNick)}')`;
+            const titleAttr = isSelf
+              ? 'Edit your status / profile'
+              : `Open @${esc(u.nickname || nickname)}'s music`;
             smEl.innerHTML = `<a href="javascript:void(0)" class="status-music-link"
-                onclick="event.stopPropagation();window.Social&&Social.openProfileMusic&&Social.openProfileMusic('${esc(safeNick)}')"
-                title="Open @${esc(u.nickname || nickname)}'s music">🎵 <span class="sml-label">Now playing:</span> <span class="sml-track">${esc(track)}</span>${moodSuffix}</a>`;
+                onclick="${clickAttr}"
+                title="${titleAttr}">🎵 <span class="sml-label">Now playing:</span> <span class="sml-track">${esc(track)}</span>${moodSuffix}</a>`;
           } else {
             smEl.textContent = [status, mood].filter(Boolean).join(' · ');
           }

@@ -3351,10 +3351,21 @@ const Social = (() => {
                 // is appended after a separator so the dot still shows.
                 const track = status.replace(/^🎵\s*/, '').trim() || 'a track';
                 const moodSuffix = u.mood ? ` <span class="sml-mood">· ${esc(u.mood)}</span>` : '';
+                // For OTHER users the pill jumps to their music. For SELF
+                // we route the click to the profile/status editor so the
+                // user can actually update their status text — otherwise
+                // their own pill just keeps re-opening their own music
+                // and they can never reach the editor from here.
+                const selfClick = `event.stopPropagation();if(typeof showProfile==='function')showProfile();`;
+                const otherClick = `event.stopPropagation();Social.openProfileMusic('${safeNick}')`;
+                const clickAttr = isSelf ? selfClick : otherClick;
+                const titleAttr = isSelf
+                  ? 'Edit your status / profile'
+                  : `Open @${esc(u.nickname || '')}'s recent music`;
                 return `<div class="sp-mood">
                   <a href="javascript:void(0)" class="sp-mood-music status-music-link"
-                     onclick="event.stopPropagation();Social.openProfileMusic('${safeNick}')"
-                     title="Open @${esc(u.nickname || '')}'s recent music">🎵 <span class="sml-label">Now playing:</span> <span class="sml-track">${esc(track)}</span>${moodSuffix}</a>
+                     onclick="${clickAttr}"
+                     title="${titleAttr}">🎵 <span class="sml-label">Now playing:</span> <span class="sml-track">${esc(track)}</span>${moodSuffix}</a>
                 </div>`;
               }
               return `<div class="sp-mood">${esc(combined)}</div>`;
