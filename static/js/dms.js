@@ -1158,7 +1158,7 @@ function renderDMChat () {
           UI.notice({
             icon: '🔒',
             title: `${undec} older message${undec===1?'':'s'} can't be read on this device`,
-            message: `You signed in on a new device, so FrogTalk issued fresh encryption keys here.\n\n${undec===1?'This message was':'These messages were'} encrypted to your previous device's keys and can't be unlocked from this one. They're still readable on the device that originally received them.\n\nNew messages in this chat will work normally going forward.`,
+            message: `${undec===1?'This message was':'These messages were'} encrypted to an encryption key this device doesn't hold, so ${undec===1?'it':'they'} can't be unlocked here.\n\nThis usually happens when either you or the other person signed in on a new device, reinstalled the app, or cleared local data — FrogTalk then issues fresh end-to-end keys, and older ciphertext stays readable only on the device it was originally delivered to.\n\nNew messages in this chat will work normally going forward.`,
             primaryLabel: 'Got it',
             actionLabel: 'Learn more',
           }).then(r => {
