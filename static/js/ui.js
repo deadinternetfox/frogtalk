@@ -3866,7 +3866,7 @@ function toggleEncryptionInfo() {
     const fpEl = document.getElementById('enc-device-fp');
     if (peerEl) peerEl.textContent = them ? '@' + them : 'this chat';
     if (slot) slot.textContent = them ? '· · · ·' : '— — — —';
-    if (fpEl) fpEl.textContent = '…';
+    if (fpEl) fpEl.innerHTML = '<span style="color:#666">Loading…</span>';
     openModal('modal-encrypt-verify');
     if (them && me && Crypto.fingerprint) {
       Crypto.fingerprint(me, them).then(emojis => {
@@ -3877,15 +3877,54 @@ function toggleEncryptionInfo() {
     }
     if (Crypto.publicKeyFingerprint) {
       Crypto.publicKeyFingerprint().then(fp => {
-        if (fpEl) fpEl.textContent = fp || '—';
+        if (!fpEl) return;
+        if (fp) {
+          fpEl.textContent = fp;
+        } else {
+          fpEl.innerHTML = '<span style="color:#b89a9a">Key unavailable — tap "Reset keys" below if encryption seems broken.</span>';
+        }
       }).catch(() => {
-        if (fpEl) fpEl.textContent = '—';
+        if (fpEl) fpEl.innerHTML = '<span style="color:#b89a9a">Key unavailable</span>';
       });
+    } else if (fpEl) {
+      fpEl.innerHTML = '<span style="color:#b89a9a">Crypto module not ready</span>';
     }
   } catch (e) {
     UI.showToast('Could not open encryption settings.', 'error');
   }
 }
+
+async function copyEncDeviceFp() {
+  const el = document.getElementById('enc-device-fp');
+  const btn = document.getElementById('enc-device-fp-copy');
+  if (!el || !btn) return;
+  const text = (el.textContent || '').trim();
+  if (!text || /^(loading|key unavailable|crypto)/i.test(text)) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges(); sel.addRange(range);
+      document.execCommand('copy');
+      sel.removeAllRanges();
+    }
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.style.background = '#1f4030';
+    btn.style.color = '#9fe5b8';
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.style.background = '#172a1f';
+      btn.style.color = '#a8d8b8';
+    }, 1400);
+  } catch {
+    UI.showToast('Could not copy', 'error');
+  }
+}
+window.copyEncDeviceFp = copyEncDeviceFp;
 
 async function resetEncryptionKeys() {
   const ok = (typeof UI !== 'undefined' && UI.confirm)

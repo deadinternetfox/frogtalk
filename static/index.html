@@ -7245,39 +7245,72 @@ window.ConnErr = (function(){
 <!-- New DM modal -->
 <!-- Encryption verification modal (Telegram-style emoji match) -->
 <div class="modal-overlay hidden" id="modal-encrypt-verify">
-  <div class="modal" style="max-width:380px;text-align:center">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <div class="modal-title" style="margin:0">🔒 Verify encryption</div>
+  <div class="modal" style="max-width:400px;text-align:center;padding:22px 22px 18px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+      <div class="modal-title" style="margin:0;display:flex;align-items:center;gap:8px;font-size:17px">
+        <span style="font-size:18px">🔒</span><span>Verify encryption</span>
+      </div>
       <button onclick="closeModal('modal-encrypt-verify')"
-        style="background:none;border:none;color:#888;font-size:20px;cursor:pointer;line-height:1;padding:4px 8px">✕</button>
+        style="background:none;border:none;color:#888;font-size:20px;cursor:pointer;line-height:1;padding:4px 8px"
+        aria-label="Close">✕</button>
     </div>
+    <div style="color:#7aa890;font-size:11.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;margin:0 0 14px">
+      End-to-end · AES-256-GCM
+    </div>
+
+    <!-- Emoji safety code -->
     <div id="enc-verify-emojis"
          onclick="copyEncVerifyEmojis()"
-         title="Click to copy"
-         style="font-size:54px;letter-spacing:12px;margin:14px auto 6px;line-height:1;user-select:all;
-                cursor:pointer;padding:14px 10px;border-radius:12px;background:#0d0d0d;
-                border:1px solid #2a4a2a;transition:background .18s,border-color .18s">
+         title="Tap to copy"
+         style="font-size:54px;letter-spacing:12px;margin:0 auto 6px;line-height:1;user-select:all;
+                cursor:pointer;padding:18px 12px;border-radius:14px;
+                background:linear-gradient(180deg,#0d1410,#070b09);
+                border:1px solid #2a4a2a;
+                box-shadow:inset 0 1px 0 rgba(255,255,255,.04), 0 4px 14px rgba(0,0,0,.4);
+                transition:background .18s,border-color .18s,transform .12s">
       · · · ·
     </div>
-    <div id="enc-verify-copy-hint" style="color:#666;font-size:11px;margin:0 0 14px">Tap the emojis to copy</div>
-    <p style="color:#bbb;font-size:13px;margin:0 0 10px;line-height:1.5">
-      If the four emoji above <strong>match</strong> the ones shown on
-      <strong id="enc-verify-peer">your friend's</strong> device, your
-      messages are end-to-end encrypted and nobody is listening in.
+    <div id="enc-verify-copy-hint" style="color:#7a7a7a;font-size:11px;margin:0 0 14px">Tap the emojis to copy</div>
+
+    <p style="color:#cfd8d2;font-size:13px;margin:0 0 8px;line-height:1.5">
+      If these four emoji <strong style="color:#7fd8a5">match</strong> the ones shown on
+      <strong id="enc-verify-peer" style="color:#fff">your friend's</strong> device, your
+      messages are end-to-end encrypted and nobody else can read them.
     </p>
-    <p style="color:#666;font-size:11px;margin:0 0 16px">
-      AES-256-GCM · Derived from both nicknames · Server sees ciphertext only.
+    <p style="color:#888;font-size:11px;margin:0 0 14px;line-height:1.45">
+      Derived from both nicknames · Server only sees ciphertext.
     </p>
-    <div style="margin:14px 0;padding:10px 12px;border-top:1px solid #2a2a2a;border-bottom:1px solid #2a2a2a;text-align:left">
-      <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-bottom:4px">This device</div>
-      <div id="enc-device-fp" style="font-family:ui-monospace,monospace;font-size:12px;color:#bbb;word-break:break-all">—</div>
-      <div style="font-size:11px;color:#666;margin-top:6px;line-height:1.4">
-        FrogTalk uses one encryption key per device. Logging in elsewhere automatically makes that device the active one — new DMs flow there. Older messages stay readable only on the device that originally received them.
+
+    <!-- This device card -->
+    <div style="margin:14px 0 12px;padding:12px 14px;background:rgba(255,255,255,.02);
+                border:1px solid #2a3a2a;border-radius:12px;text-align:left">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+                     border-radius:6px;background:#1a3a2a;border:1px solid #2f5f48;font-size:12px">📱</span>
+        <div style="display:flex;flex-direction:column;line-height:1.2;flex:1;min-width:0">
+          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">This device</span>
+          <span style="font-size:11px;color:#6a7a72">Identity key fingerprint</span>
+        </div>
+        <button id="enc-device-fp-copy" type="button" onclick="copyEncDeviceFp()" title="Copy fingerprint"
+          style="background:#172a1f;border:1px solid #2f5f48;color:#a8d8b8;font-size:11px;padding:4px 9px;
+                 border-radius:7px;cursor:pointer;flex-shrink:0">Copy</button>
+      </div>
+      <div id="enc-device-fp"
+           style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#d8e8de;
+                  word-break:break-all;background:#0a0f0c;padding:8px 10px;border-radius:8px;
+                  border:1px solid #1f2a23;letter-spacing:.5px">
+        <span style="color:#666">Loading…</span>
+      </div>
+      <div style="font-size:11px;color:#7a8a82;margin-top:9px;line-height:1.5">
+        FrogTalk uses one encryption key per device. Logging in elsewhere makes that device the active one — new DMs flow there. Older messages stay readable only on the device that originally received them.
       </div>
     </div>
-    <div class="modal-actions" style="flex-direction:column;gap:8px;align-items:stretch">
+
+    <div class="modal-actions" style="flex-direction:column;gap:8px;align-items:stretch;margin-top:10px">
       <button class="modal-btn primary" onclick="closeModal('modal-encrypt-verify')">Got it</button>
-      <button class="modal-btn" onclick="resetEncryptionKeys()" style="font-size:12px;color:#999" title="Only use if encryption seems broken on this device">🔧 Reset keys on this device</button>
+      <button class="modal-btn" onclick="resetEncryptionKeys()"
+        style="font-size:12px;color:#b89a9a;background:rgba(255,80,80,.04);border:1px solid #5a2a2a"
+        title="Only use if encryption seems broken on this device">🔧 Reset keys on this device</button>
     </div>
   </div>
 </div>

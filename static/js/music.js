@@ -70,6 +70,41 @@ const Music = (() => {
   let _lastPlayerState = null;       // YouTube playerState: 1=play 2=pause 3=buffer
   let _syncProbeStartedAt = 0;       // ms when probing began for current track
   let _syncFastProbeTimers = [];     // setTimeouts queued by fast re-probe
+  // Lightweight UI-only re-sync. Fires every ~1.5s while a track is
+  // mounted to guarantee the play/pause icon on every visible button
+  // matches reality, even when the heavy sync probe is paused (track
+  // paused, or between probes). YT's onStateChange/infoDelivery keep
+  // _lastPlayerState honest; this just propagates that to the DOM.
+  let _uiSyncTimer = null;
+  const UI_SYNC_INTERVAL_MS = 1500;
+  function _startUiSync() {
+    if (_uiSyncTimer) return;
+    _uiSyncTimer = setInterval(() => {
+      try {
+        // Re-handshake YT's listening channel each tick (idempotent) so
+        // the iframe keeps pushing state events; cheap insurance against
+        // a remounted iframe that lost the registration.
+        const cur = _state && _state.queue && _state.queue[0];
+        if (cur && cur.provider === 'youtube') {
+          const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+          if (frame && frame.contentWindow) {
+            try {
+              frame.contentWindow.postMessage(
+                JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
+              // Asking for currentTime triggers an infoDelivery reply
+              // which carries playerState. Free state-truth refresh.
+              frame.contentWindow.postMessage(
+                JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
+            } catch {}
+          }
+        }
+        _syncPlayPauseButtons();
+      } catch {}
+    }, UI_SYNC_INTERVAL_MS);
+  }
+  function _stopUiSync() {
+    if (_uiSyncTimer) { clearInterval(_uiSyncTimer); _uiSyncTimer = null; }
+  }
   const $ = (id) => document.getElementById(id);
   const esc = (s) => UI.escHtml(String(s || ''));
 
@@ -1709,6 +1744,7 @@ const Music = (() => {
     // has auto-paused or the user backgrounded the app.
     try { _syncPlayPauseButtons(); } catch {}
     try { _syncAutoNextButtons(); } catch {}
+    try { _startUiSync(); } catch {}
   }
 
   function _miniBarHtml(titleEsc, provider) {
@@ -1805,6 +1841,12 @@ const Music = (() => {
     panel.innerHTML = `
       <div id="mp-player-wrap" data-cur-key="${curKey}">${playerHtml}</div>
       <div id="mp-meta-wrap"></div>`;
+    // Mirror _renderDock — make sure every play/pause icon (mmd-play,
+    // mp-mini-playpause, mtnp-pp, mtnp-dot, mtnp-state) reflects current
+    // truth right after a fresh mount, instead of being stuck on the
+    // hardcoded data-playing="1" template default.
+    try { _syncPlayPauseButtons(); } catch {}
+    try { _startUiSync(); } catch {}
   }
 
   function expand() {
@@ -1835,6 +1877,7 @@ const Music = (() => {
 
   function close() {
     _stopSyncProbe();
+    _stopUiSync();
     const panel = $('music-panel');
     if (panel) {
       panel.classList.remove('active');
