@@ -5926,17 +5926,28 @@ const Social = (() => {
           ? `<button class="mtnp-btn mtnp-pp" onclick="Social._toggleNowPlaying()"
                     title="${cur.paused ? 'Resume' : 'Pause'}">${cur.paused ? '▶' : '⏸'}</button>`
           : '';
-        // Auto-next toggle — was buried in the solo player + mini-dock
-        // only. Surfacing it on the persistent strip means anyone can
-        // turn auto-advance off without first opening the music tab.
-        // The button uses the same `data-autonext-btn` hook so
-        // Music._syncAutoNextButtons() keeps every instance in sync.
+        // Skip-to-next track. Reuses Music.skipNext() which mirrors the
+        // existing auto-advance logic (Social.getNextMusicTrack →
+        // discover fallback in solo mode, server skip in DJ rooms),
+        // so the user can hop tracks from the persistent strip without
+        // opening the music tab.
+        const skipBtn = `<button class="mtnp-btn mtnp-skip" onclick="event.stopPropagation();Music.skipNext()"
+                                  title="Next track" aria-label="Next track">⏭</button>`;
+        // Auto-next toggle — polished checkbox style, lives on a second
+        // row beneath the title so the top button row stays clean. The
+        // `data-autonext-check` hook lets Music._syncAutoNextButtons()
+        // keep every instance (mini-dock + this strip) in sync.
         let _anOn = true;
         try { _anOn = localStorage.getItem('frogtalk:music:autonext') !== '0'; } catch {}
-        const autoNextBtn = `<button class="mtnp-btn mtnp-autonext" data-autonext-btn data-on="${_anOn ? '1' : '0'}"
-                                     onclick="event.stopPropagation();Music.toggleAutoNext(this)"
-                                     title="${_anOn ? 'Auto-next: on (click to disable)' : 'Auto-next: off (click to enable)'}"
-                                     aria-label="Toggle auto-next">${_anOn ? '⏭' : '⏭̸'}</button>`;
+        const autoNextCheck = `
+          <label class="mp-an-check mp-an-check--mtnp ${_anOn ? 'on' : ''}"
+                 onclick="event.stopPropagation()"
+                 title="${_anOn ? 'Auto-next: on (uncheck to disable)' : 'Auto-next: off (check to enable)'}">
+            <input type="checkbox" data-autonext-check ${_anOn ? 'checked' : ''}
+                   onchange="Music.toggleAutoNext()" aria-label="Auto-next">
+            <span class="mp-an-box" aria-hidden="true"></span>
+            <span class="mp-an-lbl">Auto-next</span>
+          </label>`;
         // Middle action: share this track to the viewer's FrogSocial wall.
         const shareBtn = `<button class="mtnp-btn mtnp-share" onclick="Music.shareToWall()"
                                   title="Share this track to your wall" aria-label="Share to wall">↗</button>`;
@@ -5946,10 +5957,11 @@ const Social = (() => {
           <div class="mtnp-info">
             <div class="mtnp-state">${stateTxt}<span class="mtnp-prov" data-provider="${esc(cur.provider)}">${esc(providerLabel)}</span>${sharerTxt ? `<span class="mtnp-sharer">${sharerTxt}</span>` : ''}</div>
             <a class="mtnp-title" href="${trackUrlEsc}" target="_blank" rel="noopener noreferrer" title="Open on ${esc(providerLabel)} ↗">${esc(cur.title || 'Music')}</a>
+            ${autoNextCheck}
           </div>
           <div class="mtnp-ctrls">
             ${pauseBtn}
-            ${autoNextBtn}
+            ${skipBtn}
             ${shareBtn}
             <button class="mtnp-btn mtnp-stop" onclick="Music.close()" title="Stop">✕</button>
           </div>`;

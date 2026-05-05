@@ -193,6 +193,20 @@ const Music = (() => {
   function _syncAutoNextButtons() {
     const on = _autoNextEnabled();
     const svg = on ? _AUTONEXT_ON_SVG : _AUTONEXT_OFF_SVG;
+    // Polished checkbox-style controls on mini-dock + FrogSocial strip.
+    // Mirror the live setting onto every <input data-autonext-check>; we
+    // also flip a sibling label class so the custom-painted box reflects
+    // the on/off state without depending on :checked alone (some Android
+    // WebView builds don't repaint the ::before glyph on programmatic
+    // checked changes — this dataset hook is a reliable backup).
+    document.querySelectorAll('[data-autonext-check]').forEach(inp => {
+      inp.checked = on;
+      const wrap = inp.closest('.mp-an-check');
+      if (wrap) {
+        wrap.classList.toggle('on', on);
+        wrap.title = on ? 'Auto-next: on (uncheck to disable)' : 'Auto-next: off (check to enable)';
+      }
+    });
     document.querySelectorAll('[data-autonext-btn]').forEach(b => {
       b.dataset.on = on ? '1' : '0';
       b.classList.toggle('on', on);
@@ -1649,7 +1663,11 @@ const Music = (() => {
     const art = cur.thumbnail ? `style="background-image:url('${esc(cur.thumbnail)}')"` : '';
     const noArt = cur.thumbnail ? '' : 'no-art';
     const canPause = _providerSupportsPause(cur.provider);
-    const canSkip = !_soloMode && !!(_state && _state.can_control);
+    // Skip is allowed in solo mode (advances via Social.getNextMusicTrack /
+    // discover fallback) and in room mode for users with can_control. For
+    // listeners in a room we hide the button rather than show a toast on
+    // every click — the queue is server-authoritative there anyway.
+    const canSkip = _soloMode || !!(_state && _state.can_control);
     dock.setAttribute('aria-hidden', 'false');
     dock.setAttribute('data-provider', cur.provider || '');
     dock.setAttribute('data-solo', _soloMode ? '1' : '0');
@@ -1663,21 +1681,24 @@ const Music = (() => {
          <span class="mmd-room" title="Open FrogSocial Music">${soloLabel}</span>`
       : `<span class="mmd-live-dot"></span>
          <span class="mmd-room" title="Go to #${roomEsc}">#${roomEsc}</span>`;
+    const anOn = _autoNextEnabled();
     dock.innerHTML = `
       <div class="mmd-art ${noArt}" ${art} onclick="Music.expand()" title="${expandTitle}"></div>
       <div class="mmd-info" onclick="Music.expand()">
         <div class="mmd-title" title="${titleEsc}">${titleEsc}</div>
         <div class="mmd-sub">${subInner}</div>
+        <label class="mp-an-check mp-an-check--dock ${anOn ? 'on' : ''}" onclick="event.stopPropagation()" title="${anOn ? 'Auto-next: on (uncheck to disable)' : 'Auto-next: off (check to enable)'}">
+          <input type="checkbox" data-autonext-check ${anOn ? 'checked' : ''} onchange="Music.toggleAutoNext()" aria-label="Auto-next">
+          <span class="mp-an-box" aria-hidden="true"></span>
+          <span class="mp-an-lbl">Auto-next</span>
+        </label>
       </div>
       <div class="mmd-ctrls">
         <button class="mmd-btn mmd-play ${canPause ? '' : 'unsupported'}" data-playing="1"
                 title="Pause" aria-label="Pause"
                 onclick="event.stopPropagation();Music.togglePause(this)">${_PAUSE_SVG}</button>
-        ${canSkip ? `<button class="mmd-btn" title="Skip" aria-label="Skip"
-                       onclick="event.stopPropagation();Music.skip()">${_SKIP_SVG}</button>` : ''}
-        <button class="mmd-btn mmd-autonext" data-autonext-btn data-on="${_autoNextEnabled() ? '1' : '0'}"
-                title="Auto-next" aria-label="Auto-next"
-                onclick="event.stopPropagation();Music.toggleAutoNext(this)">${_autoNextEnabled() ? _AUTONEXT_ON_SVG : _AUTONEXT_OFF_SVG}</button>
+        ${canSkip ? `<button class="mmd-btn mmd-skip" title="Next track" aria-label="Next track"
+                       onclick="event.stopPropagation();Music.skipNext()">${_SKIP_SVG}</button>` : ''}
         <button class="mmd-btn mmd-close" title="Stop" aria-label="Stop"
                 onclick="event.stopPropagation();Music.close()">✕</button>
       </div>`;
@@ -2102,6 +2123,51 @@ const Music = (() => {
       </div>`;
   }
 
+  // Public skip-to-next that works from every mini player on the site.
+  // Reuses the same advancement logic as auto-next-on-ended:
+  //   - solo mode: ask Social for the next FrogSocial music track,
+  //     fall back to the public discover endpoint;
+  //   - room mode (DJ/owner/admin): server-authoritative skip;
+  //   - room mode listener: noop with a toast (queue is server-side).
+  // Bypasses the auto-next preference because the user explicitly
+  // pressed the skip button.
+  function skipNext() {
+    const cur = _state && _state.queue && _state.queue[0];
+    if (!cur) return;
+    if (_soloMode) {
+      try {
+        const S = window.Social;
+        const next = (S && typeof S.getNextMusicTrack === 'function')
+          ? S.getNextMusicTrack(cur.url, { provider: cur.provider })
+          : null;
+        if (next && next.url && next.url !== cur.url) {
+          playSolo(next);
+          return;
+        }
+        if (S && typeof S.fetchDiscoverMusicTrack === 'function') {
+          S.fetchDiscoverMusicTrack(cur.url).then(d => {
+            if (!d || !d.url || d.url === cur.url) {
+              try { UI.showToast && UI.showToast('No next track available', 'info'); } catch {}
+              return;
+            }
+            try { UI.showToast && UI.showToast('Skipped — Discover pick 🎵', 'info'); } catch {}
+            playSolo(d);
+          }).catch(() => {
+            try { UI.showToast && UI.showToast('Could not load next track', 'error'); } catch {}
+          });
+        } else {
+          try { UI.showToast && UI.showToast('No next track available', 'info'); } catch {}
+        }
+      } catch {}
+      return;
+    }
+    if (_state && _state.can_control) {
+      skip(parseInt(cur.id, 10) || null).catch(() => {});
+    } else {
+      try { UI.showToast && UI.showToast('Only DJs can skip in this room', 'info', 1800); } catch {}
+    }
+  }
+
   async function skip() {
     const expectedTrackId = (arguments.length > 0) ? arguments[0] : null;
     const isAuto = !!(arguments.length > 1 && arguments[1] && arguments[1].auto);
@@ -2122,14 +2188,59 @@ const Music = (() => {
     if (res.ok) { _state = await _fetchState(_room); _render(); }
   }
 
+  // Loop the current track from 0 in the YT/SC iframe. Used in solo
+  // (FrogSocial mini-dock / topbar / sidebar) playback when auto-next
+  // is OFF and the head track ends — instead of leaving the user on a
+  // dead frozen player, we restart the same track. Deliberately NOT
+  // wired into room mode: a music channel queue is server-authoritative
+  // and shared across listeners, so a client-side loop would desync
+  // every other listener with the head track they're already past.
+  function _loopCurrentSolo() {
+    try {
+      const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+      if (!frame || !frame.contentWindow) return false;
+      const src = frame.src || '';
+      if (src.includes('youtube.com')) {
+        // Seek to 0, then play. YT iframe accepts both messages back to back.
+        frame.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'seekTo', args: [0, true] }), '*');
+        frame.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+        return true;
+      } else if (src.includes('soundcloud.com')) {
+        frame.contentWindow.postMessage(JSON.stringify({ method: 'seekTo', value: 0 }), '*');
+        frame.contentWindow.postMessage(JSON.stringify({ method: 'play' }), '*');
+        return true;
+      }
+    } catch {}
+    return false;
+  }
+
   function _maybeAutoAdvanceOnEnded() {
     const q = (_state && _state.queue) || [];
     const cur = q[0];
     if (!cur) return;
-    // YouTube-style toggle: when auto-next is off, let the track end
-    // and stay on it instead of skipping to the next queued item.
-    if (!_autoNextEnabled()) return;
     if ((cur.provider || '') !== 'youtube') return;
+
+    // Auto-next OFF behavior:
+    //   - solo mode (mini-dock / topbar / sidebar): loop the same
+    //     track so the user always has audio. This matches the
+    //     "keep the vibe going" expectation of a casual music dock.
+    //   - room mode (big music channel player): do nothing — the
+    //     player just sits on the last frame, exactly like YouTube
+    //     does when loop is off. Looping client-side here would
+    //     desync from other listeners hearing the server-side queue.
+    if (!_autoNextEnabled()) {
+      if (_soloMode) {
+        const key = `loop:${cur.id || cur.url || ''}`;
+        const now = Date.now();
+        if (key === _autoAdvanceLastKey && (now - _autoAdvanceLastAt) < 4000) return;
+        _autoAdvanceLastKey = key;
+        _autoAdvanceLastAt = now;
+        _loopCurrentSolo();
+      }
+      return;
+    }
 
     const key = `${_room || 'solo'}:${cur.id || cur.url || ''}`;
     const now = Date.now();
@@ -2296,7 +2407,7 @@ const Music = (() => {
     try { UI.showToast('FrogSocial not available — open Social first', 'error'); } catch {}
   }
 
-  return { mount, submit, skip, clearQueue, removeTrack, toggleDJOnly,
+  return { mount, submit, skip, skipNext, clearQueue, removeTrack, toggleDJOnly,
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo,

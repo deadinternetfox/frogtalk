@@ -5947,6 +5947,57 @@ a.mtnp-title:hover{color:#fff;text-decoration:underline}
 .mtnp-btn.mtnp-autonext svg{width:16px;height:16px}
 .mtnp-btn.mtnp-autonext.on{border-color:#4caf50;color:#9be59b}
 .mtnp-btn.mtnp-autonext:not(.on){opacity:.7}
+/* Skip-to-next inline action (matches mtnp-pp accent intensity but in a
+   cooler hue so the row reads pause / next / share / stop left to right). */
+.mtnp-btn.mtnp-skip{
+  background:linear-gradient(135deg,#3a5fd8,#2a45a8);border-color:#5a7af0;color:#fff;
+  font-size:15px
+}
+.mtnp-btn.mtnp-skip:hover{background:linear-gradient(135deg,#4a70e8,#3555c0);border-color:#6a8aff}
+/* ── Polished auto-next checkbox (mini-dock + FrogSocial strip) ─────── */
+.mp-an-check{
+  display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  font-size:11px;font-weight:700;letter-spacing:.3px;color:#b59ad0;
+  user-select:none;padding:2px 0;line-height:1;
+  transition:color .15s
+}
+.mp-an-check input[type="checkbox"]{
+  position:absolute;opacity:0;width:0;height:0;pointer-events:none
+}
+.mp-an-check .mp-an-box{
+  width:14px;height:14px;border-radius:4px;
+  border:1.5px solid rgba(200,130,255,.45);
+  background:rgba(0,0,0,.35);
+  display:inline-flex;align-items:center;justify-content:center;
+  flex-shrink:0;transition:background .15s,border-color .15s,box-shadow .15s;
+  position:relative
+}
+.mp-an-check .mp-an-box::after{
+  content:"";position:absolute;left:3px;top:0px;width:5px;height:9px;
+  border:solid #fff;border-width:0 2px 2px 0;
+  transform:rotate(45deg) scale(0);transform-origin:center;
+  transition:transform .14s cubic-bezier(.2,1.4,.4,1)
+}
+.mp-an-check.on{color:#cff0d5}
+.mp-an-check.on .mp-an-box{
+  background:linear-gradient(135deg,#4caf50,#2f8a3a);
+  border-color:#6cd078;
+  box-shadow:0 0 0 3px rgba(76,175,80,.12),0 1px 4px rgba(76,175,80,.35)
+}
+.mp-an-check.on .mp-an-box::after{transform:rotate(45deg) scale(1)}
+.mp-an-check:hover .mp-an-box{border-color:#c89bff}
+.mp-an-check.on:hover .mp-an-box{border-color:#9be59b}
+.mp-an-check input:focus-visible + .mp-an-box{outline:2px solid #c89bff;outline-offset:2px}
+/* mini-dock variant — sits as a third compact line under title/sub */
+.mp-an-check--dock{margin-top:2px;font-size:10.5px;color:#a888c8}
+.mp-an-check--dock .mp-an-lbl{
+  text-transform:uppercase;letter-spacing:.5px
+}
+/* mtnp variant — appears under the track title on the persistent strip */
+.mp-an-check--mtnp{margin-top:4px;font-size:10.5px}
+.mp-an-check--mtnp .mp-an-lbl{
+  text-transform:uppercase;letter-spacing:.5px
+}
 @media(max-width:500px){
   .mt-nowplaying{margin:6px 10px 8px;padding:9px 12px;gap:10px}
   .mtnp-title{font-size:13px}
