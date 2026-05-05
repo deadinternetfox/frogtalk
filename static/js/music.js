@@ -1394,7 +1394,14 @@ const Music = (() => {
     // WS event with the new head will rebuild the player normally.
     const wrap0 = document.getElementById('mp-player-wrap');
     const hadTrack = !!(wrap0 && wrap0.dataset.curKey);
-    if (!cur && hadTrack && _autoNextEnabled()) {
+    // Only hold the "Advancing…" placeholder when a new track is
+    // actually about to land — i.e. auto-fill is enabled for this room
+    // and the local user controls it. Without auto-fill, an empty
+    // queue is the final state, so showing a 9-second "Advancing…"
+    // splash just hides the Add Track button (and on mobile makes the
+    // panel look broken — there's nothing to advance *to*).
+    const advancingPossible = _state && _state.can_control && _autoFillEnabled(_room);
+    if (!cur && hadTrack && _autoNextEnabled() && advancingPossible) {
       const since = Number(panel.dataset.emptySince || 0);
       const now = Date.now();
       if (!since) {
