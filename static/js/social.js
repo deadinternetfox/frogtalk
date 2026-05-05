@@ -4023,6 +4023,12 @@ const Social = (() => {
         _reelsObserver = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
             if (entry.isIntersecting) return;
+            // Never pause the currently-active card via the IO. During
+            // momentum / snap settle the active card can briefly dip
+            // below the threshold, and pausing it here is exactly the
+            // "video paused after manual scroll" symptom — let the
+            // scroll-driven activate path own the active card.
+            if (entry.target === _reelsCurrentCard) return;
             const vid = entry.target.querySelector('video');
             if (!vid) return;
             try { vid.muted = true; } catch {}
@@ -4234,10 +4240,11 @@ const Social = (() => {
       return;
     }
     if (best !== _reelsCurrentCard) {
-      // Manual scroll to a new card always autoplays it. Per-card pause
-      // (_reelsUserPausedCard) is cleared inside _reelsActivateCard when
-      // the active card changes.
-      _reelsActivateCard(best, { reset: false });
+      // Manual scroll to a new card always autoplays it. Clear any
+      // lingering per-card user-pause state and force play — explicit
+      // user request: "all new scrolled cards autoplay".
+      _reelsUserPausedCard = null;
+      _reelsActivateCard(best, { reset: false, forcePlay: true });
       return;
     }
     // Reaffirming the same card. Defensively pause + mute any *other*
@@ -4791,7 +4798,7 @@ const Social = (() => {
     snap._reelsTapBound = true;
     const TAP_MAX_MOVE = 10;
     const TAP_MAX_TIME = 280;
-    const SCROLL_TOLERANCE = 2;       // px — sub-pixel jitter on snap settle
+    const SCROLL_TOLERANCE = 8;       // px — snap settle / re-correct can drift a few px after a tap
     const POST_SCROLL_GUARD_MS = 120; // wait for momentum scroll to commit
 
     let g = null;
@@ -4837,8 +4844,11 @@ const Social = (() => {
     const finalizeTap = (cur, ev) => {
       if (cur.moved) return;
       if (Date.now() - cur.t > TAP_MAX_TIME + POST_SCROLL_GUARD_MS) return;
-      // A scroll event fired anywhere in the gesture window → was a scroll.
-      if (_reelsLastScrollEventT > cur.startScrollEventT) return;
+      // Use scrollTop delta as the only "did the user actually scroll?"
+      // signal. The previous _reelsLastScrollEventT comparison was too
+      // strict — a scroll-snap container fires a `scroll` event during
+      // its own settle/re-correction after a tap, which falsely vetoed
+      // legitimate single-tap pauses ("pause button doesn't work").
       if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
       // Only ever toggle the currently active card (never one that has
       // since scrolled out of frame).
