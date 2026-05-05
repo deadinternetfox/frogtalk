@@ -3639,18 +3639,20 @@ const Social = (() => {
   // after the user has scrolled away (root cause of the "two reels playing
   // at once" / phantom audio symptom).
   let _reelsActivateGen = 0;
-  // ── One-reel-per-gesture limiter (TikTok/IG-style) ────────────────────────
-  // A single fast swipe / trackpad fling could skip 5+ reels because
-  // scroll-snap respects native momentum. We capture the starting card on
-  // gesture start and force scrollIntoView on the *adjacent* card at gesture
-  // end (touchend / wheel debounce), killing inertia and clamping movement
-  // to one reel per motion.
+  // ── One-reel-per-gesture limiter ──
+  // CSS handles touch flings via `scroll-snap-stop: always` (set in
+  // index.html on .reel-card). JS only intercepts wheel + keyboard which
+  // do not respect snap-stop natively.
   let _reelsGestureLockUntil = 0;
-  let _reelsGestureStartCard = null;
-  let _reelsGestureStartTop = 0;
-  let _reelsGestureStartT = 0;
   let _reelsWheelAccum = 0;
   let _reelsWheelResetTimer = 0;
+  // Last-known scroll position + timestamp for velocity-aware activation.
+  let _reelsLastScrollTop = 0;
+  let _reelsLastScrollT = 0;
+  // 'play' = next activated reel auto-plays. 'paused' = next reel stays
+  // paused (carries over the user's last manual pause/play decision so
+  // scrolling preserves intent like TikTok/IG).
+  let _reelsPlayMode = 'play';
     let _reelsAutoPausedMusic = false;
     let _reelsAutoPausedMusicUrl = '';
     let _reelsMusicInterlockBusy = false;
@@ -3776,42 +3778,18 @@ const Social = (() => {
     return Date.now() < _reelsGestureLockUntil;
   }
 
-  // Attach one-card-per-gesture limiters to a reels snap container.
-  // Idempotent: previous handlers (if any) are removed first.
+  // Attach gesture limiter to the snap container.
+  // Touch gestures rely on CSS `scroll-snap-stop: always` to prevent
+  // multi-card flings — this is smoother than JS forced scrollIntoView
+  // (which fights native iOS momentum and feels glitchy). JS still
+  // intercepts wheel + keyboard (which ignore snap-stop) to clamp them to
+  // one reel per discrete input.
   function _reelsAttachGestureLimiter(snap) {
     if (!snap) return;
     _reelsDetachGestureLimiter(snap);
 
-    const onTouchStart = (e) => {
-      if (!e.touches || e.touches.length !== 1) return;
-      _reelsGestureStartCard = _reelsNearestCard(snap);
-      _reelsGestureStartTop = snap.scrollTop;
-      _reelsGestureStartT = Date.now();
-    };
-    const onTouchEnd = () => {
-      const startCard = _reelsGestureStartCard;
-      _reelsGestureStartCard = null;
-      if (!startCard) return;
-      // Heuristic: any movement beyond ~24px counts as a swipe in that
-      // direction. Below threshold → snap back to start to swallow tiny taps.
-      const delta = snap.scrollTop - _reelsGestureStartTop;
-      const dur = Math.max(1, Date.now() - _reelsGestureStartT);
-      const velocity = Math.abs(delta) / dur; // px/ms
-      const SWIPE_PX = 24;
-      let dir = 0;
-      if (delta > SWIPE_PX || (delta > 8 && velocity > 0.4)) dir = 1;
-      else if (delta < -SWIPE_PX || (delta < -8 && velocity > 0.4)) dir = -1;
-      // If the user actually moved (or is mid-momentum), force a single-step
-      // scrollIntoView. This cancels native inertia and clamps to one reel.
-      // Pure taps (delta≈0) are left alone so click-to-pause still works.
-      if (dir !== 0 || Math.abs(delta) > 4) {
-        _reelsStepFrom(snap, startCard, dir);
-      }
-    };
     const onWheel = (e) => {
-      // Only intercept primarily-vertical wheel input.
       if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
-      // Block native momentum: navigate adjacent on threshold, swallow rest.
       e.preventDefault();
       if (_reelsGestureLocked()) return;
       _reelsWheelAccum += e.deltaY;
@@ -3837,24 +3815,16 @@ const Social = (() => {
       }
     };
 
-    snap.addEventListener('touchstart', onTouchStart, { passive: true });
-    snap.addEventListener('touchend',   onTouchEnd,   { passive: true });
-    snap.addEventListener('touchcancel', onTouchEnd,  { passive: true });
-    // wheel must be non-passive to preventDefault on trackpad flings.
     snap.addEventListener('wheel', onWheel, { passive: false });
     snap.addEventListener('keydown', onKey);
-    // Make snap focusable so arrow keys work after click.
     if (!snap.hasAttribute('tabindex')) snap.setAttribute('tabindex', '0');
 
-    snap._reelsGesture = { onTouchStart, onTouchEnd, onWheel, onKey };
+    snap._reelsGesture = { onWheel, onKey };
   }
 
   function _reelsDetachGestureLimiter(snap) {
     if (!snap || !snap._reelsGesture) return;
-    const { onTouchStart, onTouchEnd, onWheel, onKey } = snap._reelsGesture;
-    try { snap.removeEventListener('touchstart', onTouchStart); } catch {}
-    try { snap.removeEventListener('touchend',   onTouchEnd); } catch {}
-    try { snap.removeEventListener('touchcancel', onTouchEnd); } catch {}
+    const { onWheel, onKey } = snap._reelsGesture;
     try { snap.removeEventListener('wheel', onWheel); } catch {}
     try { snap.removeEventListener('keydown', onKey); } catch {}
     try { delete snap._reelsGesture; } catch {}
@@ -4041,19 +4011,18 @@ const Social = (() => {
         _updateTabLoadUi(loadUi, 93, 'Loading reel media', 'Priming first playable video');
       }
 
-      // IntersectionObserver: pause/play as cards scroll into/out of view
+      // IntersectionObserver: pause cards as they leave the viewport.
+      // Activation is driven exclusively by the scroll / scrollend handler
+      // (with a velocity guard) to avoid mid-fling card-flicker where
+      // every intermediate card briefly takes over playback.
       if (snap && window.IntersectionObserver) {
         _reelsObserver = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
+            if (entry.isIntersecting) return;
             const vid = entry.target.querySelector('video');
             if (!vid) return;
-            if (entry.isIntersecting) {
-              if (_reelsIsSeekLocked()) return;
-              _reelsActivateCard(entry.target, { reset: false });
-            } else {
-              try { vid.pause(); } catch {}
-              entry.target.classList.remove('is-playing');
-            }
+            try { vid.pause(); } catch {}
+            entry.target.classList.remove('is-playing');
           });
         }, { root: snap, threshold: 0.6 });
         snap.querySelectorAll('.reel-card').forEach(card => _reelsObserver.observe(card));
@@ -4117,10 +4086,14 @@ const Social = (() => {
     if (shouldReset) {
       try { v.currentTime = 0; } catch {}
     }
-    if (!userPausedThisCard || opts.forcePlay) {
+    // Honour persistent user intent: if they paused the previous reel,
+    // don't auto-play this one either (TikTok-style: tap-to-pause sticks).
+    const userWantsPlay = _reelsPlayMode === 'play' || opts.forcePlay;
+    if (userWantsPlay && !userPausedThisCard) {
       _reelsPlayVideo(card, v, 0, gen);
       card.classList.add('is-playing');
     } else {
+      try { v.pause(); } catch {}
       card.classList.remove('is-playing');
     }
   }
@@ -4164,6 +4137,14 @@ const Social = (() => {
     if (_reelsIsSeekLocked()) return;
     const cards = Array.from(snap.querySelectorAll('.reel-card'));
     if (!cards.length) return;
+    // Velocity check: avoid swapping the active reel mid-fling — that
+    // causes the "next reel plays the wrong card" symptom where every
+    // card flashes into playback for a frame as it crosses the center.
+    const now = Date.now();
+    const dt = Math.max(1, now - _reelsLastScrollT);
+    const velocity = Math.abs(snap.scrollTop - _reelsLastScrollTop) / dt; // px/ms
+    _reelsLastScrollTop = snap.scrollTop;
+    _reelsLastScrollT = now;
     const rootRect = snap.getBoundingClientRect();
     const centerY = rootRect.top + (rootRect.height / 2);
     let best = null;
@@ -4178,6 +4159,19 @@ const Social = (() => {
       }
     }
     if (!best) return;
+    // While scrolling fast, just pause every non-target card and wait for
+    // the scroll to settle (rAF / scrollend will call us again with low
+    // velocity). Critical for "auto plays a reel I didn't actually scroll
+    // to" — that was the IO + rAF activating intermediate cards.
+    if (velocity > 0.6) {
+      cards.forEach(c => {
+        if (c === best) return;
+        const v = c.querySelector('video');
+        if (v && !v.paused) { try { v.pause(); } catch {} }
+        c.classList.remove('is-playing');
+      });
+      return;
+    }
     if (best !== _reelsCurrentCard) {
       _reelsActivateCard(best, { reset: false });
       return;
@@ -4194,6 +4188,9 @@ const Social = (() => {
       }
       c.classList.remove('is-playing');
     });
+    // Honour user's last play/pause intent. If they paused, don't quietly
+    // resume on scroll-settle.
+    if (_reelsPlayMode === 'paused') return;
     if (_reelsCurrentVideo && _reelsCurrentVideo.paused && _reelsUserPausedCard !== _reelsCurrentCard) {
       const gen = _reelsActivateGen;
       _reelsCurrentVideo.play().then(() => {
@@ -4396,6 +4393,9 @@ const Social = (() => {
     });
     _reelsCurrentVideo = null;
     _reelsCurrentCard = null;
+    _reelsLastScrollTop = 0;
+    _reelsLastScrollT = 0;
+    _reelsWheelAccum = 0;
   }
 
   function _initReelCards(snap) {
@@ -4716,9 +4716,11 @@ const Social = (() => {
     const card = video.closest('.reel-card');
     if (video.paused) {
       if (card && _reelsUserPausedCard === card) _reelsUserPausedCard = null;
+      _reelsPlayMode = 'play';
       video.play().catch(() => {});
     } else {
       if (card) _reelsUserPausedCard = card;
+      _reelsPlayMode = 'paused';
       video.pause();
     }
   }
