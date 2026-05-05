@@ -300,12 +300,13 @@ const Music = (() => {
       const isYouTube = !!(cur && cur.provider === 'youtube');
       // Only YT state 2 = "paused" actually means paused. -1 (unstarted),
       // 0 (ended), 3 (buffering), 5 (cued) are transient states during a
-      // tab swap or iframe remount where the user clearly intends to be
-      // playing — treating them as paused makes the dock button blink to
-      // ▶ every time the user navigates between channels and FrogSocial
-      // even though audio is still flowing. Trust _paused (user intent)
-      // and only override when YT explicitly says "I am paused".
-      const ytKnowsPaused = isYouTube && (_lastPlayerState === 2 || _lastPlayerState === 0);
+      // tab swap, iframe remount or auto-advance where the user clearly
+      // intends to be playing — treating them as paused makes the dock
+      // button (and the FrogSocial top strip) flash to ▶ every time the
+      // user navigates between channels even though audio is still
+      // flowing. Trust _paused (user intent) and only override when YT
+      // explicitly says "I am paused".
+      const ytKnowsPaused = isYouTube && _lastPlayerState === 2;
       return _paused || ytKnowsPaused;
     } catch { return _paused; }
   }
@@ -364,11 +365,12 @@ const Music = (() => {
       const rawArt = cur ? (cur.thumbnail || cur.artwork || '') : '';
       const artworkUrl = _safeArtwork(rawArt);
       // Real-playback flag. _paused is user intent; _lastPlayerState is
-      // ground truth from the YT iframe. If YT is reporting paused (state
-      // 2) or unstarted (-1) but the user hasn't paused, the notification
-      // should still show "play" — anything else lies to the user.
+      // ground truth from the YT iframe. Only YT state 2 ("paused")
+      // actually means paused — 0 (ended), -1 (unstarted), 3 (buffering),
+      // 5 (cued) are transient and were misreporting "Paused" on the
+      // FrogSocial top strip during track changes / auto-advance.
       const isYouTube = !!(cur && cur.provider === 'youtube');
-      const ytKnowsPaused = isYouTube && (_lastPlayerState === 2 || _lastPlayerState === 0);
+      const ytKnowsPaused = isYouTube && _lastPlayerState === 2;
       const effectivePaused = _paused || ytKnowsPaused;
       // Reflect the truth in the in-app buttons too — a YT auto-pause or a
       // background-forced pause needs to flip the side UI play/pause icon
