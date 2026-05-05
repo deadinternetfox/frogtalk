@@ -281,7 +281,18 @@ const UI = (() => {
       };
     });
     pop.dataset.pendingPresence = curP;
-    pop.querySelector('#sp-msg').value = State.user.status_msg || '';
+    // When now-playing has taken over the status, the live status_msg
+    // is the song title. Showing that in the editor box would let the
+    // user accidentally save the song title as their permanent status.
+    // Pre-fill with the user's saved-original message instead so the
+    // box reflects what their status will be once music stops / the
+    // toggle is turned off.
+    {
+      const savedOrig = (_nowPlayingActive)
+        ? ((_nowPlayingSavedMsg != null) ? _nowPlayingSavedMsg : (_readSavedMsg() || ''))
+        : (State.user.status_msg || '');
+      pop.querySelector('#sp-msg').value = savedOrig;
+    }
     // Now-playing toggle reflects current LS state and flips it on click.
     const npBtn = pop.querySelector('#sp-nowplaying');
     const npIcon = pop.querySelector('#sp-np-icon');
@@ -303,6 +314,16 @@ const UI = (() => {
     // Close immediately, save in background — no blocking lag
     pop.querySelector('#sp-clear').onclick = () => {
       const presence = pop.dataset.pendingPresence || State?.user?.presence || 'online';
+      // Update the saved-baseline so when music stops the status
+      // restores to empty, not to the previous baseline.
+      _nowPlayingSavedMsg = '';
+      _writeSavedMsg('');
+      if (_nowPlayingActive) {
+        // Leave the live music status untouched; just clear baseline.
+        renderSelfStatus();
+        pop.remove();
+        return;
+      }
       State.user.presence = presence;
       State.user.status_msg = '';
       renderSelfStatus();
@@ -312,6 +333,22 @@ const UI = (() => {
     pop.querySelector('#sp-save').onclick = () => {
       const presence = pop.dataset.pendingPresence || 'online';
       const msg = pop.querySelector('#sp-msg').value.slice(0, 128);
+      // Always update the saved-baseline so when music stops or the
+      // now-playing toggle is turned off, the status restores to what
+      // the user just typed — not to the song title.
+      _nowPlayingSavedMsg = msg;
+      _writeSavedMsg(msg);
+      if (_nowPlayingActive) {
+        // Music takeover is live — only persist presence; the live
+        // status_msg keeps reflecting the song until music stops.
+        if (presence !== State.user.presence) {
+          State.user.presence = presence;
+          renderSelfStatus();
+          _saveStatus(presence, State.user.status_msg || '');
+        }
+        pop.remove();
+        return;
+      }
       State.user.presence = presence;
       State.user.status_msg = msg;
       renderSelfStatus();
