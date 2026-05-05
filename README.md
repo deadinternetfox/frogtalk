@@ -32,7 +32,7 @@ Self-host your own node and join the swamp — or run it completely standalone.
 [![Docker](https://img.shields.io/badge/ghcr.io-frogtalk-4caf50?logo=docker&logoColor=white)](https://github.com/deadinternetfox/frogtalk/pkgs/container/frogtalk)
 [![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
 
-[🌐 frogtalk.net](https://frogtalk.net) ·
+[🌐 frogtalk.xyz](https://frogtalk.xyz) ·
 [📥 Downloads](https://github.com/deadinternetfox/frogtalk/releases/latest) ·
 [📚 Node Docs](https://frogtalk.xyz/docs/node) ·
 [🔌 API Docs](https://frogtalk.xyz/docs/api)
