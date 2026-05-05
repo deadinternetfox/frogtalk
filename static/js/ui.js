@@ -3877,20 +3877,46 @@ function toggleEncryptionInfo() {
     }
     if (Crypto.publicKeyFingerprint) {
       Crypto.publicKeyFingerprint().then(fp => {
-        if (!fpEl) return;
-        if (fp) {
-          fpEl.textContent = fp;
-        } else {
-          fpEl.innerHTML = '<span style="color:#b89a9a">Key unavailable — tap "Reset keys" below if encryption seems broken.</span>';
-        }
-      }).catch(() => {
-        if (fpEl) fpEl.innerHTML = '<span style="color:#b89a9a">Key unavailable</span>';
-      });
-    } else if (fpEl) {
-      fpEl.innerHTML = '<span style="color:#b89a9a">Crypto module not ready</span>';
+        _renderEncDeviceFp(fp);
+      }).catch(() => _renderEncDeviceFp(''));
+    } else {
+      // Older cached crypto.js may not expose publicKeyFingerprint —
+      // hash getPublicKey() inline so the card still has something
+      // useful instead of the scary "Crypto module not ready" string.
+      _computeFpFallback().then(_renderEncDeviceFp).catch(() => _renderEncDeviceFp(''));
     }
   } catch (e) {
     UI.showToast('Could not open encryption settings.', 'error');
+  }
+}
+
+// Inline SHA-256 of getPublicKey() → 8-byte hex grouped 4-char, used when
+// the loaded crypto.js predates publicKeyFingerprint().
+async function _computeFpFallback() {
+  try {
+    if (typeof Crypto === 'undefined' || !Crypto.getPublicKey) return '';
+    const pub = await Crypto.getPublicKey();
+    if (!pub) return '';
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(typeof pub === 'string' ? pub : JSON.stringify(pub)));
+    const bytes = new Uint8Array(buf);
+    const hex = Array.from(bytes.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return hex.toUpperCase().match(/.{1,4}/g).join(' ');
+  } catch { return ''; }
+}
+
+// Paint the "This device" card. Empty fp → hide the card entirely with a
+// short friendly note instead of a scary technical message.
+function _renderEncDeviceFp(fp) {
+  const fpEl = document.getElementById('enc-device-fp');
+  const copyBtn = document.getElementById('enc-device-fp-copy');
+  if (!fpEl) return;
+  if (fp) {
+    fpEl.textContent = fp;
+    if (copyBtn) copyBtn.style.display = '';
+  } else {
+    fpEl.innerHTML = '<span style="color:#b89a9a">Identity key not generated yet — send a DM to create one, or tap "Reset keys" below if encryption seems broken.</span>';
+    if (copyBtn) copyBtn.style.display = 'none';
   }
 }
 
