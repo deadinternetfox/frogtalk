@@ -3764,7 +3764,20 @@ const Social = (() => {
     _reelsGoToCard(snap, cards[j], true);
     // Only lock when actually moving — taps (dir=0) should not block
     // subsequent gestures.
-    if (j !== i) _reelsGestureLockUntil = Date.now() + 420;
+    if (j !== i) {
+      _reelsGestureLockUntil = Date.now() + 420;
+      // Force-activate the destination card after the smooth scroll
+      // settles. Belt-and-braces in case the scroll handler's settle
+      // timer fires while the snap is still in flight (Chrome desktop
+      // sometimes misses the scrollend after a programmatic
+      // scrollIntoView under load).
+      const dest = cards[j];
+      setTimeout(() => {
+        if (_currentTab !== 'reels') return;
+        if (dest === _reelsCurrentCard) return;
+        try { _reelsActivateCard(dest, { reset: false, forcePlay: true }); } catch {}
+      }, 360);
+    }
   }
   function _reelsGestureLocked() {
     return Date.now() < _reelsGestureLockUntil;
@@ -3811,14 +3824,28 @@ const Social = (() => {
     snap.addEventListener('keydown', onKey);
     if (!snap.hasAttribute('tabindex')) snap.setAttribute('tabindex', '0');
 
-    snap._reelsGesture = { onWheel, onKey };
+    // Also listen on window so keys work without the user clicking the
+    // snap container first (most desktop users never focus it). Only
+    // act when reels tab is the current tab and the focused element
+    // isn't an editable field.
+    const onWinKey = (e) => {
+      if (_currentTab !== 'reels') return;
+      const t = e.target;
+      const tag = t && t.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+      onKey(e);
+    };
+    window.addEventListener('keydown', onWinKey);
+
+    snap._reelsGesture = { onWheel, onKey, onWinKey };
   }
 
   function _reelsDetachGestureLimiter(snap) {
     if (!snap || !snap._reelsGesture) return;
-    const { onWheel, onKey } = snap._reelsGesture;
+    const { onWheel, onKey, onWinKey } = snap._reelsGesture;
     try { snap.removeEventListener('wheel', onWheel); } catch {}
     try { snap.removeEventListener('keydown', onKey); } catch {}
+    if (onWinKey) { try { window.removeEventListener('keydown', onWinKey); } catch {} }
     try { delete snap._reelsGesture; } catch {}
   }
 
