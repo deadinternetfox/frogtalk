@@ -27,11 +27,29 @@ _http_client: Optional[httpx.AsyncClient] = None
 def _client() -> httpx.AsyncClient:
     global _http_client
     if _http_client is None or _http_client.is_closed:
+        # Many sites (Reddit, Twitter, Cloudflare-fronted blogs, news outlets)
+        # serve a bot-block / "please verify" interstitial when they see a
+        # custom UA — the OG meta tags we want never appear in that response.
+        # Use a stock desktop Chrome UA so the page renders normally. We also
+        # send the Accept/Accept-Language headers a real browser would, since
+        # some CDNs gate on those too. This is link preview unfurling — the
+        # same thing Discord/Slack/iMessage do — not scraping at scale.
         _http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(5.0, connect=3.0),
             follow_redirects=True,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            headers={'User-Agent': 'Mozilla/5.0 (compatible; FrogTalk/1.0; +https://frogtalk.xyz)'},
+            headers={
+                'User-Agent': (
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) '
+                    'Chrome/124.0.0.0 Safari/537.36'
+                ),
+                'Accept': (
+                    'text/html,application/xhtml+xml,application/xml;q=0.9,'
+                    'image/avif,image/webp,*/*;q=0.8'
+                ),
+                'Accept-Language': 'en-US,en;q=0.9',
+            },
         )
     return _http_client
 
@@ -56,11 +74,56 @@ def _cache_put(url: str, value: dict):
             pass
     _cache[url] = (time.time() + CACHE_TTL, value)
 
-# Regex for OG meta tags
-OG_REGEX = re.compile(r'<meta\s+(?:property|name)=["\']og:([^"\']+)["\']\s+content=["\']([^"\']*)["\']', re.IGNORECASE)
+# Match every <meta ...> tag; we then pluck attributes individually so the
+# author can put `content` before `property` (which is valid HTML and the
+# order WordPress / Reddit / Substack and many others actually use). The
+# previous order-strict regex silently dropped meta tags on those sites.
+META_TAG_REGEX = re.compile(r'<meta\b([^>]*)>', re.IGNORECASE)
+META_ATTR_REGEX = re.compile(
+    r'''(\w[\w:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))''',
+    re.IGNORECASE,
+)
 TITLE_REGEX = re.compile(r'<title[^>]*>([^<]+)</title>', re.IGNORECASE)
-DESC_REGEX = re.compile(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']*)["\']', re.IGNORECASE)
-FAVICON_REGEX = re.compile(r'<link[^>]+rel=["\'](?:icon|shortcut icon)["\'][^>]+href=["\']([^"\']+)["\']', re.IGNORECASE)
+FAVICON_REGEX = re.compile(
+    r'<link[^>]+rel=["\'](?:icon|shortcut icon|apple-touch-icon)["\'][^>]+href=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+
+def _extract_attrs(blob: str) -> dict:
+    return {
+        m.group(1).lower(): (m.group(2) or m.group(3) or m.group(4) or '')
+        for m in META_ATTR_REGEX.finditer(blob)
+    }
+
+
+def _parse_meta_tags(html: str) -> dict:
+    """Extract og:*, twitter:* and `description` from <meta> tags.
+
+    Order-agnostic: handles both `<meta property="og:title" content="X">`
+    and `<meta content="X" property="og:title">`. Also accepts unquoted /
+    single-quoted attribute values. og:* takes precedence over twitter:*
+    which takes precedence over name=description.
+    """
+    out: dict = {}
+    for match in META_TAG_REGEX.finditer(html):
+        attrs = _extract_attrs(match.group(1) or '')
+        key = (attrs.get('property') or attrs.get('name') or '').strip().lower()
+        val = (attrs.get('content') or '').strip()
+        if not key or not val:
+            continue
+        if key.startswith('og:'):
+            short = key[3:]
+            if short and short not in out:
+                out[short] = val
+        elif key.startswith('twitter:'):
+            short = key[8:]
+            mapped = {'image:src': 'image', 'site': 'site_name'}.get(short, short)
+            if mapped and mapped not in out:
+                out[mapped] = val
+        elif key == 'description' and 'description' not in out:
+            out['description'] = val
+    return out
 
 # YouTube URL patterns
 YOUTUBE_PATTERNS = [
@@ -191,35 +254,43 @@ async def _do_fetch_og(url: str) -> dict:
         if resp.status_code != 200:
             return {}
 
-        html = resp.text[:50000]  # Limit parsing to first 50KB
+        html_text = resp.text[:80000]  # Limit parsing to first 80KB
 
-        # Extract OG tags
+        # Extract OG / twitter / description tags (order-agnostic).
         og = {"type": "link"}
-        for match in OG_REGEX.finditer(html):
-            key, value = match.groups()
-            og[key] = value.strip()
+        og.update(_parse_meta_tags(html_text))
 
-        # Fallback to standard title/description
+        # Fallback to <title> if og:title was missing.
         if 'title' not in og:
-            title_match = TITLE_REGEX.search(html)
+            title_match = TITLE_REGEX.search(html_text)
             if title_match:
                 og['title'] = title_match.group(1).strip()
 
-        if 'description' not in og:
-            desc_match = DESC_REGEX.search(html)
-            if desc_match:
-                og['description'] = desc_match.group(1).strip()
+        # Decode HTML entities in user-visible fields (&amp; &#39; &quot; …).
+        import html as _html
+        for k in ('title', 'description', 'site_name'):
+            if og.get(k):
+                og[k] = _html.unescape(og[k])
 
         # Try to get favicon
-        favicon_match = FAVICON_REGEX.search(html)
+        favicon_match = FAVICON_REGEX.search(html_text)
         if favicon_match:
             favicon = favicon_match.group(1)
             # Make absolute URL if relative
-            if favicon.startswith('/'):
+            if favicon.startswith('//'):
+                from urllib.parse import urlparse
+                favicon = f"{urlparse(url).scheme}:{favicon}"
+            elif favicon.startswith('/'):
                 from urllib.parse import urlparse
                 parsed = urlparse(url)
                 favicon = f"{parsed.scheme}://{parsed.netloc}{favicon}"
             og['favicon'] = favicon
+
+        # Make og:image absolute too (some sites publish path-only).
+        img = og.get('image')
+        if img and not img.startswith(('http://', 'https://', 'data:')):
+            from urllib.parse import urlparse, urljoin
+            og['image'] = urljoin(url, img)
 
         # Set site name from URL if not present
         if 'site_name' not in og:
