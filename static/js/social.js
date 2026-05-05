@@ -3639,6 +3639,18 @@ const Social = (() => {
   // after the user has scrolled away (root cause of the "two reels playing
   // at once" / phantom audio symptom).
   let _reelsActivateGen = 0;
+  // ── One-reel-per-gesture limiter (TikTok/IG-style) ────────────────────────
+  // A single fast swipe / trackpad fling could skip 5+ reels because
+  // scroll-snap respects native momentum. We capture the starting card on
+  // gesture start and force scrollIntoView on the *adjacent* card at gesture
+  // end (touchend / wheel debounce), killing inertia and clamping movement
+  // to one reel per motion.
+  let _reelsGestureLockUntil = 0;
+  let _reelsGestureStartCard = null;
+  let _reelsGestureStartTop = 0;
+  let _reelsGestureStartT = 0;
+  let _reelsWheelAccum = 0;
+  let _reelsWheelResetTimer = 0;
     let _reelsAutoPausedMusic = false;
     let _reelsAutoPausedMusicUrl = '';
     let _reelsMusicInterlockBusy = false;
@@ -3723,6 +3735,129 @@ const Social = (() => {
     if (Date.now() > _reelsSeekLockUntil) return false;
     if (!card || !_reelsSeekCard) return true;
     return card === _reelsSeekCard;
+  }
+
+  // ── Gesture limiter helpers ──
+  function _reelsCardsList(snap) {
+    return Array.from(snap.querySelectorAll('.reel-card'));
+  }
+  function _reelsNearestCard(snap) {
+    const cards = _reelsCardsList(snap);
+    if (!cards.length) return null;
+    const rRoot = snap.getBoundingClientRect();
+    const center = rRoot.top + rRoot.height / 2;
+    let best = cards[0], bestDist = Infinity;
+    for (const c of cards) {
+      const r = c.getBoundingClientRect();
+      const d = Math.abs(r.top + r.height / 2 - center);
+      if (d < bestDist) { bestDist = d; best = c; }
+    }
+    return best;
+  }
+  function _reelsGoToCard(snap, card, smooth = true) {
+    if (!card) return;
+    try { card.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' }); } catch {}
+  }
+  // Step exactly one card from `fromCard` in direction (+1 down, -1 up, 0 stay).
+  function _reelsStepFrom(snap, fromCard, dir) {
+    if (!fromCard) return;
+    const cards = _reelsCardsList(snap);
+    const i = cards.indexOf(fromCard);
+    if (i < 0) return;
+    let j = i;
+    if (dir > 0) j = Math.min(cards.length - 1, i + 1);
+    else if (dir < 0) j = Math.max(0, i - 1);
+    _reelsGoToCard(snap, cards[j], true);
+    // Only lock when actually moving — taps (dir=0) should not block
+    // subsequent gestures.
+    if (j !== i) _reelsGestureLockUntil = Date.now() + 420;
+  }
+  function _reelsGestureLocked() {
+    return Date.now() < _reelsGestureLockUntil;
+  }
+
+  // Attach one-card-per-gesture limiters to a reels snap container.
+  // Idempotent: previous handlers (if any) are removed first.
+  function _reelsAttachGestureLimiter(snap) {
+    if (!snap) return;
+    _reelsDetachGestureLimiter(snap);
+
+    const onTouchStart = (e) => {
+      if (!e.touches || e.touches.length !== 1) return;
+      _reelsGestureStartCard = _reelsNearestCard(snap);
+      _reelsGestureStartTop = snap.scrollTop;
+      _reelsGestureStartT = Date.now();
+    };
+    const onTouchEnd = () => {
+      const startCard = _reelsGestureStartCard;
+      _reelsGestureStartCard = null;
+      if (!startCard) return;
+      // Heuristic: any movement beyond ~24px counts as a swipe in that
+      // direction. Below threshold → snap back to start to swallow tiny taps.
+      const delta = snap.scrollTop - _reelsGestureStartTop;
+      const dur = Math.max(1, Date.now() - _reelsGestureStartT);
+      const velocity = Math.abs(delta) / dur; // px/ms
+      const SWIPE_PX = 24;
+      let dir = 0;
+      if (delta > SWIPE_PX || (delta > 8 && velocity > 0.4)) dir = 1;
+      else if (delta < -SWIPE_PX || (delta < -8 && velocity > 0.4)) dir = -1;
+      // If the user actually moved (or is mid-momentum), force a single-step
+      // scrollIntoView. This cancels native inertia and clamps to one reel.
+      // Pure taps (delta≈0) are left alone so click-to-pause still works.
+      if (dir !== 0 || Math.abs(delta) > 4) {
+        _reelsStepFrom(snap, startCard, dir);
+      }
+    };
+    const onWheel = (e) => {
+      // Only intercept primarily-vertical wheel input.
+      if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+      // Block native momentum: navigate adjacent on threshold, swallow rest.
+      e.preventDefault();
+      if (_reelsGestureLocked()) return;
+      _reelsWheelAccum += e.deltaY;
+      if (_reelsWheelResetTimer) clearTimeout(_reelsWheelResetTimer);
+      _reelsWheelResetTimer = setTimeout(() => { _reelsWheelAccum = 0; }, 200);
+      const TH = 40;
+      if (_reelsWheelAccum > TH) {
+        _reelsWheelAccum = 0;
+        _reelsStepFrom(snap, _reelsNearestCard(snap), 1);
+      } else if (_reelsWheelAccum < -TH) {
+        _reelsWheelAccum = 0;
+        _reelsStepFrom(snap, _reelsNearestCard(snap), -1);
+      }
+    };
+    const onKey = (e) => {
+      if (_reelsGestureLocked()) { e.preventDefault(); return; }
+      if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+        e.preventDefault();
+        _reelsStepFrom(snap, _reelsNearestCard(snap), 1);
+      } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+        e.preventDefault();
+        _reelsStepFrom(snap, _reelsNearestCard(snap), -1);
+      }
+    };
+
+    snap.addEventListener('touchstart', onTouchStart, { passive: true });
+    snap.addEventListener('touchend',   onTouchEnd,   { passive: true });
+    snap.addEventListener('touchcancel', onTouchEnd,  { passive: true });
+    // wheel must be non-passive to preventDefault on trackpad flings.
+    snap.addEventListener('wheel', onWheel, { passive: false });
+    snap.addEventListener('keydown', onKey);
+    // Make snap focusable so arrow keys work after click.
+    if (!snap.hasAttribute('tabindex')) snap.setAttribute('tabindex', '0');
+
+    snap._reelsGesture = { onTouchStart, onTouchEnd, onWheel, onKey };
+  }
+
+  function _reelsDetachGestureLimiter(snap) {
+    if (!snap || !snap._reelsGesture) return;
+    const { onTouchStart, onTouchEnd, onWheel, onKey } = snap._reelsGesture;
+    try { snap.removeEventListener('touchstart', onTouchStart); } catch {}
+    try { snap.removeEventListener('touchend',   onTouchEnd); } catch {}
+    try { snap.removeEventListener('touchcancel', onTouchEnd); } catch {}
+    try { snap.removeEventListener('wheel', onWheel); } catch {}
+    try { snap.removeEventListener('keydown', onKey); } catch {}
+    try { delete snap._reelsGesture; } catch {}
   }
 
   function switchReelsScope(scope) {
@@ -4250,6 +4385,7 @@ const Social = (() => {
       try { snap.removeEventListener('scrollend', snap._reelsOnScrollEnd); } catch {}
       try { delete snap._reelsOnScrollEnd; } catch {}
     }
+    if (snap) _reelsDetachGestureLimiter(snap);
     _reelsScrollSnap = null;
     if (_reelsScrollRaf) {
       try { cancelAnimationFrame(_reelsScrollRaf); } catch {}
@@ -4264,6 +4400,7 @@ const Social = (() => {
 
   function _initReelCards(snap) {
     _syncReelMuteUi(snap);
+    _reelsAttachGestureLimiter(snap);
     if (_reelsScrubController) { try { _reelsScrubController.abort(); } catch {} }
     const scrubAbort = new AbortController();
     _reelsScrubController = scrubAbort;
