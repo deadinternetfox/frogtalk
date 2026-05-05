@@ -330,7 +330,7 @@ async function suppressDMPreview(msgId) {
   try {
     const res = await apiFetch(
       `/api/dms/${ch.id}/messages/${msgId}/preview-suppress`,
-      { method: 'POST' }
+      'POST'
     );
     if (!res.ok) return;
   } catch { return; }
@@ -449,12 +449,15 @@ function _renderDMPreview(msgId, preview) {
         btn.title = 'Remove preview';
         btn.setAttribute('aria-label', 'Remove preview');
         btn.textContent = '\u00d7';
-        btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+        const swallow = (e) => { e.preventDefault(); e.stopPropagation(); };
+        btn.addEventListener('mousedown', swallow, true);
+        btn.addEventListener('pointerdown', swallow, true);
+        btn.addEventListener('touchstart', swallow, { capture: true, passive: false });
         btn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
           suppressDMPreview(msgId);
-        });
+        }, true);
         wrap.appendChild(btn);
       }
     }

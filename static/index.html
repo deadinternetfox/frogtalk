@@ -6264,17 +6264,20 @@ body.mini-embedded .auth-box { padding:22px 24px 18px; }
 body.mini-embedded .auth-tabs { margin-bottom:14px; }
 
 /* ── Discord-style "X" to dismiss a link preview (author-only) ── */
+/* The wrapper exists ONLY so the dismiss button can sit OUTSIDE the
+   <a target="_blank"> embed (otherwise the anchor's navigation
+   intercepts the click). We keep it visually invisible — same width
+   as the embed, no extra margin — so the X looks like it's tucked
+   into the embed's top-right corner exactly like before. */
 .preview-wrap{
   position:relative;
-  display:block;
-  max-width:480px;
-  margin-top:0;
+  display:inline-block;
+  max-width:100%;
+  margin:0;
+  padding:0;
 }
-.preview-wrap > .link-preview,
-.preview-wrap > .yt-embed,
-.preview-wrap > .spotify-embed{ margin-top:8px; }
 .preview-suppress-btn{
-  position:absolute;top:14px;right:6px;
+  position:absolute;top:14px;right:8px;  /* +8px down accounts for the embed's own margin-top:8px */
   width:22px;height:22px;line-height:18px;text-align:center;
   padding:0;margin:0;border:none;border-radius:50%;
   background:rgba(0,0,0,.7);color:#fff;
@@ -6286,7 +6289,6 @@ body.mini-embedded .auth-tabs { margin-bottom:14px; }
 .preview-suppress-btn:focus,
 .preview-suppress-btn:hover{ opacity:1; }
 .preview-suppress-btn:hover{ background:rgba(220,38,38,.95); }
-/* Always-visible on touch devices (no hover) */
 @media (hover:none){
   .preview-suppress-btn{ opacity:.85; }
 }

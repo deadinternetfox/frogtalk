@@ -573,7 +573,7 @@ const Messages = (() => {
   // is idempotent because the embed is already gone).
   async function suppressPreview(msgId) {
     try {
-      const res = await apiFetch(`/api/messages/${msgId}/preview-suppress`, { method: 'POST' });
+      const res = await apiFetch(`/api/messages/${msgId}/preview-suppress`, 'POST');
       if (!res.ok) return;
     } catch { return; }
     applyPreviewSuppress(msgId);
@@ -730,16 +730,17 @@ const Messages = (() => {
           btn.title = 'Remove preview';
           btn.setAttribute('aria-label', 'Remove preview');
           btn.textContent = '\u00d7';
-          // Catch BOTH pointerdown (some browsers navigate on it for
-          // target=_blank anchors) and click. Either path triggers the
-          // suppress flow.
-          const trigger = (e) => {
+          // Belt + braces: stop every navigation-triggering event before
+          // it reaches the embed's <a target="_blank">.
+          const swallow = (e) => { e.preventDefault(); e.stopPropagation(); };
+          btn.addEventListener('mousedown', swallow, true);
+          btn.addEventListener('pointerdown', swallow, true);
+          btn.addEventListener('touchstart', swallow, { capture: true, passive: false });
+          btn.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
             suppressPreview(msgId);
-          };
-          btn.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
-          btn.addEventListener('click', trigger);
+          }, true);
           wrap.appendChild(btn);
         }
       }
