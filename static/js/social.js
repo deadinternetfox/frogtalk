@@ -4776,22 +4776,22 @@ const Social = (() => {
   }
 
   // Single delegated tap-vs-scroll detector for the entire reels stage.
-  // A gesture toggles playback ONLY if ALL of these hold:
-  //   - it began on a video element (not a button/control overlay)
-  //   - the snap container did not scroll during the gesture
-  //   - no scroll event fired between gesture start and ~120ms after end
-  //     (catches mobile momentum scroll: touchend fires before scrollTop
-  //     has actually moved, so we wait one snap-frame before deciding)
-  //   - the pointer never travelled more than TAP_MAX_MOVE px
-  //   - the gesture lasted less than TAP_MAX_TIME ms
-  // Any of those failing means it was a scroll/drag/long-press → no toggle.
+  // Fires immediately on touchend (no defer → no double-tap merging) and
+  // toggles playback ONLY if ALL of these hold:
+  //   - gesture began on a video element (not a button/control overlay)
+  //   - pointer moved less than TAP_MAX_MOVE px
+  //   - gesture lasted less than TAP_MAX_TIME ms
+  //   - snap container did not scroll during the gesture (scrollTop and
+  //     scroll-event timestamp both unchanged from gesture start)
+  // On a scroll-snap container, any meaningful scroll fires `scroll`
+  // events during touchmove, so checking those signals at touchend is
+  // sufficient — no post-end deferral needed.
   function _bindReelsTapGesture(snap) {
     if (!snap || snap._reelsTapBound) return;
     snap._reelsTapBound = true;
     const TAP_MAX_MOVE = 10;
     const TAP_MAX_TIME = 280;
-    const SCROLL_TOLERANCE = 2;       // px — sub-pixel jitter on snap settle
-    const POST_SCROLL_GUARD_MS = 120; // wait for momentum scroll to commit
+    const SCROLL_TOLERANCE = 2;
 
     let g = null;
     const reset = () => { g = null; };
@@ -4821,24 +4821,15 @@ const Social = (() => {
       const dy = Math.abs((p.clientY || 0) - g.y);
       if (dx > TAP_MAX_MOVE || dy > TAP_MAX_MOVE) g.moved = true;
     };
-    const finalizeTap = (cur, ev) => {
-      if (cur.moved) return;
-      if (Date.now() - cur.t > TAP_MAX_TIME + POST_SCROLL_GUARD_MS) return;
-      // A scroll event fired anywhere in the gesture window → was a scroll.
-      if (_reelsLastScrollEventT > cur.startScrollEventT) return;
-      if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
-      // Only ever toggle the currently active card (never one that has
-      // since scrolled out of frame).
-      const target = _reelsCurrentVideo || cur.video;
-      toggleReelPlayback(ev, target);
-    };
     const onUp = (e) => {
       const cur = g; g = null;
       if (!cur) return;
-      // Defer the decision one momentum-frame so we can detect a scroll
-      // event that lands AFTER touchend (common on Chrome Android +
-      // desktop trackpad fling).
-      setTimeout(() => finalizeTap(cur, e), POST_SCROLL_GUARD_MS);
+      if (cur.moved) return;
+      if (Date.now() - cur.t > TAP_MAX_TIME) return;
+      if (_reelsLastScrollEventT > cur.startScrollEventT) return;
+      if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
+      const target = _reelsCurrentVideo || cur.video;
+      toggleReelPlayback(e, target);
     };
 
     snap.addEventListener('touchstart', onDown, { passive: true });
