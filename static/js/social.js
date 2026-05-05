@@ -3633,6 +3633,12 @@ const Social = (() => {
   let _reelsSeekReleaseCard = null;
   let _reelsUserPausedCard = null;
   let _reelsScrubController = null;
+  // Bumped on every activation. Pending play retries (timeouts + once-listeners)
+  // capture the gen they were scheduled under and bail when it no longer
+  // matches — prevents an old card's retry queue from resurrecting playback
+  // after the user has scrolled away (root cause of the "two reels playing
+  // at once" / phantom audio symptom).
+  let _reelsActivateGen = 0;
     let _reelsAutoPausedMusic = false;
     let _reelsAutoPausedMusicUrl = '';
     let _reelsMusicInterlockBusy = false;
@@ -3697,14 +3703,20 @@ const Social = (() => {
   }
 
   function _reelsEndSeek(card = null) {
-    _reelsSeekLockUntil = Date.now() + 500;
+    // Release the lock (almost) immediately. The previous "+500ms grace"
+    // window left _reelsCurrentCard stale during fast manual scrolls right
+    // after a scrub, which caused stale `ended` events to auto-scroll the
+    // user back to a reel they had already skipped past. A short 80ms
+    // de-bounce is enough to swallow the click that follows pointerup
+    // without blocking real scroll-driven reactivation.
+    _reelsSeekLockUntil = Date.now() + 80;
     if (card) {
       _reelsSeekReleaseCard = card;
-      _reelsSeekReleaseUntil = Date.now() + 1400;
+      _reelsSeekReleaseUntil = Date.now() + 300;
     }
     setTimeout(() => {
       if (Date.now() > _reelsSeekLockUntil) _reelsSeekCard = null;
-    }, 300);
+    }, 120);
   }
 
   function _reelsIsSeekLocked(card = null) {
@@ -3923,6 +3935,12 @@ const Social = (() => {
         };
         snap._reelsOnScroll = onScroll;
         snap.addEventListener('scroll', onScroll, { passive: true });
+        // `scrollend` fires once the snap settles \u2014 perfect moment to
+        // re-sync the active reel even if rAF-driven onScroll missed the
+        // final landing position (common with momentum scrolling on iOS).
+        const onScrollEnd = () => _reelsSyncActiveFromScroll(snap);
+        snap._reelsOnScrollEnd = onScrollEnd;
+        snap.addEventListener('scrollend', onScrollEnd, { passive: true });
         _updateTabLoadUi(loadUi, 97, 'Finalizing reels', 'Snap controls ready');
       }
     } catch (e) {
@@ -3942,6 +3960,10 @@ const Social = (() => {
     const seekLiveGuard = _reelsIsSeekLocked(card);
     const userPausedThisCard = _reelsUserPausedCard === card;
     const shouldReset = (_reelsCurrentCard !== card) && reset && !seekReleaseGuard && !seekLiveGuard;
+    // Bump generation BEFORE pausing/playing so any in-flight retry from a
+    // previous activation aborts immediately when its captured gen no
+    // longer matches.
+    const gen = ++_reelsActivateGen;
     document.querySelectorAll('.reels-snap .reel-card').forEach(c => {
       if (c === card) return;
       const v = c.querySelector('video');
@@ -3961,14 +3983,17 @@ const Social = (() => {
       try { v.currentTime = 0; } catch {}
     }
     if (!userPausedThisCard || opts.forcePlay) {
-      _reelsPlayVideo(card, v);
+      _reelsPlayVideo(card, v, 0, gen);
       card.classList.add('is-playing');
     } else {
       card.classList.remove('is-playing');
     }
   }
 
-  function _reelsPlayVideo(card, video, attempt = 0) {
+  function _reelsPlayVideo(card, video, attempt = 0, gen = _reelsActivateGen) {
+    // Stale activation — a newer card has taken over since this play call
+    // was scheduled. Drop silently so we don't double-play.
+    if (gen !== _reelsActivateGen) return;
     if (!card || !video || card !== _reelsCurrentCard) return;
     try { video.muted = _reelsMuted; } catch {}
     const run = video.play?.();
@@ -3977,17 +4002,25 @@ const Social = (() => {
       return;
     }
     run.then(() => {
+      if (gen !== _reelsActivateGen || card !== _reelsCurrentCard) {
+        // Activation moved on between issuing play() and its resolution.
+        // Pause this video so we don't end up with two playing at once.
+        try { video.pause(); } catch {}
+        return;
+      }
       if (_reelsUserPausedCard === card) _reelsUserPausedCard = null;
       card.classList.add('is-playing');
     }).catch(() => {
+      if (gen !== _reelsActivateGen) return;
       if (card !== _reelsCurrentCard || attempt >= 6) return;
       const retry = () => {
+        if (gen !== _reelsActivateGen) return;
         if (card !== _reelsCurrentCard) return;
-        setTimeout(() => _reelsPlayVideo(card, video, attempt + 1), 40);
+        setTimeout(() => _reelsPlayVideo(card, video, attempt + 1, gen), 40);
       };
       video.addEventListener('loadeddata', retry, { once: true });
       video.addEventListener('canplay', retry, { once: true });
-      setTimeout(() => _reelsPlayVideo(card, video, attempt + 1), 180);
+      setTimeout(() => _reelsPlayVideo(card, video, attempt + 1, gen), 180);
     });
   }
 
@@ -4014,9 +4047,27 @@ const Social = (() => {
       _reelsActivateCard(best, { reset: false });
       return;
     }
+    // Reaffirming the same card. Defensively pause any *other* video that
+    // somehow ended up playing (e.g. a slow play() promise that resolved
+    // late, or a stale retry firing during fast scroll). Single-source-of
+    // -truth: only _reelsCurrentVideo should be playing.
+    cards.forEach(c => {
+      if (c === best) return;
+      const v = c.querySelector('video');
+      if (v && !v.paused) {
+        try { v.pause(); } catch {}
+      }
+      c.classList.remove('is-playing');
+    });
     if (_reelsCurrentVideo && _reelsCurrentVideo.paused && _reelsUserPausedCard !== _reelsCurrentCard) {
-      _reelsCurrentVideo.play().catch(() => {});
-      _reelsCurrentCard?.classList.add('is-playing');
+      const gen = _reelsActivateGen;
+      _reelsCurrentVideo.play().then(() => {
+        if (gen !== _reelsActivateGen) {
+          try { _reelsCurrentVideo && _reelsCurrentVideo.pause(); } catch {}
+          return;
+        }
+        _reelsCurrentCard?.classList.add('is-playing');
+      }).catch(() => {});
     }
   }
 
@@ -4145,7 +4196,19 @@ const Social = (() => {
 
   function _reelsAdvanceFrom(card) {
     const snap = card?.closest?.('.reels-snap') || document.getElementById('reels-snap');
-    if (!snap) return;
+    if (!snap || !card) return;
+    // Stale `ended` events can fire from a video the user already scrolled
+    // past (e.g. they scrubbed near the end then swiped away). Without this
+    // guard, _reelsAdvanceFrom would scrollIntoView on the card after the
+    // stale one, yanking the user backward to a reel they already skipped.
+    // Only auto-advance when `card` is still effectively the centered reel.
+    try {
+      const rRoot = snap.getBoundingClientRect();
+      const rCard = card.getBoundingClientRect();
+      const cardCenter = rCard.top + rCard.height / 2;
+      const rootCenter = rRoot.top + rRoot.height / 2;
+      if (Math.abs(cardCenter - rootCenter) > rRoot.height * 0.4) return;
+    } catch {}
     const cards = Array.from(snap.querySelectorAll('.reel-card'));
     if (!cards.length) return;
     const idx = Math.max(0, cards.indexOf(card));
@@ -4167,6 +4230,9 @@ const Social = (() => {
   }
 
   function _teardownReels() {
+    // Bump the activation gen so any pending retries / promise resolutions
+    // bail before they touch a video element from a torn-down DOM tree.
+    _reelsActivateGen++;
     if (_reelsScrubController) {
       try { _reelsScrubController.abort(); } catch {}
       _reelsScrubController = null;
@@ -4179,6 +4245,10 @@ const Social = (() => {
     if (snap && snap._reelsOnScroll) {
       try { snap.removeEventListener('scroll', snap._reelsOnScroll); } catch {}
       try { delete snap._reelsOnScroll; } catch {}
+    }
+    if (snap && snap._reelsOnScrollEnd) {
+      try { snap.removeEventListener('scrollend', snap._reelsOnScrollEnd); } catch {}
+      try { delete snap._reelsOnScrollEnd; } catch {}
     }
     _reelsScrollSnap = null;
     if (_reelsScrollRaf) {
