@@ -1054,6 +1054,10 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
   background:radial-gradient(circle at 30% 30%,#bff0d0,#4caf50);
   box-shadow:0 0 0 2px rgba(127,210,167,.18),0 0 12px rgba(76,175,80,.4)}}
 .guest-banner b{{color:#dff5e8;font-weight:700}}
+.guest-banner .gb-link{{color:#bff0d0;font-weight:700;text-decoration:none;
+  border-bottom:1px solid rgba(127,210,167,.45);padding-bottom:1px;
+  transition:color .15s ease,border-color .15s ease}}
+.guest-banner .gb-link:hover{{color:#fff;border-bottom-color:#7fd2a7}}
 .actions{{display:flex;gap:10px;margin-top:18px}}
 .btn{{display:block;flex:1;text-align:center;padding:13px 16px;border-radius:10px;
   text-decoration:none;font-weight:600;font-size:15px;border:1px solid transparent;
@@ -1067,7 +1071,7 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 .btn-secondary:hover{{background:rgba(127,210,167,.12);border-color:rgba(127,210,167,.4)}}
 </style></head><body>
 <div class=\"card\">
-  <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Viewing as guest \u2014 <b>join FrogTalk</b> to like, comment and reply.</span></div>
+  <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Viewing as guest \u2014 <a class=\"gb-link\" href=\"/app?register=1&amp;post={post_id}\">join FrogTalk</a> to like, comment and reply.</span></div>
   <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   {media_html}
@@ -1247,6 +1251,10 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
   background:radial-gradient(circle at 30% 30%,#bff0d0,#4caf50);
   box-shadow:0 0 0 2px rgba(127,210,167,.18),0 0 12px rgba(76,175,80,.4)}}
 .guest-banner b{{color:#dff5e8;font-weight:700}}
+.guest-banner .gb-link{{color:#bff0d0;font-weight:700;text-decoration:none;
+  border-bottom:1px solid rgba(127,210,167,.45);padding-bottom:1px;
+  transition:color .15s ease,border-color .15s ease}}
+.guest-banner .gb-link:hover{{color:#fff;border-bottom-color:#7fd2a7}}
 .author{{display:flex;align-items:center;gap:10px;margin-bottom:12px}}
 .author-avatar{{width:42px;height:42px;border-radius:50%;object-fit:cover;
   border:2px solid rgba(127,210,167,.55);background:#0f1f17;
@@ -1272,7 +1280,7 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 .btn-secondary:hover{{background:rgba(127,210,167,.12);border-color:rgba(127,210,167,.4)}}
 </style></head><body>
 <div class=\"card\">
-  <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Watching as guest \u2014 <b>join FrogTalk</b> to like, comment, repost and chat with friends.</span></div>
+  <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Watching as guest \u2014 <a class=\"gb-link\" href=\"/app?register=1&amp;reel={post_id}\">join FrogTalk</a> to like, comment, repost and chat with friends.</span></div>
   <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   <video class=\"reel-video\" controls playsinline preload=\"metadata\" src=\"/r/{post_id}/media\"></video>
