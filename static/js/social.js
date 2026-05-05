@@ -4791,9 +4791,11 @@ const Social = (() => {
     snap._reelsTapBound = true;
     const TAP_MAX_MOVE = 10;
     const TAP_MAX_TIME = 280;
-    const SCROLL_TOLERANCE = 2;
+    const SCROLL_TOLERANCE = 2;       // px — sub-pixel jitter on snap settle
+    const POST_SCROLL_GUARD_MS = 120; // wait for momentum scroll to commit
 
     let g = null;
+    let pendingFinalize = null;       // { cur, ev, timer } — coalesce rapid taps
     const reset = () => { g = null; };
 
     const onDown = (e) => {
@@ -4802,6 +4804,17 @@ const Social = (() => {
       if (e.target.closest('button, a, input, textarea, .reel-actions, .reel-comments, .reel-progress, .reel-react-picker, .reel-share-menu, .reel-author, .reel-react-emoji, .reel-mute-btn, .reel-play-toggle')) {
         g = null;
         return;
+      }
+      // If a previous tap is still waiting on its momentum-guard timer
+      // and the user has tapped again, flush that pending tap NOW so it
+      // doesn't overlap with this new gesture (which previously caused
+      // "I have to tap twice" — first tap finalized after second tap
+      // already ran, net result was pause→play→pause = appears no-op).
+      if (pendingFinalize) {
+        const p = pendingFinalize;
+        pendingFinalize = null;
+        try { clearTimeout(p.timer); } catch {}
+        try { finalizeTap(p.cur, p.ev); } catch {}
       }
       const p = (e.touches && e.touches[0]) || e;
       g = {
@@ -4821,15 +4834,30 @@ const Social = (() => {
       const dy = Math.abs((p.clientY || 0) - g.y);
       if (dx > TAP_MAX_MOVE || dy > TAP_MAX_MOVE) g.moved = true;
     };
+    const finalizeTap = (cur, ev) => {
+      if (cur.moved) return;
+      if (Date.now() - cur.t > TAP_MAX_TIME + POST_SCROLL_GUARD_MS) return;
+      // A scroll event fired anywhere in the gesture window → was a scroll.
+      if (_reelsLastScrollEventT > cur.startScrollEventT) return;
+      if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
+      // Only ever toggle the currently active card (never one that has
+      // since scrolled out of frame).
+      const target = _reelsCurrentVideo || cur.video;
+      toggleReelPlayback(ev, target);
+    };
     const onUp = (e) => {
       const cur = g; g = null;
       if (!cur) return;
-      if (cur.moved) return;
-      if (Date.now() - cur.t > TAP_MAX_TIME) return;
-      if (_reelsLastScrollEventT > cur.startScrollEventT) return;
-      if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
-      const target = _reelsCurrentVideo || cur.video;
-      toggleReelPlayback(e, target);
+      // Defer the decision one momentum-frame so we can detect a scroll
+      // event that lands AFTER touchend (common on Chrome Android +
+      // desktop trackpad fling). Tracked in `pendingFinalize` so a
+      // follow-up tap can pre-empt it (see onDown).
+      const slot = { cur, ev: e, timer: null };
+      slot.timer = setTimeout(() => {
+        if (pendingFinalize === slot) pendingFinalize = null;
+        finalizeTap(cur, e);
+      }, POST_SCROLL_GUARD_MS);
+      pendingFinalize = slot;
     };
 
     snap.addEventListener('touchstart', onDown, { passive: true });
