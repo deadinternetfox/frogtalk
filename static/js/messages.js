@@ -518,6 +518,7 @@ const Messages = (() => {
     try {
       const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}`);
       const data = await res.json();
+      if (!placeholder.parentNode) return;
       if (!res.ok || !data.valid) {
         placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Invite invalid or expired</span>`;
         return;
@@ -548,6 +549,7 @@ const Messages = (() => {
       const btnHtml = alreadyJoined
         ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`
         : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join</button>`;
+      if (!placeholder.parentNode) return;
       placeholder.outerHTML = `
         <div class="invite-card">
           <div class="invite-card-header">You've been invited to join a channel</div>
@@ -562,7 +564,9 @@ const Messages = (() => {
           </div>
         </div>`;
     } catch (e) {
-      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load invite</span>`;
+      if (placeholder.parentNode) {
+        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load invite</span>`;
+      }
     }
   }
 
