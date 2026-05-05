@@ -8319,6 +8319,24 @@ document.getElementById('board-frame')?.addEventListener('load', () => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoard(); });
 </script>
+<script>
+// Safari / iOS WKWebView occasionally throws "Can't find variable: FileReader"
+// (and similar) when the global is referenced from inside a Promise constructor
+// or async callback — the lexical lookup fails on a different scope chain.
+// Re-anchoring the constructor onto globalThis from window prevents the error.
+(function(){
+  try {
+    var g = (typeof globalThis !== 'undefined') ? globalThis : window;
+    ['FileReader','Blob','URL','FormData'].forEach(function(name){
+      try {
+        if (typeof g[name] === 'undefined' && typeof window !== 'undefined' && window[name]) {
+          g[name] = window[name];
+        }
+      } catch(e) {}
+    });
+  } catch(e) {}
+})();
+</script>
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/state.js?v=192"></script>
 <script src="/static/js/mute.js?v=191"></script>

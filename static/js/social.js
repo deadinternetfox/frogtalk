@@ -7476,20 +7476,19 @@ const Social = (() => {
       if (filters) filters.style.display = 'none';
       if (preview) preview.style.display = 'block';
     } else {
-      // Image: read as data URL for preview + filter pipeline
-      const reader = new FileReader();
-      reader.onload = e => {
-        _newPostMedia = e.target.result;
-        _newPostOrigMedia = e.target.result;
+      // Image: read as data URL for preview + filter pipeline.
+      // Use UI.blobToDataURL (Safari-safe) instead of `new FileReader()`.
+      UI.blobToDataURL(file).then(dataUrl => {
+        _newPostMedia = dataUrl;
+        _newPostOrigMedia = dataUrl;
         _newPostMediaType = file.type;
         _filterState = { brightness: 100, contrast: 100, saturate: 100 };
         resetFilterUI();
         if (vid) { vid.style.display = 'none'; vid.src = ''; }
-        if (img) { img.src = e.target.result; img.style.display = 'block'; }
+        if (img) { img.src = dataUrl; img.style.display = 'block'; }
         if (filters) filters.style.display = 'block';
         if (preview) preview.style.display = 'block';
-      };
-      reader.readAsDataURL(file);
+      }).catch(() => { UI.showToast('Could not read image', 'error'); });
     }
   }
 
@@ -7687,18 +7686,15 @@ const Social = (() => {
         allow_comments: allowCmt,
       };
       if (_newPostFile) {
-        // Video chosen via file picker — read to base64 now.
+        // Video chosen via file picker — read to base64 now. Uses
+        // UI.blobToDataURL which is Safari-safe (some iOS WKWebView
+        // contexts surface "Can't find variable: FileReader" when the
+        // global is referenced inside a Promise constructor).
         if (postBtn) { postBtn.textContent = 'Uploading…'; }
-        body.media_data = await new Promise((resolve, reject) => {
-          const r = new FileReader();
-          r.onprogress = (e) => {
-            if (!hasAttachedMedia || !e?.lengthComputable) return;
-            const p = Math.max(5, Math.min(88, Math.round((e.loaded / e.total) * 88)));
-            _updateStoryUploadOverlay(p, `Preparing media… ${Math.round((e.loaded / e.total) * 100)}%`);
-          };
-          r.onload = e => resolve(e.target.result);
-          r.onerror = () => reject(new Error('Could not read video file'));
-          r.readAsDataURL(_newPostFile);
+        body.media_data = await UI.blobToDataURL(_newPostFile, (pct) => {
+          if (!hasAttachedMedia) return;
+          const p = Math.max(5, Math.min(88, Math.round((pct / 100) * 88)));
+          _updateStoryUploadOverlay(p, `Preparing media… ${pct}%`);
         });
         body.media_type = _newPostFile.type;
         if (postBtn) { postBtn.textContent = 'Posting…'; }
