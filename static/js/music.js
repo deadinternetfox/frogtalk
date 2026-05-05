@@ -77,6 +77,23 @@ const Music = (() => {
   // _lastPlayerState honest; this just propagates that to the DOM.
   let _uiSyncTimer = null;
   const UI_SYNC_INTERVAL_MS = 1500;
+  // Last paused flag we broadcast to the rest of the app. Used by the UI
+  // tick to detect drift between music:statechange listeners (FrogSocial
+  // top strip, music cards, etc.) and reality, and to fire a fresh
+  // _emitState() ONLY when the effective state has flipped — so the
+  // dedupe inside _emitState does the right thing and we don't spam.
+  let _lastBroadcastPaused = null;
+  function _broadcastIfChanged() {
+    const cur = _state && _state.queue && _state.queue[0];
+    if (!cur) return;
+    const effective = _currentEffectivePaused();
+    if (effective !== _lastBroadcastPaused) {
+      _lastBroadcastPaused = effective;
+      // Force the dedupe to let this through.
+      _lastEmitHash = '';
+      try { _emitState(); } catch {}
+    }
+  }
   function _startUiSync() {
     if (_uiSyncTimer) return;
     _uiSyncTimer = setInterval(() => {
@@ -99,11 +116,18 @@ const Music = (() => {
           }
         }
         _syncPlayPauseButtons();
+        // Repaint downstream consumers (FrogSocial top "Now playing"
+        // strip, music cards) when our effective paused flag has drifted
+        // from what they last saw — without this, a transient YT state=2
+        // during iframe mount/track-change leaves the strip stuck on
+        // "Paused" even after audio is happily playing again.
+        _broadcastIfChanged();
       } catch {}
     }, UI_SYNC_INTERVAL_MS);
   }
   function _stopUiSync() {
     if (_uiSyncTimer) { clearInterval(_uiSyncTimer); _uiSyncTimer = null; }
+    _lastBroadcastPaused = null;
   }
   const $ = (id) => document.getElementById(id);
   const esc = (s) => UI.escHtml(String(s || ''));
@@ -390,6 +414,7 @@ const Music = (() => {
         artworkUrl,
       };
       document.dispatchEvent(new CustomEvent('music:statechange', { detail }));
+      _lastBroadcastPaused = effectivePaused;
     } catch { return; }
 
     // Dedupe: only push to mediaSession + Android when the user-visible
