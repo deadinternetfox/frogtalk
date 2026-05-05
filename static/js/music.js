@@ -94,6 +94,22 @@ const Music = (() => {
       try { _emitState(); } catch {}
     }
   }
+  // SoundCloud Widget API: subscribe once per iframe to play/pause/finish
+  // events so we can reconcile _paused without polling. Idempotent: marks
+  // the iframe with data-sc-bound after subscribing.
+  function _bindSoundCloudWidget(frame) {
+    if (!frame || !frame.contentWindow) return;
+    if (!(frame.src || '').includes('soundcloud.com')) return;
+    if (frame.dataset.scBound === '1') return;
+    frame.dataset.scBound = '1';
+    try {
+      ['play', 'pause', 'finish'].forEach(ev => {
+        frame.contentWindow.postMessage(
+          JSON.stringify({ method: 'addEventListener', value: ev }), '*');
+      });
+    } catch {}
+  }
+
   function _startUiSync() {
     if (_uiSyncTimer) return;
     _uiSyncTimer = setInterval(() => {
@@ -102,8 +118,8 @@ const Music = (() => {
         // the iframe keeps pushing state events; cheap insurance against
         // a remounted iframe that lost the registration.
         const cur = _state && _state.queue && _state.queue[0];
+        const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
         if (cur && cur.provider === 'youtube') {
-          const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
           if (frame && frame.contentWindow) {
             try {
               frame.contentWindow.postMessage(
@@ -112,6 +128,17 @@ const Music = (() => {
               // which carries playerState. Free state-truth refresh.
               frame.contentWindow.postMessage(
                 JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
+            } catch {}
+          }
+        } else if (cur && cur.provider === 'soundcloud') {
+          if (frame && frame.contentWindow) {
+            try {
+              _bindSoundCloudWidget(frame);
+              // Cheap state-truth refresh: SC widget answers with
+              // {method:"isPaused", value:bool} which the listener
+              // reconciles into _paused.
+              frame.contentWindow.postMessage(
+                JSON.stringify({ method: 'isPaused' }), '*');
             } catch {}
           }
         }
@@ -806,6 +833,27 @@ const Music = (() => {
             try { _startSyncProbeIfNeeded(); } catch {}
           } else if (ps === 2 && !_paused) {
             _paused = true;
+            _lastEmitHash = '';
+            try { _syncPlayPauseButtons(); } catch {}
+            try { _emitState(); } catch {}
+          }
+        }
+
+        // SoundCloud Widget API ground-truth reconciliation. The widget
+        // emits {method:"play"|"pause"|"finish"} when subscribed (see
+        // _bindSoundCloudWidget), and answers {method:"isPaused", value:
+        // bool} to polled queries from the UI sync tick. Using ev.origin
+        // gates this to actual SC frames so a stray YT message can't
+        // collide on the same `method` keys.
+        if (typeof parsed.method === 'string'
+            && ev.origin
+            && ev.origin.indexOf('soundcloud.com') !== -1) {
+          let scPaused = null;
+          if (parsed.method === 'play') scPaused = false;
+          else if (parsed.method === 'pause' || parsed.method === 'finish') scPaused = true;
+          else if (parsed.method === 'isPaused' && typeof parsed.value === 'boolean') scPaused = parsed.value;
+          if (scPaused !== null && scPaused !== _paused) {
+            _paused = scPaused;
             _lastEmitHash = '';
             try { _syncPlayPauseButtons(); } catch {}
             try { _emitState(); } catch {}
@@ -1744,6 +1792,10 @@ const Music = (() => {
       : `<span class="mmd-live-dot"></span>
          <span class="mmd-room" title="Go to #${roomEsc}">#${roomEsc}</span>`;
     const anOn = _autoNextEnabled();
+    // Compute initial play/pause icon from canonical truth so the dock
+    // doesn't flash ⏸ for a frame on a paused track before the
+    // post-render _syncPlayPauseButtons() call repaints it.
+    const _dockInitPlaying = !_currentEffectivePaused();
     dock.innerHTML = `
       <div class="mmd-art ${noArt}" ${art} onclick="Music.expand()" title="${expandTitle}"></div>
       <div class="mmd-info" onclick="Music.expand()">
@@ -1756,9 +1808,9 @@ const Music = (() => {
         </label>
       </div>
       <div class="mmd-ctrls">
-        <button class="mmd-btn mmd-play ${canPause ? '' : 'unsupported'}" data-playing="1"
-                title="Pause" aria-label="Pause"
-                onclick="event.stopPropagation();Music.togglePause(this)">${_PAUSE_SVG}</button>
+        <button class="mmd-btn mmd-play ${canPause ? '' : 'unsupported'}" data-playing="${_dockInitPlaying ? '1' : '0'}"
+                title="${_dockInitPlaying ? 'Pause' : 'Play'}" aria-label="${_dockInitPlaying ? 'Pause' : 'Play'}"
+                onclick="event.stopPropagation();Music.togglePause(this)">${_dockInitPlaying ? _PAUSE_SVG : _PLAY_SVG}</button>
         ${canSkip ? `<button class="mmd-btn mmd-skip" title="Next track" aria-label="Next track"
                        onclick="event.stopPropagation();Music.skipNext()">${_SKIP_SVG}</button>` : ''}
         <button class="mmd-btn mmd-close" title="Stop" aria-label="Stop"
@@ -1776,9 +1828,15 @@ const Music = (() => {
 
   function _miniBarHtml(titleEsc, provider) {
     const canPause = (provider === 'youtube' || provider === 'soundcloud');
+    // Same anti-flash trick as _renderDock — render the icon from the
+    // canonical effective-paused flag instead of hardcoded ⏸.
+    const playing = !_currentEffectivePaused();
+    const ppBtn = canPause
+      ? `<button class="mp-mini-btn mp-mini-playpause" data-playing="${playing ? '1' : '0'}" title="${playing ? 'Pause' : 'Play'}" aria-label="${playing ? 'Pause' : 'Play'}" onclick="Music.togglePause(this)">${playing ? _PAUSE_SVG : _PLAY_SVG}</button>`
+      : '';
     return `
       <span class="mp-mini-title" title="${titleEsc}">🎵 ${titleEsc}</span>
-      ${canPause ? `<button class="mp-mini-btn mp-mini-playpause" data-playing="1" title="Pause" onclick="Music.togglePause(this)">${_PAUSE_SVG}</button>` : ''}
+      ${ppBtn}
       <button class="mp-mini-btn" title="Back to channel" onclick="Music.expand()">⤢</button>
       <button class="mp-mini-btn" title="Stop" onclick="Music.close()">✕</button>`;
   }
