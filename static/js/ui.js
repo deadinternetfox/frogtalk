@@ -449,9 +449,20 @@ const UI = (() => {
   }
 
   // Quietly push a status_msg without toasting (used by the now-playing
-  // auto-mirror so we don't spam the user every track change).
+  // auto-mirror so we don't spam the user every track change). Coalesces
+  // overlapping calls into a trailing-edge queue: while one PATCH is in
+  // flight, only the LAST requested (presence,msg) is remembered, and is
+  // sent once the inflight one returns. This is what makes the X-button
+  // restore work — without the trailing queue, a fast tap of ✕ on the
+  // mini-dock right after a takeover-PATCH was issued would silently
+  // drop the "restore to original" PATCH and leave the status pill
+  // stuck on "🎵 SongTitle".
+  let _nowPlayingPending = null;  // {presence, status_msg} | null
   async function _saveStatusSilent(presence, status_msg) {
-    if (_nowPlayingPatchInflight) return;
+    if (_nowPlayingPatchInflight) {
+      _nowPlayingPending = { presence, status_msg };
+      return;
+    }
     _nowPlayingPatchInflight = true;
     try {
       const res = await fetch('/api/auth/profile', {
@@ -465,6 +476,17 @@ const UI = (() => {
       renderSelfStatus();
     } catch {} finally {
       _nowPlayingPatchInflight = false;
+      // Drain trailing call (if any) — but only if it actually differs
+      // from what we just persisted, to avoid a redundant round-trip.
+      const pending = _nowPlayingPending;
+      _nowPlayingPending = null;
+      if (pending
+          && (pending.presence !== State.user.presence
+              || pending.status_msg !== State.user.status_msg)) {
+        // Recurse via setTimeout so we yield the microtask queue first
+        // (any synchronous callers stacking after us get to run).
+        setTimeout(() => _saveStatusSilent(pending.presence, pending.status_msg), 0);
+      }
     }
   }
 
