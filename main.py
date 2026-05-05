@@ -1055,9 +1055,11 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
   box-shadow:0 0 0 2px rgba(127,210,167,.18),0 0 12px rgba(76,175,80,.4)}}
 .guest-banner b{{color:#dff5e8;font-weight:700}}
 .guest-banner .gb-link{{color:#bff0d0;font-weight:700;text-decoration:none;
-  border-bottom:1px solid rgba(127,210,167,.45);padding-bottom:1px;
-  transition:color .15s ease,border-color .15s ease}}
-.guest-banner .gb-link:hover{{color:#fff;border-bottom-color:#7fd2a7}}
+  text-shadow:0 0 0 rgba(127,210,167,0);
+  transition:color .2s ease,text-shadow .25s ease,filter .25s ease}}
+.guest-banner .gb-link:hover{{color:#fff;
+  text-shadow:0 0 8px rgba(127,210,167,.85),0 0 18px rgba(76,175,80,.55);
+  filter:drop-shadow(0 0 6px rgba(76,175,80,.4))}}
 .actions{{display:flex;gap:10px;margin-top:18px}}
 .btn{{display:block;flex:1;text-align:center;padding:13px 16px;border-radius:10px;
   text-decoration:none;font-weight:600;font-size:15px;border:1px solid transparent;
@@ -1252,9 +1254,11 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
   box-shadow:0 0 0 2px rgba(127,210,167,.18),0 0 12px rgba(76,175,80,.4)}}
 .guest-banner b{{color:#dff5e8;font-weight:700}}
 .guest-banner .gb-link{{color:#bff0d0;font-weight:700;text-decoration:none;
-  border-bottom:1px solid rgba(127,210,167,.45);padding-bottom:1px;
-  transition:color .15s ease,border-color .15s ease}}
-.guest-banner .gb-link:hover{{color:#fff;border-bottom-color:#7fd2a7}}
+  text-shadow:0 0 0 rgba(127,210,167,0);
+  transition:color .2s ease,text-shadow .25s ease,filter .25s ease}}
+.guest-banner .gb-link:hover{{color:#fff;
+  text-shadow:0 0 8px rgba(127,210,167,.85),0 0 18px rgba(76,175,80,.55);
+  filter:drop-shadow(0 0 6px rgba(76,175,80,.4))}}
 .author{{display:flex;align-items:center;gap:10px;margin-bottom:12px}}
 .author-avatar{{width:42px;height:42px;border-radius:50%;object-fit:cover;
   border:2px solid rgba(127,210,167,.55);background:#0f1f17;
