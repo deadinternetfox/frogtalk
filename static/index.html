@@ -1139,8 +1139,13 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
 .mmd-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .mmd-title{
   font-size:11.5px;font-weight:700;color:#f0e4ff;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;
-  margin-top:-1px
+  white-space:nowrap;overflow:hidden;line-height:1.15;
+  margin-top:-3px;
+  /* Soft fade at the right edge instead of ellipsis — lets the title
+     read as much as fits horizontally without the "..." cutting it
+     short while there's still room. */
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 14px),transparent);
+          mask-image:linear-gradient(to right,#000 calc(100% - 14px),transparent)
 }
 .mmd-sub{
   font-size:10px;color:#b090d0;
