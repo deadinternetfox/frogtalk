@@ -4030,19 +4030,34 @@ const Social = (() => {
 
       if (snap) {
         _reelsScrollSnap = snap;
+        let settleTimer = 0;
         const onScroll = () => {
           if (_reelsScrollRaf) return;
           _reelsScrollRaf = requestAnimationFrame(() => {
             _reelsScrollRaf = 0;
             _reelsSyncActiveFromScroll(snap);
           });
+          // Fallback for browsers (Safari/iOS) where `scrollend` never
+          // fires after a finger scroll: schedule a settle re-sync ~160ms
+          // after the last scroll event. Ensures the new reel auto-plays
+          // even when user scrolled into it manually.
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = setTimeout(() => {
+            settleTimer = 0;
+            _reelsLastScrollT = 0; // force low-velocity branch
+            _reelsSyncActiveFromScroll(snap);
+          }, 160);
         };
         snap._reelsOnScroll = onScroll;
         snap.addEventListener('scroll', onScroll, { passive: true });
-        // `scrollend` fires once the snap settles \u2014 perfect moment to
+        // `scrollend` fires once the snap settles — perfect moment to
         // re-sync the active reel even if rAF-driven onScroll missed the
         // final landing position (common with momentum scrolling on iOS).
-        const onScrollEnd = () => _reelsSyncActiveFromScroll(snap);
+        const onScrollEnd = () => {
+          if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
+          _reelsLastScrollT = 0;
+          _reelsSyncActiveFromScroll(snap);
+        };
         snap._reelsOnScrollEnd = onScrollEnd;
         snap.addEventListener('scrollend', onScrollEnd, { passive: true });
         _updateTabLoadUi(loadUi, 97, 'Finalizing reels', 'Snap controls ready');
@@ -4173,6 +4188,11 @@ const Social = (() => {
       return;
     }
     if (best !== _reelsCurrentCard) {
+      // Manual scroll to a new card resets the persistent pause-mode:
+      // user clearly wants to watch the new reel even if they had paused
+      // a previous one. Per-card pause (_reelsUserPausedCard) is also
+      // cleared when the card changes inside _reelsActivateCard.
+      _reelsPlayMode = 'play';
       _reelsActivateCard(best, { reset: false });
       return;
     }
@@ -6220,8 +6240,22 @@ const Social = (() => {
       }
       UI.showToast('🐸 Shared to your wall', 'success');
       closeMusicShareModal();
+      // Invalidate caches so the new track appears immediately on next
+      // visit to Feed / Music / own profile, instead of waiting for the
+      // 5-min TTL or a full app reload.
+      try { _feedCache = null; } catch {}
+      try { _musicCache.clear(); } catch {}
+      try {
+        const myNick = String(State?.user?.nickname || '').toLowerCase();
+        if (myNick) _profilePostsCache.delete(myNick);
+      } catch {}
       if (_currentTab === 'music') loadMusicTab();
       else if (_currentTab === 'feed') loadFeed();
+      else if (_currentTab === 'profile'
+               && String(_profileUser || '').toLowerCase()
+                  === String(State?.user?.nickname || '').toLowerCase()) {
+        try { loadProfilePosts(_profileUser, 'wall', ++_profileTabLoadToken); } catch {}
+      }
     } catch (e) {
       UI.showToast(e.message || 'Could not share', 'error');
       if (submit) { submit.disabled = false; submit.classList.remove('is-loading'); }
