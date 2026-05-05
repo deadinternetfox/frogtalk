@@ -4020,6 +4020,7 @@ const Social = (() => {
             if (entry.isIntersecting) return;
             const vid = entry.target.querySelector('video');
             if (!vid) return;
+            try { vid.muted = true; } catch {}
             try { vid.pause(); } catch {}
             entry.target.classList.remove('is-playing');
           });
@@ -4086,6 +4087,12 @@ const Social = (() => {
       if (c === card) return;
       const v = c.querySelector('video');
       if (v) {
+        // Force mute BEFORE pause: prevents an audio bleed when an
+        // in-flight play() promise on this video resolves late (race:
+        // play() was issued by a previous activation, user has already
+        // scrolled away, the promise lands a frame after our pause and
+        // the browser briefly emits sound before honouring pause).
+        try { v.muted = true; } catch {}
         try { v.pause(); } catch {}
       }
       c.classList.remove('is-playing');
@@ -4095,7 +4102,8 @@ const Social = (() => {
     _reelsCurrentCard = card;
     _reelsCurrentVideo = v;
     if (_reelsUserPausedCard && _reelsUserPausedCard !== card) _reelsUserPausedCard = null;
-    v.muted = _reelsMuted;
+    // Restore the user's mute preference on the *current* video only.
+    try { v.muted = _reelsMuted; } catch {}
     _syncReelMuteUi(card);
     if (shouldReset) {
       try { v.currentTime = 0; } catch {}
@@ -4126,7 +4134,8 @@ const Social = (() => {
     run.then(() => {
       if (gen !== _reelsActivateGen || card !== _reelsCurrentCard) {
         // Activation moved on between issuing play() and its resolution.
-        // Pause this video so we don't end up with two playing at once.
+        // Mute then pause so even a single-frame audio leak is silent.
+        try { video.muted = true; } catch {}
         try { video.pause(); } catch {}
         return;
       }
@@ -4181,7 +4190,10 @@ const Social = (() => {
       cards.forEach(c => {
         if (c === best) return;
         const v = c.querySelector('video');
-        if (v && !v.paused) { try { v.pause(); } catch {} }
+        if (v) {
+          try { v.muted = true; } catch {}
+          if (!v.paused) { try { v.pause(); } catch {} }
+        }
         c.classList.remove('is-playing');
       });
       return;
@@ -4193,15 +4205,16 @@ const Social = (() => {
       _reelsActivateCard(best, { reset: false });
       return;
     }
-    // Reaffirming the same card. Defensively pause any *other* video that
-    // somehow ended up playing (e.g. a slow play() promise that resolved
-    // late, or a stale retry firing during fast scroll). Single-source-of
-    // -truth: only _reelsCurrentVideo should be playing.
+    // Reaffirming the same card. Defensively pause + mute any *other*
+    // video that somehow ended up playing (e.g. a slow play() promise
+    // that resolved late, or a stale retry firing during fast scroll).
+    // Single-source-of-truth: only _reelsCurrentVideo should be playing.
     cards.forEach(c => {
       if (c === best) return;
       const v = c.querySelector('video');
-      if (v && !v.paused) {
-        try { v.pause(); } catch {}
+      if (v) {
+        try { v.muted = true; } catch {}
+        if (!v.paused) { try { v.pause(); } catch {} }
       }
       c.classList.remove('is-playing');
     });
@@ -4718,46 +4731,79 @@ const Social = (() => {
         if (_reelsCurrentCard && _reelsCurrentCard !== card) return;
         _reelsAdvanceFrom(card);
       });
-      // Tap-vs-drag detection. A bare `click` listener fires on iOS even
-      // after a vertical drag (because the snap container scrolls but the
-      // tapped video element still receives the synthesized click), which
-      // caused reels to randomly pause while the user was scrolling.
-      // Track pointerdown position + time and only toggle playback when
-      // the gesture stayed within a small radius for a short duration.
-      let _tapStartX = 0, _tapStartY = 0, _tapStartT = 0, _tapValid = false;
-      const TAP_MAX_MOVE = 10;   // px
-      const TAP_MAX_TIME = 350;  // ms
-      const onDown = (e) => {
-        const p = (e.touches && e.touches[0]) || e;
-        _tapStartX = p.clientX || 0;
-        _tapStartY = p.clientY || 0;
-        _tapStartT = Date.now();
-        _tapValid = true;
-      };
-      const onMove = (e) => {
-        if (!_tapValid) return;
-        const p = (e.touches && e.touches[0]) || e;
-        const dx = Math.abs((p.clientX || 0) - _tapStartX);
-        const dy = Math.abs((p.clientY || 0) - _tapStartY);
-        if (dx > TAP_MAX_MOVE || dy > TAP_MAX_MOVE) _tapValid = false;
-      };
-      const onUp = (e) => {
-        if (!_tapValid) return;
-        _tapValid = false;
-        if (Date.now() - _tapStartT > TAP_MAX_TIME) return;
-        toggleReelPlayback(e, video);
-      };
-      const onCancel = () => { _tapValid = false; };
-      video.addEventListener('touchstart', onDown, { passive: true });
-      video.addEventListener('touchmove',  onMove, { passive: true });
-      video.addEventListener('touchend',   onUp,   { passive: false });
-      video.addEventListener('touchcancel', onCancel, { passive: true });
-      video.addEventListener('mousedown', onDown);
-      video.addEventListener('mousemove', onMove);
-      video.addEventListener('mouseup',   onUp);
-      // Suppress synthesized click so iOS can't slip a stray pause through.
+      // Per-video click is suppressed; tap detection is delegated to the
+      // snap container in _bindReelsTapGesture (see below) so we can use
+      // scrollTop-delta as the authoritative "did this gesture scroll?"
+      // signal — far more reliable than a position-slop heuristic.
       video.addEventListener('click', (e) => { try { e.preventDefault(); e.stopPropagation(); } catch {} });
     });
+    _bindReelsTapGesture(snap);
+  }
+
+  // Single delegated tap-vs-scroll detector for the entire reels stage.
+  // A gesture toggles playback ONLY if:
+  //   - it began on a video element (not a button/control overlay)
+  //   - the snap container did not scroll during the gesture
+  //   - the pointer never travelled more than TAP_MAX_MOVE px
+  //   - it lasted less than TAP_MAX_TIME ms
+  // Any of those failing means it was a scroll/drag/long-press → no toggle.
+  function _bindReelsTapGesture(snap) {
+    if (!snap || snap._reelsTapBound) return;
+    snap._reelsTapBound = true;
+    const TAP_MAX_MOVE = 12;
+    const TAP_MAX_TIME = 320;
+    const SCROLL_TOLERANCE = 2; // px — sub-pixel jitter on snap settle
+
+    let g = null; // active gesture state
+    const reset = () => { g = null; };
+
+    const onDown = (e) => {
+      const targetVid = e.target && e.target.closest && e.target.closest('.reel-card video');
+      if (!targetVid) { g = null; return; }
+      // Bail if the touch started over an interactive overlay (buttons,
+      // links, comment input, mute button, etc.) — those have their own
+      // handlers and must not be hijacked by tap-to-pause.
+      if (e.target.closest('button, a, input, textarea, .reel-actions, .reel-comments, .reel-progress, .reel-react-picker, .reel-share-menu')) {
+        g = null;
+        return;
+      }
+      const p = (e.touches && e.touches[0]) || e;
+      g = {
+        video: targetVid,
+        x: p.clientX || 0,
+        y: p.clientY || 0,
+        t: Date.now(),
+        startScrollTop: snap.scrollTop,
+        moved: false,
+      };
+    };
+    const onMove = (e) => {
+      if (!g) return;
+      const p = (e.touches && e.touches[0]) || e;
+      const dx = Math.abs((p.clientX || 0) - g.x);
+      const dy = Math.abs((p.clientY || 0) - g.y);
+      if (dx > TAP_MAX_MOVE || dy > TAP_MAX_MOVE) g.moved = true;
+    };
+    const onUp = (e) => {
+      const cur = g; g = null;
+      if (!cur) return;
+      if (cur.moved) return;
+      if (Date.now() - cur.t > TAP_MAX_TIME) return;
+      if (Math.abs(snap.scrollTop - cur.startScrollTop) > SCROLL_TOLERANCE) return;
+      // Only toggle the *currently active* card — never the one the touch
+      // technically started on (which may have scrolled out of frame).
+      const target = _reelsCurrentVideo || cur.video;
+      toggleReelPlayback(e, target);
+    };
+
+    snap.addEventListener('touchstart', onDown, { passive: true });
+    snap.addEventListener('touchmove',  onMove, { passive: true });
+    snap.addEventListener('touchend',   onUp,   { passive: true });
+    snap.addEventListener('touchcancel', reset, { passive: true });
+    snap.addEventListener('mousedown', onDown);
+    snap.addEventListener('mousemove', onMove);
+    snap.addEventListener('mouseup',   onUp);
+    snap.addEventListener('mouseleave', reset);
   }
 
   function toggleReelPlayback(ev, video) {
