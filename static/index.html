@@ -5854,44 +5854,44 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
   .reel-react-picker.reel-react-picker-row{gap:4px}
   .reel-react-picker.reel-react-picker-row .reel-react-emoji{width:40px;height:40px;font-size:20px}
 }
-/* Story-views style stacked reactor bubbles. Each bubble is a small
-   avatar with the user's emoji as a corner badge. Stacks overlap so
-   3 bubbles fit in a compact strip. */
+/* Story-views style stacked reactor bubbles. Avatar renders at its
+   own intrinsic size (24px) — we don't force width/height so the
+   inline styles from UI.avatarEl produce a perfect square circle.
+   The wrapper just clips and positions the emoji badge. */
 .reel-reactions-stack{
   display:inline-flex;align-items:center;
-  margin-top:4px;padding:0;
+  margin-top:5px;padding:0;
   isolation:isolate;
   line-height:0;
 }
 .reel-reactions-stack .rrs-bubble{
-  position:relative;display:inline-block;
-  width:20px;height:20px;min-width:20px;min-height:20px;
+  position:relative;
+  display:inline-block;
+  width:24px;height:24px;
+  margin-left:-7px;
   border-radius:50%;
-  margin-left:-6px;
-  box-sizing:border-box;
-  border:1.5px solid rgba(255,255,255,.18);
-  background:#1a1a1a;
-  overflow:visible;
-  flex:0 0 auto;
+  flex:0 0 24px;
+  vertical-align:top;
 }
 .reel-reactions-stack .rrs-bubble:first-child{margin-left:0}
+/* The avatar itself (img or gradient span) is already rendered as a
+   24×24 circle by UI.avatarEl; we only add a thin separator ring so
+   adjacent bubbles read as distinct. */
 .reel-reactions-stack .rrs-bubble > img,
-.reel-reactions-stack .rrs-bubble > span{
-  width:100% !important;height:100% !important;
-  border-radius:50%;display:block;object-fit:cover;
-  aspect-ratio:1/1;
-  vertical-align:top;
+.reel-reactions-stack .rrs-bubble > span:not(.rrs-emoji){
+  display:block !important;
+  vertical-align:top !important;
+  box-shadow:0 0 0 1.5px #0d1410;
 }
 .reel-reactions-stack .rrs-emoji{
   position:absolute;right:-3px;bottom:-3px;
-  width:12px !important;height:12px !important;min-width:12px;min-height:12px;
+  width:13px;height:13px;
   border-radius:50%;
-  background:#0a0a0a;
+  background:#0d1410;
   display:inline-flex;align-items:center;justify-content:center;
-  font-size:8px;line-height:1;
-  border:1px solid rgba(255,255,255,.15);
+  font-size:9px;line-height:1;
   pointer-events:none;
-  aspect-ratio:1/1;
+  z-index:1;
 }
 @media(max-width:520px){
   .reels-scope-bar{padding:8px 10px 5px;gap:6px}

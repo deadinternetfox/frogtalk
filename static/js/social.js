@@ -5249,7 +5249,7 @@ const Social = (() => {
       if (!picks.length) return '';
       const bubble = (p) => {
         const av = (window.UI && typeof UI.avatarEl === 'function')
-          ? UI.avatarEl('', p.nick, 22)
+          ? UI.avatarEl('', p.nick, 24)
           : `<span class="rrs-fallback" aria-label="${esc(p.nick)}">🐸</span>`;
         return `<span class="rrs-bubble" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">${av}<span class="rrs-emoji">${esc(p.emoji)}</span></span>`;
       };
@@ -6817,7 +6817,7 @@ const Social = (() => {
       if (picks.length) {
         const bubble = (p) => {
           const av = (window.UI && typeof UI.avatarEl === 'function')
-            ? UI.avatarEl('', p.nick, 22)
+            ? UI.avatarEl('', p.nick, 24)
             : `<span class="rrs-fallback" aria-label="${esc(p.nick)}">🐸</span>`;
           return `<span class="rrs-bubble" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">${av}<span class="rrs-emoji">${esc(p.emoji)}</span></span>`;
         };
