@@ -5247,11 +5247,19 @@ const Social = (() => {
         pass++;
       }
       if (!picks.length) return '';
+      const grads = [
+        'linear-gradient(135deg,#1d4a2e,#0f2018)',
+        'linear-gradient(135deg,#2a4a1d,#15240e)',
+        'linear-gradient(135deg,#1d3a4a,#0e1a24)',
+        'linear-gradient(135deg,#3a1d4a,#1d0e24)',
+        'linear-gradient(135deg,#4a3a1d,#241a0e)',
+      ];
       const bubble = (p) => {
-        const av = (window.UI && typeof UI.avatarEl === 'function')
-          ? UI.avatarEl('', p.nick, 24)
-          : `<span class="rrs-fallback" aria-label="${esc(p.nick)}">🐸</span>`;
-        return `<span class="rrs-bubble" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">${av}<span class="rrs-emoji">${esc(p.emoji)}</span></span>`;
+        const idx = ((p.nick || '?').charCodeAt(0) || 0) % grads.length;
+        return `<span class="rrs-item" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">`+
+          `<span class="rrs-ava" style="background:${grads[idx]}">🐸</span>`+
+          `<span class="rrs-badge">${esc(p.emoji)}</span>`+
+        `</span>`;
       };
       return `<span class="reel-reactions-stack" aria-label="Recent reactions">${picks.map(bubble).join('')}</span>`;
     })();
@@ -6815,11 +6823,19 @@ const Social = (() => {
         pass++;
       }
       if (picks.length) {
+        const grads = [
+          'linear-gradient(135deg,#1d4a2e,#0f2018)',
+          'linear-gradient(135deg,#2a4a1d,#15240e)',
+          'linear-gradient(135deg,#1d3a4a,#0e1a24)',
+          'linear-gradient(135deg,#3a1d4a,#1d0e24)',
+          'linear-gradient(135deg,#4a3a1d,#241a0e)',
+        ];
         const bubble = (p) => {
-          const av = (window.UI && typeof UI.avatarEl === 'function')
-            ? UI.avatarEl('', p.nick, 24)
-            : `<span class="rrs-fallback" aria-label="${esc(p.nick)}">🐸</span>`;
-          return `<span class="rrs-bubble" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">${av}<span class="rrs-emoji">${esc(p.emoji)}</span></span>`;
+          const idx = ((p.nick || '?').charCodeAt(0) || 0) % grads.length;
+          return `<span class="rrs-item" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">`+
+            `<span class="rrs-ava" style="background:${grads[idx]}">🐸</span>`+
+            `<span class="rrs-badge">${esc(p.emoji)}</span>`+
+          `</span>`;
         };
         const html = `<span class="reel-reactions-stack" aria-label="Recent reactions">${picks.map(bubble).join('')}</span>`;
         if (old) {
