@@ -1637,6 +1637,13 @@ const Messages = (() => {
                   const anchor = body.querySelector(':scope > .msg-content');
                   if (anchor) anchor.insertAdjacentHTML('afterend', mediaHtml);
                   else body.insertAdjacentHTML('beforeend', mediaHtml);
+                  // If the echo only carried `has_media` (server stripped
+                  // media_data from the broadcast), kick off the fetch now
+                  // so it loads live instead of being stuck on "Loading
+                  // media…" until the user changes channels.
+                  if (!msg.media_data && msg.has_media) {
+                    setTimeout(() => loadMedia(msg.id), 50);
+                  }
                 }
               }
             }

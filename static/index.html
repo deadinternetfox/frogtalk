@@ -2830,9 +2830,10 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 
 /* ── Auto-loading media stub spinner ─────────────────────────────────── */
 @keyframes ft-spin{to{transform:rotate(360deg)}}
+.media-lazy.auto{display:inline-block;max-width:100%}
 .media-lazy.auto .media-lazy-placeholder.media-lazy-auto{
-  flex-direction:row;width:auto;min-width:180px;height:auto;
-  padding:10px 14px;gap:10px;cursor:default
+  display:inline-flex;flex-direction:row;width:auto;min-width:0;
+  max-width:280px;height:auto;padding:8px 14px;gap:10px;cursor:default
 }
 .media-lazy-spinner{
   width:14px;height:14px;border:2px solid #333;border-top-color:#4caf50;
