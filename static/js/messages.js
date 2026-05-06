@@ -1628,9 +1628,9 @@ const Messages = (() => {
           // Optimistic bubble had no media (temp msg always sets media_data:null);
           // when the server echo includes media, inject it now or it never renders.
           try {
-            if (msg.media_data) {
+            if (msg.media_data || msg.has_media) {
               const body = pendingEl.querySelector('.msg-body') || pendingEl.querySelector('.msg-cont-wrap > div') || pendingEl;
-              const hasMedia = body.querySelector(':scope > .msg-media, :scope > .audio-msg, :scope > .chat-video, :scope > .spoiler-wrap, :scope > .view-once-wrap');
+              const hasMedia = body.querySelector(':scope > .msg-media, :scope > .audio-msg, :scope > .chat-video, :scope > .spoiler-wrap, :scope > .view-once-wrap, :scope > .media-lazy');
               if (!hasMedia) {
                 const mediaHtml = _buildMediaHtml(msg);
                 if (mediaHtml) {
