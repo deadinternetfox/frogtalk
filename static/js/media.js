@@ -418,7 +418,8 @@ function showRecordingUI (stream) {
   try {
     _audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
     _analyser   = _audioCtx.createAnalyser();
-    _analyser.fftSize = 64;
+    _analyser.fftSize = 128;
+    _analyser.smoothingTimeConstant = 0.6;
     const src   = _audioCtx.createMediaStreamSource(stream);
     src.connect(_analyser);
 
@@ -426,26 +427,32 @@ function showRecordingUI (stream) {
     const thumb = document.getElementById('attachment-thumb');
     prev.style.display = 'flex';
 
-    // Build the canvas — transparent so it sits cleanly on the new
-    // attachment-preview gradient instead of showing the old dark slab.
-    let canvas = document.getElementById('rec-canvas');
-    if (!canvas) {
-      canvas = document.createElement('canvas');
-      canvas.id = 'rec-canvas';
-      canvas.width  = 160;
-      canvas.height = 32;
-      canvas.style.cssText = 'border-radius:18px;background:transparent;vertical-align:middle';
-    }
     thumb.innerHTML = '';
     // Wrap waveform in a chat-style bubble so the recording preview matches
     // the .audio-msg look used in messages / finished preview.
     const bubble = document.createElement('div');
     bubble.className = 'audio-msg att-voice-bubble att-voice-recording';
-    bubble.style.cssText = 'min-width:220px;cursor:default;padding:8px 14px;gap:10px';
+    bubble.style.cssText = 'min-width:260px;cursor:default;padding:8px 14px;gap:10px';
     const recDot = document.createElement('span');
     recDot.style.cssText = 'width:10px;height:10px;border-radius:50%;background:#f85149;box-shadow:0 0 8px #f85149;flex-shrink:0;animation:wave-bounce .9s ease-in-out infinite alternate';
     bubble.appendChild(recDot);
-    bubble.appendChild(canvas);
+
+    // Live-driven CSS bar waveform — matches playback look, fills the bubble
+    // and is mirrored around the center so it doesn't bunch to one side.
+    const waves = document.createElement('div');
+    waves.className = 'audio-waves';
+    waves.id = 'rec-waves';
+    const BAR_COUNT = 32;
+    const bars = [];
+    for (let i = 0; i < BAR_COUNT; i++) {
+      const b = document.createElement('div');
+      b.className = 'wave-bar';
+      b.style.height = '4px';
+      waves.appendChild(b);
+      bars.push(b);
+    }
+    bubble.appendChild(waves);
+
     const dur = document.createElement('span');
     dur.id    = 'rec-duration';
     dur.className = 'audio-duration';
@@ -454,19 +461,22 @@ function showRecordingUI (stream) {
     bubble.appendChild(dur);
     thumb.appendChild(bubble);
 
-    const ctx = canvas.getContext('2d');
-    const buf = new Uint8Array(_analyser.frequencyBinCount);
-
+    const buf  = new Uint8Array(_analyser.frequencyBinCount); // 64 bins
+    const half = BAR_COUNT >> 1;
     function draw () {
       _animFrame = requestAnimationFrame(draw);
       _analyser.getByteFrequencyData(buf);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const bw = canvas.width / buf.length;
-      buf.forEach((v, i) => {
-        const h = (v / 255) * canvas.height;
-        ctx.fillStyle = `hsl(${140 - v * .3},80%,50%)`;
-        ctx.fillRect(i * bw, canvas.height - h, bw - 1, h);
-      });
+      // Mirror around the centre: bar i samples bin |i - half|, so the
+      // loudest low frequencies form a peak in the middle and taper to
+      // both edges instead of stacking up on the left.
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const v = buf[Math.abs(i - half)] || 0;
+        const h = 4 + (v / 255) * 22;
+        const bar = bars[i];
+        bar.style.height = h.toFixed(1) + 'px';
+        if (v > 40) bar.classList.add('active');
+        else        bar.classList.remove('active');
+      }
     }
     draw();
   } catch {}
