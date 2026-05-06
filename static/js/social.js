@@ -4186,13 +4186,40 @@ const Social = (() => {
       if (snap && window.IntersectionObserver) {
         _reelsObserver = new IntersectionObserver((entries) => {
           entries.forEach(entry => {
-            if (entry.intersectionRatio >= 0.1) return;
-            if (entry.target === _reelsCurrentCard) return;
-            const v = entry.target.querySelector('video');
-            if (v && !v.paused) { try { v.muted = true; v.pause(); } catch {} }
-            entry.target.classList.remove('is-playing');
+            // Off-screen cleanup: pause + mute cards that have left the
+            // viewport so they don't keep spending bandwidth or bleed audio.
+            if (entry.intersectionRatio < 0.1) {
+              if (entry.target === _reelsCurrentCard) return;
+              const v = entry.target.querySelector('video');
+              if (v && !v.paused) { try { v.muted = true; v.pause(); } catch {} }
+              entry.target.classList.remove('is-playing');
+              return;
+            }
+            // High-visibility activation: a card that's \u226570% visible is
+            // the de-facto centered reel after a snap settle. This is a
+            // belt-and-suspenders activator on top of the scroll/scrollend
+            // handlers \u2014 some browsers fire neither reliably during a
+            // snap-driven scroll, leaving a paused frame on the new reel.
+            if (entry.intersectionRatio >= 0.7) {
+              const target = entry.target;
+              if (target.classList.contains('reel-end-card')) {
+                if (target !== _reelsCurrentCard) {
+                  try { _reelsActivateCard(target, { reset: false }); } catch {}
+                }
+                return;
+              }
+              if (_reelsIsSeekLocked()) return;
+              if (target !== _reelsCurrentCard) {
+                try { _reelsActivateCard(target, { reset: false, forcePlay: true }); } catch {}
+                return;
+              }
+              const v = target.querySelector('video');
+              if (v && v.paused && _reelsUserPausedCard !== target) {
+                try { _reelsPlayVideo(target, v, 0, _reelsActivateGen); } catch {}
+              }
+            }
           });
-        }, { root: snap, threshold: [0, 0.1] });
+        }, { root: snap, threshold: [0, 0.1, 0.7] });
         snap.querySelectorAll('.reel-card').forEach(card => _reelsObserver.observe(card));
         snap._reelsObserveCard = (card) => { try { _reelsObserver.observe(card); } catch {} };
       }
@@ -4221,8 +4248,21 @@ const Social = (() => {
         const tryActivate = () => {
           if (_reelsIsSeekLocked()) return;
           const c = pickCenteredCard();
-          if (!c || c === _reelsCurrentCard) return;
-          _reelsActivateCard(c, { reset: false, forcePlay: true });
+          if (!c) return;
+          if (c !== _reelsCurrentCard) {
+            _reelsActivateCard(c, { reset: false, forcePlay: true });
+            return;
+          }
+          // Same card is already "current" \u2014 but if its video drifted
+          // into a paused state (e.g. autoplay-policy reject after a fast
+          // swipe, or a stale pause from the IO observer firing on the
+          // outgoing card), kick it back into play. This is the fix for
+          // "scroll down, video paused, no autoplay".
+          if (c.classList.contains('reel-end-card')) return;
+          const v = c.querySelector('video');
+          if (!v || !v.paused) return;
+          if (_reelsUserPausedCard === c) return; // user explicitly paused
+          try { _reelsPlayVideo(c, v, 0, _reelsActivateGen); } catch {}
         };
         let scrollRaf = 0;
         let settleTimer = 0;
@@ -5046,19 +5086,19 @@ const Social = (() => {
       const myId = window.State?.user?.id;
       const isMe = post.user_id == myId;
       const action = String(post.friend_actor_action || '').toLowerCase();
+      // Author is the actor → the username is already shown right above
+      // the ribbon. A second "@nick 📹 posted" line is just noise, so
+      // suppress the ribbon entirely in that case.
+      if (isMe || action === 'posted') return '';
       const avaHtml = post.friend_actor_avatar
         ? `<img src="${esc(post.friend_actor_avatar)}" class="reel-friend-ava" alt="" loading="lazy">`
         : '';
       let badge = '';
       let verb = '';
-      if (isMe || action === 'posted') {
-        badge = '<span class="reel-friend-badge">📹</span>';
-        verb = 'posted';
-      } else if (action === 'reposted') {
+      if (action === 'reposted') {
         badge = '<span class="reel-friend-badge">🔁</span>';
         verb = 'reposted';
       } else {
-        // Reaction — show the actual emoji the friend used.
         const em = String(post.friend_actor_emoji || '❤️');
         badge = `<span class="reel-friend-badge">${esc(em)}</span>`;
         verb = 'reacted';
