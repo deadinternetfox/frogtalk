@@ -4532,8 +4532,7 @@ async function loadUserWall(nickname) {
         + (totalReactions > 0
           ? `<button type="button" class="sf-rx-summary" onclick="showWallReactionDetail(${p.id})" aria-label="See reactions">`
               + `<span class="sf-rx-emojis">${topEmojis}</span><span class="sf-rx-total">${totalReactions}</span></button>`
-          : '')
-        + `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" onclick="showWallReactionPicker(${p.id})" aria-label="Add reaction" title="Add reaction">${addIcon}</button>`
+          : `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" onclick="showWallReactionDetail(${p.id})" aria-label="Add reaction" title="Add reaction">${addIcon}</button>`)
         + `</div>`;
 
       // Comments count
