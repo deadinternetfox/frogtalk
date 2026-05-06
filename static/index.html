@@ -5638,7 +5638,7 @@ a.status-music-link:hover *{
   z-index:1;background:transparent;outline:none;
   transition:opacity .18s ease
 }
-.reel-card:not(.is-ready):not(.no-poster) video{opacity:0}
+.reel-card:not(.is-ready):not(.no-poster):not(.has-thumb) video{opacity:0}
 .reel-card video::-webkit-media-controls,
 .reel-card video::-webkit-media-controls-start-playback-button,
 .reel-card video::-webkit-media-controls-overlay-play-button,
@@ -5664,7 +5664,8 @@ a.status-music-link:hover *{
   box-shadow:0 0 14px rgba(102,201,129,.24);
 }
 .reel-card.is-ready .reel-loading-layer,
-.reel-card.no-poster .reel-loading-layer{display:none}
+.reel-card.no-poster .reel-loading-layer,
+.reel-card.has-thumb .reel-loading-layer{display:none}
 @keyframes reel-spin{to{transform:rotate(360deg)}}
 .reel-card.no-poster .reel-video-poster{opacity:0 !important;filter:none;transform:none}
 .reel-card.no-poster video{opacity:1}

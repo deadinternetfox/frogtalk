@@ -4195,6 +4195,18 @@ const Social = (() => {
               entry.target.classList.remove('is-playing');
               return;
             }
+            // Any visibility — promote this card's video to preload="auto"
+            // so it has bytes ready by the time it becomes the centered
+            // reel. Cheaper than waiting for _reelsPreloadNeighbours to
+            // fire on the *previous* card's activation, especially for
+            // fast scrolls that skip neighbours.
+            try {
+              const _v = entry.target.querySelector('video');
+              if (_v && _v.preload !== 'auto') {
+                _v.preload = 'auto';
+                try { _v.load?.(); } catch {}
+              }
+            } catch {}
             // High-visibility activation: a card that's \u226570% visible is
             // the de-facto centered reel after a snap settle. This is a
             // belt-and-suspenders activator on top of the scroll/scrollend
@@ -4404,7 +4416,7 @@ const Social = (() => {
 
   function _reelsPreloadNeighbours(card) {
     if (!card) return;
-    const NEIGHBOURS = 2;
+    const NEIGHBOURS = 3;
     let next = card.nextElementSibling;
     let promoted = 0;
     while (next && promoted < NEIGHBOURS) {
@@ -5098,6 +5110,9 @@ const Social = (() => {
 
   function _renderReelCard(post) {
     const videoSrc = esc(_authMediaSrc(post.media_data || ''));
+    const thumbSrc = esc(_authMediaThumb(post.media_data || ''));
+    const posterAttr = thumbSrc ? ` poster="${thumbSrc}"` : '';
+    const posterStyle = thumbSrc ? ` style="background-image:url('${thumbSrc}')"` : '';
     const nick = esc(post.nickname || '');
     const rawNick = post.nickname || '';
     const avatarSrc = post.avatar ? esc(post.avatar) : '';
@@ -5139,10 +5154,10 @@ const Social = (() => {
     const canShare = shareEnabled && postPrivacy !== 'friends' && postPrivacy !== 'private';
 
     return `
-      <div class="reel-card" data-post-id="${post.id}">
+      <div class="reel-card${thumbSrc ? ' has-thumb' : ''}" data-post-id="${post.id}">
         <div class="reel-loading-layer"><span class="reel-loading-spinner"></span></div>
-        <div class="reel-video-poster"></div>
-        <video src="${videoSrc}" playsinline preload="metadata" muted></video>
+        <div class="reel-video-poster"${posterStyle}></div>
+        <video src="${videoSrc}"${posterAttr} playsinline preload="metadata" muted></video>
         <button class="reel-play-toggle" title="Play or pause" onclick="Social.toggleReelPlayback(event,this.previousElementSibling)">▶</button>
         <div class="reel-progress"><span></span></div>
         <div class="reel-overlay-top"></div>
