@@ -428,22 +428,20 @@ function showRecordingUI (stream) {
 
     // Build the canvas — transparent so it sits cleanly on the new
     // attachment-preview gradient instead of showing the old dark slab.
-    // Width is sized to whatever the bubble gives us (flex:1) so the
-    // waveform fills the entire voice-note area instead of bunching to the
-    // left at a fixed 160px.
     let canvas = document.getElementById('rec-canvas');
     if (!canvas) {
       canvas = document.createElement('canvas');
       canvas.id = 'rec-canvas';
+      canvas.width  = 160;
       canvas.height = 32;
-      canvas.style.cssText = 'flex:1;min-width:0;width:100%;height:32px;border-radius:18px;background:transparent;vertical-align:middle';
+      canvas.style.cssText = 'border-radius:18px;background:transparent;vertical-align:middle';
     }
     thumb.innerHTML = '';
     // Wrap waveform in a chat-style bubble so the recording preview matches
     // the .audio-msg look used in messages / finished preview.
     const bubble = document.createElement('div');
     bubble.className = 'audio-msg att-voice-bubble att-voice-recording';
-    bubble.style.cssText = 'flex:1;min-width:220px;width:100%;cursor:default;padding:8px 14px;gap:10px';
+    bubble.style.cssText = 'min-width:220px;cursor:default;padding:8px 14px;gap:10px';
     const recDot = document.createElement('span');
     recDot.style.cssText = 'width:10px;height:10px;border-radius:50%;background:#f85149;box-shadow:0 0 8px #f85149;flex-shrink:0;animation:wave-bounce .9s ease-in-out infinite alternate';
     bubble.appendChild(recDot);
@@ -461,10 +459,6 @@ function showRecordingUI (stream) {
 
     function draw () {
       _animFrame = requestAnimationFrame(draw);
-      // Keep the pixel buffer in sync with the on-screen flex width so
-      // the waveform fills the whole voice-note area, not just 160px.
-      const cssW = canvas.clientWidth || canvas.offsetWidth || 160;
-      if (canvas.width !== cssW) canvas.width = cssW;
       _analyser.getByteFrequencyData(buf);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       const bw = canvas.width / buf.length;
