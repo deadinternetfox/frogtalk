@@ -2321,20 +2321,42 @@ const Messages = (() => {
   // Pre-load just the metadata of a voice note so the duration shows up on
   // first render instead of "0:00" until the user hits play. Defers via
   // setTimeout so the bubble is in the DOM before we look up the span.
+  //
+  // Chromium MediaRecorder webm/opus blobs report duration=Infinity until
+  // we seek to the very end — so we do the well-known "seek to 1e10, wait
+  // for durationchange, then seek back to 0" dance.
   function _probeAudioDuration(msgId, src) {
     if (!src) return;
     setTimeout(() => {
       const durEl = document.getElementById(`audio-dur-${msgId}`);
       if (!durEl) return;
+      const writeDur = (d) => {
+        if (!isFinite(d) || d <= 0) return;
+        const m = Math.floor(d / 60);
+        const s = Math.floor(d % 60).toString().padStart(2, '0');
+        durEl.textContent = `${m}:${s}`;
+      };
       try {
         const a = new Audio();
         a.preload = 'metadata';
+        a.muted = true;
         a.src = src;
         a.addEventListener('loadedmetadata', () => {
-          if (!isFinite(a.duration) || a.duration <= 0) return;
-          const m = Math.floor(a.duration / 60);
-          const s = Math.floor(a.duration % 60).toString().padStart(2, '0');
-          durEl.textContent = `${m}:${s}`;
+          if (isFinite(a.duration) && a.duration > 0) {
+            writeDur(a.duration);
+            return;
+          }
+          // Force the browser to scan to the end so it discovers the real
+          // duration of the chunked MediaRecorder blob.
+          const onChange = () => {
+            if (isFinite(a.duration) && a.duration > 0) {
+              a.removeEventListener('durationchange', onChange);
+              writeDur(a.duration);
+              try { a.currentTime = 0; } catch {}
+            }
+          };
+          a.addEventListener('durationchange', onChange);
+          try { a.currentTime = 1e10; } catch {}
         }, { once: true });
       } catch {}
     }, 0);
@@ -2378,18 +2400,38 @@ const Messages = (() => {
     _currentAudioId = msgId;
 
     const durEl = document.getElementById(`audio-dur-${msgId}`);
+    let _knownDur = 0;
+    const _setDur = () => {
+      if (isFinite(audio.duration) && audio.duration > 0) {
+        _knownDur = audio.duration;
+      }
+    };
 
     audio.addEventListener('loadedmetadata', () => {
-      if (durEl && isFinite(audio.duration)) {
-        const m = Math.floor(audio.duration / 60);
-        const s = Math.floor(audio.duration % 60).toString().padStart(2, '0');
+      _setDur();
+      if (durEl && _knownDur) {
+        const m = Math.floor(_knownDur / 60);
+        const s = Math.floor(_knownDur % 60).toString().padStart(2, '0');
+        durEl.textContent = `${m}:${s}`;
+      } else {
+        // Chromium MediaRecorder webm fix: force a seek to discover duration.
+        try { audio.currentTime = 1e10; } catch {}
+      }
+    });
+
+    audio.addEventListener('durationchange', () => {
+      _setDur();
+      if (durEl && _knownDur && audio.currentTime > 1e9) {
+        try { audio.currentTime = 0; } catch {}
+        const m = Math.floor(_knownDur / 60);
+        const s = Math.floor(_knownDur % 60).toString().padStart(2, '0');
         durEl.textContent = `${m}:${s}`;
       }
     });
 
     audio.addEventListener('timeupdate', () => {
-      if (durEl && isFinite(audio.duration)) {
-        const rem = audio.duration - audio.currentTime;
+      if (durEl && _knownDur) {
+        const rem = Math.max(0, _knownDur - audio.currentTime);
         const m = Math.floor(rem / 60);
         const s = Math.floor(rem % 60).toString().padStart(2, '0');
         durEl.textContent = `${m}:${s}`;
