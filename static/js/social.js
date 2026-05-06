@@ -5053,7 +5053,9 @@ const Social = (() => {
     // Horizontal reaction line (Messenger / IG style) anchored to the
     // heart button and extending LEFT across the bottom of the card.
     // Quick tap on the heart still hearts; long-press opens this picker.
-    const emojis = ['❤️','🔥','😂','😮','😢','👏','💯','🎉','💪','😍'];
+    // The heart itself represents ❤️ so we don't repeat it here, and we
+    // keep the row short enough to never overflow on phone widths.
+    const emojis = ['🔥','😂','😮','😢','👏','💯','😍'];
     const picker = document.createElement('div');
     picker.className = 'reel-react-picker reel-react-picker-row';
     picker.innerHTML = emojis.map(e =>
@@ -5062,13 +5064,15 @@ const Social = (() => {
     card.appendChild(picker);
     // Position the picker on the SAME horizontal line as the heart
     // icon, extending to the LEFT, so it visually reads as the heart
-    // button being stretched into a row of reaction options.
+    // button being stretched into a row of reaction options. The
+    // picker's right edge butts against the heart icon's left edge so
+    // the heart visually becomes the rightmost member of the row.
     try {
       const cardRect = card.getBoundingClientRect();
       const iconEl = btn.querySelector('.reel-act-icon') || btn;
       const iconRect = iconEl.getBoundingClientRect();
-      // 8 px gap to the left of the heart icon.
-      let right = Math.max(8, cardRect.right - iconRect.left + 8);
+      // No gap — heart should read as the right-most reaction in the row.
+      let right = Math.max(8, cardRect.right - iconRect.left);
       const top = Math.max(8, iconRect.top - cardRect.top);
       picker.style.right = `${right}px`;
       picker.style.top = `${top}px`;
