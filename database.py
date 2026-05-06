@@ -6931,8 +6931,11 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
     Scoring (computed in SQL, deterministic):
       + 5  per accepted-friend / mutual reaction on the reel
       + 3  per accepted-friend / mutual repost
+      + 4  per accepted-friend / mutual comment
       + 8  if the reel author is a mutual / friend
       + 4  if the viewer follows the author
+      + 2  per DISTINCT friend who interacted (capped at 6 = 3 friends)
+      +    velocity bonus: (engagement / hours_since_post), capped at 6
       + 0.5 per global ❤️ reaction
       + 0.3 per global other reaction
       + 0.6 per repost
@@ -6970,16 +6973,21 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
         fids_csv = ",".join(str(i) for i in friend_ids) if friend_ids else "-1"
         aff_csv  = ",".join(str(i) for i in affinity_ids) if affinity_ids else "-1"
 
-        # Pre-aggregate the per-post counters that drive the score via three
+        # Pre-aggregate the per-post counters that drive the score via
         # tiny derived tables (filtered to the affinity set / heart emoji)
-        # rather than five correlated subqueries per row. This keeps the
-        # planner's cost roughly O(rows-in-narrow-tables) instead of
+        # rather than many correlated subqueries per row. Keeps the
+        # planner cost roughly O(rows-in-narrow-tables) instead of
         # O(candidate-reels × subqueries).
         score_expr = """(
             5.0 * COALESCE(ar_aff.c, 0)
           + 3.0 * COALESCE(rp_aff.c, 0)
+          + 4.0 * COALESCE(cm_aff.c, 0)
           + (CASE WHEN wp.user_id IN (FIDS) THEN 8.0 ELSE 0.0 END)
           + (CASE WHEN wp.user_id IN (AIDS) AND wp.user_id NOT IN (FIDS) THEN 4.0 ELSE 0.0 END)
+          + MIN(6.0, 2.0 * COALESCE(fe.c, 0))
+          + MIN(6.0,
+                (wp.reaction_count + wp.comment_count * 2.0)
+                / MAX(1.0, (julianday('now') - julianday(wp.created_at)) * 24.0))
           + 0.5 * COALESCE(hc.c, 0)
           + 0.3 * (wp.reaction_count - COALESCE(hc.c, 0))
           + 0.6 * wp.repost_count
@@ -7023,15 +7031,34 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
                 WHERE user_id IN ({aff_csv})
                 GROUP BY post_id
             ),
+            cm_aff AS (
+                SELECT post_id, COUNT(*) AS c FROM wall_comments
+                WHERE user_id IN ({aff_csv})
+                GROUP BY post_id
+            ),
+            -- Distinct friends/follows who interacted (any of: react,
+            -- repost, comment). Drives the breadth bonus + the
+            -- "and N others" reason text shown to the user.
+            fe AS (
+                SELECT post_id, COUNT(DISTINCT user_id) AS c FROM (
+                    SELECT post_id, user_id FROM wall_post_reactions WHERE user_id IN ({aff_csv})
+                    UNION
+                    SELECT post_id, user_id FROM wall_reposts WHERE user_id IN ({aff_csv})
+                    UNION
+                    SELECT post_id, user_id FROM wall_comments WHERE user_id IN ({aff_csv})
+                )
+                GROUP BY post_id
+            ),
             hc AS (
                 SELECT post_id, COUNT(*) AS c FROM wall_post_reactions
                 WHERE emoji='❤️'
                 GROUP BY post_id
             ),
             -- Pick ONE friend per post to credit on the reel ribbon
-            -- ("Alice ❤️ reacted" / "Bob 🔁 reposted"). Reactions and
-            -- reposts are unioned, ranked by recency, and the most recent
-            -- friend action wins. Author-is-friend handled in SELECT below.
+            -- ("Alice ❤️ reacted" / "Bob 🔁 reposted" / "Carol 💬 commented").
+            -- Reactions, reposts and comments are unioned, ranked by
+            -- recency, and the most recent friend action wins.
+            -- Author-is-friend handled in SELECT below.
             friend_act_raw AS (
                 SELECT post_id, user_id, action, emoji, ts,
                        ROW_NUMBER() OVER (
@@ -7048,6 +7075,11 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
                            COALESCE(created_at, '') AS ts
                     FROM wall_reposts
                     WHERE user_id IN ({fids_csv})
+                    UNION ALL
+                    SELECT post_id, user_id, 'commented' AS action, NULL AS emoji,
+                           COALESCE(created_at, '') AS ts
+                    FROM wall_comments
+                    WHERE user_id IN ({fids_csv})
                 )
             ),
             friend_act AS (
@@ -7063,10 +7095,11 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
                    COALESCE(hc.c, 0) AS like_count,
                    wp.comment_count AS comment_count,
                    wp.repost_count AS repost_count,
+                   COALESCE(fe.c, 0) AS friend_engagement_count,
                    EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
                    -- Friend ribbon: prefer the post author when they're a
                    -- friend (action='posted'); else the most-recent friend
-                   -- reaction/repost picked by friend_act.
+                   -- reaction/repost/comment picked by friend_act.
                    CASE
                        WHEN wp.user_id IN ({fids_csv}) THEN u.nickname
                        ELSE (SELECT uf.nickname FROM users uf WHERE uf.id = friend_act.user_id)
@@ -7088,6 +7121,8 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
             JOIN users u ON wp.user_id = u.id
             LEFT JOIN ar_aff ON ar_aff.post_id = wp.id
             LEFT JOIN rp_aff ON rp_aff.post_id = wp.id
+            LEFT JOIN cm_aff ON cm_aff.post_id = wp.id
+            LEFT JOIN fe     ON fe.post_id     = wp.id
             LEFT JOIN hc     ON hc.post_id     = wp.id
             LEFT JOIN friend_act ON friend_act.post_id = wp.id
             WHERE wp.media_type LIKE 'video/%'

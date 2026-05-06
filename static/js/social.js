@@ -5197,12 +5197,18 @@ const Social = (() => {
       if (action === 'reposted') {
         badge = '<span class="reel-friend-badge">🔁</span>';
         verb = 'reposted';
+      } else if (action === 'commented') {
+        badge = '<span class="reel-friend-badge">💬</span>';
+        verb = 'commented';
       } else {
         const em = String(post.friend_actor_emoji || '❤️');
         badge = `<span class="reel-friend-badge">${esc(em)}</span>`;
         verb = 'reacted';
       }
-      return `<span class="reel-friend-label">${avaHtml}<span class="reel-friend-nick">${esc(post.friend_actor_nick)}</span> ${badge} <span class="reel-friend-verb">${verb}</span></span>`;
+      // "+N others" suffix when multiple friends/follows interacted.
+      const fec = Number(post.friend_engagement_count || 0);
+      const others = fec > 1 ? ` <span class="reel-friend-others">+${fec - 1}</span>` : '';
+      return `<span class="reel-friend-label">${avaHtml}<span class="reel-friend-nick">${esc(post.friend_actor_nick)}</span> ${badge} <span class="reel-friend-verb">${verb}</span>${others}</span>`;
     })();
 
     const caption = post.content ? `<div class="reel-caption">${esc(post.content)}</div>` : '';
