@@ -86,13 +86,13 @@ function renderFriendTab () {
 
   el.innerHTML = list.map(f => `
     <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
-      <div style="position:relative;flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center">
+      <div style="position:relative;flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">
         ${fmtAv(f.avatar, f.nickname, 40)}
         <span style="position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;
           background:${presenceColor(f.presence)};border:2px solid #12231d"></span>
       </div>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:14px;color:#e3f6ec">${esc(f.nickname)}</div>
+        <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${esc(f.nickname)}</div>
         <div style="font-size:12px;color:#9dc4b2">${_renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))}</div>
       </div>
       <div style="display:flex;gap:4px">
@@ -116,9 +116,9 @@ function renderPending (el) {
   el.innerHTML = `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin-bottom:8px;letter-spacing:.4px">INCOMING</div>` +
     incoming.map(f => `
       <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
-        <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${fmtAv(f.avatar, f.nickname, 40)}</div>
+        <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${fmtAv(f.avatar, f.nickname, 40)}</div>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:14px;color:#e3f6ec">${esc(f.nickname)}</div>
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${esc(f.nickname)}</div>
           <div style="font-size:12px;color:#9dc4b2">${esc(f.bio||'')}</div>
         </div>
         <div style="display:flex;gap:6px">
@@ -155,9 +155,9 @@ async function searchFriends () {
     el.innerHTML = users.filter(u => u.nickname !== myNick).map(u => {
       const isFriend = _allFriends.some(f => f.nickname === u.nickname);
       return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
-        <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0">${fmtAv(u.avatar, u.nickname, 40)}</div>
+        <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(u.nickname)}',${Number(u.id)||0})" title="View profile">${fmtAv(u.avatar, u.nickname, 40)}</div>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:14px;color:#e3f6ec">${esc(u.nickname)}</div>
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(u.nickname)}',${Number(u.id)||0})" title="View profile">${esc(u.nickname)}</div>
           <div style="font-size:12px;color:#9dc4b2">${esc(u.bio||'')}</div>
         </div>
         ${isFriend
