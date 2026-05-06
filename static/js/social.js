@@ -4327,6 +4327,21 @@ const Social = (() => {
       _reelsActivateGen++;
       return;
     }
+    // Idempotent same-card re-activation: if the requested card is
+    // already current and its video is happily playing, do nothing.
+    // This avoids racing the previous play() promise (a fresh
+    // _reelsActivateGen++ would invalidate it and force a re-play that
+    // briefly stutters the video).
+    if (card === _reelsCurrentCard && !opts.reset) {
+      const _v = card.querySelector('video');
+      if (_v) {
+        if (_v.paused && _reelsUserPausedCard !== card) {
+          // Just kick play(); don't churn through full reactivation.
+          try { _reelsPlayVideo(card, _v, 0, _reelsActivateGen); } catch {}
+        }
+        return;
+      }
+    }
     // Mark this reel as seen for personalisation as soon as the card
     // becomes the active (autoplaying) one. _reportReelSeen handles
     // dedupe + debounced batched POST.
@@ -4589,7 +4604,11 @@ const Social = (() => {
       const rCard = card.getBoundingClientRect();
       const cardCenter = rCard.top + rCard.height / 2;
       const rootCenter = rRoot.top + rRoot.height / 2;
-      if (Math.abs(cardCenter - rootCenter) > rRoot.height * 0.4) return;
+      // Loosened to 0.55 (was 0.4): ended often fires a few frames after
+      // the user has already nudged scroll position slightly; 0.4 was
+      // rejecting legitimate "video just finished" advances on mobile
+      // where touch inertia keeps the snap container drifting.
+      if (Math.abs(cardCenter - rootCenter) > rRoot.height * 0.55) return;
     } catch {}
     const cards = Array.from(snap.querySelectorAll('.reel-card'));
     if (!cards.length) return;
@@ -4954,7 +4973,12 @@ const Social = (() => {
       video.addEventListener('ended', () => {
         card.classList.remove('is-playing');
         if (_currentTab !== 'reels') return;
-        if (_reelsCurrentCard && _reelsCurrentCard !== card) return;
+        // Don't gate on `_reelsCurrentCard !== card`: if the user nudged
+        // the snap container slightly, IO 0.7 may have reassigned
+        // `_reelsCurrentCard` to a neighbour while THIS card was still
+        // technically playing the last frame. _reelsAdvanceFrom has its
+        // own center-distance guard which is the source of truth for
+        // "is this card still the centered one?".
         _reelsAdvanceFrom(card);
       });
       // Tap on video toggles play/pause for THIS card. Browsers natively
