@@ -698,6 +698,15 @@ const Messages = (() => {
       `;
     }
     
+    // Capture scroll position BEFORE insertion — once we add the iframe
+    // wrapper its padding-bottom:56.25% box immediately bumps scrollHeight
+    // by ~270px, which would make the post-insert "near bottom" check
+    // always read false and skip the auto-snap.
+    const _scrollArea = document.getElementById('messages-area');
+    const _wasNearBottomBefore = _scrollArea
+      ? (_scrollArea.scrollHeight - _scrollArea.scrollTop - _scrollArea.clientHeight) < 240
+      : false;
+
     body.insertAdjacentHTML('beforeend', html);
 
     // Discord-style "X" to suppress the embed.
@@ -754,29 +763,21 @@ const Messages = (() => {
     // message bubble grows in size *after* it has been appended. If the
     // user was reading the bottom of the chat the embed pushes the text
     // off-screen — re-snap to bottom whenever a fresh embed lands or one
-    // of its images finishes loading. We treat "near bottom" as ≤120 px
-    // from the floor so casual scroll-up isn't fought by the snap.
+    // of its images finishes loading.
     try {
-      const area = document.getElementById('messages-area');
-      if (area) {
-        const wasNearBottom = (area.scrollHeight - area.scrollTop - area.clientHeight) < 120;
-        if (wasNearBottom) {
-          const snap = () => { area.scrollTop = area.scrollHeight; };
-          requestAnimationFrame(() => { snap(); requestAnimationFrame(snap); });
-          // Re-snap after each <img>/<iframe> in the new embed reports
-          // its final size — those events fire well after insertion.
-          const newEmbed = body.querySelector(':scope > .link-preview:last-child, :scope > .yt-embed:last-child, :scope > .spotify-embed:last-child');
-          if (newEmbed) {
-            newEmbed.querySelectorAll('img,iframe').forEach(el => {
-              const onReady = () => {
-                if ((area.scrollHeight - area.scrollTop - area.clientHeight) < 240) {
-                  area.scrollTop = area.scrollHeight;
-                }
-              };
-              el.addEventListener('load', onReady, { once: true });
-              el.addEventListener('error', onReady, { once: true });
-            });
-          }
+      const area = _scrollArea;
+      if (area && _wasNearBottomBefore) {
+        const snap = () => { area.scrollTop = area.scrollHeight; };
+        requestAnimationFrame(() => { snap(); requestAnimationFrame(snap); });
+        // Re-snap after each <img>/<iframe> in the new embed reports
+        // its final size — those events fire well after insertion.
+        const newEmbed = body.querySelector(':scope > .link-preview:last-child, :scope > .yt-embed:last-child, :scope > .spotify-embed:last-child, :scope > .preview-wrap:last-child');
+        if (newEmbed) {
+          newEmbed.querySelectorAll('img,iframe').forEach(el => {
+            const onReady = () => { area.scrollTop = area.scrollHeight; };
+            el.addEventListener('load', onReady, { once: true });
+            el.addEventListener('error', onReady, { once: true });
+          });
         }
       }
     } catch {}
