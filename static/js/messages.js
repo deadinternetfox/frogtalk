@@ -869,7 +869,7 @@ const Messages = (() => {
       inner = `<div class="audio-msg" id="audio-${msg.id}" data-src="${msg.media_data}" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}">
         <button class="audio-play-btn" onclick="Messages.playInlineAudio(${msg.id},this,event)">▶</button>
         <div class="audio-waves">${waveBars}</div>
-        <div class="audio-meta"><span class="audio-label">Voice</span><span class="audio-duration" id="audio-dur-${msg.id}">0:00</span></div>
+        <div class="audio-meta"><span class="audio-duration" id="audio-dur-${msg.id}">0:00</span></div>
       </div>`;
       _probeAudioDuration(msg.id, msg.media_data);
     } else {
@@ -2262,7 +2262,7 @@ const Messages = (() => {
         html = `<div class="audio-msg" id="audio-${msgId}" data-src="${data.media_data}" data-sender="${UI.escHtml(sender)}" data-time="${time}">
           <button class="audio-play-btn" onclick="Messages.playInlineAudio(${msgId},this,event)">▶</button>
           <div class="audio-waves">${waveBars}</div>
-          <div class="audio-meta"><span class="audio-label">Voice</span><span class="audio-duration" id="audio-dur-${msgId}">0:00</span></div>
+          <div class="audio-meta"><span class="audio-duration" id="audio-dur-${msgId}">0:00</span></div>
         </div>`;
         _probeAudioDuration(msgId, data.media_data);
       } else {

@@ -218,7 +218,7 @@ function finaliseVoiceMemo () {
         <div class="audio-msg att-voice-bubble" data-src="${url}">
           <button type="button" class="audio-play-btn" onclick="_attPreviewPlayVoice(this,event)">▶</button>
           <div class="audio-waves">${waveBars}</div>
-          <div class="audio-meta"><span class="audio-label">Voice</span><span class="audio-duration">${dur}</span></div>
+          <div class="audio-meta"><span class="audio-duration">${dur}</span></div>
         </div>
         ${_voBtn}
       </div>
