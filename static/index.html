@@ -5816,42 +5816,57 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
   background:none;border:none
 }
 .reel-react-emoji:hover{transform:scale(1.25)}
-/* Horizontal long-press picker (Messenger / IG style). Anchors right
-   edge to the heart button and extends to the LEFT across the bottom
-   of the reel card. Right/bottom positions are set inline by
-   openReelReactPicker(); the rest of the visual style lives here. */
+/* Horizontal long-press picker. Visually it's an EXTENSION of the
+   heart button: same icon size, same circular backdrop, same hover
+   feel — just laid out in a row to the left of the heart. No pill
+   wrapper / shadow / opaque background; each emoji is its own little
+   round chip so the row reads as part of the action bar. */
 .reel-react-picker.reel-react-picker-row{
   flex-direction:row;align-items:center;
-  gap:2px;padding:6px 8px;
-  border-radius:999px;
-  background:rgba(18,18,18,.92);
-  border:1px solid rgba(255,255,255,.08);
-  box-shadow:0 8px 28px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.4);
+  gap:6px;padding:0;
+  background:none;border:none;box-shadow:none;backdrop-filter:none;
+  border-radius:0;
   z-index:30;
-  transform-origin:bottom right;
-  transform:scale(.6) translateY(8px);
+  transform-origin:right center;
+  transform:scaleX(.4) translateX(12px);
   opacity:0;
-  transition:transform .18s cubic-bezier(.2,.9,.3,1.4), opacity .18s ease;
+  transition:transform .2s cubic-bezier(.2,.9,.3,1.4), opacity .18s ease;
   pointer-events:auto;
   white-space:nowrap;
   max-width:calc(100vw - 24px)
 }
 .reel-react-picker.reel-react-picker-row.open{
-  transform:scale(1) translateY(0);opacity:1
+  transform:scaleX(1) translateX(0);opacity:1
 }
 .reel-react-picker.reel-react-picker-row .reel-react-emoji{
-  font-size:26px;line-height:1;padding:6px 7px;border-radius:50%;
+  width:44px;height:44px;border-radius:50%;
+  background:rgba(255,255,255,.12);backdrop-filter:blur(4px);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;line-height:1;padding:0;border:none;cursor:pointer;
   transition:transform .14s cubic-bezier(.2,.9,.3,1.4), background .14s ease
 }
 .reel-react-picker.reel-react-picker-row .reel-react-emoji:hover,
 .reel-react-picker.reel-react-picker-row .reel-react-emoji:active{
-  transform:scale(1.35) translateY(-2px);
-  background:rgba(255,255,255,.06)
+  transform:scale(1.18) translateY(-2px);
+  background:rgba(255,255,255,.22)
 }
 @media(max-width:520px){
-  .reel-react-picker.reel-react-picker-row{padding:5px 6px;gap:0}
-  .reel-react-picker.reel-react-picker-row .reel-react-emoji{font-size:23px;padding:5px}
+  .reel-react-picker.reel-react-picker-row{gap:4px}
+  .reel-react-picker.reel-react-picker-row .reel-react-emoji{width:40px;height:40px;font-size:20px}
 }
+/* Tiny reactions summary chip in the author / why-suggested area. */
+.reel-reactions-chip{
+  display:inline-flex;align-items:center;gap:3px;
+  margin-top:3px;padding:2px 8px 2px 5px;
+  background:rgba(0,0,0,.45);backdrop-filter:blur(4px);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:999px;
+  font-size:11.5px;color:#dcdcdc;line-height:1;
+  max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.reel-reactions-chip .rrc-em{font-size:13px;line-height:1;margin-right:1px}
+.reel-reactions-chip .rrc-em + .rrc-em{margin-left:-3px}
+.reel-reactions-chip .rrc-count{margin-left:4px;font-weight:600;color:#fff}
 @media(max-width:520px){
   .reels-scope-bar{padding:8px 10px 5px;gap:6px}
   .rsb-pill{padding:5px 12px;font-size:12.5px}

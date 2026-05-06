@@ -5060,20 +5060,21 @@ const Social = (() => {
       `<button type="button" class="reel-react-emoji" onclick="Social._reelPickEmoji(${postId},'${e}',this)">${e}</button>`
     ).join('');
     card.appendChild(picker);
-    // Position the picker so its right edge lines up with the heart
-    // button and it extends to the left. Computed at runtime so it
-    // adapts to action-bar relayouts on resize.
+    // Position the picker on the SAME horizontal line as the heart
+    // icon, extending to the LEFT, so it visually reads as the heart
+    // button being stretched into a row of reaction options.
     try {
       const cardRect = card.getBoundingClientRect();
-      const btnRect = btn.getBoundingClientRect();
-      // right offset from card right edge -> keep picker right-aligned
-      // to the heart button.
-      const right = Math.max(8, cardRect.right - btnRect.right);
-      const bottom = Math.max(8, cardRect.bottom - btnRect.top + 6);
+      const iconEl = btn.querySelector('.reel-act-icon') || btn;
+      const iconRect = iconEl.getBoundingClientRect();
+      // 8 px gap to the left of the heart icon.
+      const right = Math.max(8, cardRect.right - iconRect.left + 8);
+      const top = Math.max(8, iconRect.top - cardRect.top);
       picker.style.right = `${right}px`;
-      picker.style.bottom = `${bottom}px`;
+      picker.style.top = `${top}px`;
       picker.style.left = 'auto';
-      picker.style.top = 'auto';
+      picker.style.bottom = 'auto';
+      picker.style.height = `${iconRect.height}px`;
     } catch {}
     // Animate in
     requestAnimationFrame(() => picker.classList.add('open'));
@@ -5188,7 +5189,33 @@ const Social = (() => {
     })();
 
     const caption = post.content ? `<div class="reel-caption">${esc(post.content)}</div>` : '';
-    const likeCount = post.like_count ?? post.reaction_count ?? 0;
+    // Reactions summary + my-reaction lookup. Reels endpoint already
+    // returns post.reactions (top emojis with users + counts), so we
+    // can render the user's chosen emoji on the heart button at first
+    // paint instead of waiting for an api roundtrip.
+    const myNickRaw = String(window.State?.user?.nickname || '');
+    const reactionsArr = Array.isArray(post.reactions) ? post.reactions : [];
+    const myReaction = reactionsArr.find(r => {
+      if (!r || !r.emoji) return false;
+      const users = Array.isArray(r.users)
+        ? r.users
+        : String(r.users || '').split(',').map(s => s.trim()).filter(Boolean);
+      return users.includes(myNickRaw);
+    });
+    const myEmoji = myReaction ? String(myReaction.emoji) : '';
+    const heartEmoji = myEmoji || '❤️';
+    const reactionsTotal = reactionsArr.reduce((s, r) => s + Number(r?.count || 0), 0);
+    // Top 3 distinct emojis by count, used as a tiny chip beneath the
+    // friend ribbon ("why this is in your feed" area).
+    const topEmojis = [...reactionsArr]
+      .filter(r => r && r.emoji && Number(r.count || 0) > 0)
+      .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
+      .slice(0, 3)
+      .map(r => String(r.emoji));
+    const reactionsChip = (reactionsTotal > 0 && topEmojis.length)
+      ? `<span class="reel-reactions-chip" aria-label="Reactions">${topEmojis.map(e => `<span class="rrc-em">${esc(e)}</span>`).join('')}<span class="rrc-count">${reactionsTotal}</span></span>`
+      : '';
+    const likeCount = post.like_count ?? post.reaction_count ?? reactionsTotal ?? 0;
     const commentCount = post.comment_count ?? 0;
     const repostCount = post.repost_count ?? 0;
     const postPrivacy = String(post.privacy || 'public').toLowerCase();
@@ -5210,12 +5237,13 @@ const Social = (() => {
           <div class="reel-author-info">
             <span class="reel-author-nick">@${nick}</span>
             ${friendLabel}
+            ${reactionsChip}
           </div>
         </div>
         ${caption}
         <div class="reel-actions">
-          <button class="reel-act-btn ${post.i_liked ? 'liked' : ''}" title="Like (hold for reactions)" onclick="Social.reactReelHeart(event,${post.id},this)" onpointerdown="Social._reelHeartHoldStart(event,${post.id},this)" onpointerup="Social._reelHeartHoldEnd(event,this)" onpointercancel="Social._reelHeartHoldEnd(event,this)" onpointerleave="Social._reelHeartHoldEnd(event,this)" oncontextmenu="event.preventDefault();return false">
-            <div class="reel-act-icon">❤️</div>
+          <button class="reel-act-btn ${myEmoji ? 'liked' : ''}" title="Like (hold for reactions)" data-my-emoji="${esc(myEmoji)}" onclick="Social.reactReelHeart(event,${post.id},this)" onpointerdown="Social._reelHeartHoldStart(event,${post.id},this)" onpointerup="Social._reelHeartHoldEnd(event,this)" onpointercancel="Social._reelHeartHoldEnd(event,this)" onpointerleave="Social._reelHeartHoldEnd(event,this)" oncontextmenu="event.preventDefault();return false">
+            <div class="reel-act-icon reel-like-icon">${esc(heartEmoji)}</div>
             <span class="reel-act-count reel-like-count">${likeCount}</span>
           </button>
           <button class="reel-act-btn" title="Comments" onclick="Social.openReelComments(event,${post.id})">
@@ -5242,29 +5270,39 @@ const Social = (() => {
     // If a long-press just fired the picker, don't ALSO toggle heart on
     // the synthetic click that follows the pointerup.
     if (btn && btn._heartHoldFired) return;
+    const myNick = String(State?.user?.nickname || '');
     const countEl = btn?.querySelector('.reel-like-count');
+    const iconEl = btn?.querySelector('.reel-act-icon');
     const wasLiked = !!btn?.classList.contains('liked');
+    const prevEmoji = String(btn?.dataset?.myEmoji || '');
     const prev = Number(countEl?.textContent || '0');
+    // Optimistic toggle: if user already had ANY reaction, tapping the
+    // heart removes it; otherwise it adds ❤️.
     if (btn && countEl) {
       btn.classList.toggle('liked', !wasLiked);
+      btn.dataset.myEmoji = !wasLiked ? '❤️' : '';
+      if (iconEl) iconEl.textContent = !wasLiked ? '❤️' : '❤️';
       countEl.textContent = String(Math.max(0, prev + (!wasLiked ? 1 : -1)));
       btn.disabled = true;
     }
     try {
-      const res = await api(`/api/wall/posts/${postId}/reactions`, 'POST', { emoji: '❤️' });
+      // If the user previously reacted with a non-heart emoji, the heart
+      // tap should still mean "clear my reaction" — backend toggles by
+      // emoji-key, so send the user's current emoji to remove it, else
+      // send heart to add.
+      const sendEmoji = (wasLiked && prevEmoji) ? prevEmoji : '❤️';
+      const res = await api(`/api/wall/posts/${postId}/reactions`, 'POST', { emoji: sendEmoji });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Failed to like');
       const reactions = Array.isArray(data.reactions) ? data.reactions : [];
-      const heart = reactions.find(r => r && r.emoji === '❤️');
-      const nextCount = Number(heart?.count || 0);
-      const me = String(State?.user?.nickname || '');
-      const nextLiked = heart && Array.isArray(heart.users)
-        ? heart.users.includes(me)
-        : !!data.added;
-      if (btn) btn.classList.toggle('liked', nextLiked);
-      if (countEl) countEl.textContent = String(nextCount);
+      _updateReactionsInCaches(postId, _normalizeReactions(reactions));
+      _updateReelReactionUi(postId, _normalizeReactions(reactions), myNick);
     } catch {
-      if (btn) btn.classList.toggle('liked', wasLiked);
+      if (btn) {
+        btn.classList.toggle('liked', wasLiked);
+        btn.dataset.myEmoji = prevEmoji;
+        if (iconEl) iconEl.textContent = prevEmoji || '❤️';
+      }
       if (countEl) countEl.textContent = String(prev);
     } finally {
       if (btn) btn.disabled = false;
@@ -6693,13 +6731,43 @@ const Social = (() => {
     const card = document.querySelector(`.reel-card[data-post-id="${postId}"]`);
     if (!card) return;
     const total = reactions.reduce((s, r) => s + Number(r.count || 0), 0);
-    const heart = reactions.find(r => r.emoji === '❤️');
-    const heartCount = Number(heart?.count || 0);
-    const meHeart = !!heart?.users?.includes(myNick);
-    const likeBtn = card.querySelector('.reel-act-btn[title="Like"]');
+    // Find the user's current reaction (any emoji — not just ❤️).
+    const mine = reactions.find(r => {
+      const users = Array.isArray(r.users)
+        ? r.users
+        : String(r.users || '').split(',').map(s => s.trim()).filter(Boolean);
+      return r && r.emoji && users.includes(String(myNick || ''));
+    });
+    const myEmoji = mine ? String(mine.emoji) : '';
+    const likeBtn = card.querySelector('.reel-act-btn[title="Like (hold for reactions)"], .reel-act-btn[title="Like"]');
     const likeCountEl = card.querySelector('.reel-like-count');
-    if (likeCountEl) likeCountEl.textContent = String(heartCount);
-    if (likeBtn) likeBtn.classList.toggle('liked', meHeart);
+    const likeIconEl = card.querySelector('.reel-like-icon') || likeBtn?.querySelector('.reel-act-icon');
+    if (likeCountEl) likeCountEl.textContent = String(total);
+    if (likeBtn) {
+      likeBtn.classList.toggle('liked', !!myEmoji);
+      likeBtn.dataset.myEmoji = myEmoji;
+    }
+    if (likeIconEl) likeIconEl.textContent = myEmoji || '❤️';
+    // Refresh the small reactions summary chip in the author area.
+    const info = card.querySelector('.reel-author-info');
+    if (info) {
+      const old = info.querySelector('.reel-reactions-chip');
+      const top3 = [...reactions]
+        .filter(r => r && r.emoji && Number(r.count || 0) > 0)
+        .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
+        .slice(0, 3)
+        .map(r => String(r.emoji));
+      if (total > 0 && top3.length) {
+        const html = `<span class="reel-reactions-chip" aria-label="Reactions">${top3.map(e => `<span class="rrc-em">${esc(e)}</span>`).join('')}<span class="rrc-count">${total}</span></span>`;
+        if (old) {
+          old.outerHTML = html;
+        } else {
+          info.insertAdjacentHTML('beforeend', html);
+        }
+      } else if (old) {
+        old.remove();
+      }
+    }
     card.dataset.reactionCount = String(total);
   }
 
