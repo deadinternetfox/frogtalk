@@ -5294,7 +5294,11 @@ const Social = (() => {
       };
       return `<span class="reel-reactions-stack" aria-label="Recent reactions">${picks.map(bubble).join('')}</span>`;
     })();
-    const likeCount = post.like_count ?? post.reaction_count ?? reactionsTotal ?? 0;
+    // Reaction button shows TOTAL reactions across all emojis — it's a
+    // unified reactions affordance (long-press to pick an emoji), not a
+    // hearts-only counter. `like_count` from the SQL is ❤️-only and was
+    // making the button under-report when users picked other emojis.
+    const likeCount = post.reaction_count ?? reactionsTotal ?? post.like_count ?? 0;
     const commentCount = post.comment_count ?? 0;
     const repostCount = post.repost_count ?? 0;
     const postPrivacy = String(post.privacy || 'public').toLowerCase();
