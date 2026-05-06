@@ -4530,9 +4530,14 @@ async function loadUserWall(nickname) {
         : `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block"><circle cx="11" cy="12" r="8"/><path d="M8 14c.8 1.2 2 2 3 2s2.2-.8 3-2"/><circle cx="8.5" cy="10.5" r=".8" fill="currentColor" stroke="none"/><circle cx="13.5" cy="10.5" r=".8" fill="currentColor" stroke="none"/><path d="M19 4v4M21 6h-4"/></svg>`;
       const reactionBarHtml = `<div class="sf-rx-bar">`
         + (totalReactions > 0
-          ? `<button type="button" class="sf-rx-summary" onclick="showWallReactionDetail(${p.id})" aria-label="See reactions">`
-              + `<span class="sf-rx-emojis">${topEmojis}</span><span class="sf-rx-total">${totalReactions}</span></button>`
-          : `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" onclick="showWallReactionDetail(${p.id})" aria-label="Add reaction" title="Add reaction">${addIcon}</button>`)
+          ? `<span class="sf-rx-hover-wrap" data-post-id="${p.id}" onmouseenter="showWallReactionHover(${p.id}, this)" onmouseleave="scheduleHideWallReactionHover(${p.id}, this)">`
+              + `<button type="button" class="sf-rx-summary" onclick="showWallReactionDetail(${p.id})" aria-label="See reactions">`
+                + `<span class="sf-rx-emojis">${topEmojis}</span><span class="sf-rx-total">${totalReactions}</span>`
+              + `</button>`
+            + `</span>`
+          : `<span class="sf-rx-hover-wrap" data-post-id="${p.id}" onmouseenter="showWallReactionHover(${p.id}, this)" onmouseleave="scheduleHideWallReactionHover(${p.id}, this)">`
+              + `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" onclick="showWallReactionDetail(${p.id})" aria-label="Add reaction" title="Add reaction">${addIcon}</button>`
+            + `</span>`)
         + `</div>`;
 
       // Comments count
@@ -4587,25 +4592,56 @@ function showWallReactionDetail(postId) {
   } catch {}
 }
 
-// Quick reaction picker for wall posts
-function showWallReactionPicker(postId) {
-  const quickEmojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏'];
-  const postEl = document.querySelector(`[data-post-id="${postId}"]`);
-  if (!postEl) return;
-  // Remove existing picker
-  const old = postEl.querySelector('.wall-reaction-picker');
-  if (old) { old.remove(); return; }
-  const myEmoji = postEl.querySelector('.sf-rx-add')?.dataset?.myEmoji || '';
-  const picker = document.createElement('div');
-  picker.className = 'wall-reaction-picker';
-  picker.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;padding:8px;background:#101710;border-radius:10px;border:1px solid #2a3a2a';
-  const removeBtnHtml = myEmoji
-    ? `<button onclick="toggleWallReaction(${postId},'${myEmoji}');this.parentElement.remove()" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:8px;padding:4px 8px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
-    : '';
-  picker.innerHTML = removeBtnHtml + quickEmojis.map(e =>
-    `<button onclick="toggleWallReaction(${postId},'${e}');this.parentElement.remove()" style="background:none;border:1px solid #2a2a2a;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:8px;transition:background .15s" onmouseover="this.style.background='#1a2e1a'" onmouseout="this.style.background='none'">${e}</button>`
-  ).join('');
-  postEl.appendChild(picker);
+// Quick reaction picker for wall posts — shown on hover above the
+// reaction button. Click on the button itself opens the full modal
+// (showWallReactionDetail). The picker auto-hides when the cursor
+// leaves both the wrap and the popover.
+function showWallReactionHover(postId, wrap) {
+  try {
+    if (!wrap) return;
+    const quickEmojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏'];
+    // Cancel any pending hide
+    if (wrap._rxHideTimer) { clearTimeout(wrap._rxHideTimer); wrap._rxHideTimer = null; }
+    let pop = wrap.querySelector(':scope > .wall-reaction-picker');
+    if (pop) return;
+    const myEmoji = wrap.querySelector('.sf-rx-add')?.dataset?.myEmoji || '';
+    pop = document.createElement('div');
+    pop.className = 'wall-reaction-picker';
+    pop.style.cssText = 'position:absolute;bottom:calc(100% + 6px);left:0;display:flex;gap:4px;padding:6px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5);z-index:50;white-space:nowrap';
+    pop.onmouseenter = () => { if (wrap._rxHideTimer) { clearTimeout(wrap._rxHideTimer); wrap._rxHideTimer = null; } };
+    pop.onmouseleave = () => scheduleHideWallReactionHover(postId, wrap);
+    const removeBtn = myEmoji
+      ? `<button type="button" data-emoji="__remove__" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
+      : '';
+    pop.innerHTML = removeBtn + quickEmojis.map(e =>
+      `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:20px;cursor:pointer;padding:2px 6px;border-radius:999px;line-height:1;transition:transform .12s,background .12s" onmouseover="this.style.background='#1a2e1a';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
+    ).join('');
+    pop.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button[data-emoji]');
+      if (!btn) return;
+      ev.stopPropagation();
+      const em = btn.getAttribute('data-emoji');
+      const target = (em === '__remove__') ? myEmoji : em;
+      if (target) toggleWallReaction(postId, target);
+      pop.remove();
+    });
+    // Anchor the wrap so absolute popover positions correctly
+    const cs = getComputedStyle(wrap);
+    if (cs.position === 'static') wrap.style.position = 'relative';
+    wrap.appendChild(pop);
+  } catch {}
+}
+
+function scheduleHideWallReactionHover(postId, wrap) {
+  try {
+    if (!wrap) return;
+    if (wrap._rxHideTimer) clearTimeout(wrap._rxHideTimer);
+    wrap._rxHideTimer = setTimeout(() => {
+      const pop = wrap.querySelector(':scope > .wall-reaction-picker');
+      if (pop) pop.remove();
+      wrap._rxHideTimer = null;
+    }, 180);
+  } catch {}
 }
 
 // Toggle comments section for a wall post
