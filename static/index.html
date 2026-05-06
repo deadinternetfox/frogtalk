@@ -4634,6 +4634,16 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .social-grid-item{position:relative;aspect-ratio:1;overflow:hidden;cursor:pointer;background:#111}
 .social-grid-item img,.social-grid-item video{width:100%;height:100%;object-fit:cover;transition:opacity .15s}
 .social-grid-item:hover img,.social-grid-item:hover video{opacity:.7}
+/* Fallback when the server-side /thumb 404s (missing/old reel): show a
+   subtle frog-tinted gradient instead of an empty black tile so the
+   grid still reads as "video" via the corner ▶ badge. */
+.social-grid-item.ft-thumb-missing{
+  background:linear-gradient(135deg,#1d4a2e,#0f2018);
+}
+.social-grid-item.ft-thumb-missing::before{
+  content:'🐸';position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:center;font-size:30px;opacity:.55;pointer-events:none
+}
 .social-grid-video-ico{
   position:absolute; top:6px; right:6px; color:#fff; font-size:11px;
   background:rgba(0,0,0,.65); padding:2px 6px; border-radius:4px;

@@ -5428,12 +5428,26 @@ const Social = (() => {
         return;
       }
 
-      // Grid view for profile reels
+      // Grid view for profile reels.
+      // We render lightweight <img> thumbnails (the server-generated
+      // /thumb JPG, mid-frame, cached on disk) instead of <video>
+      // elements. This drops the per-tile socket cost from one HTTP
+      // range-request per video to a single tiny image, eliminates the
+      // canvas-capture race that produced the "all-black" / shimmering
+      // glitch, and lets the grid scroll smoothly even with 50+ reels.
+      // The actual video opens via openSharedReel on click.
       _disposeMediaIn(container);
       container.innerHTML = `<div class="social-grid">${posts.map(p => {
+        const thumb = esc(_authMediaThumb(p.media_data || ''));
+        const isMine = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
+        const delBtn = isMine
+          ? `<button type="button" class="social-media-del-btn" title="Delete" aria-label="Delete reel" onclick="event.stopPropagation();Social.promptDeletePostMedia(${p.id})">✕</button>`
+          : '';
         return `
-          <div class="social-grid-item is-video" onclick="Social.openSharedReel(${p.id})">
-            <video src="${esc(_authMediaSrc(p.media_data || ''))}" poster="${esc(_authMediaThumb(p.media_data || ''))}" muted playsinline preload="auto"></video>
+          <div class="social-grid-item is-video ft-poster-ready" onclick="Social.openSharedReel(${p.id})">
+            <img src="${thumb}" alt="" loading="lazy" decoding="async"
+                 onerror="this.style.display='none';this.parentNode.classList.add('ft-thumb-missing')">
+            ${delBtn}
             <span class="social-grid-video-ico">▶</span>
             <div class="social-grid-overlay">
               <span>❤️ ${p.reaction_count || 0}</span>
@@ -5441,7 +5455,6 @@ const Social = (() => {
             </div>
           </div>`;
       }).join('')}</div>`;
-      try { _hydrateVideoThumbs(container); } catch {}
     } catch {
       if (!_isProfileTabLoadCurrent('reels', loadToken)) return;
       container.innerHTML = _socialErrorHTML('Could not load reels', "Social.switchProfileTab('reels')", { ico: '🎞️' });
