@@ -4254,11 +4254,13 @@ const Social = (() => {
           // `loose` mode (called from scrollend / settle timer): the snap
           // is already committed, so accept the closest card no matter
           // how it's measured. `strict` mode (mid-fling rAF tick): only
-          // activate when a card is dominantly centered (≤ 50% of root
-          // height) so we don't keep flipping during the ride.
+          // activate when a card is dominantly centered (≤ 30% of root
+          // height) so we don't pre-activate during a still-moving fling
+          // (which would call play() before the gesture settles, and the
+          // browser would reject autoplay → user has to tap to start).
           if (!best) return null;
           if (loose) return best;
-          if (bestDist <= rRoot.height * 0.5) return best;
+          if (bestDist <= rRoot.height * 0.3) return best;
           return null;
         };
         const tryActivate = (settled = false) => {
@@ -4266,18 +4268,6 @@ const Social = (() => {
           const c = pickCenteredCard(settled);
           if (!c) return;
           if (c !== _reelsCurrentCard) {
-            // Belt-and-suspenders: pause every other reel video before
-            // activating the new card. _reelsActivateCard's own pause
-            // loop covers this, but a stale activation from IO could
-            // re-promise a play on the outgoing video a frame later;
-            // forcing mute+pause here first guarantees no audio bleed
-            // while the user scrolls between reels.
-            try {
-              snap.querySelectorAll('.reel-card video').forEach(v => {
-                if (v.closest('.reel-card') === c) return;
-                try { v.muted = true; v.pause(); } catch {}
-              });
-            } catch {}
             _reelsActivateCard(c, { reset: false, forcePlay: true });
             return;
           }
@@ -4288,9 +4278,11 @@ const Social = (() => {
           // "scroll down, video paused, no autoplay".
           if (c.classList.contains('reel-end-card')) return;
           const v = c.querySelector('video');
-          if (!v || !v.paused) return;
+          if (!v) return;
           if (_reelsUserPausedCard === c) return; // user explicitly paused
-          try { _reelsPlayVideo(c, v, 0, _reelsActivateGen); } catch {}
+          if (v.paused) {
+            try { _reelsPlayVideo(c, v, 0, _reelsActivateGen); } catch {}
+          }
         };
         let scrollRaf = 0;
         let settleTimer = 0;
