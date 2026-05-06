@@ -4238,7 +4238,7 @@ const Social = (() => {
 
       if (snap) {
         _reelsScrollSnap = snap;
-        const pickCenteredCard = () => {
+        const pickCenteredCard = (loose = false) => {
           const cards = snap.querySelectorAll('.reel-card');
           if (!cards.length) return null;
           const rRoot = snap.getBoundingClientRect();
@@ -4251,17 +4251,33 @@ const Social = (() => {
             const d = Math.abs(cy - center);
             if (d < bestDist) { bestDist = d; best = c; }
           });
-          // Only activate if the centered card is reasonably close to
-          // the viewport center (≤ 30% of root height) — prevents
-          // mid-fling activation flicker.
-          if (best && bestDist <= rRoot.height * 0.3) return best;
+          // `loose` mode (called from scrollend / settle timer): the snap
+          // is already committed, so accept the closest card no matter
+          // how it's measured. `strict` mode (mid-fling rAF tick): only
+          // activate when a card is dominantly centered (≤ 50% of root
+          // height) so we don't keep flipping during the ride.
+          if (!best) return null;
+          if (loose) return best;
+          if (bestDist <= rRoot.height * 0.5) return best;
           return null;
         };
-        const tryActivate = () => {
+        const tryActivate = (settled = false) => {
           if (_reelsIsSeekLocked()) return;
-          const c = pickCenteredCard();
+          const c = pickCenteredCard(settled);
           if (!c) return;
           if (c !== _reelsCurrentCard) {
+            // Belt-and-suspenders: pause every other reel video before
+            // activating the new card. _reelsActivateCard's own pause
+            // loop covers this, but a stale activation from IO could
+            // re-promise a play on the outgoing video a frame later;
+            // forcing mute+pause here first guarantees no audio bleed
+            // while the user scrolls between reels.
+            try {
+              snap.querySelectorAll('.reel-card video').forEach(v => {
+                if (v.closest('.reel-card') === c) return;
+                try { v.muted = true; v.pause(); } catch {}
+              });
+            } catch {}
             _reelsActivateCard(c, { reset: false, forcePlay: true });
             return;
           }
@@ -4282,14 +4298,19 @@ const Social = (() => {
           if (scrollRaf) return;
           scrollRaf = requestAnimationFrame(() => {
             scrollRaf = 0;
-            tryActivate();
+            tryActivate(false);
           });
           if (settleTimer) clearTimeout(settleTimer);
-          settleTimer = setTimeout(() => { settleTimer = 0; tryActivate(); }, 140);
+          // Settle timer is the fallback for browsers where `scrollend`
+          // never fires (older iOS Safari, some Android WebViews). Once
+          // 140ms passes with no further scroll events, treat the layout
+          // as committed and run a *loose* activate so the closest card
+          // wins regardless of pixel-precise centering.
+          settleTimer = setTimeout(() => { settleTimer = 0; tryActivate(true); }, 140);
         };
         const onScrollEnd = () => {
           if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
-          tryActivate();
+          tryActivate(true);
         };
         snap._reelsOnScroll = onScroll;
         snap._reelsOnScrollEnd = onScrollEnd;
