@@ -4044,7 +4044,7 @@ const Social = (() => {
       const _entry = _reelsCache.get(`${_scope}:${_sort}`);
       if (_entry && _cacheFresh(_entry) && Array.isArray(_entry.posts) && _entry.posts.length) {
         _teardownReels();
-        const cards = _entry.posts.map(p => _renderReelCard(p)).join('');
+        const cards = _entry.posts.map(p => _renderReelCard(p)).join('') + _reelsEndCardHtml(_scope);
         const scopeBar = `
           <div class="reels-scope-bar">
             <button class="rsb-pill ${_scope==='for_you'?'active':''}" onclick="Social.switchReelsScope('for_you')">✨ For You</button>
@@ -4107,7 +4107,7 @@ const Social = (() => {
     const reelsFresh = _cacheFresh(cachedEntry);
     const cachedPosts = _cacheUsable(cachedEntry) ? (cachedEntry.posts || []) : null;
     if (cachedPosts && cachedPosts.length) {
-      const cachedCards = cachedPosts.map(p => _renderReelCard(p)).join('');
+      const cachedCards = cachedPosts.map(p => _renderReelCard(p)).join('') + _reelsEndCardHtml(scope);
       content.innerHTML = scopeBar + `
         <div class="reels-stage" id="reels-stage">
           <div class="reels-snap" id="reels-snap">${cachedCards}</div>
@@ -4157,7 +4157,7 @@ const Social = (() => {
         return;
       }
 
-      const cards = posts.map(p => _renderReelCard(p)).join('');
+      const cards = posts.map(p => _renderReelCard(p)).join('') + _reelsEndCardHtml(scope);
       _updateTabLoadUi(loadUi, 74, 'Rendering reels', `${posts.length} reels loaded`);
       content.innerHTML = scopeBar + `
         <div class="reels-stage is-loading" id="reels-stage">
@@ -4255,8 +4255,38 @@ const Social = (() => {
     }
   }
 
+  function reelsBackToStart() {
+    const snap = document.getElementById('reels-snap');
+    if (!snap) return;
+    const first = snap.querySelector('.reel-card:not(.reel-end-card)');
+    if (!first) return;
+    // Use instant scroll, not smooth — a smooth scroll across many cards
+    // fires IO + scroll listeners for every card it passes through, each
+    // racing _reelsActivateCard and leaving videos in inconsistent states
+    // (visible symptom: "all reels broken after the auto-loop"). Instant
+    // jumps land in one frame so only the first card activates.
+    try { snap.scrollTo({ top: 0, left: 0, behavior: 'auto' }); } catch { snap.scrollTop = 0; }
+    setTimeout(() => {
+      if (_currentTab !== 'reels') return;
+      try { _reelsActivateCard(first, { reset: true, forcePlay: true }); } catch {}
+    }, 60);
+  }
+
   function _reelsActivateCard(card, opts = {}) {
     if (!card || !card.classList.contains('reel-card')) return;
+    // End card is a sentinel "you've seen them all" placeholder — no
+    // video, no autoplay, no seen-tracking. Just mark it as the current
+    // card so IO cleanup leaves it alone, and pause whatever was playing.
+    if (card.classList.contains('reel-end-card')) {
+      document.querySelectorAll('.reels-snap .reel-card video').forEach(v => {
+        try { v.muted = true; v.pause(); } catch {}
+      });
+      document.querySelectorAll('.reels-snap .reel-card.is-playing').forEach(c => c.classList.remove('is-playing'));
+      _reelsCurrentCard = card;
+      _reelsCurrentVideo = null;
+      _reelsActivateGen++;
+      return;
+    }
     // Mark this reel as seen for personalisation as soon as the card
     // becomes the active (autoplaying) one. _reportReelSeen handles
     // dedupe + debounced batched POST.
@@ -4386,7 +4416,7 @@ const Social = (() => {
   function _reelsAutoplayVisible() {
     const snap = document.getElementById('reels-snap');
     if (!snap) return;
-    const firstCard = snap.querySelector('.reel-card');
+    const firstCard = snap.querySelector('.reel-card:not(.reel-end-card)');
     if (firstCard) _reelsActivateCard(firstCard, { reset: true });
   }
 
@@ -4524,7 +4554,12 @@ const Social = (() => {
     const cards = Array.from(snap.querySelectorAll('.reel-card'));
     if (!cards.length) return;
     const idx = Math.max(0, cards.indexOf(card));
-    const next = cards[idx + 1] || cards[0] || null;
+    // When the last *real* reel ends, advance to the end card (a single-
+    // card scroll) instead of wrapping to cards[0] — wrapping across the
+    // whole list with smooth scroll fires IO/scroll listeners for every
+    // intermediate reel, which used to leave videos in a broken state.
+    // The end card has no video → no further auto-advance from there.
+    const next = cards[idx + 1] || null;
     if (!next) return;
     if (next === card) {
       const v = card.querySelector('video');
@@ -4972,6 +5007,29 @@ const Social = (() => {
         _updateReelReactionUi(postId, reactions, myNick);
       }
     } catch {}
+  }
+
+  function _reelsEndCardHtml(scope) {
+    const label = scope === 'friends'
+      ? 'You\u2019re caught up with friend reels.'
+      : (scope === 'for_you'
+          ? 'You\u2019re all caught up with your For You reels.'
+          : 'You\u2019ve seen every reel here.');
+    const sub = scope === 'for_you'
+      ? 'Try \u201CAll\u201D for fresh picks, or watch again from the start.'
+      : 'Swipe up to watch again from the start.';
+    return `
+      <div class="reel-card reel-end-card" data-reel-end="1" aria-label="End of reels">
+        <div class="reel-end-inner">
+          <div class="reel-end-emoji">\u2728</div>
+          <div class="reel-end-title">${esc(label)}</div>
+          <div class="reel-end-sub">${esc(sub)}</div>
+          <div class="reel-end-actions">
+            <button type="button" class="reel-end-btn primary" onclick="Social.reelsBackToStart()">\ud83d\udd01 Watch again</button>
+            ${scope !== 'all' ? '<button type="button" class="reel-end-btn" onclick="Social.switchReelsScope(\'all\')">\ud83c\udf10 Browse All</button>' : ''}
+          </div>
+        </div>
+      </div>`;
   }
 
   function _renderReelCard(post) {
@@ -8639,6 +8697,7 @@ const Social = (() => {
     toggleReelMute, toggleReelPlayback, reactReelHeart, openReelComments,
     openSharedReel,
     openReelReactPicker, _reelPickEmoji,
+    reelsBackToStart,
     // Activity / notifications
     loadActivity, markAllActivityRead, openActivityItem,
     handleSocialNotification, refreshActivityBadge, _onLogin, _onLogout,
