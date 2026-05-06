@@ -212,6 +212,72 @@ const Social = (() => {
       if (!postId) return;
       showReactPicker(ev, postId);
     });
+    // Hover quick-pick: float a small emoji row above the button. Click
+    // on the button itself opens the full picker modal (handled above).
+    const QUICK = ['❤️','👍','😂','😮','😢','🔥','🐸','👏'];
+    const showHover = (btn) => {
+      try {
+        if (!btn || btn.dataset.rxHoverOpen === '1') return;
+        const postId = Number(btn.dataset.postId || btn.closest('[data-post-id]')?.dataset.postId || 0);
+        if (!postId) return;
+        // Cancel any pending hides on this button
+        if (btn._rxHideTimer) { clearTimeout(btn._rxHideTimer); btn._rxHideTimer = null; }
+        // Don't double-render
+        if (btn.querySelector(':scope > .sf-rx-quick')) return;
+        btn.dataset.rxHoverOpen = '1';
+        const myEmoji = btn.dataset.myEmoji || '';
+        const pop = document.createElement('div');
+        pop.className = 'sf-rx-quick';
+        pop.style.cssText = 'position:absolute;bottom:calc(100% + 6px);left:0;display:flex;gap:4px;padding:6px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5);z-index:50;white-space:nowrap';
+        const removeChip = myEmoji
+          ? `<button type="button" data-emoji="__remove__" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
+          : '';
+        pop.innerHTML = removeChip + QUICK.map(e =>
+          `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:20px;cursor:pointer;padding:2px 6px;border-radius:999px;line-height:1;transition:transform .12s,background .12s" onmouseover="this.style.background='#1a2e1a';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
+        ).join('');
+        pop.addEventListener('mouseenter', () => {
+          if (btn._rxHideTimer) { clearTimeout(btn._rxHideTimer); btn._rxHideTimer = null; }
+        });
+        pop.addEventListener('mouseleave', () => scheduleHide(btn));
+        pop.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          ev.preventDefault();
+          const tb = ev.target.closest('button[data-emoji]');
+          if (!tb) return;
+          const em = tb.getAttribute('data-emoji');
+          const target = (em === '__remove__') ? myEmoji : em;
+          if (target) reactPost(ev, postId, target);
+          pop.remove();
+          delete btn.dataset.rxHoverOpen;
+        });
+        // Anchor positioning
+        const cs = getComputedStyle(btn);
+        if (cs.position === 'static') btn.style.position = 'relative';
+        btn.appendChild(pop);
+      } catch {}
+    };
+    const scheduleHide = (btn) => {
+      try {
+        if (!btn) return;
+        if (btn._rxHideTimer) clearTimeout(btn._rxHideTimer);
+        btn._rxHideTimer = setTimeout(() => {
+          const pop = btn.querySelector(':scope > .sf-rx-quick');
+          if (pop) pop.remove();
+          delete btn.dataset.rxHoverOpen;
+          btn._rxHideTimer = null;
+        }, 180);
+      } catch {}
+    };
+    document.addEventListener('mouseenter', (ev) => {
+      const btn = ev.target?.closest?.('.sf-rx-main');
+      if (!btn) return;
+      showHover(btn);
+    }, true);
+    document.addEventListener('mouseleave', (ev) => {
+      const btn = ev.target?.closest?.('.sf-rx-main');
+      if (!btn) return;
+      scheduleHide(btn);
+    }, true);
   }
 
   function _authMediaSrc(raw) {
