@@ -3694,10 +3694,16 @@ const Social = (() => {
         return;
       }
 
+      _disposeMediaIn(container);
       container.innerHTML = `${toggleHtml}<div class="social-grid">${mediaPosts.map(p => {
         const isVideo = p.media_type && p.media_type.startsWith('video/');
+        // Use the lightweight server-side /thumb JPG for video tiles
+        // (same fix as the reels grid) — eliminates the canvas-capture
+        // race that produced flickering/black previews and drops the
+        // socket cost from one video range-request per tile to a tiny
+        // image. The full video opens via viewPostDetail on click.
         const thumb = isVideo
-          ? `<video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" muted preload="metadata"></video>`
+          ? `<img src="${esc(_authMediaThumb(p.media_data))}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none';this.parentNode.classList.add('ft-thumb-missing')">`
           : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
         return `
           <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
