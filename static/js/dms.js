@@ -378,7 +378,7 @@ function _renderDMPreview(msgId, preview) {
   let html = '';
   if (preview.type === 'youtube' && preview.video_id) {
     html = `
-      <div class="yt-embed" style="margin-top:8px;max-width:480px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+      <div class="yt-embed" style="margin-top:8px;max-width:560px;width:100%;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
         <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
           <iframe
             src="https://www.youtube.com/embed/${esc(preview.video_id)}"
@@ -410,8 +410,8 @@ function _renderDMPreview(msgId, preview) {
       </div>`;
   } else {
     html = `
-      <a href="${esc(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:400px;box-shadow:0 2px 12px rgba(0,0,0,.35)">
-        ${preview.image ? `<img src="${esc(preview.image)}" alt="" style="width:100%;max-height:200px;object-fit:cover" onerror="this.style.display='none'">` : ''}
+      <a href="${esc(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:480px;width:100%;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+        ${preview.image ? `<img src="${esc(preview.image)}" alt="" style="width:100%;max-height:260px;object-fit:cover" onerror="this.style.display='none'">` : ''}
         <div style="padding:10px;background:rgba(12,28,22,.52)">
           <div style="font-size:11px;color:#85a89a;display:flex;align-items:center;gap:4px;margin-bottom:4px">
             ${preview.favicon ? `<img src="${esc(preview.favicon)}" style="width:14px;height:14px;border-radius:2px" onerror="this.style.display='none'">` : ''}
