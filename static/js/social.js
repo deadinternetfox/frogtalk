@@ -6499,6 +6499,36 @@ const Social = (() => {
     const postPrivacy = String(p.privacy || 'public').toLowerCase();
     const shareEnabled = Number(p.share_enabled ?? 1) === 1;
     const canAudienceShare = (postPrivacy === 'public' || postPrivacy === 'followers');
+
+    // Inline link embed — when the post is text-only and the body contains
+    // a YouTube or Spotify URL, render an embed underneath the text so the
+    // post looks like a "shared video/track" card instead of bare text +
+    // blue link. Mirrors what chat link previews do.
+    let linkEmbedHtml = '';
+    try {
+      if (!mediaHtml && postText) {
+        const urlMatch = postText.match(/https?:\/\/[^\s<>"']+/);
+        if (urlMatch) {
+          const u = urlMatch[0];
+          const m = _parseMusicTrack(u);
+          if (m && m.embed && m.provider === 'youtube') {
+            linkEmbedHtml = `<div class="sf-link-embed sf-yt-embed" style="margin-top:10px;max-width:560px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027,#102018);border:1px solid #2f5548">
+              <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
+                <iframe src="${esc(m.embed)}" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>
+              </div>
+            </div>`;
+          } else if (m && m.embed && m.provider === 'spotify') {
+            linkEmbedHtml = `<div class="sf-link-embed sf-sp-embed" style="margin-top:10px;max-width:480px;border-radius:12px;overflow:hidden">
+              <iframe src="${esc(m.embed)}?theme=0" loading="lazy" width="100%" height="152" frameBorder="0" allow="autoplay;clipboard-write;encrypted-media;fullscreen;picture-in-picture" style="border-radius:12px"></iframe>
+            </div>`;
+          } else if (m && m.embed && m.provider === 'soundcloud') {
+            linkEmbedHtml = `<div class="sf-link-embed sf-sc-embed" style="margin-top:10px;max-width:480px;border-radius:8px;overflow:hidden">
+              <iframe src="${esc(m.embed)}" loading="lazy" width="100%" height="166" frameBorder="0" allow="autoplay" style="border-radius:8px"></iframe>
+            </div>`;
+          }
+        }
+      }
+    } catch {}
     const isRepostCard = String(p.feed_kind || 'post') === 'repost';
     const repostByNick = String(p.repost_by_nickname || '').trim();
     const repostByEsc = esc(repostByNick || p.nickname || '');
@@ -6540,6 +6570,7 @@ const Social = (() => {
           onclick="event.stopPropagation();Social.openPostMenu(this)">⋯</button>
       </div>
       ${postText ? `<div class="sf-post-text ${isMusicPost ? 'is-music-caption' : ''}">${_formatPostContent(postText)}</div>` : ''}
+      ${linkEmbedHtml}
       ${mediaHtml}
       <div class="sf-post-actions">
         ${_renderReactionBar(reactions, State.user?.nickname || '', p.id)}
@@ -7763,6 +7794,12 @@ const Social = (() => {
       const res = await api('/api/wall/posts', 'POST', body);
       if (res.ok) {
         const isVideo = (_newPostFile?.type || _newPostMediaType || '').startsWith('video/');
+        // Invalidate caches so the new post shows up immediately on the
+        // wall / feed without needing a logout-relogin.
+        try {
+          if (State.user?.nickname) _invalidateProfilePostsCache(State.user.nickname);
+          _feedCache = null;
+        } catch {}
         if (hasAttachedMedia) {
           try {
             const ov = _ensureStoryUploadOverlay();
@@ -7782,7 +7819,11 @@ const Social = (() => {
         } else if (_currentTab === 'profile') {
           loadProfile(State.user?.nickname);
         } else if (_currentTab === 'feed') {
-          loadFeed();
+          loadFeed({ force: true });
+        } else {
+          // User is on Explore / Reels / Music etc — still bounce them
+          // to their wall so they can see the post they just made.
+          switchTab('profile');
         }
       } else {
         const data = await res.json();
