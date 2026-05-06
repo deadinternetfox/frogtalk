@@ -5855,37 +5855,44 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
   .reel-react-picker.reel-react-picker-row .reel-react-emoji{width:40px;height:40px;font-size:20px}
 }
 /* Story-views style stacked reactor bubbles. Each bubble is a small
-   avatar with the user's emoji as a corner badge. Stacks overlap by
-   ~8px so 3 bubbles fit in ~52px width. */
+   avatar with the user's emoji as a corner badge. Stacks overlap so
+   3 bubbles fit in a compact strip. */
 .reel-reactions-stack{
   display:inline-flex;align-items:center;
   margin-top:4px;padding:0;
   isolation:isolate;
+  line-height:0;
 }
 .reel-reactions-stack .rrs-bubble{
   position:relative;display:inline-block;
-  width:22px;height:22px;border-radius:50%;
-  margin-left:-7px;
-  box-shadow:0 0 0 1.5px rgba(0,0,0,.65);
-  background:#0a0a0a;
+  width:20px;height:20px;min-width:20px;min-height:20px;
+  border-radius:50%;
+  margin-left:-6px;
+  box-sizing:border-box;
+  border:1.5px solid rgba(255,255,255,.18);
+  background:#1a1a1a;
+  overflow:visible;
+  flex:0 0 auto;
 }
 .reel-reactions-stack .rrs-bubble:first-child{margin-left:0}
 .reel-reactions-stack .rrs-bubble > img,
 .reel-reactions-stack .rrs-bubble > span{
-  width:22px !important;height:22px !important;
-  border-radius:50%;display:block;object-fit:cover
+  width:100% !important;height:100% !important;
+  border-radius:50%;display:block;object-fit:cover;
+  aspect-ratio:1/1;
+  vertical-align:top;
 }
 .reel-reactions-stack .rrs-emoji{
-  position:absolute;right:-4px;bottom:-4px;
-  width:14px !important;height:14px !important;
+  position:absolute;right:-3px;bottom:-3px;
+  width:12px !important;height:12px !important;min-width:12px;min-height:12px;
   border-radius:50%;
-  background:rgba(10,10,10,.92);
+  background:#0a0a0a;
   display:inline-flex;align-items:center;justify-content:center;
-  font-size:9px;line-height:1;
-  box-shadow:0 0 0 1.5px rgba(0,0,0,.7);
-  pointer-events:none
+  font-size:8px;line-height:1;
+  border:1px solid rgba(255,255,255,.15);
+  pointer-events:none;
+  aspect-ratio:1/1;
 }
-.reel-reactions-stack .rrs-bubble:hover{transform:scale(1.08);transition:transform .12s}
 @media(max-width:520px){
   .reels-scope-bar{padding:8px 10px 5px;gap:6px}
   .rsb-pill{padding:5px 12px;font-size:12.5px}
