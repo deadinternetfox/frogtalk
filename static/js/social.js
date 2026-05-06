@@ -1161,8 +1161,10 @@ const Social = (() => {
           const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12${_reelsExcludeParam()}`).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
+            // Cache prefetched posts but DO NOT mark them as 'shown' — the
+            // user hasn't actually seen them yet. Only the autoplay
+            // observer should populate _reelsShownSession.
             if (Array.isArray(d.posts)) {
-              _reelsRememberPosts(d.posts);
               _cacheSet(_reelsCache, _rrKey, { ts: Date.now(), posts: d.posts });
             }
           }
@@ -1259,8 +1261,8 @@ const Social = (() => {
           const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12${_reelsExcludeParam()}`).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
+            // Same as bg-prefetch: cache only, don't poison exclude set.
             if (Array.isArray(d.posts)) {
-              _reelsRememberPosts(d.posts);
               _cacheSet(_reelsCache, `${_reelsScope}:${_reelsSort}`, { ts: Date.now(), posts: d.posts });
             }
           }
@@ -3737,8 +3739,9 @@ const Social = (() => {
   let _reelsSeenFlushTimer = null;
   function _reelsExcludeParam() {
     if (!_reelsShownSession.size) return '';
-    // Keep the URL bounded — last 100 IDs are plenty for the de-dupe.
-    const ids = Array.from(_reelsShownSession).slice(-100);
+    // Cap at 50 most-recent IDs — keeps URL short and prevents the
+    // backend from filtering down to nothing on long sessions.
+    const ids = Array.from(_reelsShownSession).slice(-50);
     return ids.length ? `&exclude=${encodeURIComponent(ids.join(','))}` : '';
   }
   function _reelsRememberPosts(posts) {
@@ -4135,7 +4138,9 @@ const Social = (() => {
       _updateTabLoadUi(loadUi, 68, 'Processing reels', 'Parsing reel data…');
       const data = res && res.ok ? await res.json() : { posts: [] };
       const posts = data.posts || [];
-      _reelsRememberPosts(posts);
+      // Note: do NOT mark posts as shown here. _reportReelSeen() driven
+      // by the IntersectionObserver / autoplay path is the single source
+      // of truth for what the user has actually viewed.
       _cacheSet(_reelsCache, cacheKey, { ts: Date.now(), posts });
 
       if (posts.length === 0) {

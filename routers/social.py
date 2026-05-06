@@ -1141,14 +1141,23 @@ async def get_reels(
             )
             seen_pass = False
             if not posts and offset == 0:
-                # Nothing unseen — fall back to scored list including seen so
-                # the user always has reels to scroll. Seen ones get a
-                # negative penalty inside the SQL so fresh content still wins
-                # if any is left.
+                # Tier 1 fallback: include seen reels (penalised so any
+                # remaining unseen wins). DROP exclude IDs here — if the
+                # client sent every reel as 'shown' there'd be nothing
+                # left to return otherwise.
                 posts = await run_in_threadpool(
                     db.get_personalized_reels, uid,
                     scope=scope, limit=limit, offset=offset,
-                    include_seen=True, exclude_post_ids=excl_ids,
+                    include_seen=True, exclude_post_ids=None,
+                )
+                seen_pass = True
+            if not posts and offset == 0 and scope != "all":
+                # Tier 2 fallback: widen scope to 'all' so the user always
+                # sees something even with no friends/follows yet.
+                posts = await run_in_threadpool(
+                    db.get_personalized_reels, uid,
+                    scope="all", limit=limit, offset=offset,
+                    include_seen=True, exclude_post_ids=None,
                 )
                 seen_pass = True
         else:

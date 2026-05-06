@@ -6955,22 +6955,22 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
         fids_csv = ",".join(str(i) for i in friend_ids) if friend_ids else "-1"
         aff_csv  = ",".join(str(i) for i in affinity_ids) if affinity_ids else "-1"
 
-        score_expr = f"""(
-            5.0  * (SELECT COUNT(*) FROM wall_post_reactions wpr_a
-                    WHERE wpr_a.post_id=wp.id AND wpr_a.user_id IN ({aff_csv}))
-          + 3.0  * (SELECT COUNT(*) FROM wall_reposts wr_a
-                    WHERE wr_a.post_id=wp.id AND wr_a.user_id IN ({aff_csv}))
-          + (CASE WHEN wp.user_id IN ({fids_csv}) THEN 8.0 ELSE 0.0 END)
-          + (CASE WHEN wp.user_id IN ({aff_csv}) AND wp.user_id NOT IN ({fids_csv})
-                  THEN 4.0 ELSE 0.0 END)
-          + 0.5 * (SELECT COUNT(*) FROM wall_post_reactions wpr_l
-                   WHERE wpr_l.post_id=wp.id AND wpr_l.emoji='❤️')
-          + 0.3 * (wp.reaction_count - (SELECT COUNT(*) FROM wall_post_reactions wpr_l2
-                   WHERE wpr_l2.post_id=wp.id AND wpr_l2.emoji='❤️'))
+        # Pre-aggregate the per-post counters that drive the score via three
+        # tiny derived tables (filtered to the affinity set / heart emoji)
+        # rather than five correlated subqueries per row. This keeps the
+        # planner's cost roughly O(rows-in-narrow-tables) instead of
+        # O(candidate-reels × subqueries).
+        score_expr = """(
+            5.0 * COALESCE(ar_aff.c, 0)
+          + 3.0 * COALESCE(rp_aff.c, 0)
+          + (CASE WHEN wp.user_id IN (FIDS) THEN 8.0 ELSE 0.0 END)
+          + (CASE WHEN wp.user_id IN (AIDS) AND wp.user_id NOT IN (FIDS) THEN 4.0 ELSE 0.0 END)
+          + 0.5 * COALESCE(hc.c, 0)
+          + 0.3 * (wp.reaction_count - COALESCE(hc.c, 0))
           + 0.6 * wp.repost_count
           + 0.4 * wp.comment_count
           + MIN(8.0, 12.0 / (((julianday('now') - julianday(wp.created_at)) * 24.0) + 4.0))
-        )"""
+        )""".replace("FIDS", fids_csv).replace("AIDS", aff_csv)
 
         seen_filter = "" if include_seen else \
             f" AND NOT EXISTS (SELECT 1 FROM reels_seen rs WHERE rs.user_id={int(viewer_id)} AND rs.post_id=wp.id)"
@@ -6988,9 +6988,8 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
         else:
             scope_filter = ""
 
-        # Recency tie-break only matters when scores match. We add a tiny
-        # random jitter via wp.id mod prime so consecutive ties don't always
-        # surface the same reel order across requests.
+        # When include_seen=True we still want unseen reels to win, so apply
+        # a -50 penalty for already-seen rows. Bound parameter for safety.
         sort_seen_penalty = "" if not include_seen else \
             " - (CASE WHEN EXISTS (SELECT 1 FROM reels_seen rs2 WHERE rs2.user_id=? AND rs2.post_id=wp.id) THEN 50.0 ELSE 0.0 END)"
 
@@ -6999,13 +6998,28 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
             params.append(viewer_id)
 
         sql = f"""
+            WITH ar_aff AS (
+                SELECT post_id, COUNT(*) AS c FROM wall_post_reactions
+                WHERE user_id IN ({aff_csv})
+                GROUP BY post_id
+            ),
+            rp_aff AS (
+                SELECT post_id, COUNT(*) AS c FROM wall_reposts
+                WHERE user_id IN ({aff_csv})
+                GROUP BY post_id
+            ),
+            hc AS (
+                SELECT post_id, COUNT(*) AS c FROM wall_post_reactions
+                WHERE emoji='❤️'
+                GROUP BY post_id
+            )
             SELECT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
                    wp.privacy, wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
                    1 AS has_media,
                    u.nickname, u.avatar,
                    wp.reaction_count AS reaction_count,
-                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji='❤️') AS like_count,
+                   COALESCE(hc.c, 0) AS like_count,
                    wp.comment_count AS comment_count,
                    wp.repost_count AS repost_count,
                    EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
@@ -7020,6 +7034,9 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
                    {score_expr} {sort_seen_penalty} AS reels_score
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
+            LEFT JOIN ar_aff ON ar_aff.post_id = wp.id
+            LEFT JOIN rp_aff ON rp_aff.post_id = wp.id
+            LEFT JOIN hc     ON hc.post_id     = wp.id
             WHERE wp.media_type LIKE 'video/%'
               AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
