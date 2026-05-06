@@ -5934,6 +5934,24 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
   pointer-events:none;
   z-index:1;
 }
+/* Desktop: hovering the stack fans out the overlapping reactor
+   avatars so each one is fully visible — same affordance as
+   Instagram's like-bubble row on web. Disabled on touch (pointer:
+   coarse) where the stack is tap-only. */
+@media (hover:hover) and (pointer:fine){
+  .reel-reactions-stack{
+    transition:gap .22s ease;
+  }
+  .reel-reactions-stack:hover .rrs-item{
+    margin-left:2px;
+    transform:translateY(-1px) scale(1.05);
+    z-index:2;
+  }
+  .reel-reactions-stack:hover .rrs-item:first-child{margin-left:0}
+  .reel-reactions-stack .rrs-item{
+    transition:margin-left .22s ease, transform .18s ease;
+  }
+}
 @media(max-width:520px){
   .reels-scope-bar{padding:8px 10px 5px;gap:6px}
   .rsb-pill{padding:5px 12px;font-size:12.5px}

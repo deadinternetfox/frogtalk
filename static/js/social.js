@@ -3706,7 +3706,7 @@ const Social = (() => {
           ? `<img src="${esc(_authMediaThumb(p.media_data))}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none';this.parentNode.classList.add('ft-thumb-missing')">`
           : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
         return `
-          <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
+          <div class="social-grid-item ${isVideo ? 'is-video ft-poster-ready' : ''}" onclick="Social.viewPostDetail(${p.id})">
             ${thumb}
             ${String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase()
               ? `<button type="button" class="social-media-del-btn" title="Delete" aria-label="Delete media" onclick="event.stopPropagation();Social.promptDeletePostMedia(${p.id})">✕</button>`
