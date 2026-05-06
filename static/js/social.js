@@ -4310,10 +4310,25 @@ const Social = (() => {
           if (settleTimer) { clearTimeout(settleTimer); settleTimer = 0; }
           tryActivate(true);
         };
+        // Belt-and-suspenders: a wheel/touchend pulse from the user means
+        // a scroll gesture has just completed even if the browser failed
+        // to fire `scrollend` (e.g. user wheels twice in quick succession
+        // and the second pulse cancels the first's settle). Re-arm the
+        // settle timer on every input pulse so a final loose-activate
+        // always lands within ~160ms of the last gesture, even if the
+        // intersection observer threshold callbacks miss the new card.
+        const armPulse = () => {
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = setTimeout(() => { settleTimer = 0; tryActivate(true); }, 160);
+        };
         snap._reelsOnScroll = onScroll;
         snap._reelsOnScrollEnd = onScrollEnd;
+        snap._reelsOnPulse = armPulse;
         snap.addEventListener('scroll', onScroll, { passive: true });
         snap.addEventListener('scrollend', onScrollEnd, { passive: true });
+        snap.addEventListener('wheel', armPulse, { passive: true });
+        snap.addEventListener('touchend', armPulse, { passive: true });
+        snap.addEventListener('touchcancel', armPulse, { passive: true });
         _updateTabLoadUi(loadUi, 97, 'Finalizing reels', 'Snap controls ready');
       }
     } catch (e) {
@@ -4686,6 +4701,12 @@ const Social = (() => {
     if (snap && snap._reelsOnScrollEnd) {
       try { snap.removeEventListener('scrollend', snap._reelsOnScrollEnd); } catch {}
       try { delete snap._reelsOnScrollEnd; } catch {}
+    }
+    if (snap && snap._reelsOnPulse) {
+      try { snap.removeEventListener('wheel', snap._reelsOnPulse); } catch {}
+      try { snap.removeEventListener('touchend', snap._reelsOnPulse); } catch {}
+      try { snap.removeEventListener('touchcancel', snap._reelsOnPulse); } catch {}
+      try { delete snap._reelsOnPulse; } catch {}
     }
     if (snap) _reelsDetachGestureLimiter(snap);
     _reelsScrollSnap = null;
