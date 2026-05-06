@@ -5121,6 +5121,52 @@ const Social = (() => {
       };
       document.addEventListener('click', dismiss, true);
     }, 10);
+    // Desktop hover bridge: keep the picker open while the cursor is
+    // over the heart button OR the picker itself, close it after a
+    // short grace period when both are unhovered. Touch devices never
+    // fire mouseenter so this is a no-op there.
+    try {
+      let closeTimer = null;
+      const scheduleClose = () => {
+        if (closeTimer) return;
+        closeTimer = setTimeout(() => {
+          if (!btn.matches(':hover') && !picker.matches(':hover')) {
+            picker.remove();
+          }
+          closeTimer = null;
+        }, 220);
+      };
+      const cancelClose = () => {
+        if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+      };
+      picker.addEventListener('mouseenter', cancelClose);
+      picker.addEventListener('mouseleave', scheduleClose);
+      btn.addEventListener('mouseleave', scheduleClose);
+      btn.addEventListener('mouseenter', cancelClose);
+    } catch {}
+  }
+
+  // Desktop hover trigger for the reel heart button. On fine-pointer
+  // devices we open the reaction row on mouseenter so users don't need
+  // to long-press; touch devices ignore this and keep the long-press
+  // path. Also debounced so flicking past the heart doesn't open it.
+  function _reelHeartHoverEnter(ev, postId, btn) {
+    if (!btn) return;
+    if (!window.matchMedia || !window.matchMedia('(hover:hover) and (pointer:fine)').matches) return;
+    if (btn._heartHoverTimer) { clearTimeout(btn._heartHoverTimer); }
+    btn._heartHoverTimer = setTimeout(() => {
+      btn._heartHoverTimer = null;
+      // Only open if the cursor is still over the button.
+      if (!btn.matches(':hover')) return;
+      // Don't double-open if a picker is already attached to this card.
+      const card = btn.closest('.reel-card');
+      if (card && card.querySelector('.reel-react-picker')) return;
+      try { openReelReactPicker(postId, btn); } catch {}
+    }, 180);
+  }
+  function _reelHeartHoverLeave(ev, btn) {
+    if (!btn) return;
+    if (btn._heartHoverTimer) { clearTimeout(btn._heartHoverTimer); btn._heartHoverTimer = null; }
   }
 
   // Long-press on the heart button -> open horizontal reaction picker.
@@ -5331,7 +5377,7 @@ const Social = (() => {
         </div>
         ${caption}
         <div class="reel-actions">
-          <button class="reel-act-btn ${myEmoji ? 'liked' : ''}" title="Like (hold for reactions)" data-my-emoji="${esc(myEmoji)}" onclick="Social.reactReelHeart(event,${post.id},this)" onpointerdown="Social._reelHeartHoldStart(event,${post.id},this)" onpointerup="Social._reelHeartHoldEnd(event,this)" onpointercancel="Social._reelHeartHoldEnd(event,this)" onpointerleave="Social._reelHeartHoldEnd(event,this)" oncontextmenu="event.preventDefault();return false">
+          <button class="reel-act-btn ${myEmoji ? 'liked' : ''}" title="Like (hold for reactions)" data-my-emoji="${esc(myEmoji)}" onclick="Social.reactReelHeart(event,${post.id},this)" onpointerdown="Social._reelHeartHoldStart(event,${post.id},this)" onpointerup="Social._reelHeartHoldEnd(event,this)" onpointercancel="Social._reelHeartHoldEnd(event,this)" onpointerleave="Social._reelHeartHoldEnd(event,this)" onmouseenter="Social._reelHeartHoverEnter(event,${post.id},this)" onmouseleave="Social._reelHeartHoverLeave(event,this)" oncontextmenu="event.preventDefault();return false">
             <div class="reel-act-icon reel-like-icon">${esc(heartEmoji)}</div>
             <span class="reel-act-count reel-like-count">${likeCount}</span>
           </button>
@@ -9055,6 +9101,7 @@ const Social = (() => {
     toggleReelMute, toggleReelPlayback, reactReelHeart, openReelComments,
     openSharedReel,
     openReelReactPicker, _reelPickEmoji, _reelHeartHoldStart, _reelHeartHoldEnd,
+    _reelHeartHoverEnter, _reelHeartHoverLeave,
     reelsBackToStart,
     // Activity / notifications
     loadActivity, markAllActivityRead, openActivityItem,
