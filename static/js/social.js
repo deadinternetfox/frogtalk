@@ -5068,13 +5068,25 @@ const Social = (() => {
       const iconEl = btn.querySelector('.reel-act-icon') || btn;
       const iconRect = iconEl.getBoundingClientRect();
       // 8 px gap to the left of the heart icon.
-      const right = Math.max(8, cardRect.right - iconRect.left + 8);
+      let right = Math.max(8, cardRect.right - iconRect.left + 8);
       const top = Math.max(8, iconRect.top - cardRect.top);
       picker.style.right = `${right}px`;
       picker.style.top = `${top}px`;
       picker.style.left = 'auto';
       picker.style.bottom = 'auto';
       picker.style.height = `${iconRect.height}px`;
+      // Clamp so the picker's left edge can't go off the card. Run on
+      // next frame so the picker's intrinsic width is measurable.
+      requestAnimationFrame(() => {
+        try {
+          const pickerW = picker.offsetWidth;
+          const cardW = cardRect.width;
+          const maxRight = Math.max(8, cardW - pickerW - 8);
+          if (right > maxRight) {
+            picker.style.right = `${maxRight}px`;
+          }
+        } catch {}
+      });
     } catch {}
     // Animate in
     requestAnimationFrame(() => picker.classList.add('open'));
@@ -5205,16 +5217,44 @@ const Social = (() => {
     const myEmoji = myReaction ? String(myReaction.emoji) : '';
     const heartEmoji = myEmoji || '❤️';
     const reactionsTotal = reactionsArr.reduce((s, r) => s + Number(r?.count || 0), 0);
-    // Top 3 distinct emojis by count, used as a tiny chip beneath the
-    // friend ribbon ("why this is in your feed" area).
-    const topEmojis = [...reactionsArr]
-      .filter(r => r && r.emoji && Number(r.count || 0) > 0)
-      .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
-      .slice(0, 3)
-      .map(r => String(r.emoji));
-    const reactionsChip = (reactionsTotal > 0 && topEmojis.length)
-      ? `<span class="reel-reactions-chip" aria-label="Reactions">${topEmojis.map(e => `<span class="rrc-em">${esc(e)}</span>`).join('')}<span class="rrc-count">${reactionsTotal}</span></span>`
-      : '';
+    // Story-views style stack: up to 3 most-recent reactors as small
+    // avatar bubbles, each badged with the emoji they used. Dedupes by
+    // nickname so a single user reacting twice doesn't show twice.
+    const reactionsStack = (() => {
+      if (!reactionsArr.length) return '';
+      const sorted = [...reactionsArr]
+        .filter(r => r && r.emoji)
+        .sort((a, b) => Number(b.count || 0) - Number(a.count || 0));
+      const seen = new Set();
+      const picks = [];
+      // Round-robin one-per-emoji first so every distinct reaction is
+      // represented before we backfill from the most-popular bucket.
+      let pass = 0;
+      while (picks.length < 3 && pass < 12) {
+        let added = false;
+        for (const r of sorted) {
+          const users = Array.isArray(r.users)
+            ? r.users
+            : String(r.users || '').split(',').map(s => s.trim()).filter(Boolean);
+          const u = users[pass];
+          if (!u || seen.has(u)) continue;
+          seen.add(u);
+          picks.push({ nick: u, emoji: String(r.emoji) });
+          added = true;
+          if (picks.length >= 3) break;
+        }
+        if (!added) break;
+        pass++;
+      }
+      if (!picks.length) return '';
+      const bubble = (p) => {
+        const av = (window.UI && typeof UI.avatarEl === 'function')
+          ? UI.avatarEl('', p.nick, 22)
+          : `<span class="rrs-fallback" aria-label="${esc(p.nick)}">🐸</span>`;
+        return `<span class="rrs-bubble" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">${av}<span class="rrs-emoji">${esc(p.emoji)}</span></span>`;
+      };
+      return `<span class="reel-reactions-stack" aria-label="Recent reactions">${picks.map(bubble).join('')}</span>`;
+    })();
     const likeCount = post.like_count ?? post.reaction_count ?? reactionsTotal ?? 0;
     const commentCount = post.comment_count ?? 0;
     const repostCount = post.repost_count ?? 0;
@@ -5237,7 +5277,7 @@ const Social = (() => {
           <div class="reel-author-info">
             <span class="reel-author-nick">@${nick}</span>
             ${friendLabel}
-            ${reactionsChip}
+            ${reactionsStack}
           </div>
         </div>
         ${caption}
@@ -6748,17 +6788,40 @@ const Social = (() => {
       likeBtn.dataset.myEmoji = myEmoji;
     }
     if (likeIconEl) likeIconEl.textContent = myEmoji || '❤️';
-    // Refresh the small reactions summary chip in the author area.
+    // Refresh the small reactions stack in the author area.
     const info = card.querySelector('.reel-author-info');
     if (info) {
-      const old = info.querySelector('.reel-reactions-chip');
-      const top3 = [...reactions]
-        .filter(r => r && r.emoji && Number(r.count || 0) > 0)
-        .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
-        .slice(0, 3)
-        .map(r => String(r.emoji));
-      if (total > 0 && top3.length) {
-        const html = `<span class="reel-reactions-chip" aria-label="Reactions">${top3.map(e => `<span class="rrc-em">${esc(e)}</span>`).join('')}<span class="rrc-count">${total}</span></span>`;
+      const old = info.querySelector('.reel-reactions-stack');
+      const sorted = [...reactions]
+        .filter(r => r && r.emoji)
+        .sort((a, b) => Number(b.count || 0) - Number(a.count || 0));
+      const seen = new Set();
+      const picks = [];
+      let pass = 0;
+      while (picks.length < 3 && pass < 12) {
+        let added = false;
+        for (const r of sorted) {
+          const users = Array.isArray(r.users)
+            ? r.users
+            : String(r.users || '').split(',').map(s => s.trim()).filter(Boolean);
+          const u = users[pass];
+          if (!u || seen.has(u)) continue;
+          seen.add(u);
+          picks.push({ nick: u, emoji: String(r.emoji) });
+          added = true;
+          if (picks.length >= 3) break;
+        }
+        if (!added) break;
+        pass++;
+      }
+      if (picks.length) {
+        const bubble = (p) => {
+          const av = (window.UI && typeof UI.avatarEl === 'function')
+            ? UI.avatarEl('', p.nick, 22)
+            : `<span class="rrs-fallback" aria-label="${esc(p.nick)}">🐸</span>`;
+          return `<span class="rrs-bubble" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">${av}<span class="rrs-emoji">${esc(p.emoji)}</span></span>`;
+        };
+        const html = `<span class="reel-reactions-stack" aria-label="Recent reactions">${picks.map(bubble).join('')}</span>`;
         if (old) {
           old.outerHTML = html;
         } else {
