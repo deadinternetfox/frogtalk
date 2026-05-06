@@ -2401,33 +2401,30 @@ const Messages = (() => {
     _currentAudioId = msgId;
 
     const durEl = document.getElementById(`audio-dur-${msgId}`);
+    // The on-render _probeAudioDuration() has already discovered the real
+    // length via the seek-to-1e10 trick and stamped it into durEl. Reuse
+    // that here — doing a second seek-during-play makes Chromium jump to
+    // the end and instantly fire 'ended' before any audio plays.
     let _knownDur = 0;
-    const _setDur = () => {
-      if (isFinite(audio.duration) && audio.duration > 0) {
-        _knownDur = audio.duration;
-      }
+    const _parseDurText = () => {
+      if (!durEl) return 0;
+      const m = (durEl.textContent || '').match(/^(\d+):(\d+)$/);
+      if (!m) return 0;
+      return (+m[1]) * 60 + (+m[2]);
     };
+    _knownDur = _parseDurText();
 
     audio.addEventListener('loadedmetadata', () => {
-      _setDur();
+      if (isFinite(audio.duration) && audio.duration > 0) _knownDur = audio.duration;
       if (durEl && _knownDur) {
         const m = Math.floor(_knownDur / 60);
         const s = Math.floor(_knownDur % 60).toString().padStart(2, '0');
         durEl.textContent = `${m}:${s}`;
-      } else {
-        // Chromium MediaRecorder webm fix: force a seek to discover duration.
-        try { audio.currentTime = 1e10; } catch {}
       }
     });
 
     audio.addEventListener('durationchange', () => {
-      _setDur();
-      if (durEl && _knownDur && audio.currentTime > 1e9) {
-        try { audio.currentTime = 0; } catch {}
-        const m = Math.floor(_knownDur / 60);
-        const s = Math.floor(_knownDur % 60).toString().padStart(2, '0');
-        durEl.textContent = `${m}:${s}`;
-      }
+      if (isFinite(audio.duration) && audio.duration > 0) _knownDur = audio.duration;
     });
 
     audio.addEventListener('timeupdate', () => {
