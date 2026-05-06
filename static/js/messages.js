@@ -1606,10 +1606,41 @@ const Messages = (() => {
           pendingEl = area?.querySelector('.msg-pending[data-own="1"]') || null;
         }
         if (pendingEl) {
+          // Capture the optimistic temp id BEFORE we rename the element so we
+          // can rewrite all the inline onclick handlers / data-rid attributes
+          // that were rendered with the negative temp id. Without this, the
+          // ⋯ menu button (and Reply/Edit/Delete) still target the temp id
+          // and the action sheet pops up empty until the user navigates away
+          // and back to force a full re-render.
+          let tempId = null;
+          try {
+            const m = /^msg-(-?\d+)$/.exec(pendingEl.id || '');
+            if (m) tempId = m[1];
+          } catch {}
           pendingEl.classList.remove('msg-pending');
           pendingEl.removeAttribute('data-own');
           pendingEl.removeAttribute('data-nonce');
           pendingEl.id = `msg-${msg.id}`;
+          // Rewrite any onclick / data-rid that referenced the temp id so the
+          // ⋯ menu, Reply, Edit, Delete, React, Copy buttons all work right
+          // away on this freshly-reconciled bubble.
+          if (tempId !== null && String(msg.id) !== tempId) {
+            try {
+              const realId = String(msg.id);
+              pendingEl.querySelectorAll('[onclick],[data-rid]').forEach(node => {
+                const oc = node.getAttribute('onclick');
+                if (oc && oc.includes(tempId)) {
+                  // Replace bare-number occurrences only (avoid touching
+                  // unrelated digits inside string literals like usernames).
+                  node.setAttribute('onclick', oc.split('(' + tempId).join('(' + realId)
+                                                .split(',' + tempId).join(',' + realId)
+                                                .split(' ' + tempId).join(' ' + realId));
+                }
+                const rid = node.getAttribute('data-rid');
+                if (rid === tempId) node.setAttribute('data-rid', realId);
+              });
+            } catch {}
+          }
           // The pending render may have already hoisted a share-card row
           // (.msg-share-row with the loaded embed) ABOVE .msg-content. We
           // are about to rebuild .msg-content's innerHTML which produces a
