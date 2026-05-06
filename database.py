@@ -4728,11 +4728,16 @@ def has_wall_reposted(post_id: int, user_id: int) -> bool:
 
 
 def get_post_reactions(post_id: int) -> List[Dict]:
-    """Get aggregated reactions for a post."""
+    """Get aggregated reactions for a post.
+
+    Also returns user_ids (CSV) so the reels reactor stack can render
+    real avatars via /api/users/{uid}/avatar.png after a fresh react.
+    """
     with _conn() as con:
         rows = con.execute("""
             SELECT emoji, COUNT(*) as count,
-                   GROUP_CONCAT(u.nickname) as users
+                   GROUP_CONCAT(u.nickname) as users,
+                   GROUP_CONCAT(wpr.user_id) as user_ids
             FROM wall_post_reactions wpr
             JOIN users u ON wpr.user_id = u.id
             WHERE wpr.post_id=?

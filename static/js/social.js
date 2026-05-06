@@ -6782,6 +6782,13 @@ const Social = (() => {
         emoji: String(r.emoji),
         count: Number(r.count || 0),
         users: _reactionUsersArray(r.users),
+        // Preserve user_ids so the reels reactor stack can keep
+        // rendering real avatars after a react/unreact round-trip.
+        // Without this the bubbles would fall back to the frog
+        // gradient as soon as the user reacts to a reel.
+        user_ids: Array.isArray(r.user_ids)
+          ? r.user_ids.map(s => String(s))
+          : String(r.user_ids || '').split(',').map(s => s.trim()).filter(Boolean),
       }))
       .sort((a, b) => (b.count - a.count) || a.emoji.localeCompare(b.emoji));
   }
