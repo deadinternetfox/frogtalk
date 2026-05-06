@@ -4525,13 +4525,15 @@ async function loadUserWall(nickname) {
         .slice(0, 3)
         .map(r => r.emoji)
         .join('');
+      const addIcon = myEmoji
+        ? esc(myEmoji)
+        : `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block"><circle cx="11" cy="12" r="8"/><path d="M8 14c.8 1.2 2 2 3 2s2.2-.8 3-2"/><circle cx="8.5" cy="10.5" r=".8" fill="currentColor" stroke="none"/><circle cx="13.5" cy="10.5" r=".8" fill="currentColor" stroke="none"/><path d="M19 4v4M21 6h-4"/></svg>`;
       const reactionBarHtml = `<div class="sf-rx-bar">`
         + (totalReactions > 0
           ? `<button type="button" class="sf-rx-summary" onclick="showWallReactionDetail(${p.id})" aria-label="See reactions">`
               + `<span class="sf-rx-emojis">${topEmojis}</span><span class="sf-rx-total">${totalReactions}</span></button>`
-              + `<button type="button" class="sf-rx-list" onclick="showWallReactionDetail(${p.id})" aria-label="Open reactions list">👥</button>`
           : '')
-        + `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" onclick="showWallReactionPicker(${p.id})" aria-label="React">${myEmoji || '😊'}</button>`
+        + `<button type="button" class="sf-rx-add${myEmoji ? ' active' : ''}" data-my-emoji="${esc(myEmoji)}" onclick="showWallReactionPicker(${p.id})" aria-label="Add reaction" title="Add reaction">${addIcon}</button>`
         + `</div>`;
 
       // Comments count
