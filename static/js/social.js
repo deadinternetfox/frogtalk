@@ -5241,10 +5241,14 @@ const Social = (() => {
           const users = Array.isArray(r.users)
             ? r.users
             : String(r.users || '').split(',').map(s => s.trim()).filter(Boolean);
+          const userIds = Array.isArray(r.user_ids)
+            ? r.user_ids
+            : String(r.user_ids || '').split(',').map(s => s.trim()).filter(Boolean);
           const u = users[pass];
+          const uid = userIds[pass];
           if (!u || seen.has(u)) continue;
           seen.add(u);
-          picks.push({ nick: u, emoji: String(r.emoji) });
+          picks.push({ nick: u, emoji: String(r.emoji), uid: uid || '' });
           added = true;
           if (picks.length >= 3) break;
         }
@@ -5261,8 +5265,11 @@ const Social = (() => {
       ];
       const bubble = (p) => {
         const idx = ((p.nick || '?').charCodeAt(0) || 0) % grads.length;
+        const avaInner = p.uid
+          ? `<img class="rrs-img" src="/api/users/${encodeURIComponent(p.uid)}/avatar.png" alt="" loading="lazy" onerror="this.style.display='none';this.parentNode.classList.add('rrs-fallback')">`
+          : '🐸';
         return `<span class="rrs-item" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">`+
-          `<span class="rrs-ava" style="background:${grads[idx]}">🐸</span>`+
+          `<span class="rrs-ava" style="background:${grads[idx]}">${avaInner}</span>`+
           `<span class="rrs-badge">${esc(p.emoji)}</span>`+
         `</span>`;
       };
@@ -6817,10 +6824,14 @@ const Social = (() => {
           const users = Array.isArray(r.users)
             ? r.users
             : String(r.users || '').split(',').map(s => s.trim()).filter(Boolean);
+          const userIds = Array.isArray(r.user_ids)
+            ? r.user_ids
+            : String(r.user_ids || '').split(',').map(s => s.trim()).filter(Boolean);
           const u = users[pass];
+          const uid = userIds[pass];
           if (!u || seen.has(u)) continue;
           seen.add(u);
-          picks.push({ nick: u, emoji: String(r.emoji) });
+          picks.push({ nick: u, emoji: String(r.emoji), uid: uid || '' });
           added = true;
           if (picks.length >= 3) break;
         }
@@ -6837,8 +6848,11 @@ const Social = (() => {
         ];
         const bubble = (p) => {
           const idx = ((p.nick || '?').charCodeAt(0) || 0) % grads.length;
+          const avaInner = p.uid
+            ? `<img class="rrs-img" src="/api/users/${encodeURIComponent(p.uid)}/avatar.png" alt="" loading="lazy" onerror="this.style.display='none';this.parentNode.classList.add('rrs-fallback')">`
+            : '🐸';
           return `<span class="rrs-item" title="${esc(p.nick)} reacted with ${esc(p.emoji)}">`+
-            `<span class="rrs-ava" style="background:${grads[idx]}">🐸</span>`+
+            `<span class="rrs-ava" style="background:${grads[idx]}">${avaInner}</span>`+
             `<span class="rrs-badge">${esc(p.emoji)}</span>`+
           `</span>`;
         };

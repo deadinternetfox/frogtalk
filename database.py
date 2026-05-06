@@ -4773,10 +4773,13 @@ def get_post_reactions_bulk(post_ids: List[int]) -> Dict[int, List[Dict]]:
     USERS_PER_EMOJI_CAP = 32
     with _conn() as con:
         rows = con.execute(f"""
-            SELECT post_id, emoji, GROUP_CONCAT(nickname) AS users
+            SELECT post_id, emoji,
+                   GROUP_CONCAT(nickname) AS users,
+                   GROUP_CONCAT(user_id)  AS user_ids
             FROM (
                 SELECT wpr.post_id AS post_id, wpr.emoji AS emoji,
                        u.nickname AS nickname,
+                       wpr.user_id AS user_id,
                        ROW_NUMBER() OVER (
                            PARTITION BY wpr.post_id, wpr.emoji
                            ORDER BY wpr.created_at DESC
@@ -4802,6 +4805,7 @@ def get_post_reactions_bulk(post_ids: List[int]) -> Dict[int, List[Dict]]:
             "emoji": r["emoji"],
             "count": totals.get(key, 0),
             "users": r["users"],
+            "user_ids": r["user_ids"],
         })
     return out
 
