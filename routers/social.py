@@ -1095,38 +1095,101 @@ class MarkNotifsReadRequest(BaseModel):
 @limiter.limit("300/hour")
 async def get_reels(
     request: Request,
-    scope: str = Query("all"),
+    scope: str = Query("for_you"),
     sort: str = Query("hot"),
     limit: int = Query(20, le=50),
     offset: int = Query(0, ge=0),
+    exclude: str = Query("", description="Comma-separated post IDs to exclude (already-shown this session)"),
     current_user: dict = Depends(get_current_user),
 ):
     """Video posts for the Reels tab.
 
-    scope: 'all' = all public videos, 'friends' = videos posted/reposted/liked by friends.
-    sort:  'hot' = ❤️-driven ranking, 'new' = newest, 'top' = all-time hearts.
+    scope:
+      'for_you' (default) → personalized scoring (mutuals, friend reactions,
+                            follows, engagement, recency); unseen-first.
+      'friends'           → reels involving accepted friends (legacy).
+      'all'               → all public videos.
+    sort: kept for backward compat; only used when scope='friends' or 'all'
+          and the legacy ranker is selected (sort='new'/'top').
     """
-    if scope not in ("all", "friends"):
-        scope = "all"
+    if scope not in ("for_you", "friends", "all"):
+        scope = "for_you"
     if sort not in ("hot", "new", "top"):
         sort = "hot"
     uid = current_user["id"]
-    key = f"reels:{uid}:{scope}:{sort}:{limit}:{offset}"
+
+    excl_ids: list = []
+    if exclude:
+        for tok in exclude.split(",")[:200]:
+            tok = tok.strip()
+            if tok.lstrip("-").isdigit():
+                excl_ids.append(int(tok))
+
+    # Personalized for_you uses the new scorer; legacy scopes with non-hot
+    # sort still go through the old ranker so behavior is unchanged when the
+    # client explicitly asks for 'new' or 'top'.
+    use_personalized = (scope == "for_you") or (sort == "hot")
+
+    key = f"reels:{uid}:{scope}:{sort}:{limit}:{offset}:{','.join(map(str, excl_ids[:32]))}"
 
     async def _build():
-        posts = await run_in_threadpool(
-            db.get_reels_posts, uid, scope=scope, sort=sort,
-            limit=limit, offset=offset,
-        )
+        if use_personalized:
+            posts = await run_in_threadpool(
+                db.get_personalized_reels, uid,
+                scope=scope, limit=limit, offset=offset,
+                include_seen=False, exclude_post_ids=excl_ids,
+            )
+            seen_pass = False
+            if not posts and offset == 0:
+                # Nothing unseen — fall back to scored list including seen so
+                # the user always has reels to scroll. Seen ones get a
+                # negative penalty inside the SQL so fresh content still wins
+                # if any is left.
+                posts = await run_in_threadpool(
+                    db.get_personalized_reels, uid,
+                    scope=scope, limit=limit, offset=offset,
+                    include_seen=True, exclude_post_ids=excl_ids,
+                )
+                seen_pass = True
+        else:
+            legacy_scope = "all" if scope == "for_you" else scope
+            posts = await run_in_threadpool(
+                db.get_reels_posts, uid, scope=legacy_scope, sort=sort,
+                limit=limit, offset=offset,
+            )
+            seen_pass = False
         _rmap = await run_in_threadpool(db.get_post_reactions_bulk, [p["id"] for p in posts])
         for p in posts:
             # Serve media lazily through the authenticated media endpoint so we
             # never ship multi-MB base64 blobs in the reels listing payload.
             p["media_data"] = f"/api/social/posts/{p['id']}/media"
             p["reactions"] = _rmap.get(p["id"], [])
-        return {"posts": posts}
+        return {"posts": posts, "seen_pass": seen_pass, "scope": scope}
 
     return await _coalesce_hot(key, _build)
+
+
+class MarkReelsSeenRequest(BaseModel):
+    post_ids: list
+
+
+@router.post("/reels/seen")
+@limiter.limit("1200/hour")
+async def mark_reels_seen_endpoint(
+    request: Request,
+    body: MarkReelsSeenRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Mark a batch of reels as seen by the current viewer."""
+    raw = body.post_ids if isinstance(body.post_ids, list) else []
+    pids: list = []
+    for v in raw[:200]:
+        try:
+            pids.append(int(v))
+        except (TypeError, ValueError):
+            continue
+    n = await run_in_threadpool(db.mark_reels_seen, current_user["id"], pids)
+    return {"ok": True, "marked": n}
 
 
 @router.get("/notifications")

@@ -1158,10 +1158,13 @@ const Social = (() => {
       const _rrKey = `${_reelsScope}:${_reelsSort}`;
       if (excludeTab !== 'reels' && !_cacheFresh(_reelsCache.get(_rrKey))) {
         jobs.push((async () => {
-          const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12`).catch(() => null);
+          const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12${_reelsExcludeParam()}`).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
-            if (Array.isArray(d.posts)) _cacheSet(_reelsCache, _rrKey, { ts: Date.now(), posts: d.posts });
+            if (Array.isArray(d.posts)) {
+              _reelsRememberPosts(d.posts);
+              _cacheSet(_reelsCache, _rrKey, { ts: Date.now(), posts: d.posts });
+            }
           }
         })());
       }
@@ -1253,10 +1256,13 @@ const Social = (() => {
             if (Array.isArray(d.posts)) _cacheSet(_exploreCache, sort, { ts: Date.now(), posts: d.posts, channels: [] });
           }
         } else if (tab === 'reels') {
-          const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12`).catch(() => null);
+          const r = await api(`/api/social/reels?scope=${encodeURIComponent(_reelsScope)}&sort=${encodeURIComponent(_reelsSort)}&limit=12${_reelsExcludeParam()}`).catch(() => null);
           if (r && r.ok) {
             const d = await r.json().catch(() => ({}));
-            if (Array.isArray(d.posts)) _cacheSet(_reelsCache, `${_reelsScope}:${_reelsSort}`, { ts: Date.now(), posts: d.posts });
+            if (Array.isArray(d.posts)) {
+              _reelsRememberPosts(d.posts);
+              _cacheSet(_reelsCache, `${_reelsScope}:${_reelsSort}`, { ts: Date.now(), posts: d.posts });
+            }
           }
         } else if (tab === 'music') {
           const url = _musicTabScope === 'explore'
@@ -1472,6 +1478,7 @@ const Social = (() => {
   function _reelsSkeletonHtml(scope, sort) {
     return `
       <div class="reels-scope-bar is-skeleton" aria-hidden="true">
+        <span class="rsb-pill is-skeleton-chip">✨ For You</span>
         <span class="rsb-pill is-skeleton-chip">🌐 All</span>
         <span class="rsb-pill is-skeleton-chip">👥 Friends</span>
         <div class="rsb-sort">
@@ -3712,7 +3719,7 @@ const Social = (() => {
 
   // ── REELS TAB ──────────────────────────────────────────────────────────────
 
-  let _reelsScope = 'all';   // 'all' | 'friends'
+  let _reelsScope = 'for_you'; // 'for_you' | 'all' | 'friends'
   let _reelsSort  = 'hot';   // 'hot' | 'new' | 'top'
   let _reelsMuted = true;    // global mute state for all reels
   let _reelsCurrentVideo = null; // currently playing video element
@@ -3723,6 +3730,44 @@ const Social = (() => {
   let _reelsSeekCard = null;
   let _reelsSeekReleaseUntil = 0;
   let _reelsSeekReleaseCard = null;
+  // Seen tracking — IDs we've already shown this session (used to ask the
+  // server to skip them) plus a flush queue for /api/social/reels/seen.
+  const _reelsShownSession = new Set();
+  let _reelsSeenQueue = new Set();
+  let _reelsSeenFlushTimer = null;
+  function _reelsExcludeParam() {
+    if (!_reelsShownSession.size) return '';
+    // Keep the URL bounded — last 100 IDs are plenty for the de-dupe.
+    const ids = Array.from(_reelsShownSession).slice(-100);
+    return ids.length ? `&exclude=${encodeURIComponent(ids.join(','))}` : '';
+  }
+  function _reelsRememberPosts(posts) {
+    if (!Array.isArray(posts)) return;
+    for (const p of posts) {
+      const pid = Number(p && p.id);
+      if (pid) _reelsShownSession.add(pid);
+    }
+  }
+  function _reportReelSeen(postId) {
+    const pid = Number(postId);
+    if (!pid) return;
+    if (_reelsShownSession.has(pid)) {
+      // Already counted this session, but still flush to server in case
+      // it was viewed across refreshes.
+    }
+    _reelsShownSession.add(pid);
+    _reelsSeenQueue.add(pid);
+    if (_reelsSeenFlushTimer) return;
+    _reelsSeenFlushTimer = setTimeout(() => {
+      _reelsSeenFlushTimer = null;
+      const ids = Array.from(_reelsSeenQueue);
+      _reelsSeenQueue = new Set();
+      if (!ids.length) return;
+      try {
+        api('/api/social/reels/seen', 'POST', { post_ids: ids }).catch(() => {});
+      } catch {}
+    }, 1500);
+  }
   let _reelsUserPausedCard = null;
   let _reelsScrubController = null;
   // Bumped on every activation. Pending play retries (timeouts + once-listeners)
@@ -3999,6 +4044,7 @@ const Social = (() => {
         const cards = _entry.posts.map(p => _renderReelCard(p)).join('');
         const scopeBar = `
           <div class="reels-scope-bar">
+            <button class="rsb-pill ${_scope==='for_you'?'active':''}" onclick="Social.switchReelsScope('for_you')">✨ For You</button>
             <button class="rsb-pill ${_scope==='all'?'active':''}" onclick="Social.switchReelsScope('all')">🌐 All</button>
             <button class="rsb-pill ${_scope==='friends'?'active':''}" onclick="Social.switchReelsScope('friends')">👥 Friends</button>
             <div class="rsb-sort">
@@ -4043,6 +4089,7 @@ const Social = (() => {
 
     const scopeBar = `
       <div class="reels-scope-bar">
+        <button class="rsb-pill ${scope==='for_you'?'active':''}" onclick="Social.switchReelsScope('for_you')">✨ For You</button>
         <button class="rsb-pill ${scope==='all'?'active':''}" onclick="Social.switchReelsScope('all')">🌐 All</button>
         <button class="rsb-pill ${scope==='friends'?'active':''}" onclick="Social.switchReelsScope('friends')">👥 Friends</button>
         <div class="rsb-sort">
@@ -4082,12 +4129,13 @@ const Social = (() => {
     try {
       _updateTabLoadUi(loadUi, 42, 'Downloading reels', `${scope === 'friends' ? 'Friends' : 'All'} reels · ${sort} order`);
       // Fake-progress timers removed — see loadFeed.
-      const res = await api(`/api/social/reels?scope=${scope}&sort=${sort}&limit=20`).catch(() => null);
+      const res = await api(`/api/social/reels?scope=${scope}&sort=${sort}&limit=20${_reelsExcludeParam()}`).catch(() => null);
       clearQueuedSteps();
       if (_currentTab !== 'reels' || loadToken !== _reelsLoadToken) return;
       _updateTabLoadUi(loadUi, 68, 'Processing reels', 'Parsing reel data…');
       const data = res && res.ok ? await res.json() : { posts: [] };
       const posts = data.posts || [];
+      _reelsRememberPosts(posts);
       _cacheSet(_reelsCache, cacheKey, { ts: Date.now(), posts });
 
       if (posts.length === 0) {
@@ -4204,6 +4252,16 @@ const Social = (() => {
 
   function _reelsActivateCard(card, opts = {}) {
     if (!card || !card.classList.contains('reel-card')) return;
+    // Mark this reel as seen for personalisation as soon as the card
+    // becomes the active (autoplaying) one. _reportReelSeen handles
+    // dedupe + debounced batched POST.
+    try {
+      const _pid = card.dataset && card.dataset.postId;
+      if (_pid && !card._seenReported) {
+        card._seenReported = true;
+        _reportReelSeen(_pid);
+      }
+    } catch {}
     const reset = opts.reset !== false;
     const seekReleaseGuard = card === _reelsSeekReleaseCard && Date.now() < _reelsSeekReleaseUntil;
     const seekLiveGuard = _reelsIsSeekLocked(card);

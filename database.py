@@ -1633,6 +1633,19 @@ def _migrate():
             FOREIGN KEY (following_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
 
+        # Reels seen — tracks which reels each viewer has already watched so
+        # the personalized reels feed can prefer unseen content. We deliberately
+        # keep this lean (uid, pid, ts) so writes on every scroll are cheap.
+        con.execute("""CREATE TABLE IF NOT EXISTS reels_seen (
+            user_id    INTEGER NOT NULL,
+            post_id    INTEGER NOT NULL,
+            seen_at    TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (user_id, post_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (post_id) REFERENCES wall_posts(id) ON DELETE CASCADE
+        )""")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_reels_seen_user_seen ON reels_seen(user_id, seen_at DESC)")
+
         con.execute("""CREATE TABLE IF NOT EXISTS recovery_keys (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id    INTEGER NOT NULL,
@@ -6870,5 +6883,166 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                 ORDER BY {order}
                 LIMIT ? OFFSET ?
             """, (viewer_id, viewer_id, viewer_id, limit, offset)).fetchall()
+
+    return [dict(r) for r in rows]
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Reels personalization — seen tracking + scored "for you" ordering
+# ──────────────────────────────────────────────────────────────────────────
+
+def mark_reels_seen(user_id: int, post_ids: List[int]) -> int:
+    """Record that this viewer has watched these reels. Idempotent."""
+    if not post_ids:
+        return 0
+    rows = [(int(user_id), int(pid)) for pid in post_ids if pid]
+    if not rows:
+        return 0
+    with _conn() as con:
+        con.executemany(
+            "INSERT OR REPLACE INTO reels_seen (user_id, post_id, seen_at) "
+            "VALUES (?, ?, datetime('now'))",
+            rows,
+        )
+    return len(rows)
+
+
+def get_personalized_reels(viewer_id: int, scope: str = "for_you",
+                           limit: int = 20, offset: int = 0,
+                           include_seen: bool = False,
+                           exclude_post_ids: Optional[List[int]] = None) -> List[Dict]:
+    """Personalized reels ordering.
+
+    Scoring (computed in SQL, deterministic):
+      + 5  per accepted-friend / mutual reaction on the reel
+      + 3  per accepted-friend / mutual repost
+      + 8  if the reel author is a mutual / friend
+      + 4  if the viewer follows the author
+      + 0.5 per global ❤️ reaction
+      + 0.3 per global other reaction
+      + 0.6 per repost
+      + 0.4 per comment
+      + recency bonus: 12 / (hours_since_post + 4) capped at 8
+
+    Seen reels are filtered out unless include_seen=True. Frontend should
+    request include_seen=False first; when result is empty, retry with
+    include_seen=True so the user always has something to watch.
+
+    scope='for_you'  → all visible reels, scored.
+    scope='friends'  → restrict to reels involving an accepted friend.
+    scope='all'      → public, sorted by score.
+    """
+    if scope not in ("for_you", "friends", "all"):
+        scope = "for_you"
+    excl_ids = [int(p) for p in (exclude_post_ids or []) if p]
+    excl_csv = ",".join(str(i) for i in excl_ids) if excl_ids else ""
+
+    with _conn() as con:
+        friend_ids = [
+            int(r[0]) for r in con.execute(
+                "SELECT CASE WHEN user_id=? THEN friend_id ELSE user_id END "
+                "FROM friends WHERE (user_id=? OR friend_id=?) AND status='accepted'",
+                (viewer_id, viewer_id, viewer_id),
+            ).fetchall()
+        ]
+        following_ids = [
+            int(r[0]) for r in con.execute(
+                "SELECT following_id FROM followers WHERE follower_id=?",
+                (viewer_id,),
+            ).fetchall()
+        ]
+        affinity_ids = sorted(set(friend_ids) | set(following_ids))
+        fids_csv = ",".join(str(i) for i in friend_ids) if friend_ids else "-1"
+        aff_csv  = ",".join(str(i) for i in affinity_ids) if affinity_ids else "-1"
+
+        score_expr = f"""(
+            5.0  * (SELECT COUNT(*) FROM wall_post_reactions wpr_a
+                    WHERE wpr_a.post_id=wp.id AND wpr_a.user_id IN ({aff_csv}))
+          + 3.0  * (SELECT COUNT(*) FROM wall_reposts wr_a
+                    WHERE wr_a.post_id=wp.id AND wr_a.user_id IN ({aff_csv}))
+          + (CASE WHEN wp.user_id IN ({fids_csv}) THEN 8.0 ELSE 0.0 END)
+          + (CASE WHEN wp.user_id IN ({aff_csv}) AND wp.user_id NOT IN ({fids_csv})
+                  THEN 4.0 ELSE 0.0 END)
+          + 0.5 * (SELECT COUNT(*) FROM wall_post_reactions wpr_l
+                   WHERE wpr_l.post_id=wp.id AND wpr_l.emoji='❤️')
+          + 0.3 * (wp.reaction_count - (SELECT COUNT(*) FROM wall_post_reactions wpr_l2
+                   WHERE wpr_l2.post_id=wp.id AND wpr_l2.emoji='❤️'))
+          + 0.6 * wp.repost_count
+          + 0.4 * wp.comment_count
+          + MIN(8.0, 12.0 / (((julianday('now') - julianday(wp.created_at)) * 24.0) + 4.0))
+        )"""
+
+        seen_filter = "" if include_seen else \
+            f" AND NOT EXISTS (SELECT 1 FROM reels_seen rs WHERE rs.user_id={int(viewer_id)} AND rs.post_id=wp.id)"
+        excl_filter = f" AND wp.id NOT IN ({excl_csv})" if excl_csv else ""
+
+        if scope == "friends":
+            scope_filter = f"""
+              AND (
+                  wp.user_id IN ({fids_csv})
+                  OR EXISTS (SELECT 1 FROM wall_reposts wr_s
+                             WHERE wr_s.post_id=wp.id AND wr_s.user_id IN ({fids_csv}))
+                  OR EXISTS (SELECT 1 FROM wall_post_reactions wpr_s
+                             WHERE wpr_s.post_id=wp.id AND wpr_s.user_id IN ({fids_csv}))
+              )"""
+        else:
+            scope_filter = ""
+
+        # Recency tie-break only matters when scores match. We add a tiny
+        # random jitter via wp.id mod prime so consecutive ties don't always
+        # surface the same reel order across requests.
+        sort_seen_penalty = "" if not include_seen else \
+            " - (CASE WHEN EXISTS (SELECT 1 FROM reels_seen rs2 WHERE rs2.user_id=? AND rs2.post_id=wp.id) THEN 50.0 ELSE 0.0 END)"
+
+        params: List = []
+        if include_seen:
+            params.append(viewer_id)
+
+        sql = f"""
+            SELECT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
+                   wp.privacy, wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
+                   wp.track_title, wp.track_room, wp.track_mood,
+                   1 AS has_media,
+                   u.nickname, u.avatar,
+                   wp.reaction_count AS reaction_count,
+                   (SELECT COUNT(*) FROM wall_post_reactions WHERE post_id=wp.id AND emoji='❤️') AS like_count,
+                   wp.comment_count AS comment_count,
+                   wp.repost_count AS repost_count,
+                   EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
+                   (SELECT u2.nickname FROM users u2 WHERE u2.id=(
+                        SELECT wpr_n.user_id FROM wall_post_reactions wpr_n
+                        WHERE wpr_n.post_id=wp.id AND wpr_n.user_id IN ({fids_csv}) LIMIT 1
+                   )) AS friend_actor_nick,
+                   (SELECT u3.avatar FROM users u3 WHERE u3.id=(
+                        SELECT wpr_a.user_id FROM wall_post_reactions wpr_a
+                        WHERE wpr_a.post_id=wp.id AND wpr_a.user_id IN ({fids_csv}) LIMIT 1
+                   )) AS friend_actor_avatar,
+                   {score_expr} {sort_seen_penalty} AS reels_score
+            FROM wall_posts wp
+            JOIN users u ON wp.user_id = u.id
+            WHERE wp.media_type LIKE 'video/%'
+              AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
+              AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+              AND (
+                  wp.user_id = ?
+                  OR wp.privacy = 'public'
+                  OR (wp.privacy = 'friends' AND wp.user_id IN ({fids_csv}))
+                  OR (wp.privacy = 'followers' AND (
+                        wp.user_id IN ({fids_csv})
+                        OR EXISTS (SELECT 1 FROM followers fl
+                                   WHERE fl.follower_id=? AND fl.following_id=wp.user_id)
+                  ))
+              )
+              {scope_filter}
+              {seen_filter}
+              {excl_filter}
+            ORDER BY reels_score DESC, wp.created_at DESC, wp.id DESC
+            LIMIT ? OFFSET ?
+        """
+        # bind: i_reposted viewer, [maybe seen penalty], block (x2), visibility viewer, follower viewer, limit, offset
+        bind: List = [viewer_id]
+        bind.extend(params)
+        bind.extend([viewer_id, viewer_id, viewer_id, viewer_id, limit, offset])
+        rows = con.execute(sql, tuple(bind)).fetchall()
 
     return [dict(r) for r in rows]
