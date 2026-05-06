@@ -871,6 +871,7 @@ const Messages = (() => {
         <div class="audio-waves">${waveBars}</div>
         <div class="audio-meta"><span class="audio-label">Voice</span><span class="audio-duration" id="audio-dur-${msg.id}">0:00</span></div>
       </div>`;
+      _probeAudioDuration(msg.id, msg.media_data);
     } else {
       inner = `<img class="msg-media clickable-media" src="${msg.media_data}" alt="media" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" onclick="Messages.openMedia(this)" loading="lazy">`;
     }
@@ -2263,6 +2264,7 @@ const Messages = (() => {
           <div class="audio-waves">${waveBars}</div>
           <div class="audio-meta"><span class="audio-label">Voice</span><span class="audio-duration" id="audio-dur-${msgId}">0:00</span></div>
         </div>`;
+        _probeAudioDuration(msgId, data.media_data);
       } else {
         html = `<img class="msg-media clickable-media" src="${data.media_data}" alt="media" data-sender="${UI.escHtml(sender)}" data-time="${time}" onclick="Messages.openMedia(this)" loading="lazy">`;
       }
@@ -2315,6 +2317,28 @@ const Messages = (() => {
   /* ── Inline audio player ─────────────────────────────────────── */
   let _currentAudio = null;
   let _currentAudioId = null;
+
+  // Pre-load just the metadata of a voice note so the duration shows up on
+  // first render instead of "0:00" until the user hits play. Defers via
+  // setTimeout so the bubble is in the DOM before we look up the span.
+  function _probeAudioDuration(msgId, src) {
+    if (!src) return;
+    setTimeout(() => {
+      const durEl = document.getElementById(`audio-dur-${msgId}`);
+      if (!durEl) return;
+      try {
+        const a = new Audio();
+        a.preload = 'metadata';
+        a.src = src;
+        a.addEventListener('loadedmetadata', () => {
+          if (!isFinite(a.duration) || a.duration <= 0) return;
+          const m = Math.floor(a.duration / 60);
+          const s = Math.floor(a.duration % 60).toString().padStart(2, '0');
+          durEl.textContent = `${m}:${s}`;
+        }, { once: true });
+      } catch {}
+    }, 0);
+  }
 
   function playInlineAudio(msgId, btn, e) {
     if (e) e.stopPropagation();
