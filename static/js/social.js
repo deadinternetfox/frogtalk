@@ -654,6 +654,18 @@ const Social = (() => {
     // Drop the foreign-profile ghost nav button so reopening Social
     // doesn't flash a stale "@them" tab from the previous session.
     try { document.getElementById('social-nav-profile-ghost')?.remove(); } catch {}
+    // Stop reels playback (video + audio) when leaving Social. Without
+    // this the most-recently-active reel keeps audio playing after the
+    // overlay is hidden because the IntersectionObserver only pauses on
+    // out-of-view, not on overlay close.
+    try { _teardownReels(); } catch {}
+    try {
+      document.querySelectorAll('#social-overlay video, #social-overlay audio').forEach(el => {
+        try { el.pause(); } catch {}
+        try { el.muted = true; } catch {}
+        try { el.currentTime = el.currentTime; } catch {}
+      });
+    } catch {}
     // Tear down all the long-lived observers / sockets so closing the
     // social overlay actually frees memory + connection slots.
     try { _socialVideoObserverInstance?.disconnect(); } catch {}
