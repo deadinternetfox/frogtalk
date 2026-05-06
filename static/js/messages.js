@@ -1625,6 +1625,22 @@ const Messages = (() => {
           if (contentEl) contentEl.innerHTML = _formatContent(msg.content || '');
           const timeEl = pendingEl.querySelector('.msg-time');
           if (timeEl) timeEl.textContent = UI.formatTime(msg.created_at);
+          // Optimistic bubble had no media (temp msg always sets media_data:null);
+          // when the server echo includes media, inject it now or it never renders.
+          try {
+            if (msg.media_data) {
+              const body = pendingEl.querySelector('.msg-body') || pendingEl.querySelector('.msg-cont-wrap > div') || pendingEl;
+              const hasMedia = body.querySelector(':scope > .msg-media, :scope > .audio-msg, :scope > .chat-video, :scope > .spoiler-wrap, :scope > .view-once-wrap');
+              if (!hasMedia) {
+                const mediaHtml = _buildMediaHtml(msg);
+                if (mediaHtml) {
+                  const anchor = body.querySelector(':scope > .msg-content');
+                  if (anchor) anchor.insertAdjacentHTML('afterend', mediaHtml);
+                  else body.insertAdjacentHTML('beforeend', mediaHtml);
+                }
+              }
+            }
+          } catch {}
           _attachLongPress(pendingEl, msg.id);
           const urlRe = /https?:\/\/[^\s<>"]+/g;
           const urls = (msg.content || '').match(urlRe);
