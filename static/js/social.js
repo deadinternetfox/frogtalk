@@ -5041,11 +5041,30 @@ const Social = (() => {
       ? `<img class="reel-author-avatar" src="${avatarSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
       : `<div class="reel-author-avatar" style="display:flex;align-items:center;justify-content:center;font-size:18px">🐸</div>`;
 
-    const friendLabel = post.friend_actor_nick
-      ? `<span class="reel-friend-label">${post.friend_actor_avatar
-          ? `<img src="${esc(post.friend_actor_avatar)}" style="width:16px;height:16px;border-radius:50%;object-fit:cover" alt="">`
-          : ''}${esc(post.friend_actor_nick)} ${post.user_id == (window.State?.user?.id) ? 'posted' : 'liked/reposted'}</span>`
-      : '';
+    const friendLabel = (() => {
+      if (!post.friend_actor_nick) return '';
+      const myId = window.State?.user?.id;
+      const isMe = post.user_id == myId;
+      const action = String(post.friend_actor_action || '').toLowerCase();
+      const avaHtml = post.friend_actor_avatar
+        ? `<img src="${esc(post.friend_actor_avatar)}" class="reel-friend-ava" alt="" loading="lazy">`
+        : '';
+      let badge = '';
+      let verb = '';
+      if (isMe || action === 'posted') {
+        badge = '<span class="reel-friend-badge">📹</span>';
+        verb = 'posted';
+      } else if (action === 'reposted') {
+        badge = '<span class="reel-friend-badge">🔁</span>';
+        verb = 'reposted';
+      } else {
+        // Reaction — show the actual emoji the friend used.
+        const em = String(post.friend_actor_emoji || '❤️');
+        badge = `<span class="reel-friend-badge">${esc(em)}</span>`;
+        verb = 'reacted';
+      }
+      return `<span class="reel-friend-label">${avaHtml}<span class="reel-friend-nick">${esc(post.friend_actor_nick)}</span> ${badge} <span class="reel-friend-verb">${verb}</span></span>`;
+    })();
 
     const caption = post.content ? `<div class="reel-caption">${esc(post.content)}</div>` : '';
     const likeCount = post.like_count ?? post.reaction_count ?? 0;

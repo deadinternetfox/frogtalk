@@ -5729,8 +5729,21 @@ a.status-music-link:hover *{
 }
 .reel-friend-label{
   font-size:11px;color:#aaa;line-height:1;
-  display:flex;align-items:center;gap:4px
+  display:inline-flex;align-items:center;gap:5px;
+  background:rgba(0,0,0,.42);backdrop-filter:blur(4px);
+  padding:3px 8px 3px 4px;border-radius:999px;
+  max-width:100%;
 }
+.reel-friend-ava{
+  width:16px;height:16px;border-radius:50%;object-fit:cover;
+  flex-shrink:0;border:1px solid rgba(255,255,255,.18)
+}
+.reel-friend-nick{
+  color:#e6e6e6;font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:120px
+}
+.reel-friend-badge{font-size:12px;line-height:1;display:inline-flex;align-items:center}
+.reel-friend-verb{color:#bbb}
 .reel-caption{
   position:absolute;bottom:20px;left:14px;right:72px;
   font-size:13px;color:#e8e8e8;line-height:1.45;

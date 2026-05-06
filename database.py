@@ -6799,7 +6799,16 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                                ELSE (SELECT wpr3.user_id FROM wall_post_reactions wpr3
                                    WHERE wpr3.post_id=wp.id AND wpr3.user_id {in_friends} LIMIT 1)
                            END
-                       )) AS friend_actor_avatar
+                       )) AS friend_actor_avatar,
+                       CASE
+                           WHEN wp.user_id {in_friends} THEN 'posted'
+                           WHEN EXISTS(SELECT 1 FROM wall_reposts wr4
+                               WHERE wr4.post_id=wp.id AND wr4.user_id {in_friends}) THEN 'reposted'
+                           ELSE 'reacted'
+                       END AS friend_actor_action,
+                       (SELECT wpr5.emoji FROM wall_post_reactions wpr5
+                           WHERE wpr5.post_id=wp.id AND wpr5.user_id {in_friends}
+                           ORDER BY wpr5.created_at DESC LIMIT 1) AS friend_actor_emoji
                 FROM wall_posts wp
                 JOIN users u ON wp.user_id = u.id
                 WHERE wp.media_type LIKE 'video/%'
@@ -6873,7 +6882,9 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                        wp.repost_count AS repost_count,
                        EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
                        NULL AS friend_actor_nick,
-                       NULL AS friend_actor_avatar
+                       NULL AS friend_actor_avatar,
+                       NULL AS friend_actor_action,
+                       NULL AS friend_actor_emoji
                 FROM wall_posts wp
                 JOIN users u ON wp.user_id = u.id
                 WHERE wp.media_type LIKE 'video/%'
@@ -7012,6 +7023,32 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
                 SELECT post_id, COUNT(*) AS c FROM wall_post_reactions
                 WHERE emoji='❤️'
                 GROUP BY post_id
+            ),
+            -- Pick ONE friend per post to credit on the reel ribbon
+            -- ("Alice ❤️ reacted" / "Bob 🔁 reposted"). Reactions and
+            -- reposts are unioned, ranked by recency, and the most recent
+            -- friend action wins. Author-is-friend handled in SELECT below.
+            friend_act_raw AS (
+                SELECT post_id, user_id, action, emoji, ts,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY post_id
+                           ORDER BY ts DESC, user_id DESC
+                       ) AS rn
+                FROM (
+                    SELECT post_id, user_id, 'reacted' AS action, emoji,
+                           COALESCE(created_at, '') AS ts
+                    FROM wall_post_reactions
+                    WHERE user_id IN ({fids_csv})
+                    UNION ALL
+                    SELECT post_id, user_id, 'reposted' AS action, NULL AS emoji,
+                           COALESCE(created_at, '') AS ts
+                    FROM wall_reposts
+                    WHERE user_id IN ({fids_csv})
+                )
+            ),
+            friend_act AS (
+                SELECT post_id, user_id, action, emoji
+                FROM friend_act_raw WHERE rn = 1
             )
             SELECT wp.id, wp.user_id, wp.content, NULL AS media_data, wp.media_type,
                    wp.privacy, wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
@@ -7023,20 +7060,32 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
                    wp.comment_count AS comment_count,
                    wp.repost_count AS repost_count,
                    EXISTS(SELECT 1 FROM wall_reposts wr WHERE wr.post_id=wp.id AND wr.user_id=?) AS i_reposted,
-                   (SELECT u2.nickname FROM users u2 WHERE u2.id=(
-                        SELECT wpr_n.user_id FROM wall_post_reactions wpr_n
-                        WHERE wpr_n.post_id=wp.id AND wpr_n.user_id IN ({fids_csv}) LIMIT 1
-                   )) AS friend_actor_nick,
-                   (SELECT u3.avatar FROM users u3 WHERE u3.id=(
-                        SELECT wpr_a.user_id FROM wall_post_reactions wpr_a
-                        WHERE wpr_a.post_id=wp.id AND wpr_a.user_id IN ({fids_csv}) LIMIT 1
-                   )) AS friend_actor_avatar,
+                   -- Friend ribbon: prefer the post author when they're a
+                   -- friend (action='posted'); else the most-recent friend
+                   -- reaction/repost picked by friend_act.
+                   CASE
+                       WHEN wp.user_id IN ({fids_csv}) THEN u.nickname
+                       ELSE (SELECT uf.nickname FROM users uf WHERE uf.id = friend_act.user_id)
+                   END AS friend_actor_nick,
+                   CASE
+                       WHEN wp.user_id IN ({fids_csv}) THEN u.avatar
+                       ELSE (SELECT uf2.avatar FROM users uf2 WHERE uf2.id = friend_act.user_id)
+                   END AS friend_actor_avatar,
+                   CASE
+                       WHEN wp.user_id IN ({fids_csv}) THEN 'posted'
+                       ELSE friend_act.action
+                   END AS friend_actor_action,
+                   CASE
+                       WHEN wp.user_id IN ({fids_csv}) THEN NULL
+                       ELSE friend_act.emoji
+                   END AS friend_actor_emoji,
                    {score_expr} {sort_seen_penalty} AS reels_score
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             LEFT JOIN ar_aff ON ar_aff.post_id = wp.id
             LEFT JOIN rp_aff ON rp_aff.post_id = wp.id
             LEFT JOIN hc     ON hc.post_id     = wp.id
+            LEFT JOIN friend_act ON friend_act.post_id = wp.id
             WHERE wp.media_type LIKE 'video/%'
               AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
