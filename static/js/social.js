@@ -5071,8 +5071,9 @@ const Social = (() => {
       const cardRect = card.getBoundingClientRect();
       const iconEl = btn.querySelector('.reel-act-icon') || btn;
       const iconRect = iconEl.getBoundingClientRect();
-      // No gap — heart should read as the right-most reaction in the row.
-      let right = Math.max(8, cardRect.right - iconRect.left);
+      // Small gap so the rightmost picker emoji isn't crammed against
+      // the heart icon — reads as a row that ends at the heart.
+      let right = Math.max(8, cardRect.right - iconRect.left + 10);
       const top = Math.max(8, iconRect.top - cardRect.top);
       picker.style.right = `${right}px`;
       picker.style.top = `${top}px`;
