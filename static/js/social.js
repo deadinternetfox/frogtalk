@@ -5050,17 +5050,33 @@ const Social = (() => {
     const card = btn.closest('.reel-card');
     if (!card) return;
 
+    // Horizontal reaction line (Messenger / IG style) anchored to the
+    // heart button and extending LEFT across the bottom of the card.
+    // Quick tap on the heart still hearts; long-press opens this picker.
     const emojis = ['❤️','🔥','😂','😮','😢','👏','💯','🎉','💪','😍'];
-    const rows = [];
-    for (let i = 0; i < emojis.length; i += 5) {
-      rows.push(`<div class="reel-react-row">${emojis.slice(i, i+5).map(e =>
-        `<button class="reel-react-emoji" onclick="Social._reelPickEmoji(${postId},'${e}',this)">${e}</button>`
-      ).join('')}</div>`);
-    }
     const picker = document.createElement('div');
-    picker.className = 'reel-react-picker';
-    picker.innerHTML = rows.join('');
+    picker.className = 'reel-react-picker reel-react-picker-row';
+    picker.innerHTML = emojis.map(e =>
+      `<button type="button" class="reel-react-emoji" onclick="Social._reelPickEmoji(${postId},'${e}',this)">${e}</button>`
+    ).join('');
     card.appendChild(picker);
+    // Position the picker so its right edge lines up with the heart
+    // button and it extends to the left. Computed at runtime so it
+    // adapts to action-bar relayouts on resize.
+    try {
+      const cardRect = card.getBoundingClientRect();
+      const btnRect = btn.getBoundingClientRect();
+      // right offset from card right edge -> keep picker right-aligned
+      // to the heart button.
+      const right = Math.max(8, cardRect.right - btnRect.right);
+      const bottom = Math.max(8, cardRect.bottom - btnRect.top + 6);
+      picker.style.right = `${right}px`;
+      picker.style.bottom = `${bottom}px`;
+      picker.style.left = 'auto';
+      picker.style.top = 'auto';
+    } catch {}
+    // Animate in
+    requestAnimationFrame(() => picker.classList.add('open'));
     // Dismiss on outside click
     setTimeout(() => {
       const dismiss = (ev) => {
@@ -5068,6 +5084,32 @@ const Social = (() => {
       };
       document.addEventListener('click', dismiss, true);
     }, 10);
+  }
+
+  // Long-press on the heart button -> open horizontal reaction picker.
+  // Quick tap (under ~350 ms) -> normal heart toggle (handled by onclick).
+  function _reelHeartHoldStart(ev, postId, btn) {
+    if (!btn) return;
+    // Only main button / primary touch.
+    if (ev && ev.button != null && ev.button !== 0) return;
+    btn._heartHoldFired = false;
+    if (btn._heartHoldTimer) { clearTimeout(btn._heartHoldTimer); btn._heartHoldTimer = null; }
+    btn._heartHoldTimer = setTimeout(() => {
+      btn._heartHoldFired = true;
+      btn._heartHoldTimer = null;
+      try { openReelReactPicker(postId, btn); } catch {}
+    }, 360);
+  }
+  function _reelHeartHoldEnd(ev, btn) {
+    if (!btn) return;
+    if (btn._heartHoldTimer) { clearTimeout(btn._heartHoldTimer); btn._heartHoldTimer = null; }
+    // If long-press already fired, swallow the trailing click so the
+    // heart toggle doesn't ALSO run alongside the picker.
+    if (btn._heartHoldFired) {
+      try { ev?.preventDefault?.(); ev?.stopPropagation?.(); } catch {}
+      // Clear the flag after the click event has bubbled.
+      setTimeout(() => { btn._heartHoldFired = false; }, 50);
+    }
   }
 
   async function _reelPickEmoji(postId, emoji, btn) {
@@ -5172,7 +5214,7 @@ const Social = (() => {
         </div>
         ${caption}
         <div class="reel-actions">
-          <button class="reel-act-btn ${post.i_liked ? 'liked' : ''}" title="Like" onclick="Social.reactReelHeart(event,${post.id},this)">
+          <button class="reel-act-btn ${post.i_liked ? 'liked' : ''}" title="Like (hold for reactions)" onclick="Social.reactReelHeart(event,${post.id},this)" onpointerdown="Social._reelHeartHoldStart(event,${post.id},this)" onpointerup="Social._reelHeartHoldEnd(event,this)" onpointercancel="Social._reelHeartHoldEnd(event,this)" onpointerleave="Social._reelHeartHoldEnd(event,this)" oncontextmenu="event.preventDefault();return false">
             <div class="reel-act-icon">❤️</div>
             <span class="reel-act-count reel-like-count">${likeCount}</span>
           </button>
@@ -5197,6 +5239,9 @@ const Social = (() => {
       ev?.preventDefault?.();
       ev?.stopPropagation?.();
     } catch {}
+    // If a long-press just fired the picker, don't ALSO toggle heart on
+    // the synthetic click that follows the pointerup.
+    if (btn && btn._heartHoldFired) return;
     const countEl = btn?.querySelector('.reel-like-count');
     const wasLiked = !!btn?.classList.contains('liked');
     const prev = Number(countEl?.textContent || '0');
@@ -8794,7 +8839,7 @@ const Social = (() => {
     loadReelsTab, switchReelsScope, switchReelsSort,
     toggleReelMute, toggleReelPlayback, reactReelHeart, openReelComments,
     openSharedReel,
-    openReelReactPicker, _reelPickEmoji,
+    openReelReactPicker, _reelPickEmoji, _reelHeartHoldStart, _reelHeartHoldEnd,
     reelsBackToStart,
     // Activity / notifications
     loadActivity, markAllActivityRead, openActivityItem,
