@@ -432,16 +432,16 @@ function showRecordingUI (stream) {
     if (!canvas) {
       canvas = document.createElement('canvas');
       canvas.id = 'rec-canvas';
-      canvas.width  = 160;
+      canvas.width  = 280;
       canvas.height = 32;
-      canvas.style.cssText = 'border-radius:18px;background:transparent;vertical-align:middle';
+      canvas.style.cssText = 'border-radius:18px;background:transparent;vertical-align:middle;flex:1;min-width:0;max-width:100%';
     }
     thumb.innerHTML = '';
     // Wrap waveform in a chat-style bubble so the recording preview matches
     // the .audio-msg look used in messages / finished preview.
     const bubble = document.createElement('div');
     bubble.className = 'audio-msg att-voice-bubble att-voice-recording';
-    bubble.style.cssText = 'min-width:220px;cursor:default;padding:8px 14px;gap:10px';
+    bubble.style.cssText = 'min-width:320px;cursor:default;padding:8px 14px;gap:10px';
     const recDot = document.createElement('span');
     recDot.style.cssText = 'width:10px;height:10px;border-radius:50%;background:#f85149;box-shadow:0 0 8px #f85149;flex-shrink:0;animation:wave-bounce .9s ease-in-out infinite alternate';
     bubble.appendChild(recDot);
