@@ -404,6 +404,7 @@ async def websocket_endpoint(
                         ft_msg_id=msg_id,
                         reply_to_ft_id=reply_to or None,
                         media_blur=bool(media_blur),
+                        display_name=user.get("display_name"),
                     )
                 except Exception:
                     pass

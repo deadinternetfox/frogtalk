@@ -1471,7 +1471,7 @@ const Messages = (() => {
         <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
         <div class="msg-body">
           <div class="msg-meta">
-            <span class="msg-author" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.escHtml(msg.display_name || msg.nickname)}</span>
+            <span class="msg-author" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.escHtml(msg.display_name || msg.nickname)}</span>${msg.display_name && msg.display_name !== msg.nickname ? `<span class="msg-author-handle">@${UI.escHtml(msg.nickname)}</span>` : ''}
             ${_bridgeBadge(msg)}
             <span class="msg-time">${time}</span>
           </div>
@@ -1493,7 +1493,7 @@ const Messages = (() => {
       <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
       <div class="msg-body">
         <div class="msg-meta">
-          <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(msg.display_name || msg.nickname)}</span>
+          <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(msg.display_name || msg.nickname)}</span>${msg.display_name && msg.display_name !== msg.nickname ? `<span class="msg-author-handle">@${UI.escHtml(msg.nickname)}</span>` : ''}
           ${_bridgeBadge(msg)}
           <span class="msg-time">${time}</span>
           ${editedTag}
@@ -2987,6 +2987,7 @@ async function sendMessage() {
       _nonce: _nonce,
       room: State.currentRoom,
       nickname: State.user?.nickname,
+      display_name: State.user?.display_name,
       user_id: State.user?.id,
       avatar: State.user?.avatar,
       content: text,
@@ -3274,7 +3275,7 @@ function _buildMsgHtml(msg, isCont) {
     <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}">${avatar}</div>
     <div class="msg-body">
       <div class="msg-meta">
-        <span class="msg-author">${UI.escHtml(msg.display_name || msg.nickname)}</span>
+        <span class="msg-author">${UI.escHtml(msg.display_name || msg.nickname)}</span>${msg.display_name && msg.display_name !== msg.nickname ? `<span class="msg-author-handle">@${UI.escHtml(msg.nickname)}</span>` : ''}
         <span class="msg-time">${time}</span>
       </div>
       <div class="msg-content">${content}</div>

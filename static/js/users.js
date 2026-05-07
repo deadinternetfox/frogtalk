@@ -17,9 +17,28 @@ const Users = (() => {
       const key = u.user_id || u.id || u.nickname;
       if (!key) continue;
       const prev = seen.get(key);
-      // Keep the entry with online-dot info; if both are present, later one wins
-      if (!prev) seen.set(key, { ...u });
-      else seen.set(key, { ...prev, ...u });
+      // Keep the entry with online-dot info; if both are present, later one wins.
+      // Preserve display_name from previous entry if the incoming one is null/missing
+      // (WS online_nicknames may omit display_name for pre-existing connections).
+      if (!prev) {
+        seen.set(key, { ...u });
+      } else {
+        const merged = { ...prev, ...u };
+        if (!merged.display_name && prev.display_name) merged.display_name = prev.display_name;
+        seen.set(key, merged);
+      }
+    }
+    // For any online user whose display_name is still missing, try to fill it
+    // from the already-loaded channelMembers list (which comes from the DB).
+    if (_channelMembers.length) {
+      for (const [key, u] of seen) {
+        if (!u.display_name) {
+          const cm = _channelMembers.find(m =>
+            (m.user_id && m.user_id === u.user_id) || m.nickname === u.nickname
+          );
+          if (cm && cm.display_name) u.display_name = cm.display_name;
+        }
+      }
     }
     // Inject self only if the server didn't include us. Never override a
     // server-provided avatar with the stale local cache — that's what caused
@@ -30,9 +49,16 @@ const Users = (() => {
         seen.set(selfKey, {
           user_id: State.user.id,
           nickname: State.user.nickname,
+          display_name: State.user.display_name,
           avatar: State.user.avatar,
           is_admin: State.user.is_admin,
         });
+      } else if (selfKey && seen.has(selfKey)) {
+        // Always keep our own display_name up to date from local State
+        const self = seen.get(selfKey);
+        if (!self.display_name && State.user.display_name) {
+          self.display_name = State.user.display_name;
+        }
       }
     }
     const deduped = Array.from(seen.values());
@@ -70,7 +96,7 @@ const Users = (() => {
       search = document.createElement('input');
       search.id = 'member-search';
       search.className = 'member-search-input';
-      search.placeholder = 'Search members…';
+      search.placeholder = 'Search by username…';
       search.oninput = () => { _filter = search.value.trim().toLowerCase(); _renderFiltered(); };
     }
     list.appendChild(search);
@@ -116,12 +142,16 @@ const Users = (() => {
     const avatarSrc = u.avatar || (isSelf ? State.user.avatar : null);
     const dot = isOnline ? '<span class="online-dot"></span>' : '<span class="offline-dot"></span>';
     const displayLabel = u.display_name || u.nickname;
+    const hasHandle = !!(u.display_name && u.display_name !== u.nickname);
     el.innerHTML = `
       <div class="user-avatar">
         ${UI.avatarEl(avatarSrc, u.nickname, 32)}
         ${dot}
       </div>
-      <span class="user-name${isAdmin ? ' admin' : ''}" title="@${UI.escHtml(u.nickname)}">${isAdmin ? '👑 ' : ''}${UI.escHtml(displayLabel)}${voiceIcon ? ' ' + voiceIcon : ''}</span>
+      <div class="user-name-wrap">
+        <span class="user-name${isAdmin ? ' admin' : ''}">${isAdmin ? '👑 ' : ''}${UI.escHtml(displayLabel)}${voiceIcon ? ' ' + voiceIcon : ''}</span>
+        ${hasHandle ? `<span class="user-handle">@${UI.escHtml(u.nickname)}</span>` : ''}
+      </div>
     `;
     return el;
   }
@@ -136,6 +166,15 @@ const Users = (() => {
       const data = await res.json();
       _channelMembers = data.members || [];
       _channelRoom = roomName;
+      // Backfill display_name into any online users that the WS sent without it
+      for (const u of _allUsers) {
+        if (!u.display_name) {
+          const cm = _channelMembers.find(m =>
+            (m.user_id && m.user_id === u.user_id) || m.nickname === u.nickname
+          );
+          if (cm && cm.display_name) u.display_name = cm.display_name;
+        }
+      }
       _renderFiltered();
     } catch {}
   }

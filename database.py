@@ -2273,7 +2273,7 @@ def search_users(query: str, limit: int = 20, requester_id: int = 0) -> List[Dic
     """Search public profiles. Friends are visible regardless of privacy setting."""
     with _conn() as con:
         rows = con.execute(
-            """SELECT u.id, u.nickname, u.avatar, u.bio, u.presence, u.last_seen,
+            """SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, u.presence, u.last_seen,
                       u.profile_public, u.allow_friend_requests, u.status_msg
                FROM users u
                WHERE u.nickname LIKE ?
@@ -2442,7 +2442,7 @@ def get_friends(user_id: int) -> List[Dict]:
     """All accepted friends with basic profile."""
     with _conn() as con:
         rows = con.execute("""
-            SELECT u.id, u.nickname, u.avatar, u.presence, u.last_seen, u.status_msg
+            SELECT u.id, u.nickname, u.display_name, u.avatar, u.presence, u.last_seen, u.status_msg
             FROM friends f JOIN users u ON f.friend_id = u.id
             WHERE f.user_id=? AND f.status='accepted'
             ORDER BY u.nickname
@@ -2453,7 +2453,7 @@ def get_friends(user_id: int) -> List[Dict]:
 def get_friend_requests_in(user_id: int) -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
-            SELECT u.id, u.nickname, u.avatar, f.created_at
+            SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, f.created_at
             FROM friends f JOIN users u ON f.user_id = u.id
             WHERE f.friend_id=? AND f.status='pending'
             ORDER BY f.created_at DESC
@@ -2464,7 +2464,7 @@ def get_friend_requests_in(user_id: int) -> List[Dict]:
 def get_friend_requests_out(user_id: int) -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
-            SELECT u.id, u.nickname, u.avatar, f.created_at
+            SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, f.created_at
             FROM friends f JOIN users u ON f.friend_id = u.id
             WHERE f.user_id=? AND f.status='pending'
             ORDER BY f.created_at DESC

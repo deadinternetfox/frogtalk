@@ -5245,7 +5245,8 @@ function showSearchModal() {
       ? `#${State.currentRoom}`
       : 'Global';
   }
-  document.getElementById('search-results').innerHTML = '<div style="color:#555;text-align:center;padding:40px 20px"><div style="font-size:32px;margin-bottom:8px;opacity:.5">🔍</div><div style="font-size:13px">Search messages by keyword</div></div>';
+  document.getElementById('search-results').innerHTML =
+    '<div class="search-empty"><div class="emoji">🔍</div><div>Search messages by keyword</div></div>';
   setTimeout(() => document.getElementById('search-input').focus(), 100);
 }
 
@@ -5254,7 +5255,7 @@ async function performSearch() {
   if (!query) return;
   
   const resultsEl = document.getElementById('search-results');
-  resultsEl.innerHTML = '<div style="color:#666;text-align:center;padding:30px">Searching…</div>';
+  resultsEl.innerHTML = '<div class="search-loading">Searching…</div>';
   
   try {
     // Search in current room or globally
@@ -5278,40 +5279,43 @@ async function performSearch() {
     if (Array.isArray(data.results)) results = data.results;
     
     if (!results.length) {
-      resultsEl.innerHTML = `<div style="color:#666;text-align:center;padding:30px">
-        <div style="font-size:32px;margin-bottom:8px">🔍</div>
-        <div>No results for "<strong style="color:#e0e0e0">${UI.escHtml(query)}</strong>"</div>
+      resultsEl.innerHTML = `<div class="search-empty">
+        <div class="emoji">🔍</div>
+        <div>No results for "<strong>${UI.escHtml(query)}</strong>"</div>
       </div>`;
       return;
     }
 
     const heading = isGlobal ? 'Global results' : `Results in #${UI.escHtml(State.currentRoom)}`;
-    resultsEl.innerHTML = `<div style="font-size:12px;color:#666;margin-bottom:8px;padding:0 4px">${heading} — ${results.length} match${results.length !== 1 ? 'es' : ''}</div>` +
+    resultsEl.innerHTML = `<div class="search-summary">${heading} — ${results.length} match${results.length !== 1 ? 'es' : ''}</div>` +
       results.map(r => {
       const nick = r.nickname || r.sender_nick || 'Unknown';
+      const displayName = r.display_name || r.sender_display_name || nick;
+      const hasHandle = !!(displayName && displayName !== nick);
       const loc = r.room_name ? `#${r.room_name}` : (r.peer_nick ? `DM with ${r.peer_nick}` : '');
       const content = r.content || '';
       // Highlight the match
       const hl = content.substring(0, 200).replace(
         new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'),
-        '<mark style="background:#4caf5040;color:#4caf50;border-radius:2px;padding:0 1px">$1</mark>'
+        '<mark>$1</mark>'
       );
       return `
       <div class="search-result" onclick="jumpToMessage(${r.id}, '${UI.escHtml(r.room_name || '')}', ${r.channel_id || 0})"
-           style="padding:10px 12px;border-radius:8px;background:#1a1a1a;margin-bottom:6px;cursor:pointer;transition:all .15s;border:1px solid #222">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+           >
+        <div class="search-result-head">
           ${UI.avatarEl(r.avatar, nick, 24)}
-          <span style="font-weight:600;color:#e0e0e0;font-size:13px">${UI.escHtml(nick)}</span>
-          ${loc ? `<span style="color:#4caf50;font-size:11px;background:#1a3a1a;border-radius:4px;padding:1px 6px">${UI.escHtml(loc)}</span>` : ''}
-          <span style="color:#444;font-size:11px;margin-left:auto;white-space:nowrap">${UI.formatTime(r.created_at)}</span>
+          <span class="search-author">${UI.escHtml(displayName)}</span>
+          ${hasHandle ? `<span class="search-handle">@${UI.escHtml(nick)}</span>` : ''}
+          ${loc ? `<span class="search-loc">${UI.escHtml(loc)}</span>` : ''}
+          <span class="search-time">${UI.formatTime(r.created_at)}</span>
         </div>
-        <div style="color:#bbb;font-size:13px;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">
-          ${content ? hl : '<span style="color:#888;font-style:italic">📎 Media attachment</span>'}
+        <div class="search-content">
+          ${content ? hl : '<span class="search-media">📎 Media attachment</span>'}
         </div>
       </div>`;
     }).join('');
   } catch (e) {
-    resultsEl.innerHTML = '<div style="color:#ff5555;text-align:center;padding:30px">Search failed — try again</div>';
+    resultsEl.innerHTML = '<div class="search-error">Search failed — try again</div>';
   }
 }
 

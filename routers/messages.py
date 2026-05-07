@@ -168,6 +168,7 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
             ft_msg_id=msg_id,
             reply_to_ft_id=body.reply_to,
             media_blur=bool(body.media_blur),
+            display_name=current_user.get("display_name"),
         )
     except Exception:
         pass

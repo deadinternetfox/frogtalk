@@ -784,7 +784,8 @@ async def forward_to_telegram(room: str, nickname: str, content: str,
                               media_data: str = None,
                               *, ft_msg_id: int | None = None,
                               reply_to_ft_id: int | None = None,
-                              media_blur: bool = False):
+                              media_blur: bool = False,
+                              display_name: str | None = None):
     """Forward a FrogTalk message to all linked Telegram chats.
 
     Formats the message with a rich HTML header so Telegram readers can
@@ -818,10 +819,16 @@ async def forward_to_telegram(room: str, nickname: str, content: str,
 
     safe_nick = _html.escape(nickname)
     safe_room = _html.escape(room)
-    if sender_avatar:
-        nick_html = f'<a href="{_html.escape(sender_avatar, quote=True)}">{safe_nick}</a>'
+    _display = (display_name or "").strip() or None
+    if _display and _display != nickname:
+        safe_display = _html.escape(_display)
+        label_text = f"{safe_display} @{safe_nick}"
     else:
-        nick_html = safe_nick
+        label_text = safe_nick
+    if sender_avatar:
+        nick_html = f'<a href="{_html.escape(sender_avatar, quote=True)}">{label_text}</a>'
+    else:
+        nick_html = label_text
     # Plain, compact header. No frog emoji (users find it noisy); the
     # "via FrogTalk #room" tail makes the source unambiguous without
     # competing with the message body for attention.

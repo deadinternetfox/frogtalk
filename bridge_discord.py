@@ -955,7 +955,8 @@ async def forward_to_discord(room: str, nickname: str, content: str,
                              *, ft_msg_id: int | None = None,
                              reply_to_ft_id: int | None = None,
                              media_blur: bool = False,
-                             sender_user_id: int | None = None):
+                             sender_user_id: int | None = None,
+                             display_name: str | None = None):
     """Forward a FrogTalk message to all linked Discord channels as a
     rich embed (nickname + avatar + source-channel footer)."""
     if not _bridges:
@@ -1020,9 +1021,11 @@ async def forward_to_discord(room: str, nickname: str, content: str,
             except Exception:
                 reply_dc_id = None
         try:
+            _dn = (display_name or "").strip() or None
+            _bridge_nick = f"{_dn} (@{nickname})" if (_dn and _dn != nickname) else nickname
             dc_msg_id = await send_to_discord(
                 channel_id, body, media_data,
-                nickname=nickname, avatar=resolved_avatar, room=room,
+                nickname=_bridge_nick, avatar=resolved_avatar, room=room,
                 has_spoiler=bool(media_blur),
                 reply_to_message_id=reply_dc_id,
             )

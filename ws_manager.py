@@ -173,8 +173,8 @@ class ConnectionManager:
         for ws in dead:
             self.disconnect(ws)
 
-    def update_user_meta(self, user_id: int, *, avatar: str = None, nickname: str = None):
-        """Update cached meta (avatar / nickname) on all active websockets for a user."""
+    def update_user_meta(self, user_id: int, *, avatar: str = None, nickname: str = None, display_name: str = None):
+        """Update cached meta (avatar / nickname / display_name) on all active websockets for a user."""
         for ws in list(self._user_ws.get(user_id, [])):
             meta = self._ws_meta.get(ws)
             if not meta:
@@ -185,6 +185,8 @@ class ConnectionManager:
                 av = avatar
             if nickname is not None:
                 nick = nickname
+            if display_name is not None:
+                dn = display_name if display_name.strip() else None
             self._ws_meta[ws] = (room, nick, uid, av, is_adm, meta[5] if len(meta) > 5 else '', dn)
 
     async def disconnect_user(self, user_id: int) -> int:

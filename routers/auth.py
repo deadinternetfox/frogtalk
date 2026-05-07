@@ -798,6 +798,7 @@ async def change_display_name(
         })
     db.set_display_name(current_user["id"], cleaned or None)
     invalidate_token_cache(x_session_token)
+    manager.update_user_meta(current_user["id"], display_name=cleaned or "")
     return {"ok": True, "display_name": cleaned or None}
 
 

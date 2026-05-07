@@ -23,6 +23,15 @@ function _renderStatusHtml (status_msg, nickname, fallbackLabel) {
   return esc(raw);
 }
 
+function _friendNameHtml (u) {
+  const nick = String(u?.nickname || '');
+  const dn = String(u?.display_name || '').trim();
+  if (dn && dn !== nick) {
+    return `${esc(dn)} <span style="font-size:11px;color:#91a59c;font-weight:400">@${esc(nick)}</span>`;
+  }
+  return esc(nick);
+}
+
 let _currentFriendTab = 'friends';
 let _pendingFriends    = [];
 let _allFriends        = [];
@@ -92,7 +101,7 @@ function renderFriendTab () {
           background:${presenceColor(f.presence)};border:2px solid #12231d"></span>
       </div>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${esc(f.nickname)}</div>
+        <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
         <div style="font-size:12px;color:#9dc4b2">${_renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))}</div>
       </div>
       <div style="display:flex;gap:4px">
@@ -118,7 +127,7 @@ function renderPending (el) {
       <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${fmtAv(f.avatar, f.nickname, 40)}</div>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${esc(f.nickname)}</div>
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
           <div style="font-size:12px;color:#9dc4b2">${esc(f.bio||'')}</div>
         </div>
         <div style="display:flex;gap:6px">
@@ -131,7 +140,7 @@ function renderPending (el) {
 function renderAddFriend (el) {
   el.innerHTML = `
     <div style="display:flex;gap:8px;margin-bottom:16px">
-      <input id="friend-search-inp" class="modal-input" style="margin:0;flex:1" placeholder="Search by nickname…"
+      <input id="friend-search-inp" class="modal-input" style="margin:0;flex:1" placeholder="Search by username…"
              oninput="searchFriends()" maxlength="64">
     </div>
     <div id="friend-search-results"></div>`;
@@ -157,7 +166,7 @@ async function searchFriends () {
       return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(u.nickname)}',${Number(u.id)||0})" title="View profile">${fmtAv(u.avatar, u.nickname, 40)}</div>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(u.nickname)}',${Number(u.id)||0})" title="View profile">${esc(u.nickname)}</div>
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(u.nickname)}',${Number(u.id)||0})" title="View profile">${_friendNameHtml(u)}</div>
           <div style="font-size:12px;color:#9dc4b2">${esc(u.bio||'')}</div>
         </div>
         ${isFriend

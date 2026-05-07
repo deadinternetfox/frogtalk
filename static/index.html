@@ -1983,6 +1983,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .msg-author{font-size:14px;font-weight:600;cursor:pointer}
 .msg-author:hover{text-decoration:underline}
 .msg-author.admin{color:#ffd700}
+.msg-author-handle{font-size:11px;color:#555;font-weight:400;margin-left:4px}
 .msg-time{font-size:11px;color:#444}
 .msg-edited{font-size:11px;color:#444;font-style:italic}
 .bridge-origin-badge{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 7px 1px 5px;border-radius:999px;line-height:1.5;vertical-align:1px;user-select:none;transition:filter .15s ease}
@@ -2535,6 +2536,8 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .user-item.offline .user-avatar{filter:grayscale(60%)}
 .user-name{font-size:14px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .user-name.admin{color:#ffd700}
+.user-name-wrap{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.user-handle{font-size:11px;color:#555;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2}
 .in-call-badge{font-size:11px;opacity:.85}
 .in-call-badge.live{opacity:1;color:#4caf50;animation:livePulse 2s ease-in-out infinite}
 .in-call-badge.muted{opacity:1;color:#f05050}
@@ -3741,6 +3744,65 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   100%{background:transparent}
 }
 .search-result:hover{background:#222!important;border-color:#333!important}
+
+/* Message search modal — align with FrogTalk popup language */
+#modal-search .search-modal{
+  background:linear-gradient(180deg,#173027 0%,#11211b 48%,#0d1814 100%) !important;
+  border:1px solid #2f5548 !important;
+  box-shadow:0 14px 40px rgba(0,0,0,.46), 0 0 0 1px rgba(127,210,167,.08) inset;
+}
+#modal-search .search-title{color:#dff5e8 !important}
+#modal-search .search-scope-chip{
+  font-size:12px;color:#bff0d0;background:linear-gradient(180deg,#1a3a2c,#132b21);
+  border:1px solid #2f5548;border-radius:999px;padding:3px 9px;margin-left:auto;font-weight:600;
+}
+#modal-search .search-row{align-items:center}
+#modal-search .search-input{margin-bottom:0 !important}
+#modal-search .search-results{
+  border:1px solid #2a4a3d;border-radius:10px;padding:8px;
+  background:linear-gradient(180deg,#0d1814,#0a1411);
+}
+#modal-search .search-actions{margin-top:12px}
+
+.search-empty,
+.search-loading,
+.search-error{
+  color:#7f9289;text-align:center;padding:30px 16px;font-size:13px;
+}
+.search-empty .emoji{font-size:30px;opacity:.55;margin-bottom:8px}
+.search-error{color:#ff9a9a}
+.search-summary{
+  font-size:12px;color:#94b3a5;margin:0 4px 8px;padding:0 2px;
+}
+.search-result{
+  padding:10px 12px;border-radius:10px;
+  background:linear-gradient(180deg,#13231c,#0f1d18);
+  margin-bottom:7px;cursor:pointer;
+  transition:background .16s ease,border-color .16s ease,transform .12s ease,box-shadow .16s ease;
+  border:1px solid #244438;
+}
+.search-result:hover{
+  background:linear-gradient(180deg,#173027,#12241d) !important;
+  border-color:#356252 !important;
+  transform:translateY(-1px);
+  box-shadow:0 6px 16px rgba(0,0,0,.28);
+}
+.search-result-head{display:flex;align-items:center;gap:8px;margin-bottom:4px}
+.search-author{font-weight:600;color:#dff5e8;font-size:13px}
+.search-handle{font-size:11px;color:#8ea79a;font-weight:500}
+.search-loc{
+  color:#bff0d0;font-size:11px;background:#193327;
+  border:1px solid #2a4f40;border-radius:999px;padding:1px 7px;
+}
+.search-time{color:#6f8279;font-size:11px;margin-left:auto;white-space:nowrap}
+.search-content{
+  color:#b8cfc3;font-size:13px;line-height:1.4;overflow:hidden;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+}
+.search-content .search-media{color:#90a69b;font-style:italic}
+.search-content mark{
+  background:rgba(107,182,152,.28);color:#dff5e8;border-radius:3px;padding:0 2px;
+}
 
 /* Pin indicators */
 .msg-pinned::before{
@@ -8644,18 +8706,18 @@ window.ConnErr = (function(){
 
 <!-- ═══════════ SEARCH MODAL ═════════════════════════════════════════════════ -->
 <div class="modal-overlay hidden" id="modal-search">
-  <div class="modal" style="max-width:520px;max-height:80vh;display:flex;flex-direction:column">
-    <div class="modal-title" style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+  <div class="modal search-modal" style="max-width:520px;max-height:80vh;display:flex;flex-direction:column">
+    <div class="modal-title search-title" style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
       🔍 Search Messages
-      <span id="search-scope" style="font-size:12px;color:#4caf50;background:#1a3a1a;border-radius:6px;padding:2px 8px;margin-left:auto;font-weight:500"></span>
+      <span id="search-scope" class="search-scope-chip"></span>
     </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px">
-      <input class="modal-input" id="search-input" placeholder="Search messages…" style="flex:1;margin-bottom:0"
+    <div class="search-row" style="display:flex;gap:8px;margin-bottom:12px">
+      <input class="modal-input search-input" id="search-input" placeholder="Search messages…" style="flex:1;margin-bottom:0"
              onkeydown="if(event.key==='Enter')performSearch()">
-      <button class="modal-btn primary" onclick="performSearch()" style="margin:0;padding:8px 18px;flex-shrink:0;white-space:nowrap">Search</button>
+      <button class="modal-btn primary search-btn" onclick="performSearch()" style="margin:0;padding:8px 18px;flex-shrink:0;white-space:nowrap">Search</button>
     </div>
-    <div id="search-results" style="flex:1;overflow-y:auto;min-height:200px"></div>
-    <div class="modal-actions" style="margin-top:12px">
+    <div id="search-results" class="search-results" style="flex:1;overflow-y:auto;min-height:200px"></div>
+    <div class="modal-actions search-actions" style="margin-top:12px">
       <button class="modal-btn secondary" onclick="closeModal('modal-search')">Close</button>
     </div>
   </div>
