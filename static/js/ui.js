@@ -3912,7 +3912,7 @@ function _refreshUsernameCooldownUI() {
     el.style.color = '#c08040';
     if (input) input.setAttribute('data-cooldown-active', '1');
   } else {
-    el.textContent = 'Username changes are saved with the main Save button and require your current password.';
+    el.textContent = '';
     el.style.color = '#888';
     if (input) input.removeAttribute('data-cooldown-active');
   }
