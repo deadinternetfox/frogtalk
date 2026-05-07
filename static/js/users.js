@@ -7,7 +7,27 @@ const Users = (() => {
   let _channelMembers = [];    // full joined-member list for the room (online+offline)
   let _channelRoom = null;     // which room _channelMembers is for
   let _filter = '';
+  let _searchInput = null;
   const _displayNameCache = new Map();
+
+  function _mergeLocalSelf(user) {
+    if (!user || !State.user) return user;
+    const sameUser = (user.user_id && State.user.id && user.user_id === State.user.id)
+      || (user.nickname && State.user.nickname && user.nickname === State.user.nickname);
+    if (!sameUser) return user;
+    return {
+      ...user,
+      user_id: user.user_id || State.user.id,
+      nickname: user.nickname || State.user.nickname,
+      display_name: State.user.display_name || user.display_name,
+      avatar: State.user.avatar || user.avatar,
+      is_admin: State.user.is_admin || user.is_admin,
+    };
+  }
+
+  function _mergeLocalSelfIntoList(users) {
+    return (users || []).map(u => _mergeLocalSelf(u));
+  }
 
   async function _hydrateDisplayNames(users) {
     const missing = (users || []).filter(u => u && u.nickname && !u.display_name && (!State.user || u.nickname !== State.user.nickname));
@@ -85,7 +105,7 @@ const Users = (() => {
         }
       }
     }
-    const deduped = Array.from(seen.values());
+    const deduped = _mergeLocalSelfIntoList(Array.from(seen.values()));
     State.onlineUsers = deduped;
     _allUsers = deduped;
     _renderFiltered();
@@ -137,16 +157,28 @@ const Users = (() => {
     if (count) count.textContent = _allUsers.length;
 
     const prevSearchValue = _filter;
+    const hadFocus = _searchInput && document.activeElement === _searchInput;
+    const selStart = hadFocus ? _searchInput.selectionStart : null;
+    const selEnd = hadFocus ? _searchInput.selectionEnd : null;
     list.innerHTML = '';
 
     // Search input
-    const search = document.createElement('input');
-    search.id = 'member-search';
-    search.className = 'member-search-input';
-    search.placeholder = 'Search by display name or username…';
-    search.value = prevSearchValue;
-    search.oninput = () => { _filter = search.value.trim().toLowerCase(); _renderFiltered(); };
-    list.appendChild(search);
+    if (!_searchInput) {
+      _searchInput = document.createElement('input');
+      _searchInput.id = 'member-search';
+      _searchInput.className = 'member-search-input';
+      _searchInput.placeholder = 'Search by display name or username…';
+      _searchInput.oninput = () => {
+        _filter = _searchInput.value.trim().toLowerCase();
+        _renderFiltered();
+      };
+    }
+    if (_searchInput.value !== prevSearchValue) _searchInput.value = prevSearchValue;
+    list.appendChild(_searchInput);
+    if (hadFocus) {
+      _searchInput.focus();
+      try { _searchInput.setSelectionRange(selStart, selEnd); } catch {}
+    }
 
     if (onlineShown.length) {
       const header = document.createElement('div');
@@ -213,7 +245,7 @@ const Users = (() => {
       });
       if (!res.ok) return;
       const data = await res.json();
-      _channelMembers = data.members || [];
+      _channelMembers = _mergeLocalSelfIntoList(data.members || []);
       _channelRoom = roomName;
       // Backfill display_name into any online users that the WS sent without it
       for (const u of _allUsers) {
