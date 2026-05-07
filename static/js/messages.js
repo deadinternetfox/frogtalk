@@ -1574,9 +1574,13 @@ const Messages = (() => {
       const urls = (msg.content || '').match(urlRe);
       if (urls && urls.length) {
         const firstUrl = urls[0];
-        const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
+        const isInvite = /\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(firstUrl);
         const isSocial = !!_parseFrogSocialUrl(firstUrl);
-        if (!isInvite && !isSocial && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: firstUrl });
+        // Always strip our own (frogtalk.xyz / frogtalk.app) OG previews —
+        // invite/profile/post/reel URLs hydrate as native cards, and bare
+        // self-links shouldn't echo a redundant OG card next to themselves.
+        const isSelf = /^https?:\/\/(?:www\.)?frogtalk\.(?:xyz|app)\b/i.test(firstUrl);
+        if (!isInvite && !isSocial && !isSelf && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: firstUrl });
       }
     });
 
@@ -1780,9 +1784,10 @@ const Messages = (() => {
           const urls = (msg.content || '').match(urlRe);
           if (urls && urls.length) {
             const firstUrl = urls[0];
-            const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
+            const isInvite = /\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(firstUrl);
             const isSocial = !!_parseFrogSocialUrl(firstUrl);
-            if (!isInvite && !isSocial && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
+            const isSelf = /^https?:\/\/(?:www\.)?frogtalk\.(?:xyz|app)\b/i.test(firstUrl);
+            if (!isInvite && !isSocial && !isSelf && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
           }
           setTimeout(() => _hydrateSpecialCards(msg.id), 100);
           const cached = State.messages[room] || [];

@@ -182,6 +182,9 @@ function _extractDMPreviewUrl(text) {
   // Skip invite/short-link URLs — they get their own rich invite-card embed.
   if (/\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(first)) return '';
   if (_parseDMFrogSocialUrl(first)) return '';
+  // Always strip our own (frogtalk.xyz / frogtalk.app) OG previews so we never
+  // render a redundant FrogTalk OG card next to native invite/profile cards.
+  if (/^https?:\/\/(?:www\.)?frogtalk\.(?:xyz|app)\b/i.test(first)) return '';
   return first;
 }
 
