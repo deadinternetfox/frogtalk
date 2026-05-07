@@ -68,6 +68,20 @@ const Music = (() => {
   let _lastDriftSec = null;          // null = unknown/checking
   let _lastSyncProvider = '';
   let _lastPlayerState = null;       // YouTube playerState: 1=play 2=pause 3=buffer
+  // Wall-clock ms of the most recent USER play/pause toggle (button click,
+  // notification action, togglePauseGlobal, etc.). Iframe state events
+  // that arrive within USER_INTENT_GUARD_MS AFTER this and CONTRADICT
+  // the user's intent are ignored — they are almost always stale
+  // pre-toggle state messages still in flight from the embed and were
+  // the root cause of the play/pause button flipping back to the wrong
+  // icon a moment after the click.
+  let _userIntentAt = 0;
+  let _userIntentPaused = null;      // last user-intent value (true=paused)
+  const USER_INTENT_GUARD_MS = 900;
+  function _userIntentActive() {
+    return _userIntentPaused !== null
+      && (Date.now() - _userIntentAt) < USER_INTENT_GUARD_MS;
+  }
   let _syncProbeStartedAt = 0;       // ms when probing began for current track
   let _syncFastProbeTimers = [];     // setTimeouts queued by fast re-probe
   // Lightweight UI-only re-sync. Fires every ~1.5s while a track is
@@ -589,6 +603,10 @@ const Music = (() => {
   function resumeFromNotification() {
     const cur = _state && _state.queue && _state.queue[0];
     if (!cur) return false;
+    // User-intent guard: tray Play is a real user click; suppress any
+    // stale playerState=2 events from before the resume ladder lands.
+    _userIntentPaused = false;
+    _userIntentAt = Date.now();
     // Bring the user back to the music source (channel or FrogSocial
     // music tab) so they actually see the player they tapped on.
     try { expand(); } catch {}
@@ -788,14 +806,24 @@ const Music = (() => {
           // own play button, the embed self-resumes after a buffer, or
           // the resume ladder lands. Without this, _paused gets stuck
           // at whatever _onAppHidden / togglePause set it to.
+          // Suppress contradictory reconciliations during the brief
+          // window after a user toggle — stale events from before the
+          // postMessage(pause/play) was honoured by the embed routinely
+          // arrived here and undid the flip, leaving the button icon
+          // out of sync with the actual audio.
+          const guardActive = _userIntentActive();
           if (nowPlaying && _paused) {
-            _paused = false;
-            try { _syncPlayPauseButtons(); } catch {}
+            if (!(guardActive && _userIntentPaused === true)) {
+              _paused = false;
+              try { _syncPlayPauseButtons(); } catch {}
+            }
           } else if (parsed.info === 2 && !_paused) {
             // YT paused itself (background, user-clicked iframe, etc.).
             // Mirror to _paused so the dock + tray + badge are honest.
-            _paused = true;
-            try { _syncPlayPauseButtons(); } catch {}
+            if (!(guardActive && _userIntentPaused === false)) {
+              _paused = true;
+              try { _syncPlayPauseButtons(); } catch {}
+            }
           }
           if (wasPlaying !== nowPlaying) {
             // Force the next _emitState() through the dedupe so the
@@ -825,17 +853,22 @@ const Music = (() => {
               && Math.abs(parsed.info.duration - _currentDurationSec) > 0.5) {
             _currentDurationSec = parsed.info.duration;
           }
+          const guardActiveInfo = _userIntentActive();
           if (ps === 1 && _paused) {
-            _paused = false;
-            _lastEmitHash = '';
-            try { _syncPlayPauseButtons(); } catch {}
-            try { _emitState(); } catch {}
-            try { _startSyncProbeIfNeeded(); } catch {}
+            if (!(guardActiveInfo && _userIntentPaused === true)) {
+              _paused = false;
+              _lastEmitHash = '';
+              try { _syncPlayPauseButtons(); } catch {}
+              try { _emitState(); } catch {}
+              try { _startSyncProbeIfNeeded(); } catch {}
+            }
           } else if (ps === 2 && !_paused) {
-            _paused = true;
-            _lastEmitHash = '';
-            try { _syncPlayPauseButtons(); } catch {}
-            try { _emitState(); } catch {}
+            if (!(guardActiveInfo && _userIntentPaused === false)) {
+              _paused = true;
+              _lastEmitHash = '';
+              try { _syncPlayPauseButtons(); } catch {}
+              try { _emitState(); } catch {}
+            }
           }
         }
 
@@ -853,10 +886,17 @@ const Music = (() => {
           else if (parsed.method === 'pause' || parsed.method === 'finish') scPaused = true;
           else if (parsed.method === 'isPaused' && typeof parsed.value === 'boolean') scPaused = parsed.value;
           if (scPaused !== null && scPaused !== _paused) {
-            _paused = scPaused;
-            _lastEmitHash = '';
-            try { _syncPlayPauseButtons(); } catch {}
-            try { _emitState(); } catch {}
+            // Same intent guard as YouTube — SC's widget will answer
+            // an in-flight isPaused poll with the pre-toggle value
+            // moments after the user clicks the dock button. Only
+            // skip when the iframe is reporting the OPPOSITE of what
+            // the user just asked for; matching reports always pass.
+            if (!(_userIntentActive() && _userIntentPaused !== scPaused)) {
+              _paused = scPaused;
+              _lastEmitHash = '';
+              try { _syncPlayPauseButtons(); } catch {}
+              try { _emitState(); } catch {}
+            }
           }
         }
 
@@ -1879,6 +1919,15 @@ const Music = (() => {
     // flipped by lots of paths (visibility, infoDelivery, surrender);
     // _userPaused is sticky and only the user toggles it.
     _userPaused = !nowPlaying;
+    // Stamp the user-intent guard so the iframe reconciliation handlers
+    // ignore any stale pre-toggle state events still in flight. Without
+    // this, clicking pause and then receiving a buffered playerState=1
+    // event a moment later would silently flip _paused back to false
+    // and leave the dock/mini buttons showing ⏸ while audio was paused
+    // (and vice versa on a click-to-play). Same root cause for both
+    // YouTube and SoundCloud iframes.
+    _userIntentPaused = !nowPlaying;
+    _userIntentAt = Date.now();
     // Don't auto-catch-up on un-pause. The iframe resumes from where
     // the user paused it — that's the expected behaviour. Resync is
     // a separate explicit action.
