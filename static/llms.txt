@@ -24,7 +24,7 @@ FrogTalk runs on the web, Android, and desktop (Linux AppImage). It supports dir
 - **Voice & video calls**: 1-to-1 and group calls in browser and on Android.
 - **Channels & directory**: Public and private rooms with a searchable directory.
 - **Frog Social**: Public posts, Reels, stories, reactions, replies, polls.
-- **Music together**: Synchronized shared listening sessions.
+- **Media channels**: Synchronized watch-together / listen-together sessions (YouTube, Spotify, SoundCloud).
 - **Discord & Telegram bridges**: Two-way message bridging with both networks.
 - **Disappearing messages**: Per-chat expiry timers.
 - **Cross-platform**: Web, Android, Linux desktop. Same account everywhere.
