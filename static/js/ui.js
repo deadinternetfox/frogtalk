@@ -5227,9 +5227,28 @@ async function pinMessage(msgId) {
     });
     if (res.ok) {
       toast('Message pinned', 'success');
+      // Optimistically reflect the pinned state on the local message bubble
+      // so the 📌 badge appears without waiting for a reload. Other clients
+      // see it on their next pins refresh.
+      try {
+        const el = document.getElementById(`msg-${msgId}`);
+        if (el && !el.querySelector('.msg-pinned')) {
+          const head = el.querySelector('.msg-author')?.parentElement;
+          if (head) {
+            const tag = document.createElement('span');
+            tag.className = 'msg-pinned';
+            tag.style.cssText = 'color:#4caf50;font-size:11px;margin-left:4px';
+            tag.textContent = '📌';
+            head.appendChild(tag);
+          }
+        }
+      } catch {}
     } else {
-      const data = await res.json();
-      toast(data.error || 'Failed to pin', 'error');
+      let errMsg = 'Failed to pin';
+      try { const data = await res.json(); errMsg = data.error || errMsg; } catch {}
+      if (res.status === 403) errMsg = 'Only mods or the owner can pin messages';
+      else if (res.status === 409) errMsg = 'Already pinned';
+      toast(errMsg, 'error');
     }
   } catch (e) {
     toast('Failed to pin message', 'error');

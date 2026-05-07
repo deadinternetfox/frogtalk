@@ -1337,11 +1337,13 @@ const Messages = (() => {
     const mediaHtml = _buildMediaHtml(msg);
     const fwdBadge = _forwardedBadgeHtml(msg);
 
-    // Pin button only shows in rooms (not DMs)
-    const canPin = !State.currentRoomType || State.currentRoomType !== 'dm';
+    // Pin button only shows in rooms (not DMs) AND only for users who can
+    // actually pin — owners, mods, or global admins. Showing it to regular
+    // members just produced a 403 toast when they tried.
     const isRoomOwner = State.currentRoomOwner === State.user?.nickname;
     const isRoomMod = Array.isArray(State.currentRoomMods) && State.currentRoomMods.includes(State.user?.nickname);
     const canModerateHere = (isRoomOwner || isRoomMod || State.user?.is_admin) && State.currentRoomType !== 'dm';
+    const canPin = canModerateHere;
     // Edit: only the author can edit their own message. Global admins may edit
     // for moderation. Room owners / mods CANNOT edit other users' messages —
     // they can only delete.

@@ -484,7 +484,9 @@ async def websocket_endpoint(
             # ── Pin message ───────────────────────────────────────────
             elif msg_type == "pin":
                 msg_id = int(data.get("id", 0))
-                if user.get("is_admin") or True:  # room owners can pin too
+                # Only owners, mods, or global admins may pin. Previous
+                # logic was an `or True` no-op that let anyone pin.
+                if db.can_moderate_room(room_name, user["id"], bool(user.get("is_admin"))):
                     ok = db.pin_message(room_name, msg_id, user["id"])
                     if ok:
                         await manager.broadcast_room(room_name, {
