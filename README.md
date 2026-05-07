@@ -38,7 +38,7 @@ Self-host your own node and join the swamp — or run it completely standalone.
 - 🧅 **Tor-native** — flip a flag and your node lives behind a `.onion`; clearnet IP never leaks.
 - 📱 **Everywhere** — Web, Android (APK), iOS (TestFlight), Windows portable, Linux AppImage / `.deb`, and Electron desktop.
 - 🎵 **More than chat** — DMs, group calls (WebRTC), reels, friend wall, music rooms (YT/Spotify/SoundCloud), imageboard, GIF picker, custom emojis.
-- 🛠 **Full API** — REST + WebSocket for bots, bridges and custom clients. Discord and Telegram bridges ship in-tree.
+- ⚒️ **Full API** — REST + WebSocket for bots, bridges and custom clients. Discord and Telegram bridges ship in-tree.
 
 ---
 
