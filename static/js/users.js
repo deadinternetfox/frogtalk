@@ -7,6 +7,30 @@ const Users = (() => {
   let _channelMembers = [];    // full joined-member list for the room (online+offline)
   let _channelRoom = null;     // which room _channelMembers is for
   let _filter = '';
+  const _displayNameCache = new Map();
+
+  async function _hydrateDisplayNames(users) {
+    const missing = (users || []).filter(u => u && u.nickname && !u.display_name && (!State.user || u.nickname !== State.user.nickname));
+    if (!missing.length || !State.token) return;
+    await Promise.all(missing.map(async (u) => {
+      const nick = String(u.nickname || '').trim();
+      if (!nick || _displayNameCache.has(nick)) {
+        const cached = _displayNameCache.get(nick);
+        if (cached) u.display_name = cached;
+        return;
+      }
+      try {
+        const res = await fetch(`/api/users/profile/${encodeURIComponent(nick)}`, {
+          headers: { 'X-Session-Token': State.token }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        const displayName = (data && data.display_name) ? String(data.display_name).trim() : '';
+        _displayNameCache.set(nick, displayName || null);
+        if (displayName) u.display_name = displayName;
+      } catch {}
+    }));
+  }
 
   function updateList(users) {
     // Deduplicate by user_id (or nickname if id missing) and always prefer the
@@ -65,6 +89,7 @@ const Users = (() => {
     State.onlineUsers = deduped;
     _allUsers = deduped;
     _renderFiltered();
+    _hydrateDisplayNames(_allUsers).then(() => _renderFiltered()).catch(() => {});
   }
 
   function _renderFiltered() {
@@ -178,6 +203,7 @@ const Users = (() => {
         }
       }
       _renderFiltered();
+      _hydrateDisplayNames(_channelMembers).then(() => _renderFiltered()).catch(() => {});
     } catch {}
   }
 

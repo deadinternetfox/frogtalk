@@ -36,6 +36,39 @@ let _currentFriendTab = 'friends';
 let _pendingFriends    = [];
 let _allFriends        = [];
 const _FSM_BUILD = 5;
+const _friendDisplayNameCache = new Map();
+
+async function _hydrateFriendDisplayNames(list) {
+  const missing = (list || []).filter(u => u && u.nickname && !u.display_name);
+  if (!missing.length || !State.token) return false;
+  let changed = false;
+  await Promise.all(missing.map(async (u) => {
+    const nick = String(u.nickname || '').trim();
+    if (!nick) return;
+    if (_friendDisplayNameCache.has(nick)) {
+      const cached = _friendDisplayNameCache.get(nick);
+      if (cached && !u.display_name) {
+        u.display_name = cached;
+        changed = true;
+      }
+      return;
+    }
+    try {
+      const res = await fetch(`/api/users/profile/${encodeURIComponent(nick)}`, {
+        headers: { 'X-Session-Token': State.token }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const displayName = (data && data.display_name) ? String(data.display_name).trim() : '';
+      _friendDisplayNameCache.set(nick, displayName || null);
+      if (displayName && !u.display_name) {
+        u.display_name = displayName;
+        changed = true;
+      }
+    } catch {}
+  }));
+  return changed;
+}
 
 /* ── Open / close ──────────────────────────────────────────────────────────── */
 function openFriends () {
@@ -72,6 +105,8 @@ async function loadFriends () {
       badge.textContent = '';
     }
     renderFriendTab();
+    _hydrateFriendDisplayNames(_allFriends).then(changed => { if (changed) renderFriendTab(); }).catch(() => {});
+    _hydrateFriendDisplayNames(_pendingFriends).then(changed => { if (changed && _currentFriendTab === 'pending') renderFriendTab(); }).catch(() => {});
   } catch (e) { console.error('loadFriends', e); }
 }
 
@@ -160,6 +195,7 @@ async function searchFriends () {
     const el = document.getElementById('friend-search-results');
     if (!el) return;
     if (!users.length) { el.innerHTML='<div style="color:#9ec4b2;text-align:center;padding:16px">No users found</div>'; return; }
+    await _hydrateFriendDisplayNames(users);
     const myNick = STATE.user?.nickname;
     el.innerHTML = users.filter(u => u.nickname !== myNick).map(u => {
       const isFriend = _allFriends.some(f => f.nickname === u.nickname);
