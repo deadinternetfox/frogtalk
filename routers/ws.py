@@ -494,6 +494,16 @@ async def websocket_endpoint(
                             "by": user["nickname"],
                         })
 
+            # ── Unpin message ─────────────────────────────────────────
+            elif msg_type == "unpin":
+                msg_id = int(data.get("id", 0))
+                if db.can_moderate_room(room_name, user["id"], bool(user.get("is_admin"))):
+                    db.unpin_message(room_name, msg_id)
+                    await manager.broadcast_room(room_name, {
+                        "type": "unpin", "id": msg_id, "room": room_name,
+                        "by": user["nickname"],
+                    })
+
             # ── DM message (real-time relay) ──────────────────────────
             elif msg_type == "dm_message":
                 channel_id = int(data.get("channel_id", 0))

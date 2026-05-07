@@ -5245,6 +5245,10 @@ async function pinMessage(msgId) {
           }
         }
       } catch {}
+      // Kick a banner refresh so the new pin shows up at the top
+      // of chat right away. The 'pin' WS broadcast will also do this
+      // for everyone else in the room.
+      try { refreshPinnedBar(); } catch {}
     } else {
       let errMsg = 'Failed to pin';
       try { const data = await res.json(); errMsg = data.error || errMsg; } catch {}
@@ -5264,6 +5268,16 @@ async function unpinMessage(msgId) {
     const res = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/pins/${msgId}`, 'DELETE');
     if (res.ok) {
       toast('Message unpinned', 'success');
+      // Optimistically reflect locally so the bar updates instantly even
+      // before the server's pin/unpin WS broadcast arrives.
+      try {
+        if (Array.isArray(State.currentRoomPins)) {
+          State.currentRoomPins = State.currentRoomPins.filter(p => Number(p.id) !== Number(msgId));
+          renderPinnedBar(State.currentRoomPins);
+        }
+        const el = document.getElementById(`msg-${msgId}`);
+        if (el) el.querySelectorAll('.msg-pinned').forEach(n => n.remove());
+      } catch {}
       showPinnedMessages(); // Refresh the list
     } else {
       toast('Failed to unpin', 'error');
@@ -5272,6 +5286,105 @@ async function unpinMessage(msgId) {
     toast('Failed to unpin message', 'error');
   }
 }
+
+// ─── Discord-style pinned-messages banner ────────────────────────────────
+// State.currentRoomPins holds the live list for the active channel. We
+// fetch on every room switch and on every 'pin' / 'unpin' WS event so
+// the banner stays in sync without any page reloads.
+
+function renderPinnedBar(pins) {
+  const bar = document.getElementById('pinned-bar');
+  if (!bar) return;
+  // Hide for DMs and when the current room has no pins.
+  if (!State.currentRoom || State.currentRoomType === 'dm' || !Array.isArray(pins) || pins.length === 0) {
+    bar.style.display = 'none';
+    return;
+  }
+  // Latest pin first (server returns ORDER BY pinned_at DESC).
+  const top = pins[0] || {};
+  const author = String(top.nickname || 'Someone');
+  const raw = String(top.content || '').replace(/\s+/g, ' ').trim();
+  const preview = raw || (top.media_type ? '📎 Media attachment' : '(empty message)');
+  const textEl = document.getElementById('pinned-bar-text');
+  const countEl = document.getElementById('pinned-bar-count');
+  if (textEl) {
+    textEl.innerHTML =
+      `<span class="pinned-bar-author">${UI.escHtml(author)}:</span>` +
+      `<span class="pinned-bar-snippet">${UI.escHtml(preview.slice(0, 180))}</span>`;
+  }
+  if (countEl) countEl.textContent = String(pins.length);
+  bar.style.display = '';
+}
+
+async function refreshPinnedBar() {
+  const bar = document.getElementById('pinned-bar');
+  if (!bar) return;
+  // DM / no room → hide and clear cache.
+  if (!State.currentRoom || State.currentRoomType === 'dm') {
+    State.currentRoomPins = [];
+    bar.style.display = 'none';
+    return;
+  }
+  // Snapshot the room we fetched for, so a fast room-switch doesn't
+  // race a stale response onto the new room's bar.
+  const room = State.currentRoom;
+  try {
+    const res = await apiFetch(`/api/rooms/${encodeURIComponent(room)}/pins`);
+    if (!res.ok) {
+      // 403/404/etc — just hide quietly. The bar is non-critical.
+      State.currentRoomPins = [];
+      bar.style.display = 'none';
+      return;
+    }
+    const data = await res.json();
+    if (room !== State.currentRoom) return; // user switched rooms mid-fetch
+    const pins = Array.isArray(data.pins) ? data.pins : [];
+    State.currentRoomPins = pins;
+    renderPinnedBar(pins);
+    // Also refresh the per-message 📌 badges for any pins currently
+    // on screen, so opening a channel where messages were already
+    // rendered (e.g. from cache) gets the indicator without a reload.
+    try {
+      const ids = new Set(pins.map(p => Number(p.id)));
+      document.querySelectorAll('.msg').forEach(el => {
+        const id = Number(el.id?.replace(/^msg-/, '')) || 0;
+        if (!id) return;
+        const has = !!el.querySelector('.msg-pinned');
+        if (ids.has(id) && !has) {
+          const head = el.querySelector('.msg-author')?.parentElement;
+          if (head) {
+            const tag = document.createElement('span');
+            tag.className = 'msg-pinned';
+            tag.style.cssText = 'color:#4caf50;font-size:11px;margin-left:4px';
+            tag.textContent = '📌';
+            head.appendChild(tag);
+          }
+        } else if (!ids.has(id) && has) {
+          el.querySelectorAll('.msg-pinned').forEach(n => n.remove());
+        }
+      });
+    } catch {}
+  } catch {
+    State.currentRoomPins = [];
+    bar.style.display = 'none';
+  }
+}
+
+// Called from ws.js when a 'pin' or 'unpin' event arrives for the current room.
+// We do an authoritative re-fetch so order and metadata are correct.
+function onPinEventLive(evt) {
+  try {
+    if (!evt || !evt.room || evt.room !== State.currentRoom) return;
+    refreshPinnedBar();
+  } catch {}
+}
+
+// Expose for inline onclick + cross-module calls.
+try {
+  window.refreshPinnedBar = refreshPinnedBar;
+  window.renderPinnedBar = renderPinnedBar;
+  window.onPinEventLive = onPinEventLive;
+} catch {}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // @MENTION AUTOCOMPLETE

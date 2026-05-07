@@ -654,6 +654,16 @@ async def pin_message(room_name: str, msg_id: int,
     ok = db.pin_message(room_name, msg_id, current_user["id"])
     if not ok:
         return JSONResponse(status_code=409, content={"error": "Message already pinned"})
+    # Broadcast so every connected client in this room can update their
+    # pinned-bar in real time without a page reload (Discord-style).
+    try:
+        from ws_manager import manager
+        await manager.broadcast_room(room_name, {
+            "type": "pin", "id": msg_id, "room": room_name,
+            "by": current_user["nickname"],
+        })
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -665,6 +675,14 @@ async def unpin_message(room_name: str, msg_id: int,
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
     
     db.unpin_message(room_name, msg_id)
+    try:
+        from ws_manager import manager
+        await manager.broadcast_room(room_name, {
+            "type": "unpin", "id": msg_id, "room": room_name,
+            "by": current_user["nickname"],
+        })
+    except Exception:
+        pass
     return {"ok": True}
 
 

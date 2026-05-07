@@ -192,6 +192,33 @@ const WS = (() => {
         Messages.updateReactions(data.id, data.reactions);
         break;
       }
+      case 'pin':
+      case 'unpin': {
+        // Live update the Discord-style pinned banner above the chat for
+        // every connected client in this room. Also flip the per-message
+        // 📌 badge so users don't have to reload to see it.
+        try {
+          if (typeof window.onPinEventLive === 'function') {
+            window.onPinEventLive(data);
+          }
+          const el = document.getElementById(`msg-${data.id}`);
+          if (el) {
+            if (data.type === 'pin' && !el.querySelector('.msg-pinned')) {
+              const head = el.querySelector('.msg-author')?.parentElement;
+              if (head) {
+                const tag = document.createElement('span');
+                tag.className = 'msg-pinned';
+                tag.style.cssText = 'color:#4caf50;font-size:11px;margin-left:4px';
+                tag.textContent = '📌';
+                head.appendChild(tag);
+              }
+            } else if (data.type === 'unpin') {
+              el.querySelectorAll('.msg-pinned').forEach(n => n.remove());
+            }
+          }
+        } catch {}
+        break;
+      }
       case 'typing': {
         UI.showTyping(data.nickname);
         break;

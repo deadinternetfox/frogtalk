@@ -708,6 +708,17 @@ const Rooms = (() => {
       }
     } catch {}
 
+    // Refresh the Discord-style pinned-messages banner. Hidden in DMs;
+    // populated from /api/rooms/{room}/pins for channels.
+    try {
+      if (typeof refreshPinnedBar === 'function') {
+        refreshPinnedBar();
+      } else {
+        const pb = document.getElementById('pinned-bar');
+        if (pb) pb.style.display = 'none';
+      }
+    } catch {}
+
     // Update header
     const roomData = State.rooms.find(r => r.name === name);
     State.currentRoomOwner = roomData?.owner_nickname || null;
