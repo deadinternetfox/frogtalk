@@ -4669,7 +4669,7 @@ def get_wall_post(post_id: int) -> Optional[Dict]:
     # subquery — counters are kept in sync by triggers (see _ensure_schema).
     with _conn() as con:
         row = con.execute("""
-            SELECT wp.*, u.nickname, u.avatar
+            SELECT wp.*, u.nickname, u.avatar, u.display_name
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             WHERE wp.id=?
