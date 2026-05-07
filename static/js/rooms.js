@@ -1592,7 +1592,7 @@ const Rooms = (() => {
   async function fetchInvites(roomName) {
     const container = document.getElementById('ch-invites-list');
     const noInvites = document.getElementById('ch-no-invites');
-    
+
     const res = await fetch(`/api/invites/channels/${encodeURIComponent(roomName)}`, {
       headers: { 'X-Session-Token': State.token }
     });
@@ -1600,11 +1600,15 @@ const Rooms = (() => {
     if (!res.ok) {
       container.innerHTML = '';
       noInvites.style.display = 'block';
+      _renderVanityCard(false, null);
       return;
     }
 
     const data = await res.json();
     const invites = data.invites || [];
+
+    // Owner-only vanity card. Render before invite list so layout is stable.
+    _renderVanityCard(!!data.is_owner, data.vanity || null);
 
     if (!invites.length) {
       container.innerHTML = '';
@@ -1614,7 +1618,7 @@ const Rooms = (() => {
 
     noInvites.style.display = 'none';
     container.innerHTML = invites.map(inv => {
-      const url = `https://frogtalk.xyz/invite/${inv.code}`;
+      const url = `https://frogtalk.xyz/i/${inv.code}`;
       const uses = inv.max_uses > 0 ? `${inv.use_count || 0}/${inv.max_uses} uses` : `${inv.use_count || 0} uses`;
       const expires = inv.expires_at ? `Expires ${new Date(inv.expires_at).toLocaleDateString()}` : 'Never expires';
       return `<div class="modal-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px">
@@ -1626,6 +1630,223 @@ const Rooms = (() => {
         <button class="icon-btn" title="Revoke" onclick="Rooms.revokeInvite('${inv.code}')" style="font-size:16px;color:#f85149">🗑</button>
       </div>`;
     }).join('');
+  }
+
+  // ─── Vanity URL (owner-only) ────────────────────────────────────────────
+  // Lifecycle: fetchInvites() seeds {is_owner, vanity}. The card is hidden
+  // for non-owners (server also enforces). Live validation runs client-side
+  // first, then a debounced server availability check fires once the input
+  // looks plausible. Save commits the slug; Clear removes it.
+
+  const _VANITY_RE = /^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$/;
+  let _vanityCurrent = null;       // last server-confirmed vanity for this room
+  let _vanityCheckTimer = null;
+  let _vanityCheckSeq = 0;
+  let _vanityWired = false;
+  let _vanityLastStatus = 'idle';  // 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'unchanged'
+
+  function _renderVanityCard(isOwner, currentVanity) {
+    const card = document.getElementById('ch-vanity-card');
+    if (!card) return;
+    if (!isOwner) {
+      card.style.display = 'none';
+      return;
+    }
+    card.style.display = '';
+    _vanityCurrent = currentVanity || null;
+
+    const input = document.getElementById('ch-vanity-input');
+    const clearBtn = document.getElementById('ch-vanity-clear-btn');
+    const currentRow = document.getElementById('ch-vanity-current');
+    const currentLink = document.getElementById('ch-vanity-current-link');
+
+    if (input) {
+      input.value = _vanityCurrent || '';
+      input.disabled = false;
+    }
+    if (clearBtn) clearBtn.style.display = _vanityCurrent ? '' : 'none';
+    if (currentRow && currentLink) {
+      if (_vanityCurrent) {
+        const url = `https://frogtalk.xyz/i/${_vanityCurrent}`;
+        currentRow.style.display = '';
+        currentLink.textContent = `frogtalk.xyz/i/${_vanityCurrent}`;
+        currentLink.href = url;
+      } else {
+        currentRow.style.display = 'none';
+      }
+    }
+    _setVanityStatus('idle');
+
+    if (!_vanityWired && input) {
+      _vanityWired = true;
+      input.addEventListener('input', _onVanityInput);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (_vanityLastStatus === 'available') saveVanity();
+        }
+      });
+    }
+  }
+
+  function _setVanityStatus(state, text) {
+    _vanityLastStatus = state;
+    const statusEl = document.getElementById('ch-vanity-status');
+    const saveBtn = document.getElementById('ch-vanity-save-btn');
+    if (saveBtn) saveBtn.disabled = (state !== 'available');
+    if (!statusEl) return;
+    let html = '';
+    let color = '#7fa897';
+    if (state === 'idle') {
+      html = 'Letters, digits, hyphen and underscore. 2–32 characters.';
+    } else if (state === 'checking') {
+      html = '<span style="opacity:.85">Checking availability…</span>';
+    } else if (state === 'available') {
+      html = `<span style="color:#7fd2a7;font-weight:600">✓ Available</span>`;
+      color = '#7fd2a7';
+    } else if (state === 'unchanged') {
+      html = '<span style="color:#7fa897">This is already your vanity</span>';
+    } else if (state === 'invalid') {
+      html = `<span style="color:#f8a058">${UI.escHtml(text || 'Invalid')}</span>`;
+      color = '#f8a058';
+    } else if (state === 'taken') {
+      html = `<span style="color:#f85149">${UI.escHtml(text || 'Already taken')}</span>`;
+      color = '#f85149';
+    } else if (state === 'error') {
+      html = `<span style="color:#f85149">${UI.escHtml(text || 'Could not check')}</span>`;
+      color = '#f85149';
+    }
+    statusEl.style.color = color;
+    statusEl.innerHTML = html;
+  }
+
+  function _onVanityInput() {
+    const input = document.getElementById('ch-vanity-input');
+    if (!input) return;
+    // Coerce to canonical form as the user types: lowercase, strip spaces.
+    const normalized = (input.value || '').toLowerCase().replace(/\s+/g, '');
+    if (input.value !== normalized) {
+      const pos = input.selectionStart;
+      input.value = normalized;
+      try { input.setSelectionRange(pos, pos); } catch {}
+    }
+
+    if (_vanityCheckTimer) {
+      clearTimeout(_vanityCheckTimer);
+      _vanityCheckTimer = null;
+    }
+    if (!normalized) {
+      _setVanityStatus('idle');
+      return;
+    }
+    if (normalized === (_vanityCurrent || '')) {
+      _setVanityStatus('unchanged');
+      return;
+    }
+    if (normalized.length < 2) {
+      _setVanityStatus('invalid', 'Too short — minimum 2 characters');
+      return;
+    }
+    if (normalized.length > 32) {
+      _setVanityStatus('invalid', 'Too long — maximum 32 characters');
+      return;
+    }
+    if (!_VANITY_RE.test(normalized)) {
+      _setVanityStatus('invalid', 'Use lowercase letters, digits, hyphen and underscore (must start/end with a letter or digit)');
+      return;
+    }
+    _setVanityStatus('checking');
+    const seq = ++_vanityCheckSeq;
+    _vanityCheckTimer = setTimeout(() => _vanityServerCheck(normalized, seq), 350);
+  }
+
+  async function _vanityServerCheck(slug, seq) {
+    try {
+      const url = `/api/invites/vanity-check?slug=${encodeURIComponent(slug)}&room=${encodeURIComponent(_currentSettingsRoom || '')}`;
+      const res = await fetch(url, { headers: { 'X-Session-Token': State.token } });
+      if (seq !== _vanityCheckSeq) return; // stale
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        _setVanityStatus('error', data.error || 'Could not check availability');
+        return;
+      }
+      if (data.available) {
+        _setVanityStatus('available');
+      } else {
+        _setVanityStatus('taken', data.error || 'Already taken');
+      }
+    } catch (err) {
+      if (seq === _vanityCheckSeq) _setVanityStatus('error', 'Network error');
+    }
+  }
+
+  async function saveVanity() {
+    const input = document.getElementById('ch-vanity-input');
+    if (!input || !_currentSettingsRoom) return;
+    const slug = (input.value || '').trim().toLowerCase();
+    if (!slug) return;
+    if (!_VANITY_RE.test(slug) || slug.length < 2 || slug.length > 32) {
+      _setVanityStatus('invalid', 'Invalid format');
+      return;
+    }
+    const saveBtn = document.getElementById('ch-vanity-save-btn');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    try {
+      const res = await fetch(`/api/invites/channels/${encodeURIComponent(_currentSettingsRoom)}/vanity`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+        body: JSON.stringify({ vanity: slug })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        UI.showToast(data.error || 'Could not save vanity', 'error');
+        _setVanityStatus(res.status === 409 ? 'taken' : 'error', data.error);
+        return;
+      }
+      _vanityCurrent = data.vanity || null;
+      UI.showToast('Vanity URL saved!');
+      // Refresh card state from authoritative response.
+      _renderVanityCard(true, _vanityCurrent);
+      // Auto-copy short URL for convenience.
+      if (data.url && await UI.copy(data.url)) UI.showToast('Link copied!');
+    } catch (err) {
+      UI.showToast('Network error', 'error');
+    } finally {
+      if (saveBtn) { saveBtn.textContent = 'Save'; }
+    }
+  }
+
+  async function clearVanity() {
+    if (!_currentSettingsRoom || !_vanityCurrent) return;
+    if (!confirm(`Remove the vanity URL frogtalk.xyz/i/${_vanityCurrent}? Existing /invite/ links will continue to work.`)) return;
+    const clearBtn = document.getElementById('ch-vanity-clear-btn');
+    if (clearBtn) clearBtn.disabled = true;
+    try {
+      const res = await fetch(`/api/invites/channels/${encodeURIComponent(_currentSettingsRoom)}/vanity`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+        body: JSON.stringify({ vanity: null })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        UI.showToast(data.error || 'Could not remove vanity', 'error');
+        return;
+      }
+      _vanityCurrent = null;
+      _renderVanityCard(true, null);
+      UI.showToast('Vanity URL removed');
+    } catch (err) {
+      UI.showToast('Network error', 'error');
+    } finally {
+      if (clearBtn) clearBtn.disabled = false;
+    }
+  }
+
+  async function copyVanityLink() {
+    if (!_vanityCurrent) return;
+    const url = `https://frogtalk.xyz/i/${_vanityCurrent}`;
+    if (await UI.copy(url)) UI.showToast('Link copied!');
+    else UI.showToast('Could not copy — long-press the link to copy manually', 'error');
   }
 
   async function revokeInvite(code) {
@@ -1776,6 +1997,7 @@ const Rooms = (() => {
     triggerRoomIconUpload, handleCreateRoomIconSelect, handleChannelRoomIconSelect, handleChannelBannerSelect,
     handleChannelThemeBgUpload, clearChannelThemeBgImage,
     createInvite, revokeInvite, fetchInvites, showChannelAbout,
+    saveVanity, clearVanity, copyVanityLink,
     renderMuteState, renderRooms, openChannelLink,
     cancelPrivateSecretPrompt, submitPrivateSecretPrompt,
     toggleSecretVisibility,

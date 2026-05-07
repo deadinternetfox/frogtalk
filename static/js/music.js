@@ -1587,7 +1587,7 @@ const Music = (() => {
     const submitHtml = _state.can_submit ? `
       <div class="mp-submit">
         <button class="mp-btn primary mp-add-btn" onclick="Music.openAddModal()" title="Add a track to the queue">
-          <span class="mp-add-lbl">Add Track</span>
+          <span class="mp-add-lbl">Add Media</span>
         </button>
         ${_state.can_control ? `
           <label class="mp-dj-toggle" title="${_state.dj_only ? 'DJ-only mode is ON — only DJs can queue' : 'Open mode — anyone can queue'}">
@@ -1626,7 +1626,7 @@ const Music = (() => {
         </div>` : `
         <div class="mp-upnext-row mp-upnext-empty">
           <span class="mp-upnext-label">Up next</span>
-          <span class="mp-upnext-empty-msg">Nothing queued — ${_state.can_submit ? 'add a track to keep the music going' : 'waiting for a DJ to add one'}</span>
+          <span class="mp-upnext-empty-msg">Nothing queued — ${_state.can_submit ? 'add a track to keep the vibes going' : 'waiting for a DJ to add one'}</span>
         </div>`}
         ${playlistPillHtml}
       </div>` : '';
@@ -2351,7 +2351,7 @@ const Music = (() => {
       </div>` : '';
     const emptyHtml = upcoming.length ? '' :
       (_state && _state.can_submit
-        ? `<div class="mp-pl-empty">Nothing queued yet — tap <b>Add Track</b> to drop the first one.</div>`
+        ? `<div class="mp-pl-empty">Nothing queued yet — tap <b>Add Media</b> to drop the first one.</div>`
         : `<div class="mp-pl-empty">Nothing queued yet. ${_state && _state.dj_only ? 'Only DJs can add tracks in this channel.' : 'Be the first to add one!'}</div>`);
     const canAdd = _state && _state.can_submit;
     const headSubtitle = (_state && _state.dj_only)
@@ -2371,7 +2371,7 @@ const Music = (() => {
           <div class="mp-pl-list">${items}${emptyHtml}</div>
         </div>
         <div class="mp-add-actions">
-          ${canAdd ? `<button class="mp-btn primary" type="button" onclick="Music.closePlaylistModal();Music.openAddModal()">Add Track</button>` : ''}
+          ${canAdd ? `<button class="mp-btn primary" type="button" onclick="Music.closePlaylistModal();Music.openAddModal()">Add Media</button>` : ''}
           <button class="mp-btn" type="button" onclick="Music.closePlaylistModal()">Close</button>
         </div>
       </div>`;

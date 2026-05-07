@@ -179,7 +179,8 @@ function _extractDMPreviewUrl(text) {
   const urls = text.match(/https?:\/\/[^\s<>"]+/g) || [];
   if (!urls.length) return '';
   const first = urls[0] || '';
-  if (/\/invite\/[A-Za-z0-9]{6,16}/.test(first)) return '';
+  // Skip invite/short-link URLs — they get their own rich invite-card embed.
+  if (/\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(first)) return '';
   if (_parseDMFrogSocialUrl(first)) return '';
   return first;
 }
@@ -1538,8 +1539,9 @@ function renderDMMessage (m) {
     });
     contentHtml = contentHtml.replace(urlRe, url => {
       // FrogTalk channel-invite URLs → reuse the same loader as channels.
-      // Match host: frogtalk.xyz, frogtalk.app, or localhost.
-      const inviteMatch = url.match(/^https?:\/\/(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/invite\/([A-Za-z0-9]{6,16})\b/i);
+      // Match host: frogtalk.xyz, frogtalk.app, or localhost; accept both
+      // legacy /invite/<code> and the short /i/<code-or-vanity> form.
+      const inviteMatch = url.match(/^https?:\/\/(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})\b/i);
       if (inviteMatch) {
         const code = inviteMatch[1];
         return `<span class="invite-card-placeholder" data-invite-code="${esc(code)}">` +

@@ -553,6 +553,17 @@ async def serve_invite_landing(code: str):
     return await invite_landing_page(code)
 
 
+@app.get("/i/{ident}")
+async def serve_short_invite_landing(ident: str):
+    """Short-link form: /i/<code-or-vanity>.
+
+    Resolves either a real invite code OR a channel vanity slug. The
+    landing-page builder transparently handles both shapes.
+    """
+    from routers.invites import invite_landing_page
+    return await invite_landing_page(ident)
+
+
 def _og_escape(s: str) -> str:
     """Minimal HTML attribute escape for OG tags."""
     return (

@@ -1473,6 +1473,15 @@ def _migrate():
         # Forward button on its messages.
         if "forwarding_disabled" not in room_cols:
             con.execute("ALTER TABLE rooms ADD COLUMN forwarding_disabled INTEGER DEFAULT 0")
+        # Vanity invite slug — owner-set custom URL component for
+        # https://frogtalk.xyz/i/<vanity>. NULL = unset. Uniqueness across
+        # channels is enforced case-insensitively via a partial index below.
+        if "vanity" not in room_cols:
+            con.execute("ALTER TABLE rooms ADD COLUMN vanity TEXT")
+        con.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_vanity_lower "
+            "ON rooms(LOWER(vanity)) WHERE vanity IS NOT NULL"
+        )
         # Forwarded-from metadata for room messages: JSON blob
         # {nick, source_label, kind:'room'|'dm', original_id?}.
         if "forwarded_from" not in msg_cols:
@@ -3207,6 +3216,7 @@ def get_room_by_name(room_name: str) -> Optional[Dict]:
                    r.is_public, r.category, r.tags, r.directory_description,
                    (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
                    r.banner, r.about, r.dj_only_queue, r.forwarding_disabled,
+                   r.vanity,
                    u.nickname AS owner_nickname
             FROM rooms r LEFT JOIN users u ON r.owner_id = u.id
             WHERE r.name = ?
@@ -4036,6 +4046,70 @@ def delete_invite(code: str, room_id: int) -> bool:
             (code, room_id)
         )
         return cur.rowcount > 0
+
+
+# ─── Vanity invite slugs ──────────────────────────────────────────────────
+# A channel owner may claim a single human-friendly slug, served at
+# https://frogtalk.xyz/i/<vanity>. Stored on rooms.vanity (UNIQUE LOWER).
+# All comparisons are case-insensitive; we always store the canonical
+# lowercased form so the URL is deterministic.
+
+def get_room_by_vanity(slug: str) -> Optional[Dict]:
+    """Resolve a vanity slug to a room. Case-insensitive lookup."""
+    if not slug:
+        return None
+    with _conn() as con:
+        row = con.execute("""
+            SELECT r.id, r.name, r.description, r.icon, r.owner_id,
+                   r.invite_only, r.who_can_invite, r.vanity,
+                   u.nickname AS owner_nickname
+            FROM rooms r LEFT JOIN users u ON r.owner_id = u.id
+            WHERE LOWER(r.vanity) = LOWER(?)
+        """, (slug,)).fetchone()
+    return dict(row) if row else None
+
+
+def is_vanity_available(slug: str, exclude_room_id: Optional[int] = None) -> bool:
+    """True iff no other room currently owns this vanity (case-insensitive)."""
+    if not slug:
+        return False
+    with _conn() as con:
+        if exclude_room_id is not None:
+            row = con.execute(
+                "SELECT 1 FROM rooms WHERE LOWER(vanity)=LOWER(?) AND id<>? LIMIT 1",
+                (slug, exclude_room_id),
+            ).fetchone()
+        else:
+            row = con.execute(
+                "SELECT 1 FROM rooms WHERE LOWER(vanity)=LOWER(?) LIMIT 1",
+                (slug,),
+            ).fetchone()
+    return row is None
+
+
+def set_room_vanity(room_id: int, slug: Optional[str]) -> bool:
+    """Set or clear a room's vanity. Caller must validate format/blacklist
+    and call is_vanity_available() first; this performs a final UNIQUE-safe
+    write and returns False on collision (race) or DB error."""
+    canonical = slug.strip().lower() if slug else None
+    try:
+        with _conn() as con:
+            con.execute("UPDATE rooms SET vanity=? WHERE id=?", (canonical, room_id))
+        return True
+    except Exception:
+        return False
+
+
+def get_invite_code_collides(slug: str) -> bool:
+    """True iff any active invite already uses this exact code (case-sensitive
+    on `code`, since codes are random URL-safe tokens)."""
+    if not slug:
+        return False
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM channel_invites WHERE code=? LIMIT 1", (slug,)
+        ).fetchone()
+    return row is not None
 
 
 def get_public_channels(category: str = None, search: str = None,

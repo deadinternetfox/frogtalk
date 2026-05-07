@@ -7454,6 +7454,41 @@ window.ConnErr = (function(){
 
     <!-- Invites tab -->
     <div id="ch-panel-invites" style="display:none">
+      <!-- Owner-only: Vanity URL. rooms.js toggles display based on
+           whether the current user owns this channel. -->
+      <div id="ch-vanity-card" style="display:none;background:linear-gradient(180deg,#13211a 0%,#101a14 100%);border:1px solid #2e4a3a;border-radius:12px;padding:14px 14px 12px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#bff0d0;font-size:13px;margin-bottom:4px">
+          <span aria-hidden="true">🔗</span>
+          <span>Custom URL</span>
+          <span style="margin-left:auto;font-size:10.5px;color:#7fa897;font-weight:600;letter-spacing:.04em;text-transform:uppercase">Owner</span>
+        </div>
+        <div style="font-size:12.5px;color:#9bd0ad;line-height:1.5;margin-bottom:10px">
+          Claim a memorable short link for your channel. Anyone visiting
+          <code style="background:#0a1410;padding:1px 6px;border-radius:4px;color:#bff0d0;font-size:11.5px">frogtalk.xyz/i/&lt;name&gt;</code>
+          will land on a join page.
+        </div>
+        <div id="ch-vanity-row" style="display:flex;gap:8px;align-items:stretch">
+          <div style="flex:1;display:flex;align-items:stretch;background:#0a1410;border:1px solid #2e4a3a;border-radius:10px;overflow:hidden;min-width:0">
+            <span style="display:flex;align-items:center;padding:0 10px;color:#7fa897;font-size:12.5px;background:rgba(127,210,167,.04);border-right:1px solid #2e4a3a;white-space:nowrap">frogtalk.xyz/i/</span>
+            <input id="ch-vanity-input" type="text" maxlength="32" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+                   placeholder="frogs"
+                   style="flex:1;min-width:0;background:transparent;border:0;outline:0;color:#dff5e8;padding:9px 10px;font-size:14px;font-family:inherit">
+          </div>
+          <button id="ch-vanity-save-btn" type="button" onclick="Rooms.saveVanity()"
+                  style="padding:0 16px;border-radius:10px;border:1px solid #6cd870;color:#fff;font-weight:700;font-size:13px;cursor:pointer;background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3e8c43 100%);box-shadow:0 4px 12px rgba(76,175,80,.28),inset 0 1px 0 rgba(255,255,255,.18);white-space:nowrap"
+                  disabled>Save</button>
+          <button id="ch-vanity-clear-btn" type="button" onclick="Rooms.clearVanity()" title="Remove vanity URL"
+                  style="padding:0 12px;border-radius:10px;border:1px solid #3a3a3a;color:#bcd6c8;font-weight:600;font-size:13px;cursor:pointer;background:#1a1a1a;display:none">Clear</button>
+        </div>
+        <div id="ch-vanity-status" style="font-size:12px;margin-top:8px;min-height:16px;color:#7fa897;line-height:1.4">
+          Letters, digits, hyphen and underscore. 2–32 characters.
+        </div>
+        <div id="ch-vanity-current" style="display:none;font-size:12px;margin-top:6px;color:#9bd0ad">
+          Currently live at <a id="ch-vanity-current-link" href="#" target="_blank" rel="noopener noreferrer" style="color:#bff0d0;font-weight:700;text-decoration:none">—</a>
+          · <button type="button" onclick="Rooms.copyVanityLink()" style="background:transparent;border:0;color:#7fd2a7;cursor:pointer;font-size:12px;padding:0;text-decoration:underline">Copy</button>
+        </div>
+      </div>
+
       <div style="font-size:13px;color:#888;margin-bottom:12px">
         Create invite links to share this channel. Links can have usage limits and expiration.
       </div>

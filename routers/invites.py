@@ -1,4 +1,5 @@
 """Invite link management routes."""
+import re
 import secrets
 import time
 import uuid
@@ -16,6 +17,50 @@ router = APIRouter(prefix="/invites", tags=["invites"])
 def generate_invite_code() -> str:
     """Generate a short readable invite code."""
     return secrets.token_urlsafe(8).replace('-', '').replace('_', '')[:8]
+
+
+# ─── Vanity slug rules ──────────────────────────────────────────────────
+# Slug format: 2–32 chars, lowercase letters/digits/hyphen/underscore, must
+# start and end with alphanumeric. Reserved words below also block top-level
+# path collisions and obvious abuse vectors.
+VANITY_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_-]{0,30}[a-z0-9])?$")
+VANITY_MIN_LEN = 2
+VANITY_MAX_LEN = 32
+
+VANITY_RESERVED = frozenset({
+    # App + framework paths
+    "api", "app", "admin", "auth", "ws", "static", "assets", "favicon",
+    "sitemap", "sitemap.xml", "robots", "robots.txt", "manifest", "sw",
+    "service-worker", "opensearch",
+    # Existing top-level routes
+    "i", "invite", "og", "u", "c", "p", "r", "directory", "channels",
+    "rooms", "users", "messages", "dms", "wall", "social", "calls",
+    "friends", "gifs", "emojis", "bots", "bridge", "federation",
+    "external", "preview", "push", "location", "server-admin",
+    # Marketing / legal / docs
+    "home", "index", "login", "logout", "signup", "register", "settings",
+    "help", "support", "about", "terms", "privacy", "tos", "docs",
+    "download", "downloads", "ios", "android", "desktop", "board",
+    # Common abuse / impersonation
+    "frogtalk", "official", "system", "root", "owner", "moderator", "mod",
+    "staff", "team", "null", "undefined", "void",
+})
+
+
+def validate_vanity_slug(slug: str) -> Optional[str]:
+    """Return None if valid, else a user-facing error message."""
+    if slug is None or not str(slug).strip():
+        return "Vanity cannot be empty"
+    s = str(slug).strip().lower()
+    if len(s) < VANITY_MIN_LEN:
+        return f"Too short — minimum {VANITY_MIN_LEN} characters"
+    if len(s) > VANITY_MAX_LEN:
+        return f"Too long — maximum {VANITY_MAX_LEN} characters"
+    if not VANITY_RE.match(s):
+        return "Use only lowercase letters, digits, hyphen and underscore (must start/end with a letter or digit)"
+    if s in VANITY_RESERVED:
+        return "This name is reserved"
+    return None
 
 
 class CreateInviteRequest(BaseModel):
@@ -46,11 +91,94 @@ async def create_invite(room_name: str, body: CreateInviteRequest, current_user:
     if db.create_invite(room["id"], current_user["id"], code, body.max_uses, body.expires_hours):
         return {
             "code": code,
-            "url": f"https://frogtalk.xyz/invite/{code}",
+            "url": f"https://frogtalk.xyz/i/{code}",
             "max_uses": body.max_uses,
             "expires_hours": body.expires_hours
         }
     return JSONResponse(status_code=500, content={"error": "Failed to create invite"})
+
+
+# ─── Vanity slug management ───────────────────────────────────────────────
+
+class SetVanityRequest(BaseModel):
+    vanity: Optional[str] = None  # null/empty string clears the vanity
+
+
+def _check_vanity_conflicts(slug: str, room_id: int) -> Optional[str]:
+    """Return user-facing error string if the slug is taken, else None."""
+    if not db.is_vanity_available(slug, exclude_room_id=room_id):
+        return "That vanity is already taken by another channel"
+    if db.get_invite_code_collides(slug):
+        return "That name conflicts with an existing invite code"
+    return None
+
+
+@router.get("/vanity-check")
+async def vanity_check(slug: str = "", room: str = "", current_user: dict = Depends(get_current_user)):
+    """Live-availability check used by the channel-settings UI.
+
+    Owner-only (the field is only shown to owners). Returns
+    {available: bool, error: str|null, normalized: str}.
+    """
+    target_room = db.get_room_by_name(room) if room else None
+    if not target_room:
+        return JSONResponse(status_code=404, content={"error": "Channel not found"})
+    if target_room["owner_id"] != current_user["id"] and not current_user.get("is_admin"):
+        return JSONResponse(status_code=403, content={"error": "Only the channel owner can manage vanity URLs"})
+
+    normalized = (slug or "").strip().lower()
+    err = validate_vanity_slug(normalized)
+    if err:
+        return {"available": False, "error": err, "normalized": normalized}
+    err = _check_vanity_conflicts(normalized, target_room["id"])
+    if err:
+        return {"available": False, "error": err, "normalized": normalized}
+    return {"available": True, "error": None, "normalized": normalized}
+
+
+@router.put("/channels/{room_name}/vanity")
+async def set_channel_vanity(
+    room_name: str,
+    body: SetVanityRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Set or clear a channel's vanity slug. Owner-only (admin can override).
+
+    Body: {"vanity": "frogs"} sets it; {"vanity": null} or {"vanity": ""} clears it.
+    """
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Channel not found"})
+
+    is_owner = room["owner_id"] == current_user["id"]
+    if not is_owner and not current_user.get("is_admin"):
+        return JSONResponse(status_code=403, content={"error": "Only the channel owner can manage vanity URLs"})
+
+    raw = (body.vanity or "").strip()
+    if raw == "":
+        # Clear
+        db.set_room_vanity(room["id"], None)
+        return {"ok": True, "vanity": None, "url": None}
+
+    normalized = raw.lower()
+    err = validate_vanity_slug(normalized)
+    if err:
+        return JSONResponse(status_code=400, content={"error": err})
+    err = _check_vanity_conflicts(normalized, room["id"])
+    if err:
+        return JSONResponse(status_code=409, content={"error": err})
+
+    if not db.set_room_vanity(room["id"], normalized):
+        # Race or DB error — re-check and surface the right message.
+        if not db.is_vanity_available(normalized, exclude_room_id=room["id"]):
+            return JSONResponse(status_code=409, content={"error": "That vanity was just claimed by another channel"})
+        return JSONResponse(status_code=500, content={"error": "Failed to save vanity"})
+
+    return {
+        "ok": True,
+        "vanity": normalized,
+        "url": f"https://frogtalk.xyz/i/{normalized}",
+    }
 
 
 @router.get("/channels/{room_name}")
@@ -66,7 +194,11 @@ async def list_channel_invites(room_name: str, current_user: dict = Depends(get_
         return JSONResponse(status_code=403, content={"error": "Not authorized"})
     
     invites = db.get_channel_invites(room["id"])
-    return {"invites": invites}
+    return {
+        "invites": invites,
+        "vanity": room.get("vanity"),
+        "is_owner": is_owner,
+    }
 
 
 @router.delete("/channels/{room_name}/{code}")
@@ -88,47 +220,78 @@ async def delete_invite(room_name: str, code: str, current_user: dict = Depends(
 
 @router.get("/{code}")
 async def get_invite_info(code: str):
-    """Get public info about an invite (for landing page)."""
+    """Get public info about an invite (for landing page).
+
+    Resolves either a real invite code or a channel vanity slug. The shape
+    is the same so chat clients can render an invite card identically.
+    """
     invite = db.get_invite(code)
-    if not invite:
+    if invite:
+        # Check if expired or max uses reached
+        if invite.get("expires_at"):
+            with db._conn() as con:
+                expired = con.execute(
+                    "SELECT datetime('now') > ?", (invite["expires_at"],)
+                ).fetchone()[0]
+                if expired:
+                    return JSONResponse(status_code=410, content={"error": "Invite expired"})
+
+        if invite.get("max_uses", 0) > 0 and invite.get("use_count", 0) >= invite["max_uses"]:
+            return JSONResponse(status_code=410, content={"error": "Invite has reached max uses"})
+
+        return {
+            "code": code,
+            "room_name": invite["room_name"],
+            "room_desc": invite.get("room_desc", ""),
+            "room_icon": invite.get("room_icon", "💬"),
+            "created_by": invite.get("created_by_name"),
+            "is_vanity": False,
+            "valid": True,
+        }
+
+    # Fall back to vanity slug. Vanities are a per-channel canonical URL,
+    # not a per-user invite — credit them to the channel owner.
+    room = db.get_room_by_vanity(code)
+    if not room:
         return JSONResponse(status_code=404, content={"error": "Invite not found or expired"})
-    
-    # Check if expired or max uses reached
-    if invite.get("expires_at"):
-        with db._conn() as con:
-            expired = con.execute(
-                "SELECT datetime('now') > ?", (invite["expires_at"],)
-            ).fetchone()[0]
-            if expired:
-                return JSONResponse(status_code=410, content={"error": "Invite expired"})
-    
-    if invite.get("max_uses", 0) > 0 and invite.get("use_count", 0) >= invite["max_uses"]:
-        return JSONResponse(status_code=410, content={"error": "Invite has reached max uses"})
-    
+
     return {
-        "code": code,
-        "room_name": invite["room_name"],
-        "room_desc": invite.get("room_desc", ""),
-        "room_icon": invite.get("room_icon", "💬"),
-        "created_by": invite.get("created_by_name"),
-        "valid": True
+        "code": (room.get("vanity") or code).lower(),
+        "room_name": room["name"],
+        "room_desc": room.get("description", "") or "",
+        "room_icon": room.get("icon", "💬") or "💬",
+        "created_by": room.get("owner_nickname"),
+        "is_vanity": True,
+        "valid": True,
     }
 
 
 @router.post("/{code}/join")
 async def join_via_invite(code: str, current_user: dict = Depends(get_current_user)):
-    """Join a channel via invite link."""
+    """Join a channel via invite link. Accepts either a real code or vanity."""
     room_id = db.use_invite(code)
+    via_vanity = False
     if not room_id:
-        return JSONResponse(status_code=410, content={"error": "Invite invalid or expired"})
-    
+        # Try vanity. Vanity does not bypass invite_only — those channels
+        # must use a real invite code.
+        room = db.get_room_by_vanity(code)
+        if not room:
+            return JSONResponse(status_code=410, content={"error": "Invite invalid or expired"})
+        if int(room.get("invite_only") or 0):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "This channel is invite-only. Ask the owner for a direct invite link."},
+            )
+        room_id = room["id"]
+        via_vanity = True
+
     # Get room info
     with db._conn() as con:
         room = con.execute("SELECT name FROM rooms WHERE id=?", (room_id,)).fetchone()
-    
+
     if not room:
         return JSONResponse(status_code=404, content={"error": "Channel no longer exists"})
-    
+
     # Actually add the user as a member (was missing — invite was accepted but
     # user was never inserted into room_members, so the sidebar never updated).
     db.join_room(current_user["id"], room_id)
@@ -143,10 +306,11 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
         })
     except Exception:
         pass
-    
+
     return {
         "ok": True,
         "room": room["name"],
+        "via_vanity": via_vanity,
         "message": f"Successfully joined #{room['name']}"
     }
 
@@ -154,8 +318,25 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
 # Landing page for invite links (served as HTML for unauthenticated users)
 @router.get("/{code}/landing", response_class=HTMLResponse)
 async def invite_landing_page(code: str):
-    """Show invite landing page with login/join options."""
+    """Show invite landing page with login/join options.
+
+    Accepts either a real invite code (looked up in channel_invites) or a
+    channel vanity slug (looked up in rooms.vanity). Vanity hits get a
+    synthesized invite-shape so the rendering stays unified.
+    """
     invite = db.get_invite(code)
+    if not invite:
+        room = db.get_room_by_vanity(code)
+        if room:
+            invite = {
+                "room_name": room["name"],
+                "room_desc": room.get("description", "") or "",
+                "room_icon": room.get("icon", "💬") or "💬",
+                "created_by_name": room.get("owner_nickname"),
+                "_is_vanity": True,
+            }
+            # Use the canonical (lowercased) slug as the join token in URLs.
+            code = (room.get("vanity") or code).lower()
     if not invite:
         html = """<!DOCTYPE html>
 <html><head><title>Invalid Invite - FrogTalk</title>
@@ -213,11 +394,15 @@ a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
         )
         # For Discord/Telegram previews: data: URLs aren't scrapable, so route
         # through /og/invite/{code}.img which decodes the base64 server-side.
-        # Absolute paths and external URLs can be used directly.
+        # Absolute paths and external URLs can be used directly. For vanity
+        # short-links the og endpoint won't find a matching code, so fall back
+        # to the branded image.
         if raw_icon.startswith('/'):
             og_image = f'https://frogtalk.xyz{raw_icon}'
         elif raw_icon.startswith(('http://', 'https://')):
             og_image = raw_icon
+        elif invite.get('_is_vanity'):
+            og_image = 'https://frogtalk.xyz/static/icons/og-image.png'
         else:
             og_image = f'https://frogtalk.xyz/og/invite/{code}.img'
     else:
@@ -237,7 +422,7 @@ a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
         f"{raw_bio}"
     )
     og_desc_safe = _html_mod.escape(og_desc_full[:200])
-    canonical = f"https://frogtalk.xyz/invite/{code}"
+    canonical = f"https://frogtalk.xyz/i/{code}"
 
     html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
