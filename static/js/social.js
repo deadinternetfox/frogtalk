@@ -711,6 +711,13 @@ const Social = (() => {
     // Paint the persistent "Now playing" strip immediately — it lives in
     // #social-overlay and must reflect current music state on open.
     try { _applyMusicState(); } catch {}
+    // Belt-and-braces: if the in-music.js recovery heartbeat hasn't run
+    // since the last YT state flip, the snapshot we just painted may
+    // still say "Paused" while the iframe is happily playing. Poke the
+    // strip again at 250ms and 1700ms — by then the heartbeat (every
+    // ~1.5s) has reconciled `_paused` to YT's ground truth.
+    setTimeout(() => { try { _applyMusicState(); } catch {} }, 250);
+    setTimeout(() => { try { _applyMusicState(); } catch {} }, 1700);
     // Sync the topbar Auto-next pill (and the dock button if mounted) so
     // its on/off state reflects the user's saved preference, not the
     // hard-coded "ON" markup baked into the static HTML.
@@ -3537,7 +3544,7 @@ const Social = (() => {
           const isVideo = p.media_type && p.media_type.startsWith('video/');
           const thumb = isVideo
             ? `<video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" muted preload="metadata"></video>`
-            : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
+            : `<img src="${esc(_authMediaSrc(p.media_data))}" alt="" loading="lazy">`;
           return `
           <div class="social-grid-item ${isVideo ? 'is-video' : ''}" onclick="Social.viewPostDetail(${p.id})">
             ${thumb}
@@ -3719,7 +3726,7 @@ const Social = (() => {
         // image. The full video opens via viewPostDetail on click.
         const thumb = isVideo
           ? `<img src="${esc(_authMediaThumb(p.media_data))}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none';this.parentNode.classList.add('ft-thumb-missing')">`
-          : `<img src="${esc(p.media_data)}" alt="" loading="lazy">`;
+          : `<img src="${esc(_authMediaSrc(p.media_data))}" alt="" loading="lazy">`;
         return `
           <div class="social-grid-item ${isVideo ? 'is-video ft-poster-ready' : ''}" onclick="Social.viewPostDetail(${p.id})">
             ${thumb}
@@ -7124,7 +7131,13 @@ const Social = (() => {
     let isMusicPost = false;
     if (p.media_data && p.media_type) {
       if (p.media_type.startsWith('image/')) {
-        mediaHtml = `<div class="sf-media"><img src="${esc(p.media_data)}" alt="" loading="lazy" decoding="async" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" onerror="this.closest('.sf-media')?.remove()"></div>`;
+        // Wall/feed/explore endpoints run in lite=1 mode — media_data
+        // for image posts is a `/api/social/posts/{id}/media` URL that
+        // requires `?token=` because the browser's <img> request can't
+        // attach our session header. Without _authMediaSrc the image
+        // gets a 401 and the post renders as text-only (root cause of
+        // "new post with image shows up missing the image").
+        mediaHtml = `<div class="sf-media"><img src="${esc(_authMediaSrc(p.media_data))}" alt="" loading="lazy" decoding="async" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" onerror="this.closest('.sf-media')?.remove()"></div>`;
       } else if (p.media_type.startsWith('video/')) {
         mediaHtml = `<div class="sf-media"><video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
       } else if (p.media_type.startsWith('music/')) {
@@ -8450,10 +8463,14 @@ const Social = (() => {
       if (res.ok) {
         const isVideo = (_newPostFile?.type || _newPostMediaType || '').startsWith('video/');
         // Invalidate caches so the new post shows up immediately on the
-        // wall / feed without needing a logout-relogin.
+        // wall / feed / explore without needing a logout-relogin.
         try {
           if (State.user?.nickname) _invalidateProfilePostsCache(State.user.nickname);
           _feedCache = null;
+          // Discover (Explore) keeps its own per-sort cache; clear all
+          // entries so the freshly-published post appears the moment
+          // the user switches to the Discover tab.
+          _exploreCache.clear();
         } catch {}
         if (hasAttachedMedia) {
           try {

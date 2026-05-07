@@ -2068,6 +2068,18 @@ const Music = (() => {
     _soloMode = false;
     _paused = false;
     _muted = false;
+    // Reset every sticky pause flag so the NEXT render (channel mount
+    // or playSolo) builds an autoplay=1 iframe. Without this, a user
+    // who paused a track and then triggered "Send to player" / clicked
+    // a music card got a silent iframe (autoplay=0 from _userPaused)
+    // and the play/pause buttons stayed stuck on ▶ even though the
+    // freshly-mounted iframe was happy to play. Same root cause for
+    // both the side player and the FrogSocial top strip — both consume
+    // _userPaused / _userIntentPaused via _currentEffectivePaused().
+    _userPaused = false;
+    _userIntentPaused = null;
+    _userIntentAt = 0;
+    _lastPlayerState = null;
     _emitState();
   }
 
@@ -2085,12 +2097,25 @@ const Music = (() => {
   // any time and re-sync.
   function playSolo(opts) {
     opts = opts || {};
+    // Clear sticky pause-intent BEFORE anything else. _renderMini reads
+    // _userPaused to decide autoplay=0 vs 1 in the iframe URL — and if
+    // the user had paused a previous track in this session, that flag
+    // would leak into the fresh iframe, producing silent playback. Same
+    // for _userIntentPaused which gates iframe state-event reconciliation.
+    _userPaused = false;
+    _userIntentPaused = null;
+    _userIntentAt = 0;
+    _lastPlayerState = null;
     if (_room && !_soloMode) {
       // Tear down the channel-mode UI/state without leaving the room
       // server-side: close() resets _room/_state/_paused locally so the
       // fresh solo render below starts from a clean slate. The channel
       // continues for other users; this client just stopped following.
       try { close(); } catch {}
+      // close() resets _userPaused; re-clear here so the order of the
+      // ifs above doesn't matter to a future reader.
+      _userPaused = false;
+      _userIntentPaused = null;
     }
     const url = String(opts.url || '').trim();
     if (!url) return false;
@@ -2135,6 +2160,14 @@ const Music = (() => {
     _soloMode = true;
     _room = null;
     _state = { queue: [track], can_control: false, is_dj: false, position_sec: 0 };
+    // Critical: reset playback flags BEFORE _renderMini below. The mini
+    // iframe is built from these (autoplay=${_userPaused ? 0 : 1}); if
+    // we let _setAnchor or stale state set _userPaused=true, we get a
+    // silent iframe and the dock button stuck on ▶.
+    _paused = false;
+    _muted = false;
+    _userPaused = false;
+    _userIntentPaused = null;
     _setAnchor(track, 0);
 
     // Keep the #music-panel hidden (solo playback runs inside the mini-dock
@@ -2152,8 +2185,6 @@ const Music = (() => {
       _renderMini(track);
       document.body.setAttribute('data-music', '1');
     }
-    _paused = false;
-    _muted = false;
     _renderDock(track);
     _emitState();
     // Critical: kick off the sync probe so the YT iframe's 'listening'

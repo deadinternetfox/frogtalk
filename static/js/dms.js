@@ -194,10 +194,14 @@ function _parseDMFrogSocialUrl(url) {
     const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'localhost');
     if (!hostOk) return null;
     const path = parsed.pathname || '/';
+    const profilePath = path.match(/^\/u\/([A-Za-z0-9_]{1,32})\/?$/i);
+    if (profilePath) return { type: 'profile', nickname: profilePath[1] };
     const postPath = path.match(/^\/p\/(\d+)\/?$/i);
     if (postPath) return { type: 'post', postId: Number(postPath[1]) };
     const reelPath = path.match(/^\/r\/(\d+)\/?$/i);
     if (reelPath) return { type: 'reel', postId: Number(reelPath[1]) };
+    const qProfile = (parsed.searchParams.get('profile') || '').trim();
+    if (/^[A-Za-z0-9_]{1,32}$/.test(qProfile)) return { type: 'profile', nickname: qProfile };
     const qPost = (parsed.searchParams.get('post') || parsed.searchParams.get('p') || '').trim();
     if (/^\d+$/.test(qPost)) return { type: 'post', postId: Number(qPost) };
     const qReel = (parsed.searchParams.get('reel') || '').trim();
@@ -292,6 +296,33 @@ async function _loadDMSocialReelCard(msgId, postId) {
 function _hydrateDMSocialCards(msgId) {
   const msgEl = document.getElementById(`msg-${msgId}`);
   if (!msgEl) return;
+  // Invite cards: delegate to the channel-side loader so DMs and channels
+  // render identical join cards (icon + room name + Join/Open button).
+  // The channel loader is keyed off the same .invite-card-placeholder
+  // [data-invite-code] markup we emit during DM render.
+  msgEl.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
+    const code = (el.dataset.inviteCode || '').trim();
+    if (!code) return;
+    try {
+      if (typeof Messages !== 'undefined' && typeof Messages._loadInviteCard === 'function') {
+        Messages._loadInviteCard(msgId, code);
+      } else if (typeof window !== 'undefined' && window.Messages && typeof window.Messages._loadInviteCard === 'function') {
+        window.Messages._loadInviteCard(msgId, code);
+      }
+    } catch {}
+  });
+  // FrogSocial profile cards: same delegation pattern as invites.
+  msgEl.querySelectorAll('.social-profile-card-placeholder[data-social-profile]').forEach(el => {
+    const nick = (el.dataset.socialProfile || '').trim();
+    if (!nick) return;
+    try {
+      if (typeof Messages !== 'undefined' && typeof Messages._loadSocialProfileCard === 'function') {
+        Messages._loadSocialProfileCard(msgId, nick);
+      } else if (typeof window !== 'undefined' && window.Messages && typeof window.Messages._loadSocialProfileCard === 'function') {
+        window.Messages._loadSocialProfileCard(msgId, nick);
+      }
+    } catch {}
+  });
   msgEl.querySelectorAll('.dm-social-post-card-placeholder[data-social-post]').forEach(el => {
     const postId = Number(el.dataset.socialPost || '0');
     if (Number.isFinite(postId) && postId > 0) _loadDMSocialPostCard(msgId, postId);
@@ -1479,7 +1510,19 @@ function renderDMMessage (m) {
       return `<span class="mention${isSelf ? ' mention-self' : ''}">@${nick}</span>`;
     });
     contentHtml = contentHtml.replace(urlRe, url => {
+      // FrogTalk channel-invite URLs → reuse the same loader as channels.
+      // Match host: frogtalk.xyz, frogtalk.app, or localhost.
+      const inviteMatch = url.match(/^https?:\/\/(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/invite\/([A-Za-z0-9]{6,16})\b/i);
+      if (inviteMatch) {
+        const code = inviteMatch[1];
+        return `<span class="invite-card-placeholder" data-invite-code="${esc(code)}">` +
+          `<span class="invite-card-loading">🐸 Loading invite…</span></span>`;
+      }
       const social = _parseDMFrogSocialUrl(url);
+      if (social?.type === 'profile') {
+        return `<span class="social-profile-card-placeholder" data-social-profile="${esc(social.nickname)}">` +
+          `<span class="invite-card-loading">🐸 Loading profile…</span></span>`;
+      }
       if (social?.type === 'post') {
         return `<span class="dm-social-post-card-placeholder" data-social-post="${social.postId}">` +
           `<span class="invite-card-loading">🐸 Loading post…</span></span>`;
