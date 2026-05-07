@@ -3853,8 +3853,13 @@ async function changeNickname() {
     State.user.nickname = data.nickname;
     State.user.username_change_remaining_seconds = 7 * 86400;
     State.save();
-    const selfNick = document.getElementById('self-nick');
-    if (selfNick) selfNick.textContent = State.user.display_name || data.nickname;
+    const selfName = document.getElementById('self-name');
+    const selfHandle = document.getElementById('self-handle');
+    if (selfName) selfName.textContent = State.user.display_name || data.nickname;
+    if (selfHandle) {
+      const showHandle = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
+      selfHandle.textContent = showHandle ? `@${State.user.nickname}` : '';
+    }
     _refreshUsernameCooldownUI();
     UI.showToast('Username changed to @' + data.nickname, 'success');
   } catch { UI.showToast('Network error', 'error'); }
@@ -3871,8 +3876,13 @@ async function changeDisplayName() {
     if (!res.ok) { UI.showToast(data.error || 'Could not save nickname', 'error'); return; }
     State.user.display_name = data.display_name || null;
     State.save();
-    const selfNick = document.getElementById('self-nick');
-    if (selfNick) selfNick.textContent = State.user.display_name || State.user.nickname;
+    const selfName = document.getElementById('self-name');
+    const selfHandle = document.getElementById('self-handle');
+    if (selfName) selfName.textContent = State.user.display_name || State.user.nickname;
+    if (selfHandle) {
+      const showHandle = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
+      selfHandle.textContent = showHandle ? `@${State.user.nickname}` : '';
+    }
     UI.showToast(data.display_name ? 'Nickname saved' : 'Nickname cleared', 'success');
   } catch { UI.showToast('Network error', 'error'); }
 }

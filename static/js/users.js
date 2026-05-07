@@ -141,8 +141,10 @@ const Users = (() => {
     const isSelf = State.user && u.nickname === State.user.nickname;
     const avatarSrc = u.avatar || (isSelf ? State.user.avatar : null);
     const dot = isOnline ? '<span class="online-dot"></span>' : '<span class="offline-dot"></span>';
-    const displayLabel = u.display_name || u.nickname;
-    const hasHandle = !!(u.display_name && u.display_name !== u.nickname);
+    const displayLabel = (isSelf && State.user?.display_name)
+      ? State.user.display_name
+      : (u.display_name || u.nickname);
+    const hasHandle = !!(displayLabel && displayLabel !== u.nickname);
     el.innerHTML = `
       <div class="user-avatar">
         ${UI.avatarEl(avatarSrc, u.nickname, 32)}

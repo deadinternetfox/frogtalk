@@ -1810,6 +1810,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .self-avatar img{width:100%;height:100%;object-fit:cover}
 .self-info{flex:1;min-width:0;overflow:hidden}
 .self-name{font-size:14px;font-weight:700;color:#e6f6ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.self-handle{font-size:11px;color:#89a79a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;line-height:1.15}
 .self-status-display{
   font-size:11px;color:#7ecfa3;margin-top:1px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
@@ -7116,6 +7117,7 @@ window.ConnErr = (function(){
       <div class="self-avatar" id="self-avatar-el" onclick="showProfile()">🐸</div>
       <div class="self-info">
         <div class="self-name" id="self-name">Loading…</div>
+        <div class="self-handle" id="self-handle"></div>
         <div class="self-status-display" id="self-status-display">🟢 Online</div>
       </div>
       <div class="self-quick-menu" id="self-quick-menu" aria-label="Quick profile actions">
