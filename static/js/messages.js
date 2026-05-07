@@ -1803,6 +1803,11 @@ const Messages = (() => {
       }
     } catch {}
 
+    // Dedup: if a bubble for this message id already exists (e.g. history
+    // reload races a WS echo, or two WS connections both deliver the same
+    // server broadcast), skip creating a second identical bubble.
+    if (msg.id && !msg._pending && document.getElementById(`msg-${msg.id}`)) return;
+
     const area = document.getElementById('messages-area');
     // "At bottom" with a generous threshold so tiny composer-height shifts /
     // reply preview / attachment preview don't flip us into "user scrolled up".
