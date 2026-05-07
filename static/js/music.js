@@ -2630,6 +2630,38 @@ const Music = (() => {
     try { UI.showToast('FrogSocial not available — open Social first', 'error'); } catch {}
   }
 
+  // ─── Chat-embed routing helpers ──────────────────────────────────────
+  // Used by messages.js to decide where the "▸ Send to player" affordance
+  // should send a YouTube/Spotify/SoundCloud link when the user is viewing
+  // a media channel:
+  //   • If they're in a media channel AND have queue permission → route
+  //     the link into the channel's BIG player as a queue add (so the
+  //     whole room hears it together).
+  //   • If they're in a media channel WITHOUT queue permission → omit
+  //     the affordance entirely (no point offering a button that 403s).
+  //   • Anywhere else (text channels, DMs, FrogSocial) → fall back to
+  //     the side / solo player as before.
+  function isMediaChannelContext() {
+    try {
+      const ct = String(State?.currentChannelType || '');
+      const inMedia = ct === 'music' || ct === 'voice';
+      return !!(inMedia && _room && State?.currentRoom === _room);
+    } catch { return false; }
+  }
+  function canQueueInCurrentRoom() {
+    return !!(_state && _state.can_submit) && isMediaChannelContext();
+  }
+  async function queueFromUrl(url) {
+    // Used by chat-embed Send-to-player buttons in media channels.
+    // Returns true on a successful queue add, false otherwise. The
+    // caller decides whether to fall back to playSolo on failure.
+    if (!canQueueInCurrentRoom()) return false;
+    try {
+      const ok = await submit(url);
+      return ok !== false;
+    } catch { return false; }
+  }
+
   return { mount, submit, skip, skipNext, clearQueue, removeTrack, toggleDJOnly,
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
@@ -2641,6 +2673,7 @@ const Music = (() => {
            openAddModal, closeAddModal, submitFromModal,
            openPlaylistModal, closePlaylistModal,
            toggleCollapse,
+           isMediaChannelContext, canQueueInCurrentRoom, queueFromUrl,
            // Native-callable hooks: MainActivity invokes these from
            // Activity.onPause() / onResume() because we deliberately keep
            // the WebView running in the background (so YT audio survives),
