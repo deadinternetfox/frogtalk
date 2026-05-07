@@ -106,6 +106,23 @@ const WS = (() => {
         // history window.
         if (_historyInFlight.get(room) === histSig || prevApplied === histSig) {
           Users.updateList(data.online || []);
+          // Edge case: empty channel revisit. After a fresh-create with no
+          // messages the first history packet (sig "0:0:0") is applied and
+          // remembered. Switching away and back fires switchToRoom which
+          // paints a "Loading #room…" spinner; the next history packet
+          // matches the remembered sig so the early-out skips loadHistory
+          // and the spinner sticks forever. If the messages area is still
+          // showing the loading state for THIS room, force a re-render
+          // from cache (which may legitimately be empty → empty-state).
+          try {
+            if (State.currentRoom === room) {
+              const area = document.getElementById('messages-area');
+              if (area && area.querySelector('#ch-loading-state')) {
+                const cachedNow = (State.messages && State.messages[room]) || [];
+                Messages.loadHistory(room, cachedNow.slice());
+              }
+            }
+          } catch {}
           break;
         }
         _historyInFlight.set(room, histSig);
@@ -120,6 +137,16 @@ const WS = (() => {
             if (sameLen && sameFirst && sameLast) {
               _historyLastApplied.set(room, histSig);
               Users.updateList(data.online || []);
+              // Same defensive paint-over as the dedup-by-sig branch
+              // above: if the spinner is still up, render from cache.
+              try {
+                if (State.currentRoom === room) {
+                  const area = document.getElementById('messages-area');
+                  if (area && area.querySelector('#ch-loading-state')) {
+                    Messages.loadHistory(room, cached.slice());
+                  }
+                }
+              } catch {}
               break;
             }
           }

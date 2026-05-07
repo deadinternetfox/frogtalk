@@ -843,9 +843,14 @@ const Rooms = (() => {
     // For text/DM channels, prefer rendering cached history instantly.
     // Show spinner only when there is no cache yet.
     if (chType !== 'voice' && msgArea) {
-      const hasCached = type !== 'dm' && Array.isArray(State.messages[name]) && State.messages[name].length;
+      // An empty array IS a valid cache state (e.g. a freshly-created
+      // channel that has no messages yet). Treat presence of the array
+      // as cache-hit so loadHistory renders the empty-state immediately
+      // instead of showing a perpetual "Loading #room…" spinner that
+      // the WS history dedup will refuse to clear.
+      const hasCached = type !== 'dm' && Array.isArray(State.messages[name]);
       if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
-        try { Messages.loadHistory(name, State.messages[name]); } catch {}
+        try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
       } else {
         const label = type === 'dm'
           ? `Loading conversation with ${dmPeer}…`
