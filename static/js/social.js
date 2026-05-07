@@ -7212,6 +7212,7 @@ const Social = (() => {
     const repostCount = Number(p.repost_count || 0);
     const iReposted = Number(p.i_reposted || 0) === 1;
     const escNick = esc(p.nickname);
+    const escDisplayName = esc(p.display_name || p.nickname);
     const repostContextHtml = isRepostCard
       ? `<div class="sf-repost-context">
            <span class="sf-repost-icon">🔁</span>
@@ -7237,7 +7238,8 @@ const Social = (() => {
       <div class="sf-post-header">
         <div class="sf-post-avatar" onclick="Social.openProfile('${escNick}')">${UI.avatarEl(p.avatar, p.nickname, 36)}</div>
         <div class="sf-post-info" onclick="Social.openProfile('${escNick}')">
-          <span class="sf-post-nick">${escNick}</span>
+          <span class="sf-post-nick">${escDisplayName}</span>
+          ${p.display_name ? `<span class="sf-post-handle">@${escNick}</span>` : ''}
           <span class="sf-post-time">${timeAgo(displayTime)}</span>
         </div>
         <button class="sf-post-menu" title="More options" aria-label="Post options"
