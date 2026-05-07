@@ -6406,8 +6406,31 @@ def get_server_admin_stats() -> Dict:
     with _conn() as con:
         users_total = con.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
         users_admin = con.execute("SELECT COUNT(*) AS c FROM users WHERE is_admin=1").fetchone()["c"]
+        # Human-operated admins, excluding the seed `admin` system account
+        # (used internally for moderation audit attribution — see
+        # routers/server_admin.py:_admin_user_id_for_actions). Without
+        # this, the dashboard always reads "+1 admin" higher than reality.
+        users_admin_human = con.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE is_admin=1 AND LOWER(nickname) != 'admin'"
+        ).fetchone()["c"]
         sessions_active = con.execute(
             "SELECT COUNT(*) AS c FROM sessions WHERE expires_at > datetime('now')"
+        ).fetchone()["c"]
+        # Sessions that have actually been used in the last 7 days. The
+        # plain `sessions_active` count includes long-lived tokens from
+        # devices that were logged in once and never returned, which
+        # makes the dashboard misleadingly large (often 100×+ reality).
+        sessions_recent_7d = con.execute(
+            "SELECT COUNT(*) AS c FROM sessions "
+            "WHERE expires_at > datetime('now') "
+            "AND last_active IS NOT NULL "
+            "AND last_active > datetime('now', '-7 days')"
+        ).fetchone()["c"]
+        sessions_users_recent_7d = con.execute(
+            "SELECT COUNT(DISTINCT user_id) AS c FROM sessions "
+            "WHERE expires_at > datetime('now') "
+            "AND last_active IS NOT NULL "
+            "AND last_active > datetime('now', '-7 days')"
         ).fetchone()["c"]
         rooms_total = con.execute("SELECT COUNT(*) AS c FROM rooms").fetchone()["c"]
         dms_total = con.execute("SELECT COUNT(*) AS c FROM dm_channels").fetchone()["c"]
@@ -6432,7 +6455,10 @@ def get_server_admin_stats() -> Dict:
     return {
         "users_total": int(users_total),
         "users_admin": int(users_admin),
+        "users_admin_human": int(users_admin_human),
         "sessions_active": int(sessions_active),
+        "sessions_recent_7d": int(sessions_recent_7d),
+        "sessions_users_recent_7d": int(sessions_users_recent_7d),
         "rooms_total": int(rooms_total),
         "dm_channels_total": int(dms_total),
         "messages_total": int(messages_total),

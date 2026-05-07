@@ -435,9 +435,24 @@
   function renderStats(payload, pingMs) {
     const db = payload.db || {};
     const ws = payload.ws || {};
+    // Prefer the human-admin count (excludes the seed `admin` system
+    // account used internally for moderation audit attribution); fall
+    // back to the raw count for older server builds that don't return
+    // the new field.
+    const adminCount = (db.users_admin_human != null) ? db.users_admin_human : (db.users_admin ?? 0);
+    const adminLabel = `${adminCount} ${adminCount === 1 ? 'admin' : 'admins'}`;
+    // Sessions: report the number of tokens that have actually been
+    // used in the last 7 days (reality), with the long-lived token
+    // pool — most of which are dormant logins from devices that never
+    // came back — relegated to the sub-label so it's still visible
+    // but doesn't dominate the headline number.
+    const sessRecent = db.sessions_recent_7d ?? db.sessions_active ?? 0;
+    const sessUsersRecent = db.sessions_users_recent_7d ?? 0;
+    const sessTotal = db.sessions_active ?? 0;
+    const sessSub = `${sessUsersRecent} ${sessUsersRecent === 1 ? 'user' : 'users'} · ${sessTotal} total tokens`;
     statsGrid.innerHTML = [
-      statCard('Total Users', db.users_total ?? 0, `${db.users_admin ?? 0} admins`),
-      statCard('Active Sessions', db.sessions_active ?? 0, 'Signed-in accounts'),
+      statCard('Total Users', db.users_total ?? 0, adminLabel),
+      statCard('Active Sessions (7d)', sessRecent, sessSub),
       statCard('WS Connections', ws.ws_connections ?? 0, `${ws.online_users ?? 0} users online`),
       statCard('Messages / min', db.msg_per_min_5m ?? 0, 'Rolling 5-minute avg'),
       statCard('Rooms', db.rooms_total ?? 0, `${ws.active_rooms ?? 0} with live sockets`),
