@@ -15,7 +15,7 @@ let _previewStream = null;
 /* ── Voice-message recording toggle ─────────────────────────────────────────── */
 async function toggleVoiceRecord () {
   if (document.body.classList.contains('in-music-channel')) {
-    if (typeof toast === 'function') toast('Voice notes are disabled in music channels', 'info');
+    if (typeof toast === 'function') toast('Voice notes are disabled in media channels', 'info');
     return;
   }
   if (_isRecording && _recMode === 'voice') {
@@ -31,7 +31,7 @@ async function toggleVoiceRecord () {
 /* ── Video-note recording toggle ─────────────────────────────────────────────── */
 async function toggleVideoRecord () {
   if (document.body.classList.contains('in-music-channel')) {
-    if (typeof toast === 'function') toast('Video notes are disabled in music channels', 'info');
+    if (typeof toast === 'function') toast('Video notes are disabled in media channels', 'info');
     return;
   }
   if (_isRecording && _recMode === 'video') {
@@ -488,7 +488,7 @@ function addPendingAttachmentFile (file, opts = {}) {
 
   // Music channels: only images / GIFs are allowed to keep the DJ set clean.
   if (document.body.classList.contains('in-music-channel') && !mime.startsWith('image/')) {
-    toast('Only pictures and GIFs are allowed in music channels', 'info');
+    toast('Only pictures and GIFs are allowed in media channels', 'info');
     return false;
   }
   const MAX = 20 * 1024 * 1024;

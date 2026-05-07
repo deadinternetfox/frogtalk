@@ -1541,7 +1541,7 @@ const Music = (() => {
           <div class="mp-header-info">
             <div class="mp-header-room">
               <span class="mp-header-room-hash">#</span>${esc(_room)}
-              <span class="mp-header-badge">🎵 Music</span>
+              <span class="mp-header-badge">� Media</span>
             </div>
             <div class="mp-header-sub">
               ${cur ? `<span class="mp-live-pulse"></span> Now playing · ${esc(providerLabel)}` : 'Idle · waiting for a track'}
