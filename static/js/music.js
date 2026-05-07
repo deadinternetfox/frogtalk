@@ -407,6 +407,34 @@ const Music = (() => {
     } catch { return _paused; }
   }
 
+  // After a surface switch (big↔mini), the YT iframe may already be
+  // playing/paused but our cached _lastPlayerState can be stale. Poke
+  // the iframe so it answers with a fresh onStateChange/infoDelivery,
+  // then re-paint every play/pause button on a short ladder so the
+  // dock + mini bar + FrogSocial top strip all converge to truth
+  // within ~1s instead of waiting for the next 1.5s UI sync tick.
+  function _probeIframeStateSoon() {
+    try {
+      const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+      const cur = _state && _state.queue && _state.queue[0];
+      if (frame && frame.contentWindow && cur && cur.provider === 'youtube') {
+        try {
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
+        } catch {}
+      }
+    } catch {}
+    // Belt + braces re-paint ladder. Each tick re-derives from
+    // _currentEffectivePaused() so any state event landing in between
+    // is reflected immediately on every visible surface.
+    [60, 250, 700, 1500].forEach(ms => {
+      setTimeout(() => {
+        try { _syncPlayPauseButtons(); } catch {}
+        try { _broadcastIfChanged(); } catch {}
+      }, ms);
+    });
+  }
+
   // Sync the on-screen play/pause buttons (drawer + mini player) to the
   // given playing flag. Used by togglePauseGlobal AND by _emitState so a
   // state flip from any source (Android tray, visibility change, YT
@@ -1710,6 +1738,14 @@ const Music = (() => {
         // from effective state so the button reflects YT's actual
         // playback, not the template default.
         try { _syncPlayPauseButtons(); } catch {}
+        // Surface change (big↔mini): force a state broadcast + probe
+        // so the FrogSocial top strip and music cards repaint from
+        // the live `_currentEffectivePaused()` value instead of the
+        // last cached snapshot. Without this, going from big to mini
+        // (or back) could leave the top strip showing the opposite
+        // glyph until the next 1.5s UI tick caught the drift.
+        try { _lastEmitHash = ''; _emitState(); } catch {}
+        try { _probeIframeStateSoon(); } catch {}
         return;
       }
       panel.classList.remove('active');
@@ -1756,6 +1792,21 @@ const Music = (() => {
       return;
     }
     _render();
+    // Surface change: force a state broadcast through the dedupe so every
+    // dependent UI (FrogSocial top strip, music cards, dock) repaints from
+    // current truth instead of holding the snapshot from before the switch.
+    try { _lastEmitHash = ''; _emitState(); } catch {}
+    // Owner / DJ auto-fill: if the user just opened a media channel that
+    // happens to be empty AND auto-fill is enabled for this room, queue
+    // a Discover pick now. Previously this only fired off WS events, so
+    // joining an idle room sat empty until something else nudged the
+    // queue.
+    try { _maybeAutoFillEmptyQueue(); } catch {}
+    // Probe the iframe so _lastPlayerState reflects reality ASAP after
+    // a surface switch (large ↔ mini), and re-paint buttons on a short
+    // ladder so any transient YT "buffering/cued" state doesn't leave a
+    // surface mid-flip with the wrong glyph.
+    try { _probeIframeStateSoon(); } catch {}
   }
 
   // Toggle the collapsed state of the music panel. When collapsed, the
@@ -2044,6 +2095,10 @@ const Music = (() => {
       // No auto-resync. The iframe was kept alive while the user was on
       // another channel; it's still where they left it. If they want
       // to catch back up to the room they can hit Resync explicitly.
+      // Surface change (mini→big): force every dependent UI to repaint
+      // from live state instead of holding the previous snapshot.
+      try { _lastEmitHash = ''; _emitState(); } catch {}
+      try { _probeIframeStateSoon(); } catch {}
     }
   }
 
@@ -2193,6 +2248,11 @@ const Music = (() => {
     // solo track ends — auto-next would silently die. The probe is
     // cheap (postMessage every 4s) and self-stops on pause/unmount.
     try { _startSyncProbeIfNeeded(); } catch {}
+    // Reconcile every surface (dock + FrogSocial top strip) to live
+    // truth on the same ladder mount() uses, so a Send-to-player from
+    // a music card flips every visible play/pause glyph correctly
+    // even before YT's first state event lands.
+    try { _probeIframeStateSoon(); } catch {}
     return true;
   }
 
