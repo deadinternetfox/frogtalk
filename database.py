@@ -615,12 +615,16 @@ def list_rooms() -> List[Dict]:
 
 def create_room(name: str, description: str, room_type: str, owner_id: int,
                 room_key_hint: Optional[str], icon: Optional[str] = None,
-                channel_type: str = "text") -> Optional[int]:
+                channel_type: str = "text", about: Optional[str] = None) -> Optional[int]:
+    # Seed the long-form "about" with the description on creation so the
+    # Settings → About tab shows the same text the creator typed instead of
+    # being blank until they re-save.
+    about_val = about if (about is not None and about != "") else (description or "")
     try:
         with _conn() as con:
             cur = con.execute(
-                "INSERT INTO rooms (name, description, type, owner_id, room_key_hint, icon, channel_type) VALUES (?,?,?,?,?,?,?)",
-                (name, description, room_type, owner_id, room_key_hint, icon, channel_type)
+                "INSERT INTO rooms (name, description, about, type, owner_id, room_key_hint, icon, channel_type) VALUES (?,?,?,?,?,?,?,?)",
+                (name, description, about_val, room_type, owner_id, room_key_hint, icon, channel_type)
             )
             con.commit()
             return cur.lastrowid
