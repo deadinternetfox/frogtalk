@@ -574,10 +574,11 @@ const Messages = (() => {
       }
       const name = UI.escHtml(data.room_name || '');
       const desc = data.room_desc ? `<div class="invite-card-desc">${UI.escHtml(data.room_desc.substring(0, 100))}</div>` : '';
-      const createdBy = (data.created_by_handle || (data.created_by ? `@${data.created_by}` : '')).trim();
-      const byNick = data.created_by || '';
+      const _rawByNick = ((data.created_by_handle || data.created_by || '').replace(/^@+/, '').trim());
+      const byNick = _rawByNick;
+      const createdBy = _rawByNick ? `@${_rawByNick}` : '';
       const by = createdBy
-        ? `<span class="invite-card-by">Invited by <strong${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" style="cursor:pointer"` : ''}>${UI.escHtml(createdBy)}</strong></span>`
+        ? `<span class="invite-card-by">Invited by <strong class="invite-card-by-nick"${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" tabindex="0" role="button"` : ''}>${UI.escHtml(createdBy)}</strong></span>`
         : '';
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
