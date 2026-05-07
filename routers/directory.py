@@ -146,7 +146,7 @@ async def channel_profile(room_name: str, current_user: dict = Depends(get_curre
         "created_at": room.get("created_at"),
         "owner_name": owner["nickname"] if owner else None,
         "owner_avatar": owner.get("avatar") if owner else None,
-        "is_owner": room["owner_id"] == current_user["id"],
+        "is_owner": (room["owner_id"] == current_user["id"]) or bool(current_user.get("is_admin")),
         "like_count": db.get_channel_like_count(room["id"]),
         "liked_by_me": db.user_liked_channel(room["id"], current_user["id"]),
         "recent_comments": db.get_channel_comments(

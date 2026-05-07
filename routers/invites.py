@@ -197,7 +197,9 @@ async def list_channel_invites(room_name: str, current_user: dict = Depends(get_
     return {
         "invites": invites,
         "vanity": room.get("vanity"),
-        "is_owner": is_owner,
+        # Platform admins (the "frog" account) see all owner-only UI
+        # affordances — including the vanity URL card — on every channel.
+        "is_owner": is_owner or bool(current_user.get("is_admin")),
     }
 
 
