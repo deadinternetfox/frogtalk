@@ -7325,7 +7325,13 @@ window.ConnErr = (function(){
       <label class="modal-label">Accent Color</label>
       <input class="modal-input" type="color" id="ch-theme-accent" value="#4caf50" style="height:40px;padding:4px;cursor:pointer">
       <label class="modal-label">Background Image URL (optional)</label>
-      <input class="modal-input" id="ch-theme-bg-image" placeholder="https://... or leave empty" maxlength="512">
+      <div style="display:flex;gap:8px;align-items:stretch">
+        <input class="modal-input" id="ch-theme-bg-image" placeholder="https://... or upload below" maxlength="512" style="flex:1;min-width:0">
+        <button class="modal-btn secondary" type="button" style="flex:0 0 auto;padding:0 12px" onclick="document.getElementById('ch-theme-bg-image-file').click()">Upload</button>
+        <button class="modal-btn secondary" type="button" style="flex:0 0 auto;padding:0 12px" onclick="clearChannelThemeBgImage()" title="Remove background image">✕</button>
+      </div>
+      <input type="file" id="ch-theme-bg-image-file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="handleChannelThemeBgUpload(this)">
+      <div class="room-icon-hint" id="ch-theme-bg-image-hint" style="margin-top:4px">JPEG, PNG, or WEBP. Up to 8 MB. Auto-resized to 2560 px.</div>
       <label class="modal-label">Custom CSS (optional, max 4KB)</label>
       <textarea class="modal-input" id="ch-theme-css" rows="4" style="font-family:monospace;font-size:12px;resize:vertical" placeholder="#messages-area { ... }" maxlength="4096"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px">

@@ -1,11 +1,14 @@
 """Room management routes."""
 import asyncio
+import io
 import json
+import os
 import re
 import time
 import uuid
-from fastapi import APIRouter, Request, Depends
-from fastapi.responses import JSONResponse
+from pathlib import Path
+from fastapi import APIRouter, Request, Depends, UploadFile, File
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from slowapi import Limiter
 from typing import Optional
@@ -282,6 +285,153 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     )
     if not ok:
         return JSONResponse(status_code=409, content={"error": "Update failed (name conflict?)"})
+    return {"ok": True}
+
+
+# ─── Channel theme background image upload ───────────────────────────────────
+# Stored on disk and served via a dedicated endpoint instead of being
+# inlined into the channel_theme JSON (which is capped at 4KB and would
+# explode for any real photo). Pillow re-encodes every upload to strip
+# EXIF/metadata, decline animated/SVG payloads, and cap dimensions —
+# defends against decompression bombs and tracking pixels in one shot.
+
+_CHANNEL_BG_DIR = Path(os.environ.get("FROGTALK_DATA_DIR", "data")) / "channel_bg"
+_CHANNEL_BG_DIR.mkdir(parents=True, exist_ok=True)
+_CHANNEL_BG_MAX_BYTES = 8 * 1024 * 1024     # 8 MB raw upload cap
+_CHANNEL_BG_MAX_DIM = 2560                  # cap longest side after resize
+_CHANNEL_BG_EXTS = ("jpg", "webp")
+
+
+def _channel_bg_path(room_id: int, ext: str) -> Path:
+    return _CHANNEL_BG_DIR / f"{int(room_id)}.{ext}"
+
+
+def _existing_channel_bg(room_id: int) -> Optional[Path]:
+    for ext in _CHANNEL_BG_EXTS:
+        p = _channel_bg_path(room_id, ext)
+        if p.exists():
+            return p
+    return None
+
+
+def _purge_channel_bg(room_id: int) -> None:
+    for ext in _CHANNEL_BG_EXTS:
+        try:
+            _channel_bg_path(room_id, ext).unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+@router.post("/{room_name}/theme-bg")
+@limiter.limit("20/hour")
+async def upload_channel_theme_bg(request: Request, room_name: str,
+                                  media: UploadFile = File(...),
+                                  current_user: dict = Depends(get_current_user)):
+    """Upload a channel theme background image. Owner / mods / admin only.
+    Returns a relative URL that the client should drop into the
+    channel_theme.bgImage field via the regular PATCH /rooms/{name} call."""
+    if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Room not found"})
+
+    raw = await media.read()
+    if not raw:
+        return JSONResponse(status_code=400, content={"error": "Empty upload"})
+    if len(raw) > _CHANNEL_BG_MAX_BYTES:
+        return JSONResponse(
+            status_code=413,
+            content={"error": "Image too large (max 8 MB)"},
+        )
+
+    # Best-effort content-type sanity check before paying the Pillow cost.
+    ct = (media.content_type or "").lower()
+    if ct and not ct.startswith("image/"):
+        return JSONResponse(status_code=400, content={"error": "Not an image"})
+
+    try:
+        from PIL import Image, ImageOps
+        # Cap pixel count BEFORE decode — Pillow uses this to short-circuit
+        # decompression bombs (e.g. 100,000 × 100,000 PNG that decodes to
+        # 40 GB of RAM). 50 MP is comfortably above any photo a user would
+        # legitimately use as a chat background.
+        Image.MAX_IMAGE_PIXELS = 50_000_000
+        # First pass: verify() detects truncated / malformed payloads.
+        with Image.open(io.BytesIO(raw)) as probe:
+            probe.verify()
+            fmt = (probe.format or "").upper()
+        if fmt not in ("JPEG", "PNG", "WEBP"):
+            # Reject SVG (script execution risk), GIF (animation +
+            # potential ImageMagick-style abuse), BMP/TIFF (rarely
+            # legitimate, often huge).
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Use JPEG, PNG, or WEBP"},
+            )
+        # Re-open for actual processing — verify() leaves the image in an
+        # unusable state per Pillow docs.
+        im = Image.open(io.BytesIO(raw))
+        im = ImageOps.exif_transpose(im)    # honour rotation, then drop EXIF
+        has_alpha = im.mode in ("RGBA", "LA") or "transparency" in im.info
+        if has_alpha:
+            im = im.convert("RGBA")
+        else:
+            im = im.convert("RGB")
+        im.thumbnail((_CHANNEL_BG_MAX_DIM, _CHANNEL_BG_MAX_DIM), Image.LANCZOS)
+        out_buf = io.BytesIO()
+        if has_alpha:
+            im.save(out_buf, format="WEBP", quality=85, method=4)
+            ext = "webp"
+        else:
+            im.save(out_buf, format="JPEG", quality=82,
+                    optimize=True, progressive=True)
+            ext = "jpg"
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Invalid image file"})
+
+    # Atomic-ish write: write to a temp sibling then rename. Avoids serving
+    # a half-written file if the process crashes mid-flush.
+    _purge_channel_bg(int(room["id"]))
+    out_path = _channel_bg_path(int(room["id"]), ext)
+    tmp_path = out_path.with_suffix(out_path.suffix + ".part")
+    payload = out_buf.getvalue()
+    tmp_path.write_bytes(payload)
+    os.replace(tmp_path, out_path)
+    mtime = int(out_path.stat().st_mtime)
+    url = f"/api/rooms/{room_name}/theme-bg?v={mtime}"
+    return {"ok": True, "url": url, "size": len(payload)}
+
+
+@router.get("/{room_name}/theme-bg")
+async def get_channel_theme_bg(room_name: str):
+    """Serve the channel theme background image. Public so CSS background-image
+    can fetch it without bespoke headers; the URL itself contains no
+    sensitive data and the room name is already enumerable via /api/rooms."""
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    p = _existing_channel_bg(int(room["id"]))
+    if not p:
+        return JSONResponse(status_code=404, content={"error": "No background"})
+    media_type = "image/webp" if p.suffix == ".webp" else "image/jpeg"
+    # Cache for a day — clients busted via ?v=<mtime> on update.
+    return FileResponse(
+        p,
+        media_type=media_type,
+        headers={"Cache-Control": "public, max-age=86400, immutable"},
+    )
+
+
+@router.delete("/{room_name}/theme-bg")
+async def delete_channel_theme_bg(room_name: str,
+                                  current_user: dict = Depends(get_current_user)):
+    if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    _purge_channel_bg(int(room["id"]))
     return {"ok": True}
 
 

@@ -294,6 +294,78 @@ const Rooms = (() => {
     input.value = '';
   }
 
+  // Upload a channel theme background image to the dedicated server
+  // endpoint. The server re-encodes / strips EXIF / caps dimensions and
+  // returns a relative URL we drop into the theme.bgImage input.
+  // Multipart (rather than a base64 data URL inlined into the
+  // channel_theme JSON) is the only viable path because channel_theme
+  // is capped at 4 KB server-side.
+  async function handleChannelThemeBgUpload(input) {
+    const file = input?.files?.[0];
+    if (!file) return;
+    const room = _currentSettingsRoom || State.currentRoom;
+    const urlField = document.getElementById('ch-theme-bg-image');
+    const hint = document.getElementById('ch-theme-bg-image-hint');
+    const setHint = (msg, cls) => {
+      if (!hint) return;
+      hint.textContent = msg;
+      hint.style.color = cls === 'error' ? '#e57373' : (cls === 'ok' ? '#7cb342' : '#888');
+    };
+    if (!room) { setHint('No channel selected', 'error'); input.value = ''; return; }
+    if (!/^image\/(jpeg|png|webp)$/i.test(file.type || '')) {
+      setHint('Use JPEG, PNG, or WEBP', 'error'); input.value = ''; return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setHint('Image too large (max 8 MB)', 'error'); input.value = ''; return;
+    }
+    setHint('Uploading…');
+    try {
+      const fd = new FormData();
+      fd.append('media', file, file.name || 'bg');
+      const res = await fetch(`/api/rooms/${encodeURIComponent(room)}/theme-bg`, {
+        method: 'POST',
+        headers: { 'X-Session-Token': State.token },
+        body: fd,
+      });
+      let data = null;
+      try { data = await res.json(); } catch {}
+      if (!res.ok || !data?.url) {
+        setHint(data?.error || `Upload failed (${res.status})`, 'error');
+        return;
+      }
+      if (urlField) urlField.value = data.url;
+      const kb = Math.max(1, Math.round((data.size || 0) / 1024));
+      setHint(`Uploaded (${kb} KB). Click Preview to see it, then Save.`, 'ok');
+    } catch (e) {
+      setHint('Network error', 'error');
+    } finally {
+      input.value = '';
+    }
+  }
+
+  // Wired to the small ✕ next to the Background Image URL field. Clears
+  // the input AND tells the server to delete the stored file so we don't
+  // leak storage when an admin gives up on a theme. The actual
+  // channel_theme JSON still gets the empty string committed when they
+  // hit Save.
+  async function clearChannelThemeBgImage() {
+    const urlField = document.getElementById('ch-theme-bg-image');
+    if (urlField) urlField.value = '';
+    const hint = document.getElementById('ch-theme-bg-image-hint');
+    const room = _currentSettingsRoom || State.currentRoom;
+    if (!room) return;
+    try {
+      await fetch(`/api/rooms/${encodeURIComponent(room)}/theme-bg`, {
+        method: 'DELETE',
+        headers: { 'X-Session-Token': State.token },
+      });
+      if (hint) {
+        hint.textContent = 'Background removed. Save to apply.';
+        hint.style.color = '#888';
+      }
+    } catch {}
+  }
+
   async function loadRooms() {
     // Show skeleton placeholders while loading (first load only)
     const container = document.getElementById('public-channels');
@@ -1557,6 +1629,7 @@ const Rooms = (() => {
     switchChannelTab,
     selectRoomType, selectChannelType, selectSettingsChannelType,
     triggerRoomIconUpload, handleCreateRoomIconSelect, handleChannelRoomIconSelect, handleChannelBannerSelect,
+    handleChannelThemeBgUpload, clearChannelThemeBgImage,
     createInvite, revokeInvite, fetchInvites, showChannelAbout,
     renderMuteState, renderRooms, openChannelLink,
     cancelPrivateSecretPrompt, submitPrivateSecretPrompt,
@@ -1597,6 +1670,8 @@ function triggerRoomIconUpload(kind) { Rooms.triggerRoomIconUpload(kind); }
 function handleCreateRoomIconSelect(input) { Rooms.handleCreateRoomIconSelect(input); }
 function handleChannelRoomIconSelect(input) { Rooms.handleChannelRoomIconSelect(input); }
 function handleChannelBannerSelect(input) { Rooms.handleChannelBannerSelect(input); }
+function handleChannelThemeBgUpload(input) { Rooms.handleChannelThemeBgUpload(input); }
+function clearChannelThemeBgImage() { Rooms.clearChannelThemeBgImage(); }
 function showChannelAbout() { Rooms.showChannelAbout(); }
 
 function toggleNewRoomDirectoryFields() {
@@ -2968,9 +3043,20 @@ function applyChannelThemeOverride(t) {
   if (t.text) css += `#messages-area .msg-content { color: ${t.text} !important; }\n`;
   if (t.accent) css += `.msg-author { color: ${t.accent} !important; }\n`;
   if (t.bgImage) {
-    // Sanitize: only allow http/https URLs
-    if (/^https?:\/\//i.test(t.bgImage)) {
-      css += `#messages-area { background-image: url('${t.bgImage.replace(/'/g, '')}'); background-size: cover; background-position: center; background-attachment: fixed; }\n`;
+    // Sanitize: only allow http(s) URLs OR same-origin absolute paths
+    // (which is what /api/rooms/<name>/theme-bg?v=<mtime> uploads return).
+    // Anything else — javascript:, data:, file:, embedded ')' to break
+    // out of the url() — is rejected.
+    const safeBgImage = (() => {
+      const v = String(t.bgImage || '').trim();
+      if (!v) return '';
+      if (/[)\\\s'"<>]/.test(v)) return '';
+      if (/^https?:\/\//i.test(v)) return v;
+      if (/^\/[A-Za-z0-9._\-/?=&%]+$/.test(v)) return v;
+      return '';
+    })();
+    if (safeBgImage) {
+      css += `#messages-area { background-image: url('${safeBgImage}'); background-size: cover; background-position: center; background-attachment: fixed; }\n`;
     }
   }
   if (t.css) {
