@@ -4049,6 +4049,7 @@ async function saveProfile() {
     State.user.bio = bio;
     State.user.status_msg = statusMsg;
     State.user.presence   = presence;
+    renderSelfStatus();
     State.user.profile_public = profilePublic ? 1 : 0;
     State.user.allow_friend_requests = allowFr ? 1 : 0;
     State.user.allow_dms_from = allowDms;
