@@ -157,6 +157,26 @@ const Music = (() => {
           }
         }
         _syncPlayPauseButtons();
+        // Recovery heartbeat: reconcile `_paused` to YT/SC ground truth
+        // even when no state event fired. The infoDelivery/onStateChange
+        // listeners only correct drift when an event arrives — so if YT
+        // is steadily reporting state=1 ("playing") and our local
+        // `_paused` got stuck `true` (stale pre-toggle event, app
+        // visibility race, _onAppHidden optimism, etc.), nothing else
+        // will heal it. Run outside the user-intent guard window so we
+        // don't fight a fresh user click.
+        try {
+          if (cur && cur.provider === 'youtube'
+              && (_lastPlayerState === 1 || _lastPlayerState === 2)
+              && !_userIntentActive()) {
+            const ytPaused = (_lastPlayerState === 2);
+            if (_paused !== ytPaused) {
+              _paused = ytPaused;
+              _lastEmitHash = '';
+              try { _emitState(); } catch {}
+            }
+          }
+        } catch {}
         // Repaint downstream consumers (FrogSocial top "Now playing"
         // strip, music cards) when our effective paused flag has drifted
         // from what they last saw — without this, a transient YT state=2
@@ -363,6 +383,17 @@ const Music = (() => {
     try {
       const cur = _state && _state.queue && _state.queue[0];
       const isYouTube = !!(cur && cur.provider === 'youtube');
+      // YT ground-truth wins when it's known. If the iframe explicitly
+      // says state=1 (playing), the player is playing — full stop —
+      // even if our local `_paused` flag drifted true (e.g. a stale
+      // pre-toggle event slipped past the guard, or _onAppHidden
+      // optimistically set it). Without this, the dock button can get
+      // stuck on ▶ while audio is happily playing, and the user has
+      // to click pause-then-play to unstick it. The recovery tick in
+      // _startUiSync also reconciles `_paused` to truth in the
+      // background, but this guards the UI immediately.
+      const ytKnowsPlaying = isYouTube && _lastPlayerState === 1;
+      if (ytKnowsPlaying) return false;
       // Only YT state 2 = "paused" actually means paused. -1 (unstarted),
       // 0 (ended), 3 (buffering), 5 (cued) are transient states during a
       // tab swap, iframe remount or auto-advance where the user clearly
