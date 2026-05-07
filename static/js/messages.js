@@ -1552,8 +1552,14 @@ const Messages = (() => {
     let html = '';
     const urlRe = /https?:\/\/[^\s<>"]+/g;
     const linksToPreview = [];
-    
+    const _seenIds = new Set();
+
     msgs.forEach(msg => {
+      // Dedup: skip if same message id already rendered (server sending duplicates).
+      if (msg.id) {
+        if (_seenIds.has(msg.id)) return;
+        _seenIds.add(msg.id);
+      }
       // Hide messages from blocked authors (client-side filter; server also
       // enforces blocks in DMs/feed/comments). Own messages always show.
       if (msg.nickname && State.blockedNicks &&
