@@ -5222,9 +5222,11 @@ async function pinMessage(msgId) {
   if (!State.currentRoom || State.currentRoomType === 'dm') return;
   
   try {
-    const res = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/pins/${msgId}`, {
-      method: 'POST'
-    });
+    // apiFetch signature is (url, method, body) — passing { method: 'POST' }
+    // as the 2nd arg makes the underlying fetch call blow up with a
+    // TypeError, which surfaced as the generic "Failed to pin message"
+    // toast even for legitimate channel owners.
+    const res = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/pins/${msgId}`, 'POST');
     if (res.ok) {
       toast('Message pinned', 'success');
       // Optimistically reflect the pinned state on the local message bubble
@@ -5259,9 +5261,7 @@ async function unpinMessage(msgId) {
   if (!State.currentRoom) return;
   
   try {
-    const res = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/pins/${msgId}`, {
-      method: 'DELETE'
-    });
+    const res = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/pins/${msgId}`, 'DELETE');
     if (res.ok) {
       toast('Message unpinned', 'success');
       showPinnedMessages(); // Refresh the list

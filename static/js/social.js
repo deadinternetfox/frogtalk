@@ -6569,6 +6569,15 @@ const Social = (() => {
     // Make sure the freshly-rendered button reflects the live setting
     // and gets toggled whenever Music.toggleAutoNext() flips it.
     try { window.Music && Music._syncAutoNextButtons && Music._syncAutoNextButtons(); } catch {}
+    // Belt + braces: the strip was just rebuilt from `cur.paused` (a
+    // snapshot at event-dispatch time). If a stale music:statechange
+    // event raced ahead of the music.js recovery heartbeat, the dot /
+    // ▶ button / "Paused" text could be momentarily wrong. Calling the
+    // music.js post-render syncer here re-paints those bits from
+    // `_currentEffectivePaused()` (which trusts YT state=1 over the
+    // local `_paused` flag), so the top strip self-heals on every
+    // event tick instead of waiting for the next reconciliation.
+    try { window.Music && Music._syncPlayPauseButtons && Music._syncPlayPauseButtons(); } catch {}
   }
 
   function _toggleNowPlaying() {

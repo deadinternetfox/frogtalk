@@ -2637,6 +2637,7 @@ const Music = (() => {
            toggleAutoNext,
            toggleAutoFill,
            _syncAutoNextButtons,
+           _syncPlayPauseButtons,
            openAddModal, closeAddModal, submitFromModal,
            openPlaylistModal, closePlaylistModal,
            toggleCollapse,
