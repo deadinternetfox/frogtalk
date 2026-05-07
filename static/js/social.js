@@ -3391,7 +3391,8 @@ const Social = (() => {
             <div class="sp-avatar">${UI.avatarEl(u.avatar, u.nickname, 86)}</div>
             <div class="sp-info">
               <div class="sp-name-row">
-                <span class="sp-nick">${esc(u.nickname)}</span>
+                <span class="sp-nick">${esc(u.display_name || u.nickname)}</span>
+                <span class="sp-handle">@${esc(u.nickname)}</span>
               </div>
               <div class="sp-private-note">
                 <span class="sp-lock">🔒</span> This profile is private.
@@ -3430,7 +3431,8 @@ const Social = (() => {
           </div>
           <div class="sp-info">
             <div class="sp-name-row">
-              <span class="sp-nick">${u.is_admin ? '<span style="color:#ffd700">👑</span> ' : ''}${esc(u.nickname)}${isSelf && u.profile_public === false ? ' <span class="sp-privacy-badge" title="Your profile is private — only friends can view it">🔒 Private</span>' : ''}</span>
+              <span class="sp-nick">${u.is_admin ? '<span style="color:#ffd700">👑</span> ' : ''}${esc(u.display_name || u.nickname)}${isSelf && u.profile_public === false ? ' <span class="sp-privacy-badge" title="Your profile is private — only friends can view it">🔒 Private</span>' : ''}</span>
+              <span class="sp-handle">@${esc(u.nickname)}</span>
               ${isSelf
                 ? `<button class="sp-action-btn secondary" onclick="Social.openNewPost()">+ New Post</button>
                    <button class="sp-share-btn" onclick="Social.shareProfile('${esc(u.nickname)}',this)" title="Copy share link">🔗 Share</button>`

@@ -1613,7 +1613,7 @@ function renderDMMessage (m) {
     <div class="msg-avatar" data-nick="${esc(senderNick||'')}">${UI.avatarEl(avatar, senderNick, 38)}</div>
     <div class="msg-body">
       <div class="msg-meta">
-        <span class="msg-author" onclick="showUserInfo('${esc(senderNick)}',${m.sender_id||'null'})">${esc(senderNick)}</span>
+        <span class="msg-author" onclick="showUserInfo('${esc(senderNick)}',${m.sender_id||'null'})">${esc(m.sender_display_name || senderNick)}</span>
         <span class="msg-time">${time}</span>
         ${tickHtml}
         ${editedTag}
@@ -2045,6 +2045,7 @@ async function sendDMMessage () {
       channel_id : _activeDM.id,
       sender_id  : _me.id,
       sender_nick: _me.nickname,
+      sender_display_name: _me.display_name,
       sender_avatar: _me.avatar,
       content    : content,            // plaintext \u2014 what the user typed
       created_at : new Date().toISOString().replace('Z',''),

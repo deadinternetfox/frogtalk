@@ -198,6 +198,7 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
         return {
             "id": uid,
             "nickname": user["nickname"],
+            "display_name": user.get("display_name"),
             "avatar": user.get("avatar"),
             "banner": user.get("banner"),
             "bio": user.get("bio", ""),

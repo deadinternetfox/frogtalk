@@ -131,6 +131,7 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         "id": msg_id,
         "room": room_name,
         "nickname": current_user["nickname"],
+        "display_name": current_user.get("display_name"),
         "user_id": current_user["id"],
         "avatar": current_user.get("avatar"),
         "content": content,

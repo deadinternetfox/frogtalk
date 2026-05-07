@@ -3560,7 +3560,7 @@ async function showProfile() {
   // Profile tab
   document.getElementById('profile-nickname').value = u.nickname;
   const dispInput = document.getElementById('profile-display-name');
-  if (dispInput) dispInput.value = u.display_name || '';
+  if (dispInput) dispInput.value = u.display_name || u.nickname || '';
   if (typeof _refreshUsernameCooldownUI === 'function') _refreshUsernameCooldownUI();
   document.getElementById('profile-bio').value = u.bio || '';
   const smEl = document.getElementById('profile-status-msg');
@@ -4436,6 +4436,19 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
       .then(u => {
         document.getElementById('userinfo-bio').textContent = u.bio || 'No bio set.';
         document.getElementById('userinfo-avatar').innerHTML = UI.avatarEl(u.avatar, u.nickname, 90);
+        // Update name headline to show display_name + @handle
+        if (nameEl && _userInfoTarget === nickname) {
+          const displayText = u.display_name || u.nickname;
+          nameEl.textContent = displayText;
+          let handleEl = document.getElementById('userinfo-handle');
+          if (!handleEl) {
+            handleEl = document.createElement('div');
+            handleEl.id = 'userinfo-handle';
+            handleEl.style.cssText = 'font-size:13px;color:#888;margin-top:2px';
+            nameEl.insertAdjacentElement('afterend', handleEl);
+          }
+          handleEl.textContent = '@' + u.nickname;
+        }
         if (smEl) {
           const status = String(u.status_msg || '').trim();
           const mood = String(u.mood || '').trim();

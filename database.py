@@ -868,6 +868,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
+                          u.display_name AS display_name,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
                    FROM messages m
@@ -886,6 +887,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
+                          u.display_name AS display_name,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
                    FROM messages m
@@ -2788,7 +2790,8 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
-                       u.nickname AS sender_nick, u.avatar AS sender_avatar
+                       u.nickname AS sender_nick, u.avatar AS sender_avatar,
+                       u.display_name AS sender_display_name
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id > ? AND dm.deleted=0
                 ORDER BY dm.id ASC LIMIT ?
@@ -2801,7 +2804,8 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
-                       u.nickname AS sender_nick, u.avatar AS sender_avatar
+                       u.nickname AS sender_nick, u.avatar AS sender_avatar,
+                       u.display_name AS sender_display_name
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id < ? AND dm.deleted=0
                 ORDER BY dm.id DESC LIMIT ?
@@ -2814,7 +2818,8 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.deleted, dm.created_at, dm.media_blur, dm.view_once,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
-                       u.nickname AS sender_nick, u.avatar AS sender_avatar
+                       u.nickname AS sender_nick, u.avatar AS sender_avatar,
+                       u.display_name AS sender_display_name
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.deleted=0
                 ORDER BY dm.id DESC LIMIT ?
