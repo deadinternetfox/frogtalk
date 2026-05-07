@@ -3018,6 +3018,23 @@ def cleanup_expired_dm_messages():
     return total_deleted
 
 
+def get_dm_reactions_bulk(message_ids: List[int]) -> Dict[int, Dict[str, int]]:
+    """Return {msg_id: {emoji: count}} for a batch of message IDs."""
+    if not message_ids:
+        return {}
+    placeholders = ",".join("?" * len(message_ids))
+    with _conn() as con:
+        rows = con.execute(
+            f"SELECT message_id, emoji, COUNT(*) as count FROM dm_reactions "
+            f"WHERE message_id IN ({placeholders}) GROUP BY message_id, emoji",
+            message_ids
+        ).fetchall()
+    result: Dict[int, Dict[str, int]] = {}
+    for r in rows:
+        result.setdefault(r["message_id"], {})[r["emoji"]] = r["count"]
+    return result
+
+
 def toggle_dm_reaction(msg_id: int, user_id: int, emoji: str) -> Dict:
     with _conn() as con:
         existing = con.execute(

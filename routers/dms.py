@@ -165,9 +165,14 @@ async def get_messages(channel_id: int, before: Optional[int] = None,
             viewed_map = db.get_dm_view_once_viewed_map(msg_ids, viewer_id)
         except Exception:
             viewed_map = {}
+        try:
+            reactions_map = db.get_dm_reactions_bulk(msg_ids)
+        except Exception:
+            reactions_map = {}
         for msg in msgs:
             msg["channel_id"] = channel_id
             msg["has_media"] = bool(msg.get("has_media"))
+            msg["reactions"] = reactions_map.get(int(msg.get("id") or 0), {})
             if msg.get("view_once"):
                 msg["viewed_by_me"] = 1 if viewed_map.get(int(msg.get("id") or 0)) else 0
         return (True, msgs)
