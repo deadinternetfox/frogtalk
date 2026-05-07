@@ -3883,6 +3883,14 @@ async function changeDisplayName() {
       const showHandle = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
       selfHandle.textContent = showHandle ? `@${State.user.nickname}` : '';
     }
+    try {
+      if (typeof Users !== 'undefined') {
+        if (Users.updateList) Users.updateList(State.onlineUsers || []);
+        if (State.currentRoom && State.currentChannelType !== 'dm' && Users.loadChannelMembers) {
+          Users.loadChannelMembers(State.currentRoom);
+        }
+      }
+    } catch {}
     UI.showToast(data.display_name ? 'Nickname saved' : 'Nickname cleared', 'success');
   } catch { UI.showToast('Network error', 'error'); }
 }
