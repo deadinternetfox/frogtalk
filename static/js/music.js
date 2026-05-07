@@ -2642,10 +2642,23 @@ const Music = (() => {
   //   • Anywhere else (text channels, DMs, FrogSocial) → fall back to
   //     the side / solo player as before.
   function isMediaChannelContext() {
+    // Authoritative signal: Music has mounted into a room (mount() only
+    // sets _room when channelType resolves to 'music' / 'voice'), and
+    // the user is still standing in that same room. We deliberately
+    // DON'T trust State.currentChannelType here — switchToRoom() copies
+    // the *parameter* into State, but that parameter defaults to 'text'
+    // when callers omit it, so for media channels State.currentChannelType
+    // is frequently 'text' even though Music.mount was called with the
+    // correct chType derived from roomData. Using _room as the source
+    // of truth avoids that whole class of false negatives (which were
+    // sending owner clicks to the side player instead of the queue).
     try {
-      const ct = String(State?.currentChannelType || '');
-      const inMedia = ct === 'music' || ct === 'voice';
-      return !!(inMedia && _room && State?.currentRoom === _room);
+      if (!_room) return false;
+      const panel = document.getElementById('music-panel');
+      // mount() flips this on for music/voice; off for text/dm.
+      if (panel && !panel.classList.contains('active')) return false;
+      const cur = String(State?.currentRoom || '');
+      return cur === _room;
     } catch { return false; }
   }
   function canQueueInCurrentRoom() {
