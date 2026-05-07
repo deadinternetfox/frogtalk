@@ -115,12 +115,13 @@ const Users = (() => {
     const isSelf = State.user && u.nickname === State.user.nickname;
     const avatarSrc = u.avatar || (isSelf ? State.user.avatar : null);
     const dot = isOnline ? '<span class="online-dot"></span>' : '<span class="offline-dot"></span>';
+    const displayLabel = u.display_name || u.nickname;
     el.innerHTML = `
       <div class="user-avatar">
         ${UI.avatarEl(avatarSrc, u.nickname, 32)}
         ${dot}
       </div>
-      <span class="user-name${isAdmin ? ' admin' : ''}">${isAdmin ? '👑 ' : ''}${UI.escHtml(u.nickname)}${voiceIcon ? ' ' + voiceIcon : ''}</span>
+      <span class="user-name${isAdmin ? ' admin' : ''}" title="@${UI.escHtml(u.nickname)}">${isAdmin ? '👑 ' : ''}${UI.escHtml(displayLabel)}${voiceIcon ? ' ' + voiceIcon : ''}</span>
     `;
     return el;
   }

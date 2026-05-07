@@ -3885,7 +3885,7 @@ def get_room_members(room_id: Optional[int] = None) -> List[Dict]:
     with _conn() as con:
         if room_id:
             rows = con.execute("""
-                SELECT u.id, u.nickname, u.avatar, u.presence
+                SELECT u.id, u.nickname, u.avatar, u.presence, u.display_name
                 FROM room_members rm
                 JOIN users u ON u.id = rm.user_id
                 WHERE rm.room_id = ?
@@ -3893,7 +3893,7 @@ def get_room_members(room_id: Optional[int] = None) -> List[Dict]:
             """, (room_id,)).fetchall()
         else:
             rows = con.execute("""
-                SELECT id, nickname, avatar, presence
+                SELECT id, nickname, avatar, presence, display_name
                 FROM users
                 ORDER BY nickname
             """).fetchall()
@@ -3906,7 +3906,7 @@ def get_channel_members(room_id: int) -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
             SELECT u.id AS user_id, u.nickname, u.avatar, u.is_admin,
-                   u.presence, u.last_seen
+                   u.presence, u.last_seen, u.display_name
             FROM room_members rm
             JOIN users u ON u.id = rm.user_id
             WHERE rm.room_id = ?

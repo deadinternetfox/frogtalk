@@ -36,7 +36,7 @@ class ConnectionManager:
         # (ip, user_id) -> active connection count (per-account-per-IP cap)
         self._ip_user_count: Dict[tuple, int] = {}
 
-    async def connect(self, ws: WebSocket, room: str, nickname: str, user_id: int, avatar: str = None, is_admin: bool = False):
+    async def connect(self, ws: WebSocket, room: str, nickname: str, user_id: int, avatar: str = None, is_admin: bool = False, display_name: str = None):
         # Per-IP cap (covers phone+desktop+browser tabs at 5).
         # When deployed behind nginx/Cloudflare, ws.client.host is the loopback
         # address (127.0.0.1 / ::1) for every client, so the raw socket peer is
@@ -80,7 +80,7 @@ class ConnectionManager:
         if room not in self._rooms:
             self._rooms[room] = set()
         self._rooms[room].add(ws)
-        self._ws_meta[ws] = (room, nickname, user_id, avatar, is_admin, ip)
+        self._ws_meta[ws] = (room, nickname, user_id, avatar, is_admin, ip, display_name)
         if user_id not in self._user_ws:
             self._user_ws[user_id] = set()
         self._user_ws[user_id].add(ws)
@@ -179,12 +179,13 @@ class ConnectionManager:
             meta = self._ws_meta.get(ws)
             if not meta:
                 continue
-            room, nick, uid, av, is_adm = meta
+            room, nick, uid, av, is_adm = meta[0], meta[1], meta[2], meta[3], meta[4]
+            dn = meta[6] if len(meta) > 6 else None
             if avatar is not None:
                 av = avatar
             if nickname is not None:
                 nick = nickname
-            self._ws_meta[ws] = (room, nick, uid, av, is_adm)
+            self._ws_meta[ws] = (room, nick, uid, av, is_adm, meta[5] if len(meta) > 5 else '', dn)
 
     async def disconnect_user(self, user_id: int) -> int:
         """Disconnect all websockets belonging to a user. Returns count of disconnected sessions."""
@@ -212,6 +213,7 @@ class ConnectionManager:
                     "user_id": meta[2],
                     "avatar": meta[3] if len(meta) > 3 else None,
                     "is_admin": meta[4] if len(meta) > 4 else False,
+                    "display_name": meta[6] if len(meta) > 6 else None,
                 })
         return result
 
