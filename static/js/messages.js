@@ -627,6 +627,32 @@ const Messages = (() => {
     
     const body = msgEl.querySelector('.msg-body') || msgEl.querySelector('.msg-cont-wrap > div');
     if (!body) return;
+
+    // Build a "Send to side player" affordance for music-capable embeds.
+    // The Music side-player understands raw YT/Spotify/SoundCloud URLs
+    // via Music.playSolo; we just need to hand it the original URL plus
+    // a hint so it shows the right artwork in the dock.
+    //
+    // We render the button as a real <button> (not an <a>) so it can
+    // safely live inside a parent <a target="_blank"> without racing
+    // the anchor's default navigation. The click handler also swallows
+    // bubbling so the parent <a> can't fire.
+    function _buildSendToPlayerBtn(provider) {
+      const url = String(preview.url || '');
+      if (!url) return '';
+      const title = String(preview.title || (provider === 'youtube' ? 'YouTube video' : provider === 'spotify' ? 'Spotify track' : 'SoundCloud track'));
+      const thumb = String(preview.image || preview.thumbnail || '');
+      // JSON-encode then HTML-escape — safe to drop into an attribute.
+      const payload = UI.escHtml(JSON.stringify({ url, title, provider, thumbnail: thumb }));
+      return `<button type="button" class="embed-send-player" data-payload="${payload}"
+        onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));if(window.Music&&Music.playSolo){Music.playSolo(p);UI&&UI.showToast&&UI.showToast('Playing in side player');}}catch(e){}})(this)"
+        onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
+        title="Open in the music side player"
+        style="background:transparent;border:0;padding:2px 8px;font-size:11px;font-weight:500;color:rgba(76,175,80,.72);cursor:pointer;border-radius:4px;line-height:1.4;letter-spacing:.2px;flex:0 0 auto;transition:color .15s,background .15s"
+        onmouseover="this.style.color='#7ed28a';this.style.background='rgba(76,175,80,.10)'"
+        onmouseout="this.style.color='rgba(76,175,80,.72)';this.style.background='transparent'"
+      >▸ Send to player</button>`;
+    }
     
     let html = '';
     
@@ -642,12 +668,15 @@ const Messages = (() => {
               allowfullscreen
             ></iframe>
           </div>
-          <div style="padding:8px 12px;border-top:1px solid #2f5548;background:rgba(12,28,22,.52)">
-            <div style="font-size:11px;color:#ff0000;display:flex;align-items:center;gap:4px;margin-bottom:4px">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path fill="#fff" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-              YouTube${preview.author ? ` • ${UI.escHtml(preview.author)}` : ''}
+          <div style="padding:8px 12px;border-top:1px solid #2f5548;background:rgba(12,28,22,.52);display:flex;align-items:center;gap:10px">
+            <div style="flex:1 1 auto;min-width:0">
+              <div style="font-size:11px;color:#ff0000;display:flex;align-items:center;gap:4px;margin-bottom:4px">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path fill="#fff" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                YouTube${preview.author ? ` • ${UI.escHtml(preview.author)}` : ''}
+              </div>
+              <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" style="font-weight:600;color:#dff5e8;font-size:13px;text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(preview.title || 'YouTube Video')}</a>
             </div>
-            <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" style="font-weight:600;color:#dff5e8;font-size:13px;text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(preview.title || 'YouTube Video')}</a>
+            ${_buildSendToPlayerBtn('youtube')}
           </div>
         </div>
       `;
@@ -656,15 +685,19 @@ const Messages = (() => {
     else if (preview.type === 'spotify' && preview.embed_url) {
       const height = preview.spotify_type === 'track' ? '80' : '152';
       html = `
-        <div class="spotify-embed" style="margin-top:8px;max-width:400px;border-radius:12px;overflow:hidden">
+        <div class="spotify-embed" style="margin-top:8px;max-width:400px;border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           <iframe 
             src="${UI.escHtml(preview.embed_url)}?theme=0" 
             width="100%" 
             height="${height}" 
             frameBorder="0" 
             allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            style="border-radius:12px"
+            style="display:block;border:0"
           ></iframe>
+          <div style="padding:6px 10px;border-top:1px solid #2f5548;background:rgba(12,28,22,.52);display:flex;align-items:center;gap:10px">
+            <div style="flex:1 1 auto;min-width:0;font-size:11px;color:#1db954;font-weight:600;letter-spacing:.3px">Spotify</div>
+            ${_buildSendToPlayerBtn('spotify')}
+          </div>
         </div>
       `;
     }
@@ -683,13 +716,23 @@ const Messages = (() => {
     }
     // Standard link preview
     else {
+      // Detect SoundCloud (and other audio-capable URLs) so we can offer
+      // the same Send-to-player affordance even when the server returned
+      // a generic OG-card preview rather than a typed embed.
+      const _u = String(preview.url || '');
+      const _isSoundcloud = /(?:^|[\/\.])soundcloud\.com|on\.soundcloud\.com/i.test(_u);
+      const _isYouTube = /(?:^|[\/\.])(?:youtube\.com|youtu\.be)/i.test(_u);
+      const _isSpotify = /(?:^|[\/\.])open\.spotify\.com/i.test(_u);
+      const _musicProvider = _isSoundcloud ? 'soundcloud' : (_isYouTube ? 'youtube' : (_isSpotify ? 'spotify' : null));
+      const _sendBtn = _musicProvider ? _buildSendToPlayerBtn(_musicProvider) : '';
       html = `
         <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:480px;width:100%;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           ${preview.image ? `<img src="${UI.escHtml(preview.image)}" alt="" style="width:100%;max-height:260px;object-fit:cover" onerror="this.style.display='none'">` : ''}
           <div style="padding:10px;background:rgba(12,28,22,.52)">
             <div style="font-size:11px;color:#85a89a;display:flex;align-items:center;gap:4px;margin-bottom:4px">
               ${preview.favicon ? `<img src="${UI.escHtml(preview.favicon)}" style="width:14px;height:14px;border-radius:2px" onerror="this.style.display='none'">` : ''}
-              ${UI.escHtml(preview.site_name || '')}
+              <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(preview.site_name || '')}</span>
+              ${_sendBtn}
             </div>
             ${preview.title ? `<div style="font-weight:600;color:#dff5e8;margin-bottom:4px;font-size:14px">${UI.escHtml(preview.title)}</div>` : ''}
             ${preview.description ? `<div style="font-size:12px;color:#85a89a;line-height:1.4">${UI.escHtml(preview.description.substring(0, 150))}${preview.description.length > 150 ? '…' : ''}</div>` : ''}

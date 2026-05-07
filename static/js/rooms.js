@@ -1141,6 +1141,19 @@ const Rooms = (() => {
     
     // Render moderators
     renderModerators(data.moderators);
+
+    // Show/hide owner-only Danger Zone (transfer ownership) based on
+    // whether the current user actually owns this room. Server enforces
+    // the same rule; this is just a UI clarity layer.
+    try {
+      const dangerEl = document.getElementById('ch-owner-danger');
+      const ownerNameEl = document.getElementById('ch-owner-current-name');
+      const myNick = State.user && State.user.nickname;
+      const ownerNick = data.room && data.room.owner_nickname;
+      const iAmOwner = !!(myNick && ownerNick && myNick === ownerNick);
+      if (dangerEl) dangerEl.style.display = iAmOwner ? '' : 'none';
+      if (ownerNameEl) ownerNameEl.textContent = ownerNick || '—';
+    } catch {}
     
     // Fetch and render bans
     fetchBans(roomName);
@@ -1266,6 +1279,127 @@ const Rooms = (() => {
     });
     const roomData = await roomRes.json().catch(() => ({}));
     renderModerators(roomData.moderators || []);
+  }
+
+  // ── Transfer ownership ───────────────────────────────────────────────
+  // Two-step confirmation: user must type the exact target nickname AND
+  // tick the acknowledgement before the destructive button arms. Server
+  // additionally requires confirm=true and re-checks owner status, so a
+  // tampered client can't bypass this.
+  function openTransferOwnershipModal() {
+    const room = _currentSettingsRoom;
+    if (!room) return;
+    const labelEl = document.getElementById('xfer-room-label');
+    if (labelEl) labelEl.textContent = '#' + room;
+    const inp = document.getElementById('xfer-target-input');
+    if (inp) inp.value = '';
+    const ack = document.getElementById('xfer-ack');
+    if (ack) ack.checked = false;
+    const hint = document.getElementById('xfer-target-hint');
+    if (hint) {
+      hint.textContent = 'Type the username exactly as shown in the member list.';
+      hint.style.color = '#85a89a';
+    }
+    _setTransferConfirmArmed(false);
+    if (typeof openModal === 'function') openModal('modal-transfer-ownership');
+    setTimeout(() => { try { inp && inp.focus(); } catch {} }, 50);
+  }
+
+  function _setTransferConfirmArmed(armed) {
+    const btn = document.getElementById('xfer-confirm-btn');
+    if (!btn) return;
+    btn.disabled = !armed;
+    btn.style.opacity = armed ? '1' : '.55';
+    btn.style.cursor = armed ? 'pointer' : 'not-allowed';
+  }
+
+  function onTransferOwnershipInput() {
+    const inp = document.getElementById('xfer-target-input');
+    const ack = document.getElementById('xfer-ack');
+    const name = (inp && inp.value || '').trim();
+    const ackOK = !!(ack && ack.checked);
+    const myNick = (State.user && State.user.nickname) || '';
+    const hint = document.getElementById('xfer-target-hint');
+    let armed = false;
+    if (!name) {
+      if (hint) { hint.textContent = 'Type the username exactly as shown in the member list.'; hint.style.color = '#85a89a'; }
+    } else if (myNick && name.toLowerCase() === myNick.toLowerCase()) {
+      if (hint) { hint.textContent = "That's you — pick a different member."; hint.style.color = '#ff9b9b'; }
+    } else {
+      if (hint) { hint.textContent = ackOK ? 'Ready.' : 'Tick the acknowledgement to enable the transfer.'; hint.style.color = ackOK ? '#9bd0ad' : '#85a89a'; }
+      armed = ackOK;
+    }
+    _setTransferConfirmArmed(armed);
+  }
+
+  async function confirmTransferOwnership() {
+    const btn = document.getElementById('xfer-confirm-btn');
+    if (!btn || btn.disabled) return;
+    const inp = document.getElementById('xfer-target-input');
+    const ack = document.getElementById('xfer-ack');
+    const name = (inp && inp.value || '').trim();
+    if (!name || !ack || !ack.checked) return;
+    const room = _currentSettingsRoom;
+    if (!room) return;
+
+    btn.disabled = true;
+    btn.style.opacity = '.55';
+    const origLabel = btn.textContent;
+    btn.textContent = 'Transferring…';
+
+    try {
+      // Resolve nickname → user_id via /api/users (same lookup the
+      // mod-add path uses, so behaviour is consistent and we never
+      // sneak a numeric id through the UI).
+      const usersRes = await apiFetch('/api/users');
+      const usersData = await usersRes.json().catch(() => ({}));
+      if (!usersRes.ok) {
+        UI.showToast(usersData.error || 'Failed to look up user', 'error');
+        btn.textContent = origLabel;
+        _setTransferConfirmArmed(true);
+        return;
+      }
+      const users = Array.isArray(usersData.users) ? usersData.users : [];
+      const target = users.find(u => String(u.nickname || '').toLowerCase() === name.toLowerCase());
+      if (!target) {
+        const hint = document.getElementById('xfer-target-hint');
+        if (hint) { hint.textContent = 'No user with that exact username.'; hint.style.color = '#ff9b9b'; }
+        btn.textContent = origLabel;
+        _setTransferConfirmArmed(false);
+        return;
+      }
+
+      const res = await fetch(`/api/rooms/${encodeURIComponent(room)}/transfer-ownership`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+        body: JSON.stringify({ user_id: target.id, confirm: true })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        UI.showToast(data.error || 'Transfer failed', 'error');
+        btn.textContent = origLabel;
+        _setTransferConfirmArmed(true);
+        return;
+      }
+      UI.showToast(`Ownership of #${room} transferred to ${target.nickname}`);
+      try { closeModal('modal-transfer-ownership'); } catch {}
+      try { closeModal('modal-channel-settings'); } catch {}
+      // Refresh local view of mod state — the WS room_owner_changed
+      // event also fires for everyone in the room (see ws.js handler).
+      try {
+        const roomRes = await fetch(`/api/rooms/${encodeURIComponent(room)}`, {
+          headers: { 'X-Session-Token': State.token }
+        });
+        const roomData = await roomRes.json().catch(() => ({}));
+        if (Array.isArray(roomData.moderators)) {
+          State.currentRoomMods = roomData.moderators.map(m => m.nickname);
+        }
+      } catch {}
+    } catch (e) {
+      UI.showToast('Network error', 'error');
+      btn.textContent = origLabel;
+      _setTransferConfirmArmed(true);
+    }
   }
 
   async function fetchBans(roomName) {
@@ -1633,7 +1767,8 @@ const Rooms = (() => {
     createInvite, revokeInvite, fetchInvites, showChannelAbout,
     renderMuteState, renderRooms, openChannelLink,
     cancelPrivateSecretPrompt, submitPrivateSecretPrompt,
-    toggleSecretVisibility
+    toggleSecretVisibility,
+    openTransferOwnershipModal, onTransferOwnershipInput, confirmTransferOwnership
   };
 })();
 
@@ -1673,6 +1808,11 @@ function handleChannelBannerSelect(input) { Rooms.handleChannelBannerSelect(inpu
 function handleChannelThemeBgUpload(input) { Rooms.handleChannelThemeBgUpload(input); }
 function clearChannelThemeBgImage() { Rooms.clearChannelThemeBgImage(); }
 function showChannelAbout() { Rooms.showChannelAbout(); }
+
+// Transfer-ownership modal hooks (HTML onclick targets).
+function openTransferOwnershipModal() { Rooms.openTransferOwnershipModal(); }
+function onTransferOwnershipInput() { Rooms.onTransferOwnershipInput(); }
+function confirmTransferOwnership() { Rooms.confirmTransferOwnership(); }
 
 function toggleNewRoomDirectoryFields() {
   const cb = document.getElementById('new-room-list-directory');

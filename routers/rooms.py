@@ -480,6 +480,72 @@ async def remove_moderator(room_name: str, user_id: int,
     return {"ok": True}
 
 
+# ─── Transfer ownership ───────────────────────────────────────────────────────
+
+class TransferOwnershipRequest(BaseModel):
+    user_id: int
+    confirm: bool = False
+
+
+@router.post("/{room_name}/transfer-ownership")
+async def transfer_ownership(room_name: str, body: TransferOwnershipRequest,
+                             current_user: dict = Depends(get_current_user)):
+    """Transfer ownership of a channel to another user.
+
+    Strictly owner-only (admins are NOT allowed to forcibly transfer a
+    user-owned channel — that's a different intentional flow). The
+    request must include `confirm=true` so a stray button click can't
+    fire it accidentally; the UI surfaces a two-step modal.
+
+    The outgoing owner is automatically demoted to moderator so they
+    keep delete/ban powers; the new owner is removed from the mods list
+    (they outrank that role now) and auto-added as a member if not
+    already.
+    """
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    if int(room["owner_id"]) != int(current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Only the current owner can transfer ownership"})
+    if not body.confirm:
+        return JSONResponse(status_code=400, content={"error": "Confirmation required"})
+    if int(body.user_id) == int(current_user["id"]):
+        return JSONResponse(status_code=400, content={"error": "You are already the owner"})
+    target = db.get_user_by_id(body.user_id)
+    if not target:
+        return JSONResponse(status_code=404, content={"error": "Target user not found"})
+
+    result = db.transfer_room_ownership(room["id"], current_user["id"], body.user_id)
+    if not result.get("ok"):
+        # 409 covers the "already owner" / membership race conditions
+        # the DB-layer check rejects.
+        return JSONResponse(status_code=409, content={"error": result.get("error", "Transfer failed")})
+
+    # Notify everyone subscribed to the room so member-list role badges
+    # update without a manual reload, and let the new owner's other
+    # devices refresh their permissions cache too.
+    try:
+        from ws_manager import manager
+        await manager.broadcast_room(room_name, {
+            "type": "room_owner_changed",
+            "room": room_name,
+            "previous_owner_id": int(current_user["id"]),
+            "previous_owner_nickname": current_user.get("nickname"),
+            "new_owner_id": int(body.user_id),
+            "new_owner_nickname": target.get("nickname"),
+        })
+        # Direct ping to the new owner so any client of theirs that's
+        # on a different page (DMs, social) still gets the toast.
+        await manager.send_to_user(body.user_id, {
+            "type": "room_ownership_received",
+            "room": room_name,
+            "from_nickname": current_user.get("nickname"),
+        })
+    except Exception:
+        pass
+    return {"ok": True, "new_owner_id": int(body.user_id)}
+
+
 # ─── Room bans ────────────────────────────────────────────────────────────────
 
 class BanRequest(BaseModel):

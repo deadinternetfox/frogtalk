@@ -7302,6 +7302,27 @@ window.ConnErr = (function(){
         <button class="modal-btn primary" onclick="addModerator()">Add</button>
       </div>
       <div id="ch-mods-list" style="max-height:260px;overflow-y:auto"></div>
+
+      <!-- Owner-only danger zone: transfer channel ownership. Hidden by
+           default; rooms.js reveals it when the active settings room is
+           owned by the current user. -->
+      <div id="ch-owner-danger" style="display:none;margin-top:18px;border:1px solid #4a2020;background:linear-gradient(180deg,#1a0d0d 0%,#140909 100%);border-radius:10px;padding:14px 14px 12px">
+        <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#ff8a8a;font-size:13px;margin-bottom:6px">
+          <span aria-hidden="true">⚠</span>
+          <span>Danger zone</span>
+        </div>
+        <div style="font-size:12.5px;color:#d8b4b4;line-height:1.5;margin-bottom:10px">
+          Transfer ownership to a member of this channel. You'll be demoted to moderator. <b>This cannot be undone</b> — only the new owner can transfer it back.
+        </div>
+        <div style="font-size:11.5px;color:#9bd0ad;margin-bottom:6px">
+          Current owner: <b id="ch-owner-current-name" style="color:#dff5e8">—</b>
+        </div>
+        <button class="modal-btn" id="ch-owner-transfer-btn" type="button"
+                onclick="openTransferOwnershipModal()"
+                style="width:100%;background:#3a1818;color:#ffb8b8;border:1px solid #5a2828;font-weight:600">
+          Transfer ownership…
+        </button>
+      </div>
     </div>
     
     <!-- Bans tab -->
@@ -7481,6 +7502,36 @@ window.ConnErr = (function(){
       <button class="modal-btn danger" id="ch-delete-btn" onclick="deleteChannelFromSettings()" style="margin-right:auto">Delete Channel</button>
       <button class="modal-btn secondary" onclick="closeModal('modal-channel-settings')">Cancel</button>
       <button class="modal-btn primary" id="ch-settings-save-btn" onclick="saveChannelSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Transfer-ownership confirmation modal. Two-step: must type new
+     owner's nickname AND tick acknowledgement before the button arms. -->
+<div class="modal-overlay hidden" id="modal-transfer-ownership">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title" style="display:flex;align-items:center;gap:8px;color:#ff9b9b">
+      <span aria-hidden="true">⚠</span><span>Transfer channel ownership</span>
+    </div>
+    <div style="font-size:13px;color:#d8b4b4;line-height:1.5;margin-bottom:12px">
+      You're about to give <b id="xfer-room-label" style="color:#dff5e8">#channel</b> to another member.
+      You'll be demoted to <b>moderator</b>. Only the new owner will be able to delete the channel,
+      change permissions, or transfer it again.
+    </div>
+    <label class="modal-label" style="margin-top:0">New owner</label>
+    <input class="modal-input" id="xfer-target-input" placeholder="Enter exact username" autocomplete="off" spellcheck="false"
+           oninput="onTransferOwnershipInput()" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmTransferOwnership();}">
+    <div id="xfer-target-hint" style="font-size:12px;color:#85a89a;margin-top:6px;min-height:16px">Type the username exactly as shown in the member list.</div>
+    <label style="display:flex;align-items:flex-start;gap:8px;margin-top:14px;font-size:12.5px;color:#d8b4b4;cursor:pointer;line-height:1.45">
+      <input type="checkbox" id="xfer-ack" oninput="onTransferOwnershipInput()" style="margin-top:2px;flex:0 0 auto">
+      <span>I understand this is permanent and only the new owner can transfer ownership back.</span>
+    </label>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="modal-btn secondary" type="button" onclick="closeModal('modal-transfer-ownership')">Cancel</button>
+      <button class="modal-btn" type="button" id="xfer-confirm-btn" onclick="confirmTransferOwnership()" disabled
+              style="background:#5a2020;color:#fff;border:1px solid #7a2c2c;font-weight:600;opacity:.55;cursor:not-allowed">
+        Transfer ownership
+      </button>
     </div>
   </div>
 </div>

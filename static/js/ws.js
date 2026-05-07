@@ -224,6 +224,41 @@ const WS = (() => {
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
         break;
       }
+      case 'room_owner_changed': {
+        // Owner transferred. Update locally cached mod list (the
+        // outgoing owner just became a moderator) and surface a small
+        // toast for everyone watching the room. The new owner gets a
+        // direct `room_ownership_received` ping below.
+        if (data.room === room) {
+          try {
+            // Refresh full room metadata so the moderator list and
+            // owner_nickname pick up the change without a reload.
+            fetch(`/api/rooms/${encodeURIComponent(data.room)}`, {
+              headers: { 'X-Session-Token': State.token }
+            }).then(r => r.json()).then(roomData => {
+              if (roomData && Array.isArray(roomData.moderators)) {
+                State.currentRoomMods = roomData.moderators.map(m => m.nickname);
+              }
+            }).catch(() => {});
+          } catch {}
+          try {
+            const prev = data.previous_owner_nickname || 'previous owner';
+            const next = data.new_owner_nickname || 'new owner';
+            UI.showToast(`#${data.room}: ${prev} transferred ownership to ${next}`);
+          } catch {}
+        }
+        try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
+        break;
+      }
+      case 'room_ownership_received': {
+        // Direct ping to the new owner. Toast even if they're not
+        // currently looking at that room — they'll likely want to know.
+        try {
+          const from = data.from_nickname || 'someone';
+          UI.showToast(`You're now the owner of #${data.room} (transferred by ${from})`);
+        } catch {}
+        break;
+      }
       case 'profile_update': {
         // If our own avatar changed on another device, sync local state + self panel
         if (State.user && (

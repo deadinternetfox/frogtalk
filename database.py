@@ -6051,6 +6051,79 @@ def is_room_member(user_id: int, room_id: int) -> bool:
     return row is not None
 
 
+def transfer_room_ownership(room_id: int, current_owner_id: int, new_owner_id: int) -> Dict:
+    """Atomically transfer ownership of a room.
+
+    Returns a dict describing the result:
+      {"ok": True, "previous_owner_id": <id>, "new_owner_id": <id>}
+      {"ok": False, "error": "<reason>"}
+
+    Guarantees, all in a single transaction so a racing /join, /leave or
+    parallel transfer can't leave the room half-owned:
+      * the calling user is still the current owner
+      * the new owner exists and is a member of the room (auto-joined if not)
+      * the new owner is removed from the moderators list (owner already
+        has every mod power, so leaving them duplicated muddies the UI)
+      * the previous owner is added to the moderators list so they keep
+        delete/ban powers and don't lock themselves out of moderation
+    """
+    if int(current_owner_id) == int(new_owner_id):
+        return {"ok": False, "error": "User is already the owner"}
+    with _conn() as con:
+        # IMMEDIATE upgrades the implicit transaction so the SELECT below
+        # is part of the same write barrier as the UPDATE — required to
+        # make the owner check race-safe under SQLite's WAL mode.
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            row = con.execute(
+                "SELECT owner_id FROM rooms WHERE id=?", (room_id,)
+            ).fetchone()
+            if not row:
+                con.execute("ROLLBACK")
+                return {"ok": False, "error": "Room not found"}
+            if int(row["owner_id"]) != int(current_owner_id):
+                con.execute("ROLLBACK")
+                return {"ok": False, "error": "Only the current owner can transfer ownership"}
+            target = con.execute(
+                "SELECT id FROM users WHERE id=?", (new_owner_id,)
+            ).fetchone()
+            if not target:
+                con.execute("ROLLBACK")
+                return {"ok": False, "error": "Target user not found"}
+            # Make sure target is a member; auto-join is harmless and prevents
+            # a hostile UI flow that hands ownership to a non-member who
+            # then can't even open the channel without rejoining.
+            con.execute(
+                "INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?,?)",
+                (room_id, new_owner_id),
+            )
+            # Pull the new owner out of the mods list (they're about to
+            # outrank that role) and add the outgoing owner to it so they
+            # keep moderation powers.
+            con.execute(
+                "DELETE FROM room_moderators WHERE room_id=? AND user_id=?",
+                (room_id, new_owner_id),
+            )
+            con.execute(
+                "INSERT OR IGNORE INTO room_moderators (room_id, user_id, added_by) VALUES (?,?,?)",
+                (room_id, current_owner_id, current_owner_id),
+            )
+            con.execute(
+                "UPDATE rooms SET owner_id=? WHERE id=?",
+                (new_owner_id, room_id),
+            )
+            con.commit()
+        except Exception as exc:
+            try: con.execute("ROLLBACK")
+            except Exception: pass
+            return {"ok": False, "error": f"Database error: {exc}"}
+    return {
+        "ok": True,
+        "previous_owner_id": int(current_owner_id),
+        "new_owner_id": int(new_owner_id),
+    }
+
+
 def auto_join_defaults(user_id: int):
     """Default-channel auto-join is disabled. Kept as a no-op so any legacy
     callers don't crash. New users start with an empty channel list and can
