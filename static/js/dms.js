@@ -188,6 +188,25 @@ function _normalizeUrl(url) {
   return String(url || '').replace(/&amp;/g, '&');
 }
 
+// Re-pin the DM messages area to the bottom AFTER an async embed swap
+// (post/reel/invite/profile placeholder → real card). The render-time
+// auto-scroll fires before hydration completes; without this nudge the
+// card pushes the latest message below the fold. Only snap if the
+// viewer is already at/near the bottom — never yank someone reading
+// history. DMs share #messages-area with channels, so we delegate to
+// the Messages helper when available; otherwise inline the same logic.
+function _dmScrollIfNearBottom() {
+  if (typeof Messages !== 'undefined' && typeof Messages._scrollIfNearBottom === 'function') {
+    try { Messages._scrollIfNearBottom(); return; } catch {}
+  }
+  const area = document.getElementById('messages-area');
+  if (!area) return;
+  const distance = area.scrollHeight - area.scrollTop - area.clientHeight;
+  if (distance > 450) return;
+  const snap = () => { area.scrollTop = area.scrollHeight; };
+  requestAnimationFrame(() => { snap(); requestAnimationFrame(snap); });
+}
+
 function _parseDMFrogSocialUrl(url) {
   try {
     const parsed = new URL(_normalizeUrl(url));
@@ -221,6 +240,7 @@ async function _loadDMSocialPostCard(msgId, postId) {
     const res = await apiFetch(`/api/wall/posts/${postId}`);
     if (!res.ok) {
       placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`;
+      _dmScrollIfNearBottom();
       return;
     }
     const p = await res.json();
@@ -230,6 +250,7 @@ async function _loadDMSocialPostCard(msgId, postId) {
     const mediaType = String(p.media_type || '').toLowerCase();
     if (mediaType.startsWith('music/') && typeof Messages !== 'undefined' && Messages._renderRichShareEmbed) {
       placeholder.outerHTML = Messages._renderRichShareEmbed(p, 'post', Number(p.id || postId));
+      _dmScrollIfNearBottom();
       return;
     }
     const nick = esc(p.nickname || 'frog');
@@ -252,8 +273,10 @@ async function _loadDMSocialPostCard(msgId, postId) {
           `<div class="share-card-bio">${safePreview}</div>` +
         `</div>` +
       `</div>`;
+    _dmScrollIfNearBottom();
   } catch {
     placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load post</span>`;
+    _dmScrollIfNearBottom();
   }
 }
 
@@ -266,12 +289,14 @@ async function _loadDMSocialReelCard(msgId, postId) {
     const res = await apiFetch(`/api/wall/posts/${postId}`);
     if (!res.ok) {
       placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Reel unavailable</span>`;
+      _dmScrollIfNearBottom();
       return;
     }
     const p = await res.json();
     const mediaType = String(p.media_type || '').toLowerCase();
     if (!mediaType.startsWith('video/')) {
       placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`;
+      _dmScrollIfNearBottom();
       return;
     }
     const nick = esc(p.nickname || 'frog');
@@ -288,8 +313,10 @@ async function _loadDMSocialReelCard(msgId, postId) {
           `<div class="share-card-bio">${safePreview}</div>` +
         `</div>` +
       `</div>`;
+    _dmScrollIfNearBottom();
   } catch {
     placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load reel</span>`;
+    _dmScrollIfNearBottom();
   }
 }
 

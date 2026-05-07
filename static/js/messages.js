@@ -26,6 +26,24 @@ const Messages = (() => {
     return String(url || '').replace(/&amp;/g, '&');
   }
 
+  // Re-pin the messages area to the bottom AFTER an async embed swap
+  // (invite/profile/post/reel) replaces a small placeholder span with a
+  // taller card. The render-time auto-scroll fires before hydration
+  // completes; without this nudge, the new card pushes the latest
+  // message below the fold. We only snap if the viewer was already at
+  // (or very near) the bottom — never yank someone who's reading
+  // history. Threshold is generous (450px) because a single card can
+  // be 200–400px tall and we want to keep the bottom anchored even if
+  // multiple embeds finish in series.
+  function _scrollIfNearBottom() {
+    const area = document.getElementById('messages-area');
+    if (!area) return;
+    const distance = area.scrollHeight - area.scrollTop - area.clientHeight;
+    if (distance > 450) return;
+    const snap = () => { area.scrollTop = area.scrollHeight; };
+    requestAnimationFrame(() => { snap(); requestAnimationFrame(snap); });
+  }
+
   function _parseFrogSocialUrl(url) {
     try {
       const parsed = new URL(_normalizeUrl(url));
@@ -194,6 +212,7 @@ const Messages = (() => {
     });
     if (!result.ok) {
       placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Profile unavailable</span>`;
+      _scrollIfNearBottom();
       return;
     }
     const d = result.data || {};
@@ -210,6 +229,7 @@ const Messages = (() => {
           `<div class="share-card-bio">${subtitle}</div>` +
         `</div>` +
       `</div>`;
+    _scrollIfNearBottom();
   }
 
   // Build a provider-iframe src for a music-post URL. Returns null if
@@ -423,9 +443,11 @@ const Messages = (() => {
     });
     if (!result.ok) {
       placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`;
+      _scrollIfNearBottom();
       return;
     }
     placeholder.outerHTML = _renderRichShareEmbed(result.data || {}, 'post', postId);
+    _scrollIfNearBottom();
   }
 
   async function _loadSocialReelCard(msgId, postId) {
@@ -441,15 +463,18 @@ const Messages = (() => {
     });
     if (!result.ok) {
       placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Reel unavailable</span>`;
+      _scrollIfNearBottom();
       return;
     }
     const data = result.data || {};
     const mt = String(data.media_type || '').toLowerCase();
     if (!mt.startsWith('video/')) {
       placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`;
+      _scrollIfNearBottom();
       return;
     }
     placeholder.outerHTML = _renderRichShareEmbed(data, 'reel', postId);
+    _scrollIfNearBottom();
   }
 
   // Hoist share-card placeholders (and the cards they become) onto
@@ -521,6 +546,7 @@ const Messages = (() => {
       if (!placeholder.parentNode) return;
       if (!res.ok || !data.valid) {
         placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Invite invalid or expired</span>`;
+        _scrollIfNearBottom();
         return;
       }
       // room_icon can be a single emoji, an uploaded image (data: URL,
@@ -563,9 +589,11 @@ const Messages = (() => {
             ${btnHtml}
           </div>
         </div>`;
+      _scrollIfNearBottom();
     } catch (e) {
       if (placeholder.parentNode) {
         placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load invite</span>`;
+        _scrollIfNearBottom();
       }
     }
   }
@@ -2808,7 +2836,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
