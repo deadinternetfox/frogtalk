@@ -52,7 +52,7 @@
   a:hover { color: var(--green-dim); }
 
   /* ── NAV ── */
-  nav {
+  body > nav {
     position: fixed; top: 0; left: 0; right: 0; z-index: 100;
     display: flex; align-items: center; justify-content: space-between;
     padding: 0 2rem;
@@ -198,7 +198,7 @@
   .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
 
   @media (max-width: 720px) {
-    nav { padding: 0 1rem; }
+    body > nav { padding: 0 1rem; }
     .nav-links a:not(.btn) { display: none; }
     .privacy-hero { padding-top: 7rem; }
     footer { flex-direction: column; text-align: center; gap: 1rem; }
