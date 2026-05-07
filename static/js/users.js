@@ -97,33 +97,55 @@ const Users = (() => {
     const count = document.getElementById('online-count');
     if (!list) return;
 
-    // Build the display list:
-    //   - Online first: every entry from _allUsers (server-confirmed online).
-    //   - Offline next: _channelMembers - online intersection (if we have a
-    //     member list for the current room). If we don't, we just show online.
-    const onlineNicks = new Set(_allUsers.map(u => (u.nickname || '').toLowerCase()));
     const onRoom = _channelRoom && State.currentRoom === _channelRoom;
-    const offline = onRoom
-      ? _channelMembers.filter(m => !onlineNicks.has((m.nickname || '').toLowerCase()))
-      : [];
 
-    const matches = (u) => !_filter || (u.nickname || '').toLowerCase().includes(_filter);
-    const onlineShown  = _allUsers.filter(matches);
-    const offlineShown = offline.filter(matches);
+    // When we have a full room-member snapshot, use that as the source of
+    // truth for names/display_names and only merge online presence into it.
+    let onlineSource = _allUsers;
+    let offlineSource = [];
+    if (onRoom && _channelMembers.length) {
+      const onlineMap = new Map(
+        _allUsers.map(u => [String((u.nickname || '')).toLowerCase(), u])
+      );
+      onlineSource = [];
+      offlineSource = [];
+      for (const member of _channelMembers) {
+        const key = String((member.nickname || '')).toLowerCase();
+        const online = onlineMap.get(key);
+        const merged = online ? { ...member, ...online, display_name: member.display_name || online.display_name } : { ...member };
+        if (online) onlineSource.push(merged);
+        else offlineSource.push(merged);
+      }
+      // Include any online users not present in the members snapshot as a fallback.
+      for (const user of _allUsers) {
+        const key = String((user.nickname || '')).toLowerCase();
+        if (!_channelMembers.some(m => String((m.nickname || '')).toLowerCase() === key)) {
+          onlineSource.push(user);
+        }
+      }
+    }
+
+    const matches = (u) => {
+      if (!_filter) return true;
+      const nickname = String(u.nickname || '').toLowerCase();
+      const displayName = String(u.display_name || '').toLowerCase();
+      return nickname.includes(_filter) || displayName.includes(_filter);
+    };
+    const onlineShown = onlineSource.filter(matches);
+    const offlineShown = offlineSource.filter(matches);
 
     if (count) count.textContent = _allUsers.length;
 
+    const prevSearchValue = _filter;
     list.innerHTML = '';
 
     // Search input
-    let search = document.getElementById('member-search');
-    if (!search) {
-      search = document.createElement('input');
-      search.id = 'member-search';
-      search.className = 'member-search-input';
-      search.placeholder = 'Search by username…';
-      search.oninput = () => { _filter = search.value.trim().toLowerCase(); _renderFiltered(); };
-    }
+    const search = document.createElement('input');
+    search.id = 'member-search';
+    search.className = 'member-search-input';
+    search.placeholder = 'Search by display name or username…';
+    search.value = prevSearchValue;
+    search.oninput = () => { _filter = search.value.trim().toLowerCase(); _renderFiltered(); };
     list.appendChild(search);
 
     if (onlineShown.length) {
