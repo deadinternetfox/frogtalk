@@ -4623,7 +4623,19 @@ async function loadUserWall(nickname) {
       let mediaHtml = '';
       if (p.media_data && p.media_type) {
         if (p.media_type.startsWith('image/')) {
-          mediaHtml = `<div style="margin:8px 0"><img loading="lazy" decoding="async" src="${esc(p.media_data)}" style="max-width:100%;border-radius:8px;cursor:pointer" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" alt="Post media"></div>`;
+          let imgSrc = String(p.media_data || '');
+          try {
+            if (imgSrc.startsWith('/api/social/posts/')) {
+              let tok = '';
+              try { tok = String((typeof State !== 'undefined' && State && State.token) || ''); } catch {}
+              if (tok) {
+                const ui = new URL(imgSrc, window.location.origin);
+                if (!ui.searchParams.get('token')) ui.searchParams.set('token', tok);
+                imgSrc = ui.pathname + ui.search;
+              }
+            }
+          } catch {}
+          mediaHtml = `<div style="margin:8px 0"><img loading="lazy" decoding="async" src="${esc(imgSrc)}" style="max-width:100%;border-radius:8px;cursor:pointer" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" alt="Post media"></div>`;
         } else if (p.media_type.startsWith('video/')) {
           // /api/social/posts/{id}/media is auth-gated; <video src>
           // can't send headers, so we add ?token=... to BOTH the src
