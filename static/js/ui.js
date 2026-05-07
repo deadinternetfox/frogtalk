@@ -3560,7 +3560,7 @@ async function showProfile() {
   // Profile tab
   document.getElementById('profile-nickname').value = u.nickname;
   const dispInput = document.getElementById('profile-display-name');
-  if (dispInput) dispInput.value = u.display_name || u.nickname || '';
+  if (dispInput) dispInput.value = u.display_name || '';
   if (typeof _refreshUsernameCooldownUI === 'function') _refreshUsernameCooldownUI();
   document.getElementById('profile-bio').value = u.bio || '';
   const smEl = document.getElementById('profile-status-msg');
@@ -3897,25 +3897,28 @@ async function changeDisplayName() {
 
 function _refreshUsernameCooldownUI() {
   const el = document.getElementById('profile-username-cooldown');
-  const btn = document.getElementById('profile-nickname-btn');
+  const input = document.getElementById('profile-nickname');
   if (!el) return;
   const remaining = Number(State.user?.username_change_remaining_seconds || 0);
   if (remaining > 0) {
     const days = Math.floor(remaining / 86400);
     const hours = Math.floor((remaining % 86400) / 3600);
-    el.textContent = `Next change available in ${days ? days+'d ' : ''}${hours}h.`;
+    el.textContent = `Username can change again in ${days ? days+'d ' : ''}${hours}h. Use Save after updating your current password.`;
     el.style.color = '#c08040';
-    if (btn) { btn.disabled = true; btn.style.opacity = '.5'; btn.style.cursor = 'not-allowed'; }
+    if (input) input.setAttribute('data-cooldown-active', '1');
   } else {
-    el.textContent = 'Username can only be changed once a week.';
+    el.textContent = 'Username changes are saved with the main Save button and require your current password.';
     el.style.color = '#888';
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.style.cursor = ''; }
+    if (input) input.removeAttribute('data-cooldown-active');
   }
 }
 window._refreshUsernameCooldownUI = _refreshUsernameCooldownUI;
 window.changeDisplayName = changeDisplayName;
 
 async function saveProfile() {
+  const displayName = document.getElementById('profile-display-name')?.value?.trim() || '';
+  const nicknameInput = document.getElementById('profile-nickname');
+  const nextNickname = (nicknameInput?.value || '').trim();
   const bio = document.getElementById('profile-bio').value.slice(0, 256);
   const curPw = document.getElementById('profile-cur-pw').value;
   const newPw = document.getElementById('profile-new-pw').value;
@@ -3953,6 +3956,24 @@ async function saveProfile() {
   // Theme
   const currentTheme = document.body.dataset.theme || 'dark';
 
+  if (displayName.length > 32) {
+    errEl.textContent = 'Display name must be 32 characters or fewer';
+    return;
+  }
+  if (!nextNickname) {
+    errEl.textContent = 'Username cannot be empty';
+    return;
+  }
+  if (!/^[a-zA-Z0-9_\-]{2,32}$/.test(nextNickname)) {
+    errEl.textContent = 'Username: 2-32 chars, letters/numbers/_/-';
+    return;
+  }
+  const wantsNicknameChange = nextNickname !== (State.user?.nickname || '');
+  if (wantsNicknameChange && !curPw) {
+    errEl.textContent = 'Enter your current password to save a username change';
+    return;
+  }
+
   const body = {
     bio,
     status_msg: statusMsg,
@@ -3975,6 +3996,38 @@ async function saveProfile() {
   if (newPw) { body.new_password = newPw; body.current_password = curPw; }
 
   try {
+    errEl.textContent = '';
+
+    if (displayName !== String(State.user?.display_name || '')) {
+      const displayRes = await apiFetch('/api/auth/display-name', 'PATCH', { display_name: displayName });
+      const displayData = await displayRes.json();
+      if (!displayRes.ok) {
+        errEl.textContent = displayData.error || 'Display name save failed';
+        return;
+      }
+      State.user.display_name = displayData.display_name || null;
+    }
+
+    if (wantsNicknameChange) {
+      const nickRes = await apiFetch('/api/auth/nickname', 'PATCH', {
+        nickname: nextNickname,
+        password: curPw,
+      });
+      const nickData = await nickRes.json();
+      if (!nickRes.ok) {
+        if (nickRes.status === 429 && Number(nickData.retry_after_seconds) > 0) {
+          State.user.username_change_remaining_seconds = Number(nickData.retry_after_seconds);
+          State.save();
+          _refreshUsernameCooldownUI();
+        }
+        errEl.textContent = nickData.error || 'Username save failed';
+        return;
+      }
+      State.user.nickname = nickData.nickname;
+      State.user.username_change_remaining_seconds = 7 * 86400;
+      _refreshUsernameCooldownUI();
+    }
+
     const res = await fetch('/api/auth/profile', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
@@ -3997,6 +4050,8 @@ async function saveProfile() {
     State.user.notify_dms = notifyDms ? 1 : 0;
     State.user.notify_mentions = notifyMentions ? 1 : 0;
     State.user.theme = currentTheme;
+    State.user.display_name = displayName || null;
+    State.user.nickname = nextNickname;
     if (newAvatar) State.user.avatar = newAvatar;
 
     const wallRes = await apiFetch('/api/wall/settings', 'PATCH', {
@@ -4029,6 +4084,21 @@ async function saveProfile() {
         });
       } catch {}
     }
+    const selfName = document.getElementById('self-name');
+    const selfHandle = document.getElementById('self-handle');
+    if (selfName) selfName.textContent = State.user.display_name || State.user.nickname;
+    if (selfHandle) {
+      const showHandle = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
+      selfHandle.textContent = showHandle ? `@${State.user.nickname}` : '';
+    }
+    try {
+      if (typeof Users !== 'undefined') {
+        if (Users.updateList) Users.updateList(State.onlineUsers || []);
+        if (State.currentRoom && State.currentChannelType !== 'dm' && Users.loadChannelMembers) {
+          await Users.loadChannelMembers(State.currentRoom);
+        }
+      }
+    } catch {}
     closeModal('modal-profile');
     UI.showToast('Settings saved', 'success');
   } catch {

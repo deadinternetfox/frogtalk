@@ -878,6 +878,7 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
             "payload": {
                 "global_user_id": ident.get("global_user_id") or "",
                 "nickname": ident.get("nickname") or current_user.get("nickname") or "",
+                "display_name": ident.get("display_name") or "",
                 "avatar": ident.get("avatar") or "",
                 "bio": ident.get("bio") or "",
                 "status_msg": ident.get("status_msg") or "",
@@ -1134,6 +1135,7 @@ async def register_with_captcha(
             "payload": {
                 "global_user_id": ident.get("global_user_id") or "",
                 "nickname": ident.get("nickname") or body.nickname,
+                "display_name": ident.get("display_name") or "",
                 "avatar": ident.get("avatar") or "",
                 "bio": ident.get("bio") or "",
                 "identity_pubkey": ident.get("identity_pubkey") or "",

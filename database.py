@@ -490,7 +490,7 @@ def get_user_identity(user_id: int) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(
             """
-            SELECT id, nickname, avatar, bio, global_user_id, identity_pubkey
+            SELECT id, nickname, display_name, avatar, bio, global_user_id, identity_pubkey
             FROM users WHERE id=?
             """,
             (user_id,),
@@ -1370,6 +1370,7 @@ def _migrate():
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 global_user_id   TEXT NOT NULL UNIQUE,
                 nickname         TEXT NOT NULL,
+                display_name     TEXT DEFAULT '',
                 avatar           TEXT DEFAULT '',
                 bio              TEXT DEFAULT '',
                 identity_pubkey  TEXT DEFAULT '',
@@ -1870,6 +1871,9 @@ def _migrate():
         fed_srv_cols = {r["name"] for r in con.execute("PRAGMA table_info(federation_servers)").fetchall()}
         if fed_srv_cols and "transport_preference" not in fed_srv_cols:
             con.execute("ALTER TABLE federation_servers ADD COLUMN transport_preference TEXT DEFAULT 'auto'")
+        fed_profile_cols = {r["name"] for r in con.execute("PRAGMA table_info(federation_user_profiles)").fetchall()}
+        if fed_profile_cols and "display_name" not in fed_profile_cols:
+            con.execute("ALTER TABLE federation_user_profiles ADD COLUMN display_name TEXT DEFAULT ''")
 
         # ── Denormalized engagement counters on wall_posts ──
         # The /feed, /explore and /reels endpoints used to evaluate three
@@ -2250,6 +2254,7 @@ def build_signed_profile_claim(user_id: int, ttl_seconds: int = 3600) -> Optiona
         "exp": now + max(60, int(ttl_seconds)),
         "sub": ident.get("global_user_id") or "",
         "nickname": ident.get("nickname") or "",
+        "display_name": ident.get("display_name") or "",
         "avatar": ident.get("avatar") or "",
         "bio": ident.get("bio") or "",
         "identity_pubkey": ident.get("identity_pubkey") or "",
@@ -6938,6 +6943,7 @@ def get_or_create_federation_system_user() -> int:
 def upsert_federation_user_profile(
     global_user_id: str,
     nickname: str,
+    display_name: str = "",
     avatar: str = "",
     bio: str = "",
     identity_pubkey: str = "",
@@ -6951,17 +6957,18 @@ def upsert_federation_user_profile(
         con.execute(
             """
             INSERT INTO federation_user_profiles
-            (global_user_id, nickname, avatar, bio, identity_pubkey, origin_server_id, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            (global_user_id, nickname, display_name, avatar, bio, identity_pubkey, origin_server_id, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(global_user_id) DO UPDATE SET
                 nickname=excluded.nickname,
+                display_name=excluded.display_name,
                 avatar=excluded.avatar,
                 bio=excluded.bio,
                 identity_pubkey=excluded.identity_pubkey,
                 origin_server_id=excluded.origin_server_id,
                 updated_at=datetime('now')
             """,
-            (gid, nick, avatar or "", bio or "", identity_pubkey or "", origin_server_id or ""),
+            (gid, nick, display_name or "", avatar or "", bio or "", identity_pubkey or "", origin_server_id or ""),
         )
         con.commit()
     return True

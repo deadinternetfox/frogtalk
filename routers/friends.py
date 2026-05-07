@@ -91,6 +91,7 @@ def _emit_profile_update(user_id: int) -> None:
             "payload": {
                 "global_user_id": ident.get("global_user_id") or "",
                 "nickname": ident.get("nickname") or "",
+                "display_name": ident.get("display_name") or "",
                 "avatar": ident.get("avatar") or "",
                 "bio": ident.get("bio") or "",
                 "status_msg": ident.get("status_msg") or "",

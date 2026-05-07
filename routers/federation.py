@@ -830,6 +830,7 @@ async def identity_me(x_session_token: str | None = Header(default=None)):
     return {
         "id": ident.get("id"),
         "nickname": ident.get("nickname"),
+        "display_name": ident.get("display_name"),
         "global_user_id": ident.get("global_user_id"),
         "identity_pubkey": ident.get("identity_pubkey"),
     }
@@ -1435,6 +1436,7 @@ async def _handle_user_event(event: dict) -> None:
     db.upsert_federation_user_profile(
         global_user_id=str(payload.get("global_user_id") or "").strip(),
         nickname=str(payload.get("nickname") or "").strip(),
+        display_name=str(payload.get("display_name") or ""),
         avatar=str(payload.get("avatar") or ""),
         bio=str(payload.get("bio") or ""),
         identity_pubkey=str(payload.get("identity_pubkey") or ""),
@@ -1452,17 +1454,19 @@ async def _handle_user_event(event: dict) -> None:
     presence = str(payload.get("presence") or "").strip().lower()
     if presence not in allowed_presence:
         presence = None
+    display_name = "".join(ch for ch in str(payload.get("display_name") or "") if ch == " " or ch.isprintable()).strip()[:32]
 
     with db._conn() as con:
         con.execute(
             """
             UPDATE users
-            SET avatar=?, bio=?, status_msg=?, mood=?,
+            SET display_name=?, avatar=?, bio=?, status_msg=?, mood=?,
                 presence=COALESCE(?, presence),
                 identity_pubkey=COALESCE(NULLIF(?, ''), identity_pubkey)
             WHERE id=?
             """,
             (
+                display_name or None,
                 str(payload.get("avatar") or ""),
                 str(payload.get("bio") or ""),
                 str(payload.get("status_msg") or "")[:128],

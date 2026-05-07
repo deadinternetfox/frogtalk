@@ -770,7 +770,7 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
         con.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", params)
         row = con.execute("""
             SELECT wall_enabled, wall_comments_enabled, mood, custom_css,
-                   global_user_id, nickname, avatar, bio, status_msg, presence, identity_pubkey
+                   global_user_id, nickname, display_name, avatar, bio, status_msg, presence, identity_pubkey
             FROM users WHERE id=?
         """, (current_user["id"],)).fetchone()
 
@@ -782,6 +782,7 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
                 "payload": {
                     "global_user_id": row["global_user_id"] or "",
                     "nickname": row["nickname"] or current_user.get("nickname") or "",
+                    "display_name": row["display_name"] or "",
                     "avatar": row["avatar"] or "",
                     "bio": row["bio"] or "",
                     "status_msg": row["status_msg"] or "",
