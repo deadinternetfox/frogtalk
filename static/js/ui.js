@@ -1785,6 +1785,82 @@ function clearAuthError() {
   document.getElementById('auth-error').textContent = '';
 }
 
+// Live availability check on the signup nickname field. Debounced so we
+// don't hammer the server on every keystroke. Renders a green/red hint
+// + clickable suggestions strip when the typed username is taken.
+let _authNickCheckTimer = null;
+let _authNickLastChecked = '';
+function onAuthNicknameInput() {
+  const isReg = document.getElementById('tab-register')?.classList.contains('active');
+  const hint = document.getElementById('auth-username-hint');
+  const sugBox = document.getElementById('auth-username-suggestions');
+  if (!isReg) {
+    if (hint) hint.style.display = 'none';
+    if (sugBox) sugBox.style.display = 'none';
+    return;
+  }
+  const nick = (document.getElementById('auth-nickname').value || '').trim();
+  if (_authNickCheckTimer) { clearTimeout(_authNickCheckTimer); _authNickCheckTimer = null; }
+  if (hint) { hint.style.display = 'none'; hint.textContent = ''; hint.style.color = ''; }
+  if (sugBox) { sugBox.style.display = 'none'; sugBox.innerHTML = ''; }
+  if (!nick) return;
+  if (nick === _authNickLastChecked) return;
+  if (!/^[a-zA-Z0-9_-]{2,32}$/.test(nick)) {
+    if (hint) {
+      hint.textContent = 'Username must be 2-32 characters: letters, numbers, _ or -';
+      hint.style.color = '#ff8b8b';
+      hint.style.display = 'block';
+    }
+    return;
+  }
+  _authNickCheckTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/auth/check-username?nickname=${encodeURIComponent(nick)}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      _authNickLastChecked = nick;
+      // Drop stale results if the user kept typing.
+      const current = (document.getElementById('auth-nickname').value || '').trim();
+      if (current !== nick) return;
+      if (data.available) {
+        if (hint) {
+          hint.textContent = `✓ @${nick} is available`;
+          hint.style.color = '#7fd2a7';
+          hint.style.display = 'block';
+        }
+        if (sugBox) { sugBox.style.display = 'none'; sugBox.innerHTML = ''; }
+      } else {
+        if (hint) {
+          hint.textContent = data.error || 'That username is already taken';
+          hint.style.color = '#ff8b8b';
+          hint.style.display = 'block';
+        }
+        const list = Array.isArray(data.suggestions) ? data.suggestions : [];
+        _renderUsernameSuggestions(list);
+      }
+    } catch {}
+  }, 350);
+}
+
+function _renderUsernameSuggestions(list) {
+  const sugBox = document.getElementById('auth-username-suggestions');
+  if (!sugBox) return;
+  if (!list || !list.length) { sugBox.style.display = 'none'; sugBox.innerHTML = ''; return; }
+  const safe = (s) => String(s).replace(/[<>&"']/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;' }[c]));
+  sugBox.innerHTML = `<span style="font-size:11px;color:#85a89a;align-self:center;margin-right:4px">Try:</span>` +
+    list.map(s => `<button type="button" class="auth-sug-btn" data-nick="${safe(s)}"
+      style="background:rgba(127,210,167,.12);border:1px solid #2f5548;border-radius:14px;color:#bff0d0;font-size:12px;padding:4px 10px;cursor:pointer;font-family:inherit">@${safe(s)}</button>`).join('');
+  sugBox.style.display = 'flex';
+  sugBox.querySelectorAll('.auth-sug-btn').forEach(btn => {
+    btn.onclick = () => {
+      const n = btn.dataset.nick;
+      const inp = document.getElementById('auth-nickname');
+      if (inp) { inp.value = n; inp.focus(); }
+      onAuthNicknameInput();
+    };
+  });
+}
+
 function switchAuthTab(tab) {
   const isReg = tab === 'register';
   document.getElementById('tab-login').classList.toggle('active', !isReg);
@@ -1794,6 +1870,12 @@ function switchAuthTab(tab) {
   if (captchaBox) captchaBox.style.display = isReg ? 'block' : 'none';
   if (isReg) loadCaptcha();
   clearAuthError();
+  // Reset live username availability widgets when switching tabs.
+  const hint = document.getElementById('auth-username-hint');
+  const sugBox = document.getElementById('auth-username-suggestions');
+  if (hint) { hint.style.display = 'none'; hint.textContent = ''; }
+  if (sugBox) { sugBox.style.display = 'none'; sugBox.innerHTML = ''; }
+  if (isReg) onAuthNicknameInput();
 }
 
 let _captchaId = null;
@@ -1848,11 +1930,16 @@ async function doAuth() {
     const data = await res.json();
     if (!res.ok) {
       errEl.textContent = data.error || 'Auth failed';
+      // If the server returned alternative usernames (signup collision),
+      // surface them as clickable chips so the user can accept one.
+      if (isReg && Array.isArray(data.suggestions) && data.suggestions.length) {
+        _renderUsernameSuggestions(data.suggestions);
+      }
       if (isReg) loadCaptcha();
       return;
     }
     State.token = data.token;
-    State.user = { id: data.user_id, nickname: data.nickname, avatar: data.avatar, bio: data.bio, is_admin: data.is_admin };
+    State.user = { id: data.user_id, nickname: data.nickname, display_name: data.display_name || null, username_change_remaining_seconds: Number(data.username_change_remaining_seconds || 0), avatar: data.avatar, bio: data.bio, is_admin: data.is_admin };
     State.save();
     App.launch();
   } catch {
@@ -3472,6 +3559,9 @@ async function showProfile() {
   switchSettingsTab('profile');
   // Profile tab
   document.getElementById('profile-nickname').value = u.nickname;
+  const dispInput = document.getElementById('profile-display-name');
+  if (dispInput) dispInput.value = u.display_name || '';
+  if (typeof _refreshUsernameCooldownUI === 'function') _refreshUsernameCooldownUI();
   document.getElementById('profile-bio').value = u.bio || '';
   const smEl = document.getElementById('profile-status-msg');
   if (smEl) smEl.value = u.status_msg || '';
@@ -3736,22 +3826,76 @@ async function changeNickname() {
   const input = document.getElementById('profile-nickname');
   const newNick = (input?.value || '').trim();
   if (!newNick) return;
-  if (newNick === State.user?.nickname) { UI.showToast("That's already your nickname", 'error'); return; }
-  if (!/^[a-zA-Z0-9_\-]{2,32}$/.test(newNick)) { UI.showToast('Nickname: 2-32 chars, letters/numbers/_/-', 'error'); return; }
-  const password = prompt('Enter your password to confirm nickname change:');
+  if (newNick === State.user?.nickname) { UI.showToast("That's already your username", 'error'); return; }
+  if (!/^[a-zA-Z0-9_\-]{2,32}$/.test(newNick)) { UI.showToast('Username: 2-32 chars, letters/numbers/_/-', 'error'); return; }
+  // Surface the once-per-week cooldown before asking for a password.
+  const remaining = Number(State.user?.username_change_remaining_seconds || 0);
+  if (remaining > 0) {
+    const days = Math.floor(remaining / 86400);
+    const hours = Math.floor((remaining % 86400) / 3600);
+    UI.showToast(`Username can only change once a week. Try again in ${days ? days+'d ' : ''}${hours}h`, 'error');
+    return;
+  }
+  const password = prompt('Enter your password to confirm username change:');
   if (!password) return;
   try {
     const res = await apiFetch('/api/auth/nickname', 'PATCH', { nickname: newNick, password });
     const data = await res.json();
-    if (!res.ok) { UI.showToast(data.error || 'Could not change nickname', 'error'); return; }
+    if (!res.ok) {
+      if (res.status === 429 && Number(data.retry_after_seconds) > 0) {
+        State.user.username_change_remaining_seconds = Number(data.retry_after_seconds);
+        State.save();
+        _refreshUsernameCooldownUI();
+      }
+      UI.showToast(data.error || 'Could not change username', 'error');
+      return;
+    }
     State.user.nickname = data.nickname;
+    State.user.username_change_remaining_seconds = 7 * 86400;
     State.save();
-    // Update sidebar
     const selfNick = document.getElementById('self-nick');
-    if (selfNick) selfNick.textContent = data.nickname;
-    UI.showToast('Nickname changed to ' + data.nickname, 'success');
+    if (selfNick) selfNick.textContent = State.user.display_name || data.nickname;
+    _refreshUsernameCooldownUI();
+    UI.showToast('Username changed to @' + data.nickname, 'success');
   } catch { UI.showToast('Network error', 'error'); }
 }
+
+async function changeDisplayName() {
+  const input = document.getElementById('profile-display-name');
+  if (!input) return;
+  const raw = (input.value || '').trim();
+  if (raw.length > 32) { UI.showToast('Nickname must be 32 characters or fewer', 'error'); return; }
+  try {
+    const res = await apiFetch('/api/auth/display-name', 'PATCH', { display_name: raw });
+    const data = await res.json();
+    if (!res.ok) { UI.showToast(data.error || 'Could not save nickname', 'error'); return; }
+    State.user.display_name = data.display_name || null;
+    State.save();
+    const selfNick = document.getElementById('self-nick');
+    if (selfNick) selfNick.textContent = State.user.display_name || State.user.nickname;
+    UI.showToast(data.display_name ? 'Nickname saved' : 'Nickname cleared', 'success');
+  } catch { UI.showToast('Network error', 'error'); }
+}
+
+function _refreshUsernameCooldownUI() {
+  const el = document.getElementById('profile-username-cooldown');
+  const btn = document.getElementById('profile-nickname-btn');
+  if (!el) return;
+  const remaining = Number(State.user?.username_change_remaining_seconds || 0);
+  if (remaining > 0) {
+    const days = Math.floor(remaining / 86400);
+    const hours = Math.floor((remaining % 86400) / 3600);
+    el.textContent = `Next change available in ${days ? days+'d ' : ''}${hours}h.`;
+    el.style.color = '#c08040';
+    if (btn) { btn.disabled = true; btn.style.opacity = '.5'; btn.style.cursor = 'not-allowed'; }
+  } else {
+    el.textContent = 'Username can only be changed once a week.';
+    el.style.color = '#888';
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.style.cursor = ''; }
+  }
+}
+window._refreshUsernameCooldownUI = _refreshUsernameCooldownUI;
+window.changeDisplayName = changeDisplayName;
 
 async function saveProfile() {
   const bio = document.getElementById('profile-bio').value.slice(0, 256);

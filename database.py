@@ -342,6 +342,42 @@ def init_db():
                 ("admin", _bcrypt.hashpw(admin_pw.encode(), _bcrypt.gensalt()).decode())
             )
         # Case-insensitive unique index on nickname — blocks "Frog" vs "frog" collisions
+        # First, dedupe any existing case-variant duplicates: keep the
+        # lowest user id (earliest registration) and rename the later
+        # ones by appending "1", "2", ... until unique. Without this
+        # the unique index creation below would fail on legacy rows.
+        try:
+            dup_groups = con.execute(
+                "SELECT LOWER(nickname) AS k FROM users "
+                "GROUP BY LOWER(nickname) HAVING COUNT(*) > 1"
+            ).fetchall()
+            for g in dup_groups:
+                key = g["k"]
+                rows = con.execute(
+                    "SELECT id, nickname FROM users WHERE LOWER(nickname)=? ORDER BY id ASC",
+                    (key,),
+                ).fetchall()
+                # Keep rows[0]; rename the rest.
+                for r in rows[1:]:
+                    base = r["nickname"]
+                    # Trim so the "+suffix" still fits in 32 chars.
+                    base_trim = base[:30] if len(base) > 30 else base
+                    suffix = 1
+                    new_name = f"{base_trim}{suffix}"
+                    while con.execute(
+                        "SELECT 1 FROM users WHERE LOWER(nickname)=LOWER(?) LIMIT 1",
+                        (new_name,),
+                    ).fetchone() is not None:
+                        suffix += 1
+                        # Re-trim if the suffix grew more digits.
+                        max_base = 32 - len(str(suffix))
+                        base_trim = base[:max_base] if len(base) > max_base else base
+                        new_name = f"{base_trim}{suffix}"
+                    con.execute("UPDATE users SET nickname=? WHERE id=?", (new_name, r["id"]))
+                    print(f"[DB] dedupe: renamed user id={r['id']} '{r['nickname']}' -> '{new_name}'")
+            con.commit()
+        except Exception as _e:
+            print(f"[DB] username dedupe pass failed (non-fatal): {_e}")
         try:
             con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nickname_nocase ON users(nickname COLLATE NOCASE)")
         except sqlite3.IntegrityError:
@@ -388,6 +424,55 @@ def create_user_with_hash(nickname: str, password_hash: str, global_user_id: Opt
         return None
 
 
+def is_username_available(nickname: str) -> bool:
+    """Return True if the username is not yet taken (case-insensitive)."""
+    if not nickname:
+        return False
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM users WHERE LOWER(nickname) = LOWER(?) LIMIT 1",
+            (nickname,),
+        ).fetchone()
+    return row is None
+
+
+def suggest_available_usernames(base: str, count: int = 5) -> list[str]:
+    """Suggest up to `count` available username variants near `base`.
+
+    Strategy: numeric suffixes (base2, base3 …) plus a few short random
+    suffixes. Caller has already validated `base` against NICKNAME_RE so
+    we only need length-trimming here. Returns lowercase suggestions
+    only — the username column is case-insensitive on the unique check.
+    """
+    import random as _random
+    base = (base or "").strip().lower()
+    if not base:
+        return []
+    # Reserve a few characters for the suffix so we never exceed 32.
+    base_trim = base[:28] if len(base) > 28 else base
+    out: list[str] = []
+    seen: set[str] = set()
+    # Numeric suffixes first — most users prefer "name2" over "nameXyz".
+    n = 2
+    while len(out) < count and n < 9999:
+        cand = f"{base_trim}{n}"
+        if cand not in seen and is_username_available(cand):
+            out.append(cand)
+            seen.add(cand)
+        n += 1
+    # Top up with short random alphanumeric suffixes if needed.
+    alphabet = "abcdefghijkmnpqrstuvwxyz23456789"
+    safety = 0
+    while len(out) < count and safety < 200:
+        suffix = "".join(_random.choice(alphabet) for _ in range(3))
+        cand = f"{base_trim}_{suffix}"
+        if cand not in seen and is_username_available(cand):
+            out.append(cand)
+            seen.add(cand)
+        safety += 1
+    return out
+
+
 def get_user_password_hash(user_id: int) -> Optional[str]:
     with _conn() as con:
         row = con.execute("SELECT password_hash FROM users WHERE id=?", (user_id,)).fetchone()
@@ -410,7 +495,8 @@ def verify_user(nickname: str, password: str) -> Optional[Dict]:
 def get_user_by_token(token: str) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute("""
-            SELECT u.id, u.nickname, u.avatar, u.bio, u.is_admin,
+            SELECT u.id, u.nickname, u.display_name, u.username_changed_at,
+                   u.avatar, u.bio, u.is_admin,
                    u.presence, u.status_msg, u.profile_public,
                    u.allow_friend_requests, u.banner, u.ecdh_pub_key,
                    u.global_user_id, u.identity_pubkey,
@@ -427,7 +513,7 @@ def get_user_by_token(token: str) -> Optional[Dict]:
 def get_user_by_id(user_id: int) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(
-            "SELECT id, nickname, avatar, bio, is_admin, global_user_id, identity_pubkey FROM users WHERE id=?",
+            "SELECT id, nickname, display_name, avatar, bio, is_admin, global_user_id, identity_pubkey FROM users WHERE id=?",
             (user_id,)
         ).fetchone()
     return dict(row) if row else None
@@ -591,8 +677,59 @@ def update_profile(user_id: int, avatar: Optional[str] = None, bio: Optional[str
 
 def get_all_users() -> List[Dict]:
     with _conn() as con:
-        rows = con.execute("SELECT id, nickname, avatar, bio, is_admin FROM users").fetchall()
+        rows = con.execute("SELECT id, nickname, display_name, avatar, bio, is_admin FROM users").fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Identity: display_name (free) + username (= unique nickname column)
+# ---------------------------------------------------------------------------
+
+USERNAME_CHANGE_COOLDOWN_DAYS = 7
+
+
+def set_display_name(user_id: int, display_name: Optional[str]) -> None:
+    """Set or clear the freeform display name. Pass None / empty to clear
+    (UI will fall back to the username)."""
+    val = (display_name or "").strip() or None
+    with _conn() as con:
+        con.execute("UPDATE users SET display_name=? WHERE id=?", (val, user_id))
+        con.commit()
+
+
+def username_change_remaining_seconds(user_id: int) -> int:
+    """Returns seconds until the user is allowed to change username again.
+    0 means change is allowed right now."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT username_changed_at FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+    if not row or not row["username_changed_at"]:
+        return 0
+    try:
+        last = datetime.fromisoformat(row["username_changed_at"])
+    except Exception:
+        return 0
+    elapsed = (datetime.utcnow() - last).total_seconds()
+    cooldown = USERNAME_CHANGE_COOLDOWN_DAYS * 86400
+    remaining = int(cooldown - elapsed)
+    return max(0, remaining)
+
+
+def set_username(user_id: int, new_username: str, old_username: str) -> None:
+    """Rename the unique handle and stamp the cooldown clock. Caller is
+    responsible for permission, regex and uniqueness checks."""
+    with _conn() as con:
+        con.execute(
+            "INSERT INTO nickname_history (user_id, old_nickname) VALUES (?, ?)",
+            (user_id, old_username),
+        )
+        con.execute(
+            "UPDATE users SET nickname=?, username_changed_at=? WHERE id=?",
+            (new_username, datetime.utcnow().isoformat(), user_id),
+        )
+        con.commit()
+
 
 
 # ---------------------------------------------------------------------------
@@ -1020,6 +1157,14 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN global_user_id TEXT")
         if "identity_pubkey" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN identity_pubkey TEXT")
+        # Identity split: `nickname` is the unique handle (UI label
+        # "Username"), `display_name` is the freeform display label
+        # (UI label "Nickname") that defaults to nickname when NULL.
+        # `username_changed_at` anchors the once-per-week rate limit.
+        if "display_name" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
+        if "username_changed_at" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN username_changed_at TEXT")
         # Sessions: per-device metadata so users can see/revoke other logins.
         sess_cols = {r["name"] for r in con.execute("PRAGMA table_info(sessions)").fetchall()}
         if "user_agent" not in sess_cols:
@@ -2178,7 +2323,8 @@ def search_users(query: str, limit: int = 20, requester_id: int = 0) -> List[Dic
 def get_user_profile(nickname: str) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(
-            """SELECT id, nickname, avatar, banner, bio, status_msg,
+            """SELECT id, nickname, display_name, username_changed_at,
+                      avatar, banner, bio, status_msg,
                       presence, last_seen, is_admin, ecdh_pub_key,
                       mood, custom_css, wall_enabled, wall_comments_enabled,
                       show_last_seen, show_read_receipts, profile_public,

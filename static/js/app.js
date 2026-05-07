@@ -100,6 +100,8 @@ const App = {
       State.user = {
         id: data.user_id,
         nickname: data.nickname,
+        display_name: data.display_name || null,
+        username_change_remaining_seconds: Number(data.username_change_remaining_seconds || 0),
         avatar: data.avatar,
         bio: data.bio,
         is_admin: data.is_admin,

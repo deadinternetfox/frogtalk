@@ -12,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from typing import Optional
 
 _log = logging.getLogger(__name__)
 from fastapi import APIRouter, Request, Depends, Header
@@ -519,7 +520,14 @@ async def register(
         return JSONResponse(status_code=400, content={"error": "Password must be at least 6 characters"})
     user_id = db.create_user(body.nickname, body.password)
     if user_id is None:
-        return JSONResponse(status_code=409, content={"error": "Could not register"})
+        # Username taken (or another integrity error). Surface a few
+        # available alternatives so the client can offer one-click
+        # accept on the signup form.
+        suggestions = db.suggest_available_usernames(body.nickname, count=5)
+        return JSONResponse(status_code=409, content={
+            "error": "That username is already taken",
+            "suggestions": suggestions,
+        })
     db.auto_join_defaults(user_id)
     try:
         ident = db.get_user_by_id(user_id) or {}
@@ -570,6 +578,8 @@ async def login(request: Request, body: LoginRequest):
     return {
         "token": token,
         "nickname": user["nickname"],
+        "display_name": user.get("display_name"),
+        "username_change_remaining_seconds": int(db.username_change_remaining_seconds(user["id"])),
         "user_id": user["id"],
         "is_admin": bool(user["is_admin"]),
         "avatar": user["avatar"],
@@ -613,6 +623,8 @@ async def login_with_federation_ticket(
     return {
         "token": token,
         "nickname": user["nickname"],
+        "display_name": user.get("display_name"),
+        "username_change_remaining_seconds": int(db.username_change_remaining_seconds(user["id"])),
         "user_id": user["id"],
         "is_admin": bool(user.get("is_admin")),
         "avatar": user.get("avatar"),
@@ -727,34 +739,81 @@ class NicknameChangeRequest(BaseModel):
 @router.patch("/nickname")
 @limiter.limit("5/hour")
 async def change_nickname(request: Request, body: NicknameChangeRequest, current_user: dict = Depends(get_current_user)):
-    """Change user's nickname. Requires password confirmation."""
+    """Change user's username (the unique @handle).
+
+    Note: this endpoint is historically named `/nickname` because the
+    underlying column is `users.nickname`, but in the UX it is the
+    "Username" — limited to once per 7 days. The freeform display
+    name lives at PATCH /api/auth/display-name and has no cooldown.
+    """
     if not NICKNAME_RE.match(body.nickname):
         return JSONResponse(status_code=400, content={
-            "error": "Nickname must be 2-32 characters: letters, numbers, _ or -"
+            "error": "Username must be 2-32 characters: letters, numbers, _ or -"
         })
     if body.nickname == current_user["nickname"]:
-        return JSONResponse(status_code=400, content={"error": "That's already your nickname"})
+        return JSONResponse(status_code=400, content={"error": "That's already your username"})
     if not db.verify_user(current_user["nickname"], body.password):
         return JSONResponse(status_code=401, content={"error": "Incorrect password"})
+    # Once-per-week rate limit (server-enforced; the client also surfaces this).
+    remaining = db.username_change_remaining_seconds(current_user["id"])
+    if remaining > 0:
+        days = remaining // 86400
+        hours = (remaining % 86400) // 3600
+        when = "in " + (f"{days}d {hours}h" if days else f"{hours}h")
+        return JSONResponse(status_code=429, content={
+            "error": f"Username can only be changed once a week. Try again {when}.",
+            "retry_after_seconds": remaining,
+        })
     existing = db.get_user_by_nick(body.nickname)
     if existing and existing["id"] != current_user["id"]:
-        return JSONResponse(status_code=409, content={"error": "Could not change nickname"})
+        return JSONResponse(status_code=409, content={"error": "That username is taken"})
     try:
-        with db._conn() as con:
-            # Log old nickname to history
-            con.execute("INSERT INTO nickname_history (user_id, old_nickname) VALUES (?, ?)",
-                       (current_user["id"], current_user["nickname"]))
-            # Update nickname — FK user_id keeps posts, DMs, messages intact
-            con.execute("UPDATE users SET nickname=? WHERE id=?", (body.nickname, current_user["id"]))
-            con.commit()
+        db.set_username(current_user["id"], body.nickname, current_user["nickname"])
     except Exception:
-        return JSONResponse(status_code=409, content={"error": "Could not change nickname"})
-    return {"ok": True, "nickname": body.nickname}
+        return JSONResponse(status_code=409, content={"error": "Could not change username"})
+    return {"ok": True, "nickname": body.nickname, "username": body.nickname}
+
+
+class DisplayNameUpdateRequest(BaseModel):
+    display_name: Optional[str] = None  # None or "" clears it
+
+
+@router.patch("/display-name")
+@limiter.limit("30/hour")
+async def change_display_name(
+    request: Request,
+    body: DisplayNameUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Set or clear the freeform display name (the "nickname" in UI).
+    Empty/null clears it and the UI falls back to showing @username.
+    """
+    raw = body.display_name or ""
+    # Strip control chars; keep emoji + unicode letters + spaces.
+    cleaned = "".join(ch for ch in raw if ch == " " or ch.isprintable()).strip()
+    if len(cleaned) > 32:
+        return JSONResponse(status_code=400, content={
+            "error": "Nickname must be 32 characters or fewer"
+        })
+    db.set_display_name(current_user["id"], cleaned or None)
+    return {"ok": True, "display_name": cleaned or None}
+
 
 
 @router.get("/me")
 async def me(current_user: dict = Depends(get_current_user)):
-    return current_user
+    out = dict(current_user)
+    # Username/display split: ensure both keys are present and surface
+    # the cooldown so Settings can show "next change available" inline.
+    out.setdefault("display_name", out.get("display_name"))
+    out["username"] = out.get("nickname")
+    try:
+        out["username_change_remaining_seconds"] = int(
+            db.username_change_remaining_seconds(current_user["id"])
+        )
+    except Exception:
+        out["username_change_remaining_seconds"] = 0
+    return out
 
 
 @router.patch("/profile")
@@ -974,6 +1033,35 @@ class CaptchaResponse(BaseModel):
     text_challenge: str | None = None  # Fallback if image generation fails
 
 
+@router.get("/check-username")
+@limiter.limit("60/minute")
+async def check_username(request: Request, nickname: str = ""):
+    """Live username-availability check used by the signup form.
+
+    Returns {available: bool, error: str|null, suggestions: [str]}. When
+    the requested nickname is taken or invalid, `suggestions` contains
+    up to 5 close-by available alternatives (e.g. name → name2, name3,
+    name_xyz). Public endpoint — no auth required.
+    """
+    nick = (nickname or "").strip()
+    if not nick:
+        return {"available": False, "error": "Username cannot be empty", "suggestions": []}
+    if not NICKNAME_RE.match(nick):
+        return {
+            "available": False,
+            "error": "Username must be 2-32 characters: letters, numbers, _ or -",
+            "suggestions": [],
+        }
+    if db.is_username_available(nick):
+        return {"available": True, "error": None, "suggestions": []}
+    suggestions = db.suggest_available_usernames(nick, count=5)
+    return {
+        "available": False,
+        "error": "That username is already taken",
+        "suggestions": suggestions,
+    }
+
+
 @router.get("/captcha")
 @limiter.limit("30/hour")
 async def get_captcha(request: Request):
@@ -1029,7 +1117,11 @@ async def register_with_captcha(
     
     user_id = db.create_user(body.nickname, body.password)
     if user_id is None:
-        return JSONResponse(status_code=409, content={"error": "Could not register"})
+        suggestions = db.suggest_available_usernames(body.nickname, count=5)
+        return JSONResponse(status_code=409, content={
+            "error": "That username is already taken",
+            "suggestions": suggestions,
+        })
     db.auto_join_defaults(user_id)
     try:
         ident = db.get_user_by_id(user_id) or {}
