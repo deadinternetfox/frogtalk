@@ -183,6 +183,16 @@ const Music = (() => {
         // during iframe mount/track-change leaves the strip stuck on
         // "Paused" even after audio is happily playing again.
         _broadcastIfChanged();
+        // Belt + braces: the postMessages above are async — YT's reply
+        // updates _lastPlayerState ~tens of ms later. Schedule a
+        // delayed repaint so any state correction from this tick's
+        // probe lands on the side-menu mini-dock button (.mmd-play)
+        // and the FrogSocial top strip BEFORE the next tick. Without
+        // this, a stale ▶/⏸ icon can survive an extra ~1.5s window.
+        setTimeout(() => {
+          try { _syncPlayPauseButtons(); } catch {}
+          try { _broadcastIfChanged(); } catch {}
+        }, 350);
       } catch {}
     }, UI_SYNC_INTERVAL_MS);
   }
