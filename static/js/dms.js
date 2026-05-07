@@ -1301,13 +1301,7 @@ function renderDMChat () {
       }
     }
   } catch {}
-  // Attach reaction buttons
-  area.querySelectorAll('.dm-react-btn').forEach(btn => {
-    btn.addEventListener('click', e => {
-      const msgId = +btn.closest('[data-dmid]').dataset.dmid;
-      toggleDMReaction(msgId, btn.dataset.emoji);
-    });
-  });
+  // reaction buttons now use inline onclick → showDMReactMenu, no delegation needed
   _observeDMLazyMedia(area);
 
   // DM link previews/embeds (YouTube/Spotify/cards), including forwarded links.
@@ -1600,7 +1594,7 @@ function renderDMMessage (m) {
   const actions = `
     <div class="msg-actions">
       <button class="msg-act-btn" title="Reply" onclick="replyToDM(${m.id},'${esc(senderNick)}','${esc((safeContent||'').substring(0,80))}')">↩️</button>
-      <button class="msg-act-btn dm-react-btn" data-dmid="${m.id}" data-emoji="👍" title="React">👍</button>
+      <button class="msg-act-btn" title="React" onclick="showDMReactMenu(${m.id}, this)">😀</button>
       <button class="msg-act-btn" title="Copy" onclick="Messages.copyMessage(${m.id})">📋</button>
       ${fwdDisabled ? '' : `<button class="msg-act-btn" title="Forward" onclick="forwardDMMessage(${m.id})">📤</button>`}
       ${mine ? `<button class="msg-act-btn" title="Edit" onclick="editDMMsg(${m.id})">✏️</button>` : ''}
@@ -2247,12 +2241,7 @@ function appendDMMessage (m) {
   const tmp = document.createElement('div');
   tmp.innerHTML = renderDMMessage(m);
   const el = tmp.firstElementChild;
-  el.querySelectorAll('.dm-react-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const msgId = +btn.closest('[data-dmid]').dataset.dmid;
-      toggleDMReaction(msgId, btn.dataset.emoji);
-    });
-  });
+  // reaction buttons now use inline onclick → showDMReactMenu
   area.appendChild(el);
   if (mine || atBottom) _scrollDMToBottomStable();
   const previewUrl = _extractDMPreviewUrl(String(m.content || ''));
@@ -2339,6 +2328,116 @@ async function deleteDMMsg (id) {
 }
 
 /* ── Reactions ─────────────────────────────────────────────────────────────── */
+const _DM_REACT_QUICK = ['👍','❤️','😂','😮','😢','🎉','🔥','🐸'];
+const _DM_REACT_CATS = [
+  { id:'smileys', icon:'😀', name:'Smileys & People', emojis:['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🤧','🥵','🥶','🥴','😵','🤯','🥳','😎','🤓','🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖'] },
+  { id:'hearts', icon:'❤️', name:'Hearts', emojis:['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','♥️','💌'] },
+  { id:'hands', icon:'👋', name:'Gestures', emojis:['👍','👎','👌','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','☝️','✋','🤚','🖐️','🖖','👋','🤛','🤜','✊','👊','👏','🙌','👐','🤲','🙏','✍️','💪','🦾','🫶'] },
+  { id:'animals', icon:'🐸', name:'Animals & Nature', emojis:['🐸','🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐽','🐵','🙈','🙉','🙊','🐒','🦆','🦅','🦉','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🐢','🐍','🦎','🐙','🦀','🐠','🐟','🐡','🐬','🦈','🐳','🐋','🌱','🌿','🍀','🌵','🌴','🌲','🌳','🌺','🌻','🌹','🌷','🌸','🌼'] },
+  { id:'food', icon:'🍔', name:'Food & Drink', emojis:['🍎','🍌','🍓','🍇','🍉','🍍','🥝','🍅','🥑','🌽','🥕','🥦','🧄','🍞','🥐','🥨','🧀','🥚','🥓','🍗','🍖','🍔','🍟','🍕','🌭','🥪','🌮','🌯','🥙','🍝','🍜','🍲','🍛','🍣','🍱','🍙','🍘','🍰','🎂','🧁','🍮','🍭','🍬','🍫','🍿','🍩','🍪','☕','🍵','🥤','🧋','🍺','🍻','🥂','🍷','🥃','🍸','🍹'] },
+  { id:'activity', icon:'⚽', name:'Activity & Objects', emojis:['⚽','🏀','🏈','⚾','🎾','🏐','🏉','🎱','🏓','🏸','🥅','⛳','🎣','🎽','🎿','🎯','🎮','🎲','🧩','🎭','🎨','🎬','🎤','🎧','🎼','🎹','🥁','🎷','🎺','🎸','🎻','💻','📱','⌚','📷','🔒','🔑','💡','🔋','🔦','🛒','🎁','🎈','🎀','🎊','🎉'] },
+  { id:'symbols', icon:'⭐', name:'Symbols', emojis:['⭐','🌟','✨','⚡','💥','🔥','🌈','☀️','🌙','❄️','☃️','💧','🌊','✅','❌','❓','❗','⁉️','‼️','💯','💢','💬','💭','💤','👀','🎉','🏆','🥇','🥈','🥉','🏅','♻️','☯️','☮️','🆗','🆒','🆕','🆙','💫','⚠️','🚫','✔️','☑️'] },
+];
+
+function showDMReactMenu(msgId, anchor) {
+  const existing = document.getElementById('dm-react-picker');
+  if (existing) { existing.remove(); return; }
+
+  let anchorEl = anchor && anchor.nodeType === 1 ? anchor : null;
+  let rect = anchorEl ? anchorEl.getBoundingClientRect() : null;
+  if (!rect || (rect.width === 0 && rect.height === 0)) {
+    const msgEl = document.getElementById('msg-' + msgId);
+    rect = msgEl ? msgEl.getBoundingClientRect() : null;
+  }
+
+  const recent = (() => { try { const r = localStorage.getItem('ft-recent-reacts'); const a = r ? JSON.parse(r) : []; return Array.isArray(a) ? a.slice(0, 24) : []; } catch { return []; } })();
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  const picker = document.createElement('div');
+  picker.id = 'dm-react-picker';
+  picker.className = 'react-picker';
+  picker.innerHTML = `
+    <div class="rp-quick">
+      ${_DM_REACT_QUICK.map(e => `<button class="rp-quick-btn" data-e="${esc(e)}" type="button">${e}</button>`).join('')}
+      <button class="rp-quick-btn rp-plus" type="button" title="More reactions" aria-label="More reactions">＋</button>
+    </div>
+    <div class="rp-body" hidden>
+      <div class="rp-search"><input type="text" class="rp-search-input" placeholder="Search emoji…" aria-label="Search emoji"></div>
+      <div class="rp-grid"></div>
+      <div class="rp-tabs">
+        ${recent.length ? `<button class="rp-tab" data-cat="recent" title="Recent" type="button">🕘</button>` : ''}
+        ${_DM_REACT_CATS.map(c => `<button class="rp-tab" data-cat="${c.id}" title="${esc(c.name)}" type="button">${c.icon}</button>`).join('')}
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(picker);
+
+  const _position = () => {
+    if (!rect) return;
+    const ph = picker.offsetHeight, pw = picker.offsetWidth;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let top = rect.top - ph - 6;
+    if (top < 6) top = rect.bottom + 6;
+    if (top + ph > vh - 6) top = vh - ph - 6;
+    let left = rect.left;
+    if (left + pw > vw - 6) left = vw - pw - 6;
+    if (left < 6) left = 6;
+    picker.style.cssText = `position:fixed;top:${top}px;left:${left}px;z-index:9999`;
+  };
+  _position();
+
+  const body = picker.querySelector('.rp-body');
+  const grid = picker.querySelector('.rp-grid');
+  const tabs = picker.querySelectorAll('.rp-tab');
+  const searchInput = picker.querySelector('.rp-search-input');
+
+  const close = () => {
+    picker.classList.add('rp-closing');
+    setTimeout(() => picker.remove(), 140);
+    document.removeEventListener('keydown', _onKey);
+    document.removeEventListener('mousedown', _onOutside, true);
+  };
+  const pick = (e) => {
+    try { const cur = recent.filter(x => x !== e); cur.unshift(e); localStorage.setItem('ft-recent-reacts', JSON.stringify(cur.slice(0,24))); } catch {}
+    toggleDMReaction(msgId, e);
+    close();
+  };
+  const _onKey = (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); close(); } };
+  const _onOutside = (ev) => { if (!picker.contains(ev.target)) close(); };
+
+  const _renderCat = (catId) => {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.cat === catId));
+    let emojis = catId === 'recent' ? recent : ((_DM_REACT_CATS.find(c => c.id === catId) || {}).emojis || []);
+    grid.innerHTML = emojis.map(e => `<button class="rp-emoji" data-e="${esc(e)}" type="button">${e}</button>`).join('');
+    grid.scrollTop = 0;
+  };
+
+  picker.querySelector('.rp-quick').addEventListener('click', ev => {
+    const btn = ev.target.closest('button');
+    if (!btn) return;
+    if (btn.classList.contains('rp-plus')) {
+      body.hidden = !body.hidden;
+      picker.classList.toggle('rp-expanded', !body.hidden);
+      if (!body.hidden) { const ft = picker.querySelector('.rp-tab'); if (ft) _renderCat(ft.dataset.cat); _position(); }
+      return;
+    }
+    if (btn.dataset.e) pick(btn.dataset.e);
+  });
+
+  tabs.forEach(t => t.addEventListener('click', () => _renderCat(t.dataset.cat)));
+  grid.addEventListener('click', ev => { const btn = ev.target.closest('.rp-emoji'); if (btn && btn.dataset.e) pick(btn.dataset.e); });
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    if (!q) { _renderCat(picker.querySelector('.rp-tab.active')?.dataset.cat || _DM_REACT_CATS[0].id); return; }
+    const all = _DM_REACT_CATS.flatMap(c => c.emojis);
+    grid.innerHTML = all.filter(e => e.toLowerCase().includes(q)).map(e => `<button class="rp-emoji" data-e="${esc(e)}" type="button">${e}</button>`).join('');
+  });
+
+  document.addEventListener('keydown', _onKey);
+  setTimeout(() => document.addEventListener('mousedown', _onOutside, true), 0);
+}
+
 async function toggleDMReaction (msgId, emoji) {
   await apiFetch(`/api/dms/${_activeDM.id}/messages/${msgId}/react`, 'POST', { emoji });
   // Reload messages to get updated counts
