@@ -341,43 +341,10 @@ def init_db():
                 "INSERT INTO users (nickname, password_hash, is_admin) VALUES (?, ?, 1)",
                 ("admin", _bcrypt.hashpw(admin_pw.encode(), _bcrypt.gensalt()).decode())
             )
-        # Case-insensitive unique index on nickname — blocks "Frog" vs "frog" collisions
-        # First, dedupe any existing case-variant duplicates: keep the
-        # lowest user id (earliest registration) and rename the later
-        # ones by appending "1", "2", ... until unique. Without this
-        # the unique index creation below would fail on legacy rows.
-        try:
-            dup_groups = con.execute(
-                "SELECT LOWER(nickname) AS k FROM users "
-                "GROUP BY LOWER(nickname) HAVING COUNT(*) > 1"
-            ).fetchall()
-            for g in dup_groups:
-                key = g["k"]
-                rows = con.execute(
-                    "SELECT id, nickname FROM users WHERE LOWER(nickname)=? ORDER BY id ASC",
-                    (key,),
-                ).fetchall()
-                # Keep rows[0]; rename the rest.
-                for r in rows[1:]:
-                    base = r["nickname"]
-                    # Trim so the "+suffix" still fits in 32 chars.
-                    base_trim = base[:30] if len(base) > 30 else base
-                    suffix = 1
-                    new_name = f"{base_trim}{suffix}"
-                    while con.execute(
-                        "SELECT 1 FROM users WHERE LOWER(nickname)=LOWER(?) LIMIT 1",
-                        (new_name,),
-                    ).fetchone() is not None:
-                        suffix += 1
-                        # Re-trim if the suffix grew more digits.
-                        max_base = 32 - len(str(suffix))
-                        base_trim = base[:max_base] if len(base) > max_base else base
-                        new_name = f"{base_trim}{suffix}"
-                    con.execute("UPDATE users SET nickname=? WHERE id=?", (new_name, r["id"]))
-                    print(f"[DB] dedupe: renamed user id={r['id']} '{r['nickname']}' -> '{new_name}'")
-            con.commit()
-        except Exception as _e:
-            print(f"[DB] username dedupe pass failed (non-fatal): {_e}")
+        # Case-insensitive unique index on nickname — blocks "Frog" vs "frog" collisions.
+        # (A one-time dedupe pass for legacy case-variant duplicates ran in
+        # an earlier release; both production nodes have already converged,
+        # so the migration code has been removed.)
         try:
             con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nickname_nocase ON users(nickname COLLATE NOCASE)")
         except sqlite3.IntegrityError:
