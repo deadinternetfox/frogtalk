@@ -642,39 +642,31 @@ const Messages = (() => {
       if (!url) return '';
       const title = String(preview.title || (provider === 'youtube' ? 'YouTube video' : provider === 'spotify' ? 'Spotify track' : 'SoundCloud track'));
       const thumb = String(preview.image || preview.thumbnail || '');
-      // Media-channel routing:
-      //   • In a media channel WITH queue permission → button queues into
-      //     the room's big player (everyone hears it together, side-player
-      //     stays untouched and naturally syncs to whatever the channel
-      //     plays).
-      //   • In a media channel WITHOUT queue permission → no button at
-      //     all (would 403 and just confuse non-DJs).
-      //   • Anywhere else → original "Send to side player" behaviour.
-      let inMedia = false, canQueue = false;
+      // Render-time hide: in a media channel where the user can't queue
+      // (DJ-only mode and they're not a DJ/mod/owner), don't show the
+      // affordance at all. We only check this on render — the queue-vs-
+      // solo routing is decided at click time below so a late Music.mount
+      // doesn't leave us stuck on the wrong path. The click handler also
+      // re-checks "no queue permission" and bails out gracefully if the
+      // permission flipped between render and click.
       try {
-        inMedia = !!(window.Music && Music.isMediaChannelContext && Music.isMediaChannelContext());
-        canQueue = inMedia && !!(window.Music && Music.canQueueInCurrentRoom && Music.canQueueInCurrentRoom());
+        if (window.Music && Music.isMediaChannelContext && Music.isMediaChannelContext()
+            && Music.canQueueInCurrentRoom && !Music.canQueueInCurrentRoom()) {
+          return '';
+        }
       } catch {}
-      if (inMedia && !canQueue) return '';
       // JSON-encode then HTML-escape — safe to drop into an attribute.
       const payload = UI.escHtml(JSON.stringify({ url, title, provider, thumbnail: thumb }));
-      if (inMedia && canQueue) {
-        // Queue into the big player. We still pause the inline embed so
-        // the chat iframe doesn't double up with the channel speaker.
-        return `<button type="button" class="embed-send-player embed-send-queue" data-payload="${payload}"
-          onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));if(window.Music&&Music.queueFromUrl){Music.queueFromUrl(p.url).then(function(ok){try{UI&&UI.showToast&&UI.showToast(ok?'Added to channel queue':'Could not queue track','info');}catch(_){}});}try{window._pauseChatEmbed&&window._pauseChatEmbed(b);}catch(_){}}catch(e){}})(this)"
-          onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
-          title="Queue this track for the whole channel"
-          style="background:transparent;border:0;padding:2px 8px;font-size:11px;font-weight:500;color:rgba(76,175,80,.85);cursor:pointer;border-radius:4px;line-height:1.4;letter-spacing:.2px;flex:0 0 auto;transition:color .15s,background .15s"
-          onmouseover="this.style.color='#a8f5b0';this.style.background='rgba(76,175,80,.14)'"
-          onmouseout="this.style.color='rgba(76,175,80,.85)';this.style.background='transparent'"
-        >＋ Add to queue</button>`;
-      }
-      // Default: send to the side / solo player.
+      // Click handler routes at click time:
+      //   • Media channel + queue permission → queue into the big channel
+      //     player so the whole room hears it together.
+      //   • Otherwise → side / solo player.
+      // Always pause the inline embed afterwards so the chat iframe and
+      // the player don't double-play out of sync.
       return `<button type="button" class="embed-send-player" data-payload="${payload}"
-        onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));if(window.Music&&Music.playSolo){Music.playSolo(p);}try{window._pauseChatEmbed&&window._pauseChatEmbed(b);}catch(_){}try{UI&&UI.showToast&&UI.showToast('Playing in side player');}catch(_){}}catch(e){}})(this)"
+        onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));var M=window.Music;var inMedia=!!(M&&M.isMediaChannelContext&&M.isMediaChannelContext());var canQ=inMedia&&!!(M&&M.canQueueInCurrentRoom&&M.canQueueInCurrentRoom());if(inMedia&&canQ&&M.queueFromUrl){M.queueFromUrl(p.url).then(function(ok){try{UI&&UI.showToast&&UI.showToast(ok?'Added to channel queue':'Could not queue — playing in side player','info');}catch(_){}if(!ok&&M.playSolo){try{M.playSolo(p);}catch(_){}}});}else if(inMedia&&!canQ){try{UI&&UI.showToast&&UI.showToast('You don\\u0027t have queue permission in this channel','error');}catch(_){}return;}else if(M&&M.playSolo){M.playSolo(p);try{UI&&UI.showToast&&UI.showToast('Playing in side player');}catch(_){}}try{window._pauseChatEmbed&&window._pauseChatEmbed(b);}catch(_){}}catch(e){}})(this)"
         onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
-        title="Open in the music side player"
+        title="Send this track to the player"
         style="background:transparent;border:0;padding:2px 8px;font-size:11px;font-weight:500;color:rgba(76,175,80,.72);cursor:pointer;border-radius:4px;line-height:1.4;letter-spacing:.2px;flex:0 0 auto;transition:color .15s,background .15s"
         onmouseover="this.style.color='#7ed28a';this.style.background='rgba(76,175,80,.10)'"
         onmouseout="this.style.color='rgba(76,175,80,.72)';this.style.background='transparent'"
