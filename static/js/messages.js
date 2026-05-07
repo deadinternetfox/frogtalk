@@ -1696,6 +1696,7 @@ const Messages = (() => {
 
     // Reconcile optimistic pending message from this client with the server
     // echo in-place so it never disappears before becoming delivered.
+    let _reconciled = false;
     try {
       const isOwnIncoming = !!(msg && State.user && msg.nickname === State.user.nickname && !msg._pending);
       if (isOwnIncoming) {
@@ -1710,6 +1711,7 @@ const Messages = (() => {
           pendingEl = area?.querySelector('.msg-pending[data-own="1"]') || null;
         }
         if (pendingEl) {
+          _reconciled = true; // Guard: even if work below throws, the catch must not fall through to a second bubble.
           // Capture the optimistic temp id BEFORE we rename the element so we
           // can rewrite all the inline onclick handlers / data-rid attributes
           // that were rendered with the negative temp id. Without this, the
@@ -1802,6 +1804,10 @@ const Messages = (() => {
         }
       }
     } catch {}
+    // Safety: if an exception was thrown after we started reconciling the
+    // pending bubble (e.g. a throw inside the DOM-rewrite helpers), swallow
+    // it but still return so we never render a second bubble for the same msg.
+    if (_reconciled) return;
 
     // Dedup: if a bubble for this message id already exists (e.g. history
     // reload races a WS echo, or two WS connections both deliver the same
