@@ -644,8 +644,12 @@ const Messages = (() => {
       const thumb = String(preview.image || preview.thumbnail || '');
       // JSON-encode then HTML-escape — safe to drop into an attribute.
       const payload = UI.escHtml(JSON.stringify({ url, title, provider, thumbnail: thumb }));
+      // Click handler also pauses the inline embed so the chat iframe
+      // and the side-player don't double-play out of sync. See
+      // window._pauseChatEmbed (defined below) for the per-provider
+      // pause logic (YT postMessage / Spotify iframe reload).
       return `<button type="button" class="embed-send-player" data-payload="${payload}"
-        onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));if(window.Music&&Music.playSolo){Music.playSolo(p);UI&&UI.showToast&&UI.showToast('Playing in side player');}}catch(e){}})(this)"
+        onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));if(window.Music&&Music.playSolo){Music.playSolo(p);}try{window._pauseChatEmbed&&window._pauseChatEmbed(b);}catch(_){}try{UI&&UI.showToast&&UI.showToast('Playing in side player');}catch(_){}}catch(e){}})(this)"
         onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
         title="Open in the music side player"
         style="background:transparent;border:0;padding:2px 8px;font-size:11px;font-weight:500;color:rgba(76,175,80,.72);cursor:pointer;border-radius:4px;line-height:1.4;letter-spacing:.2px;flex:0 0 auto;transition:color .15s,background .15s"
@@ -662,7 +666,7 @@ const Messages = (() => {
         <div class="yt-embed" style="margin-top:8px;max-width:560px;width:100%;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
             <iframe 
-              src="https://www.youtube.com/embed/${UI.escHtml(preview.video_id)}" 
+              src="https://www.youtube.com/embed/${UI.escHtml(preview.video_id)}?enablejsapi=1" 
               style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
               allowfullscreen
@@ -3489,3 +3493,44 @@ function handleRoomBan(data) {
   }
 }
 window.handleRoomBan = handleRoomBan;
+
+// Pause the chat-embedded player adjacent to the given Send-to-player
+// button so the inline iframe and the Music side-player don't double-
+// play out of sync. YouTube uses its iframe postMessage API
+// (enablejsapi=1 must be on the iframe src — see _renderPreview);
+// Spotify's embed has no JS pause API, so we reload the iframe by
+// re-assigning its src, which stops audio cleanly. SoundCloud chat
+// embeds aren't iframes (they're OG cards), so nothing to pause there.
+window._pauseChatEmbed = function _pauseChatEmbed(btn) {
+  try {
+    if (!btn || !btn.closest) return;
+    const wrap = btn.closest('.yt-embed, .spotify-embed');
+    if (!wrap) return;
+    const iframe = wrap.querySelector('iframe');
+    if (!iframe) return;
+    if (wrap.classList.contains('yt-embed')) {
+      try {
+        iframe.contentWindow && iframe.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }),
+          '*'
+        );
+      } catch {}
+      // Belt + braces: if for some reason JS API isn't ready (e.g. the
+      // iframe was rendered before this fix shipped and src lacks
+      // enablejsapi=1), fall back to reloading the src so audio stops.
+      setTimeout(() => {
+        try {
+          const src = iframe.getAttribute('src') || '';
+          if (src && !/[?&]enablejsapi=1\b/.test(src)) {
+            iframe.setAttribute('src', src);
+          }
+        } catch {}
+      }, 250);
+    } else if (wrap.classList.contains('spotify-embed')) {
+      try {
+        const src = iframe.getAttribute('src');
+        if (src) iframe.setAttribute('src', src);
+      } catch {}
+    }
+  } catch {}
+};
