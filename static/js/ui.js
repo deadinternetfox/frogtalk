@@ -4356,6 +4356,8 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
   const nameEl = document.getElementById('userinfo-name');
   nameEl.textContent = nickname;
   nameEl.dataset.nick = nickname;
+  const _handleEl = document.getElementById('userinfo-handle');
+  if (_handleEl) _handleEl.textContent = '';
   document.getElementById('userinfo-avatar').innerHTML = UI.avatarEl(null, nickname, 90);
   document.getElementById('userinfo-bio').textContent = 'Loading...';
   const smEl = document.getElementById('userinfo-status-msg');

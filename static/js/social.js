@@ -3432,7 +3432,11 @@ const Social = (() => {
           <div class="sp-info">
             <div class="sp-name-row">
               <span class="sp-nick">${u.is_admin ? '<span style="color:#ffd700">👑</span> ' : ''}${esc(u.display_name || u.nickname)}${isSelf && u.profile_public === false ? ' <span class="sp-privacy-badge" title="Your profile is private — only friends can view it">🔒 Private</span>' : ''}</span>
+            </div>
+            <div class="sp-handle-row" style="margin-bottom:8px">
               <span class="sp-handle">@${esc(u.nickname)}</span>
+            </div>
+            <div class="sp-actions-row" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
               ${isSelf
                 ? `<button class="sp-action-btn secondary" onclick="Social.openNewPost()">+ New Post</button>
                    <button class="sp-share-btn" onclick="Social.shareProfile('${esc(u.nickname)}',this)" title="Copy share link">🔗 Share</button>`

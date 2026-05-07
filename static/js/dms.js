@@ -1373,7 +1373,7 @@ function renderDMMessage (m) {
   const _uid = STATE.user?.id;
   const mine = (m.sender_id != null && _uid != null && (+m.sender_id === +_uid))
             || (!!m.sender_nick && !!STATE.user?.nickname && m.sender_nick === STATE.user.nickname);
-  const time  = new Date(m.created_at + 'Z').toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  const time  = new Date(m.created_at && m.created_at.endsWith('Z') ? m.created_at : m.created_at + 'Z').toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   const avatar = m.sender_avatar || m.avatar || '🐸';
   const senderNick = m.sender_nick || '';
   const editedTag = (m.edited_at || m.edited) ? '<span class="msg-edited">(edited)</span>' : '';

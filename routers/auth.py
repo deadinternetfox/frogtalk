@@ -22,7 +22,7 @@ from slowapi import Limiter
 
 import database as db
 import geoip
-from deps import get_current_user, client_ip
+from deps import get_current_user, client_ip, invalidate_token_cache
 from ws_manager import manager
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -783,6 +783,7 @@ class DisplayNameUpdateRequest(BaseModel):
 async def change_display_name(
     request: Request,
     body: DisplayNameUpdateRequest,
+    x_session_token: str = Header(None, alias="X-Session-Token"),
     current_user: dict = Depends(get_current_user),
 ):
     """Set or clear the freeform display name (the "nickname" in UI).
@@ -796,6 +797,7 @@ async def change_display_name(
             "error": "Nickname must be 32 characters or fewer"
         })
     db.set_display_name(current_user["id"], cleaned or None)
+    invalidate_token_cache(x_session_token)
     return {"ok": True, "display_name": cleaned or None}
 
 

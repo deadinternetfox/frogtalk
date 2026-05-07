@@ -5092,8 +5092,9 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 #userinfo-avatar.has-story:hover{transform:scale(1.04);filter:saturate(1.06)}
 .sp-info{padding-top:12px}
-.sp-name-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.sp-name-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px}
 .sp-nick{font-size:20px;font-weight:700;color:#e0e0e0}
+.sp-handle{font-size:13px;color:#666;margin-top:-6px;display:block;width:100%}
 .sp-action-btn{padding:7px 18px;border-radius:8px;border:none;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
 .sp-action-btn.primary{background:#4caf50;color:#000}
 .sp-action-btn.primary:hover{background:#5bc661}
@@ -7888,7 +7889,7 @@ window.ConnErr = (function(){
         <input class="modal-input" id="profile-display-name" style="flex:1;margin-bottom:0" maxlength="32">
         <button class="modal-btn secondary" id="profile-display-name-btn" onclick="changeDisplayName()" style="white-space:nowrap;font-size:12px;padding:8px 12px">Save</button>
       </div>
-      <div style="font-size:11px;color:#555;margin:2px 0 10px">Up to 32 characters. Leave blank to fall back to your @username.</div>
+      <div style="font-size:11px;color:#555;margin:2px 0 10px">Up to 32 characters.</div>
 
       <label class="modal-label">Username <span style="font-weight:400;color:#888;font-size:11px">— your unique @handle</span></label>
       <div style="display:flex;gap:6px;align-items:center">
@@ -8362,7 +8363,8 @@ window.ConnErr = (function(){
       <div class="profile-identity-row" style="display:flex;align-items:flex-end;gap:14px;margin-top:-44px;margin-bottom:10px">
         <div class="profile-avatar-large" id="userinfo-avatar" style="width:88px;height:88px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4);background:#1a3a1a;display:flex;align-items:center;justify-content:center">🐸</div>
         <div style="flex:1;min-width:0;padding-bottom:6px;display:flex;flex-direction:column;gap:6px;align-items:flex-start">
-          <div id="userinfo-name" class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;max-width:100%" onclick="copyUserTag(this.textContent)" title="Click to copy @tag"></div>
+          <div id="userinfo-name" class="userinfo-nick" data-nick="" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;max-width:100%" onclick="copyUserTag(this.dataset.nick || this.textContent)" title="Click to copy @tag"></div>
+          <div id="userinfo-handle" style="font-size:13px;color:#666;margin-top:-2px;margin-bottom:2px"></div>
           <div id="userinfo-status-msg" style="font-size:13px;color:#9dc4b2;display:block;max-width:100%;overflow:hidden;line-height:1.2"></div>
         </div>
       </div>
@@ -8384,7 +8386,7 @@ window.ConnErr = (function(){
       <!-- View Full Profile is the gateway into FrogSocial, kept full
            width below the primary + secondary action rows. -->
       <div style="margin-bottom:14px">
-        <button class="modal-btn secondary" id="userinfo-social-btn" onclick="closeModal('modal-user-info');Social.openProfile(document.getElementById('userinfo-name').textContent)" style="width:100%;background:#1a3a1a;color:#4caf50;border:1px solid #2a4a2a;font-weight:600">🌐 View Full Profile</button>
+        <button class="modal-btn secondary" id="userinfo-social-btn" onclick="closeModal('modal-user-info');Social.openProfile(document.getElementById('userinfo-name').dataset.nick || document.getElementById('userinfo-name').textContent)" style="width:100%;background:#1a3a1a;color:#4caf50;border:1px solid #2a4a2a;font-weight:600">🌐 View Full Profile</button>
       </div>
       
       <!-- Bio Section -->
