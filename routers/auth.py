@@ -799,6 +799,16 @@ async def change_display_name(
     db.set_display_name(current_user["id"], cleaned or None)
     invalidate_token_cache(x_session_token)
     manager.update_user_meta(current_user["id"], display_name=cleaned or "")
+    # Broadcast so all connected clients update their member-list caches
+    try:
+        await manager.broadcast_all({
+            "type": "profile_update",
+            "user_id": current_user["id"],
+            "nickname": current_user["nickname"],
+            "display_name": cleaned or None,
+        })
+    except Exception:
+        pass
     return {"ok": True, "display_name": cleaned or None}
 
 

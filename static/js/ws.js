@@ -328,6 +328,29 @@ const WS = (() => {
         }
         if (typeof Users !== 'undefined' && Users.updateAvatar) {
           Users.updateAvatar(data.user_id, data.nickname, data.avatar);
+                // Sync display_name change to member list caches
+                if (data.display_name !== undefined) {
+                  if (State.user && (
+                        (data.user_id && data.user_id === State.user.id) ||
+                        (data.nickname && data.nickname === State.user.nickname)
+                      )) {
+                    State.user.display_name = data.display_name || null;
+                    try { State.save(); } catch {}
+                    // Update self panel
+                    try {
+                      const sn = document.getElementById('self-name');
+                      const sh = document.getElementById('self-handle');
+                      if (sn) sn.textContent = State.user.display_name || State.user.nickname;
+                      if (sh) {
+                        const showH = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
+                        sh.textContent = showH ? `@${State.user.nickname}` : '';
+                      }
+                    } catch {}
+                  }
+                  if (typeof Users !== 'undefined' && Users.updateDisplayName) {
+                    Users.updateDisplayName(data.user_id, data.nickname, data.display_name || null);
+                  }
+                }
         }
         // Refresh inline Suggested-for-you avatars + any social-rendered profile refs.
         try {

@@ -217,25 +217,32 @@ const Users = (() => {
         iAmInSameVoice
           ? '<span class="in-call-badge live" title="Live in voice">🔊</span>'
           : '<span class="in-call-badge" title="In voice channel">📞</span>');
-    const isSelf = State.user && u.nickname === State.user.nickname;
+    // isSelf: prefer user_id match (most reliable), fall back to nickname
+    const isSelf = State.user && (
+      (u.user_id && State.user.id && u.user_id === State.user.id) ||
+      u.nickname === State.user.nickname
+    );
+    const handleNick = isSelf ? (State.user.nickname || u.nickname) : u.nickname;
     const avatarSrc = u.avatar || (isSelf ? State.user.avatar : null);
     const dot = isOnline ? '<span class="online-dot"></span>' : '<span class="offline-dot"></span>';
-    const displayLabel = (isSelf && State.user?.display_name)
-      ? State.user.display_name
+    // For self always use authoritative State.user data so stale WS/DB caches can't win
+    const displayLabel = isSelf
+      ? (State.user.display_name || State.user.nickname || u.nickname)
       : (u.display_name || u.nickname);
-    const hasHandle = !!(displayLabel && displayLabel !== u.nickname);
+    const hasHandle = !!(displayLabel && displayLabel !== handleNick);
     el.innerHTML = `
       <div class="user-avatar">
-        ${UI.avatarEl(avatarSrc, u.nickname, 32)}
+        ${UI.avatarEl(avatarSrc, handleNick, 32)}
         ${dot}
       </div>
       <div class="user-name-wrap">
         <span class="user-name${isAdmin ? ' admin' : ''}">${isAdmin ? '👑 ' : ''}${UI.escHtml(displayLabel)}${voiceIcon ? ' ' + voiceIcon : ''}</span>
-        ${hasHandle ? `<span class="user-handle">@${UI.escHtml(u.nickname)}</span>` : ''}
+        ${hasHandle ? `<span class="user-handle">@${UI.escHtml(handleNick)}</span>` : ''}
       </div>
     `;
     return el;
   }
+
 
   async function loadChannelMembers(roomName) {
     if (!roomName || !State.token) return;
@@ -259,6 +266,23 @@ const Users = (() => {
       _renderFiltered();
       _hydrateDisplayNames(_channelMembers).then(() => _renderFiltered()).catch(() => {});
     } catch {}
+  }
+
+  function updateDisplayName(userId, nickname, displayName) {
+    let changed = false;
+    for (const u of _allUsers) {
+      if ((userId && u.user_id === userId) || (nickname && u.nickname === nickname)) {
+        u.display_name = displayName;
+        changed = true;
+      }
+    }
+    for (const m of _channelMembers) {
+      if ((userId && m.user_id === userId) || (nickname && m.nickname === nickname)) {
+        m.display_name = displayName;
+        changed = true;
+      }
+    }
+    if (changed) _renderFiltered();
   }
 
   function updateAvatar(userId, nickname, avatar) {
@@ -291,5 +315,5 @@ const Users = (() => {
     } catch {}
   }
 
-  return { updateList, updateAvatar, loadChannelMembers };
+  return { updateList, updateAvatar, updateDisplayName, loadChannelMembers };
 })();
