@@ -5175,46 +5175,103 @@ async function showPinnedMessages() {
   const modal = document.getElementById('modal-pins');
   const list = document.getElementById('pins-list');
   const empty = document.getElementById('pins-empty');
-  
+  const subtitle = document.getElementById('pins-modal-subtitle');
+
   modal.classList.remove('hidden');
-  list.innerHTML = '<div style="color:#666;text-align:center;padding:20px">Loading…</div>';
+  list.innerHTML = '<div class="pins-loading">Loading pins\u2026</div>';
   empty.style.display = 'none';
-  
+  if (subtitle) subtitle.innerHTML = 'Loading\u2026';
+
   if (!State.currentRoom || State.currentRoomType === 'dm') {
     list.innerHTML = '';
-    empty.textContent = 'Pinned messages are only available in channels';
+    if (subtitle) subtitle.textContent = 'Direct messages';
+    const t = empty.querySelector('.pins-empty-title');
+    const s = empty.querySelector('.pins-empty-sub');
+    if (t) t.textContent = 'Pins are channel-only';
+    if (s) s.textContent = 'You can pin messages inside any channel where you have moderator rights.';
     empty.style.display = 'block';
     return;
   }
-  
+
   try {
     const res = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/pins`);
     if (!res.ok) throw new Error('Failed to load pins');
-    
+
     const data = await res.json();
     const pins = data.pins || [];
-    
+    State.currentRoomPins = pins;
+    try { renderPinnedBar(pins); } catch {}
+
+    const channelLabel = `<span class="pins-channel-name">#${UI.escHtml(String(State.currentRoom))}</span>`;
+    if (subtitle) {
+      subtitle.innerHTML = pins.length
+        ? `${pins.length} pinned in ${channelLabel}`
+        : `Nothing pinned in ${channelLabel}`;
+    }
+
     if (!pins.length) {
       list.innerHTML = '';
+      const t = empty.querySelector('.pins-empty-title');
+      const s = empty.querySelector('.pins-empty-sub');
+      if (t) t.textContent = 'Nothing pinned yet';
+      if (s) s.textContent = 'Channel mods can pin a message from its \u22ee menu so everyone can find it later.';
       empty.style.display = 'block';
       return;
     }
-    
+
     empty.style.display = 'none';
-    list.innerHTML = pins.map(p => `
-      <div class="pin-item" style="padding:12px;border-radius:8px;background:#1a1a1a;margin-bottom:8px;position:relative">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <span style="font-weight:600;color:#4caf50">${UI.escHtml(p.nickname)}</span>
-          <span style="color:#444;font-size:11px">${UI.formatDate(p.created_at)} ${UI.formatTime(p.created_at)}</span>
+
+    const room = String(State.currentRoom || '');
+    const roomJs = room.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const canMod = (() => {
+      try {
+        const me = State.user?.nickname;
+        if (!me) return false;
+        if (State.user?.is_admin) return true;
+        if (State.currentRoomOwner && State.currentRoomOwner === me) return true;
+        const mods = Array.isArray(State.currentRoomMods) ? State.currentRoomMods : [];
+        return mods.includes(me);
+      } catch { return false; }
+    })();
+
+    list.innerHTML = pins.map(p => {
+      const author = String(p.nickname || 'Unknown');
+      const initial = author.trim().charAt(0).toUpperCase() || '?';
+      const raw = String(p.content || '');
+      const isMedia = !raw && p.media_type;
+      const bodyHtml = isMedia
+        ? `<div class="pin-card-body pin-card-body--media">\ud83d\udcce ${UI.escHtml(String(p.media_type)).split('/')[0] || 'Media'} attachment</div>`
+        : (raw
+            ? `<div class="pin-card-body${raw.length < 220 ? ' pin-card-body--short' : ''}">${UI.escHtml(raw)}</div>`
+            : `<div class="pin-card-body pin-card-body--media">\u2014 empty message</div>`);
+      const dateStr = p.created_at ? `${UI.formatDate(p.created_at)} \u00b7 ${UI.formatTime(p.created_at)}` : '';
+      const pinnedBy = String(p.pinned_by_nick || 'someone');
+      const unpinBtn = canMod
+        ? `<button class="pin-action-btn pin-action-unpin" onclick="event.stopPropagation();unpinMessage(${Number(p.id)})" title="Unpin this message">Unpin</button>`
+        : '';
+      return `
+        <div class="pin-card" role="button" tabindex="0" onclick="closeModal('modal-pins');jumpToMessage(${Number(p.id)}, '${UI.escHtml(roomJs)}', 0)">
+          <div class="pin-card-head">
+            <div class="pin-card-avatar" aria-hidden="true">${UI.escHtml(initial)}</div>
+            <div class="pin-card-meta">
+              <span class="pin-card-author">${UI.escHtml(author)}</span>
+              <span class="pin-card-time">${UI.escHtml(dateStr)}</span>
+            </div>
+          </div>
+          ${bodyHtml}
+          <div class="pin-card-footer">
+            <div class="pin-card-pinner">Pinned by <span class="pin-card-pinner-name">${UI.escHtml(pinnedBy)}</span></div>
+            <div class="pin-card-actions">
+              ${unpinBtn}
+              <button class="pin-action-btn pin-action-jump" onclick="event.stopPropagation();closeModal('modal-pins');jumpToMessage(${Number(p.id)}, '${UI.escHtml(roomJs)}', 0)">Jump \u2192</button>
+            </div>
+          </div>
         </div>
-        <div style="color:#e0e0e0;font-size:14px">${UI.escHtml(p.content || '📎 Media')}</div>
-        <div style="font-size:11px;color:#666;margin-top:6px">Pinned by ${UI.escHtml(p.pinned_by_nick)}</div>
-        <button onclick="unpinMessage(${p.id})" style="position:absolute;top:8px;right:8px;background:none;border:none;color:#666;cursor:pointer;font-size:14px" title="Unpin">✕</button>
-        <button onclick="jumpToMessage(${p.id}, '${UI.escHtml(State.currentRoom)}', 0)" style="position:absolute;bottom:8px;right:8px;background:none;border:none;color:#4caf50;cursor:pointer;font-size:12px">Jump →</button>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   } catch (e) {
-    list.innerHTML = '<div style="color:#ff5555;text-align:center;padding:20px">Failed to load pins</div>';
+    list.innerHTML = '<div class="pins-loading" style="color:#ff8a8a">Failed to load pinned messages</div>';
+    if (subtitle) subtitle.textContent = 'Could not load pins';
   }
 }
 
