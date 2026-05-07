@@ -3876,6 +3876,11 @@ async function changeDisplayName() {
     if (!res.ok) { UI.showToast(data.error || 'Could not save nickname', 'error'); return; }
     State.user.display_name = data.display_name || null;
     State.save();
+    try {
+      if (typeof Users !== 'undefined' && Users.updateDisplayName) {
+        Users.updateDisplayName(State.user.id, State.user.nickname, State.user.display_name);
+      }
+    } catch {}
     const selfName = document.getElementById('self-name');
     const selfHandle = document.getElementById('self-handle');
     if (selfName) selfName.textContent = State.user.display_name || State.user.nickname;
@@ -4006,6 +4011,11 @@ async function saveProfile() {
         return;
       }
       State.user.display_name = displayData.display_name || null;
+      try {
+        if (typeof Users !== 'undefined' && Users.updateDisplayName) {
+          Users.updateDisplayName(State.user.id, State.user.nickname, State.user.display_name);
+        }
+      } catch {}
     }
 
     if (wantsNicknameChange) {

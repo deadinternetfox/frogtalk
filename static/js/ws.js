@@ -314,11 +314,15 @@ const WS = (() => {
         break;
       }
       case 'profile_update': {
+        const sameUser = (user) => {
+          if (!user) return false;
+          if (data.user_id != null && user.id != null && String(data.user_id) === String(user.id)) return true;
+          const a = String(data.nickname || '').toLowerCase();
+          const b = String(user.nickname || '').toLowerCase();
+          return !!(a && b && a === b);
+        };
         // If our own avatar changed on another device, sync local state + self panel
-        if (State.user && (
-              (data.user_id && data.user_id === State.user.id) ||
-              (data.nickname && data.nickname === State.user.nickname)
-            )) {
+        if (sameUser(State.user)) {
           if (data.avatar !== undefined) State.user.avatar = data.avatar;
           try { State.save(); } catch {}
           try {
@@ -328,29 +332,26 @@ const WS = (() => {
         }
         if (typeof Users !== 'undefined' && Users.updateAvatar) {
           Users.updateAvatar(data.user_id, data.nickname, data.avatar);
-                // Sync display_name change to member list caches
-                if (data.display_name !== undefined) {
-                  if (State.user && (
-                        (data.user_id && data.user_id === State.user.id) ||
-                        (data.nickname && data.nickname === State.user.nickname)
-                      )) {
-                    State.user.display_name = data.display_name || null;
-                    try { State.save(); } catch {}
-                    // Update self panel
-                    try {
-                      const sn = document.getElementById('self-name');
-                      const sh = document.getElementById('self-handle');
-                      if (sn) sn.textContent = State.user.display_name || State.user.nickname;
-                      if (sh) {
-                        const showH = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
-                        sh.textContent = showH ? `@${State.user.nickname}` : '';
-                      }
-                    } catch {}
-                  }
-                  if (typeof Users !== 'undefined' && Users.updateDisplayName) {
-                    Users.updateDisplayName(data.user_id, data.nickname, data.display_name || null);
-                  }
-                }
+        }
+        // Sync display_name change to member list caches
+        if (data.display_name !== undefined) {
+          if (sameUser(State.user)) {
+            State.user.display_name = data.display_name || null;
+            try { State.save(); } catch {}
+            // Update self panel
+            try {
+              const sn = document.getElementById('self-name');
+              const sh = document.getElementById('self-handle');
+              if (sn) sn.textContent = State.user.display_name || State.user.nickname;
+              if (sh) {
+                const showH = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
+                sh.textContent = showH ? `@${State.user.nickname}` : '';
+              }
+            } catch {}
+          }
+          if (typeof Users !== 'undefined' && Users.updateDisplayName) {
+            Users.updateDisplayName(data.user_id, data.nickname, data.display_name || null);
+          }
         }
         // Refresh inline Suggested-for-you avatars + any social-rendered profile refs.
         try {

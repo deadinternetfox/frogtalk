@@ -10,10 +10,16 @@ const Users = (() => {
   let _searchInput = null;
   const _displayNameCache = new Map();
 
+  function _sameUser(aUserId, aNickname, bUserId, bNickname) {
+    if (aUserId != null && bUserId != null && String(aUserId) === String(bUserId)) return true;
+    const aNick = String(aNickname || '').toLowerCase();
+    const bNick = String(bNickname || '').toLowerCase();
+    return !!(aNick && bNick && aNick === bNick);
+  }
+
   function _mergeLocalSelf(user) {
     if (!user || !State.user) return user;
-    const sameUser = (user.user_id && State.user.id && user.user_id === State.user.id)
-      || (user.nickname && State.user.nickname && user.nickname === State.user.nickname);
+    const sameUser = _sameUser(user.user_id, user.nickname, State.user.id, State.user.nickname);
     if (!sameUser) return user;
     return {
       ...user,
@@ -30,7 +36,7 @@ const Users = (() => {
   }
 
   async function _hydrateDisplayNames(users) {
-    const missing = (users || []).filter(u => u && u.nickname && !u.display_name && (!State.user || u.nickname !== State.user.nickname));
+    const missing = (users || []).filter(u => u && u.nickname && !u.display_name && (!State.user || !_sameUser(u.user_id, u.nickname, State.user.id, State.user.nickname)));
     if (!missing.length || !State.token) return;
     await Promise.all(missing.map(async (u) => {
       const nick = String(u.nickname || '').trim();
@@ -218,10 +224,7 @@ const Users = (() => {
           ? '<span class="in-call-badge live" title="Live in voice">🔊</span>'
           : '<span class="in-call-badge" title="In voice channel">📞</span>');
     // isSelf: prefer user_id match (most reliable), fall back to nickname
-    const isSelf = State.user && (
-      (u.user_id && State.user.id && u.user_id === State.user.id) ||
-      u.nickname === State.user.nickname
-    );
+    const isSelf = !!(State.user && _sameUser(u.user_id, u.nickname, State.user.id, State.user.nickname));
     const handleNick = isSelf ? (State.user.nickname || u.nickname) : u.nickname;
     const avatarSrc = u.avatar || (isSelf ? State.user.avatar : null);
     const dot = isOnline ? '<span class="online-dot"></span>' : '<span class="offline-dot"></span>';
@@ -271,13 +274,13 @@ const Users = (() => {
   function updateDisplayName(userId, nickname, displayName) {
     let changed = false;
     for (const u of _allUsers) {
-      if ((userId && u.user_id === userId) || (nickname && u.nickname === nickname)) {
+      if (_sameUser(u.user_id, u.nickname, userId, nickname)) {
         u.display_name = displayName;
         changed = true;
       }
     }
     for (const m of _channelMembers) {
-      if ((userId && m.user_id === userId) || (nickname && m.nickname === nickname)) {
+      if (_sameUser(m.user_id, m.nickname, userId, nickname)) {
         m.display_name = displayName;
         changed = true;
       }
@@ -288,14 +291,14 @@ const Users = (() => {
   function updateAvatar(userId, nickname, avatar) {
     let changed = false;
     for (const u of _allUsers) {
-      if ((userId && u.user_id === userId) || (nickname && u.nickname === nickname)) {
+      if (_sameUser(u.user_id, u.nickname, userId, nickname)) {
         if (avatar !== undefined) u.avatar = avatar;
         changed = true;
       }
     }
     if (State.onlineUsers) {
       for (const u of State.onlineUsers) {
-        if ((userId && u.user_id === userId) || (nickname && u.nickname === nickname)) {
+        if (_sameUser(u.user_id, u.nickname, userId, nickname)) {
           if (avatar !== undefined) u.avatar = avatar;
         }
       }
