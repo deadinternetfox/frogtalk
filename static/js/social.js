@@ -4273,6 +4273,26 @@ const Social = (() => {
           if (_reelsIsSeekLocked()) return;
           const c = pickCenteredCard(settled);
           if (!c) return;
+          // Hard sweep: in `settled` (loose) mode the gesture has
+          // committed, so anything that isn't the centered card MUST be
+          // paused. Without this, fast scrolls can leave the previous
+          // reel mid-play if its IntersectionObserver entry never crossed
+          // below the 0.1 cleanup threshold (e.g. it's still partially
+          // visible above the viewport) and the activate path's per-card
+          // pause loop ran on a slightly stale DOM. Costs ~O(n) querySelectorAll
+          // on settle only, not on every rAF tick.
+          if (settled) {
+            try {
+              snap.querySelectorAll('.reel-card').forEach(other => {
+                if (other === c) return;
+                const v = other.querySelector('video');
+                if (v && !v.paused) {
+                  try { v.muted = true; v.pause(); } catch {}
+                }
+                other.classList.remove('is-playing');
+              });
+            } catch {}
+          }
           if (c !== _reelsCurrentCard) {
             _reelsActivateCard(c, { reset: false, forcePlay: true });
             return;

@@ -459,6 +459,22 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
     db.join_room(current_user["id"], room["id"])
+    # Notify everyone currently subscribed to this room over WS so their
+    # member sidebar picks up the new joiner without a page reload. The
+    # old behaviour relied on the joiner eventually opening a WS to the
+    # room (which fires online_users), but if they joined via Discover
+    # without entering the room, existing members never saw them.
+    try:
+        from ws_manager import manager
+        await manager.broadcast_room(room_name, {
+            "type": "member_joined",
+            "room": room_name,
+            "user_id": current_user["id"],
+            "nickname": current_user["nickname"],
+            "avatar": current_user.get("avatar"),
+        })
+    except Exception:
+        pass
     try:
         db.insert_federation_outbox_event({
             "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",

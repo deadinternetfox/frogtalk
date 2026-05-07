@@ -194,7 +194,27 @@ async def websocket_endpoint(
         try:
             _room_data = db.get_room_by_name(room_name)
             if _room_data:
+                # Detect "first time joining" so we can broadcast a
+                # member_joined to everyone else's sidebar — without this
+                # the right-hand member list would only update on their
+                # next reload of the channel.
+                _was_member = False
+                try:
+                    _was_member = bool(db.is_room_member(user["id"], _room_data["id"]))
+                except Exception:
+                    _was_member = False
                 db.join_room(user["id"], _room_data["id"])
+                if not _was_member:
+                    try:
+                        await manager.broadcast_room(room_name, {
+                            "type": "member_joined",
+                            "room": room_name,
+                            "user_id": user["id"],
+                            "nickname": user["nickname"],
+                            "avatar": user.get("avatar"),
+                        })
+                    except Exception:
+                        pass
         except Exception:
             pass
 

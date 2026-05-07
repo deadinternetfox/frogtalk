@@ -213,6 +213,17 @@ const WS = (() => {
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
         break;
       }
+      case 'member_joined': {
+        // A new member joined this room (either via REST /join or via a
+        // first-time WS connect). Refresh the channel-members cache so
+        // the right-hand sidebar shows them immediately, even if they
+        // haven't opened a WS to this room yet.
+        if (data.room === room && typeof Users !== 'undefined' && Users.loadChannelMembers) {
+          try { Users.loadChannelMembers(data.room); } catch {}
+        }
+        try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
+        break;
+      }
       case 'profile_update': {
         // If our own avatar changed on another device, sync local state + self panel
         if (State.user && (
