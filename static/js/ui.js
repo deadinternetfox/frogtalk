@@ -4607,15 +4607,21 @@ function showWallReactionHover(postId, wrap) {
     const myEmoji = wrap.querySelector('.sf-rx-add')?.dataset?.myEmoji || '';
     pop = document.createElement('div');
     pop.className = 'wall-reaction-picker';
-    pop.style.cssText = 'position:absolute;bottom:calc(100% + 6px);left:0;display:flex;gap:4px;padding:6px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5);z-index:50;white-space:nowrap';
+    // Transparent hover bridge: anchor the popup at `bottom:100%` and
+    // give it `padding-bottom:10px` so the gap between button and pill
+    // is part of the popup's own hit-box. Previously a literal 6px gap
+    // sat outside any hover target and would dismiss the picker if the
+    // cursor crossed it slowly.
+    pop.style.cssText = 'position:absolute;bottom:100%;left:0;display:flex;gap:4px;padding:6px 6px 12px 6px;background:transparent;border:0;box-shadow:none;z-index:50;white-space:nowrap';
     pop.onmouseenter = () => { if (wrap._rxHideTimer) { clearTimeout(wrap._rxHideTimer); wrap._rxHideTimer = null; } };
     pop.onmouseleave = () => scheduleHideWallReactionHover(postId, wrap);
     const removeBtn = myEmoji
       ? `<button type="button" data-emoji="__remove__" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
       : '';
-    pop.innerHTML = removeBtn + quickEmojis.map(e =>
+    const innerStyle = 'display:flex;gap:4px;padding:6px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5)';
+    pop.innerHTML = `<div style="${innerStyle}">` + removeBtn + quickEmojis.map(e =>
       `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:20px;cursor:pointer;padding:2px 6px;border-radius:999px;line-height:1;transition:transform .12s,background .12s" onmouseover="this.style.background='#1a2e1a';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
-    ).join('');
+    ).join('') + '</div>';
     pop.addEventListener('click', (ev) => {
       const btn = ev.target.closest('button[data-emoji]');
       if (!btn) return;
@@ -4640,7 +4646,7 @@ function scheduleHideWallReactionHover(postId, wrap) {
       const pop = wrap.querySelector(':scope > .wall-reaction-picker');
       if (pop) pop.remove();
       wrap._rxHideTimer = null;
-    }, 180);
+    }, 280);
   } catch {}
 }
 

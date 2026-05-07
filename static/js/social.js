@@ -228,13 +228,28 @@ const Social = (() => {
         const myEmoji = btn.dataset.myEmoji || '';
         const pop = document.createElement('div');
         pop.className = 'sf-rx-quick';
-        pop.style.cssText = 'position:absolute;bottom:calc(100% + 6px);left:0;display:flex;gap:4px;padding:6px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5);z-index:50;white-space:nowrap';
+        // Position the picker so its visible chip strip floats above
+        // the button with a *transparent hover bridge* between them.
+        // Previously a literal 6px gap (`bottom: calc(100% + 6px)`) sat
+        // outside the popup's hit-box, so the cursor crossing it would
+        // fire the button's `mouseleave` and then the popup's never
+        // arrived in time — the picker would vanish mid-pick. Anchoring
+        // the popup at `bottom:100%` and giving it `padding-bottom:10px`
+        // makes that bridge part of the popup's own hit-box, so the
+        // cursor never lands on dead space.
+        pop.style.cssText = 'position:absolute;bottom:100%;left:0;display:flex;gap:4px;padding:6px 6px 12px 6px;background:transparent;border:0;box-shadow:none;z-index:50;white-space:nowrap;pointer-events:auto';
+        // Inner pill is the visible part — the outer pop element is
+        // mostly invisible padding that acts as the hover bridge.
+        pop.dataset.bridged = '1';
         const removeChip = myEmoji
           ? `<button type="button" data-emoji="__remove__" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
           : '';
-        pop.innerHTML = removeChip + QUICK.map(e =>
+        // Wrap the chips in an inner pill so the visible styling sits
+        // above the bridge padding.
+        const innerStyle = 'display:flex;gap:4px;padding:6px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5)';
+        pop.innerHTML = `<div style="${innerStyle}">` + removeChip + QUICK.map(e =>
           `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:20px;cursor:pointer;padding:2px 6px;border-radius:999px;line-height:1;transition:transform .12s,background .12s" onmouseover="this.style.background='#1a2e1a';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
-        ).join('');
+        ).join('') + '</div>';
         pop.addEventListener('mouseenter', () => {
           if (btn._rxHideTimer) { clearTimeout(btn._rxHideTimer); btn._rxHideTimer = null; }
         });
@@ -265,7 +280,7 @@ const Social = (() => {
           if (pop) pop.remove();
           delete btn.dataset.rxHoverOpen;
           btn._rxHideTimer = null;
-        }, 180);
+        }, 280);
       } catch {}
     };
     document.addEventListener('mouseenter', (ev) => {
@@ -7180,7 +7195,7 @@ const Social = (() => {
     const repostBtnHtml = !canAudienceShare
       ? ''
       : (shareEnabled
-        ? `<button type="button" data-role="repost-toggle" class="sf-comment-btn ${iReposted ? 'liked' : ''}" title="Repost" aria-label="Repost" onclick="Social.toggleRepost(event, ${p.id}, { nickname: '${escNick}', privacy: '${esc(postPrivacy)}', shareEnabled: 1 })">🔁 ${repostCount}</button>`
+        ? `<button type="button" data-role="repost-toggle" class="sf-comment-btn ${iReposted ? 'liked' : ''}" title="Repost" aria-label="Repost" onclick="Social.openRepostComposer(event, ${p.id}, { nickname: '${escNick}', privacy: '${esc(postPrivacy)}', shareEnabled: 1, iReposted: ${iReposted ? 'true' : 'false'} })">🔁 ${repostCount}</button>`
         : `<button type="button" class="sf-comment-btn" title="Repost disabled" aria-label="Repost disabled" disabled><span style="text-decoration:line-through;opacity:.75">🔁</span> ${repostCount}</button>`);
     const shareBtnHtml = !canAudienceShare
       ? ''
@@ -7383,7 +7398,7 @@ const Social = (() => {
         }
       } catch {}
       try {
-        UI.showToast(data.reposted ? (payload.quote ? 'Quote reposted' : 'Reposted') : 'Repost removed', 'success');
+        UI.showToast(data.reposted ? (payload.quote ? 'Reposted with comment' : 'Reposted') : 'Repost removed', 'success');
       } catch {}
     } catch (e) {
       if (btn) {
@@ -7789,15 +7804,14 @@ const Social = (() => {
     const items = [];
     items.push({ icon: '👤', label: `View @${nick}`, onclick: () => openProfile(nick) });
     if (privacy !== 'friends' && privacy !== 'private' && shareEnabled) {
+      // Single unified "Repost" entry — opens the composer where the
+      // user can optionally add a comment, update an existing one, or
+      // remove their repost. Replaces the previous Repost / Quote repost
+      // split.
       items.push({
         icon: '🔁',
-        label: 'Repost',
-        onclick: () => toggleRepost(null, pid, { nickname: nick, privacy, shareEnabled: 1 })
-      });
-      items.push({
-        icon: '📝',
-        label: iReposted ? 'Edit quote repost' : 'Quote repost',
-        onclick: () => openQuoteRepost(pid, { nickname: nick, privacy, shareEnabled: 1 })
+        label: iReposted ? 'Edit / remove repost' : 'Repost',
+        onclick: () => openRepostComposer(null, pid, { nickname: nick, privacy, shareEnabled: 1, iReposted })
       });
     }
     if (privacy !== 'friends' && privacy !== 'private' && shareEnabled) {
@@ -8496,6 +8510,9 @@ const Social = (() => {
     }
   }
 
+  // Repost composer state. The composer drives both plain reposts and
+  // reposts-with-comment from a single UI; backend already accepts an
+  // optional `quote_text` on /api/wall/posts/{id}/repost.
   function openQuoteRepost(postId, meta = {}) {
     const privacy = String(meta.privacy || 'public').toLowerCase();
     const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
@@ -8508,15 +8525,59 @@ const Social = (() => {
       return;
     }
     _quoteRepostPostId = Number(postId || 0);
-    _quoteRepostMeta = meta || {};
+    // Detect prior repost state from the live card so the composer can
+    // switch between "Repost" / "Update repost" / "Remove repost" without
+    // an extra API round-trip.
+    let iReposted = !!meta.iReposted;
+    try {
+      const cardBtn = document.querySelector(`.sf-post[data-post-id="${_quoteRepostPostId}"] [data-role="repost-toggle"]`);
+      if (cardBtn) iReposted = cardBtn.classList.contains('liked');
+    } catch {}
+    _quoteRepostMeta = { ...(meta || {}), iReposted };
     const overlay = document.getElementById('social-quote-repost');
     const input = document.getElementById('qrp-text');
     const title = document.getElementById('qrp-title');
+    const sub = document.getElementById('qrp-sub');
+    const removeBtn = document.getElementById('qrp-remove');
     if (!overlay || !input) return;
-    if (title) title.textContent = `Quote repost @${meta.nickname || 'user'}`;
+    if (title) title.textContent = iReposted ? 'Update repost' : 'Repost';
+    if (sub) sub.textContent = meta.nickname ? `@${meta.nickname}` : '';
+    if (removeBtn) removeBtn.style.display = iReposted ? '' : 'none';
     input.value = '';
     overlay.classList.remove('hidden');
+    onRepostInput();
     setTimeout(() => input.focus(), 30);
+  }
+
+  function onRepostInput() {
+    const input = document.getElementById('qrp-text');
+    const submit = document.getElementById('qrp-submit');
+    const count = document.getElementById('qrp-count');
+    const hint = document.getElementById('qrp-hint');
+    if (!input || !submit) return;
+    const text = String(input.value || '').trim();
+    const len = String(input.value || '').length;
+    if (count) count.textContent = `${len} / 1000`;
+    const iReposted = !!(_quoteRepostMeta && _quoteRepostMeta.iReposted);
+    let label = iReposted ? 'Update repost' : 'Repost';
+    let canSubmit = true;
+    if (iReposted && !text) {
+      // Already reposted with no new comment — nothing to submit (and
+      // crucially, an empty submit on an existing repost would *delete*
+      // it server-side; we route that through the explicit Remove button
+      // so a click here can never accidentally undo the repost).
+      canSubmit = false;
+      label = 'Update repost';
+      if (hint) hint.textContent = 'You\u2019ve already reposted. Type a comment to update, or use Remove repost.';
+    } else if (hint) {
+      hint.textContent = iReposted
+        ? (text ? 'Will replace your existing comment.' : 'Comment is optional · up to 1000 characters')
+        : (text ? 'Will repost with your comment.' : 'Comment is optional · up to 1000 characters');
+    }
+    submit.textContent = label;
+    submit.disabled = !canSubmit;
+    submit.style.opacity = canSubmit ? '1' : '.55';
+    submit.style.cursor = canSubmit ? 'pointer' : 'not-allowed';
   }
 
   function closeQuoteRepost() {
@@ -8533,22 +8594,52 @@ const Social = (() => {
     const btn = document.getElementById('qrp-submit');
     const quote = String(input?.value || '').trim();
     if (!_quoteRepostPostId) return;
-    if (!quote) {
-      try { UI.showToast('Write a short quote first', 'info'); } catch {}
-      input?.focus();
+    const iReposted = !!(_quoteRepostMeta && _quoteRepostMeta.iReposted);
+    if (iReposted && !quote) {
+      // Defensive — onRepostInput() should've disabled the button.
+      try { UI.showToast('Type a comment to update the repost, or use Remove repost', 'info'); } catch {}
       return;
     }
     if (quote.length > 1000) {
-      try { UI.showToast('Quote is too long (max 1000 chars)', 'error'); } catch {}
+      try { UI.showToast('Comment is too long (max 1000 chars)', 'error'); } catch {}
       return;
     }
-    if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
+    if (btn) { btn.disabled = true; btn.textContent = iReposted ? 'Updating\u2026' : 'Reposting\u2026'; }
     try {
-      await toggleRepost(null, _quoteRepostPostId, { ...(_quoteRepostMeta || {}), quote });
+      // Pass quote even when empty + not yet reposted — the backend
+      // treats empty/missing quote as a plain repost create.
+      const meta = { ...(_quoteRepostMeta || {}) };
+      if (quote) meta.quote = quote;
+      await toggleRepost(null, _quoteRepostPostId, meta);
       closeQuoteRepost();
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Quote repost'; }
+      if (btn) { btn.disabled = false; btn.textContent = iReposted ? 'Update repost' : 'Repost'; }
     }
+  }
+
+  // Explicit "Remove repost" path. Distinct from the plain-toggle code
+  // path so an empty text field on an already-reposted post never
+  // silently deletes the repost.
+  async function removeRepost() {
+    if (!_quoteRepostPostId) return;
+    const btn = document.getElementById('qrp-remove');
+    if (btn) { btn.disabled = true; btn.textContent = 'Removing\u2026'; }
+    try {
+      const meta = { ...(_quoteRepostMeta || {}) };
+      // Force an undo regardless of current optimistic state.
+      meta.forceRemove = true;
+      await toggleRepost(null, _quoteRepostPostId, meta);
+      closeQuoteRepost();
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Remove repost'; }
+    }
+  }
+
+  // Friendly alias used by the new unified entry points (post button,
+  // post "\u22ef" menu). Same behaviour as openQuoteRepost.
+  function openRepostComposer(ev, postId, meta = {}) {
+    try { ev?.preventDefault?.(); ev?.stopPropagation?.(); } catch {}
+    return openQuoteRepost(postId, meta);
   }
 
   // ── followers/following list popup ──────────────────────────────────────
@@ -9112,6 +9203,7 @@ const Social = (() => {
     toggleFollow, reactPost, showReactPicker, showReactionDetail, toggleComments,
     toggleRepost,
     openQuoteRepost, closeQuoteRepost, submitQuoteRepost,
+    openRepostComposer, onRepostInput, removeRepost,
     submitComment, deleteComment, voteComment, deletePost, dmUser,
     shareProfile, profileShareUrl,
     sharePostUrl, postShareUrl,

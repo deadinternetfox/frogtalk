@@ -8572,18 +8572,29 @@ window.ConnErr = (function(){
   </div>
 </div>
 
-<!-- Quote repost modal -->
+<!-- Repost composer (Twitter-style: single repost flow with an
+     optional comment box; switches to "Update" / "Remove repost" when
+     the viewer has already reposted). -->
 <div id="social-quote-repost" class="hidden" onclick="if(event.target===this)Social.closeQuoteRepost()">
   <div class="qrp-box">
-    <h3 id="qrp-title">Quote repost</h3>
-    <textarea id="qrp-text" maxlength="1000" placeholder="Add your take on this post..."></textarea>
+    <h3 id="qrp-title">Repost</h3>
+    <div id="qrp-sub" style="font-size:12px;color:#7d9a7d;margin:-4px 0 10px"></div>
+    <textarea id="qrp-text" maxlength="1000" placeholder="Add a comment (optional)…" oninput="Social.onRepostInput()"></textarea>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;color:#6f8f6f;font-size:12px">
-      <span>Up to 1000 characters</span>
-      <span id="qrp-count">Public quote</span>
+      <span id="qrp-hint">Comment is optional · up to 1000 characters</span>
+      <span id="qrp-count">0 / 1000</span>
     </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-      <button style="background:#1a1a1a;border:none;color:#888;padding:8px 14px;border-radius:8px;cursor:pointer" onclick="Social.closeQuoteRepost()">Cancel</button>
-      <button id="qrp-submit" style="background:#4caf50;border:none;color:#000;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer" onclick="Social.submitQuoteRepost()">Quote repost</button>
+    <div class="qrp-actions" style="display:flex;align-items:center;gap:8px;margin-top:14px">
+      <button id="qrp-remove" type="button"
+              style="display:none;background:#2a1414;border:1px solid #5a2020;color:#ff8a8a;font-weight:600;padding:8px 14px;border-radius:8px;cursor:pointer"
+              onclick="Social.removeRepost()">Remove repost</button>
+      <span style="flex:1 1 auto"></span>
+      <button type="button"
+              style="background:#1a1a1a;border:none;color:#888;padding:8px 14px;border-radius:8px;cursor:pointer"
+              onclick="Social.closeQuoteRepost()">Cancel</button>
+      <button id="qrp-submit" type="button"
+              style="background:#4caf50;border:none;color:#000;font-weight:600;padding:8px 16px;border-radius:8px;cursor:pointer"
+              onclick="Social.submitQuoteRepost()">Repost</button>
     </div>
   </div>
 </div>
