@@ -1812,7 +1812,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .self-name{font-size:14px;font-weight:700;color:#e6f6ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 .self-handle{font-size:11px;color:#89a79a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;line-height:1.15}
 .self-status-display{
-  font-size:11px;color:#7ecfa3;margin-top:1px;
+  font-size:11px;color:#7ecfa3;margin-top:5px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
   line-height:1.3;pointer-events:none
 }
@@ -8433,8 +8433,8 @@ window.ConnErr = (function(){
         <div class="profile-avatar-large" id="userinfo-avatar" style="width:88px;height:88px;font-size:42px;flex-shrink:0;border:4px solid #111;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,0.4);background:#1a3a1a;display:flex;align-items:center;justify-content:center">🐸</div>
         <div style="flex:1;min-width:0;padding-bottom:6px;display:flex;flex-direction:column;gap:6px;align-items:flex-start">
           <div id="userinfo-name" class="userinfo-nick" data-nick="" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;max-width:100%" onclick="copyUserTag(this.dataset.nick || this.textContent)" title="Click to copy @tag"></div>
-          <div id="userinfo-handle" style="font-size:13px;color:#666;margin-top:-2px;margin-bottom:2px"></div>
-          <div id="userinfo-status-msg" style="font-size:13px;color:#9dc4b2;display:block;max-width:100%;overflow:hidden;line-height:1.2"></div>
+          <div id="userinfo-handle" style="font-size:13px;color:#666;margin-top:-2px;margin-bottom:0"></div>
+          <div id="userinfo-status-msg" style="font-size:13px;color:#9dc4b2;display:block;max-width:100%;overflow:hidden;line-height:1.2;margin-top:6px"></div>
         </div>
       </div>
       <!-- Primary Actions: Message + Call (camera can be toggled mid-call) -->
