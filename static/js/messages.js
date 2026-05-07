@@ -574,7 +574,8 @@ const Messages = (() => {
       }
       const name = UI.escHtml(data.room_name || '');
       const desc = data.room_desc ? `<div class="invite-card-desc">${UI.escHtml(data.room_desc.substring(0, 100))}</div>` : '';
-      const by = data.created_by ? `<span class="invite-card-by">Invited by <strong>${UI.escHtml(data.created_by)}</strong></span>` : '';
+      const createdBy = (data.created_by_handle || (data.created_by ? `@${data.created_by}` : '')).trim();
+      const by = createdBy ? `<span class="invite-card-by">Invited by <strong>${UI.escHtml(createdBy)}</strong></span>` : '';
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
         ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`

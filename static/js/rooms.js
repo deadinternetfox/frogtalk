@@ -1626,10 +1626,11 @@ const Rooms = (() => {
       const url = `https://frogtalk.xyz/i/${inv.code}`;
       const uses = inv.max_uses > 0 ? `${inv.use_count || 0}/${inv.max_uses} uses` : `${inv.use_count || 0} uses`;
       const expires = inv.expires_at ? `Expires ${new Date(inv.expires_at).toLocaleDateString()}` : 'Never expires';
+      const by = inv.created_by_name ? `@${inv.created_by_name}` : '?';
       return `<div class="modal-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px">
         <div style="flex:1;min-width:0">
           <div style="font-size:13px;font-weight:700;color:#7fd2a7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(url)}</div>
-          <div style="font-size:11px;color:#7a9c8d;margin-top:2px">${uses} · ${expires} · by ${UI.escHtml(inv.created_by_name || '?')}</div>
+          <div style="font-size:11px;color:#7a9c8d;margin-top:2px">${uses} · ${expires} · by ${UI.escHtml(by)}</div>
         </div>
         <button class="icon-btn" title="Copy" onclick="UI.copy('${url}').then(ok=>UI.showToast(ok?'Copied!':'Could not copy',ok?'success':'error'))" style="font-size:16px">📋</button>
         <button class="icon-btn" title="Revoke" onclick="Rooms.revokeInvite('${inv.code}')" style="font-size:16px;color:#f85149">🗑</button>

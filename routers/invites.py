@@ -247,6 +247,7 @@ async def get_invite_info(code: str):
             "room_desc": invite.get("room_desc", ""),
             "room_icon": invite.get("room_icon", "💬"),
             "created_by": invite.get("created_by_name"),
+            "created_by_handle": (f"@{invite.get('created_by_name')}" if invite.get("created_by_name") else None),
             "is_vanity": False,
             "valid": True,
         }
@@ -263,6 +264,7 @@ async def get_invite_info(code: str):
         "room_desc": room.get("description", "") or "",
         "room_icon": room.get("icon", "💬") or "💬",
         "created_by": room.get("owner_nickname"),
+        "created_by_handle": (f"@{room.get('owner_nickname')}" if room.get("owner_nickname") else None),
         "is_vanity": True,
         "valid": True,
     }
@@ -415,12 +417,14 @@ a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
 
     room_name_safe = _html_mod.escape(invite['room_name'])
     room_desc_safe = _html_mod.escape(invite.get('room_desc') or 'A FrogTalk channel')
-    created_by_safe = _html_mod.escape(invite.get('created_by_name') or 'someone')
+    _raw_created_by = (invite.get('created_by_name') or '').strip()
+    _created_by_with_handle = f"@{_raw_created_by}" if _raw_created_by else '@someone'
+    created_by_safe = _html_mod.escape(_created_by_with_handle)
     # Richer preview description: include inviter + channel purpose so the
     # message preview actually tells you what you're joining.
     raw_bio = (invite.get('room_desc') or 'Join the conversation — end-to-end encrypted chat, voice & video calls.').strip()
     og_desc_full = (
-        f"{invite.get('created_by_name') or 'A friend'} invited you to #{invite['room_name']} on FrogTalk. "
+        f"{_created_by_with_handle} invited you to #{invite['room_name']} on FrogTalk. "
         f"{raw_bio}"
     )
     og_desc_safe = _html_mod.escape(og_desc_full[:200])
