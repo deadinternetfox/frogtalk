@@ -653,14 +653,13 @@ p{{color:#aaa;font-size:14px;line-height:1.5;margin:6px 0 22px}}
   <h1>This profile is private</h1>
   <p>@{_og_escape(nick)} has chosen to keep their profile hidden from public view. Sign in to send a friend request.</p>
   <a href=\"/app?dm={_og_escape(nick)}\" class=\"btn btn-primary\">Sign in to FrogTalk</a>
-  <a href=\"/\" class=\"btn btn-secondary\">← Back to frogtalk.xyz</a>
-  <div class=\"foot\">🐸 <a href=\"/\">frogtalk.xyz</a></div>
 </div>
 <script>try{{if(localStorage.getItem('token')){{window.location.replace('/app?profile={_og_escape(nick)}');}}}}catch(e){{}}</script>
 </body></html>"""
         return HTMLResponse(content=priv_html)
 
     bio = (user.get("bio") or user.get("status_msg") or "").strip()
+    display_name = (user.get("display_name") or "").strip()
     # Clamp + strip newlines for meta attributes.
     desc = bio.replace("\n", " ").strip()[:180] or f"@{nick} on FrogTalk — secure encrypted chat."
     avatar = user.get("avatar") or ""
@@ -726,12 +725,11 @@ h1{{color:#4caf50;margin:0 0 6px;font-size:26px}}
 </style></head><body>
 <div class=\"card\">
   <div class=\"avatar\" style=\"background-image:url('{_og_escape(card_avatar)}')\"></div>
-  <h1>@{_og_escape(nick)}</h1>
-  <div class=\"handle\">FrogTalk · secure encrypted chat</div>
+  {f'<h1>{_og_escape(display_name)}</h1>' if display_name else f'<h1>@{_og_escape(nick)}</h1>'}
+  <div class=\"handle\">{f'@{_og_escape(nick)} · FrogTalk' if display_name else 'FrogTalk · secure encrypted chat'}</div>
   {f'<div class="bio">{_og_escape(bio)}</div>' if bio else ''}
   <a href=\"/app?profile={_og_escape(nick)}\" class=\"btn btn-primary\">View profile</a>
   <a href=\"/app?dm={_og_escape(nick)}\" class=\"btn btn-secondary\">💬 Send a message</a>
-  <div class=\"foot\">🐸 <a href=\"/\">frogtalk.xyz</a></div>
 </div>
 <script>
 // Already logged in? Jump straight into the app.
@@ -842,7 +840,6 @@ h1{{color:#4caf50;margin:0 0 6px;font-size:24px;word-break:break-word}}
   <div class=\"desc\">{_og_escape(desc)}</div>
   <a href=\"/app?room={_og_escape(room_name)}\" class=\"btn btn-primary\">Open channel</a>
   <a href=\"/app\" class=\"btn btn-secondary\">Sign in to FrogTalk</a>
-  <div class=\"foot\">🐸 <a href=\"/\">frogtalk.xyz</a></div>
 </div>
 <script>
 try {{
@@ -898,6 +895,7 @@ async def serve_post_landing(post_id: int):
         return HTMLResponse(content=html, status_code=404)
 
     nick = post.get("nickname") or "frog"
+    display_name = (post.get("display_name") or "").strip()
     content = (post.get("content") or "").strip()
     desc = content.replace("\n", " ").strip()[:180] or f"A public post by @{nick} on FrogTalk."
     title_snippet = content.replace("\n", " ").strip()[:72]
@@ -1085,7 +1083,7 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 </style></head><body>
 <div class=\"card\">
   <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Viewing as guest \u2014 <a class=\"gb-link\" href=\"/app?register=1&amp;post={post_id}\">join FrogTalk</a> to like, comment and reply.</span></div>
-  <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
+  <div class=\"author\">{avatar_html}<div><div class=\"author-name\">{_og_escape(display_name) if display_name else f'@{_og_escape(nick)}'}</div></div></div>
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   {media_html}
   <div class=\"actions\">
@@ -1200,6 +1198,7 @@ async def serve_reel_landing(post_id: int):
         return HTMLResponse(content=html, status_code=404)
 
     nick = post.get("nickname") or "frog"
+    display_name = (post.get("display_name") or "").strip()
     content = (post.get("content") or "").strip()
     desc = content.replace("\n", " ").strip()[:180] or f"A public reel by @{nick} on FrogTalk."
     title_snippet = content.replace("\n", " ").strip()[:72]
@@ -1296,7 +1295,7 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 </style></head><body>
 <div class=\"card\">
   <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Watching as guest \u2014 <a class=\"gb-link\" href=\"/app?register=1&amp;reel={post_id}\">join FrogTalk</a> to like, comment, repost and chat with friends.</span></div>
-  <div class=\"author\">{avatar_html}<div><div class=\"author-name\">@{_og_escape(nick)}</div></div></div>
+  <div class=\"author\">{avatar_html}<div><div class=\"author-name\">{_og_escape(display_name) if display_name else f'@{_og_escape(nick)}'}</div></div></div>
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   <video class=\"reel-video\" controls playsinline preload=\"metadata\" src=\"/r/{post_id}/media\"></video>
   <div class=\"actions\">
@@ -1355,6 +1354,7 @@ def _public_share_post_payload(post: dict, kind: str) -> dict:
         "id": pid,
         "kind": kind,  # "post" or "reel"
         "nickname": post.get("nickname") or "frog",
+        "display_name": post.get("display_name") or None,
         "avatar": post.get("avatar") or None,
         "content": (post.get("content") or "")[:280],
         "media_type": media_type or None,
@@ -1410,6 +1410,7 @@ async def share_profile_info(nickname: str):
     return JSONResponse(
         {
             "nickname": user.get("nickname") or nickname,
+            "display_name": user.get("display_name") or None,
             "avatar": avatar,
             "bio": (user.get("bio") or "")[:200],
             "status_msg": (user.get("status_msg") or "")[:120],
