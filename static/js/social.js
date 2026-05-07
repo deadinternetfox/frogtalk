@@ -5309,6 +5309,8 @@ const Social = (() => {
     const posterStyle = thumbSrc ? ` style="background-image:url('${thumbSrc}')"` : '';
     const nick = esc(post.nickname || '');
     const rawNick = post.nickname || '';
+    const displayName = esc(post.display_name || post.nickname || '');
+    const hasDisplayName = !!(post.display_name && post.display_name !== post.nickname);
     const avatarSrc = post.avatar ? esc(post.avatar) : '';
     const avatarHtml = avatarSrc
       ? `<img class="reel-author-avatar" src="${avatarSrc}" alt="" loading="lazy" onerror="this.style.display='none'">`
@@ -5439,6 +5441,7 @@ const Social = (() => {
         <div class="reel-author" onclick="Social.openProfile('${nick}')">
           ${avatarHtml}
           <div class="reel-author-info">
+            <span class="reel-author-display-name">${displayName}</span>
             <span class="reel-author-nick">@${nick}</span>
             ${friendLabel}
             ${reactionsStack}
