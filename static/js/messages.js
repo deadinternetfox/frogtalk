@@ -79,7 +79,7 @@ const Messages = (() => {
             <div style="flex-shrink:0">${UI.avatarEl(d.avatar || null, d.nickname, 42)}</div>
             <div class="share-card-info">
               <div class="share-card-label">FrogTalk Profile</div>
-              <div class="share-card-name">${UI.escHtml(d.nickname)}</div>
+              <div class="share-card-name">@${UI.escHtml(d.nickname)}</div>
               ${d.bio ? `<div class="share-card-bio">${UI.escHtml(d.bio.substring(0, 60))}</div>` : ''}
             </div>
           </div>`;
@@ -575,7 +575,10 @@ const Messages = (() => {
       const name = UI.escHtml(data.room_name || '');
       const desc = data.room_desc ? `<div class="invite-card-desc">${UI.escHtml(data.room_desc.substring(0, 100))}</div>` : '';
       const createdBy = (data.created_by_handle || (data.created_by ? `@${data.created_by}` : '')).trim();
-      const by = createdBy ? `<span class="invite-card-by">Invited by <strong>${UI.escHtml(createdBy)}</strong></span>` : '';
+      const byNick = data.created_by || '';
+      const by = createdBy
+        ? `<span class="invite-card-by">Invited by <strong${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" style="cursor:pointer"` : ''}>${UI.escHtml(createdBy)}</strong></span>`
+        : '';
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
         ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`
