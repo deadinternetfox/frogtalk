@@ -3089,11 +3089,16 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 /* ─── Share / Profile embed card ────────────────────────────── */
 .share-card{
   display:inline-flex;align-items:center;gap:12px;
-  background:#1a1a1a;border:1px solid #2a2a2a;border-left:4px solid #4caf50;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 92%,black),color-mix(in srgb,var(--surface-color) 84%,black));
+  border:1px solid var(--border-color);border-left:4px solid var(--accent-color);
   border-radius:8px;padding:12px 14px;max-width:300px;margin-top:6px;
-  cursor:pointer;transition:background .15s;vertical-align:top
+  cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s;vertical-align:top;
+  box-shadow:0 3px 12px color-mix(in srgb,var(--accent-color) 12%,transparent)
 }
-.share-card:hover{background:#222}
+.share-card:hover{
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 98%,white),color-mix(in srgb,var(--surface-color) 86%,black));
+  border-color:color-mix(in srgb,var(--accent-color) 40%,var(--border-color));
+}
 /* reply quote */
 .msg-reply-quote{display:flex;gap:6px;align-items:baseline;padding:4px 8px;margin-bottom:4px;border-left:3px solid #4caf50;background:#0d1f0d;border-radius:0 6px 6px 0;cursor:pointer;max-width:480px}
 .msg-reply-quote:hover{background:#142814}
@@ -3117,18 +3122,18 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .room-mention.dead{color:#888;background:rgba(150,150,150,.08);text-decoration:line-through;cursor:not-allowed}
 @keyframes rmPulse{0%,100%{opacity:1}50%{opacity:.55}}
 .share-card-info{min-width:0;flex:1}
-.share-card-label{font-size:10px;color:#4caf50;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
-.share-card-name{font-size:14px;font-weight:700;color:#e0e0e0;margin-bottom:2px}
-.share-card-bio{font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.share-card-label{font-size:10px;color:var(--accent-color);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px}
+.share-card-name{font-size:14px;font-weight:700;color:var(--text-color);margin-bottom:2px}
+.share-card-bio{font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ─── Rich chat share embed (reel/post inline player) ──────────── */
 .chat-share-embed{
   display:block;margin-top:8px;
   width:fit-content;max-width:240px;
-  background:linear-gradient(180deg,#163026 0%,#0f1f17 100%);
-  border:1px solid #2f5548;border-left:4px solid #4caf50;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 90%,var(--accent-color) 10%) 0%,color-mix(in srgb,var(--surface-color) 86%,black) 100%);
+  border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color));border-left:4px solid var(--accent-color);
   border-radius:14px;overflow:hidden;cursor:pointer;
-  box-shadow:0 4px 18px rgba(0,0,0,.4);
+  box-shadow:0 4px 18px color-mix(in srgb,var(--accent-color) 16%,rgba(0,0,0,.4));
   transition:transform .12s ease,box-shadow .15s ease,border-color .15s ease;
   text-decoration:none;
 }
@@ -3139,9 +3144,9 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   width:auto;
 }
 .chat-share-embed:hover{
-  border-color:#4caf50;
+  border-color:var(--accent-color);
   transform:translateY(-1px);
-  box-shadow:0 6px 22px rgba(0,0,0,.5);
+  box-shadow:0 6px 22px color-mix(in srgb,var(--accent-color) 20%,rgba(0,0,0,.55));
 }
 .chat-share-embed-head{
   display:flex;align-items:center;gap:10px;padding:10px 12px 8px;
@@ -3149,18 +3154,18 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .chat-share-embed-avatar{flex-shrink:0}
 .chat-share-embed-meta{flex:1;min-width:0}
 .chat-share-embed-label{
-  font-size:10px;color:#7fd49a;text-transform:uppercase;
+  font-size:10px;color:color-mix(in srgb,var(--accent-color) 65%,white);text-transform:uppercase;
   letter-spacing:0.6px;font-weight:700;margin-bottom:2px
 }
 .chat-share-embed-name{
-  font-size:14px;font-weight:700;color:#dff5e8;
+  font-size:14px;font-weight:700;color:var(--text-color);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap
 }
 .chat-share-embed-logo{
   font-size:18px;flex-shrink:0;opacity:.7;line-height:1;
 }
 .chat-share-embed-caption{
-  padding:0 12px 10px;font-size:13px;line-height:1.45;color:#cfe7d6;
+  padding:0 12px 10px;font-size:13px;line-height:1.45;color:color-mix(in srgb,var(--text-color) 88%,var(--text-muted));
   white-space:pre-wrap;word-wrap:break-word;
   display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;
   overflow:hidden
@@ -3231,10 +3236,10 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.85)
 }
 .chat-share-embed-foot{
-  padding:8px 12px 10px;font-size:11px;color:#7fd49a;
+  padding:8px 12px 10px;font-size:11px;color:color-mix(in srgb,var(--accent-color) 70%,white);
   text-transform:uppercase;letter-spacing:0.5px;font-weight:600;
-  border-top:1px solid rgba(76,175,80,.15);
-  background:rgba(0,0,0,.18)
+  border-top:1px solid color-mix(in srgb,var(--accent-color) 22%,transparent);
+  background:color-mix(in srgb,var(--surface-color) 72%,rgba(0,0,0,.18))
 }
 @media(max-width:520px){
   .chat-share-embed{max-width:100%}
@@ -3242,27 +3247,28 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 
 /* ─── Music post variant — purple, with inline mini player ─────────────── */
 .chat-share-embed.is-music{
-  background:linear-gradient(180deg,#241638 0%,#150d22 100%);
-  border-color:#4a306d;
-  border-left-color:#9b59ff;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 84%,var(--accent-color) 16%) 0%,color-mix(in srgb,var(--surface-color) 80%,black) 100%);
+  border-color:color-mix(in srgb,var(--accent-color) 42%,var(--border-color));
+  border-left-color:var(--accent-color);
   width:auto;max-width:420px;
 }
 .chat-share-embed.is-music:hover{
-  border-color:#b079ff;
-  box-shadow:0 6px 22px rgba(155,89,255,.25)
+  border-color:var(--accent-color);
+  box-shadow:0 6px 22px color-mix(in srgb,var(--accent-color) 28%,transparent)
 }
-.chat-share-embed.is-music .chat-share-embed-label{color:#c9a8ff}
-.chat-share-embed.is-music .chat-share-embed-name{color:#efe5ff}
-.chat-share-embed.is-music .chat-share-embed-caption{color:#d8c9ee}
+.chat-share-embed.is-music .chat-share-embed-label{color:color-mix(in srgb,var(--accent-color) 68%,white)}
+.chat-share-embed.is-music .chat-share-embed-name{color:var(--text-color)}
+.chat-share-embed.is-music .chat-share-embed-caption{color:color-mix(in srgb,var(--text-color) 86%,var(--text-muted))}
 .chat-share-embed.is-music .chat-share-embed-foot{
-  color:#c9a8ff;border-top-color:rgba(155,89,255,.18);
-  background:rgba(20,8,40,.32)
+  color:color-mix(in srgb,var(--accent-color) 68%,white);
+  border-top-color:color-mix(in srgb,var(--accent-color) 22%,transparent);
+  background:color-mix(in srgb,var(--surface-color) 72%,rgba(0,0,0,.22))
 }
 .chat-share-music{
-  background:#0c0518;display:block;max-height:none
+  background:color-mix(in srgb,var(--surface-color) 76%,black);display:block;max-height:none
 }
 .chat-share-music > iframe{
-  display:block;width:100%;border:0;background:#0c0518
+  display:block;width:100%;border:0;background:color-mix(in srgb,var(--surface-color) 76%,black)
 }
 /* YouTube responsive 16:9 wrapper */
 .chat-share-music-yt{padding:0;background:#000}
@@ -3276,49 +3282,49 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 /* ─── Invite card ─────────────────────────────────────────────────────────── */
 .invite-card{
   display:block;margin-top:8px;max-width:420px;
-  background:linear-gradient(180deg,#173027 0%,#102018 100%);
-  border:1px solid #3b6c59;border-radius:10px;overflow:hidden;
-  box-shadow:0 2px 12px rgba(0,0,0,.35);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 90%,var(--accent-color) 10%) 0%,color-mix(in srgb,var(--surface-color) 82%,black) 100%);
+  border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color));border-radius:10px;overflow:hidden;
+  box-shadow:0 2px 12px color-mix(in srgb,var(--accent-color) 14%,rgba(0,0,0,.35));
 }
 .invite-card-header{
-  padding:8px 14px;background:rgba(12,28,22,.7);font-size:11px;color:#85a89a;
+  padding:8px 14px;background:color-mix(in srgb,var(--surface-color) 72%,rgba(0,0,0,.28));font-size:11px;color:var(--text-muted);
   text-transform:uppercase;letter-spacing:0.6px;font-weight:600;
-  border-bottom:1px solid #2f5548;
+  border-bottom:1px solid color-mix(in srgb,var(--accent-color) 30%,var(--border-color));
 }
 .invite-card-body{
   display:flex;align-items:center;gap:14px;padding:14px;
 }
 .invite-card-icon{
   font-size:28px;flex-shrink:0;width:48px;height:48px;
-  background:linear-gradient(180deg,#1e3d30,#162e24);
-  border:1px solid #2f5548;border-radius:50%;display:flex;align-items:center;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 94%,var(--accent-color) 6%),color-mix(in srgb,var(--surface-color) 86%,black));
+  border:1px solid color-mix(in srgb,var(--accent-color) 28%,var(--border-color));border-radius:50%;display:flex;align-items:center;
   justify-content:center;line-height:1;overflow:hidden;
   text-align:center;white-space:nowrap;
 }
 .invite-card-info{flex:1;min-width:0}
-.invite-card-name{font-size:16px;font-weight:700;color:#dff5e8;margin-bottom:3px}
-.invite-card-desc{font-size:12px;color:#85a89a;line-height:1.4;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.invite-card-by{font-size:11px;color:#6a9a86}
-.invite-card-by strong{color:#a8d5bc}
+.invite-card-name{font-size:16px;font-weight:700;color:var(--text-color);margin-bottom:3px}
+.invite-card-desc{font-size:12px;color:var(--text-muted);line-height:1.4;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.invite-card-by{font-size:11px;color:color-mix(in srgb,var(--text-muted) 88%,var(--accent-color))}
+.invite-card-by strong{color:color-mix(in srgb,var(--text-color) 86%,var(--accent-color))}
 .invite-card-by-nick[onclick]{cursor:pointer}
 .invite-join-btn{
   flex-shrink:0;padding:8px 20px;border-radius:6px;border:none;cursor:pointer;
-  background:linear-gradient(180deg,#3ba55d,#2e8a4e);color:#fff;font-size:13px;font-weight:700;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--accent-color) 82%,white),var(--accent-color));color:#fff;font-size:13px;font-weight:700;
   transition:background .15s,transform .1s,box-shadow .15s;white-space:nowrap;
-  box-shadow:0 2px 6px rgba(43,140,78,.3);
+  box-shadow:0 2px 6px color-mix(in srgb,var(--accent-color) 30%,transparent);
 }
-.invite-join-btn:hover{background:linear-gradient(180deg,#45bf6e,#38a35e);box-shadow:0 3px 10px rgba(43,140,78,.45)}
+.invite-join-btn:hover{background:linear-gradient(180deg,color-mix(in srgb,var(--accent-color) 70%,white),color-mix(in srgb,var(--accent-color) 90%,black));box-shadow:0 3px 10px color-mix(in srgb,var(--accent-color) 45%,transparent)}
 .invite-join-btn:active{transform:scale(.97)}
-.invite-join-btn:disabled{background:#2a4a38;color:#5a8a6a;cursor:not-allowed;box-shadow:none}
-.invite-join-btn--already{background:linear-gradient(180deg,#2a5040,#1e3d30);color:#a8d5bc;border:1px solid #3b6c59}
-.invite-join-btn--already:hover{background:linear-gradient(180deg,#336050,#274d3c)}
+.invite-join-btn:disabled{background:color-mix(in srgb,var(--surface-color) 85%,black);color:var(--text-muted);cursor:not-allowed;box-shadow:none}
+.invite-join-btn--already{background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 95%,var(--accent-color) 5%),color-mix(in srgb,var(--surface-color) 86%,black));color:color-mix(in srgb,var(--text-color) 80%,var(--accent-color));border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color))}
+.invite-join-btn--already:hover{background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 98%,var(--accent-color) 8%),color-mix(in srgb,var(--surface-color) 90%,black))}
 .invite-card-invalid{
-  display:inline-block;margin-top:6px;font-size:12px;color:#85a89a;
-  background:linear-gradient(180deg,#12201a,#0e1a14);border:1px solid #2f5548;border-radius:6px;padding:6px 12px;
+  display:inline-block;margin-top:6px;font-size:12px;color:var(--text-muted);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 92%,black),color-mix(in srgb,var(--surface-color) 86%,black));border:1px solid color-mix(in srgb,var(--accent-color) 22%,var(--border-color));border-radius:6px;padding:6px 12px;
 }
 .invite-card-loading{
-  display:inline-block;margin-top:6px;font-size:12px;color:#6a9a86;
-  background:linear-gradient(180deg,#12201a,#0e1a14);border:1px solid #2f5548;border-radius:6px;padding:6px 12px;
+  display:inline-block;margin-top:6px;font-size:12px;color:color-mix(in srgb,var(--text-muted) 88%,var(--accent-color));
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 92%,black),color-mix(in srgb,var(--surface-color) 86%,black));border:1px solid color-mix(in srgb,var(--accent-color) 24%,var(--border-color));border-radius:6px;padding:6px 12px;
   animation:fadeInOut 1.5s ease-in-out infinite;
 }
 @media(max-width:640px){
@@ -8244,8 +8250,6 @@ window.ConnErr = (function(){
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="modal-btn primary" onclick="saveCustomTheme()" style="flex:1;min-width:100px">Save</button>
-          <button class="modal-btn secondary" onclick="exportThemeJson()" style="flex:1;min-width:100px">Export</button>
-          <button class="modal-btn secondary" onclick="importThemeJson()" style="flex:1;min-width:100px">Import</button>
           <button class="modal-btn secondary" onclick="resetCustomTheme()" style="flex:1;min-width:100px">Reset</button>
         </div>
       </div>
@@ -9103,10 +9107,10 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/state.js?v=192"></script>
 <script src="/static/js/mute.js?v=191"></script>
-<script src="/static/js/notifications.js?v=417"></script>
+<script src="/static/js/notifications.js?v=418"></script>
 <script src="/static/js/ws.js?v=222"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=419"></script>
+<script src="/static/js/ui.js?v=420"></script>
   <script src="/static/js/rooms.js?v=426"></script>
 <script src="/static/js/messages.js?v=429"></script>
 <script src="/static/js/users.js?v=195"></script>

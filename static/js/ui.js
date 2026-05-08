@@ -2996,15 +2996,15 @@ function _showThemePreviewBar(theme) {
     bar = document.createElement('div');
     bar.id = 'theme-preview-bar';
     bar.style.cssText = `position:fixed;bottom:0;left:0;right:0;z-index:9999;
-      background:linear-gradient(135deg,#1a1a1a,#222);border-top:2px solid #4caf50;
+      background:linear-gradient(135deg,var(--surface-color),color-mix(in srgb,var(--surface-color) 85%,black));border-top:2px solid var(--accent-color);
       padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;
       box-shadow:0 -4px 24px rgba(0,0,0,.6);animation:slideUpBar .25s ease`;
     document.body.appendChild(bar);
   }
   bar.innerHTML = `
-    <span style="color:#e0e0e0;font-size:14px;font-weight:600">🎨 Previewing <em style="color:#4caf50">${UI.escHtml(theme)}</em> theme</span>
-    <button onclick="confirmThemePreview()" style="background:#4caf50;color:#000;border:none;border-radius:8px;padding:8px 20px;font-weight:700;cursor:pointer;font-size:13px">✓ Save</button>
-    <button onclick="cancelThemePreview()" style="background:#333;color:#e0e0e0;border:1px solid #555;border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer;font-size:13px">✕ Cancel</button>
+    <span style="color:var(--text-color);font-size:14px;font-weight:600">🎨 Previewing <em style="color:var(--accent-color)">${UI.escHtml(theme)}</em> theme</span>
+    <button onclick="confirmThemePreview()" style="background:var(--accent-color);color:#08140b;border:none;border-radius:8px;padding:8px 20px;font-weight:700;cursor:pointer;font-size:13px">✓ Save</button>
+    <button onclick="cancelThemePreview()" style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer;font-size:13px">✕ Cancel</button>
   `;
 }
 
@@ -4152,23 +4152,27 @@ async function saveProfile() {
     State.user.nickname = nextNickname;
     if (newAvatar) State.user.avatar = newAvatar;
 
-    const wallRes = await apiFetch('/api/wall/settings', 'PATCH', {
-      mood,
-      custom_css: customCss,
-      wall_enabled: document.getElementById('profile-wall-enabled')?.checked ?? true,
-      wall_comments_enabled: document.getElementById('profile-wall-comments')?.checked ?? true,
-    });
-    const wallData = await wallRes.json();
-    if (!wallRes.ok) {
-      State.save();
-      errEl.textContent = wallData.error || 'Style save failed';
-      return;
+    let wallSaveWarning = '';
+    try {
+      const wallRes = await apiFetch('/api/wall/settings', 'PATCH', {
+        mood,
+        custom_css: customCss,
+        wall_enabled: document.getElementById('profile-wall-enabled')?.checked ?? true,
+        wall_comments_enabled: document.getElementById('profile-wall-comments')?.checked ?? true,
+      });
+      let wallData = {};
+      try { wallData = await wallRes.json(); } catch { wallData = {}; }
+      if (!wallRes.ok) {
+        wallSaveWarning = wallData.error || 'Style settings were not saved.';
+      } else {
+        State.user.mood = mood;
+        State.user.custom_css = customCss;
+        State.user.wall_enabled = wallData.wall_enabled ?? 1;
+        State.user.wall_comments_enabled = wallData.wall_comments_enabled ?? 1;
+      }
+    } catch {
+      wallSaveWarning = 'Style settings were not saved (network error).';
     }
-
-    State.user.mood = mood;
-    State.user.custom_css = customCss;
-    State.user.wall_enabled = wallData.wall_enabled ?? 1;
-    State.user.wall_comments_enabled = wallData.wall_comments_enabled ?? 1;
     State.save();
     // Update self panel
     const sa = document.getElementById('self-avatar-el');
@@ -4198,7 +4202,11 @@ async function saveProfile() {
       }
     } catch {}
     closeModal('modal-profile');
-    UI.showToast('Settings saved', 'success');
+    if (wallSaveWarning) {
+      UI.showToast(`Settings saved (except style): ${wallSaveWarning}`, 'info');
+    } else {
+      UI.showToast('Settings saved', 'success');
+    }
   } catch {
     errEl.textContent = 'Network error';
   }
