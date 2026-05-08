@@ -292,7 +292,7 @@ const App = {
     try { window.__ftApplyMiniBoardGuestMode && window.__ftApplyMiniBoardGuestMode(); } catch {}
 
     // Apply saved theme
-    const savedTheme = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'dark';
+    const savedTheme = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'frog';
     if (typeof applyTheme === 'function') applyTheme(savedTheme);
 
     // Populate self panel

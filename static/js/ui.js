@@ -2197,7 +2197,7 @@ function switchSettingsTab(tab) {
   if (tab === 'appear') {
     try { loadCustomThemeIntoInputs(); } catch {}
     try {
-      const saved = document.body.dataset.theme || localStorage.getItem('frogtalk-theme') || 'dark';
+      const saved = document.body.dataset.theme || localStorage.getItem('frogtalk-theme') || 'frog';
       document.querySelectorAll('.theme-btn').forEach(btn => {
         btn.style.borderColor = btn.dataset.theme === saved ? '#4caf50' : '#333';
       });
@@ -2979,7 +2979,7 @@ function selectTheme(theme) {
   });
   // Save current theme before preview
   if (!_themePreviewOriginal) {
-    _themePreviewOriginal = localStorage.getItem('frogtalk-theme') || 'dark';
+    _themePreviewOriginal = localStorage.getItem('frogtalk-theme') || 'frog';
   }
   // Apply visually without saving
   _applyThemeVars(theme);
@@ -3009,7 +3009,7 @@ function _showThemePreviewBar(theme) {
 }
 
 function confirmThemePreview() {
-  const theme = document.body.dataset.theme || 'dark';
+  const theme = document.body.dataset.theme || 'frog';
   localStorage.setItem('frogtalk-theme', theme);
   _themePreviewOriginal = null;
   const bar = document.getElementById('theme-preview-bar');
@@ -3018,7 +3018,7 @@ function confirmThemePreview() {
 }
 
 function cancelThemePreview() {
-  const original = _themePreviewOriginal || 'dark';
+  const original = _themePreviewOriginal || 'frog';
   _applyThemeVars(original);
   document.body.dataset.theme = original;
   localStorage.setItem('frogtalk-theme', original);
@@ -3048,6 +3048,7 @@ function _applyThemeVars(theme) {
     } catch {}
   }
   const themes = {
+    frog: { bg: '#0d0d0d', surface: '#1e1e1e', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#4caf50' },
     dark: { bg: '#0d0d0d', surface: '#1e1e1e', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#4caf50' },
     light: { bg: '#f5f5f5', surface: '#ffffff', text: '#333333', muted: '#666', border: '#ddd', accent: '#4caf50' },
     midnight: { bg: '#0a0a1a', surface: '#151528', text: '#c0c0ff', muted: '#8888aa', border: '#252540', accent: '#6666ff' },
@@ -3059,7 +3060,7 @@ function _applyThemeVars(theme) {
     solarized: { bg: '#002b36', surface: '#073642', text: '#93a1a1', muted: '#586e75', border: '#0a4a55', accent: '#b58900' },
     mono: { bg: '#0a0a0a', surface: '#1a1a1a', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#cccccc' }
   };
-  const t = themes[theme] || themes.dark;
+  const t = themes[theme] || themes.frog;
   root.style.setProperty('--bg-color', t.bg);
   root.style.setProperty('--surface-color', t.surface);
   root.style.setProperty('--text-color', t.text);
@@ -3102,9 +3103,9 @@ function saveCustomTheme() {
 }
 function resetCustomTheme() {
   localStorage.removeItem('frogtalk-custom-theme');
-  applyTheme('dark');
+  applyTheme('frog');
   loadCustomThemeIntoInputs();
-  if (typeof toast === 'function') toast('Reset to Dark', 'success');
+  if (typeof toast === 'function') toast('Reset to Frog Default', 'success');
 }
 function exportThemeJson() {
   const d = _customThemeFromInputs();
@@ -3707,7 +3708,7 @@ async function showProfile() {
   const cssEl = document.getElementById('profile-custom-css');
   if (cssEl) cssEl.value = u.custom_css || '';
   // Appearance tab - select current theme
-  const currentTheme = u.theme || localStorage.getItem('frogtalk-theme') || 'dark';
+  const currentTheme = u.theme || localStorage.getItem('frogtalk-theme') || 'frog';
   document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.style.borderColor = btn.dataset.theme === currentTheme ? '#4caf50' : '#333';
     btn.onclick = () => selectTheme(btn.dataset.theme);
@@ -4046,7 +4047,7 @@ async function saveProfile() {
   const mood = document.getElementById('profile-mood')?.value?.slice(0, 100) || '';
   const customCss = document.getElementById('profile-custom-css')?.value?.slice(0, 10240) || '';
   // Theme
-  const currentTheme = document.body.dataset.theme || 'dark';
+  const currentTheme = document.body.dataset.theme || 'frog';
 
   if (displayName.length > 32) {
     errEl.textContent = 'Display name must be 32 characters or fewer';
@@ -4087,12 +4088,16 @@ async function saveProfile() {
   if (bannerPrev?.dataset.newBanner) body.banner = bannerPrev.dataset.newBanner;
   if (newPw) { body.new_password = newPw; body.current_password = curPw; }
 
+  let profileSaved = false;
   try {
     errEl.textContent = '';
+    const parseJsonSafe = async (resp) => {
+      try { return await resp.json(); } catch { return {}; }
+    };
 
     if (displayName !== String(State.user?.display_name || '')) {
       const displayRes = await apiFetch('/api/auth/display-name', 'PATCH', { display_name: displayName });
-      const displayData = await displayRes.json();
+      const displayData = await parseJsonSafe(displayRes);
       if (!displayRes.ok) {
         errEl.textContent = displayData.error || 'Display name save failed';
         return;
@@ -4110,7 +4115,7 @@ async function saveProfile() {
         nickname: nextNickname,
         password: curPw,
       });
-      const nickData = await nickRes.json();
+      const nickData = await parseJsonSafe(nickRes);
       if (!nickRes.ok) {
         if (nickRes.status === 429 && Number(nickData.retry_after_seconds) > 0) {
           State.user.username_change_remaining_seconds = Number(nickData.retry_after_seconds);
@@ -4125,13 +4130,10 @@ async function saveProfile() {
       _refreshUsernameCooldownUI();
     }
 
-    const res = await fetch('/api/auth/profile', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
-      body: JSON.stringify(body)
-    });
-    const data = await res.json();
+    const res = await apiFetch('/api/auth/profile', 'PATCH', body);
+    const data = await parseJsonSafe(res);
     if (!res.ok) { errEl.textContent = data.error || 'Save failed'; return; }
+    profileSaved = true;
     // Update local state
     State.user.bio = bio;
     State.user.status_msg = statusMsg;
@@ -4207,7 +4209,13 @@ async function saveProfile() {
     } else {
       UI.showToast('Settings saved', 'success');
     }
-  } catch {
+  } catch (e) {
+    if (profileSaved) {
+      closeModal('modal-profile');
+      UI.showToast('Settings saved', 'success');
+      return;
+    }
+    console.error('saveProfile failed', e);
     errEl.textContent = 'Network error';
   }
 }
