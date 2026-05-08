@@ -3041,6 +3041,8 @@ function applyTheme(theme) {
   document.body.dataset.theme = theme;
   localStorage.setItem('frogtalk-theme', theme);
   _applyThemeVars(theme);
+  const dd = document.getElementById('mention-dropdown');
+  if (dd && typeof syncMentionDropdownTheme === 'function') syncMentionDropdownTheme(dd);
 }
 
 function _applyThemeVars(theme) {
@@ -3101,6 +3103,8 @@ function updateCustomTheme() {
   if (d.text) root.style.setProperty('--text-color', d.text);
   if (d.muted) root.style.setProperty('--text-muted', d.muted);
   document.body.dataset.theme = 'custom';
+  const dd = document.getElementById('mention-dropdown');
+  if (dd && typeof syncMentionDropdownTheme === 'function') syncMentionDropdownTheme(dd);
 }
 function saveCustomTheme() {
   const d = _customThemeFromInputs();
@@ -5880,6 +5884,55 @@ async function loadMentionUsers(force = false) {
 function refreshMentionUsers(force = false) { return loadMentionUsers(force); }
 window.refreshMentionUsers = refreshMentionUsers;
 
+function _mentionColorWithAlpha(color, alpha, fallback) {
+  const c = String(color || '').trim();
+  if (!c) return fallback;
+  if (c.startsWith('#')) {
+    let hex = c.slice(1);
+    if (hex.length === 3) hex = hex.split('').map(ch => ch + ch).join('');
+    if (hex.length === 6) {
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      }
+    }
+  }
+  const m = c.match(/^rgba?\(([^)]+)\)$/i);
+  if (m) {
+    const parts = m[1].split(',').map(p => p.trim());
+    const r = Number(parts[0]);
+    const g = Number(parts[1]);
+    const b = Number(parts[2]);
+    if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+  }
+  return fallback;
+}
+
+function syncMentionDropdownTheme(dropdownEl) {
+  const dd = dropdownEl || document.getElementById('mention-dropdown');
+  if (!dd) return;
+  const css = getComputedStyle(document.documentElement);
+  const surface = (css.getPropertyValue('--surface-color') || '').trim() || '#1e1e1e';
+  const border = (css.getPropertyValue('--border-color') || '').trim() || '#2a2a2a';
+  const text = (css.getPropertyValue('--text-color') || '').trim() || '#e0e0e0';
+  const accent = (css.getPropertyValue('--accent-color') || '').trim() || '#4caf50';
+  const hover = _mentionColorWithAlpha(accent, 0.10, 'rgba(76, 175, 80, 0.10)');
+  const selectedBg = _mentionColorWithAlpha(accent, 0.22, 'rgba(76, 175, 80, 0.22)');
+
+  dd.style.setProperty('--mention-bg', surface);
+  dd.style.setProperty('--mention-border', border);
+  dd.style.setProperty('--mention-text', text);
+  dd.style.setProperty('--mention-hover', hover);
+  dd.style.setProperty('--mention-selected-bg', selectedBg);
+  dd.style.setProperty('--mention-selected-fg', accent);
+  dd.style.setProperty('--mention-shadow', 'rgba(0,0,0,.45)');
+}
+window.syncMentionDropdownTheme = syncMentionDropdownTheme;
+
 function handleMentionInput(input) {
   const text = input.value;
   const cursorPos = input.selectionStart;
@@ -5890,6 +5943,7 @@ function handleMentionInput(input) {
   
   const dropdown = document.getElementById('mention-dropdown');
   if (!dropdown) return;
+  syncMentionDropdownTheme(dropdown);
   
   if (!atMatch) {
     dropdown.style.display = 'none';
@@ -5998,6 +6052,7 @@ function insertMention(nickname) {
 // Load mention users on app init
 document.addEventListener('DOMContentLoaded', () => {
   setTimeout(loadMentionUsers, 2000);
+  syncMentionDropdownTheme();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

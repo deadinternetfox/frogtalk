@@ -2926,11 +2926,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .notif-preview-btn:focus-visible{outline:2px solid #4caf50;outline-offset:2px}
 /* @mention autocomplete dropdown — themed to match new UI surfaces */
 .mention-dropdown{
-  background:var(--surface-color);
-  border:1px solid var(--border-color);
+  background:var(--mention-bg, var(--surface-color));
+  border:1px solid var(--mention-border, var(--border-color));
   border-radius:10px;
-  box-shadow:0 8px 24px rgba(0,0,0,.45);
-  color:var(--text-color);
+  box-shadow:0 8px 24px var(--mention-shadow, rgba(0,0,0,.45));
+  color:var(--mention-text, var(--text-color));
   padding:4px;
 }
 .mention-dropdown .mention-item{
@@ -2940,16 +2940,16 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   gap:10px;
   cursor:pointer;
   border-radius:8px;
-  color:var(--text-color);
+  color:var(--mention-text, var(--text-color));
   background:transparent;
   transition:background .12s ease;
 }
-.mention-dropdown .mention-item:hover{background:var(--surface-hover)}
-.mention-dropdown .mention-item.selected{background:var(--accent-dim);color:var(--accent-color)}
+.mention-dropdown .mention-item:hover{background:var(--mention-hover, var(--surface-hover))}
+.mention-dropdown .mention-item.selected{background:var(--mention-selected-bg, var(--accent-dim));color:var(--mention-selected-fg, var(--accent-color))}
 .mention-dropdown .mention-nick{flex:1;font-size:14px}
 .mention-dropdown .mention-presence{
   width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto;
-  box-shadow:0 0 0 2px var(--surface-color);
+  box-shadow:0 0 0 2px var(--mention-bg, var(--surface-color));
 }
 .mention-dropdown .mention-presence.online{background:#4caf50}
 .mention-dropdown .mention-presence.offline{background:#666}
@@ -9244,7 +9244,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=427"></script>
 <script src="/static/js/ws.js?v=222"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=424"></script>
+<script src="/static/js/ui.js?v=425"></script>
   <script src="/static/js/rooms.js?v=426"></script>
 <script src="/static/js/messages.js?v=432"></script>
 <script src="/static/js/users.js?v=195"></script>
