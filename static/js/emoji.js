@@ -158,7 +158,7 @@ function openAddEmojiModal() {
     modal.className = 'modal-overlay hidden';
     modal.id = 'modal-add-emoji';
     modal.innerHTML = `
-      <div class="modal" style="max-width:360px">
+      <div class="modal modal-add-emoji">
         <div class="modal-title">Add Custom Emoji</div>
         <label class="modal-label">Emoji Name</label>
         <input class="modal-input" id="add-emoji-name" placeholder="e.g. cool_frog" maxlength="32"
@@ -168,9 +168,9 @@ function openAddEmojiModal() {
         <div id="add-emoji-preview" class="emoji-upload-preview" onclick="document.getElementById('add-emoji-file').click()">
           <span class="emoji-upload-placeholder">Click</span>
         </div>
-        <label class="toggle-row" style="display:flex;align-items:center;gap:8px;margin:12px 0">
-          <input type="checkbox" id="add-emoji-global" style="width:18px;height:18px">
-          <span class="modal-label" style="margin:0">Make available server-wide</span>
+        <label class="toggle-row add-emoji-toggle-row">
+          <input type="checkbox" id="add-emoji-global" class="add-emoji-global-check">
+          <span class="modal-label add-emoji-toggle-label">Make available server-wide</span>
         </label>
         <div class="modal-actions">
           <button class="modal-btn secondary" onclick="closeModal('modal-add-emoji')">Cancel</button>
