@@ -2888,10 +2888,6 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 }
 .modal-input:focus{border-color:#4caf50}
 .modal-label{font-size:13px;color:#888;margin-bottom:4px;display:block}
-@media (max-width:600px){
-  .modal-label{font-size:12px}
-  .modal-label span{font-size:10px !important}
-}
 .modal-actions{display:flex;gap:10px;margin-top:16px}
 .modal-btn{
   flex:1;padding:10px;border-radius:8px;border:none;font-size:14px;font-weight:600;cursor:pointer;
@@ -7961,7 +7957,7 @@ window.ConnErr = (function(){
       <div style="font-size:11px;color:#555;margin-bottom:12px">Click banner to upload a new header image (max 3MB)</div>
       <div style="display:grid;grid-template-columns:minmax(0,1fr);gap:12px;margin-bottom:10px">
         <div>
-          <label class="modal-label">Display Name <span style="font-weight:400;color:#888;font-size:11px">— how your name shows up in chat, friends, and social</span></label>
+          <label class="modal-label">Display Name <span style="font-weight:400;color:#888;font-size:11px">— shown in chat & social</span></label>
           <input class="modal-input" id="profile-display-name" maxlength="32" placeholder="Leave blank to use only @username">
           <div style="font-size:11px;color:#555;margin:2px 0 0">Up to 32 characters.</div>
         </div>
