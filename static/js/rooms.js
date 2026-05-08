@@ -1982,9 +1982,7 @@ const Rooms = (() => {
       // Auto-join public channels so the link "just works".
       if (!room.is_private && !(cached && cached.joined)) {
         try {
-          await apiFetch(`/api/rooms/${encodeURIComponent(raw)}/join`, {
-            method: 'POST'
-          });
+          await apiFetch(`/api/rooms/${encodeURIComponent(raw)}/join`, 'POST');
         } catch {}
       }
       try { await loadRooms(); } catch {}

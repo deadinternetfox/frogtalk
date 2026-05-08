@@ -26,6 +26,11 @@ const Messages = (() => {
     return String(url || '').replace(/&amp;/g, '&');
   }
 
+  function _isInviteUrl(url) {
+    const u = _normalizeUrl(url);
+    return /https?:\/\/(?:www\.)?(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}\b/i.test(u);
+  }
+
   // Re-pin the messages area to the bottom AFTER an async embed swap
   // (invite/profile/post/reel) replaces a small placeholder span with a
   // taller card. The render-time auto-scroll fires before hydration
@@ -113,7 +118,7 @@ const Messages = (() => {
     // /i/<code-or-vanity> form. Vanities are 2–32 chars, [a-z0-9_-], so the
     // unified pattern just allows 2–32 [A-Za-z0-9_-] and lets the server
     // resolve which kind it is.
-    const inviteRe = /https?:\/\/(?:frogtalk\.xyz|localhost(?::\d+)?)\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})/g;
+    const inviteRe = /https?:\/\/(?:www\.)?(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})/g;
     escaped = escaped.replace(inviteRe, (url, code) =>
       `<span class="invite-card-placeholder" data-invite-code="${UI.escHtml(code)}">` +
       `<span class="invite-card-loading">🐸 Loading invite…</span></span>`
@@ -583,7 +588,7 @@ const Messages = (() => {
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
         ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`
-        : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join</button>`;
+        : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Open Channel</button>`;
       if (!placeholder.parentNode) return;
       placeholder.outerHTML = `
         <div class="invite-card">
@@ -1585,7 +1590,7 @@ const Messages = (() => {
       const urls = (msg.content || '').match(urlRe);
       if (urls && urls.length) {
         const firstUrl = urls[0];
-        const isInvite = /\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(firstUrl);
+        const isInvite = _isInviteUrl(firstUrl);
         const isSocial = !!_parseFrogSocialUrl(firstUrl);
         // Always strip our own (frogtalk.xyz / frogtalk.app) OG previews —
         // invite/profile/post/reel URLs hydrate as native cards, and bare
@@ -1797,7 +1802,7 @@ const Messages = (() => {
           const urls = (msg.content || '').match(urlRe);
           if (urls && urls.length) {
             const firstUrl = urls[0];
-            const isInvite = /\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(firstUrl);
+            const isInvite = _isInviteUrl(firstUrl);
             const isSocial = !!_parseFrogSocialUrl(firstUrl);
             const isSelf = /^https?:\/\/(?:www\.)?frogtalk\.(?:xyz|app)\b/i.test(firstUrl);
             if (!isInvite && !isSocial && !isSelf && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
@@ -1885,7 +1890,7 @@ const Messages = (() => {
     const urls = (msg.content || '').match(urlRe);
     if (urls && urls.length) {
       const firstUrl = urls[0];
-      const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
+      const isInvite = _isInviteUrl(firstUrl);
       const isSocial = !!_parseFrogSocialUrl(firstUrl);
       if (!isInvite && !isSocial && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 200);
     }
@@ -1912,7 +1917,7 @@ const Messages = (() => {
     const urls = (content || '').match(urlRe);
     if (urls && urls.length) {
       const firstUrl = urls[0];
-      const isInvite = /\/invite\/[A-Za-z0-9]{6,16}/.test(firstUrl);
+      const isInvite = _isInviteUrl(firstUrl);
       const isSocial = !!_parseFrogSocialUrl(firstUrl);
       if (!isInvite && !isSocial) setTimeout(() => _loadLinkPreview(id, firstUrl), 120);
     }
@@ -2844,9 +2849,9 @@ const Messages = (() => {
   }
 
   async function joinViaInvite(code, btn) {
-    if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
     try {
-      const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}/join`, { method: 'POST' });
+      const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}/join`, 'POST');
       const data = await res.json();
       if (res.ok && data.ok) {
         if (btn) {
@@ -2858,11 +2863,11 @@ const Messages = (() => {
         await Rooms.loadRooms?.();
         Rooms.openChannelLink(data.room);
       } else {
-        if (btn) { btn.disabled = false; btn.textContent = 'Join'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Open Channel'; }
         UI.toast(data.error || 'Could not join channel');
       }
     } catch (e) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Join'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Open Channel'; }
       UI.toast('Could not join channel');
     }
   }

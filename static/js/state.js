@@ -98,10 +98,15 @@ function esc (s) {
 // Signals ConnErr on network-level failures (TypeError) so the retry overlay
 // appears after repeated offline failures.
 async function apiFetch (url, method = 'GET', body = null) {
-  const headers = { 'X-Session-Token': State.token || '' };
-  const opts = { method, headers };
-  if (body && method !== 'GET') {
-    headers['Content-Type'] = 'application/json';
+  const authHeaders = { 'X-Session-Token': State.token || '' };
+  // Back-compat: many callers pass a fetch-style options object as the 2nd
+  // arg (e.g. { method:'POST' } or { signal }). Normalize both signatures.
+  const isOptsObject = method && typeof method === 'object' && !Array.isArray(method);
+  const opts = isOptsObject
+    ? { ...method, method: method.method || 'GET', headers: { ...(method.headers || {}), ...authHeaders } }
+    : { method, headers: authHeaders };
+  if (body && String(opts.method).toUpperCase() !== 'GET') {
+    opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
   // Per-request timeout so a stalled socket (e.g. video downloads
