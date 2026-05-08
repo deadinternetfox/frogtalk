@@ -5915,11 +5915,16 @@ function _mentionColorWithAlpha(color, alpha, fallback) {
 function syncMentionDropdownTheme(dropdownEl) {
   const dd = dropdownEl || document.getElementById('mention-dropdown');
   if (!dd) return;
-  const css = getComputedStyle(document.documentElement);
-  const surface = (css.getPropertyValue('--surface-color') || '').trim() || '#1e1e1e';
-  const border = (css.getPropertyValue('--border-color') || '').trim() || '#2a2a2a';
-  const text = (css.getPropertyValue('--text-color') || '').trim() || '#e0e0e0';
-  const accent = (css.getPropertyValue('--accent-color') || '').trim() || '#4caf50';
+  const rootCss = getComputedStyle(document.documentElement);
+  const inputWrap = document.querySelector('.input-wrap');
+  const area = document.getElementById('input-area');
+  const source = inputWrap || area;
+  const sourceCss = source ? getComputedStyle(source) : null;
+
+  const surface = (sourceCss && sourceCss.backgroundColor) || (rootCss.getPropertyValue('--surface-color') || '').trim() || '#1e1e1e';
+  const border = (sourceCss && sourceCss.borderColor) || (rootCss.getPropertyValue('--border-color') || '').trim() || '#2a2a2a';
+  const text = (rootCss.getPropertyValue('--text-color') || '').trim() || '#e0e0e0';
+  const accent = (rootCss.getPropertyValue('--accent-color') || '').trim() || '#4caf50';
   const hover = _mentionColorWithAlpha(accent, 0.10, 'rgba(76, 175, 80, 0.10)');
   const selectedBg = _mentionColorWithAlpha(accent, 0.22, 'rgba(76, 175, 80, 0.22)');
 
@@ -5930,8 +5935,42 @@ function syncMentionDropdownTheme(dropdownEl) {
   dd.style.setProperty('--mention-selected-bg', selectedBg);
   dd.style.setProperty('--mention-selected-fg', accent);
   dd.style.setProperty('--mention-shadow', 'rgba(0,0,0,.45)');
+
+  // Hard-apply critical colors so the popup never falls back to stale/dark CSS.
+  dd.style.background = surface;
+  dd.style.borderColor = border;
+  dd.style.color = text;
+  dd.style.boxShadow = '0 8px 24px rgba(0,0,0,.45)';
 }
 window.syncMentionDropdownTheme = syncMentionDropdownTheme;
+
+function syncMentionDropdownItemsTheme(dropdownEl) {
+  const dd = dropdownEl || document.getElementById('mention-dropdown');
+  if (!dd) return;
+  const css = getComputedStyle(document.documentElement);
+  const text = (css.getPropertyValue('--text-color') || '').trim() || '#e0e0e0';
+  const accent = (css.getPropertyValue('--accent-color') || '').trim() || '#4caf50';
+  const hover = _mentionColorWithAlpha(accent, 0.10, 'rgba(76, 175, 80, 0.10)');
+  const selectedBg = _mentionColorWithAlpha(accent, 0.22, 'rgba(76, 175, 80, 0.22)');
+
+  dd.querySelectorAll('.mention-item').forEach(item => {
+    const selected = item.classList.contains('selected');
+    item.style.color = selected ? accent : text;
+    item.style.background = selected ? selectedBg : 'transparent';
+  });
+
+  // Keep hover state themed even if external CSS is stale.
+  dd.onmouseover = (e) => {
+    const item = e.target && e.target.closest ? e.target.closest('.mention-item') : null;
+    if (!item || item.classList.contains('selected')) return;
+    item.style.background = hover;
+  };
+  dd.onmouseout = (e) => {
+    const item = e.target && e.target.closest ? e.target.closest('.mention-item') : null;
+    if (!item || item.classList.contains('selected')) return;
+    item.style.background = 'transparent';
+  };
+}
 
 function handleMentionInput(input) {
   const text = input.value;
@@ -5980,6 +6019,8 @@ function handleMentionInput(input) {
       </div>
     `;
   }).join('');
+
+  syncMentionDropdownItemsTheme(dropdown);
   
   dropdown.style.display = 'block';
   
@@ -6002,6 +6043,7 @@ function handleMentionKeydown(e) {
     items[_mentionIndex].classList.remove('selected');
     _mentionIndex = (_mentionIndex + 1) % items.length;
     items[_mentionIndex].classList.add('selected');
+    syncMentionDropdownItemsTheme(dropdown);
     return true;
   }
   
@@ -6010,6 +6052,7 @@ function handleMentionKeydown(e) {
     items[_mentionIndex].classList.remove('selected');
     _mentionIndex = (_mentionIndex - 1 + items.length) % items.length;
     items[_mentionIndex].classList.add('selected');
+    syncMentionDropdownItemsTheme(dropdown);
     return true;
   }
   
