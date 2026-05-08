@@ -3045,32 +3045,61 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .emoji-upload-preview:hover{border-color:var(--accent-color)}
 .emoji-upload-placeholder{font-size:13px;color:var(--text-muted)}
 
-/* Add Custom Emoji modal: keep it fully themed (no browser-default black/blue controls) */
+/* Add Custom Emoji modal: stronger theme match with tinted overlay + surface */
+#modal-add-emoji.modal-overlay{
+  background:
+    radial-gradient(120% 120% at 20% 10%, color-mix(in srgb, var(--accent-color) 22%, transparent), transparent 56%),
+    radial-gradient(120% 120% at 80% 100%, color-mix(in srgb, var(--accent-color) 16%, transparent), transparent 62%),
+    rgba(6, 12, 10, .78) !important;
+  backdrop-filter:blur(3px) saturate(118%);
+}
 #modal-add-emoji .modal-add-emoji{
   max-width:360px;
-  background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%) !important;
-  border:1px solid #3b6c59 !important;
-  color:#dff5e8 !important;
-  box-shadow:0 18px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(76,175,80,.08) !important;
+  background:linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-color) 78%, var(--accent-color) 22%) 0%,
+    color-mix(in srgb, var(--surface-color) 70%, var(--accent-color) 30%) 36%,
+    color-mix(in srgb, var(--bg-color) 82%, var(--accent-color) 18%) 100%
+  ) !important;
+  border:1px solid color-mix(in srgb, var(--accent-color) 46%, var(--border-color)) !important;
+  color:color-mix(in srgb, var(--text-color) 92%, #dff5e8) !important;
+  box-shadow:
+    0 22px 60px rgba(0,0,0,.56),
+    0 0 0 1px color-mix(in srgb, var(--accent-color) 18%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.04) !important;
 }
 #modal-add-emoji .modal-title{color:#dff5e8 !important}
 #modal-add-emoji .modal-label{color:#9bd0ad !important}
 #modal-add-emoji .modal-input{
-  background:linear-gradient(180deg,#10241c 0%,#0c1d16 60%,#0a1813 100%) !important;
-  border:1px solid #2f5548 !important;
+  background:linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-color) 86%, var(--accent-color) 14%) 0%,
+    color-mix(in srgb, var(--bg-color) 90%, var(--accent-color) 10%) 100%
+  ) !important;
+  border:1px solid color-mix(in srgb, var(--accent-color) 34%, var(--border-color)) !important;
   color:#e8f4ee !important;
 }
 #modal-add-emoji .modal-input::placeholder{color:#7a9c8d !important;opacity:.9}
-#modal-add-emoji .modal-input:hover{border-color:#42755f !important}
+#modal-add-emoji .modal-input:hover{
+  border-color:color-mix(in srgb, var(--accent-color) 55%, var(--border-color)) !important;
+}
 #modal-add-emoji .modal-input:focus{
-  border-color:#7fd2a7 !important;
-  box-shadow:0 0 0 3px rgba(127,210,167,.18), 0 4px 14px rgba(76,175,80,.22) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 80%, #8de0b6) !important;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--accent-color) 24%, transparent),
+    0 4px 14px color-mix(in srgb, var(--accent-color) 28%, transparent) !important;
 }
 #modal-add-emoji .emoji-upload-preview{
-  background:linear-gradient(180deg,#10241c 0%,#0c1d16 60%,#0a1813 100%) !important;
-  border:2px dashed #2f5548 !important;
+  background:linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-color) 84%, var(--accent-color) 16%) 0%,
+    color-mix(in srgb, var(--bg-color) 90%, var(--accent-color) 10%) 100%
+  ) !important;
+  border:2px dashed color-mix(in srgb, var(--accent-color) 36%, var(--border-color)) !important;
 }
-#modal-add-emoji .emoji-upload-preview:hover{border-color:#6bb698 !important}
+#modal-add-emoji .emoji-upload-preview:hover{
+  border-color:color-mix(in srgb, var(--accent-color) 74%, #9ce7c0) !important;
+}
 #modal-add-emoji .emoji-upload-placeholder{color:#9bd0ad !important}
 #modal-add-emoji .add-emoji-toggle-row{
   display:flex;
