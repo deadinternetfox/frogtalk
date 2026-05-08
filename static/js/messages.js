@@ -871,6 +871,9 @@ const Messages = (() => {
           wrap.className = 'preview-wrap';
           newEmbed.parentNode.insertBefore(wrap, newEmbed);
           wrap.appendChild(newEmbed);
+          // Move top spacing from embed to wrapper so the X anchor point is stable.
+          wrap.style.marginTop = '8px';
+          newEmbed.style.marginTop = '0';
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'preview-suppress-btn';

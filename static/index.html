@@ -6885,18 +6885,19 @@ body.mini-embedded .auth-tabs { margin-bottom:14px; }
   padding:0;
 }
 .preview-suppress-btn{
-  position:absolute;top:14px;right:8px;  /* +8px down accounts for the embed's own margin-top:8px */
+  position:absolute;top:6px;right:6px;
   width:22px;height:22px;line-height:18px;text-align:center;
   padding:0;margin:0;border:none;border-radius:50%;
   background:rgba(0,0,0,.7);color:#fff;
   font-size:16px;font-weight:600;cursor:pointer;
-  opacity:0;transition:opacity .12s ease, background .12s ease;
-  z-index:5;
+  opacity:.92;transition:opacity .12s ease, background .12s ease, transform .12s ease;
+  z-index:25;
+  pointer-events:auto;
 }
 .preview-wrap:hover > .preview-suppress-btn,
 .preview-suppress-btn:focus,
 .preview-suppress-btn:hover{ opacity:1; }
-.preview-suppress-btn:hover{ background:rgba(220,38,38,.95); }
+.preview-suppress-btn:hover{ background:rgba(220,38,38,.95); transform:scale(1.05); }
 @media (hover:none){
   .preview-suppress-btn{ opacity:.85; }
 }
@@ -9246,11 +9247,11 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=426"></script>
   <script src="/static/js/rooms.js?v=426"></script>
-<script src="/static/js/messages.js?v=434"></script>
+<script src="/static/js/messages.js?v=435"></script>
 <script src="/static/js/users.js?v=195"></script>
 <script src="/static/js/emoji.js?v=192"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=429"></script>
+<script src="/static/js/dms.js?v=430"></script>
 <script src="/static/js/calls.js?v=218"></script>
 <script src="/static/js/media.js?v=416"></script>
 <script src="/static/js/gifs.js?v=201"></script>
