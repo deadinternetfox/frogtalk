@@ -165,12 +165,12 @@ function openAddEmojiModal() {
                oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_]/g,'')">
         <label class="modal-label">Image (PNG, GIF, up to 256KB)</label>
         <input type="file" id="add-emoji-file" accept="image/png,image/gif,image/webp" style="display:none">
-        <div id="add-emoji-preview" style="width:64px;height:64px;background:#1a1a1a;border-radius:8px;margin:10px auto;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px dashed #333" onclick="document.getElementById('add-emoji-file').click()">
-          <span style="color:#666">Click</span>
+        <div id="add-emoji-preview" class="emoji-upload-preview" onclick="document.getElementById('add-emoji-file').click()">
+          <span class="emoji-upload-placeholder">Click</span>
         </div>
         <label class="toggle-row" style="display:flex;align-items:center;gap:8px;margin:12px 0">
           <input type="checkbox" id="add-emoji-global" style="width:18px;height:18px">
-          <span style="font-size:13px;color:#ccc">Make available server-wide</span>
+          <span class="modal-label" style="margin:0">Make available server-wide</span>
         </label>
         <div class="modal-actions">
           <button class="modal-btn secondary" onclick="closeModal('modal-add-emoji')">Cancel</button>
@@ -201,7 +201,7 @@ function openAddEmojiModal() {
   // Reset form
   document.getElementById('add-emoji-name').value = '';
   document.getElementById('add-emoji-file').value = '';
-  document.getElementById('add-emoji-preview').innerHTML = '<span style="color:#666">Click</span>';
+  document.getElementById('add-emoji-preview').innerHTML = '<span class="emoji-upload-placeholder">Click</span>';
   document.getElementById('add-emoji-preview').dataset.imageData = '';
   document.getElementById('add-emoji-global').checked = true;
   

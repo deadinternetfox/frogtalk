@@ -5,6 +5,7 @@
 const Messages = (() => {
   let _lastNick = null;
   let _lastBridge = null;
+  let _lastBridgeSource = null;
   let _lastDate = null;
   let _isSending = false;
   let _previewCache = {};
@@ -588,7 +589,7 @@ const Messages = (() => {
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
         ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`
-        : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Open Channel</button>`;
+        : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join Channel</button>`;
       if (!placeholder.parentNode) return;
       placeholder.outerHTML = `
         <div class="invite-card">
@@ -1526,7 +1527,8 @@ const Messages = (() => {
     // gets rendered as a header-less continuation, hiding their avatar /
     // username / timestamp.
     const curBridge = msg.bridge_platform || null;
-    return msg.nickname === _lastNick && curBridge === _lastBridge;
+    const curSource = msg.bridge_source_name || null;
+    return msg.nickname === _lastNick && curBridge === _lastBridge && curSource === _lastBridgeSource;
   }
 
   function _dateChanged(msg) {
@@ -1540,6 +1542,7 @@ const Messages = (() => {
     const area = document.getElementById('messages-area');
     _lastNick = null;
     _lastBridge = null;
+    _lastBridgeSource = null;
     _lastDate = null;
     // Reset room cache before rebuilding so repeated loadHistory calls
     // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
@@ -1577,11 +1580,13 @@ const Messages = (() => {
         html += `<div class="msg-date-divider">${UI.escHtml(dateLabel)}</div>`;
         _lastNick = null;
         _lastBridge = null;
+        _lastBridgeSource = null;
       }
       const isCont = _shouldContinue(msg);
       html += _msgHtml(msg, isCont);
       _lastNick = msg.nickname;
       _lastBridge = msg.bridge_platform || null;
+      _lastBridgeSource = msg.bridge_source_name || null;
 
       State.messages[room].push(msg);
       
@@ -1844,11 +1849,13 @@ const Messages = (() => {
       html += `<div class="msg-date-divider">${UI.escHtml(dateLabel)}</div>`;
       _lastNick = null;
       _lastBridge = null;
+      _lastBridgeSource = null;
     }
     const isCont = _shouldContinue(msg);
     html += _msgHtml(msg, isCont);
     _lastNick = msg.nickname;
     _lastBridge = msg.bridge_platform || null;
+    _lastBridgeSource = msg.bridge_source_name || null;
 
     const wrapper = document.createElement('div');
     wrapper.innerHTML = html;
@@ -2849,7 +2856,7 @@ const Messages = (() => {
   }
 
   async function joinViaInvite(code, btn) {
-    if (btn) { btn.disabled = true; btn.textContent = 'Opening…'; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
     try {
       const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}/join`, 'POST');
       const data = await res.json();
@@ -2863,11 +2870,11 @@ const Messages = (() => {
         await Rooms.loadRooms?.();
         Rooms.openChannelLink(data.room);
       } else {
-        if (btn) { btn.disabled = false; btn.textContent = 'Open Channel'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Join Channel'; }
         UI.toast(data.error || 'Could not join channel');
       }
     } catch (e) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Open Channel'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Join Channel'; }
       UI.toast('Could not join channel');
     }
   }

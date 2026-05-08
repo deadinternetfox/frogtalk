@@ -2806,8 +2806,12 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
                        u.display_name AS sender_display_name,
-                       u.is_admin AS sender_is_admin
+                       u.is_admin AS sender_is_admin,
+                       ru.nickname AS reply_nick,
+                       substr(r.content,1,120) AS reply_content
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
+                LEFT JOIN dm_messages r ON r.id = dm.reply_to
+                LEFT JOIN users ru ON ru.id = r.sender_id
                 WHERE dm.channel_id=? AND dm.id > ? AND dm.deleted=0
                 ORDER BY dm.id ASC LIMIT ?
             """, (channel_id, after_id, limit)).fetchall()
@@ -2821,8 +2825,12 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
                        u.display_name AS sender_display_name,
-                       u.is_admin AS sender_is_admin
+                       u.is_admin AS sender_is_admin,
+                       ru.nickname AS reply_nick,
+                       substr(r.content,1,120) AS reply_content
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
+                LEFT JOIN dm_messages r ON r.id = dm.reply_to
+                LEFT JOIN users ru ON ru.id = r.sender_id
                 WHERE dm.channel_id=? AND dm.id < ? AND dm.deleted=0
                 ORDER BY dm.id DESC LIMIT ?
             """, (channel_id, before_id, limit)).fetchall()
@@ -2836,8 +2844,12 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
                        u.display_name AS sender_display_name,
-                       u.is_admin AS sender_is_admin
+                       u.is_admin AS sender_is_admin,
+                       ru.nickname AS reply_nick,
+                       substr(r.content,1,120) AS reply_content
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
+                LEFT JOIN dm_messages r ON r.id = dm.reply_to
+                LEFT JOIN users ru ON ru.id = r.sender_id
                 WHERE dm.channel_id=? AND dm.deleted=0
                 ORDER BY dm.id DESC LIMIT ?
             """, (channel_id, limit)).fetchall()

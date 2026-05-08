@@ -2197,7 +2197,7 @@ function switchSettingsTab(tab) {
   if (tab === 'appear') {
     try { loadCustomThemeIntoInputs(); } catch {}
     try {
-      const saved = document.body.dataset.theme || localStorage.getItem('frogtalk-theme') || 'frog';
+      const saved = _normalizeThemeKey(document.body.dataset.theme || localStorage.getItem('frogtalk-theme') || 'frog');
       document.querySelectorAll('.theme-btn').forEach(btn => {
         btn.style.borderColor = btn.dataset.theme === saved ? '#4caf50' : '#333';
       });
@@ -2973,13 +2973,21 @@ async function deleteBot(botId) {
 
 let _themePreviewOriginal = null; // theme before preview started
 
+function _normalizeThemeKey(theme) {
+  const t = String(theme || '').trim().toLowerCase();
+  // Legacy compatibility: old accounts saved the default palette as "dark".
+  // Treat it as Frog so UI selection and persisted state stay consistent.
+  return (t === 'dark' || !t) ? 'frog' : t;
+}
+
 function selectTheme(theme) {
+  theme = _normalizeThemeKey(theme);
   document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.style.borderColor = btn.dataset.theme === theme ? '#4caf50' : '#333';
   });
   // Save current theme before preview
   if (!_themePreviewOriginal) {
-    _themePreviewOriginal = localStorage.getItem('frogtalk-theme') || 'frog';
+    _themePreviewOriginal = _normalizeThemeKey(localStorage.getItem('frogtalk-theme') || 'frog');
   }
   // Apply visually without saving
   _applyThemeVars(theme);
@@ -3009,7 +3017,8 @@ function _showThemePreviewBar(theme) {
 }
 
 function confirmThemePreview() {
-  const theme = document.body.dataset.theme || 'frog';
+  const theme = _normalizeThemeKey(document.body.dataset.theme || 'frog');
+  document.body.dataset.theme = theme;
   localStorage.setItem('frogtalk-theme', theme);
   _themePreviewOriginal = null;
   const bar = document.getElementById('theme-preview-bar');
@@ -3018,7 +3027,7 @@ function confirmThemePreview() {
 }
 
 function cancelThemePreview() {
-  const original = _themePreviewOriginal || 'frog';
+  const original = _normalizeThemeKey(_themePreviewOriginal || 'frog');
   _applyThemeVars(original);
   document.body.dataset.theme = original;
   localStorage.setItem('frogtalk-theme', original);
@@ -3028,6 +3037,7 @@ function cancelThemePreview() {
 }
 
 function applyTheme(theme) {
+  theme = _normalizeThemeKey(theme);
   document.body.dataset.theme = theme;
   localStorage.setItem('frogtalk-theme', theme);
   _applyThemeVars(theme);
@@ -3708,7 +3718,9 @@ async function showProfile() {
   const cssEl = document.getElementById('profile-custom-css');
   if (cssEl) cssEl.value = u.custom_css || '';
   // Appearance tab - select current theme
-  const currentTheme = u.theme || localStorage.getItem('frogtalk-theme') || 'frog';
+  const currentTheme = _normalizeThemeKey(u.theme || localStorage.getItem('frogtalk-theme') || 'frog');
+  document.body.dataset.theme = currentTheme;
+  localStorage.setItem('frogtalk-theme', currentTheme);
   document.querySelectorAll('.theme-btn').forEach(btn => {
     btn.style.borderColor = btn.dataset.theme === currentTheme ? '#4caf50' : '#333';
     btn.onclick = () => selectTheme(btn.dataset.theme);
@@ -4047,7 +4059,7 @@ async function saveProfile() {
   const mood = document.getElementById('profile-mood')?.value?.slice(0, 100) || '';
   const customCss = document.getElementById('profile-custom-css')?.value?.slice(0, 10240) || '';
   // Theme
-  const currentTheme = document.body.dataset.theme || 'frog';
+  const currentTheme = _normalizeThemeKey(document.body.dataset.theme || 'frog');
 
   if (displayName.length > 32) {
     errEl.textContent = 'Display name must be 32 characters or fewer';

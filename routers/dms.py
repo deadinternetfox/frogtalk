@@ -266,6 +266,24 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
         forwarded_from=(body.forwarded_from if fwd_meta else None),
     )
 
+    # Resolve reply preview for broadcast
+    _reply_nick = None
+    _reply_content = None
+    if body.reply_to:
+        try:
+            with db._conn() as _rc:
+                _rrow = _rc.execute(
+                    """SELECT u.nickname, substr(dm.content,1,120) AS content
+                       FROM dm_messages dm JOIN users u ON u.id=dm.sender_id
+                       WHERE dm.id=?""",
+                    (body.reply_to,)
+                ).fetchone()
+            if _rrow:
+                _reply_nick = _rrow["nickname"]
+                _reply_content = _rrow["content"]
+        except Exception:
+            pass
+
     # Build broadcast payload (strip heavy media_data)
     dm_broadcast = {
         "type": "dm_message",
@@ -284,6 +302,8 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
         "view_once": 1 if body.view_once else 0,
         "viewed_by_me": 0,
         "reply_to": body.reply_to,
+        "reply_nick": _reply_nick,
+        "reply_content": _reply_content,
         "forwarded_from": (body.forwarded_from if fwd_meta else None),
         "edited": False,
         "deleted": False,

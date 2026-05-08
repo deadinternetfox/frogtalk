@@ -3036,6 +3036,15 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .ep-cat:hover{background:rgba(76,175,80,.10);color:#cfe8d2}
 .ep-cat.active{background:linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 100%);color:#7fd08a;box-shadow:inset 0 0 0 1px rgba(76,175,80,.25)}
 
+/* ─── Add Custom Emoji upload preview ──────────────────────── */
+.emoji-upload-preview{
+  width:64px;height:64px;background:var(--bg-color);border-radius:8px;
+  margin:10px auto;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;border:2px dashed var(--border-color);
+}
+.emoji-upload-preview:hover{border-color:var(--accent-color)}
+.emoji-upload-placeholder{font-size:13px;color:var(--text-muted)}
+
 /* ─── Encryption lock icon ──────────────────────────────────── */
 .enc-lock{font-size:12px;opacity:.7;margin-right:4px}
 
@@ -3308,16 +3317,16 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .invite-card-by strong{color:color-mix(in srgb,var(--text-color) 86%,var(--accent-color))}
 .invite-card-by-nick[onclick]{cursor:pointer}
 .invite-join-btn{
-  flex-shrink:0;padding:8px 20px;border-radius:6px;border:none;cursor:pointer;
-  background:linear-gradient(180deg,color-mix(in srgb,var(--accent-color) 82%,white),var(--accent-color));color:#fff;font-size:13px;font-weight:700;
+  flex-shrink:0;padding:8px 20px;border-radius:6px;border:1px solid #3a7a54;cursor:pointer;
+  background:linear-gradient(180deg,#1f5c3a,#173f28);color:#b8e8c8;font-size:13px;font-weight:700;
   transition:background .15s,transform .1s,box-shadow .15s;white-space:nowrap;
-  box-shadow:0 2px 6px color-mix(in srgb,var(--accent-color) 30%,transparent);
+  box-shadow:0 2px 6px rgba(20,80,50,.35);
 }
-.invite-join-btn:hover{background:linear-gradient(180deg,color-mix(in srgb,var(--accent-color) 70%,white),color-mix(in srgb,var(--accent-color) 90%,black));box-shadow:0 3px 10px color-mix(in srgb,var(--accent-color) 45%,transparent)}
+.invite-join-btn:hover{background:linear-gradient(180deg,#265e3d,#1c4d30);border-color:#4a9068;box-shadow:0 3px 10px rgba(20,80,50,.5)}
 .invite-join-btn:active{transform:scale(.97)}
 .invite-join-btn:disabled{background:color-mix(in srgb,var(--surface-color) 85%,black);color:var(--text-muted);cursor:not-allowed;box-shadow:none}
-.invite-join-btn--already{background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 95%,var(--accent-color) 5%),color-mix(in srgb,var(--surface-color) 86%,black));color:color-mix(in srgb,var(--text-color) 80%,var(--accent-color));border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color))}
-.invite-join-btn--already:hover{background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 98%,var(--accent-color) 8%),color-mix(in srgb,var(--surface-color) 90%,black))}
+.invite-join-btn--already{background:linear-gradient(180deg,#1a3d2e,#142e22);color:#7ecf96;border:1px solid #3a7057}
+.invite-join-btn--already:hover{background:linear-gradient(180deg,#1e4834,#183628);border-color:#4a8a6a}
 .invite-card-invalid{
   display:inline-block;margin-top:6px;font-size:12px;color:var(--text-muted);
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 92%,black),color-mix(in srgb,var(--surface-color) 86%,black));border:1px solid color-mix(in srgb,var(--accent-color) 22%,var(--border-color));border-radius:6px;padding:6px 12px;
@@ -3373,14 +3382,7 @@ body[data-theme="frog"] .invite-card-icon{
   background:linear-gradient(180deg,#1a3b2e,#143026);
   border:1px solid #3f725c;
 }
-body:is([data-theme="frog"],[data-theme="dark"]) .invite-join-btn{
-  background:linear-gradient(180deg,#3ba55d,#2e8a4e);
-  box-shadow:0 2px 6px rgba(43,140,78,.3);
-}
-body:is([data-theme="frog"],[data-theme="dark"]) .invite-join-btn:hover{
-  background:linear-gradient(180deg,#45bf6e,#38a35e);
-  box-shadow:0 3px 10px rgba(43,140,78,.45);
-}
+
 @media(max-width:640px){
   .invite-card{max-width:100%}
   .invite-card-body{padding:12px;gap:10px;align-items:flex-start}
@@ -9165,14 +9167,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/state.js?v=192"></script>
 <script src="/static/js/mute.js?v=191"></script>
-<script src="/static/js/notifications.js?v=420"></script>
+<script src="/static/js/notifications.js?v=421"></script>
 <script src="/static/js/ws.js?v=222"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=420"></script>
+<script src="/static/js/ui.js?v=421"></script>
   <script src="/static/js/rooms.js?v=426"></script>
-<script src="/static/js/messages.js?v=429"></script>
+<script src="/static/js/messages.js?v=431"></script>
 <script src="/static/js/users.js?v=195"></script>
-<script src="/static/js/emoji.js?v=191"></script>
+<script src="/static/js/emoji.js?v=192"></script>
 <script src="/static/js/friends.js?v=419"></script>
 <script src="/static/js/dms.js?v=426"></script>
 <script src="/static/js/calls.js?v=218"></script>
