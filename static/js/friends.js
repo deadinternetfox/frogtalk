@@ -222,7 +222,7 @@ async function sendFriendReq (nick, btn) {
   const r = await apiFetch('/api/friends/request/' + encodeURIComponent(nick), 'POST');
   if (r.ok) {
     toast('Friend request sent to ' + nick);
-    if (btn) { btn.textContent = 'Sent ✓'; btn.style.background = '#1a3a1a'; btn.style.color = '#4caf50'; }
+    if (btn) { btn.textContent = 'Requested'; btn.style.background = '#1a3a1a'; btn.style.color = '#4caf50'; }
     // Notify recipient in real-time via WebSocket
     wsSend({ type: 'friend_notify', action: 'request', to_nick: nick });
   } else {
