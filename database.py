@@ -867,8 +867,9 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
-                          COALESCE(m.bridge_avatar, u.avatar) AS avatar,
-                          u.display_name AS display_name,
+                         COALESCE(m.bridge_avatar, u.avatar) AS avatar,
+                         CASE WHEN m.bridge_platform IS NOT NULL AND m.bridge_platform != ''
+                             THEN NULL ELSE u.display_name END AS display_name,
                           u.is_admin AS is_admin,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
@@ -887,8 +888,9 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
-                          COALESCE(m.bridge_avatar, u.avatar) AS avatar,
-                          u.display_name AS display_name,
+                         COALESCE(m.bridge_avatar, u.avatar) AS avatar,
+                         CASE WHEN m.bridge_platform IS NOT NULL AND m.bridge_platform != ''
+                             THEN NULL ELSE u.display_name END AS display_name,
                           u.is_admin AS is_admin,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
