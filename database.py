@@ -1100,7 +1100,7 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN allow_friend_requests INTEGER DEFAULT 1")
         # User settings columns
         if "theme" not in cols:
-            con.execute("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'dark'")
+            con.execute("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'frog'")
         if "notify_sounds" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN notify_sounds INTEGER DEFAULT 1")
         if "notify_desktop" not in cols:

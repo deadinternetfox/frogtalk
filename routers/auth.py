@@ -907,7 +907,7 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
     # Update user settings
     with db._conn() as con:
         if body.theme is not None:
-            allowed_themes = {"dark", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset"}
+            allowed_themes = {"frog", "dark", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset", "rose", "solarized", "mono", "custom"}
             if body.theme in allowed_themes:
                 con.execute("UPDATE users SET theme=? WHERE id=?", (body.theme, current_user["id"]))
         if body.notify_sounds is not None:
