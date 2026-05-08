@@ -370,6 +370,8 @@ async def websocket_endpoint(
                     "nickname": user["nickname"],
                     "user_id": user["id"],
                     "avatar": user.get("avatar"),
+                    "display_name": user.get("display_name"),
+                    "is_admin": bool(user.get("is_admin")),
                     "content": content,
                     "media_data": media_data,
                     "media_type": media_type,

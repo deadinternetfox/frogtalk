@@ -3320,6 +3320,14 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   background:linear-gradient(180deg,#12201a,#0e1a14);border:1px solid #2f5548;border-radius:6px;padding:6px 12px;
   animation:fadeInOut 1.5s ease-in-out infinite;
 }
+@media(max-width:640px){
+  .invite-card{max-width:100%}
+  .invite-card-body{padding:12px;gap:10px;align-items:flex-start}
+  .invite-card-icon{width:42px;height:42px;font-size:22px}
+  .invite-card-name{font-size:14px}
+  .invite-card-desc{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .invite-join-btn{margin-left:auto;padding:8px 14px;min-height:36px}
+}
 @keyframes fadeInOut{0%,100%{opacity:.6}50%{opacity:1}}
 
 /* Block-level wrapper that hosts a share-card placeholder/embed at the
@@ -9097,13 +9105,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=417"></script>
 <script src="/static/js/ws.js?v=222"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=418"></script>
-  <script src="/static/js/rooms.js?v=424"></script>
-<script src="/static/js/messages.js?v=424"></script>
+<script src="/static/js/ui.js?v=419"></script>
+  <script src="/static/js/rooms.js?v=425"></script>
+<script src="/static/js/messages.js?v=426"></script>
 <script src="/static/js/users.js?v=194"></script>
 <script src="/static/js/emoji.js?v=191"></script>
-<script src="/static/js/friends.js?v=417"></script>
-<script src="/static/js/dms.js?v=424"></script>
+<script src="/static/js/friends.js?v=418"></script>
+<script src="/static/js/dms.js?v=426"></script>
 <script src="/static/js/calls.js?v=218"></script>
 <script src="/static/js/media.js?v=416"></script>
 <script src="/static/js/gifs.js?v=201"></script>

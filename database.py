@@ -869,6 +869,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           u.display_name AS display_name,
+                          u.is_admin AS is_admin,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
                    FROM messages m
@@ -888,6 +889,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
                           COALESCE(m.bridge_avatar, u.avatar) AS avatar,
                           u.display_name AS display_name,
+                          u.is_admin AS is_admin,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
                    FROM messages m
@@ -2279,7 +2281,7 @@ def search_users(query: str, limit: int = 20, requester_id: int = 0) -> List[Dic
     with _conn() as con:
         rows = con.execute(
             """SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, u.presence, u.last_seen,
-                      u.profile_public, u.allow_friend_requests, u.status_msg
+                      u.profile_public, u.allow_friend_requests, u.status_msg, u.is_admin
                FROM users u
                WHERE u.nickname LIKE ?
                  AND (u.profile_public=1
@@ -2447,7 +2449,7 @@ def get_friends(user_id: int) -> List[Dict]:
     """All accepted friends with basic profile."""
     with _conn() as con:
         rows = con.execute("""
-            SELECT u.id, u.nickname, u.display_name, u.avatar, u.presence, u.last_seen, u.status_msg
+            SELECT u.id, u.nickname, u.display_name, u.avatar, u.presence, u.last_seen, u.status_msg, u.is_admin
             FROM friends f JOIN users u ON f.friend_id = u.id
             WHERE f.user_id=? AND f.status='accepted'
             ORDER BY u.nickname
@@ -2458,7 +2460,7 @@ def get_friends(user_id: int) -> List[Dict]:
 def get_friend_requests_in(user_id: int) -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
-            SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, f.created_at
+            SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, u.is_admin, f.created_at
             FROM friends f JOIN users u ON f.user_id = u.id
             WHERE f.friend_id=? AND f.status='pending'
             ORDER BY f.created_at DESC
@@ -2469,7 +2471,7 @@ def get_friend_requests_in(user_id: int) -> List[Dict]:
 def get_friend_requests_out(user_id: int) -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
-            SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, f.created_at
+            SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, u.is_admin, f.created_at
             FROM friends f JOIN users u ON f.friend_id = u.id
             WHERE f.user_id=? AND f.status='pending'
             ORDER BY f.created_at DESC
@@ -2796,7 +2798,8 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
-                       u.display_name AS sender_display_name
+                       u.display_name AS sender_display_name,
+                       u.is_admin AS sender_is_admin
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id > ? AND dm.deleted=0
                 ORDER BY dm.id ASC LIMIT ?
@@ -2810,7 +2813,8 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
-                       u.display_name AS sender_display_name
+                       u.display_name AS sender_display_name,
+                       u.is_admin AS sender_is_admin
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.id < ? AND dm.deleted=0
                 ORDER BY dm.id DESC LIMIT ?
@@ -2824,7 +2828,8 @@ def get_dm_messages(channel_id: int, user_id: int, limit: int = 50,
                        dm.forwarded_from,
                        COALESCE(dm.preview_suppressed, 0) AS preview_suppressed,
                        u.nickname AS sender_nick, u.avatar AS sender_avatar,
-                       u.display_name AS sender_display_name
+                       u.display_name AS sender_display_name,
+                       u.is_admin AS sender_is_admin
                 FROM dm_messages dm JOIN users u ON dm.sender_id=u.id
                 WHERE dm.channel_id=? AND dm.deleted=0
                 ORDER BY dm.id DESC LIMIT ?

@@ -26,10 +26,12 @@ function _renderStatusHtml (status_msg, nickname, fallbackLabel) {
 function _friendNameHtml (u) {
   const nick = String(u?.nickname || '');
   const dn = String(u?.display_name || '').trim();
+  const isAdmin = u?.is_admin || false;
+  const crownPrefix = isAdmin ? '👑 ' : '';
   if (dn && dn !== nick) {
-    return `${esc(dn)} <span style="font-size:11px;color:#91a59c;font-weight:400">@${esc(nick)}</span>`;
+    return `${crownPrefix}${esc(dn)} <span style="font-size:11px;color:#91a59c;font-weight:400">@${esc(nick)}</span>`;
   }
-  return esc(nick);
+  return `${crownPrefix}${esc(nick)}`;
 }
 
 let _currentFriendTab = 'friends';

@@ -4626,7 +4626,7 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
         document.getElementById('userinfo-avatar').innerHTML = UI.avatarEl(u.avatar, u.nickname, 90);
         // Update name headline to show display_name + @handle
         if (nameEl && _userInfoTarget === nickname) {
-          const displayText = u.display_name || u.nickname;
+          const displayText = (u.is_admin ? '👑 ' : '') + (u.display_name || u.nickname);
           nameEl.textContent = displayText;
           let handleEl = document.getElementById('userinfo-handle');
           if (!handleEl) {

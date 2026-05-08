@@ -1378,7 +1378,7 @@ const Messages = (() => {
 
   function _msgHtml(msg, isCont) {
     const isOwn = msg.nickname === State.user?.nickname;
-    const isAdmin = msg.nickname === 'admin' || msg._is_admin;
+    const isAdmin = msg.nickname === 'admin' || msg.is_admin || msg._is_admin;
     const time = UI.formatTime(msg.created_at);
     const editedTag = msg.edited ? '<span class="msg-edited">(edited)</span>' : '';
     const pinnedTag = msg.pinned ? '<span class="msg-pinned" style="color:#4caf50;font-size:11px;margin-left:4px">📌</span>' : '';
@@ -1476,7 +1476,7 @@ const Messages = (() => {
         <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
         <div class="msg-body">
           <div class="msg-meta">
-            <span class="msg-author" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.escHtml(msg.display_name || msg.nickname)}</span>${msg.display_name && msg.display_name !== msg.nickname ? `<span class="msg-author-handle">@${UI.escHtml(msg.nickname)}</span>` : ''}
+            <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(msg.display_name || msg.nickname)}</span>${msg.display_name && msg.display_name !== msg.nickname ? `<span class="msg-author-handle">@${UI.escHtml(msg.nickname)}</span>` : ''}
             ${_bridgeBadge(msg)}
             <span class="msg-time">${time}</span>
           </div>
