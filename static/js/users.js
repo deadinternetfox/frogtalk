@@ -177,7 +177,7 @@ const Users = (() => {
       _searchInput.className = 'member-search-input';
       _searchInput.placeholder = 'Search by display name or username…';
       _searchInput.oninput = () => {
-        _filter = _searchInput.value.trim().toLowerCase();
+        _filter = _searchInput.value.trim().replace(/^@+/, '').toLowerCase();
         _renderFiltered();
       };
     }

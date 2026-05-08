@@ -2278,6 +2278,9 @@ def get_pubkey(user_id: int) -> Optional[str]:
 
 def search_users(query: str, limit: int = 20, requester_id: int = 0) -> List[Dict]:
     """Search public profiles. Friends are visible regardless of privacy setting."""
+    query = str(query or "").strip().lstrip("@")
+    if not query:
+        return []
     with _conn() as con:
         rows = con.execute(
             """SELECT u.id, u.nickname, u.display_name, u.avatar, u.bio, u.presence, u.last_seen,

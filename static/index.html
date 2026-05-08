@@ -1943,7 +1943,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 }
 @keyframes msgEmptyFade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .msg-group{display:flex;gap:12px;padding:3px 0;align-items:flex-start}
-.msg-avatar-slot{width:38px;flex-shrink:0;align-self:flex-start;overflow:visible;position:relative}
+.msg-avatar-slot{width:42px;flex-shrink:0;align-self:flex-start;overflow:visible;position:relative}
 .msg-group{transition:background .15s,box-shadow .15s}
 .msg-group:hover{background:rgba(255,255,255,.03);border-radius:8px;margin:0 -8px;padding:2px 8px;box-shadow:inset 0 0 0 1px rgba(76,175,80,.06)}
 .msg-avatar{
@@ -1963,7 +1963,6 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   width:42px !important;height:42px !important;padding:2px;
   background:#353535 !important;
   isolation:isolate;cursor:pointer;overflow:visible !important;
-  margin:-2px;
   transition:transform .18s ease, filter .18s ease, box-shadow .24s ease;
 }
 .msg-avatar.has-story > img,
@@ -2285,8 +2284,8 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .action-sheet .as-cancel:hover{color:#dff5e8;background:#1a3128}
 @keyframes asSlideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 /* Continuation message (no avatar) */
-.msg-cont{padding:2px 0 2px 50px;position:relative}
-.msg-cont:hover{background:rgba(255,255,255,.02);border-radius:6px;margin:0 -8px;padding:2px 8px 2px 58px}
+.msg-cont{padding:2px 0 2px 54px;position:relative}
+.msg-cont:hover{background:rgba(255,255,255,.02);border-radius:6px;margin:0 -8px;padding:2px 8px 2px 62px}
 .msg-cont-wrap{display:flex;align-items:flex-start;gap:4px}
 
 /* Typing indicator */
@@ -3399,13 +3398,12 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   .send-btn{width:40px;height:40px;min-height:40px;font-size:17px;flex-shrink:0}
   #input-area{padding:4px 6px calc(8px + var(--safe-bottom))}
   #messages-area{padding:8px}
-  .msg-group{gap:8px}
-  .msg-avatar-slot{width:32px}
+  .msg-group{gap:12px}
   .msg-avatar{width:32px;height:32px;font-size:15px}
   .msg-body{padding-top:0}
   .msg-meta{margin-bottom:2px}
-  .msg-cont{padding:2px 0 2px 40px}
-  .msg-cont:hover{padding:2px 8px 2px 48px}
+  .msg-cont{padding:2px 0 2px 54px}
+  .msg-cont:hover{padding:2px 8px 2px 62px}
   /* keyboard-safe: auth & modals scroll instead of getting clipped */
   #auth-overlay{align-items:flex-start;padding:20px 16px 40px}
   .auth-box{margin-top:8px;padding:28px 20px}
@@ -9111,9 +9109,9 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/ui.js?v=419"></script>
   <script src="/static/js/rooms.js?v=426"></script>
 <script src="/static/js/messages.js?v=429"></script>
-<script src="/static/js/users.js?v=194"></script>
+<script src="/static/js/users.js?v=195"></script>
 <script src="/static/js/emoji.js?v=191"></script>
-<script src="/static/js/friends.js?v=418"></script>
+<script src="/static/js/friends.js?v=419"></script>
 <script src="/static/js/dms.js?v=426"></script>
 <script src="/static/js/calls.js?v=218"></script>
 <script src="/static/js/media.js?v=416"></script>

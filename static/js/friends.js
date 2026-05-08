@@ -188,7 +188,7 @@ let _fSearchTimer = null;
 async function searchFriends () {
   clearTimeout(_fSearchTimer);
   _fSearchTimer = setTimeout(async () => {
-    const q = (document.getElementById('friend-search-inp')?.value||'').trim();
+    const q = (document.getElementById('friend-search-inp')?.value||'').trim().replace(/^@+/, '');
     if (q.length < 2) { document.getElementById('friend-search-results').innerHTML=''; return; }
     const r = await apiFetch('/api/users/search?q=' + encodeURIComponent(q));
     if (!r.ok) return;
