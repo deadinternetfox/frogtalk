@@ -115,7 +115,8 @@ async def search_users(request: Request, q: str = "", current_user: dict = Depen
     return {"users": [
         {"id": u["id"], "nickname": u["nickname"], "display_name": u.get("display_name"), "avatar": u["avatar"],
          "presence": u.get("presence", "online"),
-         "allow_friend_requests": bool(u.get("allow_friend_requests", 1))}
+         "allow_friend_requests": bool(u.get("allow_friend_requests", 1)),
+         "friend_status": db.friend_request_status(current_user["id"], u["id"])}
         for u in results if u["id"] != current_user["id"]
     ]}
 

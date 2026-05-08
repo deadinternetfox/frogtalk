@@ -2948,6 +2948,12 @@ function sendTyping() {
 }
 
 function handleInputKey(e) {
+  // Mention autocomplete takes priority: Enter/Tab should pick the
+  // highlighted suggestion while the dropdown is open.
+  if (typeof handleMentionKeydown === 'function' && handleMentionKeydown(e)) {
+    return;
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendMessage();

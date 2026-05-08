@@ -220,18 +220,23 @@ async function searchFriends () {
     await _hydrateFriendDisplayNames(users);
     const myNick = STATE.user?.nickname;
     el.innerHTML = users.filter(u => u.nickname !== myNick).map(u => {
+      const friendStatus = String(u.friend_status || '').toLowerCase();
       const isFriend = _allFriends.some(f => f.nickname === u.nickname);
       const isRequested = _pendingOutgoing.some(f => f.nickname === u.nickname);
+      const isReceived = _pendingFriends.some(f => f.nickname === u.nickname);
       return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(u.nickname)}',${Number(u.id)||0})" title="View profile">${fmtAv(u.avatar, u.nickname, 40)}</div>
         <div style="flex:1">
           <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(u.nickname)}',${Number(u.id)||0})" title="View profile">${_friendNameHtml(u)}</div>
           <div style="font-size:12px;color:#9dc4b2">${esc(u.bio||'')}</div>
         </div>
-        ${isFriend
+        ${(friendStatus === 'friends' || isFriend)
           ? `<span style="font-size:12px;color:#7fd2a7">Friends</span>`
-          : isRequested
+          : (friendStatus === 'sent' || isRequested)
           ? `<button class="modal-btn secondary" style="padding:4px 12px;font-size:12px" disabled>Requested</button>`
+          : (friendStatus === 'received' || isReceived)
+          ? `<button class="modal-btn primary" style="padding:4px 12px;font-size:12px"
+               onclick="acceptFriend('${esc(u.nickname)}',this)">✓ Accept</button>`
           : `<button class="modal-btn primary" style="padding:4px 12px;font-size:12px"
                onclick="sendFriendReq('${esc(u.nickname)}',this)">+ Add</button>`}
       </div>`;
