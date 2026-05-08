@@ -178,13 +178,15 @@ function _extractDMPreviewUrl(text) {
   if (typeof text !== 'string' || !text) return '';
   const urls = text.match(/https?:\/\/[^\s<>"]+/g) || [];
   if (!urls.length) return '';
-  const first = urls[0] || '';
-  // Skip invite/short-link URLs — they get their own rich invite-card embed.
-  if (/\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(first)) return '';
-  if (_parseDMFrogSocialUrl(first)) return '';
-  // Allow regular internal links (docs/help/blog) to unfurl like any URL.
-  // Only invite/social share URLs are filtered above.
-  return first;
+  for (const url of urls) {
+    // Skip invite/short-link URLs — they get their own rich invite-card embed.
+    if (/\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(url)) continue;
+    if (_parseDMFrogSocialUrl(url)) continue;
+    // Allow regular internal links (docs/help/blog) to unfurl like any URL.
+    // Only invite/social share URLs are filtered above.
+    return url;
+  }
+  return '';
 }
 
 function _normalizeUrl(url) {
@@ -1577,9 +1579,10 @@ function renderDMMessage (m) {
   // Reply quote
   const replyPreviewRaw = String(m.reply_content || '…');
   const replyPreviewSafe = _looksEncryptedBlob(replyPreviewRaw) ? 'Encrypted message' : replyPreviewRaw;
+  const replyNick = m.reply_nickname || m.reply_nick || senderNick || '?';
   const replyQuote = m.reply_to
     ? `<div class="msg-reply-quote" onclick="document.querySelector('[data-dmid=&quot;${m.reply_to}&quot;]')?.scrollIntoView({behavior:'smooth',block:'center'})">
-        <span class="reply-quote-nick">${esc(m.reply_nick || senderNick || '?')}</span>
+        <span class="reply-quote-nick">${esc(replyNick)}</span>
         <span class="reply-quote-text">${esc(replyPreviewSafe.substring(0, 80))}</span>
       </div>`
     : '';

@@ -28,7 +28,7 @@ const Messages = (() => {
     // for FK integrity; never let that owner's display_name override the
     // remote sender identity shown in chat.
     if (msg && msg.bridge_platform) {
-      return msg.bridge_source_name || msg.display_name || msg.nickname;
+      return msg.nickname || msg.display_name || msg.bridge_source_name || '';
     }
     return (msg && (msg.display_name || msg.nickname)) || '';
   }
@@ -89,6 +89,18 @@ const Messages = (() => {
     } catch {
       return null;
     }
+  }
+
+  function _extractPreviewUrl(text) {
+    if (typeof text !== 'string' || !text) return '';
+    const urls = text.match(/https?:\/\/[^\s<>"]+/g) || [];
+    if (!urls.length) return '';
+    for (const url of urls) {
+      if (_isInviteUrl(url)) continue;
+      if (_parseFrogSocialUrl(url)) continue;
+      return url;
+    }
+    return '';
   }
 
   function _formatContent(text) {
@@ -1609,15 +1621,8 @@ const Messages = (() => {
       
       // Collect URLs for link previews (skip invite URLs — rendered as cards,
       // and skip Frog Social profile/post/reel URLs — rendered as our own cards).
-      const urls = (msg.content || '').match(urlRe);
-      if (urls && urls.length) {
-        const firstUrl = urls[0];
-        const isInvite = _isInviteUrl(firstUrl);
-        const isSocial = !!_parseFrogSocialUrl(firstUrl);
-        // Keep native cards for invite/social URLs, but allow normal internal
-        // pages (docs, help, blog, etc.) to render OG previews again.
-        if (!isInvite && !isSocial && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: firstUrl });
-      }
+      const previewUrl = _extractPreviewUrl(String(msg.content || ''));
+      if (previewUrl && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: previewUrl });
     });
 
     area.innerHTML = html;
@@ -1818,14 +1823,8 @@ const Messages = (() => {
             }
           } catch {}
           _attachLongPress(pendingEl, msg.id);
-          const urlRe = /https?:\/\/[^\s<>"]+/g;
-          const urls = (msg.content || '').match(urlRe);
-          if (urls && urls.length) {
-            const firstUrl = urls[0];
-            const isInvite = _isInviteUrl(firstUrl);
-            const isSocial = !!_parseFrogSocialUrl(firstUrl);
-            if (!isInvite && !isSocial && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
-          }
+          const previewUrl = _extractPreviewUrl(String(msg.content || ''));
+          if (previewUrl && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, previewUrl), 100);
           setTimeout(() => _hydrateSpecialCards(msg.id), 100);
           const cached = State.messages[room] || [];
           const idx = cached.findIndex(m => m && m._pending && (nonce ? m._nonce === nonce : true));
@@ -1907,14 +1906,8 @@ const Messages = (() => {
     }
     
     // Load link preview for this message
-    const urlRe = /https?:\/\/[^\s<>"]+/g;
-    const urls = (msg.content || '').match(urlRe);
-    if (urls && urls.length) {
-      const firstUrl = urls[0];
-      const isInvite = _isInviteUrl(firstUrl);
-      const isSocial = !!_parseFrogSocialUrl(firstUrl);
-      if (!isInvite && !isSocial && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 200);
-    }
+    const previewUrl = _extractPreviewUrl(String(msg.content || ''));
+    if (previewUrl && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, previewUrl), 200);
     setTimeout(() => _hydrateSpecialCards(msg.id), 200);
   }
 
@@ -1934,14 +1927,8 @@ const Messages = (() => {
     if (meta && !meta.querySelector('.msg-edited')) {
       meta.insertAdjacentHTML('beforeend', '<span class="msg-edited">(edited)</span>');
     }
-    const urlRe = /https?:\/\/[^\s<>"]+/g;
-    const urls = (content || '').match(urlRe);
-    if (urls && urls.length) {
-      const firstUrl = urls[0];
-      const isInvite = _isInviteUrl(firstUrl);
-      const isSocial = !!_parseFrogSocialUrl(firstUrl);
-      if (!isInvite && !isSocial) setTimeout(() => _loadLinkPreview(id, firstUrl), 120);
-    }
+    const previewUrl = _extractPreviewUrl(String(content || ''));
+    if (previewUrl) setTimeout(() => _loadLinkPreview(id, previewUrl), 120);
     setTimeout(() => _hydrateSpecialCards(id), 120);
   }
 
