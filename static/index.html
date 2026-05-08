@@ -3045,13 +3045,18 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .emoji-upload-preview:hover{border-color:var(--accent-color)}
 .emoji-upload-placeholder{font-size:13px;color:var(--text-muted)}
 
-/* Add Custom Emoji modal: keep it fully themed (no browser-default black/blue controls) */
+/* Add Custom Emoji modal: explicit frog-green foreground panel */
 #modal-add-emoji .modal-add-emoji{
   max-width:360px;
-  background:linear-gradient(180deg,#173027 0%,#13271f 56%,#102018 100%) !important;
-  border:1px solid #3b6c59 !important;
+  background:
+    radial-gradient(120% 90% at 8% 0%, rgba(74,181,120,.17), transparent 60%),
+    linear-gradient(180deg,#1b3b2f 0%,#163428 54%,#122d23 100%) !important;
+  border:1px solid #4b8f6f !important;
   color:#dff5e8 !important;
-  box-shadow:0 18px 48px rgba(0,0,0,.55), 0 0 0 1px rgba(76,175,80,.08) !important;
+  box-shadow:
+    0 18px 48px rgba(0,0,0,.55),
+    0 0 0 1px rgba(76,175,80,.16),
+    inset 0 1px 0 rgba(214,255,232,.06) !important;
 }
 #modal-add-emoji .modal-title{color:#dff5e8 !important}
 #modal-add-emoji .modal-label{color:#9bd0ad !important}
@@ -9235,7 +9240,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/state.js?v=192"></script>
 <script src="/static/js/mute.js?v=191"></script>
-<script src="/static/js/notifications.js?v=421"></script>
+<script src="/static/js/notifications.js?v=422"></script>
 <script src="/static/js/ws.js?v=222"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=421"></script>
