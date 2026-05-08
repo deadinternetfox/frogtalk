@@ -410,75 +410,213 @@ def _render_error_page(status_code: int, title: str, message: str, request: Requ
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   :root{{
-    --bg:#0d0d0d;--surface:#141a14;--surface2:#1a261a;
-    --border:rgba(76,175,80,.18);--text:#dff5e8;--muted:#8db89b;
-    --accent:{accent};--glow:rgba({glow},.35);--glow-soft:rgba({glow},.12);
+    --bg:#0a0f0a;--surface:#131a13;--surface2:#192319;
+    --border:rgba(76,175,80,.16);--text:#dff5e8;--muted:#8db89b;
+    --accent:{accent};
+    --glow:rgba({glow},.4);--glow-med:rgba({glow},.22);--glow-soft:rgba({glow},.1);
   }}
-  html,body{{height:100%;background:var(--bg);color:var(--text);
+  html,body{{
+    height:100%;background:var(--bg);color:var(--text);
     font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
-    -webkit-font-smoothing:antialiased}}
-  body{{display:flex;flex-direction:column;align-items:center;justify-content:center;
-    min-height:100vh;padding:20px;
-    background:
-      radial-gradient(ellipse 80% 50% at 50% -10%,rgba({glow},.08) 0%,transparent 65%),
-      radial-gradient(ellipse 60% 35% at 50% 110%,rgba(46,138,74,.07) 0%,transparent 60%),
-      var(--bg);}}
-  .brand{{display:flex;align-items:center;gap:10px;margin-bottom:32px;text-decoration:none;color:inherit}}
-  .brand-icon{{width:36px;height:36px;border-radius:10px;
-    background:linear-gradient(145deg,#2d6a35,#1e4827);border:1px solid rgba(76,175,80,.4);
-    display:flex;align-items:center;justify-content:center;font-size:20px;
-    box-shadow:0 4px 12px rgba(0,0,0,.5)}}
-  .brand-name{{font-size:17px;font-weight:700;letter-spacing:-.2px;
-    background:linear-gradient(180deg,#c8f0d0,#7fd2a7);
-    -webkit-background-clip:text;background-clip:text;color:transparent}}
-  .card{{position:relative;width:min(520px,100%);padding:36px 32px 32px;border-radius:20px;
-    background:linear-gradient(175deg,var(--surface2) 0%,var(--surface) 100%);
-    border:1px solid var(--border);
-    box-shadow:0 32px 72px rgba(0,0,0,.6),0 0 0 1px rgba(76,175,80,.04),
-      inset 0 1px 0 rgba(255,255,255,.04),0 0 48px var(--glow-soft);}}
-  .card::before{{content:'';position:absolute;inset:0;border-radius:20px;pointer-events:none;
-    background:linear-gradient(180deg,rgba(255,255,255,.035) 0%,transparent 50%);}}
-  .pill{{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;
-    margin-bottom:18px;background:rgba({glow},.10);border:1px solid rgba({glow},.28);
-    color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase}}
-  .code{{font-size:72px;font-weight:900;line-height:1;letter-spacing:-3px;
-    background:linear-gradient(180deg,var(--accent) 0%,rgba({glow},.5) 120%);
+    -webkit-font-smoothing:antialiased;overflow-x:hidden;
+  }}
+  body{{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-height:100dvh;padding:clamp(16px,4vw,32px);
+  }}
+
+  /* ── animated background ── */
+  .bg{{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}}
+  .bg::before{{
+    content:'';position:absolute;inset:0;
+    background-image:radial-gradient(circle at 1px 1px,rgba(76,175,80,.11) 1px,transparent 0);
+    background-size:28px 28px;
+    -webkit-mask-image:radial-gradient(ellipse 90% 90% at 50% 50%,#000 20%,transparent 100%);
+    mask-image:radial-gradient(ellipse 90% 90% at 50% 50%,#000 20%,transparent 100%);
+  }}
+  .orb{{position:absolute;border-radius:50%;filter:blur(90px);will-change:transform;animation:drift linear infinite}}
+  .orb1{{
+    width:520px;height:520px;top:-18%;left:-12%;animation-duration:24s;
+    background:radial-gradient(circle,rgba({glow},.16) 0%,transparent 68%);
+  }}
+  .orb2{{
+    width:420px;height:420px;bottom:-12%;right:-10%;animation-duration:30s;animation-delay:-11s;
+    background:radial-gradient(circle,rgba(40,120,65,.11) 0%,transparent 68%);
+  }}
+  .orb3{{
+    width:280px;height:280px;top:38%;left:55%;animation-duration:19s;animation-delay:-5s;
+    background:radial-gradient(circle,rgba({glow},.09) 0%,transparent 68%);
+  }}
+  @keyframes drift{{
+    0%{{transform:translate(0,0) scale(1)}}
+    30%{{transform:translate(38px,-28px) scale(1.04)}}
+    65%{{transform:translate(-18px,36px) scale(.97)}}
+    100%{{transform:translate(0,0) scale(1)}}
+  }}
+
+  /* ── page wrapper ── */
+  .wrap{{
+    position:relative;z-index:1;
+    display:flex;flex-direction:column;align-items:center;
+    width:100%;max-width:520px;
+    animation:rise .5s cubic-bezier(.22,1,.36,1) both;
+  }}
+  @keyframes rise{{
+    from{{opacity:0;transform:translateY(22px)}}
+    to{{opacity:1;transform:translateY(0)}}
+  }}
+
+  /* ── brand ── */
+  .brand{{
+    display:flex;align-items:center;gap:10px;margin-bottom:26px;
+    text-decoration:none;color:inherit;
+  }}
+  .brand-icon{{
+    width:38px;height:38px;border-radius:11px;
+    background:linear-gradient(145deg,#2e6e36,#1d4625);
+    border:1px solid rgba(76,175,80,.4);
+    display:flex;align-items:center;justify-content:center;font-size:21px;
+    box-shadow:0 4px 18px rgba(0,0,0,.55),0 0 0 3px rgba({glow},.1);
+  }}
+  .brand-name{{
+    font-size:17px;font-weight:700;letter-spacing:-.2px;
+    background:linear-gradient(155deg,#c8f0d0 0%,#7fd2a7 100%);
     -webkit-background-clip:text;background-clip:text;color:transparent;
-    margin-bottom:8px;filter:drop-shadow(0 0 24px var(--glow));}}
-  h1{{font-size:22px;font-weight:700;line-height:1.2;margin-bottom:10px;color:var(--text)}}
-  .desc{{font-size:14px;line-height:1.6;color:var(--muted)}}
-  .path{{display:inline-flex;align-items:center;gap:6px;margin-top:16px;padding:6px 11px;
-    border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
-    font-size:12px;color:#7a9e87;
+  }}
+
+  /* ── card ── */
+  .card{{
+    position:relative;width:100%;overflow:hidden;
+    padding:clamp(22px,5vw,38px) clamp(18px,5vw,34px) clamp(22px,4vw,30px);
+    border-radius:22px;
+    background:linear-gradient(175deg,rgba(25,35,25,.97) 0%,rgba(19,26,19,.99) 100%);
+    border:1px solid var(--border);
+    box-shadow:
+      0 40px 80px rgba(0,0,0,.7),
+      0 0 0 1px rgba(76,175,80,.03),
+      inset 0 1px 0 rgba(255,255,255,.045),
+      0 0 64px var(--glow-soft);
+    backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+  }}
+  /* top-edge highlight */
+  .card::before{{
+    content:'';position:absolute;top:0;left:0;right:0;height:1px;
+    background:linear-gradient(90deg,transparent 0%,rgba({glow},.55) 50%,transparent 100%);
+  }}
+  /* inner radial glow */
+  .card::after{{
+    content:'';position:absolute;inset:0;pointer-events:none;border-radius:22px;
+    background:radial-gradient(ellipse 65% 45% at 50% 0%,rgba({glow},.07) 0%,transparent 70%);
+  }}
+
+  /* ── emoji badge ── */
+  .emoji-badge{{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:62px;height:62px;border-radius:18px;
+    background:rgba({glow},.09);border:1px solid rgba({glow},.2);
+    font-size:30px;line-height:1;margin-bottom:14px;
+    box-shadow:0 0 28px rgba({glow},.18),inset 0 1px 0 rgba(255,255,255,.05);
+    animation:badge-pulse 3.5s ease-in-out infinite;
+  }}
+  @keyframes badge-pulse{{
+    0%,100%{{box-shadow:0 0 22px rgba({glow},.18),inset 0 1px 0 rgba(255,255,255,.05)}}
+    50%{{box-shadow:0 0 40px rgba({glow},.34),inset 0 1px 0 rgba(255,255,255,.05)}}
+  }}
+
+  /* ── pill ── */
+  .pill{{
+    display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;
+    margin-bottom:11px;background:rgba({glow},.08);border:1px solid rgba({glow},.22);
+    color:var(--accent);font-size:11px;font-weight:700;letter-spacing:.55px;text-transform:uppercase;
+  }}
+
+  /* ── big code number ── */
+  .code{{
+    font-size:clamp(58px,14vw,82px);font-weight:900;line-height:1;
+    letter-spacing:-4px;margin-bottom:10px;
+    background:linear-gradient(170deg,var(--accent) 0%,rgba({glow},.45) 120%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 28px var(--glow-med));
+  }}
+
+  h1{{font-size:clamp(18px,4vw,21px);font-weight:700;line-height:1.25;margin-bottom:9px;color:var(--text)}}
+  .desc{{font-size:14px;line-height:1.65;color:var(--muted)}}
+
+  /* ── path label ── */
+  .path{{
+    display:inline-flex;align-items:center;gap:7px;margin-top:15px;padding:7px 12px;
+    border-radius:9px;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.055);
+    font-size:12px;color:#7a9e87;max-width:100%;word-break:break-all;
     font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;
-    word-break:break-all;max-width:100%;}}
-  .path-label{{color:#4a7a58;flex-shrink:0;font-size:11px;text-transform:uppercase;letter-spacing:.4px}}
-  .divider{{height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);margin:24px 0}}
-  .actions{{display:flex;flex-wrap:wrap;gap:10px}}
-  .btn{{display:inline-flex;align-items:center;justify-content:center;padding:10px 20px;
-    border-radius:11px;font-size:14px;font-weight:600;text-decoration:none;border:1px solid transparent;
-    transition:transform .1s ease,box-shadow .15s ease,opacity .15s ease}}
-  .btn:hover{{transform:translateY(-1px)}}
-  .btn:active{{transform:translateY(0);opacity:.85}}
-  .btn-primary{{background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3a9040 100%);
-    border-color:#6cd870;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);
-    box-shadow:0 6px 20px rgba(76,175,80,.4),inset 0 1px 0 rgba(255,255,255,.2);}}
-  .btn-primary:hover{{box-shadow:0 8px 28px rgba(76,175,80,.55),inset 0 1px 0 rgba(255,255,255,.2)}}
-  .btn-ghost{{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1);color:var(--muted)}}
-  .btn-ghost:hover{{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.15);color:var(--text)}}
-  .footer{{margin-top:28px;font-size:12px;color:#4a6655;text-align:center}}
-  .footer a{{color:#5a7a62;text-decoration:none}}
-  .footer a:hover{{color:var(--accent)}}
-  @media(max-width:480px){{.card{{padding:28px 20px 24px}}.code{{font-size:56px}}h1{{font-size:20px}}}}
+  }}
+  .path-lbl{{
+    color:#3e6044;flex-shrink:0;font-size:10px;text-transform:uppercase;
+    letter-spacing:.55px;font-weight:700;
+  }}
+
+  .divider{{
+    height:1px;margin:20px 0;
+    background:linear-gradient(90deg,transparent,rgba({glow},.22),rgba(76,175,80,.1),transparent);
+  }}
+
+  /* ── buttons ── */
+  .actions{{display:flex;flex-wrap:wrap;gap:9px}}
+  .btn{{
+    display:inline-flex;align-items:center;justify-content:center;
+    padding:10px 20px;border-radius:12px;font-size:13.5px;font-weight:600;
+    text-decoration:none;border:1px solid transparent;position:relative;overflow:hidden;
+    transition:transform .15s ease,box-shadow .2s ease,opacity .15s ease;
+  }}
+  .btn::after{{
+    content:'';position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(255,255,255,.07) 0%,transparent 55%);
+    opacity:0;transition:opacity .2s ease;
+  }}
+  .btn:hover::after{{opacity:1}}
+  .btn:hover{{transform:translateY(-2px)}}
+  .btn:active{{transform:translateY(0);opacity:.82}}
+  .btn-primary{{
+    background:linear-gradient(180deg,#5dc264 0%,#4caf50 55%,#3c9245 100%);
+    border-color:rgba(108,218,118,.32);color:#fff;
+    text-shadow:0 1px 2px rgba(0,0,0,.28);
+    box-shadow:0 5px 22px rgba(76,175,80,.4),inset 0 1px 0 rgba(255,255,255,.18);
+  }}
+  .btn-primary:hover{{box-shadow:0 9px 32px rgba(76,175,80,.58),inset 0 1px 0 rgba(255,255,255,.18)}}
+  .btn-ghost{{
+    background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.09);color:var(--muted);
+  }}
+  .btn-ghost:hover{{
+    background:rgba(255,255,255,.075);border-color:rgba(255,255,255,.14);
+    color:var(--text);box-shadow:0 4px 18px rgba(0,0,0,.32);
+  }}
+
+  /* ── footer ── */
+  .foot{{margin-top:22px;font-size:12px;color:#3a5242;text-align:center;position:relative;z-index:1}}
+  .foot a{{color:#4c6a56;text-decoration:none;transition:color .15s}}
+  .foot a:hover{{color:var(--accent)}}
+
+  /* ── responsive ── */
+  @media(max-width:360px){{
+    .emoji-badge{{width:52px;height:52px;font-size:26px;border-radius:14px}}
+    .actions{{flex-direction:column}}
+    .btn{{width:100%;justify-content:center}}
+  }}
 </style>
 </head><body>
+<div class="bg">
+  <div class="orb orb1"></div>
+  <div class="orb orb2"></div>
+  <div class="orb orb3"></div>
+</div>
+<div class="wrap">
   <a class="brand" href="/"><div class="brand-icon">\U0001f438</div><span class="brand-name">FrogTalk</span></a>
   <main class="card" role="main">
-    <div class="pill">{emoji} {code_label}</div>
+    <div class="emoji-badge">{emoji}</div>
+    <div class="pill">{code_label}</div>
     <div class="code">{status_code}</div>
     <h1>{safe_title}</h1>
     <p class="desc">{safe_msg}</p>
-    <div class="path"><span class="path-label">path</span>&nbsp;{req_path}</div>
+    <div class="path"><span class="path-lbl">path</span>&ensp;{req_path}</div>
     <div class="divider"></div>
     <div class="actions">
       <a class="btn btn-primary" href="{cta_href}">{cta_text}</a>
@@ -486,9 +624,10 @@ def _render_error_page(status_code: int, title: str, message: str, request: Requ
       <a class="btn btn-ghost" href="/">Home</a>
     </div>
   </main>
-  <footer class="footer">
+  <footer class="foot">
     <a href="https://frogtalk.xyz">frogtalk.xyz</a> &nbsp;\u00b7&nbsp; <a href="/static/privacy.html">Privacy</a>
   </footer>
+</div>
 </body></html>"""
 
 
