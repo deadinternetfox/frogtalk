@@ -1101,6 +1101,10 @@ def _migrate():
         # User settings columns
         if "theme" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'frog'")
+        # One-time migration: 'dark' was the old default palette name; it is
+        # identical to 'frog'.  Normalise all legacy rows so the theme system
+        # only needs to reason about a single canonical name.
+        con.execute("UPDATE users SET theme='frog' WHERE theme='dark' OR theme IS NULL OR theme=''")
         if "notify_sounds" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN notify_sounds INTEGER DEFAULT 1")
         if "notify_desktop" not in cols:

@@ -907,9 +907,12 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
     # Update user settings
     with db._conn() as con:
         if body.theme is not None:
-            allowed_themes = {"frog", "dark", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset", "rose", "solarized", "mono", "custom"}
-            if body.theme in allowed_themes:
-                con.execute("UPDATE users SET theme=? WHERE id=?", (body.theme, current_user["id"]))
+            allowed_themes = {"frog", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset", "rose", "solarized", "mono", "custom"}
+            # 'dark' is a legacy alias for 'frog' (identical palette). Remap
+            # it so the DB never stores the old name again.
+            incoming_theme = "frog" if body.theme == "dark" else body.theme
+            if incoming_theme in allowed_themes:
+                con.execute("UPDATE users SET theme=? WHERE id=?", (incoming_theme, current_user["id"]))
         if body.notify_sounds is not None:
             con.execute("UPDATE users SET notify_sounds=? WHERE id=?", (1 if body.notify_sounds else 0, current_user["id"]))
         if body.notify_desktop is not None:
