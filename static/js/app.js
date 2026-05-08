@@ -291,9 +291,11 @@ const App = {
     document.getElementById('app').classList.remove('hidden');
     try { window.__ftApplyMiniBoardGuestMode && window.__ftApplyMiniBoardGuestMode(); } catch {}
 
-    // Apply saved theme
-    const savedThemeRaw = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'frog';
-    const savedTheme = (String(savedThemeRaw || '').toLowerCase() === 'dark') ? 'frog' : savedThemeRaw;
+    // Apply saved theme - prioritize localStorage (user's explicit choice) over server value
+    const localTheme = localStorage.getItem('frogtalk-theme');
+    const serverTheme = State.user?.theme;
+    const rawTheme = localTheme || serverTheme || 'frog';
+    const savedTheme = (String(rawTheme || '').toLowerCase() === 'dark') ? 'frog' : rawTheme;
     if (typeof applyTheme === 'function') applyTheme(savedTheme);
 
     // Populate self panel

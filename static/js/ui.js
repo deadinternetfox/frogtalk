@@ -299,8 +299,8 @@ const UI = (() => {
         <span style="flex:1">🎵 Show now-playing as status</span>
       </button>
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button id="sp-clear" style="flex:1;background:#1a3c2d;border:1px solid #3d6a58;color:#a8ccb8;padding:10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600">Clear</button>
-        <button id="sp-save" style="flex:1;background:linear-gradient(180deg,#5abf65,#48aa52);border:1px solid #65c870;color:#041704;font-weight:800;padding:10px;border-radius:9px;cursor:pointer;font-size:13px">Save</button>
+        <button id="sp-clear" style="flex:1;background:var(--surface-color,#1a3c2d);border:1px solid var(--border-color,#3d6a58);color:var(--text-muted,#a8ccb8);padding:10px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600">Clear</button>
+        <button id="sp-save" style="flex:1;background:var(--accent-color,#4caf50);border:none;color:#000;font-weight:800;padding:10px;border-radius:9px;cursor:pointer;font-size:13px">Save Status</button>
       </div>
     `;
     document.body.appendChild(pop);
@@ -326,7 +326,7 @@ const UI = (() => {
     ];
     pop.querySelector('#sp-opts').innerHTML = opts.map(o => `
       <button type="button" data-presence="${o.k}"
-        style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:${o.k===curP?'linear-gradient(180deg,#214438,#1a372d)':'linear-gradient(180deg,#182e25,#13261f)'};border:1px solid ${o.k===curP?'#66c596':'#355f4f'};color:${o.k===curP?'#9ce2be':'#deefe7'};font-size:13px;cursor:pointer;text-align:left">
+        style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:${o.k===curP?'var(--accent-dim, #214438)':'var(--surface-color, #182e25)'};border:1px solid ${o.k===curP?'var(--accent-color,#4caf50)':'var(--border-color,#355f4f)'};color:${o.k===curP?'var(--accent-color,#9ce2be)':'var(--text-color,#deefe7)'};font-size:13px;cursor:pointer;text-align:left">
         <span style="font-size:14px">${o.d}</span><span style="flex:1">${o.l}</span>${o.k===curP?'<span>✓</span>':''}
       </button>
     `).join('');
@@ -334,9 +334,9 @@ const UI = (() => {
       btn.onclick = () => {
         pop.querySelectorAll('[data-presence]').forEach(b => {
           const k = b.dataset.presence;
-          b.style.background = k === btn.dataset.presence ? 'linear-gradient(180deg,#214438,#1a372d)' : 'linear-gradient(180deg,#182e25,#13261f)';
-          b.style.borderColor = k === btn.dataset.presence ? '#66c596' : '#355f4f';
-          b.style.color = k === btn.dataset.presence ? '#9ce2be' : '#deefe7';
+          b.style.background = k === btn.dataset.presence ? 'var(--accent-dim, #214438)' : 'var(--surface-color, #182e25)';
+          b.style.borderColor = k === btn.dataset.presence ? 'var(--accent-color,#4caf50)' : 'var(--border-color,#355f4f)';
+          b.style.color = k === btn.dataset.presence ? 'var(--accent-color,#9ce2be)' : 'var(--text-color,#deefe7)';
         });
         pop.dataset.pendingPresence = btn.dataset.presence;
       };
@@ -736,7 +736,12 @@ const UI = (() => {
     const bar = document.getElementById('typing-bar');
     if (!bar) return;
     const names = Object.keys(_typingTimers);
-    if (!names.length) { bar.textContent = ''; return; }
+    if (!names.length) { 
+      bar.textContent = ''; 
+      bar.style.display = 'none';
+      return; 
+    }
+    bar.style.display = 'block';
     if (names.length === 1) bar.textContent = `${names[0]} is typing…`;
     else if (names.length === 2) bar.textContent = `${names[0]} and ${names[1]} are typing…`;
     else bar.textContent = `${names.length} people are typing…`;
@@ -2983,7 +2988,7 @@ function _normalizeThemeKey(theme) {
 function selectTheme(theme) {
   theme = _normalizeThemeKey(theme);
   document.querySelectorAll('.theme-btn').forEach(btn => {
-    btn.style.borderColor = btn.dataset.theme === theme ? '#4caf50' : '#333';
+    btn.style.borderColor = btn.dataset.theme === theme ? 'var(--accent-color, #4caf50)' : '#333';
   });
   // Save current theme before preview
   if (!_themePreviewOriginal) {
@@ -3023,6 +3028,16 @@ function confirmThemePreview() {
   _themePreviewOriginal = null;
   const bar = document.getElementById('theme-preview-bar');
   if (bar) bar.remove();
+  // Sync theme to server so it persists across logins/devices
+  try {
+    if (State.token) {
+      fetch('/api/auth/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+        body: JSON.stringify({ theme })
+      }).catch(() => {});
+    }
+  } catch {}
   toast('Theme saved!', 'success');
 }
 
@@ -3722,7 +3737,7 @@ async function showProfile() {
   document.body.dataset.theme = currentTheme;
   localStorage.setItem('frogtalk-theme', currentTheme);
   document.querySelectorAll('.theme-btn').forEach(btn => {
-    btn.style.borderColor = btn.dataset.theme === currentTheme ? '#4caf50' : '#333';
+    btn.style.borderColor = btn.dataset.theme === currentTheme ? 'var(--accent-color, #4caf50)' : '#333';
     btn.onclick = () => selectTheme(btn.dataset.theme);
   });
   openModal('modal-profile');

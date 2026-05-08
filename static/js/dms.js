@@ -719,7 +719,7 @@ function renderDMChannels () {
           ${previewHtml}
         </span>
       </span>
-      ${ch.unread ? `<span style="background:#4caf50;color:#000;border-radius:8px;padding:1px 6px;font-size:11px;font-weight:700">${ch.unread}</span>` : ''}
+      ${ch.unread ? `<span style="background:var(--accent-color,#4caf50);color:#000;border-radius:8px;padding:1px 6px;font-size:11px;font-weight:700">${ch.unread}</span>` : ''}
       <button class="dm-close-btn" onclick="event.stopPropagation();hideDMChannel(${ch.id})" title="Hide conversation"
         style="position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:#666;cursor:pointer;font-size:12px;padding:2px 4px;border-radius:4px;opacity:0;transition:opacity .15s"
         onmouseenter="this.style.color='#ff5555';this.style.opacity='1'" onmouseleave="this.style.color='#666'">✕</button>
@@ -2287,13 +2287,10 @@ function sendDMTyping () {
 
 function handleWSDMTyping (data) {
   if (!_activeDM || data.channel_id !== _activeDM.id) return;
-  const bar = document.getElementById('typing-bar');
-  if (!bar) return;
-  bar.style.display = '';
   const who = data.sender_nick || data.nickname || 'Someone';
-  bar.textContent = who + ' is typing…';
-  clearTimeout(_dmTypingTimer);
-  _dmTypingTimer = setTimeout(() => { bar.textContent = ''; }, 3000);
+  if (typeof UI !== 'undefined' && UI.showTyping) {
+    UI.showTyping(who);
+  }
 }
 
 /* ── Edit / Delete DM ───────────────────────────────────────────────────────── */

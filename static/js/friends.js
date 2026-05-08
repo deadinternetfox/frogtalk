@@ -134,15 +134,15 @@ function renderFriendTab () {
   }
 
   el.innerHTML = list.map(f => `
-    <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
+    <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-color,#244438)">
       <div style="position:relative;flex-shrink:0;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">
         ${fmtAv(f.avatar, f.nickname, 40)}
         <span style="position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;
-          background:${presenceColor(f.presence)};border:2px solid #12231d"></span>
+          background:${presenceColor(f.presence)};border:2px solid var(--surface-color,#12231d)"></span>
       </div>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
-        <div style="font-size:12px;color:#9dc4b2">${_renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))}</div>
+        <div style="font-weight:600;font-size:14px;color:var(--text-color,#e3f6ec);cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
+        <div style="font-size:12px;color:var(--text-muted,#9dc4b2)">${_renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))}</div>
       </div>
       <div style="display:flex;gap:4px">
         <button class="icon-btn" onclick="closeFriends();openDMWithNick('${esc(f.nickname)}')" title="Message">💬</button>
@@ -165,11 +165,11 @@ function renderPending (el) {
   const incomingHtml = incoming.length
     ? `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin-bottom:8px;letter-spacing:.4px">INCOMING</div>` +
       incoming.map(f => `
-      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
+      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-color,#244438)">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${fmtAv(f.avatar, f.nickname, 40)}</div>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
-          <div style="font-size:12px;color:#9dc4b2">${esc(f.bio||'')}</div>
+          <div style="font-weight:600;font-size:14px;color:var(--text-color,#e3f6ec);cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
+          <div style="font-size:12px;color:var(--text-muted,#9dc4b2)">${esc(f.bio||'')}</div>
         </div>
         <div style="display:flex;gap:6px">
           <button class="modal-btn primary" style="padding:4px 10px;font-size:12px" onclick="acceptFriend('${esc(f.nickname)}', this)">✓ Accept</button>
@@ -182,12 +182,13 @@ function renderPending (el) {
     ? `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin:14px 0 8px;letter-spacing:.4px">OUTGOING</div>` +
       outgoing.map(f => `
       <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
+      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-color, #244438)">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${fmtAv(f.avatar, f.nickname, 40)}</div>
         <div style="flex:1">
-          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
-          <div style="font-size:12px;color:#9dc4b2">Waiting for response</div>
+          <div style="font-weight:600;font-size:14px;color:var(--text-color, #e3f6ec);cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
+          <div style="font-size:12px;color:var(--text-muted, #9dc4b2)">Waiting for response</div>
         </div>
-        <span style="font-size:12px;color:#7fd2a7">Requested</span>
+        <span style="font-size:12px;color:var(--accent-color, #7fd2a7)">Requested</span>
       </div>`).join('')
     : '';
 
@@ -250,7 +251,11 @@ async function sendFriendReq (nick, btn) {
   const r = await apiFetch('/api/friends/request/' + encodeURIComponent(nick), 'POST');
   if (r.ok) {
     toast('Friend request sent to ' + nick);
-    if (btn) { btn.textContent = 'Requested'; btn.style.background = '#1a3a1a'; btn.style.color = '#4caf50'; }
+    if (btn) {
+      btn.textContent = 'Requested';
+      btn.style.background = 'var(--accent-dim,#1a3a1a)';
+      btn.style.color = 'var(--accent-color,#4caf50)';
+    }
     if (!_pendingOutgoing.some(f => f.nickname === nick)) {
       _pendingOutgoing.push({ nickname: nick });
     }
@@ -438,8 +443,8 @@ function openFriendsPanel() {
         top: 0;
         width: 300px;
         height: 100vh;
-        background: linear-gradient(180deg,#132520 0%,#0f1d19 58%,#0c1714 100%);
-        border-right: 1px solid #2a4a3f;
+        background: var(--surface-color, #132520);
+        border-right: 1px solid var(--border-color, #2a4a3f);
         z-index: 500;
         display: none;
         flex-direction: column;
@@ -457,28 +462,28 @@ function openFriendsPanel() {
         align-items: center;
         padding: 16px;
         font-weight: 600;
-        color: #dff3e9;
-        border-bottom: 1px solid #2a4a3f;
+        color: var(--text-color, #dff3e9);
+        border-bottom: 1px solid var(--border-color, #2a4a3f);
         background: linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,0));
       }
       .ffp-tabs {
         display: flex;
         padding: 8px;
         gap: 4px;
-        border-bottom: 1px solid #29453b;
+        border-bottom: 1px solid var(--border-color, #29453b);
       }
       .ffp-tab {
         flex: 1;
         background: transparent;
         border: none;
-        color: #97b3a8;
+        color: var(--text-muted, #97b3a8);
         padding: 8px;
         border-radius: 6px;
         cursor: pointer;
         font-size: 12px;
       }
-      .ffp-tab:hover { background: rgba(30,61,50,.72); color: #e7f5ee; }
-      .ffp-tab.active { background: linear-gradient(180deg,#234238,#1b332b); color: #79cf9f; }
+      .ffp-tab:hover { background: color-mix(in srgb, var(--accent-color,#4caf50) 15%, var(--bg-color,#0d0d0d)); color: var(--text-color, #e7f5ee); }
+      .ffp-tab.active { background: var(--accent-dim, linear-gradient(180deg,#234238,#1b332b)); color: var(--accent-color, #79cf9f); }
       .ffp-content {
         flex: 1;
         overflow-y: auto;
@@ -495,8 +500,8 @@ function openFriendsPanel() {
         border: 1px solid transparent;
       }
       .ffp-friend:hover {
-        background: linear-gradient(180deg,rgba(27,54,45,.65),rgba(20,40,33,.65));
-        border-color: rgba(110,178,147,.25);
+        background: color-mix(in srgb, var(--accent-color,#4caf50) 12%, var(--surface-color,#1e1e1e));
+        border-color: color-mix(in srgb, var(--accent-color,#4caf50) 25%, transparent);
         transform: translateY(-1px);
       }
       .ffp-avatar {
@@ -511,16 +516,16 @@ function openFriendsPanel() {
         width: 10px;
         height: 10px;
         border-radius: 50%;
-        border: 2px solid #12231d;
+        border: 2px solid var(--surface-color, #12231d);
       }
       .ffp-info { flex: 1; min-width: 0; }
-      .ffp-name { font-weight: 600; font-size: 14px; color: #dff3e9; }
-      .ffp-status { font-size: 12px; color: #9cb9ae; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ffp-name { font-weight: 600; font-size: 14px; color: var(--text-color, #dff3e9); }
+      .ffp-status { font-size: 12px; color: var(--text-muted, #9cb9ae); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .ffp-actions { display: flex; gap: 4px; }
       .ffp-empty {
         text-align: center;
         padding: 40px 16px;
-        color: #8aa498;
+        color: var(--text-muted, #8aa498);
       }
     `;
     document.head.appendChild(style);
@@ -569,7 +574,7 @@ function renderFfpContent(tab) {
           <div class="ffp-status">Wants to be friends</div>
         </div>
         <div class="ffp-actions">
-          <button class="icon-btn" onclick="acceptFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Accept" style="color:#4caf50">✓</button>
+          <button class="icon-btn" onclick="acceptFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Accept" style="color:var(--accent-color,#4caf50)">✓</button>
           <button class="icon-btn" onclick="declineFriend('${esc(f.nickname)}', this).then(()=>{renderFfpContent('pending')})" title="Decline" style="color:#f44336">✕</button>
         </div>
       </div>

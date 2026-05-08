@@ -1924,6 +1924,18 @@ const Messages = (() => {
   function updateEdited(id, content, room) {
     const el = document.getElementById(`msg-${id}`);
     if (!el) return;
+    const contentEl = el.querySelector('.msg-content');
+    if (!contentEl) return;
+
+    // Fix: if the user is currently editing THIS message locally, do NOT
+    // overwrite the innerHTML (which contains the <textarea>). Just update
+    // the dataset so that if they hit "Cancel", they see the new server-provided
+    // content instead of the old one.
+    if (contentEl.querySelector('textarea')) {
+      contentEl.dataset.originalText = content;
+      return;
+    }
+
     // Strip any previously hoisted share-card rows so editing a message
     // that contains a /p/<id> link doesn't double up the embed (see
     // pending-replace path for the same fix).
@@ -1931,8 +1943,8 @@ const Messages = (() => {
       const body = el.querySelector('.msg-body') || el;
       body.querySelectorAll(':scope > .msg-share-row').forEach(r => r.remove());
     } catch {}
-    const contentEl = el.querySelector('.msg-content');
-    if (contentEl) contentEl.innerHTML = _formatContent(content);
+
+    contentEl.innerHTML = _formatContent(content);
     const meta = el.querySelector('.msg-meta');
     if (meta && !meta.querySelector('.msg-edited')) {
       meta.insertAdjacentHTML('beforeend', '<span class="msg-edited">(edited)</span>');
@@ -2012,22 +2024,39 @@ const Messages = (() => {
 
   function startEdit(id) {
     const el = document.getElementById(`msg-${id}`);
-    if (!el) return;
+    if (!el || el.classList.contains('is-editing')) return;
     const contentEl = el.querySelector('.msg-content');
     if (!contentEl) return;
-    const current = contentEl.textContent;
+    
+    el.classList.add('is-editing');
+    const current = contentEl.dataset.rawText || contentEl.textContent;
     contentEl.dataset.originalText = current;
     contentEl.innerHTML = `
-      <textarea id="edit-input-${id}" style="width:100%;background:#1a1a1a;border:1px solid #4caf50;border-radius:6px;color:#e0e0e0;padding:6px;font-size:14px;resize:none;outline:none" rows="2">${UI.escHtml(current)}</textarea>
+      <textarea id="edit-input-${id}" style="width:100%;background:#1a1a1a;border:1px solid var(--accent-color,#4caf50);border-radius:6px;color:#e0e0e0;padding:6px;font-size:14px;resize:none;outline:none" rows="2">${UI.escHtml(current)}</textarea>
       <div style="display:flex;gap:8px;margin-top:4px">
-        <button onclick="Messages.submitEdit(${id})" style="background:#4caf50;border:none;border-radius:6px;color:#000;padding:4px 12px;cursor:pointer;font-size:13px">Save</button>
-        <button onclick="Messages.cancelEdit(${id})" style="background:#1a1a1a;border:none;border-radius:6px;color:#888;padding:4px 12px;cursor:pointer;font-size:13px">Cancel</button>
+        <button onclick="Messages.submitEdit(${id})" style="background:var(--accent-color,#4caf50);border:none;border-radius:6px;color:#000;padding:4px 12px;cursor:pointer;font-size:13px;font-weight:600">Save</button>
+        <button onclick="Messages.cancelEdit(${id})" style="background:#222;border:none;border-radius:6px;color:#888;padding:4px 12px;cursor:pointer;font-size:13px">Cancel</button>
       </div>
     `;
-    document.getElementById(`edit-input-${id}`)?.focus();
+    const input = document.getElementById(`edit-input-${id}`);
+    if (input) {
+      input.focus();
+      // Move cursor to end
+      input.setSelectionRange(input.value.length, input.value.length);
+      
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          submitEdit(id);
+        } else if (e.key === 'Escape') {
+          cancelEdit(id);
+        }
+      };
+    }
   }
 
   async function submitEdit(id) {
+    const el = document.getElementById(`msg-${id}`);
     const input = document.getElementById(`edit-input-${id}`);
     if (!input) return;
     const newContent = input.value.trim();
@@ -2037,6 +2066,16 @@ const Messages = (() => {
     const encrypted = key ? await Crypto.encrypt(newContent, key) : newContent;
 
     WS.send({ type: 'edit', id, content: encrypted });
+    
+    // Remove editing state so optimistic update works
+    if (el) el.classList.remove('is-editing');
+    // Clear dataset so updateEdited doesn't think we're still waiting for cancel
+    const contentEl = el?.querySelector('.msg-content');
+    if (contentEl) {
+      // Remove textarea so updateEdited's guard doesn't trigger
+      contentEl.innerHTML = ''; 
+    }
+
     // Optimistic update
     updateEdited(id, newContent, State.currentRoom);
   }
@@ -2044,6 +2083,7 @@ const Messages = (() => {
   function cancelEdit(id) {
     const el = document.getElementById(`msg-${id}`);
     if (!el) return;
+    el.classList.remove('is-editing');
     const contentEl = el.querySelector('.msg-content');
     if (!contentEl) return;
     const original = contentEl.dataset.originalText || '';

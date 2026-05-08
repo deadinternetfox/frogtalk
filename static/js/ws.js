@@ -411,6 +411,32 @@ const WS = (() => {
             if (dChanged && typeof renderDMChannels === 'function') renderDMChannels();
           }
         } catch {}
+        // Live-update active DM header when the peer's presence changes
+        try {
+          if (typeof _activeDM !== 'undefined' && _activeDM && State.currentRoomType === 'dm') {
+            const isDMPeer = (data.user_id && _activeDM.user_id && +_activeDM.user_id === +data.user_id) ||
+                             (data.nickname && _activeDM.nickname && _activeDM.nickname === data.nickname);
+            if (isDMPeer && data.presence !== undefined) {
+              const descEl = document.getElementById('ch-desc');
+              if (descEl) {
+                const presenceMap = {online: 'Online', away: 'Away', dnd: 'Do Not Disturb'};
+                const label = presenceMap[data.presence];
+                if (label) {
+                  descEl.textContent = label;
+                  // Update cached last_seen to now for online-ish states
+                  _activeDM.other_last_seen = new Date().toISOString();
+                } else {
+                  // offline / invisible — show "Offline" or formatted last seen
+                  if (typeof _formatLastSeen === 'function' && _activeDM.other_last_seen) {
+                    descEl.textContent = _formatLastSeen(_activeDM.other_last_seen);
+                  } else {
+                    descEl.textContent = 'Offline';
+                  }
+                }
+              }
+            }
+          }
+        } catch {}
         // Live-update any rendered message avatars across ALL rooms for this user
         try {
           if (data.nickname) {
