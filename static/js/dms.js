@@ -509,6 +509,11 @@ function _renderDMPreview(msgId, preview) {
         // Move top spacing from embed to wrapper so the X anchor point is stable.
         wrap.style.marginTop = '8px';
         newEmbed.style.marginTop = '0';
+        // Lock wrapper width to the actual rendered card so the X sits
+        // on the preview corner instead of the full message row edge.
+        const embedW = Math.round(newEmbed.getBoundingClientRect().width || newEmbed.offsetWidth || 0);
+        if (embedW > 0) wrap.style.width = `${embedW}px`;
+        wrap.style.maxWidth = '100%';
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'preview-suppress-btn';
