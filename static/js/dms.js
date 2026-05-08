@@ -2035,8 +2035,9 @@ async function sendDMMessage () {
   // the real id on arrival.
   try {
     const _me = STATE.user || {};
+    const _tempId = -Date.now();
     const _tempMsg = {
-      id         : 0,
+      id         : _tempId,
       _nonce     : _nonce,
       channel_id : _activeDM.id,
       sender_id  : _me.id,
@@ -2161,6 +2162,7 @@ function handleWSDMMessage (data) {
       pend.classList.remove('dm-pending');
       pend.removeAttribute('data-own');
       pend.removeAttribute('data-nonce');
+      pend.id = `msg-${data.id}`;
       pend.setAttribute('data-dmid', data.id);
       pend.style.opacity = '';
       const tick = pend.querySelector('.msg-tick');
@@ -2172,7 +2174,13 @@ function handleWSDMMessage (data) {
       }
       // Replace any cached pending entry
       const pi = _dmMessages.findIndex(x => x._nonce === data.client_nonce);
-      if (pi >= 0) _dmMessages[pi] = _normalizeDMMessage({ ...data, content: _dmMessages[pi].content });
+      if (pi >= 0) {
+        _dmMessages[pi] = _normalizeDMMessage({ ...data, content: _dmMessages[pi].content });
+        const previewUrl = _extractDMPreviewUrl(String(_dmMessages[pi].content || ''));
+        if (previewUrl && !_dmMessages[pi].preview_suppressed) {
+          setTimeout(() => _loadDMPreview(data.id, previewUrl), 80);
+        }
+      }
       return;
     }
 
@@ -2185,6 +2193,7 @@ function handleWSDMMessage (data) {
         fallback.classList.remove('dm-pending');
         fallback.removeAttribute('data-own');
         fallback.removeAttribute('data-nonce');
+        fallback.id = `msg-${data.id}`;
         fallback.setAttribute('data-dmid', data.id);
         fallback.style.opacity = '';
         const tick = fallback.querySelector('.msg-tick');
@@ -2199,7 +2208,13 @@ function handleWSDMMessage (data) {
           const x = _dmMessages[i];
           if (x && x._pending && ((x.sender_id|0) === (_selfId|0))) { pi = i; break; }
         }
-        if (pi >= 0) _dmMessages[pi] = _normalizeDMMessage({ ...data, content: _dmMessages[pi].content });
+        if (pi >= 0) {
+          _dmMessages[pi] = _normalizeDMMessage({ ...data, content: _dmMessages[pi].content });
+          const previewUrl = _extractDMPreviewUrl(String(_dmMessages[pi].content || ''));
+          if (previewUrl && !_dmMessages[pi].preview_suppressed) {
+            setTimeout(() => _loadDMPreview(data.id, previewUrl), 80);
+          }
+        }
         return;
       }
     }
