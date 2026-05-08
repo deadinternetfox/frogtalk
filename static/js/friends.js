@@ -36,6 +36,7 @@ function _friendNameHtml (u) {
 
 let _currentFriendTab = 'friends';
 let _pendingFriends    = [];
+let _pendingOutgoing   = [];
 let _allFriends        = [];
 const _FSM_BUILD = 5;
 const _friendDisplayNameCache = new Map();
@@ -100,6 +101,7 @@ async function loadFriends () {
     const d = await r.json();
     _allFriends   = d.friends        || [];
     _pendingFriends = d.requests_in  || [];
+    _pendingOutgoing = d.requests_out || [];
     const badge = document.getElementById('pending-badge');
     if (_pendingFriends.length) {
       badge.textContent = ' (' + _pendingFriends.length + ')';
@@ -109,6 +111,7 @@ async function loadFriends () {
     renderFriendTab();
     _hydrateFriendDisplayNames(_allFriends).then(changed => { if (changed) renderFriendTab(); }).catch(() => {});
     _hydrateFriendDisplayNames(_pendingFriends).then(changed => { if (changed && _currentFriendTab === 'pending') renderFriendTab(); }).catch(() => {});
+    _hydrateFriendDisplayNames(_pendingOutgoing).then(changed => { if (changed && _currentFriendTab === 'pending') renderFriendTab(); }).catch(() => {});
   } catch (e) { console.error('loadFriends', e); }
 }
 
@@ -152,15 +155,16 @@ function renderFriendTab () {
 
 function renderPending (el) {
   const incoming = _pendingFriends;
-  const outgoing = _allFriends.filter ? [] : []; // we re-fetch outgoing below if needed
+  const outgoing = _pendingOutgoing;
 
-  if (!incoming.length) {
+  if (!incoming.length && !outgoing.length) {
     el.innerHTML = `<div style="color:#9ec4b2;text-align:center;padding:32px 0">No pending requests</div>`;
     return;
   }
 
-  el.innerHTML = `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin-bottom:8px;letter-spacing:.4px">INCOMING</div>` +
-    incoming.map(f => `
+  const incomingHtml = incoming.length
+    ? `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin-bottom:8px;letter-spacing:.4px">INCOMING</div>` +
+      incoming.map(f => `
       <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${fmtAv(f.avatar, f.nickname, 40)}</div>
         <div style="flex:1">
@@ -171,7 +175,23 @@ function renderPending (el) {
           <button class="modal-btn primary" style="padding:4px 10px;font-size:12px" onclick="acceptFriend('${esc(f.nickname)}', this)">✓ Accept</button>
           <button class="modal-btn secondary" style="padding:4px 10px;font-size:12px" onclick="declineFriend('${esc(f.nickname)}', this)">✕</button>
         </div>
-      </div>`).join('');
+      </div>`).join('')
+    : '';
+
+  const outgoingHtml = outgoing.length
+    ? `<div style="font-size:12px;color:#9dc4b2;font-weight:700;margin:14px 0 8px;letter-spacing:.4px">OUTGOING</div>` +
+      outgoing.map(f => `
+      <div class="fade-in" style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
+        <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${fmtAv(f.avatar, f.nickname, 40)}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
+          <div style="font-size:12px;color:#9dc4b2">Waiting for response</div>
+        </div>
+        <span style="font-size:12px;color:#7fd2a7">Requested</span>
+      </div>`).join('')
+    : '';
+
+  el.innerHTML = incomingHtml + outgoingHtml;
 }
 
 function renderAddFriend (el) {
@@ -201,6 +221,7 @@ async function searchFriends () {
     const myNick = STATE.user?.nickname;
     el.innerHTML = users.filter(u => u.nickname !== myNick).map(u => {
       const isFriend = _allFriends.some(f => f.nickname === u.nickname);
+      const isRequested = _pendingOutgoing.some(f => f.nickname === u.nickname);
       return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid #244438">
         <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(u.nickname)}',${Number(u.id)||0})" title="View profile">${fmtAv(u.avatar, u.nickname, 40)}</div>
         <div style="flex:1">
@@ -209,6 +230,8 @@ async function searchFriends () {
         </div>
         ${isFriend
           ? `<span style="font-size:12px;color:#7fd2a7">Friends</span>`
+          : isRequested
+          ? `<button class="modal-btn secondary" style="padding:4px 12px;font-size:12px" disabled>Requested</button>`
           : `<button class="modal-btn primary" style="padding:4px 12px;font-size:12px"
                onclick="sendFriendReq('${esc(u.nickname)}',this)">+ Add</button>`}
       </div>`;
@@ -223,12 +246,28 @@ async function sendFriendReq (nick, btn) {
   if (r.ok) {
     toast('Friend request sent to ' + nick);
     if (btn) { btn.textContent = 'Requested'; btn.style.background = '#1a3a1a'; btn.style.color = '#4caf50'; }
+    if (!_pendingOutgoing.some(f => f.nickname === nick)) {
+      _pendingOutgoing.push({ nickname: nick });
+    }
+    try { await loadFriends(); } catch {}
     // Notify recipient in real-time via WebSocket
     wsSend({ type: 'friend_notify', action: 'request', to_nick: nick });
   } else {
-    if (btn) { btn.disabled = false; btn.textContent = '+ Add'; }
     const d = await r.json().catch(()=>({}));
-    toast(d.detail || d.error || 'Could not send request', 'error');
+    const msg = String(d.detail || d.error || 'Could not send request');
+    if (r.status === 409 && /already/i.test(msg)) {
+      const isFriend = _allFriends.some(f => f.nickname === nick);
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = isFriend ? 'Friends' : 'Requested';
+        btn.style.background = '#1a3a1a';
+        btn.style.color = '#4caf50';
+      }
+      try { await loadFriends(); } catch {}
+      return;
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '+ Add'; }
+    toast(msg, 'error');
   }
 }
 
