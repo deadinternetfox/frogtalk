@@ -336,6 +336,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 import logging
+from http import HTTPStatus as _HTTPStatus2
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse as _JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -346,14 +347,214 @@ if not _log.handlers:
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 
+# ── Content-negotiated error responses ──────────────────────────────────────
+
+def _wants_json_error(request: Request) -> bool:
+    """Return True for API/AJAX callers that should receive JSON errors."""
+    path = (request.url.path or "").lower()
+    if path.startswith("/api") or path.startswith("/ws"):
+        return True
+    accept = (request.headers.get("accept") or "").lower()
+    if "application/json" in accept and "text/html" not in accept:
+        return True
+    if (request.headers.get("x-requested-with") or "").lower() == "xmlhttprequest":
+        return True
+    return False
+
+
+def _err_status_text(code: int) -> str:
+    try:
+        return _HTTPStatus2(code).phrase
+    except Exception:
+        return "Error"
+
+
+def _he(s: str) -> str:
+    """Minimal HTML escape for inline text."""
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+_ERROR_THEME = {
+    401: ("\U0001f512", "#7dd3fc", "125,211,252"),
+    403: ("\U0001f6ab", "#fca5a5", "252,165,165"),
+    404: ("\U0001f438", "#4caf50", "76,175,80"),
+    429: ("\u23f3",     "#fcd34d", "252,211,77"),
+    500: ("\U0001f4a5", "#f87171", "248,113,113"),
+    503: ("\U0001f527", "#fb923c", "251,146,60"),
+}
+
+
+def _render_error_page(status_code: int, title: str, message: str, request: Request) -> str:
+    safe_title = _he(title)
+    safe_msg   = _he(message)
+    code_label = _he(f"{status_code} {_err_status_text(status_code)}")
+    req_path   = _he(request.url.path or "/")
+    is_auth    = status_code in (401, 403)
+    cta_href   = "/app?login=1" if is_auth else "/app"
+    cta_text   = "Sign in" if is_auth else "Open FrogTalk"
+    emoji, accent, glow = _ERROR_THEME.get(status_code, ("\u26a0\ufe0f", "#4caf50", "76,175,80"))
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="robots" content="noindex">
+<title>{safe_title} \u2014 FrogTalk</title>
+<link rel="icon" href="/static/icons/icon-96.png" type="image/png">
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  :root{{
+    --bg:#0d0d0d;--surface:#141a14;--surface2:#1a261a;
+    --border:rgba(76,175,80,.18);--text:#dff5e8;--muted:#8db89b;
+    --accent:{accent};--glow:rgba({glow},.35);--glow-soft:rgba({glow},.12);
+  }}
+  html,body{{height:100%;background:var(--bg);color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}}
+  body{{display:flex;flex-direction:column;align-items:center;justify-content:center;
+    min-height:100vh;padding:20px;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%,rgba({glow},.08) 0%,transparent 65%),
+      radial-gradient(ellipse 60% 35% at 50% 110%,rgba(46,138,74,.07) 0%,transparent 60%),
+      var(--bg);}}
+  .brand{{display:flex;align-items:center;gap:10px;margin-bottom:32px;text-decoration:none;color:inherit}}
+  .brand-icon{{width:36px;height:36px;border-radius:10px;
+    background:linear-gradient(145deg,#2d6a35,#1e4827);border:1px solid rgba(76,175,80,.4);
+    display:flex;align-items:center;justify-content:center;font-size:20px;
+    box-shadow:0 4px 12px rgba(0,0,0,.5)}}
+  .brand-name{{font-size:17px;font-weight:700;letter-spacing:-.2px;
+    background:linear-gradient(180deg,#c8f0d0,#7fd2a7);
+    -webkit-background-clip:text;background-clip:text;color:transparent}}
+  .card{{position:relative;width:min(520px,100%);padding:36px 32px 32px;border-radius:20px;
+    background:linear-gradient(175deg,var(--surface2) 0%,var(--surface) 100%);
+    border:1px solid var(--border);
+    box-shadow:0 32px 72px rgba(0,0,0,.6),0 0 0 1px rgba(76,175,80,.04),
+      inset 0 1px 0 rgba(255,255,255,.04),0 0 48px var(--glow-soft);}}
+  .card::before{{content:'';position:absolute;inset:0;border-radius:20px;pointer-events:none;
+    background:linear-gradient(180deg,rgba(255,255,255,.035) 0%,transparent 50%);}}
+  .pill{{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;
+    margin-bottom:18px;background:rgba({glow},.10);border:1px solid rgba({glow},.28);
+    color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase}}
+  .code{{font-size:72px;font-weight:900;line-height:1;letter-spacing:-3px;
+    background:linear-gradient(180deg,var(--accent) 0%,rgba({glow},.5) 120%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    margin-bottom:8px;filter:drop-shadow(0 0 24px var(--glow));}}
+  h1{{font-size:22px;font-weight:700;line-height:1.2;margin-bottom:10px;color:var(--text)}}
+  .desc{{font-size:14px;line-height:1.6;color:var(--muted)}}
+  .path{{display:inline-flex;align-items:center;gap:6px;margin-top:16px;padding:6px 11px;
+    border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+    font-size:12px;color:#7a9e87;
+    font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace;
+    word-break:break-all;max-width:100%;}}
+  .path-label{{color:#4a7a58;flex-shrink:0;font-size:11px;text-transform:uppercase;letter-spacing:.4px}}
+  .divider{{height:1px;background:linear-gradient(90deg,transparent,var(--border),transparent);margin:24px 0}}
+  .actions{{display:flex;flex-wrap:wrap;gap:10px}}
+  .btn{{display:inline-flex;align-items:center;justify-content:center;padding:10px 20px;
+    border-radius:11px;font-size:14px;font-weight:600;text-decoration:none;border:1px solid transparent;
+    transition:transform .1s ease,box-shadow .15s ease,opacity .15s ease}}
+  .btn:hover{{transform:translateY(-1px)}}
+  .btn:active{{transform:translateY(0);opacity:.85}}
+  .btn-primary{{background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3a9040 100%);
+    border-color:#6cd870;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3);
+    box-shadow:0 6px 20px rgba(76,175,80,.4),inset 0 1px 0 rgba(255,255,255,.2);}}
+  .btn-primary:hover{{box-shadow:0 8px 28px rgba(76,175,80,.55),inset 0 1px 0 rgba(255,255,255,.2)}}
+  .btn-ghost{{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1);color:var(--muted)}}
+  .btn-ghost:hover{{background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.15);color:var(--text)}}
+  .footer{{margin-top:28px;font-size:12px;color:#4a6655;text-align:center}}
+  .footer a{{color:#5a7a62;text-decoration:none}}
+  .footer a:hover{{color:var(--accent)}}
+  @media(max-width:480px){{.card{{padding:28px 20px 24px}}.code{{font-size:56px}}h1{{font-size:20px}}}}
+</style>
+</head><body>
+  <a class="brand" href="/"><div class="brand-icon">\U0001f438</div><span class="brand-name">FrogTalk</span></a>
+  <main class="card" role="main">
+    <div class="pill">{emoji} {code_label}</div>
+    <div class="code">{status_code}</div>
+    <h1>{safe_title}</h1>
+    <p class="desc">{safe_msg}</p>
+    <div class="path"><span class="path-label">path</span>&nbsp;{req_path}</div>
+    <div class="divider"></div>
+    <div class="actions">
+      <a class="btn btn-primary" href="{cta_href}">{cta_text}</a>
+      <a class="btn btn-ghost" href="javascript:history.back()">\u2190 Go back</a>
+      <a class="btn btn-ghost" href="/">Home</a>
+    </div>
+  </main>
+  <footer class="footer">
+    <a href="https://frogtalk.xyz">frogtalk.xyz</a> &nbsp;\u00b7&nbsp; <a href="/static/privacy.html">Privacy</a>
+  </footer>
+</body></html>"""
+
+
+def _json_http_error(status_code: int, detail=None) -> _JSONResponse:
+    phrase = _err_status_text(status_code)
+    return _JSONResponse(status_code=status_code, content={"error": detail or phrase})
+
+
+async def _handle_http_exc(request: Request, exc: StarletteHTTPException) -> HTMLResponse:
+    """Shared content-negotiated handler for HTTP errors."""
+    status_code = int(exc.status_code or 500)
+    detail = str(exc.detail or _err_status_text(status_code))
+    if _wants_json_error(request):
+        return _json_http_error(status_code, detail)
+    _TITLES = {
+        400: ("Bad request",           "The request was malformed or missing required data."),
+        401: ("Sign in required",      "You need an active FrogTalk session to view this page."),
+        403: ("Access denied",         "You do not have permission to view this page."),
+        404: ("Page not found",        "This link does not exist or may have been moved."),
+        405: ("Method not allowed",    "That action is not supported here."),
+        429: ("Slow down",             "Too many requests \u2014 please wait a moment and try again."),
+        503: ("Service unavailable",   "FrogTalk is temporarily down for maintenance. Check back soon."),
+    }
+    title, msg = _TITLES.get(status_code, (_err_status_text(status_code), detail))
+    headers = dict(_PUBLIC_HTML_NO_CACHE)
+    if getattr(exc, "headers", None):
+        headers.update(exc.headers)
+    return HTMLResponse(
+        content=_render_error_page(status_code, title, msg, request),
+        status_code=status_code,
+        headers=headers,
+    )
+
+
+# FastAPI >= 0.111 uses a subclass of starlette HTTPException that is a
+# distinct class object. FastAPI registers its own JSON handler for that
+# subclass at app init, which beats our StarletteHTTPException handler in
+# the MRO walk. Register for BOTH to intercept all HTTP errors.
+@app.exception_handler(StarletteHTTPException)
+async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    return await _handle_http_exc(request, exc)
+
+
+@app.exception_handler(HTTPException)
+async def fastapi_http_exception_handler(request: Request, exc: HTTPException):
+    return await _handle_http_exc(request, exc)
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Return JSON for unhandled exceptions; let HTTPException + RateLimit
-    bubble up to their proper handlers so status codes aren't masked."""
+    """Return JSON for API callers and themed HTML for page requests."""
     if isinstance(exc, (HTTPException, StarletteHTTPException, RateLimitExceeded)):
-        raise exc
+        return await _handle_http_exc(request, exc)
     _log.exception("Unhandled error on %s %s", request.method, request.url.path)
-    return _JSONResponse(status_code=500, content={"error": "Internal server error"})
+    if _wants_json_error(request):
+        return _JSONResponse(status_code=500, content={"error": "Internal server error"})
+    return HTMLResponse(
+        content=_render_error_page(
+            500,
+            "Something went wrong",
+            "An unexpected server error occurred. Please try again in a moment.",
+            request,
+        ),
+        status_code=500,
+        headers=_PUBLIC_HTML_NO_CACHE,
+    )
 
 
 # ── CORS ────────────────────────────────────────────────────────────────────
