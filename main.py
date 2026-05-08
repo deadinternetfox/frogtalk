@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from urllib.parse import urlparse
+from urllib.parse import quote as url_quote, urlparse
 
 _LOG_LEVEL = (os.getenv("LOG_LEVEL") or "INFO").strip().upper()
 logging.basicConfig(
@@ -12,6 +12,12 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
 _log = logging.getLogger("frogtalk.main")
+
+_PUBLIC_HTML_NO_CACHE = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -892,7 +898,7 @@ async def serve_post_landing(post_id: int):
             "<p>This post is unavailable or not public.</p>"
             "<a href=\"/app\">Go to FrogTalk</a></div></body></html>"
         )
-        return HTMLResponse(content=html, status_code=404)
+        return HTMLResponse(content=html, status_code=404, headers=_PUBLIC_HTML_NO_CACHE)
 
     nick = post.get("nickname") or "frog"
     display_name = (post.get("display_name") or "").strip()
@@ -918,6 +924,16 @@ async def serve_post_landing(post_id: int):
         if avatar.startswith(("http://", "https://", "data:image/", "/"))
         else "<div class=\"author-avatar author-fallback\">🐸</div>"
     )
+    profile_href = f"/u/{url_quote(nick, safe='')}"
+    if display_name:
+        author_block = (
+            f'<div><div class="author-name">{_og_escape(display_name)}</div>'
+            f'<a class="author-handle" href="{profile_href}">@{_og_escape(nick)}</a></div>'
+        )
+    else:
+        author_block = (
+            f'<div><a class="author-name author-name-link" href="{profile_href}">@{_og_escape(nick)}</a></div>'
+        )
     media_html = ""
     if media_type.startswith("image/") and media_data:
         media_html = f"<img class=\"post-media\" src=\"{_og_escape(media_data)}\" alt=\"Post media\">"
@@ -1036,6 +1052,8 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 .author-name{{font-weight:700;letter-spacing:-.01em;
   background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);
   -webkit-background-clip:text;background-clip:text;color:transparent}}
+.author-name-link{{text-decoration:none;color:inherit;display:inline-block}}
+.author-handle{{display:inline-block;margin-top:2px;color:#cfeadb;font-size:13px;text-decoration:none}}
 .caption{{white-space:pre-wrap;line-height:1.5;color:#dff5e8;margin-bottom:14px;word-wrap:break-word;font-size:15px}}
 .post-media{{width:100%;max-height:70vh;object-fit:contain;border-radius:14px;
   border:1px solid rgba(127,210,167,.18);background:#0a1410;
@@ -1083,7 +1101,7 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 </style></head><body>
 <div class=\"card\">
   <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Viewing as guest \u2014 <a class=\"gb-link\" href=\"/app?register=1&amp;post={post_id}\">join FrogTalk</a> to like, comment and reply.</span></div>
-  <div class=\"author\">{avatar_html}<div><div class=\"author-name\">{_og_escape(display_name) if display_name else f'@{_og_escape(nick)}'}</div></div></div>
+    <div class=\"author\">{avatar_html}{author_block}</div>
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   {media_html}
   <div class=\"actions\">
@@ -1099,7 +1117,7 @@ try {{
 }} catch (e) {{}}
 </script>
 </body></html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, headers=_PUBLIC_HTML_NO_CACHE)
 
 
 @app.get("/r/{post_id}/media")
@@ -1195,7 +1213,7 @@ async def serve_reel_landing(post_id: int):
             "<p>This reel is unavailable or not public.</p>"
             "<a href=\"/app\">Go to FrogTalk</a></div></body></html>"
         )
-        return HTMLResponse(content=html, status_code=404)
+        return HTMLResponse(content=html, status_code=404, headers=_PUBLIC_HTML_NO_CACHE)
 
     nick = post.get("nickname") or "frog"
     display_name = (post.get("display_name") or "").strip()
@@ -1211,6 +1229,16 @@ async def serve_reel_landing(post_id: int):
         if avatar.startswith(("http://", "https://", "data:image/", "/"))
         else "<div class=\"author-avatar author-fallback\">🐸</div>"
     )
+    profile_href = f"/u/{url_quote(nick, safe='')}"
+    if display_name:
+        author_block = (
+            f'<div><div class="author-name">{_og_escape(display_name)}</div>'
+            f'<a class="author-handle" href="{profile_href}">@{_og_escape(nick)}</a></div>'
+        )
+    else:
+        author_block = (
+            f'<div><a class="author-name author-name-link" href="{profile_href}">@{_og_escape(nick)}</a></div>'
+        )
 
     html = f"""<!DOCTYPE html>
 <html><head>
@@ -1277,6 +1305,8 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 .author-name{{font-weight:700;letter-spacing:-.01em;
   background:linear-gradient(180deg,#bff0d0,#7fd2a7 70%,#4caf50);
   -webkit-background-clip:text;background-clip:text;color:transparent}}
+.author-name-link{{text-decoration:none;color:inherit;display:inline-block}}
+.author-handle{{display:inline-block;margin-top:2px;color:#cfeadb;font-size:13px;text-decoration:none}}
 .caption{{white-space:pre-wrap;line-height:1.5;color:#dff5e8;margin-bottom:12px;word-wrap:break-word;font-size:15px}}
 .reel-video{{width:100%;max-height:76vh;object-fit:contain;border-radius:14px;
   border:1px solid rgba(127,210,167,.18);background:#0a1410;
@@ -1295,7 +1325,7 @@ body{{margin:0;color:#dff5e8;font-family:-apple-system,BlinkMacSystemFont,'Segoe
 </style></head><body>
 <div class=\"card\">
   <div class=\"guest-banner\"><span class=\"gb-dot\"></span><span>Watching as guest \u2014 <a class=\"gb-link\" href=\"/app?register=1&amp;reel={post_id}\">join FrogTalk</a> to like, comment, repost and chat with friends.</span></div>
-  <div class=\"author\">{avatar_html}<div><div class=\"author-name\">{_og_escape(display_name) if display_name else f'@{_og_escape(nick)}'}</div></div></div>
+    <div class=\"author\">{avatar_html}{author_block}</div>
   {f'<div class="caption">{_og_escape(content)}</div>' if content else ''}
   <video class=\"reel-video\" controls playsinline preload=\"metadata\" src=\"/r/{post_id}/media\"></video>
   <div class=\"actions\">
@@ -1311,7 +1341,7 @@ try {{
 }} catch (e) {{}}
 </script>
 </body></html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, headers=_PUBLIC_HTML_NO_CACHE)
 
 
 @app.get("/api/ping")

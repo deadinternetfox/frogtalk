@@ -7,11 +7,18 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
+from urllib.parse import quote as _url_quote
 
 import database as db
 from deps import get_current_user
 
 router = APIRouter(prefix="/invites", tags=["invites"])
+
+_PUBLIC_HTML_NO_CACHE = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
 
 
 def generate_invite_code() -> str:
@@ -376,7 +383,7 @@ a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
 <p>This invite link is invalid or has expired.</p>
 <a href="/app">Go to FrogTalk</a>
 </div></body></html>"""
-        return HTMLResponse(content=html, status_code=404)
+        return HTMLResponse(content=html, status_code=404, headers=_PUBLIC_HTML_NO_CACHE)
 
     # Channel icons can be either an emoji ("💬") or an uploaded image stored
     # as a base64 data URL / http(s) URL. Render the right element or we end up
@@ -420,6 +427,10 @@ a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
     _raw_created_by = (invite.get('created_by_name') or '').strip()
     _created_by_with_handle = f"@{_raw_created_by}" if _raw_created_by else '@someone'
     created_by_safe = _html_mod.escape(_created_by_with_handle)
+    created_by_html = (
+        f'<a class="invited-by-link" href="/u/{_url_quote(_raw_created_by, safe="")}">{created_by_safe}</a>'
+        if _raw_created_by else f"<b>{created_by_safe}</b>"
+    )
     # Richer preview description: include inviter + channel purpose so the
     # message preview actually tells you what you're joining.
     raw_bio = (invite.get('room_desc') or 'Join the conversation — end-to-end encrypted chat, voice & video calls.').strip()
@@ -509,6 +520,7 @@ h1{{
 .desc{{color:#bcd6c8;margin:0 0 14px;font-size:14px;line-height:1.45}}
 .invited-by{{color:var(--muted);font-size:13px;margin:0 0 22px}}
 .invited-by b{{color:#cfeadb;font-weight:600}}
+.invited-by-link{{color:#cfeadb;font-weight:600;text-decoration:none}}
 .btn{{
   display:block;width:100%;padding:13px 16px;margin:10px 0;
   border:1px solid transparent;border-radius:10px;
@@ -543,7 +555,7 @@ h1{{
 {icon_html}
 <h1>#{room_name_safe}</h1>
 <p class="desc">{room_desc_safe}</p>
-<p class="invited-by">Invited by <b>{created_by_safe}</b></p>
+<p class="invited-by">Invited by {created_by_html}</p>
 <a id="btn-primary" href="/app?invite={code}" class="btn btn-primary">Join</a>
 <a id="btn-secondary" href="/app?invite={code}&amp;register=1" class="btn btn-secondary">Create a new account</a>
 <p id="note" class="note">You'll join <b>#{room_name_safe}</b> after signing in.</p>
@@ -569,4 +581,4 @@ h1{{
 }})();
 </script>
 </body></html>"""
-    return HTMLResponse(content=html)
+    return HTMLResponse(content=html, headers=_PUBLIC_HTML_NO_CACHE)
