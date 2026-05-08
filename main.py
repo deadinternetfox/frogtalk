@@ -486,7 +486,7 @@ def _render_error_page(status_code: int, title: str, message: str, request: Requ
 
   /* ── card ── */
   .card{{
-    position:relative;width:100%;overflow:hidden;
+    position:relative;width:100%;overflow:hidden;text-align:center;
     padding:clamp(22px,5vw,38px) clamp(18px,5vw,34px) clamp(22px,4vw,30px);
     border-radius:22px;
     background:linear-gradient(175deg,rgba(25,35,25,.97) 0%,rgba(19,26,19,.99) 100%);
@@ -560,7 +560,7 @@ def _render_error_page(status_code: int, title: str, message: str, request: Requ
   }}
 
   /* ── buttons ── */
-  .actions{{display:flex;flex-wrap:wrap;gap:9px}}
+    .actions{{display:flex;flex-wrap:wrap;gap:9px;justify-content:center}}
   .btn{{
     display:inline-flex;align-items:center;justify-content:center;
     padding:10px 20px;border-radius:12px;font-size:13.5px;font-weight:600;
