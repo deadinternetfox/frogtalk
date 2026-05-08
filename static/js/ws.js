@@ -333,6 +333,18 @@ const WS = (() => {
         if (typeof Users !== 'undefined' && Users.updateAvatar) {
           Users.updateAvatar(data.user_id, data.nickname, data.avatar);
         }
+        // Sync presence/status changes into member list rows immediately.
+        if (data.presence !== undefined || data.status_msg !== undefined) {
+          if (sameUser(State.user)) {
+            if (data.presence !== undefined) State.user.presence = data.presence || 'online';
+            if (data.status_msg !== undefined) State.user.status_msg = data.status_msg || '';
+            try { State.save(); } catch {}
+            try { UI.renderSelfStatus && UI.renderSelfStatus(); } catch {}
+          }
+          if (typeof Users !== 'undefined' && Users.updatePresence) {
+            Users.updatePresence(data.user_id, data.nickname, data.presence, data.status_msg);
+          }
+        }
         // Sync display_name change to member list caches
         if (data.display_name !== undefined) {
           if (sameUser(State.user)) {
@@ -364,15 +376,24 @@ const WS = (() => {
           if (typeof _allFriends !== 'undefined' && Array.isArray(_allFriends)) {
             let fChanged = false;
             for (const f of _allFriends) {
-              if ((data.user_id && f.user_id === data.user_id) ||
-                  (data.nickname && f.nickname === data.nickname)) {
+              const sameById = data.user_id && (String(f.user_id || f.id || '') === String(data.user_id));
+              const sameByNick = data.nickname && f.nickname === data.nickname;
+              if (sameById || sameByNick) {
                 if (data.avatar !== undefined) { f.avatar = data.avatar; fChanged = true; }
+                if (data.display_name !== undefined) { f.display_name = data.display_name || null; fChanged = true; }
+                if (data.presence !== undefined) { f.presence = data.presence || 'online'; fChanged = true; }
+                if (data.status_msg !== undefined) { f.status_msg = data.status_msg || ''; fChanged = true; }
               }
             }
             if (fChanged) {
               const fp = document.getElementById('friends-panel');
               if (fp && !fp.classList.contains('hidden') && typeof renderFriendTab === 'function') {
                 renderFriendTab();
+              }
+              const frogPanel = document.getElementById('frog-friends-panel');
+              if (frogPanel && frogPanel.classList.contains('open') && typeof renderFfpContent === 'function') {
+                const activeTab = document.querySelector('.ffp-tab.active')?.dataset?.tab || 'online';
+                renderFfpContent(activeTab);
               }
             }
           }

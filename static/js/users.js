@@ -139,8 +139,10 @@ const Users = (() => {
         const key = String((member.nickname || '')).toLowerCase();
         const online = onlineMap.get(key);
         const merged = online ? { ...member, ...online, display_name: member.display_name || online.display_name } : { ...member };
-        if (online) onlineSource.push(merged);
-        else offlineSource.push(merged);
+        const p = String((merged.presence || member.presence || '')).toLowerCase();
+        const forceOffline = p === 'invisible' || p === 'offline';
+        if (online && !forceOffline) onlineSource.push(merged);
+        else offlineSource.push({ ...merged, presence: forceOffline ? 'offline' : merged.presence });
       }
       // Include any online users not present in the members snapshot as a fallback.
       for (const user of _allUsers) {
@@ -227,7 +229,19 @@ const Users = (() => {
     const isSelf = !!(State.user && _sameUser(u.user_id, u.nickname, State.user.id, State.user.nickname));
     const handleNick = isSelf ? (State.user.nickname || u.nickname) : u.nickname;
     const avatarSrc = u.avatar || (isSelf ? State.user.avatar : null);
-    const dot = isOnline ? '<span class="online-dot"></span>' : '<span class="offline-dot"></span>';
+    const pRaw = String(u.presence || '').toLowerCase();
+    const effectivePresence = isOnline
+      ? ((pRaw === 'away' || pRaw === 'dnd' || pRaw === 'online') ? pRaw : 'online')
+      : 'offline';
+    const presenceMeta = {
+      online: { color: '#4caf50', label: 'Online' },
+      away: { color: '#ffc107', label: 'Away' },
+      dnd: { color: '#f44336', label: 'Busy' },
+      offline: { color: '#8a8a8a', label: 'Offline' },
+    };
+    const pm = presenceMeta[effectivePresence] || presenceMeta.online;
+    const dotClass = effectivePresence === 'offline' ? 'offline-dot' : 'online-dot';
+    const dot = `<span class="${dotClass}" style="background:${pm.color}" title="${pm.label}"></span>`;
     // For self always use authoritative State.user data so stale WS/DB caches can't win
     const displayLabel = isSelf
       ? (State.user.display_name || State.user.nickname || u.nickname)
@@ -288,6 +302,35 @@ const Users = (() => {
     if (changed) _renderFiltered();
   }
 
+  function updatePresence(userId, nickname, presence, statusMsg) {
+    let changed = false;
+    const p = presence === undefined ? undefined : String(presence || '').toLowerCase();
+    const nextPresence = p;
+    for (const u of _allUsers) {
+      if (_sameUser(u.user_id, u.nickname, userId, nickname)) {
+        if (nextPresence !== undefined) u.presence = nextPresence;
+        if (statusMsg !== undefined) u.status_msg = statusMsg;
+        changed = true;
+      }
+    }
+    for (const m of _channelMembers) {
+      if (_sameUser(m.user_id, m.nickname, userId, nickname)) {
+        if (nextPresence !== undefined) m.presence = nextPresence;
+        if (statusMsg !== undefined) m.status_msg = statusMsg;
+        changed = true;
+      }
+    }
+    if (State.onlineUsers) {
+      for (const u of State.onlineUsers) {
+        if (_sameUser(u.user_id, u.nickname, userId, nickname)) {
+          if (nextPresence !== undefined) u.presence = nextPresence;
+          if (statusMsg !== undefined) u.status_msg = statusMsg;
+        }
+      }
+    }
+    if (changed) _renderFiltered();
+  }
+
   function updateAvatar(userId, nickname, avatar) {
     let changed = false;
     for (const u of _allUsers) {
@@ -318,5 +361,5 @@ const Users = (() => {
     } catch {}
   }
 
-  return { updateList, updateAvatar, updateDisplayName, loadChannelMembers };
+  return { updateList, updateAvatar, updateDisplayName, updatePresence, loadChannelMembers };
 })();

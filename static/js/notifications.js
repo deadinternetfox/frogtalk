@@ -24,7 +24,7 @@ const Notifications = (() => {
       await new Promise(res => window.addEventListener('load', res, { once: true }));
     }
     try {
-      _swReg = await navigator.serviceWorker.register('/sw.js?v=218', { scope: '/' });
+      _swReg = await navigator.serviceWorker.register('/sw.js?v=219', { scope: '/' });
       console.log('[SW] registered, scope:', _swReg.scope);
       // Note: incoming-call accept/decline is handled exclusively by the
       // in-page #incoming-call popup (driven by WS call_offer). The SW
@@ -174,6 +174,14 @@ const Notifications = (() => {
     if (v === undefined || v === null) return def;
     if (v === 0 || v === false || v === '0') return false;
     return true;
+  }
+  function _isDndActive() {
+    try {
+      const p = String((State && State.user && State.user.presence) || '').toLowerCase();
+      return p === 'dnd';
+    } catch {
+      return false;
+    }
   }
   function _vibEnabled() {
     return localStorage.getItem('ft_notify_vibrate') !== '0';
@@ -928,6 +936,7 @@ const Notifications = (() => {
 
     // In-app + desktop notification for a new message
     notify(msg) {
+      if (_isDndActive()) return;
       const myNick = State.user?.nickname || '';
       const contentText = (msg.content || '').replace(/<[^>]+>/g, '');
       let isMention = myNick && contentText.toLowerCase().includes('@' + myNick.toLowerCase());
@@ -1014,6 +1023,7 @@ const Notifications = (() => {
 
     // DM message notification
     notifyDM(msg) {
+      if (_isDndActive()) return;
       // Hard guard: never alert for our own echoed-back DM
       try {
         const selfId = State.user?.id;

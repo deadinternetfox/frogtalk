@@ -1478,6 +1478,22 @@ async def _handle_user_event(event: dict) -> None:
         )
         con.commit()
 
+    # Push live profile changes (including presence/status) to connected clients
+    # so channel member sidebars update without a manual refresh.
+    try:
+        from ws_manager import manager
+        await manager.broadcast_all({
+            "type": "profile_update",
+            "user_id": user["id"],
+            "nickname": nick,
+            "display_name": display_name or None,
+            "avatar": str(payload.get("avatar") or ""),
+            "presence": (presence or str(payload.get("presence") or "").strip().lower() or "online"),
+            "status_msg": str(payload.get("status_msg") or "")[:128],
+        })
+    except Exception:
+        pass
+
 
 def _ensure_local_user_by_nickname(nickname: str) -> dict | None:
     nick = (nickname or "").strip()

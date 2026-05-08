@@ -176,6 +176,63 @@ const UI = (() => {
     } catch {}
   }
 
+  const _AUTO_AWAY_IDLE_MS = 15 * 60 * 1000;
+  const _AUTO_AWAY_ACTIVITY_THROTTLE_MS = 5000;
+  let _autoAwayTimer = null;
+  let _autoAwayActive = false;
+  let _lastAutoAwayActivityTs = 0;
+
+  function _clearAutoAwayTimer() {
+    if (_autoAwayTimer) {
+      clearTimeout(_autoAwayTimer);
+      _autoAwayTimer = null;
+    }
+  }
+
+  function _syncAutoAwayFromPresence(presence, opts = {}) {
+    const p = String(presence || 'online').toLowerCase();
+    if (opts.autoAwaySet) {
+      _autoAwayActive = true;
+      _clearAutoAwayTimer();
+      return;
+    }
+    if (opts.autoAwayRestore) {
+      _autoAwayActive = false;
+    }
+    if (p !== 'online') {
+      _clearAutoAwayTimer();
+      if (!opts.autoAwaySet) _autoAwayActive = false;
+      return;
+    }
+    _autoAwayActive = false;
+    _clearAutoAwayTimer();
+    _autoAwayTimer = setTimeout(async () => {
+      try {
+        if (!State?.user) return;
+        const cur = String(State.user.presence || 'online').toLowerCase();
+        if (cur !== 'online') return;
+        const msg = String(State.user.status_msg || '');
+        await _saveStatusSilent('away', msg, { autoAwaySet: true });
+      } catch {}
+    }, _AUTO_AWAY_IDLE_MS);
+  }
+
+  function _handleAutoAwayActivity() {
+    const now = Date.now();
+    if ((now - _lastAutoAwayActivityTs) < _AUTO_AWAY_ACTIVITY_THROTTLE_MS) return;
+    _lastAutoAwayActivityTs = now;
+    if (!State?.user) return;
+    const cur = String(State.user.presence || 'online').toLowerCase();
+    if (_autoAwayActive && cur === 'away') {
+      const msg = String(State.user.status_msg || '');
+      _saveStatusSilent('online', msg, { autoAwayRestore: true });
+      return;
+    }
+    if (cur === 'online') {
+      _syncAutoAwayFromPresence('online');
+    }
+  }
+
   async function toggleSelfStatusComposer(open) {
     const wrap = document.getElementById('self-quick-editor');
     const input = document.getElementById('self-quick-input');
@@ -433,7 +490,7 @@ const UI = (() => {
     }
   }
 
-  async function _saveStatus(presence, status_msg) {
+  async function _saveStatus(presence, status_msg, opts = {}) {
     try {
       const res = await fetch('/api/auth/profile', {
         method: 'PATCH',
@@ -443,7 +500,17 @@ const UI = (() => {
       if (!res.ok) { toast('Could not save status', 'error'); return; }
       State.user.presence = presence;
       State.user.status_msg = status_msg;
+      try {
+        if (typeof Users !== 'undefined' && Users.updatePresence) {
+          Users.updatePresence(State.user?.id, State.user?.nickname, presence, status_msg);
+        }
+        if (typeof Users !== 'undefined' && Users.loadChannelMembers
+            && State.currentRoom && State.currentChannelType !== 'dm') {
+          await Users.loadChannelMembers(State.currentRoom);
+        }
+      } catch {}
       renderSelfStatus();
+      _syncAutoAwayFromPresence(presence, opts);
       toast('Status updated', 'success');
     } catch { toast('Could not save status', 'error'); }
   }
@@ -457,10 +524,10 @@ const UI = (() => {
   // mini-dock right after a takeover-PATCH was issued would silently
   // drop the "restore to original" PATCH and leave the status pill
   // stuck on "🎵 SongTitle".
-  let _nowPlayingPending = null;  // {presence, status_msg} | null
-  async function _saveStatusSilent(presence, status_msg) {
+  let _nowPlayingPending = null;  // {presence, status_msg, opts} | null
+  async function _saveStatusSilent(presence, status_msg, opts = {}) {
     if (_nowPlayingPatchInflight) {
-      _nowPlayingPending = { presence, status_msg };
+      _nowPlayingPending = { presence, status_msg, opts };
       return;
     }
     _nowPlayingPatchInflight = true;
@@ -473,7 +540,13 @@ const UI = (() => {
       if (!res.ok) return;
       State.user.presence = presence;
       State.user.status_msg = status_msg;
+      try {
+        if (typeof Users !== 'undefined' && Users.updatePresence) {
+          Users.updatePresence(State.user?.id, State.user?.nickname, presence, status_msg);
+        }
+      } catch {}
       renderSelfStatus();
+      _syncAutoAwayFromPresence(presence, opts);
     } catch {} finally {
       _nowPlayingPatchInflight = false;
       // Drain trailing call (if any) — but only if it actually differs
@@ -485,7 +558,7 @@ const UI = (() => {
               || pending.status_msg !== State.user.status_msg)) {
         // Recurse via setTimeout so we yield the microtask queue first
         // (any synchronous callers stacking after us get to run).
-        setTimeout(() => _saveStatusSilent(pending.presence, pending.status_msg), 0);
+        setTimeout(() => _saveStatusSilent(pending.presence, pending.status_msg, pending.opts || {}), 0);
       }
     }
   }
@@ -626,6 +699,20 @@ const UI = (() => {
     }
     // Initial sync in case music was already playing when the page loaded.
     setTimeout(() => { try { _syncNowPlayingStatus(); } catch {} }, 600);
+
+    // Auto-away wiring: mark users as away after idle, restore on activity.
+    const _activityEvents = ['pointerdown', 'keydown', 'touchstart', 'mousemove', 'scroll', 'focus'];
+    _activityEvents.forEach((evName) => {
+      try {
+        window.addEventListener(evName, _handleAutoAwayActivity, { passive: true });
+      } catch {
+        window.addEventListener(evName, _handleAutoAwayActivity);
+      }
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) _handleAutoAwayActivity();
+    });
+    _syncAutoAwayFromPresence((State?.user?.presence) || 'online');
   }
   // Defer until DOM exists.
   if (document.readyState === 'loading') {

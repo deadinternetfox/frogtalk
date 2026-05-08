@@ -303,12 +303,13 @@ function presenceLabel (p) {
 
 function isFriendOnlinePresence(friend) {
   const p = String((friend && friend.presence) || '').toLowerCase();
-  return p === 'online';
+  return p === 'online' || p === 'away' || p === 'dnd';
 }
 
 /* ── Receive WS push notification for friend request ───────────────────────── */
 function handleFriendNotify (data) {
   if (data.type === 'friend_notify') {
+    const isDnd = String((State?.user?.presence || '')).toLowerCase() === 'dnd';
     const msg = data.action === 'request'
       ? `${data.from} sent you a friend request`
       : `${data.from} accepted your friend request`;
@@ -323,11 +324,11 @@ function handleFriendNotify (data) {
         }
       } catch {}
     };
-    toast('👥 ' + msg, 'info', 6000, onClick);
+    if (!isDnd) toast('👥 ' + msg, 'info', 6000, onClick);
     loadFriends(); // refresh badge
     updateFrogBadge();
     // Show system notification (browser / Electron / Android)
-    _showFriendNotification(data.from, data.action, data.from_avatar);
+    if (!isDnd) _showFriendNotification(data.from, data.action, data.from_avatar);
   }
 }
 

@@ -868,7 +868,8 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         new_password=body.new_password,
         banner=body.banner,
     )
-    if body.status_msg is not None or body.presence is not None:
+    status_or_presence_changed = (body.status_msg is not None or body.presence is not None)
+    if status_or_presence_changed:
         with db._conn() as con:
             if body.status_msg is not None:
                 con.execute("UPDATE users SET status_msg=? WHERE id=?",
@@ -932,6 +933,18 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
             con.execute("UPDATE users SET hide_active_channels=? WHERE id=?",
                         (1 if body.hide_active_channels else 0, current_user["id"]))
         con.commit()
+    # Broadcast profile update so open clients refresh member-list caches.
+    if status_or_presence_changed:
+        try:
+            await manager.broadcast_all({
+                "type": "profile_update",
+                "user_id": current_user["id"],
+                "nickname": current_user["nickname"],
+                **({"presence": body.presence} if body.presence is not None else {}),
+                **({"status_msg": body.status_msg[:128]} if body.status_msg is not None else {}),
+            })
+        except Exception:
+            pass
     # Broadcast profile update so open clients refresh avatars / nicknames in member lists
     if body.avatar is not None:
         try:
