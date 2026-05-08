@@ -3327,6 +3327,60 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 92%,black),color-mix(in srgb,var(--surface-color) 86%,black));border:1px solid color-mix(in srgb,var(--accent-color) 24%,var(--border-color));border-radius:6px;padding:6px 12px;
   animation:fadeInOut 1.5s ease-in-out infinite;
 }
+
+/* Classic FrogTalk embed styling preserved as an explicit theme option. */
+body[data-theme="frog"] .share-card{
+  background:linear-gradient(180deg,#1a3428,#13271f);
+  border:1px solid #2f5a49;
+  border-left:4px solid #4caf50;
+  box-shadow:0 3px 12px rgba(76,175,80,.12);
+}
+body[data-theme="frog"] .share-card:hover{
+  background:linear-gradient(180deg,#204031,#163025);
+  border-color:#3f725c;
+}
+body[data-theme="frog"] .chat-share-embed{
+  background:linear-gradient(180deg,#163126 0%,#11261d 100%);
+  border:1px solid #325d4b;
+  border-left:4px solid #4caf50;
+  box-shadow:0 4px 18px rgba(76,175,80,.14);
+}
+body[data-theme="frog"] .chat-share-embed-foot{
+  border-top:1px solid #315a49;
+  background:rgba(9,26,19,.38);
+  color:#86cf97;
+}
+body[data-theme="frog"] .chat-share-embed.is-music{
+  background:linear-gradient(180deg,#2a1738 0%,#1b0f28 100%);
+  border:1px solid #5e3f8a;
+  border-left:4px solid #bf8cff;
+}
+body[data-theme="frog"] .chat-share-embed.is-music .chat-share-embed-foot{
+  border-top-color:#4a2f6e;
+  background:rgba(18,10,30,.45);
+  color:#c8a7ff;
+}
+body[data-theme="frog"] .invite-card{
+  background:linear-gradient(180deg,#143026 0%,#10231c 100%);
+  border:1px solid #315a49;
+  box-shadow:0 2px 12px rgba(76,175,80,.14);
+}
+body[data-theme="frog"] .invite-card-header{
+  background:rgba(11,35,25,.48);
+  border-bottom:1px solid #36604f;
+}
+body[data-theme="frog"] .invite-card-icon{
+  background:linear-gradient(180deg,#1a3b2e,#143026);
+  border:1px solid #3f725c;
+}
+body[data-theme="frog"] .invite-join-btn{
+  background:linear-gradient(180deg,#69cb6f,#4caf50);
+  box-shadow:0 2px 6px rgba(76,175,80,.3);
+}
+body[data-theme="frog"] .invite-join-btn:hover{
+  background:linear-gradient(180deg,#57be5f,#3f9f45);
+  box-shadow:0 3px 10px rgba(76,175,80,.45);
+}
 @media(max-width:640px){
   .invite-card{max-width:100%}
   .invite-card-body{padding:12px;gap:10px;align-items:flex-start}
@@ -8188,6 +8242,10 @@ window.ConnErr = (function(){
     <div id="set-pane-appear" style="display:none">
       <label class="modal-label">Theme</label>
       <div id="theme-options" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px">
+        <button class="theme-btn" data-theme="frog" onclick="selectTheme('frog')" style="padding:12px;border:2px solid #333;background:linear-gradient(180deg,#173027,#102018);color:#dff5e8;border-radius:8px;cursor:pointer">
+          <div style="font-size:20px">🐸</div>
+          <div style="font-size:13px;margin-top:4px">Frog Default</div>
+        </button>
         <button class="theme-btn" data-theme="dark" onclick="selectTheme('dark')" style="padding:12px;border:2px solid #333;background:#0d0d0d;color:#e0e0e0;border-radius:8px;cursor:pointer">
           <div style="font-size:20px">🌙</div>
           <div style="font-size:13px;margin-top:4px">Dark</div>
@@ -9107,7 +9165,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/state.js?v=192"></script>
 <script src="/static/js/mute.js?v=191"></script>
-<script src="/static/js/notifications.js?v=418"></script>
+<script src="/static/js/notifications.js?v=419"></script>
 <script src="/static/js/ws.js?v=222"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=420"></script>
