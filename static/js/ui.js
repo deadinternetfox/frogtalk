@@ -1759,8 +1759,19 @@ function bindLongPress(el, handler, ms = 500) {
 }
 
 function autoResize(el) {
+  if (!el) return;
   el.style.height = 'auto';
+  // When empty, skip scrollHeight measurement since browsers include placeholder
+  // text, causing permanent oversizing for long placeholders. Clear inline height
+  // so CSS min-height (32px) controls the baseline.
+  if (!el.value) {
+    el.style.height = '';
+    return;
+  }
   el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  if (el.id === 'msg-input' && typeof syncMsgInputHighlight === 'function') {
+    syncMsgInputHighlight(el);
+  }
 }
 
 function toggleUsersPanel() {
