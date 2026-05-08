@@ -1478,7 +1478,7 @@ const Messages = (() => {
 
     if (isMutedAuthor) {
       return `<div class="msg-group is-muted-user" id="msg-${msg.id}" data-nick="${UI.escHtml(msg.nickname||'')}">
-        <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
+        <div class="msg-avatar-slot"><div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div></div>
         <div class="msg-body">
           <div class="msg-meta">
             <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(msg.display_name || msg.nickname)}</span>${msg.display_name && msg.display_name !== msg.nickname ? `<span class="msg-author-handle">@${UI.escHtml(msg.nickname)}</span>` : ''}
@@ -1500,7 +1500,7 @@ const Messages = (() => {
     }
 
     return `<div class="msg-group" id="msg-${msg.id}" data-nick="${UI.escHtml(msg.nickname||'')}">
-      <div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div>
+      <div class="msg-avatar-slot"><div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div></div>
       <div class="msg-body">
         <div class="msg-meta">
           <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(msg.display_name || msg.nickname)}</span>${msg.display_name && msg.display_name !== msg.nickname ? `<span class="msg-author-handle">@${UI.escHtml(msg.nickname)}</span>` : ''}

@@ -1943,12 +1943,13 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 }
 @keyframes msgEmptyFade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .msg-group{display:flex;gap:12px;padding:3px 0;align-items:flex-start}
+.msg-avatar-slot{width:38px;flex-shrink:0;align-self:flex-start;overflow:visible;position:relative}
 .msg-group{transition:background .15s,box-shadow .15s}
 .msg-group:hover{background:rgba(255,255,255,.03);border-radius:8px;margin:0 -8px;padding:2px 8px;box-shadow:inset 0 0 0 1px rgba(76,175,80,.06)}
 .msg-avatar{
   width:38px;height:38px;border-radius:50%;background:#1e3a1e;
   display:flex;align-items:center;justify-content:center;font-size:18px;
-  flex-shrink:0;margin-top:1px;cursor:pointer;overflow:hidden
+  margin-top:1px;cursor:pointer;overflow:hidden
 }
 .msg-avatar img{width:100%;height:100%;object-fit:cover}
 /* Story ring around chat avatars (channel + DM) when the sender has an
@@ -1962,6 +1963,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   width:42px !important;height:42px !important;padding:2px;
   background:#353535 !important;
   isolation:isolate;cursor:pointer;overflow:visible !important;
+  margin:-2px;
   transition:transform .18s ease, filter .18s ease, box-shadow .24s ease;
 }
 .msg-avatar.has-story > img,
@@ -3398,6 +3400,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   #input-area{padding:4px 6px calc(8px + var(--safe-bottom))}
   #messages-area{padding:8px}
   .msg-group{gap:8px}
+  .msg-avatar-slot{width:32px}
   .msg-avatar{width:32px;height:32px;font-size:15px}
   .msg-body{padding-top:0}
   .msg-meta{margin-bottom:2px}
@@ -9107,7 +9110,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=419"></script>
   <script src="/static/js/rooms.js?v=426"></script>
-<script src="/static/js/messages.js?v=428"></script>
+<script src="/static/js/messages.js?v=429"></script>
 <script src="/static/js/users.js?v=194"></script>
 <script src="/static/js/emoji.js?v=191"></script>
 <script src="/static/js/friends.js?v=418"></script>
