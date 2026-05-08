@@ -182,9 +182,8 @@ function _extractDMPreviewUrl(text) {
   // Skip invite/short-link URLs — they get their own rich invite-card embed.
   if (/\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(first)) return '';
   if (_parseDMFrogSocialUrl(first)) return '';
-  // Always strip our own (frogtalk.xyz / frogtalk.app) OG previews so we never
-  // render a redundant FrogTalk OG card next to native invite/profile cards.
-  if (/^https?:\/\/(?:www\.)?frogtalk\.(?:xyz|app)\b/i.test(first)) return '';
+  // Allow regular internal links (docs/help/blog) to unfurl like any URL.
+  // Only invite/social share URLs are filtered above.
   return first;
 }
 
@@ -214,7 +213,7 @@ function _dmScrollIfNearBottom() {
 function _parseDMFrogSocialUrl(url) {
   try {
     const parsed = new URL(_normalizeUrl(url));
-    const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'localhost');
+    const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'frogtalk.app' || parsed.hostname === 'localhost');
     if (!hostOk) return null;
     const path = parsed.pathname || '/';
     const profilePath = path.match(/^\/u\/([A-Za-z0-9_]{1,32})\/?$/i);

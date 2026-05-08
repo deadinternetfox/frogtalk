@@ -70,7 +70,7 @@ const Messages = (() => {
   function _parseFrogSocialUrl(url) {
     try {
       const parsed = new URL(_normalizeUrl(url));
-      const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'localhost');
+      const hostOk = (parsed.hostname === 'frogtalk.xyz' || parsed.hostname === 'frogtalk.app' || parsed.hostname === 'localhost');
       if (!hostOk) return null;
       const path = parsed.pathname || '/';
       const profilePath = path.match(/^\/u\/([A-Za-z0-9_]{1,32})\/?$/i);
@@ -1614,11 +1614,9 @@ const Messages = (() => {
         const firstUrl = urls[0];
         const isInvite = _isInviteUrl(firstUrl);
         const isSocial = !!_parseFrogSocialUrl(firstUrl);
-        // Always strip our own (frogtalk.xyz / frogtalk.app) OG previews —
-        // invite/profile/post/reel URLs hydrate as native cards, and bare
-        // self-links shouldn't echo a redundant OG card next to themselves.
-        const isSelf = /^https?:\/\/(?:www\.)?frogtalk\.(?:xyz|app)\b/i.test(firstUrl);
-        if (!isInvite && !isSocial && !isSelf && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: firstUrl });
+        // Keep native cards for invite/social URLs, but allow normal internal
+        // pages (docs, help, blog, etc.) to render OG previews again.
+        if (!isInvite && !isSocial && !msg.preview_suppressed) linksToPreview.push({ id: msg.id, url: firstUrl });
       }
     });
 
@@ -1826,8 +1824,7 @@ const Messages = (() => {
             const firstUrl = urls[0];
             const isInvite = _isInviteUrl(firstUrl);
             const isSocial = !!_parseFrogSocialUrl(firstUrl);
-            const isSelf = /^https?:\/\/(?:www\.)?frogtalk\.(?:xyz|app)\b/i.test(firstUrl);
-            if (!isInvite && !isSocial && !isSelf && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
+            if (!isInvite && !isSocial && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, firstUrl), 100);
           }
           setTimeout(() => _hydrateSpecialCards(msg.id), 100);
           const cached = State.messages[room] || [];
