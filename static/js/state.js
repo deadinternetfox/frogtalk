@@ -66,12 +66,15 @@ function toast (text, type = 'info', ms = 3000, onClick) {
   const stack = document.getElementById('toasts');
   if (stack) {
     const el = document.createElement('div');
-    const colors = { error: '#f85149', success: '#4caf50', info: '#4ade80' };
-    el.style.cssText = `background:#141414;border:1px solid #2a2a2a;border-radius:10px;
-      padding:10px 18px;font-size:13px;color:${colors[type]||'#888'};
-      box-shadow:0 4px 20px rgba(0,0,0,.5);pointer-events:auto;
-      max-width:320px;cursor:pointer;animation:fadeInRight .2s ease`;
-    el.textContent = text;
+    const kind = ['error', 'success', 'warn', 'info'].includes(type) ? type : 'info';
+    el.className = `toast toast-${kind}`;
+    el.style.cssText = `max-width:320px;cursor:pointer;animation:fadeInRight .2s ease`;
+    const icons = { error: '⚠️', success: '✓', info: 'ℹ️', warn: '⚠️' };
+    el.innerHTML = `
+      <span class="toast-icon">${icons[kind] || icons.info}</span>
+      <span class="toast-text"></span>
+    `;
+    el.querySelector('.toast-text').textContent = String(text ?? '');
     el.onclick = () => {
       try { if (typeof onClick === 'function') onClick(); } catch {}
       el.remove();

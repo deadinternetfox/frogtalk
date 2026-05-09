@@ -803,34 +803,20 @@ const UI = (() => {
     if (!stack) {
       stack = document.createElement('div');
       stack.id = 'toast-stack';
-      stack.style.cssText = `
-        position:fixed;bottom:24px;left:50%;transform:translateX(-50%);
-        display:flex;flex-direction:column-reverse;gap:8px;z-index:9999;
-        pointer-events:none;max-width:92vw;align-items:center
-      `;
       document.body.appendChild(stack);
     }
     const icons  = { error: '⚠️', success: '✓',   info: 'ℹ️',  warn: '⚠️' };
-    const accent = { error: '#ff8a8a', success: '#7fd8a5', info: '#9fd8c0', warn: '#e7cf8b' };
-    const bg     = { error: '#2a1517', success: '#152721', info: '#14231f', warn: '#2a2316' };
-    const color  = accent[type] || accent.info;
+    const kind = ['error', 'success', 'warn', 'info'].includes(type) ? type : 'info';
     const toast = document.createElement('div');
-    toast.className = 'ft-toast ft-toast-enter';
+    toast.className = `ft-toast ft-toast-${kind} ft-toast-enter`;
     toast.style.cssText = `
-      display:flex;align-items:center;gap:10px;max-width:92vw;
-      background:${bg[type] || '#151515'};
-      border:1px solid ${color}55;border-left:3px solid ${color};
-      color:#e8e8e8;border-radius:10px;padding:10px 16px 10px 12px;
-      font-size:14px;line-height:1.35;
-      box-shadow:0 8px 28px rgba(0,0,0,.5),0 0 0 1px rgba(126,199,166,.08);
-      backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
       transition:transform .22s cubic-bezier(.22,1.02,.36,1),opacity .22s ease;
       transform:translateY(16px) scale(.96);opacity:0;
       pointer-events:auto;${typeof onClick === 'function' ? 'cursor:pointer;' : ''}
     `;
     toast.innerHTML = `
-      <span style="color:${color};font-size:16px;flex-shrink:0;font-weight:700;width:18px;text-align:center">${icons[type] || icons.info}</span>
-      <span style="flex:1;word-break:break-word"></span>
+      <span class="ft-toast-icon">${icons[kind] || icons.info}</span>
+      <span class="ft-toast-text"></span>
     `;
     toast.lastElementChild.textContent = String(text ?? '');
     if (typeof onClick === 'function') {
