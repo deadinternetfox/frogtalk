@@ -1,1 +1,5 @@
 *.zip filter=lfs diff=lfs merge=lfs -text
+github-build-mirror/*.AppImage filter=lfs diff=lfs merge=lfs -text
+github-build-mirror/*.deb filter=lfs diff=lfs merge=lfs -text
+github-build-mirror/*.exe filter=lfs diff=lfs merge=lfs -text
+github-build-mirror/*.zip filter=lfs diff=lfs merge=lfs -text
