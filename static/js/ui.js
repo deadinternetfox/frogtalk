@@ -3763,11 +3763,13 @@ function applyCssPreset(name) {
     textarea.value = CSS_PRESETS[name] || '';
   }
   updateCssCharCount();
+  // Apply the CSS live to the profile modal so user sees changes immediately
+  applyProfileCustomCss(textarea.value);
   // Highlight selected preset button
   document.querySelectorAll('.css-preset-btn').forEach(btn => {
     btn.style.borderColor = '#222';
   });
-  event.currentTarget.style.borderColor = '#4caf50';
+  if (event && event.currentTarget) event.currentTarget.style.borderColor = '#4caf50';
 }
 
 function updateCssCharCount() {

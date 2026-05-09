@@ -8323,6 +8323,54 @@ window.ConnErr = (function(){
         </label>
       </div>
 
+      <!-- Profile Styling -->
+      <div style="background:#0d0d0d;border:1px solid #1e1e1e;border-radius:10px;padding:16px;margin-bottom:14px">
+        <div style="font-size:14px;color:#e0e0e0;font-weight:600;margin-bottom:10px">🎨 Profile Style</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px">Customize how your profile looks to others — MySpace vibes! Pick a preset or write custom CSS.</div>
+        <div style="font-size:12px;color:#e0e0e0;font-weight:600;margin-bottom:8px">Quick Themes</div>
+        <div id="css-theme-presets" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
+          <button class="css-preset-btn" onclick="applyCssPreset('cyberpunk')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#0a0012,#1a002a);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
+            <div style="font-size:15px;margin-bottom:3px">🌆</div>
+            <div style="font-size:10px;color:#bf5af2">Cyberpunk</div>
+          </button>
+          <button class="css-preset-btn" onclick="applyCssPreset('ocean')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#001a2e,#002a40);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
+            <div style="font-size:15px;margin-bottom:3px">🌊</div>
+            <div style="font-size:10px;color:#64d2ff">Ocean</div>
+          </button>
+          <button class="css-preset-btn" onclick="applyCssPreset('retrowave')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#1a0020,#200020);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
+            <div style="font-size:15px;margin-bottom:3px">🕹️</div>
+            <div style="font-size:10px;color:#ff6b9d">Retrowave</div>
+          </button>
+          <button class="css-preset-btn" onclick="applyCssPreset('sakura')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#1a0a10,#200e15);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
+            <div style="font-size:15px;margin-bottom:3px">🌸</div>
+            <div style="font-size:10px;color:#ffb7c5">Sakura</div>
+          </button>
+          <button class="css-preset-btn" onclick="applyCssPreset('hacker')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#000800,#001a00);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
+            <div style="font-size:15px;margin-bottom:3px">💀</div>
+            <div style="font-size:10px;color:#00ff41">Hacker</div>
+          </button>
+          <button class="css-preset-btn" onclick="applyCssPreset('golden')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#1a1400,#201a00);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
+            <div style="font-size:15px;margin-bottom:3px">👑</div>
+            <div style="font-size:10px;color:#ffd700">Gold</div>
+          </button>
+          <button class="css-preset-btn" onclick="applyCssPreset('lava')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#1a0500,#2a0a00);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
+            <div style="font-size:15px;margin-bottom:3px">🌋</div>
+            <div style="font-size:10px;color:#ff5722">Lava</div>
+          </button>
+          <button class="css-preset-btn" onclick="applyCssPreset('none')" style="padding:12px;border:2px solid #222;background:#111;border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
+            <div style="font-size:15px;margin-bottom:3px">🧹</div>
+            <div style="font-size:10px;color:#888">Clear</div>
+          </button>
+        </div>
+        <div style="border:1px solid #2a2a2a;border-radius:8px;overflow:hidden;background:#0a0a0a;margin-bottom:10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#111;border-bottom:1px solid #1e1e1e">
+            <span style="font-size:11px;color:#4caf50;font-weight:600;font-family:monospace">custom.css</span>
+            <span id="css-char-count" style="font-size:10px;color:#555">0 / 10240</span>
+          </div>
+          <textarea id="profile-custom-css" style="width:100%;height:180px;background:#0a0a0a;border:none;color:#a8d8a8;font-family:'Fira Code',Consolas,'Courier New',monospace;font-size:12px;line-height:1.5;padding:10px 12px;resize:vertical;outline:none;tab-size:2" placeholder="/* Your custom CSS */" spellcheck="false" oninput="updateCssCharCount()"></textarea>
+        </div>
+      </div>
+
       <div style="background:#0d0d0d;border:1px solid #1e1e1e;border-radius:10px;padding:16px">
         <div style="font-size:14px;color:#e0e0e0;font-weight:600;margin-bottom:10px">📊 Your Stats</div>
         <div id="social-my-stats" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;text-align:center">
@@ -8586,73 +8634,9 @@ window.ConnErr = (function(){
       </div>
       <!-- No extra text below custom theme section -->
     </div>
-    <!-- Style Tab (Custom Profile CSS) -->
+    <!-- Style Tab removed - moved to Social tab -->
     <div id="set-pane-style" style="display:none">
-      <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:4px">🎨 Profile Style Editor</div>
-      <div style="font-size:12px;color:#666;margin-bottom:14px">Customize how your profile looks to other people — MySpace vibes! Pick a preset theme or write your own CSS.</div>
-      
-      <!-- Theme Presets -->
-      <div style="margin-bottom:16px">
-        <div style="font-size:13px;color:#e0e0e0;font-weight:600;margin-bottom:10px">Quick Themes</div>
-        <div id="css-theme-presets" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-          <button class="css-preset-btn" onclick="applyCssPreset('cyberpunk')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#0a0012,#1a002a);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
-            <div style="font-size:16px;margin-bottom:4px">🌆 Cyberpunk</div>
-            <div style="font-size:11px;color:#bf5af2">Neon purple & pink glows</div>
-          </button>
-          <button class="css-preset-btn" onclick="applyCssPreset('ocean')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#001a2e,#002a40);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
-            <div style="font-size:16px;margin-bottom:4px">🌊 Ocean</div>
-            <div style="font-size:11px;color:#64d2ff">Deep blue waves & teal</div>
-          </button>
-          <button class="css-preset-btn" onclick="applyCssPreset('retrowave')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#1a0020,#200020);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
-            <div style="font-size:16px;margin-bottom:4px">🕹️ Retrowave</div>
-            <div style="font-size:11px;color:#ff6b9d">80s synthwave sunset</div>
-          </button>
-          <button class="css-preset-btn" onclick="applyCssPreset('sakura')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#1a0a10,#200e15);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
-            <div style="font-size:16px;margin-bottom:4px">🌸 Sakura</div>
-            <div style="font-size:11px;color:#ffb7c5">Cherry blossom pink</div>
-          </button>
-          <button class="css-preset-btn" onclick="applyCssPreset('hacker')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#000800,#001a00);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
-            <div style="font-size:16px;margin-bottom:4px">💀 Hacker</div>
-            <div style="font-size:11px;color:#00ff41">Matrix-style green terminal</div>
-          </button>
-          <button class="css-preset-btn" onclick="applyCssPreset('golden')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#1a1400,#201a00);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
-            <div style="font-size:16px;margin-bottom:4px">👑 Royal Gold</div>
-            <div style="font-size:11px;color:#ffd700">Luxury gold & dark</div>
-          </button>
-          <button class="css-preset-btn" onclick="applyCssPreset('lava')" style="padding:12px;border:2px solid #222;background:linear-gradient(135deg,#1a0500,#2a0a00);border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
-            <div style="font-size:16px;margin-bottom:4px">🌋 Lava</div>
-            <div style="font-size:11px;color:#ff5722">Molten reds & orange</div>
-          </button>
-          <button class="css-preset-btn" onclick="applyCssPreset('none')" style="padding:12px;border:2px solid #222;background:#111;border-radius:10px;cursor:pointer;text-align:left;transition:all .2s">
-            <div style="font-size:16px;margin-bottom:4px">🧹 Clear</div>
-            <div style="font-size:11px;color:#888">Remove custom styling</div>
-          </button>
-        </div>
-        <div style="font-size:11px;color:#555;text-align:center">Click a theme to load it into the editor below — you can edit it further!</div>
-      </div>
-
-      <!-- CSS Editor -->
-      <div style="position:relative;border:1px solid #2a2a2a;border-radius:10px;overflow:hidden;background:#0a0a0a">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:#111;border-bottom:1px solid #1e1e1e">
-          <span style="font-size:12px;color:#4caf50;font-weight:600;font-family:monospace">custom-profile.css</span>
-          <div style="display:flex;gap:6px;align-items:center">
-            <span id="css-char-count" style="font-size:11px;color:#555">0 / 10240</span>
-            <button onclick="previewCssLive()" style="background:#1a3a1a;border:1px solid #2a4a2a;color:#4caf50;font-size:11px;font-weight:600;padding:4px 10px;border-radius:6px;cursor:pointer" title="Preview your CSS live">👁️ Preview</button>
-          </div>
-        </div>
-        <textarea id="profile-custom-css" style="width:100%;height:280px;background:#0a0a0a;border:none;color:#a8d8a8;font-family:'Fira Code',Consolas,'Courier New',monospace;font-size:13px;line-height:1.6;padding:12px 14px;resize:vertical;outline:none;tab-size:2" placeholder="/* Your custom CSS goes here */&#10;/* Others see this when viewing your profile */&#10;&#10;.profile-header {&#10;  background: linear-gradient(135deg, #ff00ff, #00ffff);&#10;}&#10;.userinfo-nick {&#10;  color: hotpink;&#10;  text-shadow: 0 0 10px hotpink;&#10;}" spellcheck="false" oninput="updateCssCharCount()"></textarea>
-      </div>
-      
-      <div style="margin-top:10px;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px;padding:10px 12px">
-        <div style="font-size:12px;color:#888;font-weight:600;margin-bottom:6px">💡 Tips</div>
-        <div style="font-size:11px;color:#666;line-height:1.6">
-          • Use browser DevTools (F12) to inspect class names<br>
-          • Profile classes: <code style="color:#4caf50;font-size:11px">.profile-header</code>, <code style="color:#4caf50;font-size:11px">.userinfo-nick</code>, <code style="color:#4caf50;font-size:11px">.profile-avatar-large</code>, <code style="color:#4caf50;font-size:11px">.wall-post</code><br>
-          • Social classes: <code style="color:#4caf50;font-size:11px">.sp-banner</code>, <code style="color:#4caf50;font-size:11px">.sp-avatar</code>, <code style="color:#4caf50;font-size:11px">.sp-nick</code>, <code style="color:#4caf50;font-size:11px">.sp-bio</code><br>
-          • Use <code style="color:#4caf50;font-size:11px">!important</code> to override defaults<br>
-          • CSS is sanitized for safety — no <code style="color:#4caf50;font-size:11px">url()</code> or <code style="color:#4caf50;font-size:11px">@import</code>
-        </div>
-      </div>
+      <!-- Content removed - Style tab moved to Social tab -->
     </div>
     <!-- Network Tab -->
     <div id="set-pane-network" style="display:none">
