@@ -1,6 +1,6 @@
 # FrogTalk Build Mirror
 
-This folder tracks Android mirror metadata. Desktop binaries for v1.4.1 are hosted in GitHub Releases.
+This folder mirrors FrogTalk desktop and Android builds for v1.4.1.
 
 ## Download Artifacts
 
@@ -52,10 +52,6 @@ sha256sum -c SHA256SUMS.txt
 ```
 
 Checksums are available in [SHA256SUMS.txt](./SHA256SUMS.txt).
-
-## Why The Raw Folder Shows Only APK
-
-Only a small mirror set is tracked directly in this folder. Desktop binaries are published under the v1.4.1 Release assets, which is why raw links under `github-build-mirror/` can return 404 for desktop files.
 
 ## Website Download Endpoints
 
