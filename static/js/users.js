@@ -336,6 +336,9 @@ const Users = (() => {
   }
 
   function updateAvatar(userId, nickname, avatar) {
+    // Some WS profile_update payloads only carry presence/status changes.
+    // If avatar is omitted, do not touch rendered avatars.
+    if (avatar === undefined) return;
     let changed = false;
     for (const u of _allUsers) {
       if (_sameUser(u.user_id, u.nickname, userId, nickname)) {
