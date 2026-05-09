@@ -3420,11 +3420,6 @@ const Social = (() => {
 
       _updateTabLoadUi(loadUi, 86, 'Rendering profile', 'Preparing wall and tabs');
 
-      // Apply custom CSS from user if it exists
-      if (u.custom_css && typeof window.applySocialProfileCustomCss === 'function') {
-        try { window.applySocialProfileCustomCss(u.custom_css); } catch {}
-      }
-
       content.innerHTML = `
       <div class="social-profile fade-in">
         <!-- Banner -->
@@ -3517,6 +3512,11 @@ const Social = (() => {
           <div class="social-feed">${_socialPostSkeletonCards(3)}</div>
         </div>
       </div>`;
+
+      // Apply custom CSS from user if it exists (AFTER HTML is rendered)
+      if (u.custom_css && typeof window.applySocialProfileCustomCss === 'function') {
+        try { window.applySocialProfileCustomCss(u.custom_css); } catch (e) { console.warn('CSS apply error:', e); }
+      }
 
       const wallToken = _beginProfileTabLoad('wall');
       loadProfilePosts(nickname, 'wall', wallToken);
