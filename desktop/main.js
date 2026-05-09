@@ -72,6 +72,21 @@ async function stopRendererMedia(win) {
   } catch {}
 }
 
+async function showMinimizeToTrayToast(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    await win.webContents.executeJavaScript(`(() => {
+      try {
+        if (window.UI && typeof window.UI.showToast === 'function') {
+          window.UI.showToast('Minimized to tray', 'success');
+          return true;
+        }
+      } catch {}
+      return false;
+    })()`, true);
+  } catch {}
+}
+
 function readAuthSnapshot() {
   try {
     return JSON.parse(fs.readFileSync(AUTH_SNAPSHOT_PATH, 'utf8')) || null;
@@ -325,6 +340,7 @@ function createWindow() {
       const trayReady = createTray();
       if (trayReady) {
         e.preventDefault();
+        try { await showMinimizeToTrayToast(mainWindow); } catch {}
         try { mainWindow.hide(); } catch {}
         try {
           await snapshotAuthFromRenderer(mainWindow);
