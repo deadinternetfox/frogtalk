@@ -3537,6 +3537,17 @@ const Social = (() => {
   async function loadProfilePosts(nickname, view, loadToken = _profileTabLoadToken) {
     const container = document.getElementById('sp-posts');
     if (!container) return;
+    const _reapplyProfileCss = () => {
+      try {
+        const isSelf = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
+        const css = String(_profileData?.custom_css || (isSelf ? (State.user?.custom_css || '') : '') || '');
+        if (css && typeof window.applySocialProfileCustomCss === 'function') {
+          window.applySocialProfileCustomCss(css);
+        } else if (typeof window.clearSocialProfileCustomCss === 'function') {
+          window.clearSocialProfileCustomCss();
+        }
+      } catch {}
+    };
     const tabKey = view === 'music'
       ? 'music'
       : ((view === 'public-media' || view === 'media-public') ? 'media' : 'wall');
@@ -3577,6 +3588,7 @@ const Social = (() => {
             </div>
           </div>`;
         }).join('')}</div>`;
+        _reapplyProfileCss();
         return;
       }
 
@@ -3598,6 +3610,7 @@ const Social = (() => {
           return;
         }
         container.innerHTML = `<div class="social-feed sp-music-feed">${musicPosts.map(p => renderFeedPost(p)).join('')}</div>`;
+        _reapplyProfileCss();
         return;
       }
 
@@ -3610,6 +3623,7 @@ const Social = (() => {
         return;
       }
       container.innerHTML = `<div class="social-feed">${posts.map(p => renderFeedPost(p)).join('')}</div>`;
+      _reapplyProfileCss();
     } catch {
       if (!_isProfileTabLoadCurrent(tabKey, loadToken)) return;
       const _safeNick = esc(String(nickname || ''));

@@ -3549,18 +3549,29 @@ function applySocialProfileCustomCss(css) {
         const base = String(selector || '').trim();
         if (!base) return [];
         const expanded = new Set([base]);
-        // Preview cards use .wall-post while Frog Social feed cards use .sf-post.
-        // Keep user CSS/presets backward-compatible by aliasing wall selectors.
+        // Chat/profile modal and Frog Social use different class names.
+        // Keep user CSS/presets backward-compatible by aliasing selectors.
         if (base.includes('.wall-post')) {
           expanded.add(base.replace(/\.wall-post\b/g, '.sf-post'));
         }
+        // NOTE: .profile-header is intentionally NOT aliased to .sp-header.
+        // Applying a background gradient to .sp-header breaks the banner/avatar
+        // overlap layout in the social profile view.
+        if (base.includes('.userinfo-nick')) {
+          expanded.add(base.replace(/\.userinfo-nick\b/g, '.sp-nick'));
+        }
+        // NOTE: .profile-avatar-large is intentionally NOT aliased to .sp-avatar.
+        // .sp-avatar uses absolute positioning; adding border/box-shadow via alias
+        // breaks layout in the social profile view.
         return Array.from(expanded);
       };
       const scopedSelectors = selectors
         .split(',')
         .map(selector => selector.trim())
         .filter(Boolean)
-        .flatMap(selector => expandSocialSelectorAliases(selector))
+        .reduce((acc, selector) => {
+          return acc.concat(expandSocialSelectorAliases(selector));
+        }, [])
         .map(selector => `.social-profile ${selector}`)
         .join(', ');
       return scopedSelectors ? `${scopedSelectors} { ${body} }` : '';
@@ -3602,12 +3613,12 @@ const CSS_PRESETS = {
   border: 3px solid #bf5af2 !important;
   box-shadow: 0 0 20px rgba(191,90,242,.5), 0 0 40px rgba(191,90,242,.2) !important;
 }
-.wall-post {
+.wall-post, .sf-post {
   background: rgba(20,0,40,.6) !important;
   border: 1px solid rgba(191,90,242,.3) !important;
   box-shadow: 0 0 15px rgba(191,90,242,.1) !important;
 }
-.wall-post:hover {
+.wall-post:hover, .sf-post:hover {
   border-color: #ff2d95 !important;
   box-shadow: 0 0 20px rgba(255,45,149,.2) !important;
 }
@@ -3634,11 +3645,11 @@ const CSS_PRESETS = {
   border: 3px solid #0097a7 !important;
   box-shadow: 0 0 20px rgba(0,151,167,.4) !important;
 }
-.wall-post {
+.wall-post, .sf-post {
   background: rgba(0,30,50,.6) !important;
   border: 1px solid rgba(100,210,255,.2) !important;
 }
-.wall-post:hover {
+.wall-post:hover, .sf-post:hover {
   border-color: #64d2ff !important;
 }
 .sp-nick {
@@ -3668,7 +3679,7 @@ const CSS_PRESETS = {
   border: 3px solid #ff006e !important;
   box-shadow: 0 0 25px rgba(255,0,110,.5), inset 0 0 10px rgba(255,0,110,.2) !important;
 }
-.wall-post {
+.wall-post, .sf-post {
   background: rgba(26,0,48,.7) !important;
   border: 1px solid rgba(255,107,157,.3) !important;
 }
@@ -3697,11 +3708,11 @@ const CSS_PRESETS = {
   border: 3px solid #ffb7c5 !important;
   box-shadow: 0 0 15px rgba(255,183,197,.3) !important;
 }
-.wall-post {
+.wall-post, .sf-post {
   background: rgba(30,10,18,.8) !important;
   border: 1px solid rgba(255,183,197,.2) !important;
 }
-.wall-post:hover {
+.wall-post:hover, .sf-post:hover {
   border-color: #ffb7c5 !important;
 }
 .sp-nick {
@@ -3735,7 +3746,7 @@ const CSS_PRESETS = {
   border: 2px solid #00ff41 !important;
   box-shadow: 0 0 20px rgba(0,255,65,.4), inset 0 0 30px rgba(0,255,65,.1) !important;
 }
-.wall-post {
+.wall-post, .sf-post {
   background: rgba(0,10,0,.8) !important;
   border: 1px solid #003300 !important;
   font-family: 'Courier New', monospace !important;
@@ -3771,11 +3782,11 @@ const CSS_PRESETS = {
   border: 3px solid #ffd700 !important;
   box-shadow: 0 0 20px rgba(255,215,0,.4) !important;
 }
-.wall-post {
+.wall-post, .sf-post {
   background: rgba(20,16,0,.7) !important;
   border: 1px solid rgba(255,215,0,.25) !important;
 }
-.wall-post:hover {
+.wall-post:hover, .sf-post:hover {
   border-color: #ffd700 !important;
 }
 .sp-nick {
@@ -3801,11 +3812,11 @@ const CSS_PRESETS = {
   border: 3px solid #ff5722 !important;
   box-shadow: 0 0 20px rgba(255,87,34,.5), 0 0 40px rgba(255,152,0,.2) !important;
 }
-.wall-post {
+.wall-post, .sf-post {
   background: rgba(20,5,0,.8) !important;
   border: 1px solid rgba(255,87,34,.25) !important;
 }
-.wall-post:hover {
+.wall-post:hover, .sf-post:hover {
   border-color: #ff9800 !important;
   box-shadow: 0 0 15px rgba(255,152,0,.2) !important;
 }
