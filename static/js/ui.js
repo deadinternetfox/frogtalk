@@ -3599,9 +3599,6 @@ const CSS_PRESETS = {
   border-color: #ff2d95 !important;
   box-shadow: 0 0 20px rgba(255,45,149,.2) !important;
 }
-.sp-banner {
-  background: linear-gradient(135deg, #1a003a, #33005a, #4d0066) !important;
-}
 .sp-nick {
   color: #e040fb !important;
   text-shadow: 0 0 10px #e040fb !important;
@@ -3631,9 +3628,6 @@ const CSS_PRESETS = {
 }
 .wall-post:hover {
   border-color: #64d2ff !important;
-}
-.sp-banner {
-  background: linear-gradient(180deg, #001a2e 0%, #003355 50%, #004d80 100%) !important;
 }
 .sp-nick {
   color: #4dd0e1 !important;
@@ -3666,9 +3660,6 @@ const CSS_PRESETS = {
   background: rgba(26,0,48,.7) !important;
   border: 1px solid rgba(255,107,157,.3) !important;
 }
-.sp-banner {
-  background: linear-gradient(180deg, #0d001a, #2a0040, #5c0060, #ff006e, #ff8c00) !important;
-}
 .sp-nick {
   color: #ff6bde !important;
   text-shadow: 0 0 12px #ff006e !important;
@@ -3700,9 +3691,6 @@ const CSS_PRESETS = {
 }
 .wall-post:hover {
   border-color: #ffb7c5 !important;
-}
-.sp-banner {
-  background: linear-gradient(135deg, #1a0a12, #3a1520, #4d1a2a) !important;
 }
 .sp-nick {
   color: #ffb7c5 !important;
@@ -3739,9 +3727,6 @@ const CSS_PRESETS = {
   background: rgba(0,10,0,.8) !important;
   border: 1px solid #003300 !important;
   font-family: 'Courier New', monospace !important;
-}
-.sp-banner {
-  background: linear-gradient(180deg, #000000, #001a00, #003300) !important;
 }
 .sp-nick {
   color: #00ff41 !important;
@@ -3781,10 +3766,6 @@ const CSS_PRESETS = {
 .wall-post:hover {
   border-color: #ffd700 !important;
 }
-.sp-banner {
-  background: linear-gradient(135deg, #0a0800, #1a1200, #2a1e00) !important;
-  border-bottom: 2px solid #ffd700 !important;
-}
 .sp-nick {
   color: #ffd700 !important;
   text-shadow: 0 0 15px rgba(255,215,0,.5) !important;
@@ -3816,9 +3797,6 @@ const CSS_PRESETS = {
   border-color: #ff9800 !important;
   box-shadow: 0 0 15px rgba(255,152,0,.2) !important;
 }
-.sp-banner {
-  background: linear-gradient(180deg, #0a0000, #1a0500, #330a00, #4d1500) !important;
-}
 .sp-nick {
   color: #ff5722 !important;
   text-shadow: 0 0 12px #ff5722, 0 0 25px rgba(255,152,0,.4) !important;
@@ -3838,14 +3816,15 @@ function applyCssPreset(name) {
   } else {
     textarea.value = CSS_PRESETS[name] || '';
   }
+  // Store the selected preset name so we can detect it even if CSS is modified
+  textarea.dataset.selectedPreset = name;
+  // User explicitly chose a preset; don't let async settings fetch overwrite it.
+  textarea.dataset.userTouched = '1';
   updateCssCharCount();
   // Apply the CSS live to the profile modal so user sees changes immediately
   applyProfileCustomCss(textarea.value);
   // Highlight selected preset button
-  document.querySelectorAll('.css-preset-btn').forEach(btn => {
-    btn.style.borderColor = '#222';
-  });
-  if (event && event.currentTarget) event.currentTarget.style.borderColor = '#4caf50';
+  try { _highlightCurrentPreset(); } catch {}
 }
 
 function _normalizePresetCss(css) {
@@ -3858,20 +3837,27 @@ function _normalizePresetCss(css) {
 function _highlightCurrentPreset() {
   const textarea = document.getElementById('profile-custom-css');
   if (!textarea) return;
-  const currentCss = _normalizePresetCss(textarea.value || '');
-  let matchedPreset = 'none';
-  if (!currentCss) matchedPreset = 'none';
-  // Match against preset CSS values
-  for (const [presetName, presetCss] of Object.entries(CSS_PRESETS)) {
-    if (currentCss && currentCss === _normalizePresetCss(presetCss)) {
-      matchedPreset = presetName;
-      break;
+  // First check if a preset name is stored in the data attribute
+  let matchedPreset = textarea.dataset.selectedPreset || null;
+  // If no stored preset, try to match by CSS content
+  if (!matchedPreset) {
+    const currentCss = _normalizePresetCss(textarea.value || '');
+    if (!currentCss) {
+      matchedPreset = 'none';
+    } else {
+      // Match against preset CSS values
+      for (const [presetName, presetCss] of Object.entries(CSS_PRESETS)) {
+        if (currentCss === _normalizePresetCss(presetCss)) {
+          matchedPreset = presetName;
+          break;
+        }
+      }
     }
   }
   // Highlight the matched preset button
   document.querySelectorAll('.css-preset-btn').forEach(btn => {
     const onclick = btn.getAttribute('onclick') || '';
-    if (onclick.includes(`'${matchedPreset}'`)) {
+    if (matchedPreset && onclick.includes(`'${matchedPreset}'`)) {
       btn.style.borderColor = '#4caf50';
     } else {
       btn.style.borderColor = '#222';
@@ -3918,6 +3904,7 @@ function scopeCssToContainer(css, containerId) {
 let _cssPreviewStyleEl = null;
 let _cssPreviewInputBound = false;
 let _cssPreviewKeyHandler = null;
+let _profileCssInputBound = false;
 
 function _renderCssPreviewStyle() {
   const css = document.getElementById('profile-custom-css')?.value || '';
@@ -4186,7 +4173,20 @@ async function showProfile() {
   const ringEl = document.getElementById('profile-notify-ring');
   if (ringEl) ringEl.value = localStorage.getItem('ft_notify_ring') || 'default';
   const cssEl = document.getElementById('profile-custom-css');
-  if (cssEl) cssEl.value = u.custom_css || '';
+  if (cssEl) {
+    cssEl.value = u.custom_css || '';
+    cssEl.dataset.userTouched = '0';
+    // Clear the stored preset name on initial load so matching is fresh
+    delete cssEl.dataset.selectedPreset;
+    if (!_profileCssInputBound) {
+      cssEl.addEventListener('input', () => {
+        cssEl.dataset.userTouched = '1';
+        // Manual edits are custom CSS; clear explicit preset lock.
+        delete cssEl.dataset.selectedPreset;
+      });
+      _profileCssInputBound = true;
+    }
+  }
   // Highlight the current CSS preset button (if any matches)
   try { _highlightCurrentPreset(); } catch {}
   // Appearance tab - select current theme
@@ -4204,7 +4204,15 @@ async function showProfile() {
     const res = await apiFetch('/api/wall/settings');
     if (!res.ok) return;
     const data = await res.json();
-    if (cssEl) { cssEl.value = data.custom_css || ''; updateCssCharCount(); }
+    if (cssEl) {
+      const userTouched = cssEl.dataset.userTouched === '1';
+      if (!userTouched) {
+        cssEl.value = data.custom_css || '';
+        // Clear the stored preset name after fetching fresh data
+        delete cssEl.dataset.selectedPreset;
+        updateCssCharCount();
+      }
+    }
     // Highlight the current CSS preset button after fetching
     try { _highlightCurrentPreset(); } catch {}
     State.user.mood = data.mood || '';
@@ -4528,9 +4536,21 @@ async function saveProfile() {
   localStorage.setItem('ft_notify_tone', notifyTone);
   localStorage.setItem('ft_notify_ring', notifyRing);
   localStorage.setItem('ft_autoplay_media', autoplayMedia ? '1' : '0');
-  saveNetworkSettings(true);
   const mood = String(State.user?.mood || '').slice(0, 100);
   const customCss = document.getElementById('profile-custom-css')?.value?.slice(0, 10240) || '';
+
+  // Network settings are optional for profile save; never let this block style/profile save.
+  try {
+    if (typeof saveNetworkSettings === 'function') saveNetworkSettings(true);
+  } catch {}
+
+  // Persist CSS first (same backend path as Preview Save) so Main Save always updates profile style.
+  const styleSave = await _saveWallStyleOnly(customCss, mood);
+  if (!styleSave.ok) {
+    errEl.textContent = styleSave.error || 'Style settings were not saved.';
+    UI.showToast(styleSave.error || 'Style settings were not saved.', 'error');
+    return false;
+  }
   // Theme
   const currentTheme = _normalizeThemeKey(document.body.dataset.theme || 'frog');
 
@@ -4639,13 +4659,6 @@ async function saveProfile() {
     State.user.display_name = displayName || null;
     State.user.nickname = nextNickname;
     if (newAvatar) State.user.avatar = newAvatar;
-
-    const wallSave = await _saveWallStyleOnly(customCss, mood);
-    if (!wallSave.ok) {
-      errEl.textContent = wallSave.error || 'Style settings were not saved.';
-      UI.showToast(wallSave.error || 'Style settings were not saved.', 'error');
-      return false;
-    }
 
     // Ensure style changes are visible immediately after save.
     try {
