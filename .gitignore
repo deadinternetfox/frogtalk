@@ -89,3 +89,6 @@ github-build-mirror/*.deb
 static/*.AppImage
 static/*.exe
 secrets/
+
+# Generated desktop release artifacts (too large for git)
+static/FrogTalk-*-win-x64.zip
