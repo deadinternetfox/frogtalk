@@ -3080,6 +3080,31 @@ function applyTheme(theme) {
 }
 
 function _applyThemeVars(theme) {
+  function applyForwardedVars(themeKey) {
+    const frogLike = themeKey === 'frog' || themeKey === 'dark';
+    if (frogLike) {
+      root.style.setProperty('--fwd-card-border', '#3b6c59');
+      root.style.setProperty('--fwd-card-bg', 'linear-gradient(180deg,#173027 0%,#13271f 58%,#102018 100%)');
+      root.style.setProperty('--fwd-top-border', '#2f5548');
+      root.style.setProperty('--fwd-top-bg', 'linear-gradient(180deg,#163223 0%,#122a1f 100%)');
+      root.style.setProperty('--fwd-top-color', '#cfe8d9');
+      root.style.setProperty('--fwd-preview-color', '#dff5e8');
+      root.style.setProperty('--fwd-pill-color', '#cfe8d9');
+      root.style.setProperty('--fwd-pill-bg', 'rgba(127,210,167,.16)');
+      root.style.setProperty('--fwd-pill-border', 'rgba(127,210,167,.34)');
+      return;
+    }
+    root.style.setProperty('--fwd-card-border', 'color-mix(in srgb,var(--border-color) 72%,var(--accent-color))');
+    root.style.setProperty('--fwd-card-bg', 'linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 74%,var(--accent-dim)),color-mix(in srgb,var(--surface-color) 88%,var(--bg-color)))');
+    root.style.setProperty('--fwd-top-border', 'color-mix(in srgb,var(--accent-color) 24%,var(--border-color))');
+    root.style.setProperty('--fwd-top-bg', 'linear-gradient(180deg,color-mix(in srgb,var(--accent-dim) 78%,var(--surface-color)),color-mix(in srgb,var(--accent-dim) 44%,var(--surface-color)))');
+    root.style.setProperty('--fwd-top-color', 'color-mix(in srgb,var(--text-color) 82%,var(--accent-color))');
+    root.style.setProperty('--fwd-preview-color', 'color-mix(in srgb,var(--text-color) 84%,var(--accent-color))');
+    root.style.setProperty('--fwd-pill-color', 'color-mix(in srgb,var(--accent-color) 82%,var(--text-color))');
+    root.style.setProperty('--fwd-pill-bg', 'color-mix(in srgb,var(--accent-dim) 75%,transparent)');
+    root.style.setProperty('--fwd-pill-border', 'color-mix(in srgb,var(--accent-color) 34%,var(--border-color))');
+  }
+
   const root = document.documentElement;
   if (theme === 'custom') {
     try {
@@ -3090,6 +3115,7 @@ function _applyThemeVars(theme) {
       if (d.border) root.style.setProperty('--border-color', d.border);
       if (d.text) root.style.setProperty('--text-color', d.text);
       if (d.muted) root.style.setProperty('--text-muted', d.muted);
+      applyForwardedVars('custom');
       return;
     } catch {}
   }
@@ -3113,6 +3139,7 @@ function _applyThemeVars(theme) {
   root.style.setProperty('--text-muted', t.muted);
   root.style.setProperty('--border-color', t.border);
   root.style.setProperty('--accent-color', t.accent);
+  applyForwardedVars(theme);
 }
 
 // ── Custom theme editor ──────────────────────────────────────────────────────
@@ -3136,6 +3163,15 @@ function updateCustomTheme() {
   if (d.border) root.style.setProperty('--border-color', d.border);
   if (d.text) root.style.setProperty('--text-color', d.text);
   if (d.muted) root.style.setProperty('--text-muted', d.muted);
+  root.style.setProperty('--fwd-card-border', 'color-mix(in srgb,var(--border-color) 72%,var(--accent-color))');
+  root.style.setProperty('--fwd-card-bg', 'linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 74%,var(--accent-dim)),color-mix(in srgb,var(--surface-color) 88%,var(--bg-color)))');
+  root.style.setProperty('--fwd-top-border', 'color-mix(in srgb,var(--accent-color) 24%,var(--border-color))');
+  root.style.setProperty('--fwd-top-bg', 'linear-gradient(180deg,color-mix(in srgb,var(--accent-dim) 78%,var(--surface-color)),color-mix(in srgb,var(--accent-dim) 44%,var(--surface-color)))');
+  root.style.setProperty('--fwd-top-color', 'color-mix(in srgb,var(--text-color) 82%,var(--accent-color))');
+  root.style.setProperty('--fwd-preview-color', 'color-mix(in srgb,var(--text-color) 84%,var(--accent-color))');
+  root.style.setProperty('--fwd-pill-color', 'color-mix(in srgb,var(--accent-color) 82%,var(--text-color))');
+  root.style.setProperty('--fwd-pill-bg', 'color-mix(in srgb,var(--accent-dim) 75%,transparent)');
+  root.style.setProperty('--fwd-pill-border', 'color-mix(in srgb,var(--accent-color) 34%,var(--border-color))');
   document.body.dataset.theme = 'custom';
   const dd = document.getElementById('mention-dropdown');
   if (dd && typeof syncMentionDropdownTheme === 'function') syncMentionDropdownTheme(dd);
