@@ -3080,6 +3080,88 @@ function applyTheme(theme) {
 }
 
 function _applyThemeVars(theme) {
+  const root = document.documentElement;
+
+  function applyToastVars(themeKey, custom = null) {
+    const set = (name, value) => root.style.setProperty(name, value);
+
+    if (themeKey === 'frog' || themeKey === 'dark') {
+      set('--toast-bg-start', '#183329');
+      set('--toast-bg-end', '#11271f');
+      set('--toast-border-color', '#3b6c59');
+      set('--toast-text-color', '#dff5e8');
+      set('--toast-shadow-color', '#08140f');
+    } else if (themeKey === 'light') {
+      set('--toast-bg-start', '#ffffff');
+      set('--toast-bg-end', '#edf3ef');
+      set('--toast-border-color', '#c5d8cd');
+      set('--toast-text-color', '#203227');
+      set('--toast-shadow-color', '#243229');
+    } else if (themeKey === 'midnight') {
+      set('--toast-bg-start', '#1a1d35');
+      set('--toast-bg-end', '#11152a');
+      set('--toast-border-color', '#3a4373');
+      set('--toast-text-color', '#d7dcff');
+      set('--toast-shadow-color', '#060913');
+    } else if (themeKey === 'forest') {
+      set('--toast-bg-start', '#1a2d1d');
+      set('--toast-bg-end', '#132416');
+      set('--toast-border-color', '#355f3a');
+      set('--toast-text-color', '#dcf3de');
+      set('--toast-shadow-color', '#071009');
+    } else if (themeKey === 'cyberpunk') {
+      set('--toast-bg-start', '#2a1637');
+      set('--toast-bg-end', '#1d1028');
+      set('--toast-border-color', '#6f4390');
+      set('--toast-text-color', '#f0ddff');
+      set('--toast-shadow-color', '#09040f');
+    } else if (themeKey === 'ocean') {
+      set('--toast-bg-start', '#11243d');
+      set('--toast-bg-end', '#0c1a2f');
+      set('--toast-border-color', '#2f5682');
+      set('--toast-text-color', '#d8e8f9');
+      set('--toast-shadow-color', '#040b14');
+    } else if (themeKey === 'sunset') {
+      set('--toast-bg-start', '#392016');
+      set('--toast-bg-end', '#2a170f');
+      set('--toast-border-color', '#6d3f2f');
+      set('--toast-text-color', '#ffe7db');
+      set('--toast-shadow-color', '#120905');
+    } else if (themeKey === 'rose') {
+      set('--toast-bg-start', '#351727');
+      set('--toast-bg-end', '#26121c');
+      set('--toast-border-color', '#6a3350');
+      set('--toast-text-color', '#ffe4f0');
+      set('--toast-shadow-color', '#11070d');
+    } else if (themeKey === 'solarized') {
+      set('--toast-bg-start', '#11414a');
+      set('--toast-bg-end', '#0a3139');
+      set('--toast-border-color', '#2d6d72');
+      set('--toast-text-color', '#d8ece6');
+      set('--toast-shadow-color', '#021318');
+    } else if (themeKey === 'mono') {
+      set('--toast-bg-start', '#2a2a2a');
+      set('--toast-bg-end', '#1f1f1f');
+      set('--toast-border-color', '#474747');
+      set('--toast-text-color', '#f0f0f0');
+      set('--toast-shadow-color', '#000000');
+    } else {
+      set('--toast-bg-start', 'color-mix(in srgb,var(--surface-color) 84%,var(--accent-color) 16%)');
+      set('--toast-bg-end', 'color-mix(in srgb,var(--surface-color) 76%,var(--bg-color))');
+      set('--toast-border-color', 'color-mix(in srgb,var(--accent-color) 30%,var(--border-color))');
+      set('--toast-text-color', 'var(--text-color)');
+      set('--toast-shadow-color', 'color-mix(in srgb,var(--bg-color) 80%,black)');
+    }
+
+    if (custom && themeKey === 'custom') {
+      if (custom.toast_bg) set('--toast-bg-start', custom.toast_bg);
+      if (custom.toast_bg2) set('--toast-bg-end', custom.toast_bg2);
+      if (custom.toast_border) set('--toast-border-color', custom.toast_border);
+      if (custom.toast_text) set('--toast-text-color', custom.toast_text);
+      if (custom.toast_shadow) set('--toast-shadow-color', custom.toast_shadow);
+    }
+  }
+
   function applyForwardedVars(themeKey) {
     const frogLike = themeKey === 'frog' || themeKey === 'dark';
     if (frogLike) {
@@ -3105,7 +3187,6 @@ function _applyThemeVars(theme) {
     root.style.setProperty('--fwd-pill-border', 'color-mix(in srgb,var(--accent-color) 34%,var(--border-color))');
   }
 
-  const root = document.documentElement;
   if (theme === 'custom') {
     try {
       const d = JSON.parse(localStorage.getItem('frogtalk-custom-theme') || '{}');
@@ -3115,6 +3196,7 @@ function _applyThemeVars(theme) {
       if (d.border) root.style.setProperty('--border-color', d.border);
       if (d.text) root.style.setProperty('--text-color', d.text);
       if (d.muted) root.style.setProperty('--text-muted', d.muted);
+      applyToastVars('custom', d);
       applyForwardedVars('custom');
       return;
     } catch {}
@@ -3139,6 +3221,7 @@ function _applyThemeVars(theme) {
   root.style.setProperty('--text-muted', t.muted);
   root.style.setProperty('--border-color', t.border);
   root.style.setProperty('--accent-color', t.accent);
+  applyToastVars(theme);
   applyForwardedVars(theme);
 }
 
@@ -3151,24 +3234,43 @@ function _customThemeFromInputs() {
     surface: get('ct-surface'),
     border: get('ct-border'),
     text: get('ct-text'),
-    muted: get('ct-muted')
+    muted: get('ct-muted'),
+    toast_bg: get('ct-toast-bg'),
+    toast_bg2: get('ct-toast-bg2'),
+    toast_border: get('ct-toast-border'),
+    toast_text: get('ct-toast-text'),
+    toast_shadow: get('ct-toast-shadow'),
+    fwd_border: get('ct-fwd-border'),
+    fwd_bg: get('ct-fwd-bg'),
+    fwd_top_border: get('ct-fwd-top-border'),
+    fwd_top_bg: get('ct-fwd-top-bg'),
+    fwd_top_color: get('ct-fwd-top-color'),
+    fwd_preview_color: get('ct-fwd-preview-color')
   };
 }
 function updateCustomTheme() {
   const root = document.documentElement;
   const d = _customThemeFromInputs();
+  // Core colors
   if (d.accent) root.style.setProperty('--accent-color', d.accent);
   if (d.bg) root.style.setProperty('--bg-color', d.bg);
   if (d.surface) root.style.setProperty('--surface-color', d.surface);
   if (d.border) root.style.setProperty('--border-color', d.border);
   if (d.text) root.style.setProperty('--text-color', d.text);
   if (d.muted) root.style.setProperty('--text-muted', d.muted);
-  root.style.setProperty('--fwd-card-border', 'color-mix(in srgb,var(--border-color) 72%,var(--accent-color))');
-  root.style.setProperty('--fwd-card-bg', 'linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 74%,var(--accent-dim)),color-mix(in srgb,var(--surface-color) 88%,var(--bg-color)))');
-  root.style.setProperty('--fwd-top-border', 'color-mix(in srgb,var(--accent-color) 24%,var(--border-color))');
-  root.style.setProperty('--fwd-top-bg', 'linear-gradient(180deg,color-mix(in srgb,var(--accent-dim) 78%,var(--surface-color)),color-mix(in srgb,var(--accent-dim) 44%,var(--surface-color)))');
-  root.style.setProperty('--fwd-top-color', 'color-mix(in srgb,var(--text-color) 82%,var(--accent-color))');
-  root.style.setProperty('--fwd-preview-color', 'color-mix(in srgb,var(--text-color) 84%,var(--accent-color))');
+  // Toast colors with fallbacks
+  root.style.setProperty('--toast-bg-start', d.toast_bg || 'color-mix(in srgb,var(--surface-color) 84%,var(--accent-color) 16%)');
+  root.style.setProperty('--toast-bg-end', d.toast_bg2 || 'color-mix(in srgb,var(--surface-color) 76%,var(--bg-color))');
+  root.style.setProperty('--toast-border-color', d.toast_border || 'color-mix(in srgb,var(--accent-color) 30%,var(--border-color))');
+  root.style.setProperty('--toast-text-color', d.toast_text || 'var(--text-color)');
+  root.style.setProperty('--toast-shadow-color', d.toast_shadow || 'color-mix(in srgb,var(--bg-color) 80%,black)');
+  // Forwarded message colors with fallbacks
+  root.style.setProperty('--fwd-card-border', d.fwd_border || 'color-mix(in srgb,var(--border-color) 72%,var(--accent-color))');
+  root.style.setProperty('--fwd-card-bg', d.fwd_bg || 'linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 74%,var(--accent-dim)),color-mix(in srgb,var(--surface-color) 88%,var(--bg-color)))');
+  root.style.setProperty('--fwd-top-border', d.fwd_top_border || 'color-mix(in srgb,var(--accent-color) 24%,var(--border-color))');
+  root.style.setProperty('--fwd-top-bg', d.fwd_top_bg || 'linear-gradient(180deg,color-mix(in srgb,var(--accent-dim) 78%,var(--surface-color)),color-mix(in srgb,var(--accent-dim) 44%,var(--surface-color)))');
+  root.style.setProperty('--fwd-top-color', d.fwd_top_color || 'color-mix(in srgb,var(--text-color) 82%,var(--accent-color))');
+  root.style.setProperty('--fwd-preview-color', d.fwd_preview_color || 'color-mix(in srgb,var(--text-color) 84%,var(--accent-color))');
   root.style.setProperty('--fwd-pill-color', 'color-mix(in srgb,var(--accent-color) 82%,var(--text-color))');
   root.style.setProperty('--fwd-pill-bg', 'color-mix(in srgb,var(--accent-dim) 75%,transparent)');
   root.style.setProperty('--fwd-pill-border', 'color-mix(in srgb,var(--accent-color) 34%,var(--border-color))');
@@ -3202,12 +3304,40 @@ function importThemeJson() {
   if (!txt) return;
   try {
     const d = JSON.parse(txt);
-    ['accent', 'bg', 'surface', 'border', 'text', 'muted'].forEach(k => {
-      const el = document.getElementById('ct-' + k);
-      if (el && typeof d[k] === 'string' && /^#[0-9a-f]{3,8}$/i.test(d[k])) el.value = d[k];
+    const colorFields = [
+      ['accent', 'ct-accent'],
+      ['bg', 'ct-bg'],
+      ['surface', 'ct-surface'],
+      ['border', 'ct-border'],
+      ['text', 'ct-text'],
+      ['muted', 'ct-muted'],
+      ['toast_bg', 'ct-toast-bg'],
+      ['toast_bg2', 'ct-toast-bg2'],
+      ['toast_border', 'ct-toast-border'],
+      ['toast_text', 'ct-toast-text'],
+      ['toast_shadow', 'ct-toast-shadow'],
+      ['fwd_border', 'ct-fwd-border'],
+      ['fwd_bg', 'ct-fwd-bg'],
+      ['fwd_top_border', 'ct-fwd-top-border'],
+      ['fwd_top_bg', 'ct-fwd-top-bg'],
+      ['fwd_top_color', 'ct-fwd-top-color'],
+      ['fwd_preview_color', 'ct-fwd-preview-color']
+    ];
+    let importedCount = 0;
+    colorFields.forEach(([k, id]) => {
+      const el = document.getElementById(id);
+      if (el && typeof d[k] === 'string' && /^#[0-9a-f]{3,8}$/i.test(d[k])) {
+        el.value = d[k];
+        importedCount++;
+      }
     });
+    if (importedCount === 0) {
+      if (typeof toast === 'function') toast('No valid colors found in JSON', 'warn');
+      return;
+    }
     saveCustomTheme();
-  } catch {
+    if (typeof toast === 'function') toast(`Imported ${importedCount} color settings`, 'success');
+  } catch (e) {
     if (typeof toast === 'function') toast('Invalid theme JSON', 'error');
   }
 }
@@ -3216,8 +3346,27 @@ function loadCustomThemeIntoInputs() {
   if (!raw) return;
   try {
     const d = JSON.parse(raw);
-    ['accent', 'bg', 'surface', 'border', 'text', 'muted'].forEach(k => {
-      const el = document.getElementById('ct-' + k);
+    const colorFields = [
+      ['accent', 'ct-accent'],
+      ['bg', 'ct-bg'],
+      ['surface', 'ct-surface'],
+      ['border', 'ct-border'],
+      ['text', 'ct-text'],
+      ['muted', 'ct-muted'],
+      ['toast_bg', 'ct-toast-bg'],
+      ['toast_bg2', 'ct-toast-bg2'],
+      ['toast_border', 'ct-toast-border'],
+      ['toast_text', 'ct-toast-text'],
+      ['toast_shadow', 'ct-toast-shadow'],
+      ['fwd_border', 'ct-fwd-border'],
+      ['fwd_bg', 'ct-fwd-bg'],
+      ['fwd_top_border', 'ct-fwd-top-border'],
+      ['fwd_top_bg', 'ct-fwd-top-bg'],
+      ['fwd_top_color', 'ct-fwd-top-color'],
+      ['fwd_preview_color', 'ct-fwd-preview-color']
+    ];
+    colorFields.forEach(([k, id]) => {
+      const el = document.getElementById(id);
       if (el && d[k]) el.value = d[k];
     });
   } catch {}

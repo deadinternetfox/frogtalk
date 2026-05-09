@@ -99,6 +99,11 @@
   --fwd-pill-color:#cfe8d9;
   --fwd-pill-bg:rgba(127,210,167,.16);
   --fwd-pill-border:rgba(127,210,167,.34);
+  --toast-bg-start:#183329;
+  --toast-bg-end:#11271f;
+  --toast-border-color:#3b6c59;
+  --toast-text-color:#dff5e8;
+  --toast-shadow-color:#08140f;
 }
 /* Theme overrides — maps hardcoded colors to CSS variables */
 #server-list{background:var(--bg-color) !important;border-color:var(--border-color) !important}
@@ -6933,11 +6938,13 @@ html{ scroll-behavior:smooth }
   padding:10px 16px 10px 12px;
   font-size:14px;
   line-height:1.35;
-  color:var(--text-color);
-  background:linear-gradient(135deg, var(--surface-color) 0%, rgba(0,0,0,.15)) !important;
-  border:1px solid var(--border-color) !important;
+  color:var(--toast-text-color, var(--text-color));
+  background:linear-gradient(135deg, var(--toast-bg-start) 0%, var(--toast-bg-end) 100%) !important;
+  border:1px solid var(--toast-border-color, var(--border-color)) !important;
   border-left:3px solid var(--toast-accent) !important;
-  box-shadow:0 10px 30px rgba(0,0,0,.45), 0 0 0 1px rgba(76,175,80,.25) !important;
+  box-shadow:
+    0 10px 30px color-mix(in srgb, var(--toast-shadow-color, #000) 55%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--toast-accent) 22%, transparent) !important;
   backdrop-filter:blur(8px);
   -webkit-backdrop-filter:blur(8px);
   pointer-events:auto;
@@ -8534,24 +8541,54 @@ window.ConnErr = (function(){
 
       <!-- Custom theme editor -->
       <div class="theme-custom-section" style="margin-top:6px;border-top:1px solid #25463a;padding-top:14px">
-        <label class="modal-label" style="display:flex;align-items:center;justify-content:space-between">
+        <label class="modal-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <span>🎨 Custom theme</span>
           <span style="font-size:11px;color:#85a89a;font-weight:400">Live-edits the running app</span>
         </label>
-        <div class="theme-color-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-          <label class="theme-color-row"><span>Accent</span><input type="color" id="ct-accent" value="#4caf50" oninput="updateCustomTheme()"></label>
-          <label class="theme-color-row"><span>Background</span><input type="color" id="ct-bg" value="#0d0d0d" oninput="updateCustomTheme()"></label>
-          <label class="theme-color-row"><span>Surface</span><input type="color" id="ct-surface" value="#1e1e1e" oninput="updateCustomTheme()"></label>
-          <label class="theme-color-row"><span>Border</span><input type="color" id="ct-border" value="#2a2a2a" oninput="updateCustomTheme()"></label>
-          <label class="theme-color-row"><span>Text</span><input type="color" id="ct-text" value="#e0e0e0" oninput="updateCustomTheme()"></label>
-          <label class="theme-color-row"><span>Muted</span><input type="color" id="ct-muted" value="#888888" oninput="updateCustomTheme()"></label>
+        <!-- Core Colors -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:11px;color:#7fd2a7;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;font-weight:700">Core Colors</div>
+          <div class="theme-color-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <label class="theme-color-row"><span>Accent</span><input type="color" id="ct-accent" value="#4caf50" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Background</span><input type="color" id="ct-bg" value="#0d0d0d" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Surface</span><input type="color" id="ct-surface" value="#1e1e1e" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Border</span><input type="color" id="ct-border" value="#2a2a2a" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Text</span><input type="color" id="ct-text" value="#e0e0e0" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Muted Text</span><input type="color" id="ct-muted" value="#888888" oninput="updateCustomTheme()"></label>
+          </div>
         </div>
+        <!-- Toast Colors -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:11px;color:#7fd2a7;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;font-weight:700">Toast Styling</div>
+          <div class="theme-color-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <label class="theme-color-row"><span>Toast Gradient Start</span><input type="color" id="ct-toast-bg" value="#183329" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Toast Gradient End</span><input type="color" id="ct-toast-bg2" value="#11271f" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Toast Border</span><input type="color" id="ct-toast-border" value="#3b6c59" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Toast Text</span><input type="color" id="ct-toast-text" value="#dff5e8" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Toast Shadow</span><input type="color" id="ct-toast-shadow" value="#08140f" oninput="updateCustomTheme()"></label>
+          </div>
+        </div>
+        <!-- Forwarded Message Colors -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:11px;color:#7fd2a7;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;font-weight:700">Forwarded Messages</div>
+          <div class="theme-color-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <label class="theme-color-row"><span>Card Border</span><input type="color" id="ct-fwd-border" value="#3b6c59" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Card Background</span><input type="color" id="ct-fwd-bg" value="#173027" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Header Border</span><input type="color" id="ct-fwd-top-border" value="#2f5548" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Header Background</span><input type="color" id="ct-fwd-top-bg" value="#163223" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Header Text</span><input type="color" id="ct-fwd-top-color" value="#cfe8d9" oninput="updateCustomTheme()"></label>
+            <label class="theme-color-row"><span>Preview Text</span><input type="color" id="ct-fwd-preview-color" value="#dff5e8" oninput="updateCustomTheme()"></label>
+          </div>
+        </div>
+        <!-- Action Buttons -->
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="modal-btn primary" onclick="saveCustomTheme()" style="flex:1;min-width:100px">Save</button>
-          <button class="modal-btn secondary" onclick="resetCustomTheme()" style="flex:1;min-width:100px">Reset</button>
+          <button class="modal-btn primary" onclick="saveCustomTheme()" style="flex:1;min-width:100px">Save Theme</button>
+          <button class="modal-btn secondary" onclick="resetCustomTheme()" style="flex:1;min-width:100px">Reset to Frog</button>
+          <button class="modal-btn secondary" onclick="exportThemeJson()" style="flex:1;min-width:100px">Export</button>
+          <button class="modal-btn secondary" onclick="importThemeJson()" style="flex:1;min-width:100px">Import</button>
         </div>
       </div>
-      <div style="color:#85a89a;font-size:12px;text-align:center;margin-top:10px">Theme changes are applied instantly</div>
+      <div style="color:#85a89a;font-size:11px;text-align:center;margin-top:10px;line-height:1.4">All theme changes apply instantly to the running app. Use Export/Import to backup or share custom themes.</div>
     </div>
     <!-- Style Tab (Custom Profile CSS) -->
     <div id="set-pane-style" style="display:none">
