@@ -2128,7 +2128,9 @@ const _DESKTOP_CLOSE_TO_TRAY_LS_KEY = 'frogtalk-desktop-close-to-tray';
 
 function _isDesktopSettingsRuntime() {
   try {
-    return !!(window.desktopApp && window.desktopApp.isDesktop);
+    if (window.desktopApp && window.desktopApp.isDesktop) return true;
+    const ua = String((navigator && navigator.userAgent) || '');
+    return /FrogTalkDesktop/i.test(ua);
   } catch {
     return false;
   }
