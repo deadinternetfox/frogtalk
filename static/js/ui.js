@@ -3848,6 +3848,29 @@ function applyCssPreset(name) {
   if (event && event.currentTarget) event.currentTarget.style.borderColor = '#4caf50';
 }
 
+function _highlightCurrentPreset() {
+  const textarea = document.getElementById('profile-custom-css');
+  if (!textarea) return;
+  const currentCss = textarea.value || '';
+  let matchedPreset = 'none';
+  // Match against preset CSS values
+  for (const [presetName, presetCss] of Object.entries(CSS_PRESETS)) {
+    if (currentCss.trim() === presetCss.trim()) {
+      matchedPreset = presetName;
+      break;
+    }
+  }
+  // Highlight the matched preset button
+  document.querySelectorAll('.css-preset-btn').forEach(btn => {
+    const onclick = btn.getAttribute('onclick') || '';
+    if (onclick.includes(`'${matchedPreset}'`)) {
+      btn.style.borderColor = '#4caf50';
+    } else {
+      btn.style.borderColor = '#222';
+    }
+  });
+}
+
 function updateCssCharCount() {
   const textarea = document.getElementById('profile-custom-css');
   const counter = document.getElementById('css-char-count');
@@ -4100,6 +4123,8 @@ async function showProfile() {
   if (ringEl) ringEl.value = localStorage.getItem('ft_notify_ring') || 'default';
   const cssEl = document.getElementById('profile-custom-css');
   if (cssEl) cssEl.value = u.custom_css || '';
+  // Highlight the current CSS preset button (if any matches)
+  try { _highlightCurrentPreset(); } catch {}
   // Appearance tab - select current theme
   const currentTheme = _normalizeThemeKey(u.theme || localStorage.getItem('frogtalk-theme') || 'frog');
   document.body.dataset.theme = currentTheme;
@@ -4116,6 +4141,8 @@ async function showProfile() {
     if (!res.ok) return;
     const data = await res.json();
     if (cssEl) { cssEl.value = data.custom_css || ''; updateCssCharCount(); }
+    // Highlight the current CSS preset button after fetching
+    try { _highlightCurrentPreset(); } catch {}
     State.user.mood = data.mood || '';
     State.user.custom_css = data.custom_css || '';
     State.user.wall_enabled = data.wall_enabled;
