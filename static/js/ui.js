@@ -5001,7 +5001,8 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
     // the main profile data; story_status comes from /api/social/profile
     // (count + has_unviewed). Shown for self too so the user can see
     // their own active story from the chat-profile modal.
-    apiFetch('/api/social/profile/' + encodeURIComponent(nickname))
+    const _profileFetchBust = `?v=${Date.now()}`;
+    apiFetch('/api/social/profile/' + encodeURIComponent(nickname) + _profileFetchBust)
       .then(r => r.json()).catch(() => null)
       .then(sp => {
         if (!sp || _userInfoTarget !== nickname) return;
@@ -5015,7 +5016,7 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
         // delegate in social.js (single-user mode), so we don't bind
         // a per-element onclick here.
       });
-    apiFetch('/api/users/profile/' + encodeURIComponent(nickname))
+    apiFetch('/api/users/profile/' + encodeURIComponent(nickname) + _profileFetchBust)
       .then(r => r.json())
       .then(u => {
         document.getElementById('userinfo-bio').textContent = u.bio || 'No bio set.';

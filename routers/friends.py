@@ -126,7 +126,10 @@ async def get_profile(nickname: str, _: dict = Depends(get_current_user)):
     profile = db.get_user_profile(nickname)
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    return {k: v for k, v in profile.items() if k != "ecdh_pub_key"}
+    return JSONResponse(
+        content={k: v for k, v in profile.items() if k != "ecdh_pub_key"},
+        headers={"Cache-Control": "no-store, max-age=0, must-revalidate"},
+    )
 
 
 @users_router.get("/{user_id}/pubkey")

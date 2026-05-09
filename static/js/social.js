@@ -3338,7 +3338,7 @@ const Social = (() => {
         _updateTabLoadUi(loadUi, 44, 'Profile loaded from cache', `@${nickname}'s data ready`);
       } else {
         _updateTabLoadUi(loadUi, 28, 'Downloading profile', `Fetching @${nickname}'s info…`);
-        const res = await api('/api/social/profile/' + encodeURIComponent(nickname));
+        const res = await api('/api/social/profile/' + encodeURIComponent(nickname) + `?v=${Date.now()}`);
         if (!res.ok) {
           // Only treat a clean 404 as "user doesn't exist". Transient failures
           // (5xx / 429 / network / timeout) get a retry button instead of

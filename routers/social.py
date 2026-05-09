@@ -228,7 +228,10 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
     out = await _coalesce_hot(_coalesce_key, _coalesced)
     if out is None:
         return JSONResponse(status_code=404, content={"error": "User not found"})
-    return out
+    return JSONResponse(
+        content=out,
+        headers={"Cache-Control": "no-store, max-age=0, must-revalidate"},
+    )
 
 
 # ── helper: block non-friend access to a private profile ────────────────
