@@ -3911,26 +3911,40 @@ function _renderCssPreviewStyle() {
 function _populateCssPreviewIdentity() {
   try {
     const u = State.user || {};
+    // Chat profile info
     const nameEl = document.getElementById('css-preview-name');
     if (nameEl) nameEl.textContent = u.nickname || 'YourNick';
     const bioEl = document.getElementById('css-preview-bio');
-    if (bioEl && u.bio) bioEl.textContent = u.bio;
+    if (bioEl) {
+      bioEl.textContent = u.bio || '(No bio set)';
+    }
     const statusEl = document.getElementById('css-preview-status');
     if (statusEl) {
       const parts = [u.status_msg, u.mood].filter(Boolean);
-      if (parts.length) statusEl.textContent = parts.join(' · ');
+      statusEl.textContent = parts.length ? parts.join(' · ') : '';
     }
     const avEl = document.getElementById('css-preview-avatar');
     if (avEl && typeof UI !== 'undefined' && UI.avatarEl) {
       avEl.innerHTML = UI.avatarEl(u.avatar, u.nickname, 90);
     }
     const headerEl = document.getElementById('css-preview-header');
-    if (headerEl && u.banner) {
-      headerEl.style.setProperty('background-image', `url(${u.banner})`, 'important');
-      headerEl.style.setProperty('background-size', 'cover', 'important');
-      headerEl.style.setProperty('background-position', 'center', 'important');
+    if (headerEl) {
+      if (u.banner) {
+        headerEl.style.setProperty('background-image', `url(${u.banner})`, 'important');
+        headerEl.style.setProperty('background-size', 'cover', 'important');
+        headerEl.style.setProperty('background-position', 'center', 'important');
+      } else {
+        headerEl.style.setProperty('background-image', '', 'important');
+      }
     }
-  } catch {}
+    // Social card info
+    const socialNickEl = document.getElementById('css-preview-social-nick');
+    if (socialNickEl) socialNickEl.textContent = u.nickname || 'YourNick';
+    const socialBioEl = document.getElementById('css-preview-social-bio');
+    if (socialBioEl) socialBioEl.textContent = u.bio ? u.bio.substring(0, 50) : 'Profile preview';
+  } catch (e) {
+    console.error('Error populating CSS preview:', e);
+  }
 }
 
 function previewCssLive() {
