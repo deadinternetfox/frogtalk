@@ -3751,8 +3751,6 @@ async function showProfile() {
   if (toneEl) toneEl.value = localStorage.getItem('ft_notify_tone') || 'pop';
   const ringEl = document.getElementById('profile-notify-ring');
   if (ringEl) ringEl.value = localStorage.getItem('ft_notify_ring') || 'default';
-  const moodEl = document.getElementById('profile-mood');
-  if (moodEl) moodEl.value = u.mood || '';
   const cssEl = document.getElementById('profile-custom-css');
   if (cssEl) cssEl.value = u.custom_css || '';
   // Appearance tab - select current theme
@@ -3770,7 +3768,6 @@ async function showProfile() {
     const res = await apiFetch('/api/wall/settings');
     if (!res.ok) return;
     const data = await res.json();
-    if (moodEl) moodEl.value = data.mood || '';
     if (cssEl) { cssEl.value = data.custom_css || ''; updateCssCharCount(); }
     State.user.mood = data.mood || '';
     State.user.custom_css = data.custom_css || '';
@@ -4094,7 +4091,7 @@ async function saveProfile() {
   localStorage.setItem('ft_notify_ring', notifyRing);
   localStorage.setItem('ft_autoplay_media', autoplayMedia ? '1' : '0');
   saveNetworkSettings(true);
-  const mood = document.getElementById('profile-mood')?.value?.slice(0, 100) || '';
+  const mood = String(State.user?.mood || '').slice(0, 100);
   const customCss = document.getElementById('profile-custom-css')?.value?.slice(0, 10240) || '';
   // Theme
   const currentTheme = _normalizeThemeKey(document.body.dataset.theme || 'frog');
