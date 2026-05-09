@@ -338,23 +338,17 @@ function friendActionUserInfo () {
 }
 
 /* ── Helpers ───────────────────────────────────────────────────────────────── */
-function _normPresence (p) {
-  return String(p || '').trim().toLowerCase();
-}
-
 function presenceColor (p) {
-  p = _normPresence(p);
   const m = {online:'#4caf50',away:'#ffc107',dnd:'#f44336',offline:'#888'};
   return m[p] || '#888';
 }
 function presenceLabel (p) {
-  p = _normPresence(p);
   const m = {online:'Online',away:'Away',dnd:'Do Not Disturb',offline:'Offline'};
   return m[p] || 'Offline';
 }
 
 function isFriendOnlinePresence(friend) {
-  const p = _normPresence(friend && friend.presence);
+  const p = String((friend && friend.presence) || '').toLowerCase();
   return p === 'online' || p === 'away' || p === 'dnd';
 }
 
