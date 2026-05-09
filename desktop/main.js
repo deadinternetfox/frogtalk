@@ -38,7 +38,13 @@ function writeDesktopSettings() {
 }
 
 function shouldCloseToTray() {
-  return !!(tray && _desktopSettings && _desktopSettings.closeToTrayOnX !== false);
+  return !!(_desktopSettings && _desktopSettings.closeToTrayOnX !== false);
+}
+
+function destroyTray() {
+  if (!tray) return;
+  try { tray.destroy(); } catch {}
+  tray = null;
 }
 
 async function stopRendererMedia(win) {
@@ -312,17 +318,20 @@ function createWindow() {
     }
   } catch {}
 
-  // If tray mode is enabled and available, X hides to tray; otherwise quit.
+  // If tray mode is enabled, X hides to tray; otherwise quit.
   // Before full quit, force-stop media and flush auth/session snapshot.
   mainWindow.on('close', async (e) => {
     if (!app.isQuitting && shouldCloseToTray()) {
-      e.preventDefault();
-      try { mainWindow.hide(); } catch {}
-      try {
-        await snapshotAuthFromRenderer(mainWindow);
-        await mainWindow.webContents.session.flushStorageData();
-      } catch {}
-      return;
+      const trayReady = createTray();
+      if (trayReady) {
+        e.preventDefault();
+        try { mainWindow.hide(); } catch {}
+        try {
+          await snapshotAuthFromRenderer(mainWindow);
+          await mainWindow.webContents.session.flushStorageData();
+        } catch {}
+        return;
+      }
     }
 
     if (app.isQuitting) {
@@ -352,7 +361,7 @@ function createWindow() {
 ipcMain.handle('desktop:get-settings', () => {
   return {
     closeToTrayOnX: _desktopSettings.closeToTrayOnX !== false,
-    trayAvailable: !!tray,
+    trayAvailable: process.platform !== 'linux' || !!process.env.DISPLAY || !!process.env.WAYLAND_DISPLAY,
   };
 });
 
@@ -363,25 +372,32 @@ ipcMain.handle('desktop:set-close-to-tray', (_event, enabled) => {
   return {
     ok: true,
     closeToTrayOnX: next,
-    trayAvailable: !!tray,
+    trayAvailable: process.platform !== 'linux' || !!process.env.DISPLAY || !!process.env.WAYLAND_DISPLAY,
   };
 });
 
 function createTray() {
+  if (tray) return true;
   try {
     tray = new Tray(path.join(__dirname, 'icon.png'));
     const contextMenu = Menu.buildFromTemplate([
-      { label: 'Show FrogTalk', click: () => mainWindow?.show() },
+      { label: 'Show FrogTalk', click: () => { try { mainWindow?.show(); mainWindow?.focus(); } catch {} destroyTray(); } },
       { label: 'Minimize to tray', click: () => mainWindow?.hide() },
       { type: 'separator' },
       { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } }
     ]);
     tray.setToolTip('FrogTalk');
     tray.setContextMenu(contextMenu);
-    tray.on('click', () => mainWindow?.show());
+    tray.on('click', () => {
+      try { mainWindow?.show(); mainWindow?.focus(); } catch {}
+      destroyTray();
+    });
+    return true;
   } catch (e) {
     // Tray icon might fail without a display
     console.error('Tray creation failed:', e.message);
+    tray = null;
+    return false;
   }
 }
 
@@ -389,7 +405,6 @@ app.whenReady().then(() => {
   app.isQuitting = false;
   readDesktopSettings();
   createWindow();
-  createTray();
 });
 
 app.on('window-all-closed', () => {
@@ -398,11 +413,15 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (!mainWindow) createWindow();
-  else mainWindow.show();
+  else {
+    mainWindow.show();
+    destroyTray();
+  }
 });
 
 app.on('before-quit', () => {
   app.isQuitting = true;
+  destroyTray();
   if (mainWindow && !mainWindow.isDestroyed()) {
     try { mainWindow.webContents.setAudioMuted(true); } catch {}
   }

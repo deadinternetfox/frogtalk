@@ -2151,7 +2151,6 @@ async function _loadDesktopAppSettingsIntoProfile() {
   if (!_isDesktopSettingsRuntime()) {
     row.checked = false;
     row.disabled = true;
-    if (note) note.textContent = 'Desktop-only setting. Open FrogTalk desktop app to change this.';
     return;
   }
   row.disabled = false;
@@ -2177,7 +2176,6 @@ async function _loadDesktopAppSettingsIntoProfile() {
       return;
     }
   } catch {}
-  if (note) note.textContent = 'Tray preference will apply when desktop bridge is available.';
 }
 
 function ensureNetworkPaneContent() {
