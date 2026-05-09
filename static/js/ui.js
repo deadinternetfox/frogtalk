@@ -3062,7 +3062,29 @@ function confirmThemePreview() {
   _themePreviewOriginal = null;
   const bar = document.getElementById('theme-preview-bar');
   if (bar) bar.remove();
-  toast('Theme saved!', 'success');
+  
+  // Save theme and associated CSS preset to database
+  (async () => {
+    const customCss = CSS_PRESETS[theme] || '';
+    try {
+      const wallRes = await apiFetch('/api/wall/settings', 'PATCH', {
+        custom_css: customCss,
+        wall_enabled: State.user.wall_enabled ?? 1,
+        wall_comments_enabled: State.user.wall_comments_enabled ?? 1,
+        mood: State.user.mood || ''
+      });
+      if (wallRes.ok) {
+        State.user.custom_css = customCss;
+        State.user.theme = theme;
+        State.save();
+        toast('Theme and styles saved!', 'success');
+      } else {
+        toast('Failed to save theme styles', 'error');
+      }
+    } catch (e) {
+      toast('Failed to save theme styles', 'error');
+    }
+  })();
 }
 
 function cancelThemePreview() {
@@ -3491,12 +3513,17 @@ function scopeProfileCustomCss(css) {
 function applyProfileCustomCss(css) {
   clearProfileCustomCss();
   const scopedCss = scopeProfileCustomCss(css || '');
-  if (!scopedCss) return;
+  if (!scopedCss) {
+    console.log('applyProfileCustomCss: CSS is empty after scoping', { originalLength: css?.length || 0 });
+    return;
+  }
+  console.log('applyProfileCustomCss: Applying CSS', { scopedCssLength: scopedCss.length, scopedCss: scopedCss.substring(0, 200) });
   const styleEl = document.createElement('style');
   styleEl.id = 'profile-custom-style';
   styleEl.textContent = scopedCss;
   document.head.appendChild(styleEl);
   _profileCustomCssEl = styleEl;
+  console.log('applyProfileCustomCss: Style element added to head', { elId: styleEl.id });
 }
 
 // Apply custom CSS to a social profile (scoped to .social-profile instead of #modal-user-info)
@@ -3507,7 +3534,10 @@ function applySocialProfileCustomCss(css) {
     _socialProfileCssEl.remove();
     _socialProfileCssEl = null;
   }
-  if (!css) return;
+  if (!css) {
+    console.log('applySocialProfileCustomCss: CSS is empty or falsy');
+    return;
+  }
   // Scope CSS to .social-profile container
   const scoped = css
     .split('}')
@@ -3529,12 +3559,17 @@ function applySocialProfileCustomCss(css) {
     })
     .filter(Boolean)
     .join('\n');
-  if (!scoped) return;
+  if (!scoped) {
+    console.log('applySocialProfileCustomCss: CSS is empty after scoping', { originalLength: css?.length || 0 });
+    return;
+  }
+  console.log('applySocialProfileCustomCss: Applying CSS', { scopedCssLength: scoped.length, scopedCss: scoped.substring(0, 200) });
   const styleEl = document.createElement('style');
   styleEl.id = 'social-profile-custom-style';
   styleEl.textContent = scoped;
   document.head.appendChild(styleEl);
   _socialProfileCssEl = styleEl;
+  console.log('applySocialProfileCustomCss: Style element added to head', { elId: styleEl.id });
 }
 
 function clearSocialProfileCustomCss() {
