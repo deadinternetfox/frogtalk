@@ -778,6 +778,10 @@ async function openDMChannel (id, nickname, avatar) {
   // welcome-mode body flag first. That mode intentionally hides #input-area
   // (display:none !important), which otherwise makes the composer vanish.
   try { document.body.classList.remove('in-welcome'); } catch {}
+  try {
+    const typingBar = document.getElementById('typing-bar');
+    if (typingBar) typingBar.textContent = '';
+  } catch {}
 
   // Smooth transition: if we're coming from a public channel, clear its state
   if (State.currentRoomType && State.currentRoomType !== 'dm') {

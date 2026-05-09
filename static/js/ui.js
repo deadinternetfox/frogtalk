@@ -3015,9 +3015,7 @@ let _themePreviewOriginal = null; // theme before preview started
 
 function _normalizeThemeKey(theme) {
   const t = String(theme || '').trim().toLowerCase();
-  // Legacy compatibility: old accounts saved the default palette as "dark".
-  // Treat it as Frog so UI selection and persisted state stay consistent.
-  return (t === 'dark' || !t) ? 'frog' : t;
+  return t || 'frog';
 }
 
 function selectTheme(theme) {
@@ -3094,12 +3092,18 @@ function _applyThemeVars(theme) {
   function applyToastVars(themeKey, custom = null) {
     const set = (name, value) => root.style.setProperty(name, value);
 
-    if (themeKey === 'frog' || themeKey === 'dark') {
+    if (themeKey === 'frog') {
       set('--toast-bg-start', '#183329');
       set('--toast-bg-end', '#11271f');
       set('--toast-border-color', '#3b6c59');
       set('--toast-text-color', '#dff5e8');
       set('--toast-shadow-color', '#08140f');
+    } else if (themeKey === 'dark') {
+      set('--toast-bg-start', '#1b1b1b');
+      set('--toast-bg-end', '#111111');
+      set('--toast-border-color', '#343434');
+      set('--toast-text-color', '#ededed');
+      set('--toast-shadow-color', '#000000');
     } else if (themeKey === 'light') {
       set('--toast-bg-start', '#ffffff');
       set('--toast-bg-end', '#edf3ef');
@@ -3172,8 +3176,7 @@ function _applyThemeVars(theme) {
   }
 
   function applyForwardedVars(themeKey) {
-    const frogLike = themeKey === 'frog' || themeKey === 'dark';
-    if (frogLike) {
+    if (themeKey === 'frog') {
       root.style.setProperty('--fwd-card-border', '#3b6c59');
       root.style.setProperty('--fwd-card-bg', 'linear-gradient(180deg,#173027 0%,#13271f 58%,#102018 100%)');
       root.style.setProperty('--fwd-top-border', '#2f5548');
@@ -3183,6 +3186,18 @@ function _applyThemeVars(theme) {
       root.style.setProperty('--fwd-pill-color', '#cfe8d9');
       root.style.setProperty('--fwd-pill-bg', 'rgba(127,210,167,.16)');
       root.style.setProperty('--fwd-pill-border', 'rgba(127,210,167,.34)');
+      return;
+    }
+    if (themeKey === 'dark') {
+      root.style.setProperty('--fwd-card-border', '#353535');
+      root.style.setProperty('--fwd-card-bg', 'linear-gradient(180deg,#1a1a1a 0%,#151515 58%,#111111 100%)');
+      root.style.setProperty('--fwd-top-border', '#2a2a2a');
+      root.style.setProperty('--fwd-top-bg', 'linear-gradient(180deg,#202020 0%,#171717 100%)');
+      root.style.setProperty('--fwd-top-color', '#e7e7e7');
+      root.style.setProperty('--fwd-preview-color', '#d7d7d7');
+      root.style.setProperty('--fwd-pill-color', '#efefef');
+      root.style.setProperty('--fwd-pill-bg', 'rgba(255,255,255,.08)');
+      root.style.setProperty('--fwd-pill-border', 'rgba(255,255,255,.14)');
       return;
     }
     root.style.setProperty('--fwd-card-border', 'color-mix(in srgb,var(--border-color) 72%,var(--accent-color))');
@@ -3212,7 +3227,7 @@ function _applyThemeVars(theme) {
   }
   const themes = {
     frog: { bg: '#0d0d0d', surface: '#1e1e1e', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#4caf50' },
-    dark: { bg: '#0d0d0d', surface: '#1e1e1e', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#4caf50' },
+    dark: { bg: '#070707', surface: '#141414', text: '#ececec', muted: '#9a9a9a', border: '#262626', accent: '#8ab4f8' },
     light: { bg: '#f5f5f5', surface: '#ffffff', text: '#333333', muted: '#666', border: '#ddd', accent: '#4caf50' },
     midnight: { bg: '#0a0a1a', surface: '#151528', text: '#c0c0ff', muted: '#8888aa', border: '#252540', accent: '#6666ff' },
     forest: { bg: '#0a1a0a', surface: '#152015', text: '#c0e0c0', muted: '#88aa88', border: '#254025', accent: '#4caf50' },
@@ -3315,7 +3330,7 @@ function updateResetThemeBtnLabel() {
 
 function getThemeDisplayName(themeKey) {
   const names = {
-    frog: 'Frog', dark: 'Dark', light: 'Light', midnight: 'Midnight', forest: 'Forest', cyberpunk: 'Cyberpunk', ocean: 'Ocean', sunset: 'Sunset', rose: 'Rose', solarized: 'Solarized', mono: 'Mono', custom: 'Custom'
+    frog: 'Frog (Default)', dark: 'Dark', light: 'Light', midnight: 'Midnight', forest: 'Forest', cyberpunk: 'Cyberpunk', ocean: 'Ocean', sunset: 'Sunset', rose: 'Rose', solarized: 'Solarized', mono: 'Mono', custom: 'Custom'
   };
   return names[themeKey] || (themeKey.charAt(0).toUpperCase() + themeKey.slice(1));
 }

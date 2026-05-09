@@ -626,6 +626,10 @@ const Rooms = (() => {
 
   async function switchToRoom(name, type = 'public', dmPeer = null, channelType = 'text') {    closeMobileSidebar();
     if (State.currentRoom === name && State.currentRoomType === type) return;
+    try {
+      const typingBar = document.getElementById('typing-bar');
+      if (typingBar) typingBar.textContent = '';
+    } catch {}
 
     // Resolve room encryption before mutating the current UI so canceling a
     // private-room prompt leaves the existing conversation intact.
