@@ -662,6 +662,9 @@ const Rooms = (() => {
     State.currentRoomType = type;
     State.currentChannelType = channelType;
     State.dmPeer = dmPeer;
+    try {
+      if (typeof UI !== 'undefined' && UI.updateTypingBar) UI.updateTypingBar();
+    } catch {}
     if (!State.messages[name]) State.messages[name] = [];
     State.oldestMsgId = State.messages[name].length ? State.messages[name][0].id : null;
 

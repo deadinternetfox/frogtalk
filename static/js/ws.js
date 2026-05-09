@@ -247,7 +247,7 @@ const WS = (() => {
         break;
       }
       case 'typing': {
-        UI.showTyping(data.nickname);
+        UI.showTyping(data.nickname, data.room);
         break;
       }
       case 'presence': {

@@ -769,12 +769,15 @@ const UI = (() => {
     _wireNowPlaying();
   }
 
-  function showTyping(nickname) {
-    const bar = document.getElementById('typing-bar');
-    if (!bar) return;
-    clearTimeout(_typingTimers[nickname]);
-    _typingTimers[nickname] = setTimeout(() => {
-      delete _typingTimers[nickname];
+  function showTyping(nickname, room) {
+    if (!room) return;
+    if (!_typingTimers[room]) _typingTimers[room] = {};
+    clearTimeout(_typingTimers[room][nickname]);
+    _typingTimers[room][nickname] = setTimeout(() => {
+      if (_typingTimers[room]) {
+        delete _typingTimers[room][nickname];
+        if (!Object.keys(_typingTimers[room]).length) delete _typingTimers[room];
+      }
       updateTypingBar();
     }, 3000);
     updateTypingBar();
@@ -783,7 +786,9 @@ const UI = (() => {
   function updateTypingBar() {
     const bar = document.getElementById('typing-bar');
     if (!bar) return;
-    const names = Object.keys(_typingTimers);
+    if (State?.currentChannelType === 'dm') return;
+    const room = State?.currentRoom || '';
+    const names = Object.keys(_typingTimers[room] || {});
     if (!names.length) { bar.textContent = ''; return; }
     if (names.length === 1) bar.textContent = `${names[0]} is typing…`;
     else if (names.length === 2) bar.textContent = `${names[0]} and ${names[1]} are typing…`;
@@ -1134,7 +1139,7 @@ const UI = (() => {
     });
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled };
+  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, updateTypingBar, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled };
 })();
 
 // ─── ChatVideo: themed inline video player for chat ──────────────────────────
@@ -2230,6 +2235,7 @@ function switchSettingsTab(tab) {
   // Pre-fill custom theme color inputs and highlight the saved theme button
   if (tab === 'appear') {
     try { loadCustomThemeIntoInputs(); } catch {}
+    try { updateResetThemeBtnLabel(); } catch {}
     try {
       const saved = _normalizeThemeKey(document.body.dataset.theme || localStorage.getItem('frogtalk-theme') || 'frog');
       document.querySelectorAll('.theme-btn').forEach(btn => {
@@ -3054,6 +3060,7 @@ function confirmThemePreview() {
   const theme = _normalizeThemeKey(document.body.dataset.theme || 'frog');
   document.body.dataset.theme = theme;
   localStorage.setItem('frogtalk-theme', theme);
+  try { updateResetThemeBtnLabel(); } catch {}
   _themePreviewOriginal = null;
   const bar = document.getElementById('theme-preview-bar');
   if (bar) bar.remove();
@@ -3065,6 +3072,7 @@ function cancelThemePreview() {
   _applyThemeVars(original);
   document.body.dataset.theme = original;
   localStorage.setItem('frogtalk-theme', original);
+  try { updateResetThemeBtnLabel(); } catch {}
   _themePreviewOriginal = null;
   const bar = document.getElementById('theme-preview-bar');
   if (bar) bar.remove();
@@ -3075,6 +3083,7 @@ function applyTheme(theme) {
   document.body.dataset.theme = theme;
   localStorage.setItem('frogtalk-theme', theme);
   _applyThemeVars(theme);
+  try { updateResetThemeBtnLabel(); } catch {}
   const dd = document.getElementById('mention-dropdown');
   if (dd && typeof syncMentionDropdownTheme === 'function') syncMentionDropdownTheme(dd);
 }
