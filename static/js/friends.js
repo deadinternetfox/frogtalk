@@ -123,7 +123,7 @@ function renderFriendTab () {
 
   const list = _currentFriendTab === 'friends'
     ? _allFriends.filter(isFriendOnlinePresence)
-    : _allFriends;
+    : _allFriends.filter(isFriendOfflinePresence);
 
   if (!list.length) {
     el.innerHTML = `<div style="color:#9ec4b2;text-align:center;padding:32px 0">
@@ -350,6 +350,10 @@ function presenceLabel (p) {
 function isFriendOnlinePresence(friend) {
   const p = String((friend && friend.presence) || '').toLowerCase();
   return p === 'online' || p === 'away' || p === 'dnd';
+}
+
+function isFriendOfflinePresence(friend) {
+  return !isFriendOnlinePresence(friend);
 }
 
 /* ── Receive WS push notification for friend request ───────────────────────── */
@@ -581,7 +585,7 @@ function renderFfpContent(tab) {
   if (tab === 'online') {
     list = _allFriends.filter(isFriendOnlinePresence);
   } else {
-    list = _allFriends;
+    list = _allFriends.filter(isFriendOfflinePresence);
   }
   
   if (!list.length) {
