@@ -4018,6 +4018,31 @@ function closeCssPreview() {
   }
 }
 
+async function _saveWallStyleOnly(customCss, mood) {
+  try {
+    const wallRes = await apiFetch('/api/wall/settings', 'PATCH', {
+      mood: String(mood || '').slice(0, 100),
+      custom_css: String(customCss || '').slice(0, 10240),
+      wall_enabled: document.getElementById('profile-wall-enabled')?.checked ?? true,
+      wall_comments_enabled: document.getElementById('profile-wall-comments')?.checked ?? true,
+    });
+    let wallData = {};
+    try { wallData = await wallRes.json(); } catch { wallData = {}; }
+    if (!wallRes.ok) {
+      return { ok: false, error: wallData.error || 'Style settings were not saved.' };
+    }
+    State.user.mood = String(mood || '').slice(0, 100);
+    State.user.custom_css = String(customCss || '').slice(0, 10240);
+    State.user.wall_enabled = wallData.wall_enabled ?? State.user.wall_enabled ?? 1;
+    State.user.wall_comments_enabled = wallData.wall_comments_enabled ?? State.user.wall_comments_enabled ?? 1;
+    try { State.save(); } catch {}
+    try { _highlightCurrentPreset(); } catch {}
+    return { ok: true, data: wallData };
+  } catch {
+    return { ok: false, error: 'Style settings were not saved (network error).' };
+  }
+}
+
 async function saveFromCssPreview(btn) {
   const saveBtn = btn || document.getElementById('css-preview-save-btn');
   const originalLabel = saveBtn ? saveBtn.textContent : '';
@@ -4027,8 +4052,28 @@ async function saveFromCssPreview(btn) {
     saveBtn.textContent = 'Saving...';
   }
   try {
-    const ok = await saveProfile();
+    const css = document.getElementById('profile-custom-css')?.value?.slice(0, 10240) || '';
+    const mood = String(State.user?.mood || '').slice(0, 100);
+    const res = await _saveWallStyleOnly(css, mood);
+    if (!res.ok) {
+      UI.showToast(res.error || 'Style settings were not saved.', 'error');
+      return;
+    }
+    try {
+      if (typeof Social !== 'undefined' && typeof Social.invalidateProfileCache === 'function') {
+        Social.invalidateProfileCache(State.user.nickname);
+      }
+    } catch {}
+    try {
+      const socialOpen = !document.getElementById('social-overlay')?.classList.contains('hidden');
+      const profileTabActive = !!document.querySelector('#social-overlay .social-nav-btn.active[data-tab="profile"]');
+      if (socialOpen && profileTabActive && typeof Social !== 'undefined' && typeof Social.loadProfile === 'function') {
+        Social.loadProfile(State.user.nickname);
+      }
+    } catch {}
+    const ok = true;
     if (ok) {
+      UI.showToast('Style saved', 'success');
       closeCssPreview();
     }
   } finally {
@@ -4595,31 +4640,10 @@ async function saveProfile() {
     State.user.nickname = nextNickname;
     if (newAvatar) State.user.avatar = newAvatar;
 
-    let wallSaveWarning = '';
-    try {
-      const wallRes = await apiFetch('/api/wall/settings', 'PATCH', {
-        mood,
-        custom_css: customCss,
-        wall_enabled: document.getElementById('profile-wall-enabled')?.checked ?? true,
-        wall_comments_enabled: document.getElementById('profile-wall-comments')?.checked ?? true,
-      });
-      let wallData = {};
-      try { wallData = await wallRes.json(); } catch { wallData = {}; }
-      if (!wallRes.ok) {
-        wallSaveWarning = wallData.error || 'Style settings were not saved.';
-      } else {
-        State.user.mood = mood;
-        State.user.custom_css = customCss;
-        State.user.wall_enabled = wallData.wall_enabled ?? 1;
-        State.user.wall_comments_enabled = wallData.wall_comments_enabled ?? 1;
-      }
-    } catch {
-      wallSaveWarning = 'Style settings were not saved (network error).';
-    }
-
-    if (wallSaveWarning) {
-      errEl.textContent = wallSaveWarning;
-      UI.showToast(wallSaveWarning, 'error');
+    const wallSave = await _saveWallStyleOnly(customCss, mood);
+    if (!wallSave.ok) {
+      errEl.textContent = wallSave.error || 'Style settings were not saved.';
+      UI.showToast(wallSave.error || 'Style settings were not saved.', 'error');
       return false;
     }
 
