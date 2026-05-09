@@ -3848,14 +3848,22 @@ function applyCssPreset(name) {
   if (event && event.currentTarget) event.currentTarget.style.borderColor = '#4caf50';
 }
 
+function _normalizePresetCss(css) {
+  return String(css || '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
 function _highlightCurrentPreset() {
   const textarea = document.getElementById('profile-custom-css');
   if (!textarea) return;
-  const currentCss = textarea.value || '';
+  const currentCss = _normalizePresetCss(textarea.value || '');
   let matchedPreset = 'none';
+  if (!currentCss) matchedPreset = 'none';
   // Match against preset CSS values
   for (const [presetName, presetCss] of Object.entries(CSS_PRESETS)) {
-    if (currentCss.trim() === presetCss.trim()) {
+    if (currentCss && currentCss === _normalizePresetCss(presetCss)) {
       matchedPreset = presetName;
       break;
     }
@@ -3927,7 +3935,9 @@ function _populateCssPreviewIdentity() {
     const u = State.user || {};
     // Chat profile info
     const nameEl = document.getElementById('css-preview-name');
-    if (nameEl) nameEl.textContent = u.nickname || 'YourNick';
+    if (nameEl) nameEl.textContent = u.display_name || u.nickname || 'YourNick';
+    const handleEl = document.getElementById('css-preview-handle');
+    if (handleEl) handleEl.textContent = u.nickname ? `@${u.nickname}` : '';
     const bioEl = document.getElementById('css-preview-bio');
     if (bioEl) {
       bioEl.textContent = u.bio || '(No bio set)';
@@ -3949,27 +3959,6 @@ function _populateCssPreviewIdentity() {
         headerEl.style.setProperty('background-position', 'center', 'important');
       } else {
         headerEl.style.setProperty('background-image', '', 'important');
-      }
-    }
-    // Social card info
-    const socialNickEl = document.getElementById('css-preview-social-nick');
-    if (socialNickEl) socialNickEl.textContent = u.display_name || u.nickname || 'YourNick';
-    const socialHandleEl = document.getElementById('css-preview-social-handle');
-    if (socialHandleEl) socialHandleEl.textContent = u.nickname ? `@${u.nickname}` : '';
-    const socialBioEl = document.getElementById('css-preview-social-bio');
-    if (socialBioEl) socialBioEl.textContent = u.bio ? u.bio.substring(0, 50) : 'Profile preview';
-    const socialAvatarEl = document.getElementById('css-preview-social-avatar');
-    if (socialAvatarEl && typeof UI !== 'undefined' && UI.avatarEl) {
-      socialAvatarEl.innerHTML = UI.avatarEl(u.avatar, u.nickname, 48);
-    }
-    const socialBannerEl = document.getElementById('css-preview-social-banner');
-    if (socialBannerEl) {
-      if (u.banner) {
-        socialBannerEl.style.setProperty('background-image', `url(${u.banner})`, 'important');
-        socialBannerEl.style.setProperty('background-size', 'cover', 'important');
-        socialBannerEl.style.setProperty('background-position', 'center', 'important');
-      } else {
-        socialBannerEl.style.setProperty('background-image', '', 'important');
       }
     }
   } catch (e) {
@@ -4038,8 +4027,10 @@ async function saveFromCssPreview(btn) {
     saveBtn.textContent = 'Saving...';
   }
   try {
-    await saveProfile();
-    closeCssPreview();
+    const ok = await saveProfile();
+    if (ok) {
+      closeCssPreview();
+    }
   } finally {
     if (saveBtn) {
       saveBtn.disabled = false;
@@ -4500,20 +4491,20 @@ async function saveProfile() {
 
   if (displayName.length > 32) {
     errEl.textContent = 'Display name must be 32 characters or fewer';
-    return;
+    return false;
   }
   if (!nextNickname) {
     errEl.textContent = 'Username cannot be empty';
-    return;
+    return false;
   }
   if (!/^[a-zA-Z0-9_\-]{2,32}$/.test(nextNickname)) {
     errEl.textContent = 'Username: 2-32 chars, letters/numbers/_/-';
-    return;
+    return false;
   }
   const wantsNicknameChange = nextNickname !== (State.user?.nickname || '');
   if (wantsNicknameChange && !curPw) {
     errEl.textContent = 'Enter your current password to save a username change';
-    return;
+    return false;
   }
 
   const body = {
@@ -4549,7 +4540,7 @@ async function saveProfile() {
       const displayData = await parseJsonSafe(displayRes);
       if (!displayRes.ok) {
         errEl.textContent = displayData.error || 'Display name save failed';
-        return;
+        return false;
       }
       State.user.display_name = displayData.display_name || null;
       try {
@@ -4572,7 +4563,7 @@ async function saveProfile() {
           _refreshUsernameCooldownUI();
         }
         errEl.textContent = nickData.error || 'Username save failed';
-        return;
+        return false;
       }
       State.user.nickname = nickData.nickname;
       State.user.username_change_remaining_seconds = 7 * 86400;
@@ -4581,7 +4572,7 @@ async function saveProfile() {
 
     const res = await apiFetch('/api/auth/profile', 'PATCH', body);
     const data = await parseJsonSafe(res);
-    if (!res.ok) { errEl.textContent = data.error || 'Save failed'; return; }
+    if (!res.ok) { errEl.textContent = data.error || 'Save failed'; return false; }
     profileSaved = true;
     // Update local state
     State.user.bio = bio;
@@ -4624,6 +4615,12 @@ async function saveProfile() {
       }
     } catch {
       wallSaveWarning = 'Style settings were not saved (network error).';
+    }
+
+    if (wallSaveWarning) {
+      errEl.textContent = wallSaveWarning;
+      UI.showToast(wallSaveWarning, 'error');
+      return false;
     }
 
     // Ensure style changes are visible immediately after save.
@@ -4679,19 +4676,17 @@ async function saveProfile() {
       }
     } catch {}
     closeModal('modal-profile');
-    if (wallSaveWarning) {
-      UI.showToast(`Settings saved (except style): ${wallSaveWarning}`, 'info');
-    } else {
-      UI.showToast('Settings saved', 'success');
-    }
+    UI.showToast('Settings saved', 'success');
+    return true;
   } catch (e) {
     if (profileSaved) {
       closeModal('modal-profile');
       UI.showToast('Settings saved', 'success');
-      return;
+      return true;
     }
     console.error('saveProfile failed', e);
     errEl.textContent = 'Network error';
+    return false;
   }
 }
 
