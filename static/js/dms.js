@@ -2167,11 +2167,27 @@ function handleWSDMMessage (data) {
     const area = document.getElementById('messages-area');
     const pend = area?.querySelector('.dm-pending[data-nonce="' + (data.client_nonce || '') + '"]');
     if (pend && data.id) {
+      const _oldMsgId = String((pend.id || '').replace(/^msg-/, '') || '').trim();
       pend.classList.remove('dm-pending');
       pend.removeAttribute('data-own');
       pend.removeAttribute('data-nonce');
       pend.id = `msg-${data.id}`;
       pend.setAttribute('data-dmid', data.id);
+      if (_oldMsgId && _oldMsgId !== String(data.id)) {
+        try {
+          const _newMsgId = String(data.id);
+          pend.querySelectorAll('[onclick],[data-rid]').forEach(node => {
+            const oc = node.getAttribute('onclick');
+            if (oc && oc.includes(_oldMsgId)) {
+              node.setAttribute('onclick', oc.split('(' + _oldMsgId).join('(' + _newMsgId)
+                                           .split(',' + _oldMsgId).join(',' + _newMsgId)
+                                           .split(' ' + _oldMsgId).join(' ' + _newMsgId));
+            }
+            const rid = node.getAttribute('data-rid');
+            if (rid === _oldMsgId) node.setAttribute('data-rid', _newMsgId);
+          });
+        } catch {}
+      }
       pend.style.opacity = '';
       const tick = pend.querySelector('.msg-tick');
       if (tick) {
@@ -2198,11 +2214,27 @@ function handleWSDMMessage (data) {
       const pendingEls = Array.from(area.querySelectorAll('.dm-pending[data-own="1"], .dm-pending'));
       const fallback = pendingEls.length ? pendingEls[pendingEls.length - 1] : null;
       if (fallback) {
+        const _oldMsgId = String((fallback.id || '').replace(/^msg-/, '') || '').trim();
         fallback.classList.remove('dm-pending');
         fallback.removeAttribute('data-own');
         fallback.removeAttribute('data-nonce');
         fallback.id = `msg-${data.id}`;
         fallback.setAttribute('data-dmid', data.id);
+        if (_oldMsgId && _oldMsgId !== String(data.id)) {
+          try {
+            const _newMsgId = String(data.id);
+            fallback.querySelectorAll('[onclick],[data-rid]').forEach(node => {
+              const oc = node.getAttribute('onclick');
+              if (oc && oc.includes(_oldMsgId)) {
+                node.setAttribute('onclick', oc.split('(' + _oldMsgId).join('(' + _newMsgId)
+                                             .split(',' + _oldMsgId).join(',' + _newMsgId)
+                                             .split(' ' + _oldMsgId).join(' ' + _newMsgId));
+              }
+              const rid = node.getAttribute('data-rid');
+              if (rid === _oldMsgId) node.setAttribute('data-rid', _newMsgId);
+            });
+          } catch {}
+        }
         fallback.style.opacity = '';
         const tick = fallback.querySelector('.msg-tick');
         if (tick) {

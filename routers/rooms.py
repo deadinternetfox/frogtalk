@@ -15,7 +15,7 @@ from typing import Optional
 
 import database as db
 from deps import get_current_user, client_ip
-from ws_manager import voice_manager
+from ws_manager import voice_manager, manager
 
 router = APIRouter(prefix="/rooms", tags=["rooms"])
 limiter = Limiter(key_func=client_ip)
@@ -732,6 +732,27 @@ async def get_channel_members(room_name: str,
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
     members = db.get_channel_members(room["id"])
+    try:
+        online_ids = {
+            int(u.get("user_id"))
+            for u in manager.online_users_snapshot()
+            if u.get("user_id") is not None
+        }
+    except Exception:
+        online_ids = set()
+
+    for m in members:
+        uid = int(m.get("user_id") or 0)
+        p = str(m.get("presence") or "").strip().lower()
+        live_online = uid in online_ids if uid else False
+        m["live_online"] = live_online
+        if live_online:
+            if p not in {"away", "dnd", "invisible"}:
+                m["presence"] = "online"
+        else:
+            # Keep explicit user-set states; only downgrade stale "online".
+            if p == "online" or not p:
+                m["presence"] = "away"
     return {"members": members}
 
 

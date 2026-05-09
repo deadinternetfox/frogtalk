@@ -139,9 +139,11 @@ const Users = (() => {
         const key = String((member.nickname || '')).toLowerCase();
         const online = onlineMap.get(key);
         const merged = online ? { ...member, ...online, display_name: member.display_name || online.display_name } : { ...member };
+        const liveOnline = (member.live_online === true) || !!online;
+        merged.live_online = liveOnline;
         const p = String((merged.presence || member.presence || '')).toLowerCase();
         const forceOffline = p === 'invisible' || p === 'offline';
-        if (online && !forceOffline) onlineSource.push(merged);
+        if (liveOnline && !forceOffline) onlineSource.push(merged);
         else offlineSource.push({ ...merged, presence: forceOffline ? 'offline' : merged.presence });
       }
       // Include any online users not present in the members snapshot as a fallback.
@@ -162,7 +164,7 @@ const Users = (() => {
     const onlineShown = onlineSource.filter(matches);
     const offlineShown = offlineSource.filter(matches);
 
-    if (count) count.textContent = _allUsers.length;
+    if (count) count.textContent = (onRoom && _channelMembers.length) ? onlineSource.length : _allUsers.length;
 
     const prevSearchValue = _filter;
     const hadFocus = _searchInput && document.activeElement === _searchInput;
@@ -232,7 +234,7 @@ const Users = (() => {
     const pRaw = String(u.presence || '').toLowerCase();
     const effectivePresence = isOnline
       ? ((pRaw === 'away' || pRaw === 'dnd' || pRaw === 'online') ? pRaw : 'online')
-      : 'offline';
+      : ((pRaw === 'away' || pRaw === 'dnd') ? pRaw : 'offline');
     const presenceMeta = {
       online: { color: '#4caf50', label: 'Online' },
       away: { color: '#ffc107', label: 'Away' },
