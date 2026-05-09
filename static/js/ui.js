@@ -2259,7 +2259,7 @@ function switchSettingsTab(tab) {
   const tabBtn = document.getElementById(`set-tab-${tab}`);
   if (tabBtn) tabBtn.classList.add('active');
   // Show/hide panes with animation
-  ['profile', 'social', 'privacy', 'notif', 'appear', 'style', 'network', 'application', 'dev', 'account'].forEach(p => {
+  ['profile', 'social', 'privacy', 'notif', 'appear', 'network', 'application', 'dev', 'account'].forEach(p => {
     const pane = document.getElementById(`set-pane-${p}`);
     if (pane) {
       if (p === tab) {
@@ -2291,8 +2291,6 @@ function switchSettingsTab(tab) {
   if (tab === 'application') {
     _loadDesktopAppSettingsIntoProfile();
   }
-  // Update char count on style tab
-  if (tab === 'style') updateCssCharCount();
   // Pre-fill custom theme color inputs and highlight the saved theme button
   if (tab === 'appear') {
     try { loadCustomThemeIntoInputs(); } catch {}
