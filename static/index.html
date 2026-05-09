@@ -8543,7 +8543,6 @@ window.ConnErr = (function(){
       <div class="theme-custom-section" style="margin-top:6px;border-top:1px solid #25463a;padding-top:14px">
         <label class="modal-label" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <span>🎨 Custom theme</span>
-          <span style="font-size:11px;color:#85a89a;font-weight:400">Live-edits the running app</span>
         </label>
         <!-- Core Colors -->
         <div style="margin-bottom:14px">
@@ -8580,15 +8579,12 @@ window.ConnErr = (function(){
             <label class="theme-color-row"><span>Preview Text</span><input type="color" id="ct-fwd-preview-color" value="#dff5e8" oninput="updateCustomTheme()"></label>
           </div>
         </div>
-        <!-- Action Buttons -->
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="modal-btn primary" onclick="saveCustomTheme()" style="flex:1;min-width:100px">Save Theme</button>
-          <button class="modal-btn secondary" onclick="resetCustomTheme()" style="flex:1;min-width:100px">Reset to Frog</button>
-          <button class="modal-btn secondary" onclick="exportThemeJson()" style="flex:1;min-width:100px">Export</button>
-          <button class="modal-btn secondary" onclick="importThemeJson()" style="flex:1;min-width:100px">Import</button>
+        <!-- Reset Button Only -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          <button class="modal-btn secondary" id="ct-reset-btn" style="min-width:140px" onclick="resetCustomThemeToLast()">Reset to Last Theme</button>
         </div>
       </div>
-      <div style="color:#85a89a;font-size:11px;text-align:center;margin-top:10px;line-height:1.4">All theme changes apply instantly to the running app. Use Export/Import to backup or share custom themes.</div>
+      <!-- No extra text below custom theme section -->
     </div>
     <!-- Style Tab (Custom Profile CSS) -->
     <div id="set-pane-style" style="display:none">

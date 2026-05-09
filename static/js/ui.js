@@ -3287,11 +3287,14 @@ function saveCustomTheme() {
   if (typeof toast === 'function') toast('Custom theme saved!', 'success');
   else if (typeof UI !== 'undefined' && UI.showToast) UI.showToast('Custom theme saved!', 'success');
 }
-function resetCustomTheme() {
+function resetCustomThemeToLast() {
   localStorage.removeItem('frogtalk-custom-theme');
-  applyTheme('frog');
+  // Use last selected theme from localStorage or fallback to frog
+  let lastTheme = localStorage.getItem('frogtalk-theme') || 'frog';
+  if (lastTheme === 'custom') lastTheme = 'frog';
+  applyTheme(lastTheme);
   loadCustomThemeIntoInputs();
-  if (typeof toast === 'function') toast('Reset to Frog Default', 'success');
+  if (typeof toast === 'function') toast('Reset to ' + (lastTheme.charAt(0).toUpperCase() + lastTheme.slice(1)) + ' theme', 'success');
 }
 function exportThemeJson() {
   const d = _customThemeFromInputs();
