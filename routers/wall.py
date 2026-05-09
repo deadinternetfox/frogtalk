@@ -788,6 +788,7 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
                     "status_msg": row["status_msg"] or "",
                     "presence": row["presence"] or "online",
                     "mood": row["mood"] or "",
+                    "custom_css": row["custom_css"] or "",
                     "identity_pubkey": row["identity_pubkey"] or "",
                 },
             })

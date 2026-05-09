@@ -1457,25 +1457,32 @@ async def _handle_user_event(event: dict) -> None:
     display_name = "".join(ch for ch in str(payload.get("display_name") or "") if ch == " " or ch.isprintable()).strip()[:32]
 
     with db._conn() as con:
-        con.execute(
-            """
+        base_sql = """
             UPDATE users
             SET display_name=?, avatar=?, bio=?, status_msg=?, mood=?,
                 presence=COALESCE(?, presence),
                 identity_pubkey=COALESCE(NULLIF(?, ''), identity_pubkey)
-            WHERE id=?
-            """,
-            (
-                display_name or None,
-                str(payload.get("avatar") or ""),
-                str(payload.get("bio") or ""),
-                str(payload.get("status_msg") or "")[:128],
-                str(payload.get("mood") or "")[:100],
-                presence,
-                str(payload.get("identity_pubkey") or ""),
-                user["id"],
-            ),
-        )
+        """
+        params = [
+            display_name or None,
+            str(payload.get("avatar") or ""),
+            str(payload.get("bio") or ""),
+            str(payload.get("status_msg") or "")[:128],
+            str(payload.get("mood") or "")[:100],
+            presence,
+            str(payload.get("identity_pubkey") or ""),
+        ]
+
+        # Only apply CSS when explicitly present in payload to avoid
+        # wiping an existing style from profile updates that don't carry it.
+        if "custom_css" in payload:
+            css = str(payload.get("custom_css") or "")[:10240]
+            base_sql += ", custom_css=?"
+            params.append(css)
+
+        base_sql += " WHERE id=?"
+        params.append(user["id"])
+        con.execute(base_sql, params)
         con.commit()
 
     # Push live profile changes (including presence/status) to connected clients
