@@ -367,7 +367,7 @@ const WS = (() => {
         }
         // Refresh inline Suggested-for-you avatars + any social-rendered profile refs.
         try {
-          if (typeof Social !== 'undefined' && Social.refreshUserProfile) {
+          if (data.avatar !== undefined && typeof Social !== 'undefined' && Social.refreshUserProfile) {
             Social.refreshUserProfile(data.user_id, data.nickname, data.avatar);
           }
         } catch {}
@@ -413,7 +413,7 @@ const WS = (() => {
         } catch {}
         // Live-update any rendered message avatars across ALL rooms for this user
         try {
-          if (data.nickname) {
+          if (data.avatar !== undefined && data.nickname) {
             const sel = `.msg-group[data-nick="${CSS.escape(data.nickname)}"] .msg-avatar`;
             document.querySelectorAll(sel).forEach(el => {
               el.innerHTML = UI.avatarEl(data.avatar, data.nickname, 38);

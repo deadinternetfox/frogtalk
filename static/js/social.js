@@ -9281,6 +9281,7 @@ const Social = (() => {
     // profile picture or nickname.
     refreshUserProfile(userId, nickname, avatar) {
       try {
+        if (avatar === undefined) return;
         const nick = String(nickname || '');
         if (!nick) return;
         // Suggested cards
