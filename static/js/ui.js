@@ -3938,9 +3938,30 @@ function closeCssPreview() {
   }
 }
 
+async function saveFromCssPreview(btn) {
+  const saveBtn = btn || document.getElementById('css-preview-save-btn');
+  const originalLabel = saveBtn ? saveBtn.textContent : '';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.style.opacity = '0.75';
+    saveBtn.textContent = 'Saving...';
+  }
+  try {
+    await saveProfile();
+    closeCssPreview();
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.style.opacity = '1';
+      saveBtn.textContent = originalLabel || 'Save Changes';
+    }
+  }
+}
+
 try {
   window.previewCssLive = previewCssLive;
   window.closeCssPreview = closeCssPreview;
+  window.saveFromCssPreview = saveFromCssPreview;
   window.applyCssPreset = applyCssPreset;
   window.updateCssCharCount = updateCssCharCount;
   window.previewProfileWithCss = previewProfileWithCss;

@@ -8909,9 +8909,9 @@ window.ConnErr = (function(){
           </div>
         </div>
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;background:#0d1210;border-top:1px solid #1f3a30">
-        <div style="font-size:11px;color:#85a89a">Preview only. Your settings stay open in the background.</div>
-        <button onclick="closeCssPreview()" style="background:#1a3a1a;border:1px solid #2a4a2a;color:#4caf50;font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer">Close Preview</button>
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 12px;background:#0d1210;border-top:1px solid #1f3a30">
+        <button onclick="closeCssPreview()" style="background:#141414;border:1px solid #2a2a2a;color:#d5d5d5;font-size:12px;font-weight:700;padding:7px 12px;border-radius:8px;cursor:pointer">Close</button>
+        <button id="css-preview-save-btn" onclick="saveFromCssPreview(this)" style="background:linear-gradient(180deg,#4caf50,#3e9f45);border:1px solid #2f7b36;color:#081008;font-size:12px;font-weight:800;padding:7px 14px;border-radius:8px;cursor:pointer;box-shadow:0 1px 0 rgba(255,255,255,.08) inset">Save Changes</button>
       </div>
     </div>
   </div>
@@ -9432,7 +9432,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=432"></script>
 <script src="/static/js/ws.js?v=223"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=437"></script>
+<script src="/static/js/ui.js?v=438"></script>
   <script src="/static/js/rooms.js?v=427"></script>
 <script src="/static/js/messages.js?v=437"></script>
 <script src="/static/js/users.js?v=198"></script>
