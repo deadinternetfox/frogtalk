@@ -24,7 +24,7 @@ const Notifications = (() => {
       await new Promise(res => window.addEventListener('load', res, { once: true }));
     }
     try {
-      _swReg = await navigator.serviceWorker.register('/sw.js?v=256', { scope: '/' });
+      _swReg = await navigator.serviceWorker.register('/sw.js?v=257', { scope: '/' });
       console.log('[SW] registered, scope:', _swReg.scope);
       // Note: incoming-call accept/decline is handled exclusively by the
       // in-page #incoming-call popup (driven by WS call_offer). The SW
