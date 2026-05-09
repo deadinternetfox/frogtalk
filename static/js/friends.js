@@ -120,9 +120,8 @@ function renderFriendTab () {
   const el = document.getElementById('friends-content');
   if (_currentFriendTab === 'add') { renderAddFriend(el); return; }
   if (_currentFriendTab === 'pending') { renderPending(el); return; }
-  const showOnlineOnly = _currentFriendTab === 'friends';
 
-  const list = showOnlineOnly
+  const list = _currentFriendTab === 'friends'
     ? _allFriends.filter(isFriendOnlinePresence)
     : _allFriends.filter(isFriendOfflinePresence);
 
@@ -143,9 +142,7 @@ function renderFriendTab () {
       </div>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;font-size:14px;color:#e3f6ec;cursor:pointer" onclick="closeFriends();showUserInfo('${esc(f.nickname)}',${Number(f.id)||0})" title="View profile">${_friendNameHtml(f)}</div>
-        <div style="font-size:12px;color:#9dc4b2">${showOnlineOnly
-          ? _renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))
-          : esc(presenceLabel('offline'))}</div>
+        <div style="font-size:12px;color:#9dc4b2">${_renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))}</div>
       </div>
       <div style="display:flex;gap:4px">
         <button class="icon-btn" onclick="closeFriends();openDMWithNick('${esc(f.nickname)}')" title="Message">💬</button>
@@ -564,7 +561,6 @@ function switchFfpTab(tab) {
 function renderFfpContent(tab) {
   const el = document.getElementById('ffp-content');
   if (!el) return;
-  const showOnlineOnly = tab === 'online';
   
   // Update pending count
   const countEl = document.getElementById('ffp-pending-count');
@@ -592,7 +588,7 @@ function renderFfpContent(tab) {
   }
   
   let list;
-  if (showOnlineOnly) {
+  if (tab === 'online') {
     list = _allFriends.filter(isFriendOnlinePresence);
   } else {
     list = _allFriends.filter(isFriendOfflinePresence);
@@ -611,9 +607,7 @@ function renderFfpContent(tab) {
       </div>
       <div class="ffp-info">
         <div class="ffp-name">${esc(f.nickname)}</div>
-        <div class="ffp-status">${showOnlineOnly
-          ? _renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))
-          : esc(presenceLabel('offline'))}</div>
+        <div class="ffp-status">${_renderStatusHtml(f.status_msg, f.nickname, presenceLabel(f.presence))}</div>
       </div>
       <div class="ffp-actions" onclick="event.stopPropagation()">
         <button class="icon-btn" onclick="closeFriendsPanel();openDMWithNick('${esc(f.nickname)}')" title="Message">💬</button>
