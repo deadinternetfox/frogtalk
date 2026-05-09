@@ -656,6 +656,7 @@ const Rooms = (() => {
     if (typeof selectServer === 'function') selectServer(type === 'dm' ? 'dms' : 'main');
 
     // Derive encryption key for this room
+    const hadMessageCache = Object.prototype.hasOwnProperty.call(State.messages || {}, name);
     State.roomKeys[name] = key;
     State.currentRoom = name;
     State.currentRoomType = type;
@@ -848,7 +849,7 @@ const Rooms = (() => {
       // as cache-hit so loadHistory renders the empty-state immediately
       // instead of showing a perpetual "Loading #room…" spinner that
       // the WS history dedup will refuse to clear.
-      const hasCached = type !== 'dm' && Array.isArray(State.messages[name]);
+      const hasCached = type !== 'dm' && hadMessageCache && Array.isArray(State.messages[name]);
       if (hasCached && typeof Messages !== 'undefined' && Messages.loadHistory) {
         try { Messages.loadHistory(name, State.messages[name].slice()); } catch {}
       } else {
