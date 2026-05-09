@@ -1062,9 +1062,35 @@ const Messages = (() => {
     try { meta = (typeof msg.forwarded_from === 'string') ? JSON.parse(msg.forwarded_from) : msg.forwarded_from; }
     catch { return ''; }
     if (!meta || typeof meta !== 'object') return '';
-    const nick = UI.escHtml(String(meta.nick || '?'));
+    const nickRaw = String(meta.nick || '?');
+    const nick = UI.escHtml(nickRaw);
+    const display = UI.escHtml(String(meta.display_name || meta.nick || '?'));
     const src  = UI.escHtml(String(meta.source_label || ''));
-    return `<div class="msg-forwarded" style="font-size:11px;color:#9aa0a6;margin:2px 0 4px;padding:3px 6px;border-left:2px solid #5b8def;background:rgba(91,141,239,0.08);border-radius:3px">↪ Forwarded from <b>${nick}</b>${src ? ` in ${src}` : ''}</div>`;
+    const avatar = UI.avatarEl(meta.avatar || msg.avatar || '', nickRaw, 24);
+
+    const previewRaw = String(msg.content || '').trim().replace(/\s+/g, ' ');
+    const preview = previewRaw ? UI.escHtml(previewRaw.slice(0, 180)) : '';
+    const mt = String(msg.media_type || '').toLowerCase();
+    const mediaLabel = mt.startsWith('image/') ? 'Photo'
+      : mt.startsWith('video/') ? 'Video'
+      : mt.startsWith('audio/') ? 'Audio'
+      : (msg.has_media ? 'Attachment' : '');
+
+    return `<div class="msg-forwarded-card">
+      <div class="msg-forwarded-top">
+        <span class="msg-forwarded-arrow">↪</span>
+        <span class="msg-forwarded-label">Forwarded message</span>
+        ${src ? `<span class="msg-forwarded-src">${src}</span>` : ''}
+      </div>
+      <div class="msg-forwarded-packet">
+        <div class="msg-forwarded-avatar">${avatar}</div>
+        <div class="msg-forwarded-main">
+          <div class="msg-forwarded-author">${display}${display !== nick ? ` <span class="msg-forwarded-handle">@${nick}</span>` : ''}</div>
+          ${preview ? `<div class="msg-forwarded-preview">${preview}</div>` : ''}
+          ${mediaLabel ? `<div class="msg-forwarded-media-pill">📎 ${UI.escHtml(mediaLabel)}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
   }
 
   let _forwardTargetsCache = null;
@@ -1359,6 +1385,8 @@ const Messages = (() => {
       Promise.resolve().then(async () => {
         const fwdMeta = {
           nick: msg.nickname || '?',
+          display_name: _authorDisplay(msg) || msg.nickname || '?',
+          avatar: msg.avatar || '',
           source_label: sourceLabel,
           kind: sourceKind,
           original_id: msg.id,
@@ -1431,6 +1459,8 @@ const Messages = (() => {
     const contentHtml = msg.content ? _formatContent(msg.content) : '<em style="color:#444">Media</em>';
     const mediaHtml = _buildMediaHtml(msg);
     const fwdBadge = _forwardedBadgeHtml(msg);
+    const isForwarded = !!(msg && msg.forwarded_from);
+    const messageTextHtml = (!isForwarded && contentHtml) ? `<div class="msg-content">${contentHtml}</div>` : '';
 
     // Pin button only shows in rooms (not DMs) AND only for users who can
     // actually pin — owners, mods, or global admins. Showing it to regular
@@ -1491,7 +1521,7 @@ const Messages = (() => {
               </div>
               <div class="msg-muted-hidden" style="display:none">
                 ${replyQuote}
-                <div class="msg-content">${contentHtml}</div>
+                ${messageTextHtml}
                 ${mediaHtml}
                 ${_reactionHtml(msg.reactions, msg.id)}
               </div>
@@ -1505,7 +1535,7 @@ const Messages = (() => {
           <div style="flex:1;min-width:0">
             ${replyQuote}
             ${fwdBadge}
-            <div class="msg-content">${contentHtml}</div>
+            ${messageTextHtml}
             ${mediaHtml}
             ${_reactionHtml(msg.reactions, msg.id)}
           </div>
@@ -1528,7 +1558,7 @@ const Messages = (() => {
           </div>
           <div class="msg-muted-hidden" style="display:none">
             ${replyQuote}
-            <div class="msg-content">${contentHtml}</div>
+            ${messageTextHtml}
             ${mediaHtml}
             ${_reactionHtml(msg.reactions, msg.id)}
           </div>
@@ -1549,7 +1579,7 @@ const Messages = (() => {
         </div>
         ${replyQuote}
         ${fwdBadge}
-        <div class="msg-content">${contentHtml}</div>
+        ${messageTextHtml}
         ${mediaHtml}
         ${_reactionHtml(msg.reactions, msg.id)}
       </div>

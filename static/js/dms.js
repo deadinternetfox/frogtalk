@@ -1601,6 +1601,8 @@ function renderDMMessage (m) {
   // Actions (same style as channel messages)
   const fwdDisabled = !!(_activeDM && _activeDM.forwarding_disabled);
   const fwdBadge = (typeof Messages !== 'undefined' && Messages.forwardedBadgeHtml) ? Messages.forwardedBadgeHtml(m) : '';
+  const isForwarded = !!(m && m.forwarded_from);
+  const messageTextHtml = (!isForwarded && contentHtml) ? `<div class="msg-content">${contentHtml}</div>` : '';
   const actions = `
     <div class="msg-actions">
       <button class="msg-act-btn" title="Reply" onclick="replyToDM(${m.id},'${esc(senderNick)}','${esc((safeContent||'').substring(0,80))}')">↩️</button>
@@ -1624,7 +1626,7 @@ function renderDMMessage (m) {
       </div>
       ${replyQuote}
       ${fwdBadge}
-      ${contentHtml ? `<div class="msg-content">${contentHtml}</div>` : ''}
+      ${messageTextHtml}
       ${mediaHtml}
       ${reactionsHtml}
     </div>
