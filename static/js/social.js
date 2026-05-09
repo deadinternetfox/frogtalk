@@ -739,6 +739,10 @@ const Social = (() => {
   function close() {
     const overlay = document.getElementById('social-overlay');
     if (overlay) overlay.classList.add('hidden');
+    // Clear custom CSS when closing social
+    if (typeof window.clearSocialProfileCustomCss === 'function') {
+      try { window.clearSocialProfileCustomCss(); } catch {}
+    }
     // Drop the foreign-profile ghost nav button so reopening Social
     // doesn't flash a stale "@them" tab from the previous session.
     try { document.getElementById('social-nav-profile-ghost')?.remove(); } catch {}
@@ -3415,6 +3419,11 @@ const Social = (() => {
       }
 
       _updateTabLoadUi(loadUi, 86, 'Rendering profile', 'Preparing wall and tabs');
+
+      // Apply custom CSS from user if it exists
+      if (u.custom_css && typeof window.applySocialProfileCustomCss === 'function') {
+        try { window.applySocialProfileCustomCss(u.custom_css); } catch {}
+      }
 
       content.innerHTML = `
       <div class="social-profile fade-in">

@@ -3499,6 +3499,69 @@ function applyProfileCustomCss(css) {
   _profileCustomCssEl = styleEl;
 }
 
+// Apply custom CSS to a social profile (scoped to .social-profile instead of #modal-user-info)
+let _socialProfileCssEl = null;
+function applySocialProfileCustomCss(css) {
+  // Remove old style if exists
+  if (_socialProfileCssEl) {
+    _socialProfileCssEl.remove();
+    _socialProfileCssEl = null;
+  }
+  if (!css) return;
+  // Scope CSS to .social-profile container
+  const scoped = css
+    .split('}')
+    .map(rule => rule.trim())
+    .filter(Boolean)
+    .map(rule => {
+      const braceIdx = rule.indexOf('{');
+      if (braceIdx === -1) return '';
+      const selectors = rule.slice(0, braceIdx).trim();
+      const body = rule.slice(braceIdx + 1).trim();
+      if (!selectors || !body || selectors.includes('@')) return '';
+      const scopedSelectors = selectors
+        .split(',')
+        .map(selector => selector.trim())
+        .filter(Boolean)
+        .map(selector => `.social-profile ${selector}`)
+        .join(', ');
+      return scopedSelectors ? `${scopedSelectors} { ${body} }` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+  if (!scoped) return;
+  const styleEl = document.createElement('style');
+  styleEl.id = 'social-profile-custom-style';
+  styleEl.textContent = scoped;
+  document.head.appendChild(styleEl);
+  _socialProfileCssEl = styleEl;
+}
+
+function clearSocialProfileCustomCss() {
+  if (_socialProfileCssEl) {
+    _socialProfileCssEl.remove();
+    _socialProfileCssEl = null;
+  }
+}
+
+// Preview button: open user's social profile with current CSS in editor
+function previewProfileWithCss() {
+  if (!State.user?.nickname) return;
+  const css = document.getElementById('profile-custom-css')?.value || '';
+  // Close settings modal
+  closeModal('modal-profile');
+  // Open social profile and apply CSS
+  setTimeout(() => {
+    if (typeof Social !== 'undefined' && Social.openProfile) {
+      Social.openProfile(State.user.nickname);
+      // Apply CSS after a brief delay to ensure profile is rendered
+      setTimeout(() => {
+        applySocialProfileCustomCss(css);
+      }, 500);
+    }
+  }, 100);
+}
+
 // ── CSS Theme Presets ──────────────────────────────────────────────────────
 const CSS_PRESETS = {
   cyberpunk: `/* 🌆 Cyberpunk — Neon purple & pink glow */
@@ -3893,6 +3956,9 @@ try {
   window.closeCssPreview = closeCssPreview;
   window.applyCssPreset = applyCssPreset;
   window.updateCssCharCount = updateCssCharCount;
+  window.previewProfileWithCss = previewProfileWithCss;
+  window.applySocialProfileCustomCss = applySocialProfileCustomCss;
+  window.clearSocialProfileCustomCss = clearSocialProfileCustomCss;
 } catch {}
 
 async function loadSocialStats() {
