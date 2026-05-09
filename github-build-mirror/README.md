@@ -1,27 +1,65 @@
 # FrogTalk Build Mirror
 
-This folder is a GitHub-hosted mirror source for desktop & android downloads.
+This folder is a GitHub-hosted mirror of the latest FrogTalk desktop & Android builds for v1.4.1.
 
-## Artifacts
+## Download Artifacts
 
-- `FrogTalk-1.4.1.AppImage` (Linux AppImage, desktop)
-- `frogtalk_1.4.1_amd64.deb` (Linux Debian/Ubuntu package, desktop)
-- `FrogTalk-1.4.1-win-x64-portable.exe` (Windows portable, x64 — single-file, just run it)
-- `FrogTalk-1.4.1-win-x64.zip` (Windows portable archive, x64 — unzip & run FrogTalk.exe)
-- `frogtalk-v223.apk` (Android, versionCode 223 / versionName 1.6.19)
+### Desktop Builds
 
-## Integrity
+| Platform | File | Download | Size |
+|----------|------|----------|------|
+| **Linux** (AppImage) | FrogTalk-1.4.1.AppImage | [Download](https://raw.githubusercontent.com/deadinternetfox/frogtalk/master/github-build-mirror/FrogTalk-1.4.1.AppImage) | 114MB |
+| **Linux** (Debian/Ubuntu) | frogtalk_1.4.1_amd64.deb | [Download](https://raw.githubusercontent.com/deadinternetfox/frogtalk/master/github-build-mirror/frogtalk_1.4.1_amd64.deb) | 79MB |
+| **Windows** (Portable EXE) | FrogTalk-1.4.1-win-x64-portable.exe | [Download](https://raw.githubusercontent.com/deadinternetfox/frogtalk/master/github-build-mirror/FrogTalk-1.4.1-win-x64-portable.exe) | 87MB |
+| **Windows** (Portable ZIP) | FrogTalk-1.4.1-win-x64.zip | [Download](https://raw.githubusercontent.com/deadinternetfox/frogtalk/master/github-build-mirror/FrogTalk-1.4.1-win-x64.zip) | 132MB |
 
-Checksums are stored in `SHA256SUMS.txt`.
+### Mobile Build
 
-## Site Download Endpoints
+| Platform | File | Download | Version |
+|----------|------|----------|---------|
+| **Android** | frogtalk-v223.apk | [Download](https://raw.githubusercontent.com/deadinternetfox/frogtalk/master/github-build-mirror/frogtalk-v223.apk) | v1.6.19 (versionCode 223) |
 
-The website serves latest builds via:
+## Installation Instructions
 
+### Linux (AppImage)
+```bash
+wget https://raw.githubusercontent.com/deadinternetfox/frogtalk/master/github-build-mirror/FrogTalk-1.4.1.AppImage
+chmod +x FrogTalk-1.4.1.AppImage
+./FrogTalk-1.4.1.AppImage
+```
+
+### Linux (Debian/Ubuntu)
+```bash
+wget https://raw.githubusercontent.com/deadinternetfox/frogtalk/master/github-build-mirror/frogtalk_1.4.1_amd64.deb
+sudo dpkg -i frogtalk_1.4.1_amd64.deb
+frogtalk
+```
+
+### Windows (Portable EXE)
+Download `FrogTalk-1.4.1-win-x64-portable.exe` and run it directly — no installation needed.
+
+### Windows (ZIP Archive)
+Download and extract `FrogTalk-1.4.1-win-x64.zip`, then run `FrogTalk.exe` from the extracted folder.
+
+### Android
+Download `frogtalk-v223.apk` to your Android device and open it to install.
+
+## Verify Integrity
+
+All artifacts are checksummed with SHA256. Verify downloads with:
+```bash
+sha256sum -c SHA256SUMS.txt
+```
+
+Checksums are available in [`SHA256SUMS.txt`](https://raw.githubusercontent.com/deadinternetfox/frogtalk/master/github-build-mirror/SHA256SUMS.txt).
+
+## Website Download Endpoints
+
+The main FrogTalk website serves latest builds via dynamic endpoints:
 - `/download/android`
-- `/download/linux`
+- `/download/linux` (AppImage)
 - `/download/deb`
-- `/download/windows` (serves portable .exe)
-- `/download/windows-zip` (serves .zip)
+- `/download/windows` (portable EXE)
+- `/download/windows-zip`
 
-These endpoints pick the latest matching artifact from `static/` on the server.
+These endpoints automatically pull the latest matching artifact from the server's `static/` directory.
