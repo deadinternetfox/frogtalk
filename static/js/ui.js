@@ -4530,6 +4530,31 @@ async function saveProfile() {
     } catch {
       wallSaveWarning = 'Style settings were not saved (network error).';
     }
+
+    // Ensure style changes are visible immediately after save.
+    try {
+      if (typeof Social !== 'undefined' && typeof Social.invalidateProfileCache === 'function') {
+        Social.invalidateProfileCache(State.user.nickname);
+      }
+    } catch {}
+
+    try {
+      const selfNick = String(State.user?.nickname || '').toLowerCase();
+      const shownNick = String(_userInfoTarget || '').toLowerCase();
+      const infoModalOpen = !document.getElementById('modal-user-info')?.classList.contains('hidden');
+      if (infoModalOpen && selfNick && shownNick === selfNick) {
+        applyProfileCustomCss(customCss || '');
+      }
+    } catch {}
+
+    try {
+      const socialOpen = !document.getElementById('social-overlay')?.classList.contains('hidden');
+      const profileTabActive = !!document.querySelector('#social-overlay .social-nav-btn.active[data-tab="profile"]');
+      if (socialOpen && profileTabActive && typeof Social !== 'undefined' && typeof Social.loadProfile === 'function') {
+        Social.loadProfile(State.user.nickname);
+      }
+    } catch {}
+
     State.save();
     // Update self panel
     const sa = document.getElementById('self-avatar-el');

@@ -9244,6 +9244,7 @@ const Social = (() => {
 
   return {
     open, close, openProfile, openProfileMusic, switchTab, switchProfileTab,
+    invalidateProfileCache: _invalidateProfileCache,
     switchProfileMediaMode, loadProfileMediaCombined,
     openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
     toggleFollow, reactPost, showReactPicker, showReactionDetail, toggleComments,
