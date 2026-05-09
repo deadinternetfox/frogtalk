@@ -3545,10 +3545,22 @@ function applySocialProfileCustomCss(css) {
       const selectors = rule.slice(0, braceIdx).trim();
       const body = rule.slice(braceIdx + 1).trim();
       if (!selectors || !body || selectors.includes('@')) return '';
+      const expandSocialSelectorAliases = (selector) => {
+        const base = String(selector || '').trim();
+        if (!base) return [];
+        const expanded = new Set([base]);
+        // Preview cards use .wall-post while Frog Social feed cards use .sf-post.
+        // Keep user CSS/presets backward-compatible by aliasing wall selectors.
+        if (base.includes('.wall-post')) {
+          expanded.add(base.replace(/\.wall-post\b/g, '.sf-post'));
+        }
+        return Array.from(expanded);
+      };
       const scopedSelectors = selectors
         .split(',')
         .map(selector => selector.trim())
         .filter(Boolean)
+        .flatMap(selector => expandSocialSelectorAliases(selector))
         .map(selector => `.social-profile ${selector}`)
         .join(', ');
       return scopedSelectors ? `${scopedSelectors} { ${body} }` : '';
