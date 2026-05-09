@@ -2355,18 +2355,88 @@ function handleWSDMTyping (data) {
 
 /* ── Edit / Delete DM ───────────────────────────────────────────────────────── */
 async function editDMMsg (id) {
-  const m = _dmMessages.find(x => x.id === id);
+  const m = _dmMessages.find(x => +x.id === +id);
   if (!m) return;
-  const newContent = prompt('Edit message:', m.content || '');
-  if (newContent === null) return;
+  const myId = Number(STATE?.user?.id || 0);
+  if (!myId || Number(m.sender_id || 0) !== myId) {
+    toast('Only the sender can edit this DM', 'error');
+    return;
+  }
+
+  const msgEl = document.getElementById(`msg-${id}`);
+  const contentEl = msgEl?.querySelector('.msg-content');
+  if (!contentEl) return;
+  if (contentEl.querySelector(`#dm-edit-input-${id}`)) {
+    contentEl.querySelector(`#dm-edit-input-${id}`)?.focus();
+    return;
+  }
+
+  const current = String(m.content || '');
+  contentEl.dataset.originalText = current;
+  contentEl.innerHTML = `
+    <textarea id="dm-edit-input-${id}" style="width:100%;background:#1a1a1a;border:1px solid #4caf50;border-radius:6px;color:#e0e0e0;padding:6px;font-size:14px;resize:none;outline:none" rows="2">${UI.escHtml(current)}</textarea>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button onclick="submitDMEdit(${id})" style="background:#4caf50;border:none;border-radius:6px;color:#000;padding:4px 12px;cursor:pointer;font-size:13px">Save</button>
+      <button onclick="cancelDMEdit(${id})" style="background:#1a1a1a;border:none;border-radius:6px;color:#888;padding:4px 12px;cursor:pointer;font-size:13px">Cancel</button>
+    </div>
+  `;
+  const input = document.getElementById(`dm-edit-input-${id}`);
+  if (input) {
+    input.focus();
+    try { input.setSelectionRange(input.value.length, input.value.length); } catch {}
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !ev.shiftKey) {
+        ev.preventDefault();
+        submitDMEdit(id);
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        cancelDMEdit(id);
+      }
+    });
+  }
+}
+
+async function submitDMEdit(id) {
+  const m = _dmMessages.find(x => +x.id === +id);
+  if (!m) return;
+  const myId = Number(STATE?.user?.id || 0);
+  if (!myId || Number(m.sender_id || 0) !== myId) {
+    toast('Only the sender can edit this DM', 'error');
+    return;
+  }
+  const input = document.getElementById(`dm-edit-input-${id}`);
+  if (!input) return;
+  const newContent = String(input.value || '').trim();
+  if (!newContent) {
+    toast('Message cannot be empty', 'error');
+    return;
+  }
+
   let enc = newContent;
   if (STATE.sharedSecret) { try { enc = await encryptMsg(newContent); } catch {} }
   const r = await apiFetch(`/api/dms/${_activeDM.id}/messages/${id}`, 'PUT', { content: enc });
-  if (r.ok) {
-    m.content  = newContent;
-    m.edited_at = new Date().toISOString();
-    renderDMChat();
+  if (!r.ok) {
+    toast('Could not edit message', 'error');
+    return;
   }
+
+  m.content = newContent;
+  m.edited = 1;
+  m.edited_at = new Date().toISOString();
+  renderDMChat();
+}
+
+function cancelDMEdit(id) {
+  const msgEl = document.getElementById(`msg-${id}`);
+  const contentEl = msgEl?.querySelector('.msg-content');
+  if (!contentEl) return;
+  const original = contentEl.dataset.originalText;
+  delete contentEl.dataset.originalText;
+  if (typeof original === 'string') {
+    const m = _dmMessages.find(x => +x.id === +id);
+    if (m) m.content = original;
+  }
+  renderDMChat();
 }
 
 async function deleteDMMsg (id) {

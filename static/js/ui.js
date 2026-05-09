@@ -178,9 +178,21 @@ const UI = (() => {
 
   const _AUTO_AWAY_IDLE_MS = 15 * 60 * 1000;
   const _AUTO_AWAY_ACTIVITY_THROTTLE_MS = 5000;
+  const _AUTO_AWAY_FLAG_KEY = 'ft_auto_away_active';
   let _autoAwayTimer = null;
   let _autoAwayActive = false;
   let _lastAutoAwayActivityTs = 0;
+
+  function _setAutoAwayFlag(on) {
+    try {
+      if (on) localStorage.setItem(_AUTO_AWAY_FLAG_KEY, '1');
+      else localStorage.removeItem(_AUTO_AWAY_FLAG_KEY);
+    } catch {}
+  }
+
+  function _getAutoAwayFlag() {
+    try { return localStorage.getItem(_AUTO_AWAY_FLAG_KEY) === '1'; } catch { return false; }
+  }
 
   function _clearAutoAwayTimer() {
     if (_autoAwayTimer) {
@@ -193,18 +205,26 @@ const UI = (() => {
     const p = String(presence || 'online').toLowerCase();
     if (opts.autoAwaySet) {
       _autoAwayActive = true;
+      _setAutoAwayFlag(true);
       _clearAutoAwayTimer();
       return;
     }
     if (opts.autoAwayRestore) {
       _autoAwayActive = false;
+      _setAutoAwayFlag(false);
     }
     if (p !== 'online') {
       _clearAutoAwayTimer();
+      if (p === 'away' && _getAutoAwayFlag() && !opts.manualSet) {
+        _autoAwayActive = true;
+        return;
+      }
       if (!opts.autoAwaySet) _autoAwayActive = false;
+      _setAutoAwayFlag(false);
       return;
     }
     _autoAwayActive = false;
+    _setAutoAwayFlag(false);
     _clearAutoAwayTimer();
     _autoAwayTimer = setTimeout(async () => {
       try {
@@ -223,7 +243,8 @@ const UI = (() => {
     _lastAutoAwayActivityTs = now;
     if (!State?.user) return;
     const cur = String(State.user.presence || 'online').toLowerCase();
-    if (_autoAwayActive && cur === 'away') {
+    const autoAwayMarked = _autoAwayActive || _getAutoAwayFlag();
+    if (autoAwayMarked && cur === 'away') {
       const msg = String(State.user.status_msg || '');
       _saveStatusSilent('online', msg, { autoAwayRestore: true });
       return;
@@ -510,7 +531,7 @@ const UI = (() => {
         }
       } catch {}
       renderSelfStatus();
-      _syncAutoAwayFromPresence(presence, opts);
+      _syncAutoAwayFromPresence(presence, { ...opts, manualSet: true });
       toast('Status updated', 'success');
     } catch { toast('Could not save status', 'error'); }
   }
