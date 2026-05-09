@@ -3729,7 +3729,6 @@ const CSS_PRESETS = {
   hacker: `/* 💀 Hacker — Matrix-style green terminal */
 .profile-header {
   background: #000 !important;
-  border-bottom: 1px solid #003300 !important;
 }
 .userinfo-nick {
   color: #00ff41 !important;
@@ -3771,7 +3770,6 @@ const CSS_PRESETS = {
   golden: `/* 👑 Royal Gold — Luxury gold & dark */
 .profile-header {
   background: linear-gradient(135deg, #0a0800 0%, #1a1400 40%, #2a2000 100%) !important;
-  border-bottom: 2px solid #ffd700 !important;
 }
 .userinfo-nick {
   color: #ffd700 !important;
