@@ -179,6 +179,7 @@ const UI = (() => {
   const _AUTO_AWAY_IDLE_MS = 15 * 60 * 1000;
   const _AUTO_AWAY_ACTIVITY_THROTTLE_MS = 5000;
   const _AUTO_AWAY_FLAG_KEY = 'ft_auto_away_active';
+  const _MANUAL_AWAY_FLAG_KEY = 'ft_manual_away_active';
   let _autoAwayTimer = null;
   let _autoAwayActive = false;
   let _lastAutoAwayActivityTs = 0;
@@ -194,6 +195,17 @@ const UI = (() => {
     try { return localStorage.getItem(_AUTO_AWAY_FLAG_KEY) === '1'; } catch { return false; }
   }
 
+  function _setManualAwayFlag(on) {
+    try {
+      if (on) localStorage.setItem(_MANUAL_AWAY_FLAG_KEY, '1');
+      else localStorage.removeItem(_MANUAL_AWAY_FLAG_KEY);
+    } catch {}
+  }
+
+  function _getManualAwayFlag() {
+    try { return localStorage.getItem(_MANUAL_AWAY_FLAG_KEY) === '1'; } catch { return false; }
+  }
+
   function _clearAutoAwayTimer() {
     if (_autoAwayTimer) {
       clearTimeout(_autoAwayTimer);
@@ -206,25 +218,36 @@ const UI = (() => {
     if (opts.autoAwaySet) {
       _autoAwayActive = true;
       _setAutoAwayFlag(true);
+      _setManualAwayFlag(false);
       _clearAutoAwayTimer();
       return;
     }
     if (opts.autoAwayRestore) {
       _autoAwayActive = false;
       _setAutoAwayFlag(false);
+      _setManualAwayFlag(false);
     }
     if (p !== 'online') {
       _clearAutoAwayTimer();
+      if (opts.manualSet && p === 'away') {
+        _autoAwayActive = false;
+        _setAutoAwayFlag(false);
+        _setManualAwayFlag(true);
+        return;
+      }
       if (p === 'away' && _getAutoAwayFlag() && !opts.manualSet) {
         _autoAwayActive = true;
+        _setManualAwayFlag(false);
         return;
       }
       if (!opts.autoAwaySet) _autoAwayActive = false;
       _setAutoAwayFlag(false);
+      if (p !== 'away') _setManualAwayFlag(false);
       return;
     }
     _autoAwayActive = false;
     _setAutoAwayFlag(false);
+    _setManualAwayFlag(false);
     _clearAutoAwayTimer();
     _autoAwayTimer = setTimeout(async () => {
       try {
@@ -244,7 +267,8 @@ const UI = (() => {
     if (!State?.user) return;
     const cur = String(State.user.presence || 'online').toLowerCase();
     const autoAwayMarked = _autoAwayActive || _getAutoAwayFlag();
-    if (autoAwayMarked && cur === 'away') {
+    const manualAway = _getManualAwayFlag();
+    if (cur === 'away' && (autoAwayMarked || !manualAway)) {
       const msg = String(State.user.status_msg || '');
       _saveStatusSilent('online', msg, { autoAwayRestore: true });
       return;
