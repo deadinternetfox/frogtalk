@@ -277,10 +277,9 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
     except Exception:
         online_ids = set()
 
-    # Presence in DB can remain stale after abrupt disconnects. Normalize using
-    # live WS truth: connected users are online unless they explicitly set
-    # away/dnd/invisible; disconnected users with stale "online" are shown
-    # as offline.
+    # Presence in DB can remain stale after disconnects. Match channel member
+    # list behavior: any user not currently connected is rendered offline,
+    # regardless of their last saved presence (away/dnd/etc.).
     for f in friends:
         try:
             fid = int(f.get("id"))
@@ -288,8 +287,7 @@ async def list_friends(current_user: dict = Depends(get_current_user)):
             continue
         p = str(f.get("presence") or "").strip().lower()
         if fid not in online_ids:
-            if p == "online" or not p:
-                f["presence"] = "offline"
+            f["presence"] = "offline"
             continue
         if p not in {"away", "dnd", "invisible"}:
             f["presence"] = "online"
