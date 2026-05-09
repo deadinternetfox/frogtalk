@@ -3544,35 +3544,9 @@ function clearSocialProfileCustomCss() {
   }
 }
 
-// Preview button: open user's social profile with current CSS in editor
+// Backward-compatible alias: keep callers working but use in-settings modal preview.
 function previewProfileWithCss() {
-  if (!State.user?.nickname) return;
-  const css = document.getElementById('profile-custom-css')?.value || '';
-  // Close settings modal
-  closeModal('modal-profile');
-  // Clear social profile cache to force fresh load
-  if (typeof window.Social !== 'undefined' && typeof window.Social._profileCache !== 'undefined') {
-    try {
-      const cacheKey = String(State.user.nickname).toLowerCase();
-      window.Social._profileCache.delete(cacheKey);
-    } catch {}
-  }
-  // Open social profile and apply CSS
-  setTimeout(() => {
-    if (typeof Social !== 'undefined' && Social.openProfile) {
-      Social.openProfile(State.user.nickname);
-      // Apply CSS with multiple retries to ensure DOM is ready
-      const applyWithRetry = (attempt = 0) => {
-        const profileEl = document.querySelector('.social-profile');
-        if (profileEl && css) {
-          applySocialProfileCustomCss(css);
-        } else if (attempt < 5) {
-          setTimeout(() => applyWithRetry(attempt + 1), 100);
-        }
-      };
-      setTimeout(applyWithRetry, 200);
-    }
-  }, 100);
+  previewCssLive();
 }
 
 // ── CSS Theme Presets ──────────────────────────────────────────────────────
