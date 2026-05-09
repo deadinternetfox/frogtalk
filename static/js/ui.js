@@ -3258,7 +3258,11 @@ function _applyThemeVars(theme) {
     sunset: { bg: '#1a0a05', surface: '#2a1208', text: '#f0d8c8', muted: '#bb8866', border: '#3a2010', accent: '#ff7043' },
     rose: { bg: '#1a0814', surface: '#240a18', text: '#f5d8e6', muted: '#bb8aa3', border: '#3a1a2a', accent: '#ff6b9d' },
     solarized: { bg: '#002b36', surface: '#073642', text: '#93a1a1', muted: '#586e75', border: '#0a4a55', accent: '#b58900' },
-    mono: { bg: '#0a0a0a', surface: '#1a1a1a', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#cccccc' }
+    mono: { bg: '#0a0a0a', surface: '#1a1a1a', text: '#e0e0e0', muted: '#888', border: '#2a2a2a', accent: '#cccccc' },
+    golden: { bg: '#0a0800', surface: '#1a1400', text: '#ffd700', muted: '#bb9966', border: '#2a2000', accent: '#ffd700' },
+    lava: { bg: '#0a0000', surface: '#1a0500', text: '#ff5722', muted: '#ff9800', border: '#330a00', accent: '#ff5722' },
+    retrowave: { bg: '#0a001a', surface: '#1a0030', text: '#ff6b9d', muted: '#ff006e', border: '#4a0050', accent: '#ff006e' },
+    sakura: { bg: '#1a0a12', surface: '#2a1018', text: '#ffb7c5', muted: '#cc99aa', border: '#3a1520', accent: '#ffb7c5' }
   };
   const t = themes[theme] || themes.frog;
   root.style.setProperty('--bg-color', t.bg);
@@ -3352,7 +3356,7 @@ function updateResetThemeBtnLabel() {
 
 function getThemeDisplayName(themeKey) {
   const names = {
-    frog: 'Frog (Default)', dark: 'Dark', light: 'Light', midnight: 'Midnight', forest: 'Forest', cyberpunk: 'Cyberpunk', ocean: 'Ocean', sunset: 'Sunset', rose: 'Rose', solarized: 'Solarized', mono: 'Mono', custom: 'Custom'
+    frog: 'Frog (Default)', dark: 'Dark', light: 'Light', midnight: 'Midnight', forest: 'Forest', cyberpunk: 'Cyberpunk', ocean: 'Ocean', sunset: 'Sunset', rose: 'Rose', solarized: 'Solarized', mono: 'Mono', golden: 'Golden', lava: 'Lava', retrowave: 'Retrowave', sakura: 'Sakura', custom: 'Custom'
   };
   return names[themeKey] || (themeKey.charAt(0).toUpperCase() + themeKey.slice(1));
 }
@@ -3513,17 +3517,12 @@ function scopeProfileCustomCss(css) {
 function applyProfileCustomCss(css) {
   clearProfileCustomCss();
   const scopedCss = scopeProfileCustomCss(css || '');
-  if (!scopedCss) {
-    console.log('applyProfileCustomCss: CSS is empty after scoping', { originalLength: css?.length || 0 });
-    return;
-  }
-  console.log('applyProfileCustomCss: Applying CSS', { scopedCssLength: scopedCss.length, scopedCss: scopedCss.substring(0, 200) });
+  if (!scopedCss) return;
   const styleEl = document.createElement('style');
   styleEl.id = 'profile-custom-style';
   styleEl.textContent = scopedCss;
   document.head.appendChild(styleEl);
   _profileCustomCssEl = styleEl;
-  console.log('applyProfileCustomCss: Style element added to head', { elId: styleEl.id });
 }
 
 // Apply custom CSS to a social profile (scoped to .social-profile instead of #modal-user-info)
@@ -3534,10 +3533,7 @@ function applySocialProfileCustomCss(css) {
     _socialProfileCssEl.remove();
     _socialProfileCssEl = null;
   }
-  if (!css) {
-    console.log('applySocialProfileCustomCss: CSS is empty or falsy');
-    return;
-  }
+  if (!css) return;
   // Scope CSS to .social-profile container
   const scoped = css
     .split('}')
@@ -3559,17 +3555,12 @@ function applySocialProfileCustomCss(css) {
     })
     .filter(Boolean)
     .join('\n');
-  if (!scoped) {
-    console.log('applySocialProfileCustomCss: CSS is empty after scoping', { originalLength: css?.length || 0 });
-    return;
-  }
-  console.log('applySocialProfileCustomCss: Applying CSS', { scopedCssLength: scoped.length, scopedCss: scoped.substring(0, 200) });
+  if (!scoped) return;
   const styleEl = document.createElement('style');
   styleEl.id = 'social-profile-custom-style';
   styleEl.textContent = scoped;
   document.head.appendChild(styleEl);
   _socialProfileCssEl = styleEl;
-  console.log('applySocialProfileCustomCss: Style element added to head', { elId: styleEl.id });
 }
 
 function clearSocialProfileCustomCss() {

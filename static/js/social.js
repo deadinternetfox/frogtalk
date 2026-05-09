@@ -3515,12 +3515,7 @@ const Social = (() => {
 
       // Apply custom CSS from user if it exists (AFTER HTML is rendered)
       if (u.custom_css && typeof window.applySocialProfileCustomCss === 'function') {
-        try { 
-          console.log('Applying social profile custom CSS', { cssLength: u.custom_css.length, cssPreview: u.custom_css.substring(0, 100) });
-          window.applySocialProfileCustomCss(u.custom_css); 
-        } catch (e) { console.warn('CSS apply error:', e); }
-      } else {
-        console.log('Social profile custom CSS not applied', { hasCss: !!u.custom_css, hasFunction: typeof window.applySocialProfileCustomCss === 'function' });
+        try { window.applySocialProfileCustomCss(u.custom_css); } catch (e) { console.warn('CSS apply error:', e); }
       }
 
       const wallToken = _beginProfileTabLoad('wall');
