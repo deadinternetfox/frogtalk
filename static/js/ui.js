@@ -2124,6 +2124,59 @@ let _networkSelectedServer = null;
 let _networkBuildTrustByBase = {};
 let _networkLocalBuildInfo = null;
 let _networkCurrentServerInfo = null;
+const _DESKTOP_CLOSE_TO_TRAY_LS_KEY = 'frogtalk-desktop-close-to-tray';
+
+function _isDesktopSettingsRuntime() {
+  try {
+    return !!(window.desktopApp && window.desktopApp.isDesktop);
+  } catch {
+    return false;
+  }
+}
+
+function _syncApplicationTabVisibility() {
+  const tabBtn = document.getElementById('set-tab-application');
+  const pane = document.getElementById('set-pane-application');
+  const enabled = _isDesktopSettingsRuntime();
+  if (tabBtn) tabBtn.style.display = enabled ? '' : 'none';
+  if (!enabled && pane) pane.style.display = 'none';
+}
+
+async function _loadDesktopAppSettingsIntoProfile() {
+  const row = document.getElementById('profile-close-to-tray');
+  const note = document.getElementById('profile-close-to-tray-note');
+  if (!row) return;
+  if (!_isDesktopSettingsRuntime()) {
+    row.checked = false;
+    row.disabled = true;
+    if (note) note.textContent = 'Desktop-only setting. Open FrogTalk desktop app to change this.';
+    return;
+  }
+  row.disabled = false;
+  try {
+    const fallback = localStorage.getItem(_DESKTOP_CLOSE_TO_TRAY_LS_KEY) !== '0';
+    row.checked = fallback;
+  } catch {
+    row.checked = true;
+  }
+  try {
+    if (typeof window.desktopApp.getSettings === 'function') {
+      const s = await window.desktopApp.getSettings();
+      const enabled = !!(s && s.closeToTrayOnX !== false);
+      row.checked = enabled;
+      try {
+        localStorage.setItem(_DESKTOP_CLOSE_TO_TRAY_LS_KEY, enabled ? '1' : '0');
+      } catch {}
+      if (note) {
+        note.textContent = s && s.trayAvailable
+          ? 'Tray is available. Pressing X will minimize to tray when enabled.'
+          : 'System tray unavailable right now, so X will close the app.';
+      }
+      return;
+    }
+  } catch {}
+  if (note) note.textContent = 'Tray preference will apply when desktop bridge is available.';
+}
 
 function ensureNetworkPaneContent() {
   const pane = document.getElementById('set-pane-network');
@@ -2195,13 +2248,16 @@ function ensureNetworkPaneContent() {
 }
 
 function switchSettingsTab(tab) {
+  if (tab === 'application' && !_isDesktopSettingsRuntime()) {
+    tab = 'profile';
+  }
   _currentSettingsTab = tab;
   // Update tab buttons
   document.querySelectorAll('.settings-tab').forEach(btn => btn.classList.remove('active'));
   const tabBtn = document.getElementById(`set-tab-${tab}`);
   if (tabBtn) tabBtn.classList.add('active');
   // Show/hide panes with animation
-  ['profile', 'social', 'privacy', 'notif', 'appear', 'style', 'network', 'dev', 'account'].forEach(p => {
+  ['profile', 'social', 'privacy', 'notif', 'appear', 'style', 'network', 'application', 'dev', 'account'].forEach(p => {
     const pane = document.getElementById(`set-pane-${p}`);
     if (pane) {
       if (p === tab) {
@@ -2229,6 +2285,9 @@ function switchSettingsTab(tab) {
     ensureNetworkPaneContent();
     loadNetworkSettings();
     loadLocalBuildIntegrity();
+  }
+  if (tab === 'application') {
+    _loadDesktopAppSettingsIntoProfile();
   }
   // Update char count on style tab
   if (tab === 'style') updateCssCharCount();
@@ -4179,6 +4238,8 @@ async function showProfile() {
       localStorage.setItem('frogtalk-auto-login', autoLoginEl.checked ? 'true' : 'false');
     };
   }
+  _syncApplicationTabVisibility();
+  await _loadDesktopAppSettingsIntoProfile();
   // Notifications tab
   document.getElementById('profile-notify-sounds').checked = u.notify_sounds !== 0;
   document.getElementById('profile-notify-desktop').checked = u.notify_desktop !== 0;
@@ -4543,6 +4604,15 @@ async function saveProfile() {
   // Auto-login preference (local only)
   const autoLogin = document.getElementById('profile-auto-login')?.checked ?? true;
   localStorage.setItem('frogtalk-auto-login', autoLogin ? 'true' : 'false');
+  const closeToTray = document.getElementById('profile-close-to-tray')?.checked ?? true;
+  try {
+    localStorage.setItem(_DESKTOP_CLOSE_TO_TRAY_LS_KEY, closeToTray ? '1' : '0');
+  } catch {}
+  try {
+    if (_isDesktopSettingsRuntime() && typeof window.desktopApp?.setCloseToTray === 'function') {
+      await window.desktopApp.setCloseToTray(closeToTray);
+    }
+  } catch {}
   // Notification settings
   const notifySounds   = document.getElementById('profile-notify-sounds')?.checked ?? true;
   const notifyDesktop  = document.getElementById('profile-notify-desktop')?.checked ?? true;

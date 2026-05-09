@@ -5,6 +5,7 @@ const path = require('path');
 const APP_URL = 'https://frogtalk.xyz/app';
 const WEB_PARTITION = 'persist:frogtalk-web';
 const AUTH_SNAPSHOT_PATH = path.join(app.getPath('userData'), 'auth-snapshot.json');
+const DESKTOP_SETTINGS_PATH = path.join(app.getPath('userData'), 'desktop-settings.json');
 
 // Ensure incoming call audio can start reliably without a fresh user gesture.
 try { app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required'); } catch {}
@@ -12,6 +13,33 @@ try { app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required'
 let mainWindow = null;
 let tray = null;
 let _isClosingWindow = false;
+let _desktopSettings = {
+  closeToTrayOnX: true,
+};
+
+function readDesktopSettings() {
+  try {
+    const raw = fs.readFileSync(DESKTOP_SETTINGS_PATH, 'utf8');
+    const parsed = JSON.parse(raw || '{}') || {};
+    _desktopSettings = {
+      ..._desktopSettings,
+      closeToTrayOnX: parsed.closeToTrayOnX !== false,
+    };
+  } catch {
+    // Keep defaults on first run or corrupted file.
+  }
+}
+
+function writeDesktopSettings() {
+  try {
+    fs.mkdirSync(path.dirname(DESKTOP_SETTINGS_PATH), { recursive: true });
+    fs.writeFileSync(DESKTOP_SETTINGS_PATH, JSON.stringify(_desktopSettings || {}, null, 2), 'utf8');
+  } catch {}
+}
+
+function shouldCloseToTray() {
+  return !!(tray && _desktopSettings && _desktopSettings.closeToTrayOnX !== false);
+}
 
 async function stopRendererMedia(win) {
   if (!win || win.isDestroyed()) return;
@@ -284,8 +312,19 @@ function createWindow() {
     }
   } catch {}
 
-  // X should fully close the desktop app; before quit, force-stop all media.
+  // If tray mode is enabled and available, X hides to tray; otherwise quit.
+  // Before full quit, force-stop media and flush auth/session snapshot.
   mainWindow.on('close', async (e) => {
+    if (!app.isQuitting && shouldCloseToTray()) {
+      e.preventDefault();
+      try { mainWindow.hide(); } catch {}
+      try {
+        await snapshotAuthFromRenderer(mainWindow);
+        await mainWindow.webContents.session.flushStorageData();
+      } catch {}
+      return;
+    }
+
     if (app.isQuitting) {
       try { await stopRendererMedia(mainWindow); } catch {}
       return;
@@ -310,6 +349,24 @@ function createWindow() {
   });
 }
 
+ipcMain.handle('desktop:get-settings', () => {
+  return {
+    closeToTrayOnX: _desktopSettings.closeToTrayOnX !== false,
+    trayAvailable: !!tray,
+  };
+});
+
+ipcMain.handle('desktop:set-close-to-tray', (_event, enabled) => {
+  const next = enabled !== false;
+  _desktopSettings.closeToTrayOnX = next;
+  writeDesktopSettings();
+  return {
+    ok: true,
+    closeToTrayOnX: next,
+    trayAvailable: !!tray,
+  };
+});
+
 function createTray() {
   try {
     tray = new Tray(path.join(__dirname, 'icon.png'));
@@ -330,6 +387,7 @@ function createTray() {
 
 app.whenReady().then(() => {
   app.isQuitting = false;
+  readDesktopSettings();
   createWindow();
   createTray();
 });

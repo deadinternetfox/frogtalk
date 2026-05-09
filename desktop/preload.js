@@ -6,5 +6,7 @@ contextBridge.exposeInMainWorld('desktopApp', {
   platform: process.platform,
   showNotification: (title, body) => {
     ipcRenderer.send('show-notification', { title, body });
-  }
+  },
+  getSettings: () => ipcRenderer.invoke('desktop:get-settings'),
+  setCloseToTray: (enabled) => ipcRenderer.invoke('desktop:set-close-to-tray', !!enabled)
 });
