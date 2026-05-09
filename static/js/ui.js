@@ -3289,13 +3289,32 @@ function saveCustomTheme() {
 }
 function resetCustomThemeToLast() {
   localStorage.removeItem('frogtalk-custom-theme');
-  // Use last selected theme from localStorage or fallback to frog
   let lastTheme = localStorage.getItem('frogtalk-theme') || 'frog';
   if (lastTheme === 'custom') lastTheme = 'frog';
   applyTheme(lastTheme);
   loadCustomThemeIntoInputs();
-  if (typeof toast === 'function') toast('Reset to ' + (lastTheme.charAt(0).toUpperCase() + lastTheme.slice(1)) + ' theme', 'success');
+  updateResetThemeBtnLabel();
+  if (typeof toast === 'function') toast('Reset to ' + getThemeDisplayName(lastTheme) + ' theme', 'success');
 }
+
+function updateResetThemeBtnLabel() {
+  let lastTheme = localStorage.getItem('frogtalk-theme') || 'frog';
+  if (lastTheme === 'custom') lastTheme = 'frog';
+  const btn = document.getElementById('ct-reset-btn');
+  if (btn) btn.textContent = 'Reset to ' + getThemeDisplayName(lastTheme);
+}
+
+function getThemeDisplayName(themeKey) {
+  const names = {
+    frog: 'Frog', dark: 'Dark', light: 'Light', midnight: 'Midnight', forest: 'Forest', cyberpunk: 'Cyberpunk', ocean: 'Ocean', sunset: 'Sunset', rose: 'Rose', solarized: 'Solarized', mono: 'Mono', custom: 'Custom'
+  };
+  return names[themeKey] || (themeKey.charAt(0).toUpperCase() + themeKey.slice(1));
+}
+
+// Update label on modal open and on theme change
+document.addEventListener('DOMContentLoaded', updateResetThemeBtnLabel);
+window.addEventListener('focus', updateResetThemeBtnLabel);
+window.updateResetThemeBtnLabel = updateResetThemeBtnLabel;
 function exportThemeJson() {
   const d = _customThemeFromInputs();
   const json = JSON.stringify(d, null, 2);
