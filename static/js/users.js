@@ -28,6 +28,8 @@ const Users = (() => {
       display_name: State.user.display_name || user.display_name,
       avatar: State.user.avatar || user.avatar,
       is_admin: State.user.is_admin || user.is_admin,
+      presence: (State.user.presence || user.presence || 'online'),
+      status_msg: (State.user.status_msg ?? user.status_msg ?? ''),
     };
   }
 
@@ -234,7 +236,7 @@ const Users = (() => {
     const pRaw = String(u.presence || '').toLowerCase();
     const effectivePresence = isOnline
       ? ((pRaw === 'away' || pRaw === 'dnd' || pRaw === 'online') ? pRaw : 'online')
-      : ((pRaw === 'away' || pRaw === 'dnd') ? pRaw : 'offline');
+      : 'offline';
     const presenceMeta = {
       online: { color: '#4caf50', label: 'Online' },
       away: { color: '#ffc107', label: 'Away' },

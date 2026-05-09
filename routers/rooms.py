@@ -744,15 +744,22 @@ async def get_channel_members(room_name: str,
     for m in members:
         uid = int(m.get("user_id") or 0)
         p = str(m.get("presence") or "").strip().lower()
-        live_online = uid in online_ids if uid else False
+
+        # The requester is actively authenticated in this room fetch path.
+        # Treat self as live to avoid a login/channel-switch race where the
+        # WS presence snapshot has not caught up yet.
+        if uid and uid == int(current_user.get("id") or 0):
+            live_online = True
+        else:
+            live_online = uid in online_ids if uid else False
+
         m["live_online"] = live_online
         if live_online:
             if p not in {"away", "dnd", "invisible"}:
                 m["presence"] = "online"
         else:
-            # Keep explicit user-set states; only downgrade stale "online".
-            if p == "online" or not p:
-                m["presence"] = "away"
+            # Sidebar offline section should always render offline dot/color.
+            m["presence"] = "offline"
     return {"members": members}
 
 
