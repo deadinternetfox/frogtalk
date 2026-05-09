@@ -267,8 +267,7 @@ const UI = (() => {
     if (!State?.user) return;
     const cur = String(State.user.presence || 'online').toLowerCase();
     const autoAwayMarked = _autoAwayActive || _getAutoAwayFlag();
-    const manualAway = _getManualAwayFlag();
-    if (cur === 'away' && (autoAwayMarked || !manualAway)) {
+    if (cur === 'away' && autoAwayMarked) {
       const msg = String(State.user.status_msg || '');
       _saveStatusSilent('online', msg, { autoAwayRestore: true });
       return;

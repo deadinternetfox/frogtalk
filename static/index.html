@@ -1845,6 +1845,35 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .sqm-action-btn:hover{background:linear-gradient(180deg,#214235,#1b352c);border-color:#3c6d5a;color:#ebfaf4}
 .sqm-action-btn.friends{border-color:#3b6f5a;color:#bcefd1;background:linear-gradient(180deg,#1d3a2f,#173026)}
 .sqm-action-btn.friends:hover{background:linear-gradient(180deg,#264a3c,#1e3d31);border-color:#4f8f76}
+.status-picker-popover,
+#status-picker-popover{
+  color:#e8f8ee !important;
+  background:linear-gradient(160deg,#234d3e 0%,#1c3d30 40%,#172f25 100%) !important;
+  border-color:#4f9675 !important;
+}
+#status-picker-popover input,
+#status-picker-popover textarea,
+#status-picker-popover select{
+  background:#0f2219 !important;
+  color:#e8f8ee !important;
+  border:1px solid #4a8068 !important;
+  -webkit-text-fill-color:#e8f8ee !important;
+  caret-color:#e8f8ee !important;
+}
+#status-picker-popover input::placeholder,
+#status-picker-popover textarea::placeholder{
+  color:#88b7a2 !important;
+}
+#status-picker-popover input:-webkit-autofill,
+#status-picker-popover input:-webkit-autofill:hover,
+#status-picker-popover input:-webkit-autofill:focus{
+  -webkit-text-fill-color:#e8f8ee !important;
+  box-shadow:0 0 0px 1000px #0f2219 inset !important;
+  transition:background-color 9999s ease-in-out 0s;
+}
+#status-picker-popover button{
+  color:#deefe7;
+}
 .icon-btn{
   width:34px;height:34px;min-height:34px;background:none;border:none;
   color:#888;cursor:pointer;border-radius:6px;
@@ -9245,7 +9274,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=427"></script>
 <script src="/static/js/ws.js?v=222"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=429"></script>
+<script src="/static/js/ui.js?v=430"></script>
   <script src="/static/js/rooms.js?v=426"></script>
 <script src="/static/js/messages.js?v=436"></script>
 <script src="/static/js/users.js?v=196"></script>
