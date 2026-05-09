@@ -3513,9 +3513,13 @@ const Social = (() => {
         </div>
       </div>`;
 
-      // Apply custom CSS from user if it exists (AFTER HTML is rendered)
-      if (u.custom_css && typeof window.applySocialProfileCustomCss === 'function') {
-        try { window.applySocialProfileCustomCss(u.custom_css); } catch (e) { console.warn('CSS apply error:', e); }
+      // Apply custom CSS from user if it exists (AFTER HTML is rendered).
+      // For self-profile, fall back to local state to avoid transient stale payloads.
+      const _effectiveCss = u.custom_css || (u.is_self ? (State.user?.custom_css || '') : '');
+      if (_effectiveCss && typeof window.applySocialProfileCustomCss === 'function') {
+        try { window.applySocialProfileCustomCss(_effectiveCss); } catch (e) { console.warn('CSS apply error:', e); }
+      } else if (typeof window.clearSocialProfileCustomCss === 'function') {
+        try { window.clearSocialProfileCustomCss(); } catch {}
       }
 
       const wallToken = _beginProfileTabLoad('wall');

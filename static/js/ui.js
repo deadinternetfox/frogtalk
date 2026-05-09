@@ -3953,9 +3953,25 @@ function _populateCssPreviewIdentity() {
     }
     // Social card info
     const socialNickEl = document.getElementById('css-preview-social-nick');
-    if (socialNickEl) socialNickEl.textContent = u.nickname || 'YourNick';
+    if (socialNickEl) socialNickEl.textContent = u.display_name || u.nickname || 'YourNick';
+    const socialHandleEl = document.getElementById('css-preview-social-handle');
+    if (socialHandleEl) socialHandleEl.textContent = u.nickname ? `@${u.nickname}` : '';
     const socialBioEl = document.getElementById('css-preview-social-bio');
     if (socialBioEl) socialBioEl.textContent = u.bio ? u.bio.substring(0, 50) : 'Profile preview';
+    const socialAvatarEl = document.getElementById('css-preview-social-avatar');
+    if (socialAvatarEl && typeof UI !== 'undefined' && UI.avatarEl) {
+      socialAvatarEl.innerHTML = UI.avatarEl(u.avatar, u.nickname, 48);
+    }
+    const socialBannerEl = document.getElementById('css-preview-social-banner');
+    if (socialBannerEl) {
+      if (u.banner) {
+        socialBannerEl.style.setProperty('background-image', `url(${u.banner})`, 'important');
+        socialBannerEl.style.setProperty('background-size', 'cover', 'important');
+        socialBannerEl.style.setProperty('background-position', 'center', 'important');
+      } else {
+        socialBannerEl.style.setProperty('background-image', '', 'important');
+      }
+    }
   } catch (e) {
     console.error('Error populating CSS preview:', e);
   }
@@ -3964,6 +3980,18 @@ function _populateCssPreviewIdentity() {
 function previewCssLive() {
   const overlay = document.getElementById('css-preview-overlay');
   if (!overlay) return;
+  // Pull fresh profile fields so preview always reflects current banner/name.
+  (async () => {
+    try {
+      const me = State.user?.nickname;
+      if (!me) return;
+      const resp = await apiFetch('/api/users/profile/' + encodeURIComponent(me) + `?v=${Date.now()}`);
+      if (!resp.ok) return;
+      const fresh = await resp.json();
+      State.user = Object.assign({}, State.user || {}, fresh || {});
+      _populateCssPreviewIdentity();
+    } catch {}
+  })();
   _populateCssPreviewIdentity();
   _renderCssPreviewStyle();
   overlay.classList.remove('hidden');
@@ -5129,7 +5157,8 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
             smEl.textContent = [status, mood].filter(Boolean).join(' · ');
           }
         }
-        applyProfileCustomCss(u.custom_css || '');
+        const _effectiveCss = (u.custom_css || (isSelf ? (State.user?.custom_css || '') : ''));
+        applyProfileCustomCss(_effectiveCss);
         if (tagsEl && Array.isArray(u.tags) && u.tags.length > 0) {
           tagsEl.innerHTML = u.tags.map(t =>
             `<span style="background:#1a2e1a;color:#4caf50;border-radius:12px;padding:4px 10px;font-size:12px">${esc(t)}</span>`
