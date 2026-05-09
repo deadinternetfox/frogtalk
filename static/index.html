@@ -252,6 +252,32 @@ body[data-theme="dark"] select option:hover{
   color:#dff5e8 !important;
   box-shadow:0 0 0 9999px #1f4a37 inset !important;
 }
+/* Profile/settings presence dropdown must stay readable across all themes,
+   including Electron builds that ignore body[data-theme='dark'] option rules. */
+#modal-profile select,
+#modal-profile select.modal-input,
+#channel-profile-overlay select,
+.modal-overlay select.modal-input{
+  background-color:#0e1f18 !important;
+  color:#e8f4ee !important;
+  border:1px solid #2f5548 !important;
+}
+#modal-profile select option,
+#channel-profile-overlay select option,
+.modal-overlay select.modal-input option{
+  background-color:#0e1f18 !important;
+  color:#e8f4ee !important;
+}
+#modal-profile select option:checked,
+#modal-profile select option:hover,
+#channel-profile-overlay select option:checked,
+#channel-profile-overlay select option:hover,
+.modal-overlay select.modal-input option:checked,
+.modal-overlay select.modal-input option:hover{
+  background-color:#1f4a37 !important;
+  color:#dff5e8 !important;
+  box-shadow:0 0 0 9999px #1f4a37 inset !important;
+}
 body[data-theme="dark"] .modal-btn.secondary{
   background:linear-gradient(180deg,#1a3128,#11211c) !important;
   border:1px solid #2f5548 !important;
@@ -322,6 +348,7 @@ body[data-theme="dark"] .modal-btn.primary:active{
   color:#e8f4ee !important;
 }
 #friends-panel .modal-input::placeholder{color:#85a89a !important}
+#friends-panel .modal-input::placeholder{-webkit-text-fill-color:#85a89a !important;opacity:1}
 #friends-panel .modal-input:hover{border-color:#3e6a5b !important;background:linear-gradient(180deg,#152922,#11211c) !important}
 #friends-panel .modal-input:focus{border-color:#6bb698 !important;box-shadow:0 0 0 2px rgba(107,182,152,.18) !important}
 #friends-panel .auth-tab{color:#b8d5c8 !important}
@@ -348,6 +375,7 @@ body[data-theme="dark"] .modal-btn.primary:active{
   color:#e8f4ee !important;
 }
 #modal-profile .modal-input::placeholder{color:#85a89a !important}
+#modal-profile .modal-input::placeholder{-webkit-text-fill-color:#85a89a !important;opacity:1}
 #modal-profile .modal-input:hover{border-color:#3e6a5b !important;background:linear-gradient(180deg,#152922,#11211c) !important}
 #modal-profile .modal-input:focus{border-color:#6bb698 !important;box-shadow:0 0 0 2px rgba(107,182,152,.18) !important}
 #modal-profile .modal-btn.secondary{
@@ -1863,6 +1891,8 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #status-picker-popover input::placeholder,
 #status-picker-popover textarea::placeholder{
   color:#88b7a2 !important;
+  -webkit-text-fill-color:#88b7a2 !important;
+  opacity:1;
 }
 #status-picker-popover input:-webkit-autofill,
 #status-picker-popover input:-webkit-autofill:hover,
@@ -9274,7 +9304,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=427"></script>
 <script src="/static/js/ws.js?v=222"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=430"></script>
+<script src="/static/js/ui.js?v=431"></script>
   <script src="/static/js/rooms.js?v=426"></script>
 <script src="/static/js/messages.js?v=436"></script>
 <script src="/static/js/users.js?v=196"></script>

@@ -215,6 +215,7 @@ const UI = (() => {
 
   function _syncAutoAwayFromPresence(presence, opts = {}) {
     const p = String(presence || 'online').toLowerCase();
+    const manualAway = _getManualAwayFlag();
     if (opts.autoAwaySet) {
       _autoAwayActive = true;
       _setAutoAwayFlag(true);
@@ -235,8 +236,11 @@ const UI = (() => {
         _setManualAwayFlag(true);
         return;
       }
-      if (p === 'away' && _getAutoAwayFlag() && !opts.manualSet) {
+      // On boot, an "away" without manual-away marker should be treated as
+      // auto/stale so first real activity restores online.
+      if (p === 'away' && !opts.manualSet && (_getAutoAwayFlag() || !manualAway)) {
         _autoAwayActive = true;
+        _setAutoAwayFlag(true);
         _setManualAwayFlag(false);
         return;
       }
@@ -4198,6 +4202,7 @@ async function saveProfile() {
     State.user.bio = bio;
     State.user.status_msg = statusMsg;
     State.user.presence   = presence;
+    _syncAutoAwayFromPresence(presence, { manualSet: true });
     renderSelfStatus();
     State.user.profile_public = profilePublic ? 1 : 0;
     State.user.allow_friend_requests = allowFr ? 1 : 0;
