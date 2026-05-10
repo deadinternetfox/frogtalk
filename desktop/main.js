@@ -12,10 +12,16 @@ try { app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required'
 
 let mainWindow = null;
 let tray = null;
+let _creatingTray = false;
 let _isClosingWindow = false;
 let _desktopSettings = {
   closeToTrayOnX: true,
 };
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
 
 function readDesktopSettings() {
   try {
@@ -46,6 +52,19 @@ function destroyTray() {
   try { tray.destroy(); } catch {}
   tray = null;
 }
+
+app.on('second-instance', () => {
+  try {
+    if (!mainWindow) {
+      createWindow();
+      return;
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    destroyTray();
+  } catch {}
+});
 
 async function stopRendererMedia(win) {
   if (!win || win.isDestroyed()) return;
@@ -385,6 +404,7 @@ ipcMain.handle('desktop:set-close-to-tray', (_event, enabled) => {
   const next = enabled !== false;
   _desktopSettings.closeToTrayOnX = next;
   writeDesktopSettings();
+  if (!next) destroyTray();
   return {
     ok: true,
     closeToTrayOnX: next,
@@ -394,6 +414,8 @@ ipcMain.handle('desktop:set-close-to-tray', (_event, enabled) => {
 
 function createTray() {
   if (tray) return true;
+  if (_creatingTray) return true;
+  _creatingTray = true;
   try {
     tray = new Tray(path.join(__dirname, 'icon.png'));
     const contextMenu = Menu.buildFromTemplate([
@@ -408,11 +430,13 @@ function createTray() {
       try { mainWindow?.show(); mainWindow?.focus(); } catch {}
       destroyTray();
     });
+    _creatingTray = false;
     return true;
   } catch (e) {
     // Tray icon might fail without a display
     console.error('Tray creation failed:', e.message);
     tray = null;
+    _creatingTray = false;
     return false;
   }
 }
