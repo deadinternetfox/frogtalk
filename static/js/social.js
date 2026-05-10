@@ -3909,6 +3909,7 @@ const Social = (() => {
   let _reelsCurrentCard = null;
   let _reelsObserver = null;
   let _reelsScrollSnap = null;
+  let _reelsLastScrollTs = 0;
   let _reelsSeekLockUntil = 0;
   let _reelsSeekCard = null;
   let _reelsSeekReleaseUntil = 0;
@@ -4505,6 +4506,7 @@ const Social = (() => {
         let scrollRaf = 0;
         let settleTimer = 0;
         const onScroll = () => {
+          _reelsLastScrollTs = Date.now();
           if (scrollRaf) return;
           scrollRaf = requestAnimationFrame(() => {
             scrollRaf = 0;
@@ -5260,6 +5262,10 @@ const Social = (() => {
       // no custom touch-vs-scroll detector needed (every previous
       // attempt at one created its own regressions).
       video.addEventListener('click', (e) => {
+        if (Date.now() - _reelsLastScrollTs < 240) {
+          try { e.preventDefault(); e.stopPropagation(); } catch {}
+          return;
+        }
         try { e.preventDefault(); e.stopPropagation(); } catch {}
         toggleReelPlayback(e, video);
       });
