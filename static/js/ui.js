@@ -6564,6 +6564,12 @@ function _normalizeMentionPresence(raw) {
 
 function _mentionEffectivePresence(user) {
   const nick = String(user?.nickname || '').toLowerCase();
+  try {
+    if (typeof Users !== 'undefined' && typeof Users.getPresenceByNickname === 'function') {
+      const p = _normalizeMentionPresence(Users.getPresenceByNickname(nick));
+      if (p) return p;
+    }
+  } catch {}
   // Match members-list behavior: prefer live WS-backed presence in the
   // current room over mention API snapshots.
   const live = Array.isArray(State?.onlineUsers)

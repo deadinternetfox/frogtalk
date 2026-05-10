@@ -368,5 +368,34 @@ const Users = (() => {
     } catch {}
   }
 
-  return { updateList, updateAvatar, updateDisplayName, updatePresence, loadChannelMembers };
+  function getPresenceByNickname(nickname) {
+    const nick = String(nickname || '').toLowerCase();
+    if (!nick) return 'offline';
+
+    const onRoom = _channelRoom && State.currentRoom === _channelRoom;
+    if (onRoom && _channelMembers.length) {
+      const member = _channelMembers.find(m => String((m?.nickname || '')).toLowerCase() === nick);
+      if (member) {
+        const online = _allUsers.find(u => String((u?.nickname || '')).toLowerCase() === nick);
+        const merged = online ? { ...member, ...online } : { ...member };
+        const liveOnline = (member.live_online === true) || !!online;
+        const p = String((merged.presence || member.presence || '')).toLowerCase();
+        const forceOffline = p === 'invisible' || p === 'offline';
+        if (liveOnline && !forceOffline) {
+          if (p === 'away' || p === 'dnd' || p === 'online') return p;
+          return 'online';
+        }
+        return 'offline';
+      }
+    }
+
+    const u = _allUsers.find(x => String((x?.nickname || '')).toLowerCase() === nick);
+    if (!u) return 'offline';
+    const p = String((u.presence || '')).toLowerCase();
+    if (p === 'away' || p === 'dnd' || p === 'online') return p;
+    if (p === 'offline' || p === 'invisible') return 'offline';
+    return 'online';
+  }
+
+  return { updateList, updateAvatar, updateDisplayName, updatePresence, loadChannelMembers, getPresenceByNickname };
 })();
