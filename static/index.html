@@ -6276,22 +6276,27 @@ a.status-music-link:hover *{
 }
 /* Author info (bottom-left) */
 .reel-author{
-  position:absolute;bottom:92px;left:14px;display:flex;align-items:center;gap:10px;
-  max-width:calc(100% - 80px);cursor:pointer;
+  position:absolute;bottom:80px;left:14px;display:flex;align-items:center;gap:9px;
+  max-width:calc(100% - 92px);cursor:pointer;
+  padding:6px 10px 6px 6px;
+  border-radius:16px;
+  background:rgba(0,0,0,.2);
+  backdrop-filter:blur(4px);
   z-index:3
 }
+.reel-card:has(.reel-caption) .reel-author{bottom:86px}
 .reel-author-avatar{
-  width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0;
+  width:40px;height:40px;border-radius:50%;object-fit:cover;flex-shrink:0;
   border:2px solid #fff;background:#1a2a1a
 }
-.reel-author-info{display:flex;flex-direction:column;gap:2px}
+.reel-author-info{display:flex;flex-direction:column;gap:1px}
 .reel-author-display-name{
-  font-size:14px;font-weight:700;color:#fff;
-  text-shadow:0 1px 6px rgba(0,0,0,.7);line-height:1.2
+  font-size:13.5px;font-weight:700;color:#fff;
+  text-shadow:0 1px 6px rgba(0,0,0,.72);line-height:1.16
 }
 .reel-author-nick{
-  font-size:12px;font-weight:500;color:rgba(255,255,255,.6);
-  text-shadow:0 1px 4px rgba(0,0,0,.6);line-height:1.2
+  font-size:11.5px;font-weight:500;color:rgba(255,255,255,.66);
+  text-shadow:0 1px 4px rgba(0,0,0,.62);line-height:1.14
 }
 .reel-friend-label{
   font-size:11px;color:#aaa;line-height:1;
@@ -6317,8 +6322,8 @@ a.status-music-link:hover *{
   border-radius:999px;line-height:1.4
 }
 .reel-caption{
-  position:absolute;bottom:40px;left:14px;right:72px;
-  font-size:13px;color:#e8e8e8;line-height:1.45;
+  position:absolute;bottom:34px;left:14px;right:78px;
+  font-size:13px;color:#e8e8e8;line-height:1.42;
   text-shadow:0 1px 5px rgba(0,0,0,.7);
   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
   z-index:3
@@ -6513,7 +6518,9 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
   .rsb-pill{padding:5px 12px;font-size:12.5px}
   .rsb-sort{gap:4px}
   .rsb-sort-chip{padding:4px 9px;font-size:11.5px}
-  .reel-author{bottom:86px}
+  .reel-author{bottom:74px;left:12px;max-width:calc(100% - 86px)}
+  .reel-card:has(.reel-caption) .reel-author{bottom:80px}
+  .reel-caption{left:12px;bottom:30px;right:74px}
   .reel-actions{right:8px;gap:14px}
 }
 /* End-of-reels sentinel card */
