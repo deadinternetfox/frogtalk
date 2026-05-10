@@ -5240,12 +5240,16 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   color:#041509;font-size:28px;line-height:1;
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
-  transition:opacity .14s ease,background .14s ease,filter .12s ease
+  transition:opacity .14s ease,background .12s ease;
+  will-change:opacity;
+  -webkit-tap-highlight-color:transparent;
 }
 .ft-video-play:hover{background:#7ad491}
-.ft-video-play:active{filter:brightness(1.06)}
+.ft-video-play:active{background:#7ad491}
 .ft-video-host.is-playing .ft-video-play{opacity:0;pointer-events:none}
 .ft-video-host.is-buffering .ft-video-play{opacity:0;pointer-events:none}
+.ft-video-host.is-playing .ft-video-play,
+.ft-video-host.is-buffering .ft-video-play{transform:translate(-50%,-50%) !important}
 .ft-video-buffer{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   width:34px;height:34px;border-radius:50%;
@@ -6242,13 +6246,17 @@ a.status-music-link:hover *{
   display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;
   box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
   opacity:0;
-  transition:opacity .14s ease,background .14s ease,filter .12s ease
+  transition:opacity .14s ease,background .12s ease;
+  will-change:opacity;
+  -webkit-tap-highlight-color:transparent;
 }
 .reel-play-toggle:hover{background:#7ad491}
-.reel-play-toggle:active{filter:brightness(1.06)}
+.reel-play-toggle:active{background:#7ad491}
 .reel-card.is-ready .reel-play-toggle,
 .reel-card.no-poster .reel-play-toggle{opacity:1}
 .reel-card.is-playing .reel-play-toggle{opacity:0;pointer-events:none}
+.reel-card.is-playing .reel-play-toggle,
+.reel-card.is-buffering .reel-play-toggle{transform:translate(-50%,-50%) !important}
 .reel-progress{
   position:absolute;left:10px;right:10px;bottom:max(42px, calc(24px + var(--safe-bottom)));height:14px;border-radius:999px;
   background:rgba(255,255,255,.24);z-index:5;overflow:visible;cursor:pointer;touch-action:none
