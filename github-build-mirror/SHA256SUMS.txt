@@ -1,5 +1,5 @@
-ab6e6551806ea57e692a935b47fda01f16f3e5f1b590cac3d45d4bebe176004e  FrogTalk-1.4.1.AppImage
-09a3d2106fef02ea74b8f57bbff1f134d7ad9bfb706167579987dac417ebba9d  frogtalk_1.4.1_amd64.deb
-0f6e23cc70bbc29b48ca6490d527776436abe3fe92271b8c0db1e9fb5d167a66  FrogTalk-1.4.1-win-x64-portable.exe
-4734ff162a37f7a8445fcdad4ab13b208a68dbd00ef4f069a555e4476db772e2  FrogTalk-1.4.1-win-x64.zip
+dd33bfda6e95c1ce5b044d82899fada0e7cbb4ceb529d34008840c84bc29c79b  FrogTalk-1.4.1.AppImage
+ce74883d3fe3166fee53383a99bb39f75ed828f1696d5deff9b358cd21030f75  frogtalk_1.4.1_amd64.deb
+c504ba91513e5cf50b7cce16353d73ed87f48234c8f2eabd18e0ee833290fe3c  FrogTalk-1.4.1-win-x64-portable.exe
+5d6597cdebbc31fbbdf8bd5346f09981800aebb8a7c66174a8acc220bbc34c9c  FrogTalk-1.4.1-win-x64.zip
 383ecd8880c9fe3fbb660065db5352251156d8cdcdb7d156ee436a70c1069cb2  frogtalk-v223.apk
