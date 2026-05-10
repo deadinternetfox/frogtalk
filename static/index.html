@@ -5240,10 +5240,49 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   color:#041509;font-size:28px;line-height:1;
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
-  transition:transform .15s ease,opacity .15s ease,background .15s ease
+  transition:transform .18s ease,opacity .18s ease,background .18s ease,filter .18s ease;
+  overflow:visible;isolation:isolate;will-change:transform,opacity,filter
 }
 .ft-video-play:hover{transform:translate(-50%,-50%) scale(1.06);background:#7ad491}
 .ft-video-host.is-playing .ft-video-play{opacity:0;pointer-events:none}
+.ft-video-play::before,.ft-video-play::after,
+.reel-play-toggle::before,.reel-play-toggle::after{
+  content:"";position:absolute;inset:-4px;border-radius:50%;pointer-events:none;
+  opacity:0;border:2px solid rgba(152,255,187,.55)
+}
+.ft-video-play::before,.reel-play-toggle::before{
+  clip-path:polygon(0 18%,70% 0,100% 44%,46% 100%,0 78%)
+}
+.ft-video-play::after,.reel-play-toggle::after{
+  clip-path:polygon(32% 0,100% 24%,100% 82%,54% 100%,0 56%)
+}
+.ft-video-host.is-activating .ft-video-play,
+.reel-card.is-activating .reel-play-toggle{
+  animation:ft-play-dissolve .42s cubic-bezier(.22,.72,.2,1) forwards
+}
+.ft-video-host.is-activating .ft-video-play::before,
+.reel-card.is-activating .reel-play-toggle::before{
+  animation:ft-play-shard-left .42s cubic-bezier(.22,.72,.2,1) forwards
+}
+.ft-video-host.is-activating .ft-video-play::after,
+.reel-card.is-activating .reel-play-toggle::after{
+  animation:ft-play-shard-right .42s cubic-bezier(.22,.72,.2,1) forwards
+}
+.ft-video-host.is-activating .ft-video-play:hover,
+.reel-card.is-activating .reel-play-toggle:hover{transform:translate(-50%,-50%)}
+@keyframes ft-play-dissolve{
+  0%{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}
+  35%{opacity:1;transform:translate(-50%,-50%) scale(1.08)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(.7);filter:blur(7px)}
+}
+@keyframes ft-play-shard-left{
+  0%{opacity:.7;transform:translate(0,0) scale(1) rotate(0deg)}
+  100%{opacity:0;transform:translate(-16px,-8px) scale(.7) rotate(-24deg)}
+}
+@keyframes ft-play-shard-right{
+  0%{opacity:.62;transform:translate(0,0) scale(1) rotate(0deg)}
+  100%{opacity:0;transform:translate(15px,9px) scale(.64) rotate(21deg)}
+}
 .social-grid-item.is-video .ft-video-poster.ready{opacity:1}
 .social-grid-item.is-video video{opacity:0}
 .social-grid-item.is-video.is-playing video{opacity:1}
@@ -6200,12 +6239,13 @@ a.status-music-link:hover *{
   display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;
   box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
   opacity:0;
-  transition:opacity .15s ease,transform .15s ease,background .15s ease
+  transition:opacity .18s ease,transform .18s ease,background .18s ease,filter .18s ease;
+  overflow:visible;isolation:isolate;will-change:transform,opacity,filter
 }
 .reel-play-toggle:hover{transform:translate(-50%,-50%) scale(1.06);background:#7ad491}
 .reel-card.is-ready .reel-play-toggle,
 .reel-card.no-poster .reel-play-toggle{opacity:1}
-.reel-card.is-playing .reel-play-toggle{opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.92)}
+.reel-card.is-playing .reel-play-toggle{opacity:0;pointer-events:none}
 .reel-progress{
   position:absolute;left:10px;right:10px;bottom:max(42px, calc(24px + var(--safe-bottom)));height:14px;border-radius:999px;
   background:rgba(255,255,255,.24);z-index:5;overflow:visible;cursor:pointer;touch-action:none
@@ -9442,7 +9482,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=416"></script>
 <!-- cache bump: social share button + story/profile list UX fixes -->
-<script src="/static/js/social.js?v=1012"></script>
+<script src="/static/js/social.js?v=1013"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>

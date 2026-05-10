@@ -459,6 +459,7 @@ const Social = (() => {
           play.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
+            _kickPlayBurst(host);
             host.classList.add('is-playing');
             try { video.removeAttribute('controls'); } catch {}
             try { video.controls = false; } catch {}
@@ -473,6 +474,7 @@ const Social = (() => {
             e.preventDefault();
             e.stopPropagation();
             if (video.paused) {
+              _kickPlayBurst(host);
               host.classList.add('is-playing');
               _ftVideoBind(video);
               video.play().catch(() => {});
@@ -687,6 +689,19 @@ const Social = (() => {
     // subtree:true) walks the entire DOM on every mutation.
     mo.observe(overlay, { childList: true, subtree: true });
     _socialVideoObserverInstance = mo;
+  }
+
+  function _kickPlayBurst(node) {
+    if (!node || !node.classList) return;
+    try {
+      if (node._ftPlayBurstTimer) clearTimeout(node._ftPlayBurstTimer);
+    } catch {}
+    node.classList.remove('is-activating');
+    try { void node.offsetWidth; } catch {}
+    node.classList.add('is-activating');
+    node._ftPlayBurstTimer = setTimeout(() => {
+      try { node.classList.remove('is-activating'); } catch {}
+    }, 420);
   }
 
   function timeAgo(iso) {
@@ -5254,6 +5269,7 @@ const Social = (() => {
     if (!video) return;
     const card = video.closest('.reel-card');
     if (video.paused) {
+      if (card) _kickPlayBurst(card);
       if (card && _reelsUserPausedCard === card) _reelsUserPausedCard = null;
       video.play().catch(() => {});
     } else {
