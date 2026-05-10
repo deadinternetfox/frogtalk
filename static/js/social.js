@@ -103,25 +103,26 @@ const Social = (() => {
   // Real 4xx (401/403/404 etc.) propagate immediately so callers can render
   // the correct UI ("User not found", "Forbidden") instead of looping.
   const _TRANSIENT_STATUSES = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
-  const _attemptApi = async (path, method, body) => {
+  const _attemptApi = async (path, method, body, timeoutMs = _socialApiTimeoutMs) => {
     try {
       return await Promise.race([
         apiFetch(path, method, body),
         new Promise(resolve => setTimeout(() => resolve(
           _jsonErrorResponse(504, 'Request timed out')
-        ), _socialApiTimeoutMs)),
+        ), Math.max(1000, Number(timeoutMs) || _socialApiTimeoutMs))),
       ]);
     } catch {
       return _jsonErrorResponse(503, 'Network unavailable');
     }
   };
-  const api = async (path, method, body) => {
-    let res = await _attemptApi(path, method, body);
+  const api = async (path, method, body, opts = {}) => {
+    const timeoutMs = Number(opts?.timeoutMs) || _socialApiTimeoutMs;
+    let res = await _attemptApi(path, method, body, timeoutMs);
     // One automatic retry on transient failures so a brief CF/server hiccup
     // doesn't get rendered as "User not found" / "No posts yet" forever.
     if (!res.ok && _TRANSIENT_STATUSES.has(Number(res.status) || 0)) {
       await new Promise(r => setTimeout(r, 350));
-      const retry = await _attemptApi(path, method, body);
+      const retry = await _attemptApi(path, method, body, timeoutMs);
       // Only swap in the retry if it actually improved things — otherwise
       // keep the original response so error semantics are preserved.
       if (retry.ok || !_TRANSIENT_STATUSES.has(Number(retry.status) || 0)) {
@@ -8497,7 +8498,10 @@ const Social = (() => {
         body.media_type = _newPostMediaType;
         if (hasAttachedMedia) _updateStoryUploadOverlay(92, 'Posting…');
       }
-      const res = await api('/api/wall/posts', 'POST', body);
+      const res = await api('/api/wall/posts', 'POST', body, {
+        // Video/image posts can take much longer than feed fetches.
+        timeoutMs: hasAttachedMedia ? 180000 : _socialApiTimeoutMs,
+      });
       if (res.ok) {
         const isVideo = (_newPostFile?.type || _newPostMediaType || '').startsWith('video/');
         // Invalidate caches so the new post shows up immediately on the
