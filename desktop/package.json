@@ -1,5 +1,5 @@
 {
-  "name": "frogtalk",
+  "name": "FrogTalk",
   "version": "1.4.1",
   "description": "FrogTalk - End-to-end encrypted chat with voice & video calls",
   "main": "main.js",
