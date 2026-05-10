@@ -166,6 +166,21 @@ const Users = (() => {
     const onlineShown = onlineSource.filter(matches);
     const offlineShown = offlineSource.filter(matches);
 
+    // Publish effective presence exactly as the members list computes it,
+    // so other UI (mentions, etc.) can stay in perfect sync.
+    const presenceByNick = {};
+    for (const u of onlineSource) {
+      const nick = String((u && u.nickname) || '').toLowerCase();
+      if (!nick) continue;
+      presenceByNick[nick] = _effectivePresence(u, true);
+    }
+    for (const u of offlineSource) {
+      const nick = String((u && u.nickname) || '').toLowerCase();
+      if (!nick) continue;
+      if (!presenceByNick[nick]) presenceByNick[nick] = 'offline';
+    }
+    State.presenceByNick = presenceByNick;
+
     if (count) count.textContent = (onRoom && _channelMembers.length) ? onlineSource.length : _allUsers.length;
 
     const prevSearchValue = _filter;
@@ -216,6 +231,15 @@ const Users = (() => {
     }
   }
 
+  function _effectivePresence(u, isOnline) {
+    if (!isOnline) return 'offline';
+    const pRaw = String((u && u.presence) || '').toLowerCase();
+    if (pRaw === 'busy') return 'dnd';
+    if (pRaw === 'idle') return 'away';
+    if (pRaw === 'away' || pRaw === 'dnd' || pRaw === 'online') return pRaw;
+    return 'online';
+  }
+
   function _renderUserRow(u, isOnline) {
     const el = document.createElement('div');
     el.className = 'user-item' + (isOnline ? '' : ' offline');
@@ -233,10 +257,7 @@ const Users = (() => {
     const isSelf = !!(State.user && _sameUser(u.user_id, u.nickname, State.user.id, State.user.nickname));
     const handleNick = isSelf ? (State.user.nickname || u.nickname) : u.nickname;
     const avatarSrc = u.avatar || (isSelf ? State.user.avatar : null);
-    const pRaw = String(u.presence || '').toLowerCase();
-    const effectivePresence = isOnline
-      ? ((pRaw === 'away' || pRaw === 'dnd' || pRaw === 'online') ? pRaw : 'online')
-      : 'offline';
+    const effectivePresence = _effectivePresence(u, isOnline);
     const presenceMeta = {
       online: { color: '#4caf50', label: 'Online' },
       away: { color: '#ffc107', label: 'Away' },
@@ -371,6 +392,11 @@ const Users = (() => {
   function getPresenceByNickname(nickname) {
     const nick = String(nickname || '').toLowerCase();
     if (!nick) return 'offline';
+
+    try {
+      const fromMap = State?.presenceByNick && State.presenceByNick[nick];
+      if (fromMap) return fromMap;
+    } catch {}
 
     const onRoom = _channelRoom && State.currentRoom === _channelRoom;
     if (onRoom && _channelMembers.length) {

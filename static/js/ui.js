@@ -6565,6 +6565,11 @@ function _normalizeMentionPresence(raw) {
 function _mentionEffectivePresence(user) {
   const nick = String(user?.nickname || '').toLowerCase();
   try {
+    const fromMap = State?.presenceByNick && State.presenceByNick[nick];
+    const p = _normalizeMentionPresence(fromMap);
+    if (p) return p;
+  } catch {}
+  try {
     if (typeof Users !== 'undefined' && typeof Users.getPresenceByNickname === 'function') {
       const p = _normalizeMentionPresence(Users.getPresenceByNickname(nick));
       if (p) return p;
