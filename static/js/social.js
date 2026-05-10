@@ -4171,6 +4171,8 @@ const Social = (() => {
   function openSharedReel(postId) {
     const id = Number(postId);
     if (!Number.isFinite(id) || id <= 0) return;
+    const prevScope = _reelsScope;
+    const prevSort = _reelsSort;
     _reelsDirectLaunchId = id; // suppress scope-bar flash until reel is ready
     try {
       open('reels');
@@ -4191,7 +4193,22 @@ const Social = (() => {
           loadReelsTab().finally(() => setTimeout(() => tryFocus(16, true), 120));
           return;
         }
-        try { UI.showToast('This reel is unavailable right now', 'info'); } catch {}
+        // Fallback: direct opens from profile can target a reel that isn't
+        // currently in the active feed lens (e.g. for_you/hot). Retry once
+        // in the broadest/latest lens before declaring it unavailable.
+        if (!tryFocus._fallbackTried) {
+          tryFocus._fallbackTried = true;
+          _reelsScope = 'all';
+          _reelsSort = 'new';
+          _reelsDirectLaunchId = id;
+          loadReelsTab().finally(() => setTimeout(() => tryFocus(20, true), 120));
+          return;
+        }
+        // Graceful fallback: open post detail instead of dead-ending.
+        try { viewPostDetail(id); } catch {}
+        try { UI.showToast('Reel is not in the current feed yet — opened post view', 'info'); } catch {}
+        _reelsScope = prevScope;
+        _reelsSort = prevSort;
         return;
       }
       setTimeout(() => tryFocus(attemptsLeft - 1, reloaded), 120);
@@ -8655,6 +8672,10 @@ const Social = (() => {
         }
         UI.showToast('Posted!', 'success');
         if (isVideo) {
+          // New video posts are most discoverable in all/new; this avoids a
+          // confusing jump into for_you/hot where the fresh reel may not rank yet.
+          _reelsScope = 'all';
+          _reelsSort = 'new';
           switchTab('reels');
         } else if (_currentTab === 'profile') {
           loadProfile(State.user?.nickname);
