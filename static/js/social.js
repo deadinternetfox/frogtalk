@@ -2178,25 +2178,43 @@ const Social = (() => {
   }
   function _markRealProgress() { _storyRealProgressSeen = true; }
 
+  function _ensureStoryUploadMiniPctNode(ov) {
+    if (!ov) return null;
+    let miniPct = ov.querySelector('#story-upload-pct-mini');
+    if (miniPct) return miniPct;
+    const minBtn = ov.querySelector('#story-upload-minimize');
+    if (!minBtn || !minBtn.parentNode) return null;
+    miniPct = document.createElement('div');
+    miniPct.className = 'story-upload-bar-pct';
+    miniPct.id = 'story-upload-pct-mini';
+    miniPct.style.display = 'none';
+    miniPct.style.minWidth = '42px';
+    miniPct.style.textAlign = 'center';
+    miniPct.textContent = '0%';
+    minBtn.parentNode.insertBefore(miniPct, minBtn);
+    return miniPct;
+  }
+
   function _applyStoryUploadMinimizedState(ov, minimized) {
     if (!ov) return;
     const main = ov.querySelector('#story-upload-bar-main');
     const left = ov.querySelector('#story-upload-bar-left');
     const container = ov.querySelector('#story-upload-progress-container');
-    const miniPct = ov.querySelector('#story-upload-pct-mini');
+    const miniPct = _ensureStoryUploadMiniPctNode(ov);
     const minimizeBtn = ov.querySelector('#story-upload-minimize');
     if (!main || !left || !container || !minimizeBtn) return;
 
     if (minimized) {
       left.style.display = 'none';
       container.style.display = 'none';
-      if (miniPct) miniPct.style.display = 'inline-flex';
+      if (miniPct) miniPct.style.setProperty('display', 'inline-flex', 'important');
       minimizeBtn.textContent = '+';
       minimizeBtn.title = 'Expand';
       main.classList.add('minimized');
     } else {
       left.style.display = 'flex';
       container.style.display = 'flex';
+      if (miniPct) miniPct.style.removeProperty('display');
       if (miniPct) miniPct.style.display = 'none';
       minimizeBtn.textContent = '−';
       minimizeBtn.title = 'Minimize';
@@ -2207,22 +2225,8 @@ const Social = (() => {
   function _ensureStoryUploadOverlay() {
     let ov = document.getElementById('story-upload-overlay');
     if (ov) {
-      // Backward-compat: if overlay was created by an older script
-      // version, inject the minimized percent label so collapse mode
-      // can still show live progress text.
-      if (!ov.querySelector('#story-upload-pct-mini')) {
-        const minBtn = ov.querySelector('#story-upload-minimize');
-        if (minBtn && minBtn.parentNode) {
-          const mini = document.createElement('div');
-          mini.className = 'story-upload-bar-pct';
-          mini.id = 'story-upload-pct-mini';
-          mini.style.display = 'none';
-          mini.style.minWidth = '42px';
-          mini.style.textAlign = 'center';
-          mini.textContent = '0%';
-          minBtn.parentNode.insertBefore(mini, minBtn);
-        }
-      }
+      // Backward-compat: older overlay markup may miss the mini % node.
+      _ensureStoryUploadMiniPctNode(ov);
       _applyStoryUploadMinimizedState(ov, !!_storyUploadMinimized);
       return ov;
     }
@@ -2293,7 +2297,7 @@ const Social = (() => {
     if (!ov) return;
     const fill = ov.querySelector('#story-upload-progress-fill');
     const pct = ov.querySelector('#story-upload-pct');
-    const pctMini = ov.querySelector('#story-upload-pct-mini');
+    const pctMini = _ensureStoryUploadMiniPctNode(ov);
     const sub = ov.querySelector('#story-upload-sub');
     const title = ov.querySelector('#story-upload-title');
     const icon = ov.querySelector('#story-upload-icon');
