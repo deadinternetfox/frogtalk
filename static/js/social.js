@@ -2408,6 +2408,62 @@ const Social = (() => {
     });
   }
 
+  function _uploadWallPostWithProgress(payload, onProgress) {
+    return new Promise((resolve, reject) => {
+      try {
+        const xhr = new XMLHttpRequest();
+        let lastReportedProgress = 0;
+        const uploadTimeout = setTimeout(() => {
+          try { xhr.abort(); } catch {}
+          reject(new Error('Request timed out'));
+        }, 600000); // 10 min for large media posts on slower links
+
+        xhr.open('POST', '/api/wall/posts', true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        if (State.token) xhr.setRequestHeader('X-Session-Token', State.token);
+
+        xhr.upload.onloadstart = () => {
+          if (lastReportedProgress < 1) {
+            lastReportedProgress = 1;
+            try { onProgress(1); } catch {}
+          }
+        };
+
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          const progress = Math.round((e.loaded / e.total) * 100);
+          if (progress > lastReportedProgress) {
+            lastReportedProgress = progress;
+            try { onProgress(progress); } catch {}
+          }
+        };
+
+        xhr.onerror = () => {
+          clearTimeout(uploadTimeout);
+          reject(new Error('Network error'));
+        };
+
+        xhr.onabort = () => {
+          clearTimeout(uploadTimeout);
+          reject(new Error('Request timed out'));
+        };
+
+        xhr.onload = () => {
+          clearTimeout(uploadTimeout);
+          try { onProgress(100); } catch {}
+          const txt = xhr.responseText || '';
+          let data = null;
+          try { data = txt ? JSON.parse(txt) : null; } catch {}
+          resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data, text: txt });
+        };
+
+        xhr.send(JSON.stringify(payload));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
   function _uploadStoryFileWithProgress({ file, caption, privacy }, onProgress) {
     return new Promise((resolve, reject) => {
       try {
@@ -8454,6 +8510,7 @@ const Social = (() => {
     const shareEl = document.getElementById('snp-share-enabled');
     const shareEnabled = shareEl ? !!shareEl.checked : _newPostShareEnabled;
     const hasAttachedMedia = !!_newPostFile || !!_newPostMedia;
+    let prepUiPct = 2;
     localStorage.setItem('ft_default_allow_comments', allowCmt ? '1' : '0');
     localStorage.setItem('ft_default_share_link', shareEnabled ? '1' : '0');
     try {
@@ -8483,25 +8540,45 @@ const Social = (() => {
         if (postBtn) { postBtn.textContent = 'Uploading…'; }
         body.media_data = await UI.blobToDataURL(_newPostFile, (pct) => {
           if (!hasAttachedMedia) return;
-          const p = Math.max(5, Math.min(88, Math.round((pct / 100) * 88)));
+          const p = Math.max(5, Math.min(55, Math.round((pct / 100) * 55)));
+          prepUiPct = Math.max(prepUiPct, p);
           _updateStoryUploadOverlay(p, `Preparing media… ${pct}%`);
         });
         body.media_type = _newPostFile.type;
         if (postBtn) { postBtn.textContent = 'Posting…'; }
-        if (hasAttachedMedia) _updateStoryUploadOverlay(92, 'Posting…');
       } else if (_newPostMedia && _newPostMediaType?.startsWith('image/') && _newPostOrigMedia) {
         body.media_data = await applyFilterToImage(_newPostOrigMedia);
         body.media_type = 'image/jpeg';
-        if (hasAttachedMedia) _updateStoryUploadOverlay(92, 'Posting…');
+        prepUiPct = Math.max(prepUiPct, 45);
+        if (hasAttachedMedia) _updateStoryUploadOverlay(prepUiPct, 'Preparing media…');
       } else if (_newPostMedia) {
         body.media_data = _newPostMedia;
         body.media_type = _newPostMediaType;
-        if (hasAttachedMedia) _updateStoryUploadOverlay(92, 'Posting…');
+        prepUiPct = Math.max(prepUiPct, 45);
+        if (hasAttachedMedia) _updateStoryUploadOverlay(prepUiPct, 'Preparing media…');
       }
-      const res = await api('/api/wall/posts', 'POST', body, {
-        // Video/image posts can take much longer than feed fetches.
-        timeoutMs: hasAttachedMedia ? 180000 : _socialApiTimeoutMs,
-      });
+      let res = null;
+      let postErrData = null;
+      if (hasAttachedMedia) {
+        const phaseStart = Math.max(20, Math.min(70, prepUiPct + 2));
+        let shown = phaseStart;
+        _updateStoryUploadOverlay(shown, 'Uploading… 0%');
+        const up = await _uploadWallPostWithProgress(body, (pct) => {
+          const mapped = Math.max(shown, Math.min(98, phaseStart + Math.round((Math.max(0, Math.min(100, pct)) / 100) * (98 - phaseStart))));
+          shown = mapped;
+          _updateStoryUploadOverlay(mapped, `Uploading… ${Math.max(0, Math.min(100, Math.round(pct)))}%`);
+        });
+        postErrData = up?.data || null;
+        res = {
+          ok: !!up?.ok,
+          status: Number(up?.status || 0),
+          json: async () => (up?.data || {}),
+        };
+      } else {
+        res = await api('/api/wall/posts', 'POST', body, {
+          timeoutMs: _socialApiTimeoutMs,
+        });
+      }
       if (res.ok) {
         const isVideo = (_newPostFile?.type || _newPostMediaType || '').startsWith('video/');
         // Invalidate caches so the new post shows up immediately on the
@@ -8540,7 +8617,7 @@ const Social = (() => {
           switchTab('profile');
         }
       } else {
-        const data = await res.json();
+        const data = postErrData || await res.json();
         if (hasAttachedMedia) {
           try {
             const ov = _ensureStoryUploadOverlay();
