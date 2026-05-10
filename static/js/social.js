@@ -460,7 +460,6 @@ const Social = (() => {
             e.preventDefault();
             e.stopPropagation();
             _kickPlayBurst(host);
-            host.classList.add('is-playing');
             try { video.removeAttribute('controls'); } catch {}
             try { video.controls = false; } catch {}
             try { video.muted = false; } catch {}
@@ -475,7 +474,6 @@ const Social = (() => {
             e.stopPropagation();
             if (video.paused) {
               _kickPlayBurst(host);
-              host.classList.add('is-playing');
               _ftVideoBind(video);
               video.play().catch(() => {});
             } else {
@@ -701,7 +699,7 @@ const Social = (() => {
     node.classList.add('is-activating');
     node._ftPlayBurstTimer = setTimeout(() => {
       try { node.classList.remove('is-activating'); } catch {}
-    }, 420);
+    }, 760);
   }
 
   function timeAgo(iso) {

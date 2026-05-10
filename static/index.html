@@ -5258,30 +5258,30 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 .ft-video-host.is-activating .ft-video-play,
 .reel-card.is-activating .reel-play-toggle{
-  animation:ft-play-dissolve .42s cubic-bezier(.22,.72,.2,1) forwards
+  animation:ft-play-dissolve .76s cubic-bezier(.2,.7,.2,1) forwards
 }
 .ft-video-host.is-activating .ft-video-play::before,
 .reel-card.is-activating .reel-play-toggle::before{
-  animation:ft-play-shard-left .42s cubic-bezier(.22,.72,.2,1) forwards
+  animation:ft-play-shard-left .76s cubic-bezier(.2,.7,.2,1) forwards
 }
 .ft-video-host.is-activating .ft-video-play::after,
 .reel-card.is-activating .reel-play-toggle::after{
-  animation:ft-play-shard-right .42s cubic-bezier(.22,.72,.2,1) forwards
+  animation:ft-play-shard-right .76s cubic-bezier(.2,.7,.2,1) forwards
 }
 .ft-video-host.is-activating .ft-video-play:hover,
 .reel-card.is-activating .reel-play-toggle:hover{transform:translate(-50%,-50%)}
 @keyframes ft-play-dissolve{
   0%{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}
-  35%{opacity:1;transform:translate(-50%,-50%) scale(1.08)}
-  100%{opacity:0;transform:translate(-50%,-50%) scale(.7);filter:blur(7px)}
+  55%{opacity:.92;transform:translate(-50%,-50%) scale(1.05);filter:blur(0.8px)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(.86);filter:blur(4.5px)}
 }
 @keyframes ft-play-shard-left{
-  0%{opacity:.7;transform:translate(0,0) scale(1) rotate(0deg)}
-  100%{opacity:0;transform:translate(-16px,-8px) scale(.7) rotate(-24deg)}
+  0%{opacity:.55;transform:translate(0,0) scale(1) rotate(0deg)}
+  100%{opacity:0;transform:translate(-10px,-5px) scale(.82) rotate(-14deg)}
 }
 @keyframes ft-play-shard-right{
-  0%{opacity:.62;transform:translate(0,0) scale(1) rotate(0deg)}
-  100%{opacity:0;transform:translate(15px,9px) scale(.64) rotate(21deg)}
+  0%{opacity:.5;transform:translate(0,0) scale(1) rotate(0deg)}
+  100%{opacity:0;transform:translate(9px,6px) scale(.8) rotate(13deg)}
 }
 .social-grid-item.is-video .ft-video-poster.ready{opacity:1}
 .social-grid-item.is-video video{opacity:0}
@@ -9482,7 +9482,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=416"></script>
 <!-- cache bump: social share button + story/profile list UX fixes -->
-<script src="/static/js/social.js?v=1013"></script>
+<script src="/static/js/social.js?v=1014"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>
