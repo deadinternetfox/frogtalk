@@ -7282,7 +7282,8 @@ const Social = (() => {
     });
   }
 
-  function renderFeedPost(p) {
+  function renderFeedPost(p, opts = {}) {
+    const detailMode = !!opts?.detailMode;
     const reactions = p.reactions || [];
 
     let mediaHtml = '';
@@ -7297,7 +7298,9 @@ const Social = (() => {
         // "new post with image shows up missing the image").
         mediaHtml = `<div class="sf-media"><img src="${esc(_authMediaSrc(p.media_data))}" alt="" loading="lazy" decoding="async" onclick="if(typeof openLightbox==='function')openLightbox(this.src)" onerror="this.closest('.sf-media')?.remove()"></div>`;
       } else if (p.media_type.startsWith('video/')) {
-        mediaHtml = `<div class="sf-media"><video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
+        mediaHtml = detailMode
+          ? `<div class="sf-media"><video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`
+          : `<div class="sf-media" onclick="Social.viewPostDetail(${Number(p.id) || 0})" style="cursor:pointer"><video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
       } else if (p.media_type.startsWith('music/')) {
         mediaHtml = _renderMusicCard(p);
         isMusicPost = true;
@@ -8975,8 +8978,9 @@ const Social = (() => {
       }
       const p = await res.json();
       p.reactions = p.reactions || [];
-      overlay.innerHTML = `<div class="spd-inner"><button class="social-close-btn" onclick="Social.closePostDetail()" style="position:absolute;top:8px;right:8px;z-index:1">✕</button>${renderFeedPost(p)}</div>`;
+      overlay.innerHTML = `<div class="spd-inner"><button class="social-close-btn" onclick="Social.closePostDetail()" style="position:absolute;top:8px;right:8px;z-index:1">✕</button>${renderFeedPost(p, { detailMode: true })}</div>`;
       overlay.style.display = 'flex';
+      try { _hydrateVideoThumbs(overlay); } catch {}
     } catch {
       overlay.innerHTML = `<div class="spd-inner" style="padding:24px;color:#a1a1a1">Could not load post</div>`;
     }
