@@ -5255,9 +5255,13 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   opacity:0;pointer-events:none;z-index:3;
   box-shadow:0 0 12px rgba(89,197,117,.2);
   transition:opacity .12s ease;
-  animation:reel-spin .82s linear infinite
+  animation:ft-buffer-spin .82s linear infinite
 }
 .ft-video-host.is-buffering .ft-video-buffer{opacity:1}
+@keyframes ft-buffer-spin{
+  from{transform:translate(-50%,-50%) rotate(0deg)}
+  to{transform:translate(-50%,-50%) rotate(360deg)}
+}
 .social-grid-item.is-video .ft-video-poster.ready{opacity:1}
 .social-grid-item.is-video video{opacity:0}
 .social-grid-item.is-video.is-playing video{opacity:1}
