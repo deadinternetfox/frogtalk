@@ -6637,12 +6637,14 @@ function handleMentionInput(input) {
   dropdown.innerHTML = filtered.map((u, i) => {
     const cls = u._presence || _mentionEffectivePresence(u);
     const labelMap = { online: 'Online', away: 'Away', dnd: 'Busy', offline: 'Offline' };
+    const colorMap = { online: '#4caf50', away: '#ffc107', dnd: '#f44336', offline: '#666' };
     const label = labelMap[cls] || 'Offline';
+    const dotColor = colorMap[cls] || colorMap.offline;
     return `
       <div class="mention-item${i === 0 ? ' selected' : ''}" data-nick="${UI.escHtml(u.nickname)}" onclick="insertMention('${UI.escHtml(u.nickname)}')">
         ${UI.avatarEl(u.avatar, u.nickname, 24)}
         <span class="mention-nick">${UI.escHtml(u.nickname)}</span>
-        <span class="mention-presence ${cls}" title="${label}"></span>
+        <span class="mention-presence ${cls}" title="${label}" style="background:${dotColor}"></span>
       </div>
     `;
   }).join('');
