@@ -2180,7 +2180,25 @@ const Social = (() => {
 
   function _ensureStoryUploadOverlay() {
     let ov = document.getElementById('story-upload-overlay');
-    if (ov) return ov;
+    if (ov) {
+      // Backward-compat: if overlay was created by an older script
+      // version, inject the minimized percent label so collapse mode
+      // can still show live progress text.
+      if (!ov.querySelector('#story-upload-pct-mini')) {
+        const minBtn = ov.querySelector('#story-upload-minimize');
+        if (minBtn && minBtn.parentNode) {
+          const mini = document.createElement('div');
+          mini.className = 'story-upload-bar-pct';
+          mini.id = 'story-upload-pct-mini';
+          mini.style.display = 'none';
+          mini.style.minWidth = '42px';
+          mini.style.textAlign = 'center';
+          mini.textContent = '0%';
+          minBtn.parentNode.insertBefore(mini, minBtn);
+        }
+      }
+      return ov;
+    }
     ov = document.createElement('div');
     ov.id = 'story-upload-overlay';
     ov.innerHTML = `
