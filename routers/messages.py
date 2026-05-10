@@ -403,12 +403,21 @@ async def get_mentionable_users(
 ):
     """Get all users for @mention autocomplete.
 
-    The DB `presence` column is best-effort and frequently stale (e.g. when
-    a client disconnects without cleanly setting offline). For the @mention
-    dropdown we want a live answer, so we override each user's presence with
-    the current websocket connection state. A user is considered online iff
-    they currently have at least one active websocket.
+    Build mention presence from live websocket connectivity plus stored
+    rich statuses. If a user is connected, preserve explicit away/busy-like
+    statuses from DB; otherwise force offline.
     """
+
+    def _normalize_presence(raw: object) -> str:
+        p = str(raw or "").strip().lower()
+        if p == "busy":
+            return "dnd"
+        if p == "idle":
+            return "away"
+        if p in {"online", "away", "dnd", "offline", "invisible"}:
+            return p
+        return "online"
+
     room_id = None
     if room_name:
         room = db.get_room(room_name)
@@ -426,7 +435,14 @@ async def get_mentionable_users(
         try:
             uid = u.get("id")
             if uid is not None:
-                u["presence"] = "online" if manager.is_user_online(int(uid)) else "offline"
+                is_online = manager.is_user_online(int(uid))
+                p = _normalize_presence(u.get("presence"))
+                if is_online:
+                    # Keep richer statuses while connected; do not collapse to
+                    # plain "online" or mention dots diverge from members list.
+                    u["presence"] = p if p in {"away", "dnd", "invisible"} else "online"
+                else:
+                    u["presence"] = "offline"
         except Exception:
             # Fall back to whatever the DB reported on any error.
             pass
