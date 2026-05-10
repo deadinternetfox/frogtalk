@@ -3909,7 +3909,6 @@ const Social = (() => {
   let _reelsCurrentCard = null;
   let _reelsObserver = null;
   let _reelsScrollSnap = null;
-  let _reelsLastScrollTs = 0;
   let _reelsSeekLockUntil = 0;
   let _reelsSeekCard = null;
   let _reelsSeekReleaseUntil = 0;
@@ -4392,6 +4391,7 @@ const Social = (() => {
               const v = entry.target.querySelector('video');
               if (v && !v.paused) { try { v.muted = true; v.pause(); } catch {} }
               entry.target.classList.remove('is-playing');
+              entry.target.classList.remove('is-buffering');
               return;
             }
             // Any visibility — promote this card's video to preload="auto"
@@ -4483,6 +4483,7 @@ const Social = (() => {
                   try { v.muted = true; v.pause(); } catch {}
                 }
                 other.classList.remove('is-playing');
+                other.classList.remove('is-buffering');
               });
             } catch {}
           }
@@ -4506,7 +4507,6 @@ const Social = (() => {
         let scrollRaf = 0;
         let settleTimer = 0;
         const onScroll = () => {
-          _reelsLastScrollTs = Date.now();
           if (scrollRaf) return;
           scrollRaf = requestAnimationFrame(() => {
             scrollRaf = 0;
@@ -4582,6 +4582,7 @@ const Social = (() => {
         try { v.muted = true; v.pause(); } catch {}
       });
       document.querySelectorAll('.reels-snap .reel-card.is-playing').forEach(c => c.classList.remove('is-playing'));
+      document.querySelectorAll('.reels-snap .reel-card.is-buffering').forEach(c => c.classList.remove('is-buffering'));
       _reelsCurrentCard = card;
       _reelsCurrentVideo = null;
       _reelsActivateGen++;
@@ -4634,6 +4635,7 @@ const Social = (() => {
         try { v.pause(); } catch {}
       }
       c.classList.remove('is-playing');
+      c.classList.remove('is-buffering');
     });
     const v = card.querySelector('video');
     if (!v) return;
@@ -4692,9 +4694,11 @@ const Social = (() => {
     // was scheduled. Drop silently so we don't double-play.
     if (gen !== _reelsActivateGen) return;
     if (!card || !video || card !== _reelsCurrentCard) return;
+    card.classList.add('is-buffering');
     try { video.muted = _reelsMuted; } catch {}
     const run = video.play?.();
     if (!run || typeof run.catch !== 'function') {
+      card.classList.remove('is-buffering');
       card.classList.add('is-playing');
       return;
     }
@@ -4706,9 +4710,11 @@ const Social = (() => {
         try { video.pause(); } catch {}
         return;
       }
+      card.classList.remove('is-buffering');
       if (_reelsUserPausedCard === card) _reelsUserPausedCard = null;
       card.classList.add('is-playing');
     }).catch(() => {
+      card.classList.remove('is-buffering');
       if (gen !== _reelsActivateGen) return;
       if (card !== _reelsCurrentCard || attempt >= 6) return;
       const retry = () => {
@@ -5262,10 +5268,6 @@ const Social = (() => {
       // no custom touch-vs-scroll detector needed (every previous
       // attempt at one created its own regressions).
       video.addEventListener('click', (e) => {
-        if (Date.now() - _reelsLastScrollTs < 240) {
-          try { e.preventDefault(); e.stopPropagation(); } catch {}
-          return;
-        }
         try { e.preventDefault(); e.stopPropagation(); } catch {}
         toggleReelPlayback(e, video);
       });
