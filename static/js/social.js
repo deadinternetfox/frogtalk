@@ -7889,6 +7889,19 @@ const Social = (() => {
 
   async function promptDeletePostMedia(postId) {
     if (!postId) return;
+    const cached = _findCachedPostById(postId);
+    if (cached) {
+      const mine = Number(cached.user_id || 0) === Number(State.user?.id || 0);
+      if (!mine) {
+        try { UI.showToast('Only your own posts can be modified', 'info'); } catch {}
+        return;
+      }
+      const hasText = !!String(cached.content || '').trim();
+      const hasExtra = !!String(cached.track_title || '').trim() || !!String(cached.track_room || '').trim() || !!String(cached.track_mood || '').trim();
+      const canDeleteMediaOnly = hasText || hasExtra;
+      await openMediaDeleteDialog(cached, canDeleteMediaOnly);
+      return;
+    }
     try {
       const res = await api(`/api/wall/posts/${postId}`);
       if (!res.ok) return;
@@ -7905,6 +7918,23 @@ const Social = (() => {
     } catch {
       try { UI.showToast('Could not load post', 'error'); } catch {}
     }
+  }
+
+  function _findCachedPostById(postId) {
+    const pid = Number(postId || 0);
+    if (!pid) return null;
+    let found = null;
+    const scan = (posts) => {
+      if (found || !Array.isArray(posts)) return;
+      found = posts.find(p => Number(p?.id || 0) === pid) || null;
+    };
+    scan(_feedCache?.posts);
+    _profilePostsCache.forEach(entry => scan(entry?.posts));
+    _profileRepostsCache.forEach(entry => scan(entry?.posts));
+    _exploreCache.forEach(entry => scan(entry?.posts));
+    _reelsCache.forEach(entry => scan(entry?.posts));
+    _musicCache.forEach(entry => scan(entry?.posts));
+    return found;
   }
 
   async function openMediaDeleteDialog(post, canDeleteMediaOnly) {
