@@ -6592,12 +6592,18 @@ function handleMentionInput(input) {
   _mentionIndex = 0;
   
   dropdown.innerHTML = filtered.map((u, i) => {
-    const online = u.presence === 'online';
+    const rawPresence = String(u?.presence || '').toLowerCase();
+    const presence = (rawPresence === 'away' || rawPresence === 'dnd' || rawPresence === 'busy' || rawPresence === 'offline')
+      ? rawPresence
+      : 'online';
+    const cls = presence === 'busy' ? 'dnd' : presence;
+    const labelMap = { online: 'Online', away: 'Away', dnd: 'Busy', busy: 'Busy', offline: 'Offline' };
+    const label = labelMap[presence] || 'Online';
     return `
       <div class="mention-item${i === 0 ? ' selected' : ''}" data-nick="${UI.escHtml(u.nickname)}" onclick="insertMention('${UI.escHtml(u.nickname)}')">
         ${UI.avatarEl(u.avatar, u.nickname, 24)}
         <span class="mention-nick">${UI.escHtml(u.nickname)}</span>
-        <span class="mention-presence ${online ? 'online' : 'offline'}" title="${online ? 'Online' : 'Offline'}"></span>
+        <span class="mention-presence ${cls}" title="${label}"></span>
       </div>
     `;
   }).join('');
