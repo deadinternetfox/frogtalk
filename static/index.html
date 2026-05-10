@@ -6314,7 +6314,7 @@ a.status-music-link:hover *{
 }
 /* Mute button */
 .reel-mute-btn{
-  position:absolute;top:14px;right:14px;
+  position:absolute;top:22px;right:14px;
   width:38px;height:38px;border-radius:50%;
   background:rgba(0,0,0,.45);backdrop-filter:blur(4px);
   border:none;cursor:pointer;font-size:18px;color:#fff;
@@ -6324,6 +6324,7 @@ a.status-music-link:hover *{
 }
 .reel-mute-btn:hover{background:rgba(0,0,0,.65)}
 body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
+@media(max-width:520px){.reel-mute-btn{top:26px}}
 @media(max-width:500px){body[data-social-nowplaying="1"] .reel-mute-btn{top:72px}}
 /* Empty / loading states */
 .reels-empty{
