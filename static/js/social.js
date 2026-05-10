@@ -2200,6 +2200,7 @@ const Social = (() => {
               </div>
               <div class="story-upload-bar-pct" id="story-upload-pct">0%</div>
             </div>
+            <div class="story-upload-bar-pct" id="story-upload-pct-mini" style="display:none;min-width:42px;text-align:center">0%</div>
             <button class="story-upload-bar-minimize" id="story-upload-minimize" type="button" title="Minimize">−</button>
             <button class="story-upload-bar-cancel" id="story-upload-cancel" type="button" title="Cancel upload">✕</button>
           </div>
@@ -2219,15 +2220,18 @@ const Social = (() => {
         const main = ov.querySelector('#story-upload-bar-main');
         const left = ov.querySelector('#story-upload-bar-left');
         const container = ov.querySelector('#story-upload-progress-container');
+        const miniPct = ov.querySelector('#story-upload-pct-mini');
         if (_storyUploadMinimized) {
           left.style.display = 'none';
           container.style.display = 'none';
+          if (miniPct) miniPct.style.display = 'block';
           minimizeBtn.textContent = '+';
           minimizeBtn.title = 'Expand';
           main.classList.add('minimized');
         } else {
           left.style.display = 'flex';
           container.style.display = 'flex';
+          if (miniPct) miniPct.style.display = 'none';
           minimizeBtn.textContent = '−';
           minimizeBtn.title = 'Minimize';
           main.classList.remove('minimized');
@@ -2261,6 +2265,7 @@ const Social = (() => {
     if (!ov) return;
     const fill = ov.querySelector('#story-upload-progress-fill');
     const pct = ov.querySelector('#story-upload-pct');
+    const pctMini = ov.querySelector('#story-upload-pct-mini');
     const sub = ov.querySelector('#story-upload-sub');
     const title = ov.querySelector('#story-upload-title');
     const icon = ov.querySelector('#story-upload-icon');
@@ -2271,6 +2276,7 @@ const Social = (() => {
       fill.style.width = `${p}%`;
     }
     if (pct) pct.textContent = `${Math.round(p)}%`;
+    if (pctMini) pctMini.textContent = `${Math.round(p)}%`;
     if (sub) {
       // Caller-provided text always wins so we don't get stuck at
       // "Connecting..." when a large video uploads without progress events.
