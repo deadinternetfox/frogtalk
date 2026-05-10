@@ -448,9 +448,18 @@ const Social = (() => {
         const poster = document.createElement('div');
         poster.className = 'ft-video-poster';
         host.appendChild(poster);
+        if (host.classList.contains('sf-media') && !host.querySelector('.ft-video-buffer')) {
+          const buffer = document.createElement('div');
+          buffer.className = 'ft-video-buffer';
+          buffer.setAttribute('aria-hidden', 'true');
+          host.appendChild(buffer);
+        }
         try { video.removeAttribute('controls'); } catch {}
         try { video.controls = false; } catch {}
         if (host.classList.contains('sf-media')) {
+          const setBuffering = (on) => {
+            host.classList.toggle('is-buffering', !!on);
+          };
           const play = document.createElement('button');
           play.type = 'button';
           play.className = 'ft-video-play';
@@ -459,25 +468,33 @@ const Social = (() => {
           play.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
+            setBuffering(true);
             try { video.removeAttribute('controls'); } catch {}
             try { video.controls = false; } catch {}
             try { video.muted = false; } catch {}
             // Ensure src is bound before play (covers the rare case where
             // the user taps before the IntersectionObserver fires).
             _ftVideoBind(video);
-            try { video.play().catch(() => {}); } catch {}
+            try { video.play().catch(() => setBuffering(false)); } catch { setBuffering(false); }
           };
           host.appendChild(play);
           video.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
             if (video.paused) {
+              setBuffering(true);
               _ftVideoBind(video);
-              video.play().catch(() => {});
+              video.play().catch(() => setBuffering(false));
             } else {
               video.pause();
             }
           });
+          video.addEventListener('waiting', () => { if (!video.paused) setBuffering(true); });
+          video.addEventListener('stalled', () => { if (!video.paused) setBuffering(true); });
+          video.addEventListener('playing', () => setBuffering(false));
+          video.addEventListener('canplay', () => setBuffering(false));
+          video.addEventListener('pause', () => setBuffering(false));
+          video.addEventListener('ended', () => setBuffering(false));
         }
         // Grid tiles try a sequence of seek positions until we get a
         // non-black frame. The classic failure mode was: video has a
@@ -4931,6 +4948,9 @@ const Social = (() => {
       const prog = card.querySelector('.reel-progress > span');
       const progWrap = card.querySelector('.reel-progress');
       if (!video) return;
+      const setReelBuffering = (on) => {
+        card.classList.toggle('is-buffering', !!on);
+      };
       try { video.removeAttribute('controls'); } catch {}
       try { video.controls = false; } catch {}
       let posterDrawn = false;
@@ -5211,13 +5231,19 @@ const Social = (() => {
         }, { passive: true, signal: scrubAbort.signal });
       }
       video.addEventListener('play', () => card.classList.add('is-playing'));
+      video.addEventListener('waiting', () => { if (!video.paused || card === _reelsCurrentCard) setReelBuffering(true); });
+      video.addEventListener('stalled', () => { if (!video.paused || card === _reelsCurrentCard) setReelBuffering(true); });
+      video.addEventListener('playing', () => setReelBuffering(false));
+      video.addEventListener('canplay', () => setReelBuffering(false));
       video.addEventListener('pause', () => {
+        setReelBuffering(false);
         // Activation can emit transient pause events before first real frame;
         // keep the playing-state UI during that short bootstrap window.
         if (card === _reelsCurrentCard && !video.ended && Number(video.currentTime || 0) <= 0.15) return;
         card.classList.remove('is-playing');
       });
       video.addEventListener('ended', () => {
+        setReelBuffering(false);
         card.classList.remove('is-playing');
         if (_currentTab !== 'reels') return;
         // Don't gate on `_reelsCurrentCard !== card`: if the user nudged
@@ -5252,8 +5278,9 @@ const Social = (() => {
     if (!video) return;
     const card = video.closest('.reel-card');
     if (video.paused) {
+      if (card) card.classList.add('is-buffering');
       if (card && _reelsUserPausedCard === card) _reelsUserPausedCard = null;
-      video.play().catch(() => {});
+      video.play().catch(() => { if (card) card.classList.remove('is-buffering'); });
     } else {
       if (card) _reelsUserPausedCard = card;
       video.pause();
@@ -5578,6 +5605,7 @@ const Social = (() => {
     return `
       <div class="reel-card${thumbSrc ? ' has-thumb' : ''}" data-post-id="${post.id}">
         <div class="reel-loading-layer"><span class="reel-loading-spinner"></span></div>
+        <div class="reel-buffer-layer"><span class="reel-buffer-spinner"></span></div>
         <div class="reel-video-poster"${posterStyle}></div>
         <video src="${videoSrc}"${posterAttr} playsinline preload="metadata" muted></video>
         <button class="reel-play-toggle" title="Play or pause" onclick="Social.toggleReelPlayback(event,this.previousElementSibling)">▶</button>
