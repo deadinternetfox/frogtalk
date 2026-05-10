@@ -8566,7 +8566,8 @@ const Social = (() => {
         const up = await _uploadWallPostWithProgress(body, (pct) => {
           const mapped = Math.max(shown, Math.min(98, phaseStart + Math.round((Math.max(0, Math.min(100, pct)) / 100) * (98 - phaseStart))));
           shown = mapped;
-          _updateStoryUploadOverlay(mapped, `Uploading… ${Math.max(0, Math.min(100, Math.round(pct)))}%`);
+          // Use mapped percent for both bar and text for single source of truth
+          _updateStoryUploadOverlay(mapped, `Uploading… ${Math.round(mapped)}%`);
         });
         postErrData = up?.data || null;
         res = {
