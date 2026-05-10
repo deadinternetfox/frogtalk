@@ -6554,6 +6554,30 @@ function syncMentionDropdownItemsTheme(dropdownEl) {
   };
 }
 
+function _normalizeMentionPresence(raw) {
+  const p = String(raw || '').toLowerCase();
+  if (p === 'busy') return 'dnd';
+  if (p === 'idle') return 'away';
+  if (p === 'online' || p === 'away' || p === 'dnd' || p === 'offline') return p;
+  return '';
+}
+
+function _mentionEffectivePresence(user) {
+  const nick = String(user?.nickname || '').toLowerCase();
+  // Match members-list behavior: prefer live WS-backed presence in the
+  // current room over mention API snapshots.
+  const live = Array.isArray(State?.onlineUsers)
+    ? State.onlineUsers.find(u => String(u?.nickname || '').toLowerCase() === nick)
+    : null;
+  const livePresence = _normalizeMentionPresence(live?.presence);
+  if (livePresence) return livePresence;
+
+  const apiPresence = _normalizeMentionPresence(user?.presence);
+  if (apiPresence) return apiPresence;
+
+  return 'offline';
+}
+
 function handleMentionInput(input) {
   const text = input.value;
   const cursorPos = input.selectionStart;
@@ -6578,9 +6602,17 @@ function handleMentionInput(input) {
   loadMentionUsers();
   
   const query = atMatch[1].toLowerCase();
-  const filtered = _mentionUsers.filter(u => 
-    u.nickname.toLowerCase().includes(query)
-  ).slice(0, 8);
+  const presenceRank = { online: 0, away: 1, dnd: 2, offline: 3 };
+  const filtered = _mentionUsers
+    .filter(u => u.nickname.toLowerCase().includes(query))
+    .map(u => ({ ...u, _presence: _mentionEffectivePresence(u) }))
+    .sort((a, b) => {
+      const ra = presenceRank[a._presence] ?? 99;
+      const rb = presenceRank[b._presence] ?? 99;
+      if (ra !== rb) return ra - rb;
+      return String(a.nickname || '').localeCompare(String(b.nickname || ''));
+    })
+    .slice(0, 8);
   
   if (!filtered.length) {
     dropdown.style.display = 'none';
@@ -6592,13 +6624,9 @@ function handleMentionInput(input) {
   _mentionIndex = 0;
   
   dropdown.innerHTML = filtered.map((u, i) => {
-    const rawPresence = String(u?.presence || '').toLowerCase();
-    const presence = (rawPresence === 'away' || rawPresence === 'dnd' || rawPresence === 'busy' || rawPresence === 'offline')
-      ? rawPresence
-      : 'online';
-    const cls = presence === 'busy' ? 'dnd' : presence;
-    const labelMap = { online: 'Online', away: 'Away', dnd: 'Busy', busy: 'Busy', offline: 'Offline' };
-    const label = labelMap[presence] || 'Online';
+    const cls = u._presence || _mentionEffectivePresence(u);
+    const labelMap = { online: 'Online', away: 'Away', dnd: 'Busy', offline: 'Offline' };
+    const label = labelMap[cls] || 'Offline';
     return `
       <div class="mention-item${i === 0 ? ' selected' : ''}" data-nick="${UI.escHtml(u.nickname)}" onclick="insertMention('${UI.escHtml(u.nickname)}')">
         ${UI.avatarEl(u.avatar, u.nickname, 24)}
