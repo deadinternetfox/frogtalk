@@ -5240,9 +5240,10 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   color:#041509;font-size:28px;line-height:1;
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
-  transition:opacity .14s ease,transform .14s ease,background .14s ease
+  transition:opacity .14s ease,background .14s ease,filter .12s ease
 }
-.ft-video-play:hover{transform:translate(-50%,-50%) scale(1.06);background:#7ad491}
+.ft-video-play:hover{background:#7ad491}
+.ft-video-play:active{filter:brightness(1.06)}
 .ft-video-host.is-playing .ft-video-play{opacity:0;pointer-events:none}
 .ft-video-host.is-buffering .ft-video-play{opacity:0;pointer-events:none}
 .ft-video-buffer{
@@ -6237,9 +6238,10 @@ a.status-music-link:hover *{
   display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;
   box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
   opacity:0;
-  transition:opacity .14s ease,transform .14s ease,background .14s ease
+  transition:opacity .14s ease,background .14s ease,filter .12s ease
 }
-.reel-play-toggle:hover{transform:translate(-50%,-50%) scale(1.06);background:#7ad491}
+.reel-play-toggle:hover{background:#7ad491}
+.reel-play-toggle:active{filter:brightness(1.06)}
 .reel-card.is-ready .reel-play-toggle,
 .reel-card.no-poster .reel-play-toggle{opacity:1}
 .reel-card.is-playing .reel-play-toggle{opacity:0;pointer-events:none}
