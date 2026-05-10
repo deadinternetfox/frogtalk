@@ -2178,6 +2178,32 @@ const Social = (() => {
   }
   function _markRealProgress() { _storyRealProgressSeen = true; }
 
+  function _applyStoryUploadMinimizedState(ov, minimized) {
+    if (!ov) return;
+    const main = ov.querySelector('#story-upload-bar-main');
+    const left = ov.querySelector('#story-upload-bar-left');
+    const container = ov.querySelector('#story-upload-progress-container');
+    const miniPct = ov.querySelector('#story-upload-pct-mini');
+    const minimizeBtn = ov.querySelector('#story-upload-minimize');
+    if (!main || !left || !container || !minimizeBtn) return;
+
+    if (minimized) {
+      left.style.display = 'none';
+      container.style.display = 'none';
+      if (miniPct) miniPct.style.display = 'inline-flex';
+      minimizeBtn.textContent = '+';
+      minimizeBtn.title = 'Expand';
+      main.classList.add('minimized');
+    } else {
+      left.style.display = 'flex';
+      container.style.display = 'flex';
+      if (miniPct) miniPct.style.display = 'none';
+      minimizeBtn.textContent = '−';
+      minimizeBtn.title = 'Minimize';
+      main.classList.remove('minimized');
+    }
+  }
+
   function _ensureStoryUploadOverlay() {
     let ov = document.getElementById('story-upload-overlay');
     if (ov) {
@@ -2197,6 +2223,7 @@ const Social = (() => {
           minBtn.parentNode.insertBefore(mini, minBtn);
         }
       }
+      _applyStoryUploadMinimizedState(ov, !!_storyUploadMinimized);
       return ov;
     }
     ov = document.createElement('div');
@@ -2235,25 +2262,7 @@ const Social = (() => {
     if (minimizeBtn) {
       minimizeBtn.addEventListener('click', () => {
         _storyUploadMinimized = !_storyUploadMinimized;
-        const main = ov.querySelector('#story-upload-bar-main');
-        const left = ov.querySelector('#story-upload-bar-left');
-        const container = ov.querySelector('#story-upload-progress-container');
-        const miniPct = ov.querySelector('#story-upload-pct-mini');
-        if (_storyUploadMinimized) {
-          left.style.display = 'none';
-          container.style.display = 'none';
-          if (miniPct) miniPct.style.display = 'block';
-          minimizeBtn.textContent = '+';
-          minimizeBtn.title = 'Expand';
-          main.classList.add('minimized');
-        } else {
-          left.style.display = 'flex';
-          container.style.display = 'flex';
-          if (miniPct) miniPct.style.display = 'none';
-          minimizeBtn.textContent = '−';
-          minimizeBtn.title = 'Minimize';
-          main.classList.remove('minimized');
-        }
+        _applyStoryUploadMinimizedState(ov, !!_storyUploadMinimized);
       });
     }
     
@@ -2275,6 +2284,7 @@ const Social = (() => {
         _storyNotify('Upload cancelled', 'info');
       });
     }
+    _applyStoryUploadMinimizedState(ov, !!_storyUploadMinimized);
     return ov;
   }
 
@@ -2290,6 +2300,7 @@ const Social = (() => {
     const p = Math.max(0, Math.min(100, Number(percent || 0)));
     
     ov.style.display = 'flex';
+    _applyStoryUploadMinimizedState(ov, !!_storyUploadMinimized);
     if (fill) {
       fill.style.width = `${p}%`;
     }
