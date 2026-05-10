@@ -2274,7 +2274,16 @@ const Social = (() => {
     if (sub) {
       // Caller-provided text always wins so we don't get stuck at
       // "Connecting..." when a large video uploads without progress events.
-      if (text) sub.textContent = text;
+      if (text) {
+        let syncedText = String(text);
+        // Single source of truth: if a caller includes a percentage in
+        // subtitle text, rewrite it to the same rounded value used by
+        // the bar/pct indicator so they can never drift apart.
+        if (/\d+\s*%/.test(syncedText)) {
+          syncedText = syncedText.replace(/\d+\s*%/g, `${Math.round(p)}%`);
+        }
+        sub.textContent = syncedText;
+      }
       else if (p <= 1) sub.textContent = 'Connecting…';
       else if (p < 100) sub.textContent = `${Math.round(p)}% uploading…`;
       else sub.textContent = 'Finalizing…';
