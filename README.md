@@ -37,7 +37,7 @@ Self-host your own node and join the swamp — or run it completely standalone.
 - 🌐 **Federated** — your node talks to other nodes; users, profiles, posts, rooms and DMs replicate across the swamp.
 - 🧅 **Tor-native** — flip a flag and your node lives behind a `.onion`; clearnet IP never leaks.
 - 📱 **Everywhere** — Web, Android (APK), iOS (TestFlight), Windows portable, Linux AppImage / `.deb`, and Electron desktop.
-- 🎵 **More than chat** — DMs, group calls (WebRTC), reels, friend wall, music rooms (YT/Spotify/SoundCloud), imageboard, GIF picker, custom emojis.
+- 🎵 **More than chat** — DMs, group calls (WebRTC), reels, friend wall, music rooms (YT/Spotify/SoundCloud), Frog Channel imageboard, GIF picker, custom emojis.
 - ⚒️ **Full API** — REST + WebSocket for bots, bridges and custom clients. Discord and Telegram bridges ship in-tree.
 
 ---
@@ -52,6 +52,7 @@ Self-host your own node and join the swamp — or run it completely standalone.
 | ⚡ **Real-time** | WebSocket messaging with auto-reconnect, typing indicators, reactions |
 | 🔒 **Private Rooms** | Passphrase-protected rooms — only members with the passphrase can decrypt |
 | 💬 **Direct Messages** | Fully encrypted DMs between any two users |
+| 🖼️ **Frog Channel Imageboard** | Anonymous 4chan-style thread board with replies, likes, image/video/audio posts, greentext, live board chat, and moderator approval tools |
 | 🎞 **Reels** | Vertical short-video feed with hot/new/top sorting, reactions, reposts, and comments |
 | 📎 **File Sharing** | Images, video, and file attachments up to 8 MB |
 | 🤖 **Discord & Telegram Bridges** | Mirror rooms to/from Discord channels or Telegram chats |
