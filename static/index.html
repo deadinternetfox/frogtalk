@@ -3194,6 +3194,12 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) .radio-optio
     0 4px 14px rgba(76,175,80,.22) !important;
 }
 
+/* Private channels are invite-only by definition — hide the redundant
+   "Invite Only" toggle in the Create Channel modal whenever the user
+   has the Private visibility option selected. CSS-only fallback so this
+   works even if rooms.js is cached from an older build. */
+#modal-create-room:has(#type-private.selected) #new-room-invite-only-card{display:none !important}
+
 /* ─── Profile modal ─────────────────────────────────────────── */
 .profile-avatar-wrap{text-align:center;margin-bottom:16px}
 .profile-avatar-large{
