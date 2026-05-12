@@ -40,6 +40,15 @@ const Messages = (() => {
     return `<span class="msg-author-handle">@${UI.escHtml(msg.nickname || '')}</span>`;
   }
 
+  // BOT pill — small accent-tinted badge rendered immediately after the
+  // author name (and after the @handle) when the message was sent via
+  // the External API with a bot_ key. Server stamps `is_bot` on both
+  // history and live broadcast payloads.
+  function _botPillHtml(msg) {
+    if (!msg || !msg.is_bot) return '';
+    return ' <span class="bot-pill" title="Sent by a bot via the External API">BOT</span>';
+  }
+
   function _normalizeUrl(url) {
     return String(url || '').replace(/&amp;/g, '&');
   }
@@ -1549,7 +1558,7 @@ const Messages = (() => {
         <div class="msg-avatar-slot"><div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div></div>
         <div class="msg-body">
           <div class="msg-meta">
-            <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(_authorDisplay(msg))}</span>${_authorHandleHtml(msg)}
+            <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(_authorDisplay(msg))}</span>${_authorHandleHtml(msg)}${_botPillHtml(msg)}
             ${_bridgeBadge(msg)}
             <span class="msg-time">${time}</span>
           </div>
@@ -1571,7 +1580,7 @@ const Messages = (() => {
       <div class="msg-avatar-slot"><div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div></div>
       <div class="msg-body">
         <div class="msg-meta">
-          <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(_authorDisplay(msg))}</span>${_authorHandleHtml(msg)}
+          <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(_authorDisplay(msg))}</span>${_authorHandleHtml(msg)}${_botPillHtml(msg)}
           ${_bridgeBadge(msg)}
           <span class="msg-time">${time}</span>
           ${editedTag}

@@ -3030,15 +3030,21 @@ async function loadBots() {
       return;
     }
     list.innerHTML = bots.map(b => `
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border-bottom:1px solid #1a1a1a">
-        <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border-bottom:1px solid var(--border-color, #1a1a1a);gap:6px">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">
           ${UI.avatarEl(b.avatar, b.name, 28)}
-          <div>
-            <div style="color:#e0e0e0;font-size:13px;font-weight:600">${UI.escHtml(b.name)}</div>
-            <div style="color:#666;font-size:11px">${b.is_public ? '🌐 Public' : '🔒 Private'}</div>
+          <div style="min-width:0">
+            <div style="color:var(--text-color, #e0e0e0);font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px">
+              <span>${UI.escHtml(b.name)}</span>
+              <span class="bot-pill">BOT</span>
+            </div>
+            <div style="color:var(--text-muted, #666);font-size:11px">${b.is_public ? '🌐 Public' : '🔒 Private'}${b.description ? ' · ' + UI.escHtml(String(b.description).slice(0, 40)) : ''}</div>
           </div>
         </div>
-        <button onclick="deleteBot(${b.id})" style="background:#333;border:none;color:#f44336;padding:4px 8px;border-radius:4px;font-size:12px;cursor:pointer">Delete</button>
+        <div style="display:flex;gap:4px;flex-shrink:0">
+          <button onclick="editBot(${b.id})" style="background:var(--surface-color, #2a2a2a);border:1px solid var(--border-color, #333);color:var(--accent-color, #4caf50);padding:4px 8px;border-radius:4px;font-size:12px;cursor:pointer">Edit</button>
+          <button onclick="deleteBot(${b.id})" style="background:var(--surface-color, #2a2a2a);border:1px solid var(--border-color, #333);color:#f44336;padding:4px 8px;border-radius:4px;font-size:12px;cursor:pointer">Delete</button>
+        </div>
       </div>
     `).join('');
   } catch {
@@ -3083,6 +3089,67 @@ async function deleteBot(botId) {
     UI.showToast('Failed to delete', 'error');
   }
 }
+
+// Botfather-style edit modal: rename, set avatar URL or data-URL,
+// description, toggle public listing, and regenerate the bot's API
+// token. All fields PATCH through PUT /api/developer/bots/{id}.
+async function editBot(botId) {
+  let bot = null;
+  try {
+    const res = await apiFetch(`/api/developer/bots/${botId}`);
+    bot = await res.json();
+    if (!res.ok) throw new Error(bot.error || 'load failed');
+  } catch (e) {
+    UI.showToast('Failed to load bot', 'error');
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:var(--surface-color, #1e1e1e);border:1px solid var(--border-color, #333);border-radius:14px;padding:20px;max-width:480px;width:100%;color:var(--text-color, #e0e0e0);max-height:90vh;overflow:auto">
+      <div style="font-size:16px;font-weight:700;color:var(--accent-color, #4caf50);margin-bottom:14px;display:flex;align-items:center;gap:8px">
+        🤖 Edit Bot <span class="bot-pill">BOT</span>
+      </div>
+      <label style="display:block;font-size:12px;color:var(--text-muted, #888);margin-bottom:4px">Name (unique handle)</label>
+      <input id="eb-name" type="text" value="${UI.escHtml(bot.name)}" maxlength="32" style="width:100%;background:var(--bg-color, #0d0d0d);border:1px solid var(--border-color, #333);color:var(--text-color, #e0e0e0);padding:8px;border-radius:6px;font-size:13px;margin-bottom:12px">
+      <label style="display:block;font-size:12px;color:var(--text-muted, #888);margin-bottom:4px">Avatar URL or data-URL</label>
+      <input id="eb-avatar" type="text" value="${UI.escHtml(bot.avatar || '')}" placeholder="https://… or data:image/png;base64,…" style="width:100%;background:var(--bg-color, #0d0d0d);border:1px solid var(--border-color, #333);color:var(--text-color, #e0e0e0);padding:8px;border-radius:6px;font-size:13px;margin-bottom:12px">
+      <label style="display:block;font-size:12px;color:var(--text-muted, #888);margin-bottom:4px">Description</label>
+      <textarea id="eb-desc" rows="3" maxlength="500" placeholder="What does this bot do?" style="width:100%;background:var(--bg-color, #0d0d0d);border:1px solid var(--border-color, #333);color:var(--text-color, #e0e0e0);padding:8px;border-radius:6px;font-size:13px;margin-bottom:12px;resize:vertical;font-family:inherit">${UI.escHtml(bot.description || '')}</textarea>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:16px;cursor:pointer">
+        <input id="eb-public" type="checkbox" ${bot.is_public ? 'checked' : ''} style="accent-color:var(--accent-color, #4caf50)">
+        <span>List publicly in the bot directory</span>
+      </label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="eb-save" style="flex:1;background:var(--accent-color, #4caf50);color:#000;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;min-width:120px">Save</button>
+        <button id="eb-cancel" style="background:var(--surface-color, #2a2a2a);color:var(--text-color, #e0e0e0);border:1px solid var(--border-color, #333);border-radius:8px;padding:10px 16px;cursor:pointer">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#eb-cancel').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#eb-save').onclick = async () => {
+    const patch = {
+      name: overlay.querySelector('#eb-name').value.trim(),
+      avatar: overlay.querySelector('#eb-avatar').value.trim() || null,
+      description: overlay.querySelector('#eb-desc').value.trim(),
+      is_public: overlay.querySelector('#eb-public').checked,
+    };
+    if (!patch.name || patch.name.length < 2) { UI.showToast('Name too short', 'error'); return; }
+    try {
+      const res = await apiFetch(`/api/developer/bots/${botId}`, 'PUT', patch);
+      const data = await res.json();
+      if (!res.ok) { UI.showToast(data.error || 'Update failed', 'error'); return; }
+      UI.showToast('Bot updated', 'success');
+      close();
+      loadBots();
+    } catch {
+      UI.showToast('Network error', 'error');
+    }
+  };
+}
+window.editBot = editBot;
 
 let _themePreviewOriginal = null; // theme before preview started
 

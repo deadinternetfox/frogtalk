@@ -95,11 +95,17 @@ async def create_bot(body: CreateBotRequest, current_user: dict = Depends(get_cu
     # Create a dedicated API key for the bot
     raw_key = f"bot_{secrets.token_urlsafe(32)}"
     key_hash = hash_key(raw_key)
+    # Bot keys get the full read/write/dm permission set in addition to
+    # the "bot" tag so they can use every /api/external/* endpoint a
+    # human developer key could (the "bot" tag lets server-side render
+    # paths distinguish bot traffic). Without read+write here, the
+    # require_api_key() gate at routers/external_api.py would reject
+    # every bot call with a 403 Missing permission error.
     key_id = db.create_api_key(
         current_user["id"],
         f"Bot: {body.name}",
         key_hash,
-        ["bot"]
+        ["read", "write", "dm", "bot"]
     )
     
     bot_id = db.create_bot(
@@ -129,6 +135,23 @@ async def list_bots(current_user: dict = Depends(get_current_user)):
     """List all bots owned by the current user."""
     bots = db.get_user_bots(current_user["id"])
     return {"bots": bots}
+
+
+@router.get("/bots/{bot_id}")
+async def get_bot(bot_id: int, current_user: dict = Depends(get_current_user)):
+    """Get a single bot's details (must be the owner)."""
+    bot = db.get_bot_by_id(bot_id)
+    if not bot or bot["owner_id"] != current_user["id"]:
+        return JSONResponse(status_code=404, content={"error": "Bot not found"})
+    # Strip internal-only columns before returning.
+    return {
+        "id": bot["id"],
+        "name": bot["name"],
+        "avatar": bot.get("avatar"),
+        "description": bot.get("description") or "",
+        "is_public": bool(bot.get("is_public")),
+        "created_at": bot.get("created_at"),
+    }
 
 
 @router.put("/bots/{bot_id}")

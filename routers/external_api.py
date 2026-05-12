@@ -68,19 +68,26 @@ def require_api_key(permissions: List[str] = None):
         if not key_info:
             raise HTTPException(status_code=401, detail="Invalid API key")
         
-        # Check permissions
+        # Check permissions. "admin" and "bot" act as wildcards so that
+        # any key tagged as a bot can use the full external surface
+        # without per-call permission gymnastics (the bot's owner is
+        # always a real user whose own ACLs still apply).
         if permissions:
             key_perms = key_info.get("permissions", [])
             if isinstance(key_perms, str):
                 import json
                 key_perms = json.loads(key_perms)
-            
-            for p in permissions:
-                if p not in key_perms and "admin" not in key_perms:
-                    raise HTTPException(
-                        status_code=403,
-                        detail=f"Missing permission: {p}"
-                    )
+
+            wildcards = {"admin", "bot"}
+            has_wildcard = any(w in key_perms for w in wildcards)
+
+            if not has_wildcard:
+                for p in permissions:
+                    if p not in key_perms:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=f"Missing permission: {p}"
+                        )
         
         # Update last_used
         db.update_api_key_last_used(key_info["id"])
@@ -217,9 +224,12 @@ async def get_channel_messages(
     room = db.get_room(name)
     if not room:
         raise HTTPException(status_code=404, detail="Channel not found")
-    
-    messages = db.get_room_messages(room["id"], limit=min(limit, 100), before_id=before)
-    
+
+    # NOTE: room lookup keys are the room *name*, not id. db.get_messages
+    # already left-joins the bots table so is_bot/bot_id come through
+    # for free.
+    messages = db.get_messages(name, limit=min(limit, 100), before_id=before)
+
     return {
         "channel": name,
         "messages": [
@@ -228,6 +238,14 @@ async def get_channel_messages(
                 "content": m.get("content"),
                 "nickname": m["nickname"],
                 "user_id": m["user_id"],
+                "avatar": m.get("avatar"),
+                "display_name": m.get("display_name"),
+                "is_admin": bool(m.get("is_admin")),
+                "is_bot": bool(m.get("is_bot")),
+                "bot_id": m.get("bot_id"),
+                "reply_to": m.get("reply_to"),
+                "reply_nickname": m.get("reply_nickname"),
+                "reply_content": m.get("reply_content"),
                 "created_at": m["created_at"],
                 "edited": bool(m.get("edited")),
                 "reactions": m.get("reactions"),
@@ -245,47 +263,81 @@ async def send_channel_message(
     body: SendMessageRequest,
     auth: dict = Depends(require_api_key(["write"]))
 ):
-    """Send a message to a channel."""
+    """Send a message to a channel.
+
+    For bot keys this stores the message with the bot's display name as
+    the nickname and broadcasts it with `is_bot:true` + `bot_id` so the
+    client renders the BOT pill next to the author. The owning user's
+    id is still on the row for FK integrity (same pattern the bridge
+    routers use for cross-platform attribution)."""
     room = db.get_room(name)
     if not room:
         raise HTTPException(status_code=404, detail="Channel not found")
-    
+
     if len(body.content) > 4000:
         raise HTTPException(status_code=400, detail="Message too long (max 4000)")
-    
+
     if len(body.content.strip()) == 0:
         raise HTTPException(status_code=400, detail="Empty message")
-    
+
     owner = auth["owner"]
-    
-    # Mark message as from bot if applicable
-    bot_tag = " [BOT]" if auth["is_bot"] else ""
-    
-    msg_id = db.create_message(
-        room_id=room["id"],
+    bot = db.get_bot_by_api_key_id(auth["key"]["id"]) if auth["is_bot"] else None
+
+    nickname = bot["name"] if bot else owner["nickname"]
+    avatar = (bot.get("avatar") if bot else None) or owner.get("avatar")
+    display_name = bot["name"] if bot else owner.get("display_name")
+
+    msg_id = db.save_message(
+        room_name=name,
         user_id=owner["id"],
+        nickname=nickname,
         content=body.content,
-        reply_to=body.reply_to
+        reply_to=body.reply_to,
     )
-    
-    # Broadcast via WebSocket
+
+    # Hydrate reply context for the broadcast payload so clients can
+    # render the quoted snippet immediately without a refetch.
+    reply_nickname = None
+    reply_content = None
+    if body.reply_to:
+        rrow = db.get_message(body.reply_to)
+        if rrow:
+            reply_nickname = rrow.get("nickname")
+            reply_content = (rrow.get("content") or "")[:120]
+
+    payload = {
+        "type": "message",
+        "id": msg_id,
+        "room": name,
+        "nickname": nickname,
+        "user_id": owner["id"],
+        "avatar": avatar,
+        "display_name": display_name,
+        "is_admin": False,
+        "is_bot": bool(bot),
+        "bot_id": bot["id"] if bot else None,
+        "content": body.content,
+        "media_data": None,
+        "media_type": None,
+        "media_blur": 0,
+        "view_once": 0,
+        "reply_to": body.reply_to,
+        "reply_nickname": reply_nickname,
+        "reply_content": reply_content,
+        "edited": False,
+        "reactions": {},
+        "created_at": datetime.utcnow().isoformat() + "Z",
+    }
+
     from ws_manager import manager
     import asyncio
-    asyncio.create_task(manager.broadcast_to_room(name, {
-        "type": "new_message",
-        "id": msg_id,
-        "content": body.content,
-        "nickname": owner["nickname"] + bot_tag,
-        "user_id": owner["id"],
-        "avatar": owner.get("avatar"),
-        "room": name,
-        "is_bot": auth["is_bot"],
-    }))
-    
+    asyncio.create_task(manager.broadcast_room(name, payload))
+
     return {
         "ok": True,
         "message_id": msg_id,
-        "channel": name
+        "channel": name,
+        "is_bot": bool(bot),
     }
 
 
@@ -336,25 +388,26 @@ async def send_dm(
     target = db.get_user_by_id(user_id)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     owner = auth["owner"]
-    
+
     if len(body.content) > 4000:
         raise HTTPException(status_code=400, detail="Message too long")
-    
-    # Get or create DM channel
-    channel = db.get_or_create_dm_channel(owner["id"], user_id)
-    
-    msg_id = db.create_dm_message(
-        channel_id=channel["id"],
+
+    # Resolve or create the 1-on-1 DM channel. db returns the channel
+    # id directly (not a row), so we pass it straight into send.
+    channel_id = db.get_or_create_dm(owner["id"], user_id)
+
+    msg_id = db.send_dm_message(
+        channel_id=channel_id,
         sender_id=owner["id"],
-        content=body.content + (" [BOT]" if auth["is_bot"] else "")
+        content=body.content,
     )
-    
+
     return {
         "ok": True,
         "message_id": msg_id,
-        "dm_channel": channel["id"]
+        "dm_channel": channel_id,
     }
 
 

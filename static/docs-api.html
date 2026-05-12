@@ -177,6 +177,7 @@
         <a href="#media">Media / Emojis / Preview / Push / Calls / Location</a>
         <a href="#social">Social / Wall / Directory / Invites</a>
         <a href="#bots">Developer + Bots</a>
+        <a href="#building-a-bot">Building a Bot</a>
         <a href="#external">External Token API</a>
         <a href="#bridge">Bridge API</a>
         <a href="#federation">Federation / Network / Updates</a>
@@ -400,6 +401,95 @@ DELETE /api/developer/channels/{room_name}/bots/{bot_id}
 GET    /api/developer/channels/{room_name}/bots
 GET    /api/developer/bots/public</code></pre>
           <p class="muted">Use these endpoints to mint API keys and manage bot accounts/channels from your own backend tools.</p>
+        </article>
+
+        <article class="panel" id="building-a-bot">
+          <h2>Building a Bot 🤖</h2>
+          <p>A FrogTalk bot is any program that holds a <code>bot_…</code> API key and calls the
+          <a href="#external">External Token API</a>. Bots run anywhere — your laptop, a VPS, a serverless
+          function — they only need outbound HTTP to your FrogTalk server. Every message a bot posts is
+          stamped <code>is_bot: true</code> on the wire, so clients render a <strong>BOT</strong> pill next
+          to the author name in chat. There is no way to disguise a bot as a human.</p>
+
+          <h3>1. Create the bot</h3>
+          <ol>
+            <li>Open <strong>Settings → Developer → Bots</strong> in the FrogTalk app.</li>
+            <li>Click <strong>+ Create Bot</strong> and pick a unique handle. This handle is the name
+            users will <code>@</code>-mention.</li>
+            <li>Copy the <code>bot_…</code> token shown in the dialog — it's only displayed once.</li>
+            <li>Click <strong>Edit</strong> on the bot row to set its avatar, description, and whether
+            it appears in the public directory (botfather-style).</li>
+          </ol>
+
+          <h3>2. Authenticate</h3>
+          <p>Send the bot token on every request:</p>
+<pre><code>X-API-Key: bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# or
+Authorization: Bearer bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code></pre>
+
+          <h3>3. Poll for messages</h3>
+          <p>Bots <strong>cannot</strong> open a WebSocket — they poll. Keep track of the highest
+          message id you've seen, and act on anything newer:</p>
+<pre><code>import requests, time
+
+BOT_TOKEN = "bot_…"
+CHANNEL   = "general"
+SERVER    = "https://frogtalk.xyz"
+
+last_seen = 0
+while True:
+    r = requests.get(
+        f"{SERVER}/api/external/channels/{CHANNEL}/messages",
+        headers={"X-API-Key": BOT_TOKEN},
+        params={"limit": 50},
+        timeout=15,
+    )
+    for m in r.json()["messages"]:
+        if m["id"] &lt;= last_seen:
+            continue
+        last_seen = max(last_seen, m["id"])
+        # … your logic …
+    time.sleep(2)</code></pre>
+
+          <h3>4. Reply</h3>
+<pre><code>requests.post(
+    f"{SERVER}/api/external/channels/{CHANNEL}/messages",
+    headers={"X-API-Key": BOT_TOKEN},
+    json={"content": "hello, world!", "reply_to": m["id"]},
+    timeout=15,
+)</code></pre>
+          <p>Setting <code>reply_to</code> threads the bot's reply under the trigger message so users see the quoted parent.</p>
+
+          <h3>5. Profile (botfather-style)</h3>
+          <p><code>PUT /api/developer/bots/{bot_id}</code> updates the bot's profile. Uses your user
+          session (not the bot key), so typically you'll use the in-app <strong>Edit</strong> dialog.</p>
+          <table>
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td><code>name</code></td><td>string</td><td>unique handle (≤32 chars)</td></tr>
+            <tr><td><code>avatar</code></td><td>string</td><td>URL or <code>data:</code> URL</td></tr>
+            <tr><td><code>description</code></td><td>string</td><td>shown in the directory (≤500 chars)</td></tr>
+            <tr><td><code>is_public</code></td><td>bool</td><td>list publicly</td></tr>
+          </table>
+
+          <h3>Reference implementation</h3>
+          <p>A complete, runnable example bot — a channel chat bot that replies to <code>@</code>-mentions
+          and replies-to-its-own-messages, powered by a <a href="https://runpod.io">RunPod</a> serverless
+          endpoint — lives at
+          <code>bot-examples/runpod-ai-bot/</code> in the FrogTalk repo. See
+          <a href="https://github.com/FrogTalk/frogtalk-app/tree/main/bot-examples">bot-examples/</a>
+          on GitHub for the source and a step-by-step README.</p>
+
+          <h3>Etiquette &amp; limits</h3>
+          <ul>
+            <li><strong>Rate limit:</strong> <code>POST /channels/{name}/messages</code> is capped at
+            30 req/min per bot key. Stay well under it.</li>
+            <li><strong>No mention spam:</strong> only reply when the bot is explicitly addressed
+            (an <code>@mention</code> in the message text, or a <code>reply_to</code> pointing at one
+            of your own messages).</li>
+            <li><strong>Don't impersonate:</strong> the <strong>BOT</strong> pill cannot be hidden.</li>
+            <li><strong>Be transparent:</strong> set a useful description so users understand what
+            data your bot processes.</li>
+          </ul>
         </article>
 
         <article class="panel" id="external">

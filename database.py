@@ -867,14 +867,19 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
-                         COALESCE(m.bridge_avatar, u.avatar) AS avatar,
+                         COALESCE(m.bridge_avatar, b.avatar, u.avatar) AS avatar,
                          CASE WHEN m.bridge_platform IS NOT NULL AND m.bridge_platform != ''
-                             THEN NULL ELSE u.display_name END AS display_name,
+                             THEN NULL
+                             WHEN b.id IS NOT NULL THEN b.name
+                             ELSE u.display_name END AS display_name,
                           u.is_admin AS is_admin,
+                          (b.id IS NOT NULL) AS is_bot,
+                          b.id AS bot_id,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
                    FROM messages m
                    LEFT JOIN users u ON m.user_id=u.id
+                   LEFT JOIN bots  b ON b.owner_id = m.user_id AND b.name = m.nickname
                    LEFT JOIN messages r ON r.id = m.reply_to
                    WHERE m.room_name=? AND m.id < ?
                    ORDER BY m.id DESC LIMIT ?""",
@@ -888,14 +893,19 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
-                         COALESCE(m.bridge_avatar, u.avatar) AS avatar,
+                         COALESCE(m.bridge_avatar, b.avatar, u.avatar) AS avatar,
                          CASE WHEN m.bridge_platform IS NOT NULL AND m.bridge_platform != ''
-                             THEN NULL ELSE u.display_name END AS display_name,
+                             THEN NULL
+                             WHEN b.id IS NOT NULL THEN b.name
+                             ELSE u.display_name END AS display_name,
                           u.is_admin AS is_admin,
+                          (b.id IS NOT NULL) AS is_bot,
+                          b.id AS bot_id,
                           r.nickname AS reply_nickname,
                           substr(r.content,1,120) AS reply_content
                    FROM messages m
                    LEFT JOIN users u ON m.user_id=u.id
+                   LEFT JOIN bots  b ON b.owner_id = m.user_id AND b.name = m.nickname
                    LEFT JOIN messages r ON r.id = m.reply_to
                    WHERE m.room_name=?
                    ORDER BY m.id DESC LIMIT ?""",
@@ -4049,6 +4059,17 @@ def get_bot_by_id(bot_id: int) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(
             "SELECT * FROM bots WHERE id=?", (bot_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_bot_by_api_key_id(api_key_id: int) -> Optional[Dict]:
+    """Get bot by its linked API key id. Used by the external API to map
+    an authenticated bot_… key back to the bot's display identity
+    (name, avatar) when posting messages."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM bots WHERE api_key_id=?", (api_key_id,)
         ).fetchone()
     return dict(row) if row else None
 

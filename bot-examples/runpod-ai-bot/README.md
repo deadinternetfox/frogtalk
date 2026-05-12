@@ -1,0 +1,115 @@
+# RunPod AI Bot for FrogTalk
+
+A reference channel-chat bot for [FrogTalk](https://frogtalk.xyz) that
+replies whenever it is `@`-mentioned, or when someone replies to one of
+its own messages. The brain is a [RunPod] serverless endpoint — swap in
+any chat model you like.
+
+> This bot is an **example for third-party developers**. It is *not*
+> shipped with the FrogTalk server. It only talks to the documented
+> public API at `/api/external/*`.
+
+## Features
+
+- Polling-based — no WebSocket needed (bots can't open WS anyway).
+- Replies to **@mentions** of its handle in any channel it's running in.
+- Replies to **replies** of its own messages (so users can have a
+  back-and-forth without re-tagging it every turn).
+- Sends each turn as a proper `reply_to` so the UI shows the quoted
+  parent.
+- Calls RunPod via `/runsync` and falls back to the async `/run` →
+  `/status/<job_id>` polling loop for endpoints that take longer.
+- Renders with the `BOT` pill in chat (the server stamps `is_bot:true`).
+
+## Quick start
+
+```bash
+cd bot-examples/runpod-ai-bot
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+$EDITOR .env          # fill in tokens
+python bot.py
+```
+
+You'll need:
+
+1. A **FrogTalk bot token** — open the FrogTalk app → Settings →
+   Developer → Bots → **+ Create Bot**. Copy the `bot_…` value (shown
+   once). Use the **Edit** button to set the bot's avatar and a short
+   description (botfather-style).
+2. A **RunPod endpoint id** and **API key** — both visible in your
+   RunPod console. The example targets a chat-completion-style worker
+   that accepts `{"input": {"prompt": "..."}}` and returns
+   `{"output": "..."}`. Adjust `build_runpod_request` /
+   `extract_runpod_text` in `bot.py` if your worker uses a different
+   shape.
+
+## Configuration
+
+All settings can come from environment variables, a `.env` file, or
+CLI flags. CLI > env > defaults.
+
+| Variable | Flag | Default | Meaning |
+| --- | --- | --- | --- |
+| `FROGTALK_SERVER` | `--server-url` | `https://frogtalk.xyz` | Base URL of the FrogTalk server |
+| `FROGTALK_BOT_TOKEN` | `--bot-token` | *(required)* | `bot_…` token issued in the app |
+| `FROGTALK_BOT_NAME` | `--bot-name` | *(required)* | Handle the bot was registered as (used to detect `@mentions`) |
+| `FROGTALK_CHANNELS` | `--channels` | `general` | Comma-separated channels to listen in |
+| `RUNPOD_ENDPOINT_ID` | `--runpod-endpoint` | `n9y6u6rkv73ayv` | RunPod serverless endpoint id |
+| `RUNPOD_API_KEY` | `--runpod-key` | *(required)* | `rpa_…` API key |
+| `POLL_INTERVAL` | `--poll-interval` | `2.0` | Seconds between polls per channel |
+| `MAX_CONTEXT` | `--max-context` | `8` | Recent messages to send as context |
+
+### Profile sync (botfather-style)
+
+You can update the bot's profile (avatar, description, public toggle)
+from this CLI too — it uses a **user** session cookie though, not the
+bot key, so it expects you to set `FROGTALK_USER_SESSION` to a valid
+session token (visible in the app's localStorage after login). Profile
+sync is optional; the simpler workflow is to just use the in-app
+Settings → Developer → Bots → Edit dialog.
+
+```bash
+python bot.py \
+  --update-profile \
+  --bot-avatar https://example.com/bot.png \
+  --bot-description "I'm a friendly assistant powered by RunPod." \
+  --is-public
+```
+
+## How it works
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  bot.py main loop (per channel, every POLL_INTERVAL seconds)     │
+│                                                                  │
+│    GET /api/external/channels/<ch>/messages?limit=50             │
+│      → for each message with id > last_seen:                     │
+│          if @mention(me) OR reply_to in my_messages:             │
+│              ctx = build_context(history)                        │
+│              text = call_runpod(ctx)                             │
+│              POST /api/external/channels/<ch>/messages           │
+│                   {content: text, reply_to: m["id"]}             │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+Mention detection uses the same regex shape the FrogTalk client uses
+client-side: `(^|\s|\()@<bot-name>(?=$|[\s.,!?;:)\u2026])`. Reply
+detection compares `reply_to` against an in-memory set of message ids
+the bot itself posted in this session.
+
+## Safety
+
+- Rate limited to ~30 msgs/min on the server side. The bot enforces
+  its own ~1 reply per second cap to leave headroom.
+- Refuses to reply to its own messages (no infinite-loop pingpong).
+- Refuses to reply to anything older than `last_seen` at startup
+  (avoids replaying history on restart).
+
+## License
+
+MIT.
+
+[RunPod]: https://runpod.io
