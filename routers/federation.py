@@ -1054,6 +1054,8 @@ async def federation_inbox_processor() -> int:
                 await _handle_server_event(event)
             elif event_type.startswith("sticker."):
                 await _handle_sticker_event(event)
+            elif event_type.startswith("bot."):
+                await _handle_bot_event(event)
 
             await asyncio.to_thread(db.mark_federation_inbox_event, event_id, "applied")
             processed += 1
@@ -2055,6 +2057,58 @@ async def _handle_sticker_event(event: dict) -> None:
         await asyncio.to_thread(_apply)
     except Exception:
         _log.exception("sticker federation apply failed (origin=%s pack=%s)", origin, foreign_pack_id)
+
+
+async def _handle_bot_event(event: dict) -> None:
+    """Apply incoming bot.upsert / bot.delete catalog events.
+
+    Federated public bots are mirrored locally with owner_id=-1 so peer
+    users can browse them in the Bot Directory and install them into
+    local channels. The bot's *runtime* (API key, message-sending) lives
+    on the origin server; we only replicate the catalog metadata here.
+    """
+    payload = event.get("payload") or {}
+    event_type = str(event.get("event_type") or "")
+    origin = str(event.get("origin_server_id") or "").strip()
+    foreign_bot_id = int(payload.get("bot_id") or 0)
+    if not origin or not foreign_bot_id:
+        return
+
+    def _apply() -> None:
+        # Ensure schema (older peers may not have the federation columns yet).
+        with db._conn() as con:
+            for _ddl in (
+                "ALTER TABLE bots ADD COLUMN origin_server_id TEXT DEFAULT NULL",
+                "ALTER TABLE bots ADD COLUMN foreign_bot_id INTEGER DEFAULT NULL",
+                "ALTER TABLE bots ADD COLUMN owner_nickname TEXT DEFAULT NULL",
+            ):
+                try: con.execute(_ddl)
+                except Exception: pass
+
+        if event_type == "bot.delete":
+            db.delete_federated_bot(origin, foreign_bot_id)
+            return
+
+        # upsert
+        name = str(payload.get("name") or "").strip() or f"bot{foreign_bot_id}"
+        avatar = payload.get("avatar") or None
+        desc = str(payload.get("description") or "")[:280]
+        is_public = int(payload.get("is_public") or 0)
+        owner_nick = str(payload.get("owner_nickname") or "")
+        if not is_public:
+            # Origin flipped it private — drop the mirror.
+            db.delete_federated_bot(origin, foreign_bot_id)
+            return
+        db.upsert_federated_bot(
+            origin, foreign_bot_id,
+            name=name, avatar=avatar, description=desc,
+            owner_nickname=owner_nick, is_public=1,
+        )
+
+    try:
+        await asyncio.to_thread(_apply)
+    except Exception:
+        _log.exception("bot federation apply failed (origin=%s bot=%s)", origin, foreign_bot_id)
 
 
 async def _handle_server_event(event: dict) -> None:

@@ -1173,6 +1173,25 @@ def _migrate():
             con.execute("ALTER TABLE messages ADD COLUMN reply_to INTEGER")
         if "pinned" not in msg_cols:
             con.execute("ALTER TABLE messages ADD COLUMN pinned INTEGER DEFAULT 0")
+
+        # Bot federation: cache origin server + foreign bot id so peer
+        # nodes can list and add federated bots to local channels. Also
+        # cache the owner_nickname so we don't need a local users row for
+        # display (federated bots use owner_id=-1 sentinel).
+        try:
+            bot_cols = {r["name"] for r in con.execute("PRAGMA table_info(bots)").fetchall()}
+            if bot_cols:
+                if "origin_server_id" not in bot_cols:
+                    con.execute("ALTER TABLE bots ADD COLUMN origin_server_id TEXT DEFAULT NULL")
+                if "foreign_bot_id" not in bot_cols:
+                    con.execute("ALTER TABLE bots ADD COLUMN foreign_bot_id INTEGER DEFAULT NULL")
+                if "owner_nickname" not in bot_cols:
+                    con.execute("ALTER TABLE bots ADD COLUMN owner_nickname TEXT DEFAULT NULL")
+                # api_key_id must be nullable for federated rows (they have
+                # no local key). Old schema declared it NOT NULL; sqlite
+                # can't relax a column, so we side-step with a sentinel 0.
+        except Exception:
+            pass
         if "media_blur" not in msg_cols:
             con.execute("ALTER TABLE messages ADD COLUMN media_blur INTEGER DEFAULT 0")
         if "view_once" not in msg_cols:
@@ -4138,16 +4157,95 @@ def get_channel_bots(room_id: int) -> List[Dict]:
 
 
 def get_public_bots() -> List[Dict]:
-    """Get all public bots."""
+    """Get all public bots — local + federated. Federated rows have
+    owner_id=-1 so we LEFT JOIN users and fall back to the cached
+    owner_nickname column."""
     with _conn() as con:
         rows = con.execute("""
-            SELECT b.id, b.name, b.avatar, b.description, u.nickname as owner_name
+            SELECT b.id, b.name, b.avatar, b.description,
+                   COALESCE(u.nickname, b.owner_nickname) AS owner_name,
+                   b.origin_server_id
             FROM bots b
-            JOIN users u ON b.owner_id = u.id
+            LEFT JOIN users u ON b.owner_id = u.id
             WHERE b.is_public=1
-            ORDER BY b.name
+            ORDER BY (b.origin_server_id IS NOT NULL), b.name
         """).fetchall()
     return [dict(r) for r in rows]
+
+
+def find_federated_bot(origin_server_id: str, foreign_bot_id: int) -> Optional[Dict]:
+    with _conn() as con:
+        row = con.execute(
+            "SELECT * FROM bots WHERE origin_server_id=? AND foreign_bot_id=?",
+            (origin_server_id, int(foreign_bot_id)),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_federated_bot(origin_server_id: str, foreign_bot_id: int, *,
+                         name: str, avatar: Optional[str] = None,
+                         description: str = "",
+                         owner_nickname: Optional[str] = None,
+                         is_public: int = 1) -> Optional[int]:
+    """Mirror a public bot from a peer server into the local catalog.
+    Uses owner_id = -1 as a synthetic 'federated' sentinel so it never
+    collides with a real account and never appears in get_user_bots().
+    api_key_id is 0 — federated bots have no local key; their runtime
+    lives on the origin server."""
+    if not origin_server_id or not foreign_bot_id:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT id FROM bots WHERE origin_server_id=? AND foreign_bot_id=?",
+            (origin_server_id, int(foreign_bot_id)),
+        ).fetchone()
+        if row:
+            con.execute(
+                """UPDATE bots
+                   SET name=?, avatar=?, description=?, owner_nickname=?, is_public=?
+                   WHERE id=?""",
+                (name, avatar, description or '', owner_nickname or '',
+                 1 if is_public else 0, int(row["id"])),
+            )
+            return int(row["id"])
+        try:
+            cur = con.execute(
+                """INSERT INTO bots
+                   (owner_id, name, api_key_id, avatar, description, is_public,
+                    origin_server_id, foreign_bot_id, owner_nickname)
+                   VALUES (-1, ?, 0, ?, ?, ?, ?, ?, ?)""",
+                (name, avatar, description or '', 1 if is_public else 0,
+                 origin_server_id, int(foreign_bot_id), owner_nickname or ''),
+            )
+            return int(cur.lastrowid)
+        except Exception:
+            # Likely UNIQUE(name) collision with a local bot of the same
+            # display name. Disambiguate by appending @origin once.
+            try:
+                short_origin = (origin_server_id or '').split('//')[-1].split('/')[0]
+                fed_name = f"{name}@{short_origin}" if short_origin else f"{name}#fed{foreign_bot_id}"
+                cur = con.execute(
+                    """INSERT INTO bots
+                       (owner_id, name, api_key_id, avatar, description, is_public,
+                        origin_server_id, foreign_bot_id, owner_nickname)
+                       VALUES (-1, ?, 0, ?, ?, ?, ?, ?, ?)""",
+                    (fed_name, avatar, description or '', 1 if is_public else 0,
+                     origin_server_id, int(foreign_bot_id), owner_nickname or ''),
+                )
+                return int(cur.lastrowid)
+            except Exception:
+                return None
+
+
+def delete_federated_bot(origin_server_id: str, foreign_bot_id: int) -> bool:
+    if not origin_server_id or not foreign_bot_id:
+        return False
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM bots WHERE origin_server_id=? AND foreign_bot_id=?",
+            (origin_server_id, int(foreign_bot_id)),
+        )
+        return cur.rowcount > 0
 
 
 # ===========================================================================

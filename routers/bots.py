@@ -1,6 +1,7 @@
 """Bot & API key management routes."""
 import secrets
 import hashlib
+import logging
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -10,6 +11,44 @@ import database as db
 from deps import get_current_user
 
 router = APIRouter(prefix="/developer", tags=["developer"])
+_log = logging.getLogger("frogtalk.bots")
+
+
+def _emit_bot_event(bot_id: int, action: str) -> None:
+    """Federate public-bot catalog changes. Local-only bots and federated
+    mirrors never re-emit (so we don't broadcast events back to the
+    origin server and create a loop).
+
+    action: 'upsert' | 'delete'.
+    """
+    try:
+        from routers import federation as _fed
+        bot = db.get_bot_by_id(bot_id)
+        if not bot:
+            return
+        # Skip federated mirrors — they originated elsewhere.
+        if bot.get("origin_server_id"):
+            return
+        if action == "upsert" and not bot.get("is_public"):
+            return
+        owner_nick = None
+        try:
+            row = db.get_user_by_id(int(bot.get("owner_id") or 0))
+            if row:
+                owner_nick = row.get("nickname")
+        except Exception:
+            owner_nick = None
+        payload = {
+            "bot_id": int(bot["id"]),
+            "name": bot.get("name") or "",
+            "avatar": bot.get("avatar") or "",
+            "description": bot.get("description") or "",
+            "is_public": int(bot.get("is_public") or 0),
+            "owner_nickname": owner_nick or "",
+        }
+        _fed.enqueue_server_event(f"bot.{action}", payload)
+    except Exception:
+        _log.exception("bot federation emit failed (bot=%s action=%s)", bot_id, action)
 
 
 def hash_key(key: str) -> str:
@@ -121,7 +160,12 @@ async def create_bot(body: CreateBotRequest, current_user: dict = Depends(get_cu
         # Clean up the API key
         db.delete_api_key(key_id, current_user["id"])
         return JSONResponse(status_code=409, content={"error": "Bot name already taken"})
-    
+
+    # If created public, immediately federate the catalog row so peer
+    # nodes can list + install this bot in their channels.
+    if body.is_public:
+        _emit_bot_event(bot_id, "upsert")
+
     return {
         "id": bot_id,
         "name": body.name,
@@ -160,16 +204,61 @@ async def update_bot(bot_id: int, body: UpdateBotRequest, current_user: dict = D
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if "is_public" in updates:
         updates["is_public"] = 1 if updates["is_public"] else 0
-    
+
+    # Capture pre-state so we can pick the right federation action when
+    # the public flag flips on or off in the same PUT.
+    before = db.get_bot_by_id(bot_id) or {}
+    was_public = int(before.get("is_public") or 0) == 1
+
     if db.update_bot(bot_id, current_user["id"], **updates):
+        after = db.get_bot_by_id(bot_id) or {}
+        is_public = int(after.get("is_public") or 0) == 1
+        if is_public:
+            _emit_bot_event(bot_id, "upsert")
+        elif was_public and not is_public:
+            # Was federated, now private — tell peers to drop the mirror.
+            _emit_bot_event_raw("delete", before)
         return {"ok": True}
     return JSONResponse(status_code=404, content={"error": "Bot not found or not owned by you"})
+
+
+def _emit_bot_event_raw(action: str, bot: dict) -> None:
+    """Same as _emit_bot_event but works from an already-fetched bot row.
+    Used when the row may no longer exist (e.g. just-deleted)."""
+    try:
+        if not bot:
+            return
+        if bot.get("origin_server_id"):
+            return
+        from routers import federation as _fed
+        owner_nick = None
+        try:
+            row = db.get_user_by_id(int(bot.get("owner_id") or 0))
+            if row:
+                owner_nick = row.get("nickname")
+        except Exception:
+            owner_nick = None
+        payload = {
+            "bot_id": int(bot.get("id") or 0),
+            "name": bot.get("name") or "",
+            "avatar": bot.get("avatar") or "",
+            "description": bot.get("description") or "",
+            "is_public": int(bot.get("is_public") or 0),
+            "owner_nickname": owner_nick or "",
+        }
+        _fed.enqueue_server_event(f"bot.{action}", payload)
+    except Exception:
+        _log.exception("bot federation emit (raw) failed bot=%s action=%s", bot.get("id"), action)
 
 
 @router.delete("/bots/{bot_id}")
 async def delete_bot(bot_id: int, current_user: dict = Depends(get_current_user)):
     """Delete a bot."""
+    before = db.get_bot_by_id(bot_id) or {}
     if db.delete_bot(bot_id, current_user["id"]):
+        # Only federate the takedown if it was public when it died.
+        if int(before.get("is_public") or 0) == 1 and not before.get("origin_server_id"):
+            _emit_bot_event_raw("delete", before)
         return {"ok": True}
     return JSONResponse(status_code=404, content={"error": "Bot not found"})
 
