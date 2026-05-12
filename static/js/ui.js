@@ -156,6 +156,12 @@ const UI = (() => {
         Users.updatePresence(State.user.id, State.user.nickname, p, msg);
       }
     } catch {}
+    // Keep auto-away timer + flags aligned with whatever the latest
+    // presence is. Without this, presence changes pushed via WS (other
+    // device, server-side update) leave the auto-away state machine
+    // stale — so the 15-min idle timer may not re-arm after we go back
+    // to online elsewhere, etc.
+    try { _syncAutoAwayFromPresence(p); } catch {}
   }
 
   function renderSelfQuickStatus() {
@@ -276,8 +282,12 @@ const UI = (() => {
     _lastAutoAwayActivityTs = now;
     if (!State?.user) return;
     const cur = String(State.user.presence || 'online').toLowerCase();
-    const autoAwayMarked = _autoAwayActive || _getAutoAwayFlag();
-    if (cur === 'away' && autoAwayMarked) {
+    // Restore to online on activity UNLESS the user manually set Away.
+    // We don't gate on the auto-away flag because that flag can be lost
+    // across reloads or when the server pushes presence via WS — leaving
+    // the user stranded as "away" with no way back. Manual-away is the
+    // only sticky case.
+    if (cur === 'away' && !_getManualAwayFlag()) {
       const msg = String(State.user.status_msg || '');
       _saveStatusSilent('online', msg, { autoAwayRestore: true });
       return;
@@ -3105,7 +3115,7 @@ function _showThemePreviewBar(theme) {
     bar = document.createElement('div');
     bar.id = 'theme-preview-bar';
     bar.style.cssText = `position:fixed;bottom:0;left:0;right:0;z-index:9999;
-      background:linear-gradient(135deg,var(--surface-color),color-mix(in srgb,var(--surface-color) 85%,black));border-top:2px solid var(--accent-color);
+      background:linear-gradient(135deg,color-mix(in srgb,var(--accent-color) 26%,var(--surface-color)),color-mix(in srgb,var(--accent-color) 14%,var(--surface-color)));border-top:2px solid var(--accent-color);
       padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;
       box-shadow:0 -4px 24px rgba(0,0,0,.6);animation:slideUpBar .25s ease`;
     document.body.appendChild(bar);
@@ -3113,7 +3123,7 @@ function _showThemePreviewBar(theme) {
   bar.innerHTML = `
     <span style="color:var(--text-color);font-size:14px;font-weight:600">🎨 Previewing <em style="color:var(--accent-color)">${UI.escHtml(theme)}</em> theme</span>
     <button onclick="confirmThemePreview()" style="background:var(--accent-color);color:#08140b;border:none;border-radius:8px;padding:8px 20px;font-weight:700;cursor:pointer;font-size:13px">✓ Save</button>
-    <button onclick="cancelThemePreview()" style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer;font-size:13px">✕ Cancel</button>
+    <button onclick="cancelThemePreview()" style="background:color-mix(in srgb,var(--accent-color) 12%,var(--surface-color));color:var(--text-color);border:1px solid color-mix(in srgb,var(--accent-color) 38%,var(--border-color));border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer;font-size:13px">✕ Cancel</button>
   `;
 }
 
@@ -3348,6 +3358,7 @@ function _customThemeFromInputs() {
     border: get('ct-border'),
     text: get('ct-text'),
     muted: get('ct-muted'),
+    accent_dim: get('ct-accent-dim'),
     toast_bg: get('ct-toast-bg'),
     toast_bg2: get('ct-toast-bg2'),
     toast_border: get('ct-toast-border'),
@@ -3358,7 +3369,10 @@ function _customThemeFromInputs() {
     fwd_top_border: get('ct-fwd-top-border'),
     fwd_top_bg: get('ct-fwd-top-bg'),
     fwd_top_color: get('ct-fwd-top-color'),
-    fwd_preview_color: get('ct-fwd-preview-color')
+    fwd_preview_color: get('ct-fwd-preview-color'),
+    fwd_pill_color: get('ct-fwd-pill-color'),
+    fwd_pill_bg: get('ct-fwd-pill-bg'),
+    fwd_pill_border: get('ct-fwd-pill-border')
   };
 }
 function updateCustomTheme() {
@@ -3384,9 +3398,9 @@ function updateCustomTheme() {
   root.style.setProperty('--fwd-top-bg', d.fwd_top_bg || 'linear-gradient(180deg,color-mix(in srgb,var(--accent-dim) 78%,var(--surface-color)),color-mix(in srgb,var(--accent-dim) 44%,var(--surface-color)))');
   root.style.setProperty('--fwd-top-color', d.fwd_top_color || 'color-mix(in srgb,var(--text-color) 82%,var(--accent-color))');
   root.style.setProperty('--fwd-preview-color', d.fwd_preview_color || 'color-mix(in srgb,var(--text-color) 84%,var(--accent-color))');
-  root.style.setProperty('--fwd-pill-color', 'color-mix(in srgb,var(--accent-color) 82%,var(--text-color))');
-  root.style.setProperty('--fwd-pill-bg', 'color-mix(in srgb,var(--accent-dim) 75%,transparent)');
-  root.style.setProperty('--fwd-pill-border', 'color-mix(in srgb,var(--accent-color) 34%,var(--border-color))');
+  root.style.setProperty('--fwd-pill-color', d.fwd_pill_color || 'color-mix(in srgb,var(--accent-color) 82%,var(--text-color))');
+  root.style.setProperty('--fwd-pill-bg', d.fwd_pill_bg || 'color-mix(in srgb,var(--accent-dim) 75%,transparent)');
+  root.style.setProperty('--fwd-pill-border', d.fwd_pill_border || 'color-mix(in srgb,var(--accent-color) 34%,var(--border-color))');
   document.body.dataset.theme = 'custom';
   const dd = document.getElementById('mention-dropdown');
   if (dd && typeof syncMentionDropdownTheme === 'function') syncMentionDropdownTheme(dd);
@@ -3446,6 +3460,7 @@ function importThemeJson() {
       ['border', 'ct-border'],
       ['text', 'ct-text'],
       ['muted', 'ct-muted'],
+      ['accent_dim', 'ct-accent-dim'],
       ['toast_bg', 'ct-toast-bg'],
       ['toast_bg2', 'ct-toast-bg2'],
       ['toast_border', 'ct-toast-border'],
@@ -3456,7 +3471,10 @@ function importThemeJson() {
       ['fwd_top_border', 'ct-fwd-top-border'],
       ['fwd_top_bg', 'ct-fwd-top-bg'],
       ['fwd_top_color', 'ct-fwd-top-color'],
-      ['fwd_preview_color', 'ct-fwd-preview-color']
+      ['fwd_preview_color', 'ct-fwd-preview-color'],
+      ['fwd_pill_color', 'ct-fwd-pill-color'],
+      ['fwd_pill_bg', 'ct-fwd-pill-bg'],
+      ['fwd_pill_border', 'ct-fwd-pill-border']
     ];
     let importedCount = 0;
     colorFields.forEach(([k, id]) => {
@@ -3477,34 +3495,81 @@ function importThemeJson() {
   }
 }
 function loadCustomThemeIntoInputs() {
-  const raw = localStorage.getItem('frogtalk-custom-theme');
-  if (!raw) return;
-  try {
-    const d = JSON.parse(raw);
-    const colorFields = [
-      ['accent', 'ct-accent'],
-      ['bg', 'ct-bg'],
-      ['surface', 'ct-surface'],
-      ['border', 'ct-border'],
-      ['text', 'ct-text'],
-      ['muted', 'ct-muted'],
-      ['toast_bg', 'ct-toast-bg'],
-      ['toast_bg2', 'ct-toast-bg2'],
-      ['toast_border', 'ct-toast-border'],
-      ['toast_text', 'ct-toast-text'],
-      ['toast_shadow', 'ct-toast-shadow'],
-      ['fwd_border', 'ct-fwd-border'],
-      ['fwd_bg', 'ct-fwd-bg'],
-      ['fwd_top_border', 'ct-fwd-top-border'],
-      ['fwd_top_bg', 'ct-fwd-top-bg'],
-      ['fwd_top_color', 'ct-fwd-top-color'],
-      ['fwd_preview_color', 'ct-fwd-preview-color']
-    ];
-    colorFields.forEach(([k, id]) => {
-      const el = document.getElementById(id);
-      if (el && d[k]) el.value = d[k];
-    });
-  } catch {}
+  // Build a list of (saved-key, input-id, css-var) so we can seed each
+  // input either from the user's saved custom theme JSON OR — when no
+  // value is saved — from whatever the CURRENTLY ACTIVE theme resolves
+  // that CSS var to. That way, opening the custom editor on (say)
+  // "Cyberpunk" pre-fills every box with cyberpunk's purples instead of
+  // the hardcoded frog defaults baked into the index.html `value=...`
+  // attributes.
+  const fields = [
+    ['accent',            'ct-accent',            '--accent-color'],
+    ['bg',                'ct-bg',                '--bg-color'],
+    ['surface',           'ct-surface',           '--surface-color'],
+    ['border',            'ct-border',            '--border-color'],
+    ['text',              'ct-text',              '--text-color'],
+    ['muted',             'ct-muted',             '--text-muted'],
+    ['accent_dim',        'ct-accent-dim',        '--accent-dim'],
+    ['toast_bg',          'ct-toast-bg',          '--toast-bg-start'],
+    ['toast_bg2',         'ct-toast-bg2',         '--toast-bg-end'],
+    ['toast_border',      'ct-toast-border',      '--toast-border-color'],
+    ['toast_text',        'ct-toast-text',        '--toast-text-color'],
+    ['toast_shadow',      'ct-toast-shadow',      '--toast-shadow-color'],
+    ['fwd_border',        'ct-fwd-border',        '--fwd-card-border'],
+    ['fwd_top_border',    'ct-fwd-top-border',    '--fwd-top-border'],
+    ['fwd_top_color',     'ct-fwd-top-color',     '--fwd-top-color'],
+    ['fwd_preview_color', 'ct-fwd-preview-color', '--fwd-preview-color'],
+    ['fwd_pill_color',    'ct-fwd-pill-color',    '--fwd-pill-color'],
+    ['fwd_pill_bg',       'ct-fwd-pill-bg',       '--fwd-pill-bg'],
+    ['fwd_pill_border',   'ct-fwd-pill-border',   '--fwd-pill-border']
+    // fwd_bg / fwd_top_bg are gradients; skip auto-seeding since
+    // <input type="color"> only handles solid hex values.
+  ];
+
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('frogtalk-custom-theme') || '{}') || {}; } catch {}
+
+  const cs = (typeof window !== 'undefined') ? getComputedStyle(document.documentElement) : null;
+
+  // Resolve a CSS color (rgb/rgba/hex/etc.) to a #rrggbb hex string,
+  // since <input type="color"> only accepts hex. Returns null on
+  // anything we can't parse (e.g. unsupported color-mix on older browsers).
+  function _toHex(c) {
+    if (!c) return null;
+    c = String(c).trim();
+    if (!c) return null;
+    const hex = c.match(/^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+    if (hex) {
+      let h = hex[1];
+      if (h.length === 3) h = h.split('').map(x => x + x).join('');
+      if (h.length === 8) h = h.slice(0, 6);
+      return '#' + h.toLowerCase();
+    }
+    const rgb = c.match(/^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+    if (rgb) {
+      const [r, g, b] = [rgb[1], rgb[2], rgb[3]].map(n => {
+        const v = Math.round(parseFloat(n));
+        return Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0');
+      });
+      return '#' + r + g + b;
+    }
+    return null;
+  }
+
+  fields.forEach(([key, id, cssVar]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (typeof saved[key] === 'string' && /^#[0-9a-f]{3,8}$/i.test(saved[key])) {
+      el.value = saved[key];
+      return;
+    }
+    // No saved value — derive from the currently-active theme.
+    if (cs) {
+      const raw = cs.getPropertyValue(cssVar);
+      const hex = _toHex(raw);
+      if (hex) el.value = hex;
+    }
+  });
 }
 // Expose globally so onclick=... handlers in index.html can find them.
 try {
