@@ -3182,15 +3182,18 @@ function _showThemePreviewBar(theme) {
     bar = document.createElement('div');
     bar.id = 'theme-preview-bar';
     bar.style.cssText = `position:fixed;bottom:0;left:0;right:0;z-index:9999;
-      background:linear-gradient(135deg,color-mix(in srgb,var(--accent-color) 55%,var(--surface-color)),color-mix(in srgb,var(--accent-color) 32%,var(--surface-color)));border-top:2px solid var(--accent-color);
+      background:linear-gradient(135deg,
+        var(--accent-color),
+        color-mix(in srgb,var(--accent-color) 78%,var(--surface-color)));
+      border-top:2px solid color-mix(in srgb,var(--accent-color) 70%,white);
       padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;
-      box-shadow:0 -4px 24px rgba(0,0,0,.6);animation:slideUpBar .25s ease`;
+      box-shadow:0 -6px 28px color-mix(in srgb,var(--accent-color) 35%,black);animation:slideUpBar .25s ease`;
     document.body.appendChild(bar);
   }
   bar.innerHTML = `
-    <span style="color:var(--text-color);font-size:14px;font-weight:600">🎨 Previewing <em style="color:var(--accent-color)">${UI.escHtml(theme)}</em> theme</span>
-    <button onclick="confirmThemePreview()" style="background:var(--accent-color);color:#08140b;border:none;border-radius:8px;padding:8px 20px;font-weight:700;cursor:pointer;font-size:13px">✓ Save</button>
-    <button onclick="cancelThemePreview()" style="background:color-mix(in srgb,var(--accent-color) 12%,var(--surface-color));color:var(--text-color);border:1px solid color-mix(in srgb,var(--accent-color) 38%,var(--border-color));border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer;font-size:13px">✕ Cancel</button>
+    <span style="color:#08140b;font-size:14px;font-weight:700;text-shadow:0 1px 0 rgba(255,255,255,.18)">🎨 Previewing <em style="color:#fff;font-style:italic;text-decoration:underline;text-underline-offset:3px">${UI.escHtml(theme)}</em> theme</span>
+    <button onclick="confirmThemePreview()" style="background:#0e1f15;color:#eafff1;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:8px 20px;font-weight:700;cursor:pointer;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.35)">✓ Save</button>
+    <button onclick="cancelThemePreview()" style="background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer;font-size:13px">✕ Cancel</button>
   `;
 }
 
@@ -3207,6 +3210,12 @@ function confirmThemePreview() {
   (async () => {
     const customCss = CSS_PRESETS[theme] || '';
     try {
+      // 1) Persist the *theme choice itself* to the user record so it
+      //    survives logout/app-restart. Without this PATCH the server's
+      //    `users.theme` column keeps the old value and `launch()` happily
+      //    overrides localStorage with it on next sign-in.
+      try { await apiFetch('/api/auth/profile', 'PATCH', { theme }); } catch {}
+      // 2) Persist the matching CSS preset on the wall/profile record.
       const wallRes = await apiFetch('/api/wall/settings', 'PATCH', {
         custom_css: customCss,
         wall_enabled: State.user.wall_enabled ?? 1,
@@ -3219,7 +3228,10 @@ function confirmThemePreview() {
         State.save();
         toast('Theme and styles saved!', 'success');
       } else {
-        toast('Failed to save theme styles', 'error');
+        // Theme PATCH already went through, so at minimum the theme stuck.
+        State.user.theme = theme;
+        State.save();
+        toast('Theme saved (styles failed)', 'warning');
       }
     } catch (e) {
       toast('Failed to save theme styles', 'error');
