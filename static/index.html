@@ -150,7 +150,15 @@
   border-color:#2f5548 !important;
 }
 .modal-overlay{background:rgba(0,0,0,.7) !important}
-.modal{background:var(--surface-color) !important;border-color:var(--border-color) !important;color:var(--text-color) !important}
+.modal{
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface-color) 86%, var(--accent-color) 14%) 0%,
+      color-mix(in srgb, var(--surface-color) 94%, var(--bg-color)) 56%,
+      color-mix(in srgb, var(--surface-color) 98%, var(--bg-color)) 100%) !important;
+  border:1px solid color-mix(in srgb, var(--border-color) 60%, var(--accent-color) 40%) !important;
+  color:var(--text-color) !important;
+}
 /* Default (frog-green) theme: replace flat surface with the polished
    green gradient used by Friends/Settings/Channel popups so every modal
    matches the app theme.  Other themes keep their flat surface color. */
@@ -197,12 +205,20 @@ body[data-theme="dark"] .modal-input:focus{
 body[data-theme="dark"] textarea.modal-input{resize:vertical;min-height:64px;line-height:1.45}
 /* Sub-panels inside modals (Shared secret group, Invite Only card, etc.) */
 .modal-card{
-  background:#1a1a1a;
-  border:1px solid #2a2a2a;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface-color, #1e1e1e) 88%, var(--accent-color, #4caf50) 12%) 0%,
+      color-mix(in srgb, var(--surface-color, #1e1e1e) 96%, var(--bg-color, #0d0d0d)) 100%);
+  border:1px solid color-mix(in srgb, var(--border-color, #2a2a2a) 65%, var(--accent-color, #4caf50) 35%);
   border-radius:10px;
   padding:12px;
   margin-bottom:12px;
+  color:var(--text-color, #e0e0e0);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.025),
+    0 2px 8px rgba(0,0,0,.32);
 }
+.modal-card .modal-label{color:color-mix(in srgb, var(--text-color, #e0e0e0) 70%, var(--accent-color, #4caf50)) !important}
 body[data-theme="dark"] .modal-card{
   background:linear-gradient(180deg,#0f211b 0%,#0c1c17 60%,#091813 100%) !important;
   border:1px solid #224237 !important;
@@ -326,8 +342,25 @@ body[data-theme="dark"] .modal-btn.primary:active{
   background:linear-gradient(180deg,#479e4d,#3e8c43) !important;
   box-shadow:inset 0 2px 6px rgba(0,0,0,.25) !important;
 }
-.modal-input{background:var(--bg-color) !important;border-color:var(--border-color) !important;color:var(--text-color) !important}
-.modal-label{color:var(--text-color) !important}
+.modal-input{
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--bg-color) 88%, var(--accent-color) 12%) 0%,
+      color-mix(in srgb, var(--bg-color) 96%, var(--surface-color)) 100%) !important;
+  border:1px solid color-mix(in srgb, var(--border-color) 60%, var(--accent-color) 40%) !important;
+  color:var(--text-color) !important;
+  border-radius:10px !important;
+  transition:border-color .18s ease, box-shadow .2s ease, background .2s ease !important;
+}
+.modal-input:hover{
+  border-color:color-mix(in srgb, var(--accent-color) 55%, var(--border-color)) !important;
+}
+.modal-input:focus{
+  border-color:var(--accent-color) !important;
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--accent-color) 22%, transparent) !important;
+  outline:none !important;
+}
+.modal-label{color:color-mix(in srgb, var(--text-color) 70%, var(--accent-color)) !important}
 .modal-btn.primary{background:var(--accent-color) !important}
 .settings-tab{color:var(--text-muted) !important}
 .settings-tab.active{color:var(--accent-color) !important;background:var(--accent-dim) !important}
@@ -3100,13 +3133,42 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .room-picker-actions .modal-input{margin-bottom:0}
 .room-icon-hint{font-size:12px;color:#666;margin-top:-4px;margin-bottom:10px}
 .radio-group{display:flex;gap:8px;margin-bottom:10px}
+/* Theme-aware: build the card surface from the active theme's variables
+   so the Visibility/Channel Type cards always match the surrounding modal
+   instead of rendering as flat near-black tiles on the default theme. */
 .radio-option{
-  flex:1;padding:8px;border:1px solid #2a2a2a;border-radius:8px;
-  cursor:pointer;text-align:center;font-size:13px;color:#888;transition:all .15s
+  flex:1;padding:10px 8px;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface-color, #1e1e1e) 86%, var(--accent-color, #4caf50) 14%) 0%,
+      color-mix(in srgb, var(--surface-color, #1e1e1e) 94%, var(--bg-color, #0d0d0d)) 100%);
+  border:1px solid color-mix(in srgb, var(--border-color, #2a2a2a) 70%, var(--accent-color, #4caf50) 30%);
+  border-radius:10px;
+  cursor:pointer;text-align:center;font-size:13px;
+  color:color-mix(in srgb, var(--text-color, #e0e0e0) 75%, var(--accent-color, #4caf50));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.03),
+    0 1px 2px rgba(0,0,0,.35);
+  transition:border-color .18s ease, box-shadow .2s ease, background .2s ease, color .15s ease;
 }
-.radio-option.selected{border-color:#4caf50;color:#4caf50;background:#1a3a1a}
-/* Dark (frog-green) theme: match modal-card / modal-input gradients so the
-   radio cards inside Create Channel don't render as flat black tiles. */
+.radio-option:hover{
+  border-color:color-mix(in srgb, var(--accent-color, #4caf50) 55%, var(--border-color, #2a2a2a));
+  color:color-mix(in srgb, var(--text-color, #e0e0e0) 92%, var(--accent-color, #4caf50));
+}
+.radio-option.selected{
+  border-color:var(--accent-color,#4caf50);
+  color:color-mix(in srgb, var(--text-color, #e0e0e0) 80%, var(--accent-color, #4caf50));
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--surface-color, #1e1e1e) 70%, var(--accent-color, #4caf50) 30%) 0%,
+      color-mix(in srgb, var(--surface-color, #1e1e1e) 82%, var(--accent-color, #4caf50) 18%) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.05),
+    0 0 0 1px color-mix(in srgb, var(--accent-color, #4caf50) 35%, transparent),
+    0 4px 14px color-mix(in srgb, var(--accent-color, #4caf50) 22%, transparent);
+}
+/* Legacy dark-theme overrides retained so the explicit "dark" theme keeps
+   its hand-tuned frog-green look identical to the modal-card gradients. */
 body[data-theme="dark"] .radio-option{
   background:linear-gradient(180deg,#10241c 0%,#0c1d16 60%,#0a1813 100%) !important;
   border:1px solid #2f5548 !important;
@@ -3116,7 +3178,6 @@ body[data-theme="dark"] .radio-option{
     inset 0 1px 0 rgba(255,255,255,.03),
     inset 0 0 0 1px rgba(127,210,167,.04),
     0 1px 2px rgba(0,0,0,.35) !important;
-  transition:border-color .18s ease, box-shadow .2s ease, background .2s ease, color .15s ease !important;
 }
 body[data-theme="dark"] .radio-option:hover{
   border-color:#42755f !important;
