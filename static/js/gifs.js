@@ -680,28 +680,74 @@ const GIFs = (() => {
   async function showPublicPacks() {
     const grid = document.getElementById('gif-grid');
     grid.innerHTML = '<div class="gif-loading">Loading public packs...</div>';
-    
+
     try {
       const res = await apiFetch('/api/media/stickers/public');
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
-      
+
       if (!data.packs || data.packs.length === 0) {
-        grid.innerHTML = '<div class="gif-empty">No public sticker packs yet</div>';
+        grid.innerHTML = '<div class="gif-empty">No public sticker packs yet<div class="gif-empty-hint">Create one and toggle 🌍 to share with everyone.</div></div>';
         return;
       }
-      
-      grid.innerHTML = data.packs.map(pack => `
-        <div style="grid-column:1/-1;background:#0f0f0f;padding:12px;border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <div style="font-weight:600;color:#e0e0e0">${UI.escHtml(pack.name)}</div>
-            <div style="font-size:12px;color:#666">${pack.sticker_count || 0} stickers · by ${UI.escHtml(pack.owner_name)}</div>
+
+      // Figure out which packs are already installed/owned so the button
+      // can show "Installed" instead of letting the user double-install.
+      let installedIds = new Set();
+      try {
+        const myRes = await apiFetch('/api/media/stickers/packs');
+        if (myRes.ok) {
+          const my = await myRes.json();
+          [...(my.own_packs || []), ...(my.installed_packs || [])]
+            .forEach(p => installedIds.add(p.id));
+        }
+      } catch {}
+
+      // Render each pack as a card with a small thumbnail strip showing
+      // up to 5 stickers from the pack. Fetched lazily after the cards
+      // appear so the list itself renders instantly.
+      grid.innerHTML = data.packs.map(pack => {
+        const installed = installedIds.has(pack.id);
+        const btnHtml = installed
+          ? `<button disabled style="background:color-mix(in srgb, var(--accent-color) 14%, transparent);border:1px solid var(--border-color);color:var(--text-muted);padding:6px 12px;border-radius:6px;font-size:12px;cursor:default">Installed</button>`
+          : `<button onclick="GIFs.installPack(${pack.id})" style="background:var(--accent-color);border:none;color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600">Install</button>`;
+        return `
+        <div class="sp-card" data-pack-id="${pack.id}" style="grid-column:1/-1;background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);padding:10px 12px;border-radius:10px;margin-bottom:6px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <div style="min-width:0;flex:1">
+              <div style="font-weight:600;color:var(--text-color);font-size:13px">${UI.escHtml(pack.name)}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${pack.sticker_count || 0} stickers · by ${UI.escHtml(pack.owner_name)}</div>
+            </div>
+            ${btnHtml}
           </div>
-          <button onclick="GIFs.installPack(${pack.id})" style="background:#4caf50;border:none;color:#000;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px">
-            Install
-          </button>
-        </div>
-      `).join('');
+          <div class="sp-thumbs" data-pack-id="${pack.id}" style="display:flex;gap:4px;margin-top:8px;min-height:44px;align-items:center"></div>
+        </div>`;
+      }).join('');
+
+      // Lazy-load thumbnails for each card. We grab up to 5 stickers from
+      // each pack so users can actually see what they're installing.
+      for (const pack of data.packs) {
+        const cont = grid.querySelector(`.sp-thumbs[data-pack-id="${pack.id}"]`);
+        if (!cont) continue;
+        if (!pack.sticker_count) {
+          cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted);opacity:.7">No stickers yet</div>';
+          continue;
+        }
+        try {
+          const r = await apiFetch(`/api/media/stickers/packs/${pack.id}`);
+          if (!r.ok) continue;
+          const d = await r.json();
+          const stickers = (d.stickers || []).slice(0, 5);
+          cont.innerHTML = stickers.map(s => `
+            <div title="${UI.escHtml(s.name)}" style="width:42px;height:42px;border-radius:8px;overflow:hidden;background:color-mix(in srgb, var(--surface-color) 70%, transparent);border:1px solid var(--border-color);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+              <img src="${UI.escHtml(s.image_data)}" alt="" loading="lazy" style="max-width:100%;max-height:100%;object-fit:contain">
+            </div>`).join('') + (
+              pack.sticker_count > 5
+                ? `<div style="font-size:11px;color:var(--text-muted);margin-left:4px">+${pack.sticker_count - 5}</div>`
+                : ''
+            );
+        } catch {}
+      }
     } catch (e) {
       grid.innerHTML = '<div class="gif-empty">Failed to load public packs</div>';
     }
@@ -793,15 +839,23 @@ const GIFs = (() => {
     modal.id = 'sticker-manager-modal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px';
     modal.innerHTML = `
-      <div style="background:linear-gradient(180deg,#1f3a2c 0%,#13241b 100%);border:1px solid #3a6b48;border-radius:14px;width:520px;max-width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 18px 48px rgba(0,0,0,.6),0 0 0 1px rgba(76,175,80,.15)">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid #3a6b48">
-          <div style="font-weight:700;color:#cfe8d2;font-size:15px">🎨 Manage Sticker Packs</div>
-          <button onclick="GIFs.closeManager()" style="background:none;border:none;color:#9bbf9b;font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px">✕</button>
+      <div style="background:linear-gradient(180deg,
+        color-mix(in srgb, var(--accent-color) 18%, var(--surface-color)) 0%,
+        var(--surface-color) 55%,
+        color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) 100%);
+        border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+        border-radius:14px;width:520px;max-width:100%;max-height:90vh;display:flex;flex-direction:column;
+        box-shadow:0 18px 48px rgba(0,0,0,.6), 0 0 0 1px color-mix(in srgb, var(--accent-color) 15%, transparent);
+        color:var(--text-color)">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border-color)">
+          <div style="font-weight:700;color:var(--text-color);font-size:15px">🎨 Manage Sticker Packs</div>
+          <button onclick="GIFs.closeManager()" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px">✕</button>
         </div>
-        <div id="sm-body" style="flex:1;overflow-y:auto;padding:14px 16px;color:#d6ecda;scrollbar-width:thin;scrollbar-color:rgba(76,175,80,.4) transparent"></div>
-        <div style="padding:12px 16px;border-top:1px solid #3a6b48;display:flex;gap:8px;justify-content:flex-end">
-          <button onclick="GIFs.closeManager()" style="background:rgba(0,0,0,.35);border:1px solid #3a6b48;color:#cfe8d2;padding:8px 14px;border-radius:8px;cursor:pointer">Close</button>
-          <button onclick="GIFs.showCreatePack()" style="background:linear-gradient(135deg,#2a5a2a 0%,#1a3a1a 100%);border:1px solid #4caf50;color:#fff;padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:600">+ New Pack</button>
+        <div id="sm-body" style="flex:1;overflow-y:auto;padding:14px 16px;color:var(--text-color);scrollbar-width:thin;scrollbar-color:color-mix(in srgb, var(--accent-color) 40%, transparent) transparent"></div>
+        <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <button onclick="GIFs.showPublicPacks();GIFs.closeManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Browse Public</button>
+          <button onclick="GIFs.closeManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Close</button>
+          <button onclick="GIFs.showCreatePack()" style="background:var(--accent-color);border:1px solid var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700">+ New Pack</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -818,7 +872,7 @@ const GIFs = (() => {
   async function renderManager() {
     const body = document.getElementById('sm-body');
     if (!body) return;
-    body.innerHTML = '<div style="text-align:center;padding:20px;color:#6fbf7e">Loading…</div>';
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted)">Loading…</div>';
     try {
       const res = await apiFetch('/api/media/stickers/packs');
       if (!res.ok) throw 0;
@@ -827,38 +881,38 @@ const GIFs = (() => {
       const installed = data.installed_packs || [];
       let html = '';
       if (own.length) {
-        html += '<div style="font-size:11px;color:#7fd08a;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700">Your Packs</div>';
+        html += '<div style="font-size:11px;color:var(--accent-color);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700">Your Packs</div>';
         for (const p of own) {
           html += `
-            <div style="background:rgba(0,0,0,.30);border:1px solid #3a6b48;border-radius:10px;padding:10px 12px;margin-bottom:8px">
+            <div style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid color-mix(in srgb, var(--accent-color) 25%, var(--border-color));border-radius:10px;padding:10px 12px;margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
                 <div style="min-width:0;flex:1">
-                  <div style="font-weight:700;color:#fff">${UI.escHtml(p.name)}</div>
-                  <div style="font-size:11px;color:#9bbf9b">${p.is_public ? '🌍 Public' : '🔒 Private'}${p.description ? ' · ' + UI.escHtml(p.description) : ''}</div>
+                  <div style="font-weight:700;color:var(--text-color)">${UI.escHtml(p.name)}</div>
+                  <div style="font-size:11px;color:var(--text-muted)">${p.is_public ? '🌍 Public' : '🔒 Private'}${p.description ? ' · ' + UI.escHtml(p.description) : ''}</div>
                 </div>
                 <div style="display:flex;gap:4px;flex-shrink:0">
-                  <button onclick="GIFs.editPack(${p.id})" style="background:rgba(76,175,80,.14);border:1px solid #3a6b48;color:#cfe8d2;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">✎</button>
-                  <button onclick="GIFs.togglePublic(${p.id}, ${p.is_public ? 0 : 1})" style="background:rgba(76,175,80,.14);border:1px solid #3a6b48;color:#cfe8d2;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">${p.is_public ? '🔒' : '🌍'}</button>
-                  <button onclick="GIFs.deletePack(${p.id})" style="background:rgba(180,40,40,.14);border:1px solid #6b2a2a;color:#f0a0a0;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">🗑</button>
+                  <button onclick="GIFs.editPack(${p.id})" title="Rename" style="background:color-mix(in srgb, var(--accent-color) 14%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">✎</button>
+                  <button onclick="GIFs.togglePublic(${p.id}, ${p.is_public ? 0 : 1})" title="${p.is_public ? 'Make private' : 'Publish'}" style="background:color-mix(in srgb, var(--accent-color) 14%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">${p.is_public ? '🔒' : '🌍'}</button>
+                  <button onclick="GIFs.deletePack(${p.id})" title="Delete pack" style="background:rgba(180,40,40,.18);border:1px solid #6b2a2a;color:#f0a0a0;padding:5px 9px;border-radius:6px;cursor:pointer;font-size:12px">🗑</button>
                 </div>
               </div>
-              <div id="sm-stickers-${p.id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(76,175,80,.18)"></div>
-              <div style="margin-top:8px"><button onclick="GIFs.uploadStickerTo(${p.id})" style="background:rgba(76,175,80,.10);border:1px dashed #4caf50;color:#7fd08a;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px;width:100%">+ Add sticker (PNG/WebP, ≤500KB)</button></div>
+              <div id="sm-stickers-${p.id}" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid color-mix(in srgb, var(--accent-color) 18%, transparent)"></div>
+              <div style="margin-top:8px"><button onclick="GIFs.uploadStickerTo(${p.id})" style="background:color-mix(in srgb, var(--accent-color) 10%, transparent);border:1px dashed var(--accent-color);color:var(--accent-color);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px;width:100%">+ Add sticker (PNG/WebP/GIF, ≤500KB)</button></div>
             </div>`;
         }
       }
       if (installed.length) {
-        html += '<div style="font-size:11px;color:#7fd08a;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;font-weight:700">Installed</div>';
+        html += '<div style="font-size:11px;color:var(--accent-color);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px;font-weight:700">Installed</div>';
         for (const p of installed) {
           html += `
-            <div style="background:rgba(0,0,0,.20);border:1px solid #2a5a3a;border-radius:10px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
-              <div><div style="font-weight:600;color:#cfe8d2">${UI.escHtml(p.name)}</div><div style="font-size:11px;color:#9bbf9b">by ${UI.escHtml(p.owner_name || '?')}</div></div>
-              <button onclick="GIFs.uninstallPack(${p.id})" style="background:rgba(180,40,40,.14);border:1px solid #6b2a2a;color:#f0a0a0;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px">Uninstall</button>
+            <div style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);border-radius:10px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+              <div><div style="font-weight:600;color:var(--text-color)">${UI.escHtml(p.name)}</div><div style="font-size:11px;color:var(--text-muted)">by ${UI.escHtml(p.owner_name || '?')}</div></div>
+              <button onclick="GIFs.uninstallPack(${p.id})" style="background:rgba(180,40,40,.18);border:1px solid #6b2a2a;color:#f0a0a0;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px">Uninstall</button>
             </div>`;
         }
       }
       if (!own.length && !installed.length) {
-        html += '<div style="text-align:center;padding:24px;color:#6fbf7e">No packs yet — create one or browse public packs from the picker.</div>';
+        html += '<div style="text-align:center;padding:24px;color:var(--text-muted)">No packs yet — create one with the + button below, or browse public packs.</div>';
       }
       body.innerHTML = html;
       // load own pack stickers
@@ -870,11 +924,11 @@ const GIFs = (() => {
           const cont = document.getElementById(`sm-stickers-${p.id}`);
           if (!cont) continue;
           if (!d.stickers || !d.stickers.length) {
-            cont.innerHTML = '<div style="font-size:11px;color:#6fbf7e">No stickers yet</div>';
+            cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted)">No stickers yet</div>';
             continue;
           }
           cont.innerHTML = d.stickers.map(s => `
-            <div style="position:relative;width:56px;height:56px;background:rgba(0,0,0,.35);border-radius:8px;overflow:hidden;border:1px solid #2a5a3a" title="${UI.escHtml(s.name)}">
+            <div style="position:relative;width:56px;height:56px;background:color-mix(in srgb, var(--surface-color) 70%, transparent);border-radius:8px;overflow:hidden;border:1px solid var(--border-color)" title="${UI.escHtml(s.name)}">
               <img src="${s.image_data}" style="width:100%;height:100%;object-fit:contain" alt="">
               <button onclick="GIFs.deleteSticker(${s.id})" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.7);border:none;color:#f0a0a0;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:10px;line-height:1;padding:0">×</button>
             </div>`).join('');
