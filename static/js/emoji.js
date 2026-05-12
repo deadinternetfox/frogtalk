@@ -54,7 +54,7 @@ function renderCategory(cat) {
   
   if (cat === '⭐ Custom') {
     if (_customEmojis.length === 0) {
-      grid.innerHTML = '<div style="color:#666;padding:10px;text-align:center;font-size:12px">No custom emojis yet</div>';
+      grid.innerHTML = '<div style="color:var(--text-muted);padding:10px;text-align:center;font-size:12px">No custom emojis yet</div>';
       // Add upload button for admin
       if (State.user?.is_admin) {
         const addBtn = document.createElement('button');
@@ -83,7 +83,7 @@ function renderCategory(cat) {
     if (State.user?.is_admin) {
       const addBtn = document.createElement('span');
       addBtn.className = 'ep-emoji';
-      addBtn.style.cssText = 'background:#2a2a2a;border:1px dashed #444;border-radius:4px';
+      addBtn.style.cssText = 'background:color-mix(in srgb, var(--accent-color) 10%, var(--surface-color));border:1px dashed var(--border-color);border-radius:4px;color:var(--text-color)';
       addBtn.textContent = '+';
       addBtn.title = 'Add custom emoji';
       addBtn.onclick = () => openAddEmojiModal();

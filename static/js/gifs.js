@@ -60,7 +60,7 @@ const GIFs = (() => {
           <button class="gif-tab" data-tab="stickers" onclick="GIFs.switchTab('stickers')">Stickers</button>
         </div>
         <div style="display:flex;gap:6px;align-items:center">
-          <button class="gif-manage-btn" id="gif-manage-btn" onclick="GIFs.openManager()" title="Manage sticker packs" style="display:none;background:rgba(76,175,80,.14);border:1px solid #3a6b48;color:#cfe8d2;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">⚙ Manage</button>
+          <button class="gif-manage-btn" id="gif-manage-btn" onclick="GIFs.openManager()" title="Manage sticker packs" style="display:none;padding:5px 10px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">⚙ Manage</button>
           <button class="gif-close" onclick="GIFs.close()">✕</button>
         </div>
       </div>
@@ -87,16 +87,23 @@ const GIFs = (() => {
         width: 360px;
         max-width: 95vw;
         height: 450px;
-        background: linear-gradient(180deg,#1f3a2c 0%,#193024 55%,#13241b 100%);
-        border: 1px solid #3a6b48;
+        background: linear-gradient(180deg,
+          color-mix(in srgb, var(--accent-color) 18%, var(--surface-color)) 0%,
+          var(--surface-color) 55%,
+          color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) 100%);
+        border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
         border-radius: 14px;
         display: none;
         flex-direction: column;
         z-index: 1000;
-        box-shadow: 0 12px 32px rgba(0,0,0,.6), 0 0 0 1px rgba(76,175,80,.10), inset 0 1px 0 rgba(76,175,80,.06);
+        box-shadow:
+          0 12px 32px rgba(0,0,0,.6),
+          0 0 0 1px color-mix(in srgb, var(--accent-color) 10%, transparent),
+          inset 0 1px 0 color-mix(in srgb, var(--accent-color) 6%, transparent);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         overflow: hidden;
+        color: var(--text-color);
       }
       .gif-picker.open {
         display: flex;
@@ -108,13 +115,13 @@ const GIFs = (() => {
         justify-content: space-between;
         align-items: center;
         padding: 10px 12px;
-        border-bottom: 1px solid #2a5a3a;
+        border-bottom: 1px solid var(--border-color);
       }
-      .gif-tabs { display: flex; gap: 4px; background:rgba(0,0,0,.35); padding:3px; border-radius:8px; box-shadow: inset 0 0 0 1px rgba(76,175,80,.10); }
+      .gif-tabs { display: flex; gap: 4px; background: color-mix(in srgb, var(--bg-color) 60%, transparent); padding:3px; border-radius:8px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 10%, transparent); }
       .gif-tab {
         background: transparent;
         border: none;
-        color: #9bbf9b;
+        color: var(--text-muted);
         cursor: pointer;
         padding: 6px 14px;
         border-radius: 6px;
@@ -122,33 +129,40 @@ const GIFs = (() => {
         font-weight: 600;
         transition: background .12s, color .12s;
       }
-      .gif-tab:hover { color: #cfe8d2; }
-      .gif-tab.active { background: linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 100%); color: #7fd08a; box-shadow: inset 0 0 0 1px rgba(76,175,80,.25); }
+      .gif-tab:hover { color: var(--text-color); }
+      .gif-tab.active {
+        background: color-mix(in srgb, var(--accent-color) 22%, var(--bg-color));
+        color: var(--accent-color);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 40%, transparent);
+      }
       .gif-close {
         background: none;
         border: none;
-        color: #9bbf9b;
+        color: var(--text-muted);
         cursor: pointer;
         font-size: 18px;
         width: 28px; height: 28px;
         border-radius: 6px;
         transition: background .12s, color .12s;
       }
-      .gif-close:hover { color: #cfe8d2; background: rgba(76,175,80,.12); }
+      .gif-close:hover { color: var(--text-color); background: color-mix(in srgb, var(--accent-color) 12%, transparent); }
       .gif-search-wrap { padding: 8px 12px; }
       .gif-search {
         width: 100%;
-        background: rgba(0,0,0,.35);
-        border: 1px solid #2a5a3a;
+        background: color-mix(in srgb, var(--bg-color) 60%, transparent);
+        border: 1px solid var(--border-color);
         border-radius: 8px;
         padding: 9px 12px;
-        color: #d6ecda;
+        color: var(--text-color);
         font-size: 13px;
         outline: none;
         box-sizing: border-box;
         transition: border-color .12s, box-shadow .12s;
       }
-      .gif-search:focus { border-color: #4caf50; box-shadow: 0 0 0 3px rgba(76,175,80,.18); }
+      .gif-search:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 18%, transparent);
+      }
       .gif-categories {
         display: flex;
         gap: 6px;
@@ -160,9 +174,6 @@ const GIFs = (() => {
         min-width: 0;
       }
       .gif-categories::-webkit-scrollbar { display: none; }
-      /* Desktop-only horizontal scroll arrows for the category row.
-         Arrows are proper flex siblings (not overlays), so category pills
-         never slide under them. Fades hint at more content. */
       .gif-cat-wrap {
         position: relative;
         display: flex;
@@ -177,9 +188,9 @@ const GIFs = (() => {
         display: none;
         align-items: center;
         justify-content: center;
-        background: rgba(0,0,0,.30);
-        border: 1px solid #2a5a3a;
-        color: #cfe8d2;
+        background: color-mix(in srgb, var(--bg-color) 60%, transparent);
+        border: 1px solid var(--border-color);
+        color: var(--text-color);
         font-size: 18px;
         font-weight: 700;
         line-height: 1;
@@ -187,32 +198,28 @@ const GIFs = (() => {
         cursor: pointer;
         transition: background .12s, transform .12s, border-color .12s, color .12s;
         padding: 0;
-        margin-bottom: 6px; /* align with .gif-categories bottom padding */
+        margin-bottom: 6px;
         position: relative;
         z-index: 3;
       }
       .gif-cat-scroll:hover {
-        background: linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 100%); border-color: #4caf50; color: #7fd08a;
+        background: color-mix(in srgb, var(--accent-color) 22%, var(--bg-color));
+        border-color: var(--accent-color);
+        color: var(--accent-color);
         transform: scale(1.08);
       }
       .gif-cat-scroll:active { transform: scale(.95); }
       .gif-cat-wrap.can-scroll-left  .gif-cat-scroll-l { display: flex; }
       .gif-cat-wrap.can-scroll-right .gif-cat-scroll-r { display: flex; }
-      /* Soft fade on the scroll container edges so pills don't feel cut off.
-         Sits INSIDE the scroll track between the arrows, never overlapping
-         the arrow buttons themselves. */
       .gif-cat-wrap::after,
       .gif-cat-wrap::before {
         content:'';position:absolute;top:4px;bottom:10px;width:18px;pointer-events:none;z-index:1;
         opacity:0;transition:opacity .15s;
       }
-      /* 8px wrap padding + 26px arrow + 2px gap = 36px from the edge */
-      .gif-cat-wrap::after  { right:36px; background:linear-gradient(270deg,#15291f,transparent); }
-      .gif-cat-wrap::before { left:36px;  background:linear-gradient(90deg,#15291f,transparent); }
+      .gif-cat-wrap::after  { right:36px; background:linear-gradient(270deg, var(--surface-color), transparent); }
+      .gif-cat-wrap::before { left:36px;  background:linear-gradient(90deg,  var(--surface-color), transparent); }
       .gif-cat-wrap.can-scroll-right::after { opacity:1; }
       .gif-cat-wrap.can-scroll-left::before { opacity:1; }
-      /* When arrows are hidden (no overflow on that side), the fade would
-         otherwise sit awkwardly inset from the edge. Suppress it. */
       .gif-cat-wrap:not(.can-scroll-left)  .gif-cat-scroll-l { display: none; }
       .gif-cat-wrap:not(.can-scroll-right) .gif-cat-scroll-r { display: none; }
       @media (hover: none) {
@@ -222,9 +229,9 @@ const GIFs = (() => {
         .gif-categories { padding: 4px 12px 10px; }
       }
       .gif-category {
-        background: rgba(0,0,0,.30);
-        border: 1px solid #2a5a3a;
-        color: #9bbf9b;
+        background: color-mix(in srgb, var(--bg-color) 60%, transparent);
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
         cursor: pointer;
         padding: 5px 12px;
         border-radius: 14px;
@@ -234,7 +241,11 @@ const GIFs = (() => {
         flex-shrink: 0;
         transition: background .12s, color .12s, border-color .12s;
       }
-      .gif-category:hover { background: rgba(76,175,80,.12); color: #cfe8d2; border-color: rgba(76,175,80,.35); }
+      .gif-category:hover {
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        color: var(--text-color);
+        border-color: color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+      }
       .gif-grid {
         flex: 1;
         overflow-y: auto;
@@ -243,19 +254,22 @@ const GIFs = (() => {
         gap: 6px;
         padding: 8px 12px 12px;
         scrollbar-width: thin;
-        scrollbar-color: rgba(76,175,80,.4) transparent;
+        scrollbar-color: color-mix(in srgb, var(--accent-color) 40%, transparent) transparent;
       }
       .gif-grid::-webkit-scrollbar { width: 6px; }
-      .gif-grid::-webkit-scrollbar-thumb { background: rgba(76,175,80,.35); border-radius: 3px; }
+      .gif-grid::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--accent-color) 35%, transparent); border-radius: 3px; }
       .gif-item {
         cursor: pointer;
         border-radius: 8px;
         overflow: hidden;
-        background: rgba(0,0,0,.35);
+        background: color-mix(in srgb, var(--bg-color) 60%, transparent);
         aspect-ratio: 1;
         transition: transform .12s, box-shadow .12s;
       }
-      .gif-item:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.5), 0 0 0 1px rgba(76,175,80,.25); }
+      .gif-item:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(0,0,0,.5), 0 0 0 1px color-mix(in srgb, var(--accent-color) 30%, transparent);
+      }
       .gif-item img {
         width: 100%;
         height: 100%;
@@ -270,7 +284,10 @@ const GIFs = (() => {
         background: transparent;
         transition: background .2s, transform .12s;
       }
-      .sticker-item:hover { background: rgba(76,175,80,.12); transform: translateY(-1px); }
+      .sticker-item:hover {
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        transform: translateY(-1px);
+      }
       .sticker-item img {
         width: 100%;
         height: auto;
@@ -280,24 +297,35 @@ const GIFs = (() => {
       .sticker-pack-header {
         grid-column: 1 / -1;
         padding: 8px 4px 4px;
-        color: #7fd08a;
+        color: var(--accent-color);
         font-size: 11px;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: .5px;
-        border-bottom: 1px solid #2a5a3a;
+        border-bottom: 1px solid var(--border-color);
       }
       .gif-loading {
         grid-column: 1 / -1;
         text-align: center;
         padding: 40px;
-        color: #6fbf7e;
+        color: var(--text-muted);
       }
       .gif-empty {
         grid-column: 1 / -1;
         text-align: center;
         padding: 40px;
-        color: #6fbf7e;
+        color: var(--text-muted);
+        line-height: 1.5;
+      }
+      .gif-empty .gif-empty-hint { font-size: 12px; opacity: .8; margin-top: 6px; }
+      .gif-manage-btn {
+        background: color-mix(in srgb, var(--accent-color) 14%, transparent) !important;
+        border: 1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color)) !important;
+        color: var(--text-color) !important;
+      }
+      .gif-manage-btn:hover {
+        background: color-mix(in srgb, var(--accent-color) 22%, transparent) !important;
+        border-color: var(--accent-color) !important;
       }
     `;
     document.head.appendChild(style);
@@ -536,6 +564,10 @@ const GIFs = (() => {
     try {
       const res = await _fetchGifApi('/api/media/gifs/trending');
       if (reqSeq !== _gifReqSeq) return;
+      if (res.status === 503) {
+        grid.innerHTML = '<div class="gif-empty">GIF service not configured<div class="gif-empty-hint">Ask an admin to set <code>TENOR_API_KEY</code> on the server.</div></div>';
+        return;
+      }
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
       if (reqSeq !== _gifReqSeq) return;
@@ -543,7 +575,7 @@ const GIFs = (() => {
     } catch (e) {
       if (reqSeq !== _gifReqSeq) return;
       if (e?.name === 'AbortError') return;
-      grid.innerHTML = '<div class="gif-empty">Failed to load GIFs</div>';
+      grid.innerHTML = '<div class="gif-empty">Failed to load GIFs<div class="gif-empty-hint">Check your network connection.</div></div>';
     }
   }
 
@@ -557,6 +589,10 @@ const GIFs = (() => {
     try {
       const res = await _fetchGifApi(`/api/media/gifs/search?q=${encodeURIComponent(trimmed)}`);
       if (reqSeq !== _gifReqSeq) return;
+      if (res.status === 503) {
+        grid.innerHTML = '<div class="gif-empty">GIF service not configured<div class="gif-empty-hint">Ask an admin to set <code>TENOR_API_KEY</code> on the server.</div></div>';
+        return;
+      }
       if (!res.ok) throw new Error('API error');
       const data = await res.json();
       if (reqSeq !== _gifReqSeq) return;
@@ -587,7 +623,7 @@ const GIFs = (() => {
         grid.innerHTML = `
           <div class="gif-empty">
             No stickers yet<br>
-            <button onclick="GIFs.showPublicPacks()" style="margin-top:12px;background:#4caf50;border:none;color:#000;padding:8px 16px;border-radius:8px;cursor:pointer">
+            <button onclick="GIFs.showPublicPacks()" style="margin-top:12px;background:var(--accent-color);border:none;color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">
               Browse Sticker Packs
             </button>
           </div>
