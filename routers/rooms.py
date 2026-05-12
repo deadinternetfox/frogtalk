@@ -692,6 +692,13 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
     room = db.get_room_by_name(room_name)
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
+    if not db.user_can_access_room(
+        current_user["id"], room_name, is_admin=bool(current_user.get("is_admin"))
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You cannot join this channel directly. Ask for an invite link."}
+        )
     db.join_room(current_user["id"], room["id"])
     # Notify everyone currently subscribed to this room over WS so their
     # member sidebar picks up the new joiner without a page reload. The

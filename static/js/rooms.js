@@ -1068,6 +1068,30 @@ const Rooms = (() => {
     document.getElementById('ch-settings-chtype-music').classList.toggle('selected', type === 'music');
   }
 
+  function _applyDirectoryPolicyForRoomType(roomType) {
+    const isPrivate = roomType === 'private';
+    const tab = document.getElementById('ch-tab-directory');
+    if (tab) {
+      tab.style.opacity = isPrivate ? '0.45' : '';
+      tab.style.pointerEvents = isPrivate ? 'none' : '';
+      tab.title = isPrivate ? 'Only public channels can be listed in directory' : '';
+    }
+
+    const note = document.getElementById('ch-dir-policy-note');
+    if (note) note.style.display = isPrivate ? '' : 'none';
+
+    const dirListedEl = document.getElementById('ch-dir-listed');
+    const dirCatEl = document.getElementById('ch-dir-category');
+    const dirTagsEl = document.getElementById('ch-dir-tags');
+    const dirDescEl = document.getElementById('ch-dir-desc');
+
+    if (isPrivate && dirListedEl) dirListedEl.checked = false;
+    if (dirListedEl) dirListedEl.disabled = isPrivate;
+    if (dirCatEl) dirCatEl.disabled = isPrivate;
+    if (dirTagsEl) dirTagsEl.disabled = isPrivate;
+    if (dirDescEl) dirDescEl.disabled = isPrivate;
+  }
+
   async function openChannelSettings(roomName) {
     _currentSettingsRoom = roomName;
     
@@ -1162,6 +1186,7 @@ const Rooms = (() => {
     }
     const dirDescEl = document.getElementById('ch-dir-desc');
     if (dirDescEl) dirDescEl.value = data.room.directory_description || '';
+    _applyDirectoryPolicyForRoomType(data.room.type);
     
     // Render moderators
     renderModerators(data.moderators);
@@ -1188,6 +1213,10 @@ const Rooms = (() => {
   }
 
   function switchChannelTab(tab) {
+    if (tab === 'directory' && _currentRoomData?.room?.type === 'private') {
+      UI.showToast('Private channels cannot be listed in directory', 'error');
+      tab = 'perms';
+    }
     ['general', 'perms', 'directory', 'invites', 'mods', 'bans', 'theme', 'bots', 'bridges'].forEach(t => {
       const tabEl = document.getElementById(`ch-tab-${t}`);
       const panelEl = document.getElementById(`ch-panel-${t}`);
@@ -1538,7 +1567,7 @@ const Rooms = (() => {
     }
     
     // Save directory settings separately
-    const dirListed = document.getElementById('ch-dir-listed')?.checked;
+    const dirListed = (_currentRoomData?.room?.type === 'private') ? false : !!document.getElementById('ch-dir-listed')?.checked;
     const dirCategory = document.getElementById('ch-dir-category')?.value || '';
     const dirTagsRaw = document.getElementById('ch-dir-tags')?.value || '';
     const dirDesc = document.getElementById('ch-dir-desc')?.value || '';

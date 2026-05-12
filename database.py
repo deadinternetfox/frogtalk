@@ -4296,6 +4296,7 @@ def get_public_channels(category: str = None, search: str = None,
             FROM rooms r
             JOIN users u ON r.owner_id = u.id
             WHERE r.is_public=1
+                            AND r.type='public'
               AND COALESCE((SELECT MAX(m.created_at) FROM messages m WHERE m.room_name = r.name), r.created_at)
                   >= datetime('now', '-' || ? || ' days')
         """

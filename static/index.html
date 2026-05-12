@@ -7846,7 +7846,7 @@ window.ConnErr = (function(){
           <input type="checkbox" id="ch-invite-only" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer">
           <div>
             <div style="font-weight:600;font-size:14px">Invite Only</div>
-            <div style="font-size:12px;color:#888">When enabled, users can only join through invite links</div>
+            <div style="font-size:12px;color:#888">When enabled, users can only join through invite links (does not control directory visibility)</div>
           </div>
         </label>
       </div>
@@ -7875,6 +7875,9 @@ window.ConnErr = (function(){
     <div id="ch-panel-directory" style="display:none">
       <div style="font-size:13px;color:#888;margin-bottom:16px">
         List your channel in the public directory so others can discover and join it.
+      </div>
+      <div id="ch-dir-policy-note" style="display:none;font-size:12px;color:#ffb36b;background:#2a1e12;border:1px solid #5b3f20;border-radius:8px;padding:8px 10px;margin-bottom:12px">
+        Private channels cannot be listed in directory. Change the channel type to public first.
       </div>
       
       <div class="modal-card" style="margin-bottom:16px">

@@ -80,6 +80,13 @@ async def update_channel_visibility(
     
     if room["owner_id"] != current_user["id"] and not current_user.get("is_admin"):
         return JSONResponse(status_code=403, content={"error": "Only the owner can change visibility"})
+
+    # Strict policy: private channels cannot appear in the public directory.
+    if room.get("type") == "private" and body.is_public:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Private channels cannot be listed in directory. Change the channel to public first."}
+        )
     
     if body.category and body.category not in CHANNEL_CATEGORIES:
         return JSONResponse(status_code=400, content={"error": f"Invalid category. Choose from: {', '.join(CHANNEL_CATEGORIES)}"})
@@ -287,6 +294,11 @@ async def update_channel_listing(
         return JSONResponse(status_code=404, content={"error": "Channel not found"})
     if room["owner_id"] != current_user["id"] and not current_user.get("is_admin"):
         return JSONResponse(status_code=403, content={"error": "Only the owner can edit the listing"})
+    if room.get("type") == "private":
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Private channels cannot have a public directory listing."}
+        )
     if body.category and body.category not in CHANNEL_CATEGORIES:
         return JSONResponse(status_code=400, content={"error": f"Invalid category"})
     tags_json = json.dumps(body.tags[:10])
