@@ -985,105 +985,122 @@ body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[d
   border-bottom:1px solid var(--border-color) !important;
 }
 
-/* Drop the green gradients on the main chat surfaces too when the user
-   selects a non-default theme, so the Appearance theme editor recolors the
-   whole app and not just the message text. */
-body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #server-list{
-  background:var(--bg-color) !important;
-  border-right:1px solid var(--border-color) !important;
-}
-body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #sidebar{
-  background:var(--surface-color) !important;
-  border-right:1px solid var(--border-color) !important;
-}
-body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #main{
-  background:var(--bg-color) !important;
-}
-body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #messages-area{
-  background:var(--bg-color) !important;
-}
-body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #chat-header{
-  background:var(--surface-color) !important;
-  border-bottom:1px solid var(--border-color) !important;
-}
-body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #input-area{
-  background:var(--surface-color) !important;
-}
-body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #users-panel{
-  background:var(--surface-color) !important;
-  border-left:1px solid var(--border-color) !important;
-}
-body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[data-theme="ocean"],[data-theme="sunset"],[data-theme="rose"],[data-theme="solarized"],[data-theme="mono"],[data-theme="custom"]) #self-panel{
-  background:var(--bg-color) !important;
-  border-top:1px solid var(--border-color) !important;
-}
-
-/* Chat/Channel UI refresh — move core surfaces off flat dark/grey */
+/* Chat/Channel UI refresh — theme-aware tinted surfaces.
+   Every gradient is built from var(--accent-color) over var(--bg-color) /
+   var(--surface-color) so the same polished look re-tints on every theme
+   (frog, dark, midnight, cyberpunk, ocean, sunset, rose, etc.) instead of
+   staying frog-green. On the default frog theme this matches the prior
+   look 1:1 since accent === #4caf50. */
 #server-list{
-  background:linear-gradient(180deg,#0c1713 0%,#0a1411 55%,#08110e 100%) !important;
-  border-right-color:#1d342b !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 10%, var(--bg-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 7%,  var(--bg-color)) 55%,
+    color-mix(in srgb, var(--accent-color) 4%,  var(--bg-color)) 100%) !important;
+  border-right:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color)) !important;
 }
 #sidebar{
-  background:linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%) !important;
-  border-right-color:#1f3a30 !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 14%, var(--surface-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 10%, var(--surface-color)) 55%,
+    color-mix(in srgb, var(--accent-color) 7%,  var(--surface-color)) 100%) !important;
+  border-right:1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color)) !important;
 }
 #main{
-  background:radial-gradient(1100px 420px at -10% -20%,rgba(111,199,150,.12),transparent 60%),
-             radial-gradient(900px 380px at 120% 120%,rgba(76,175,80,.10),transparent 62%),
-             linear-gradient(180deg,#0f1b18 0%,#0d1614 100%) !important;
+  background:
+    radial-gradient(1100px 420px at -10% -20%,
+      color-mix(in srgb, var(--accent-color) 14%, transparent),transparent 60%),
+    radial-gradient(900px 380px at 120% 120%,
+      color-mix(in srgb, var(--accent-color) 12%, transparent),transparent 62%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--accent-color) 6%, var(--bg-color)) 0%,
+      var(--bg-color) 100%) !important;
 }
 #messages-area{
-  background:linear-gradient(180deg,rgba(17,33,29,.76) 0%,rgba(12,24,20,.76) 100%) !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 8%, var(--bg-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 4%, var(--bg-color)) 100%) !important;
 }
 #chat-header{
-  background:linear-gradient(180deg,#142720 0%,#11221c 100%) !important;
-  border-bottom-color:#1f3a30 !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 12%, var(--surface-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 8%,  var(--surface-color)) 100%) !important;
+  border-bottom:1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color)) !important;
 }
 #input-area{
-  background:linear-gradient(180deg,#11211b 0%,#0f1b17 100%) !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 10%, var(--surface-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 6%,  var(--surface-color)) 100%) !important;
 }
 #users-panel{
-  background:linear-gradient(180deg,#132420 0%,#0f1e1a 58%,#0d1916 100%) !important;
-  border-left-color:#1f3a30 !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 12%, var(--surface-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 8%,  var(--surface-color)) 58%,
+    color-mix(in srgb, var(--accent-color) 6%,  var(--surface-color)) 100%) !important;
+  border-left:1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color)) !important;
 }
 #self-panel{
-  background:linear-gradient(180deg,#0f1d18 0%,#0d1814 100%) !important;
-  border-top-color:#1f3a30 !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 10%, var(--bg-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 6%,  var(--bg-color)) 100%) !important;
+  border-top:1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color)) !important;
 }
 .self-quick-menu{
-  background:linear-gradient(135deg,#162e25,#10221c) !important;
-  border-color:#2a4f40 !important;
+  background:linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 10%, var(--surface-color))) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 38%, var(--border-color)) !important;
 }
 .sqm-status-pill{
-  background:#183229 !important;
-  border-color:#335f4d !important;
+  background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color)) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 40%, var(--border-color)) !important;
 }
-.sqm-status-pill:hover{background:#1c3a2f !important;border-color:#3f735d !important}
-.sqm-action-btn{background:#152823 !important;border-color:#2e4f45 !important;color:#d4ece0 !important}
-.sqm-action-btn:hover{background:#1a322b !important;border-color:#3b675a !important}
-.sidebar-header{border-bottom-color:#244439 !important}
+.sqm-status-pill:hover{
+  background:color-mix(in srgb, var(--accent-color) 24%, var(--surface-color)) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 50%, var(--border-color)) !important;
+}
+.sqm-action-btn{
+  background:color-mix(in srgb, var(--accent-color) 14%, var(--surface-color)) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 34%, var(--border-color)) !important;
+  color:var(--text-color) !important;
+}
+.sqm-action-btn:hover{
+  background:color-mix(in srgb, var(--accent-color) 20%, var(--surface-color)) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 46%, var(--border-color)) !important;
+}
+.sidebar-header{border-bottom-color:color-mix(in srgb, var(--accent-color) 30%, var(--border-color)) !important}
 .sidebar-search{
-  background:#0f201b !important;
-  border-color:#2e5245 !important;
+  background:color-mix(in srgb, var(--accent-color) 8%, var(--bg-color)) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 36%, var(--border-color)) !important;
+  color:var(--text-color) !important;
 }
-.sidebar-search:focus{border-color:#5f9d86 !important;box-shadow:0 0 0 2px rgba(111,199,150,.20) !important}
-.channel-list{scrollbar-color:#396457 transparent !important}
-.channel-list::-webkit-scrollbar-thumb{background:#396457 !important}
+.sidebar-search:focus{
+  border-color:var(--accent-color) !important;
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 22%, transparent) !important;
+}
+.channel-list{scrollbar-color:color-mix(in srgb, var(--accent-color) 50%, var(--border-color)) transparent !important}
+.channel-list::-webkit-scrollbar-thumb{background:color-mix(in srgb, var(--accent-color) 50%, var(--border-color)) !important}
 .channel-item{
-  background:linear-gradient(180deg,#162923,#12221d) !important;
-  border-color:rgba(52,95,80,.28) !important;
-  color:#b9ccc4 !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 10%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 7%,  var(--surface-color))) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 22%, var(--border-color)) !important;
+  color:color-mix(in srgb, var(--text-color) 80%, var(--text-muted)) !important;
 }
 .channel-item:hover{
-  background:linear-gradient(180deg,#1c332b,#172a23) !important;
-  border-color:#3f735f !important;
-  color:#edf8f2 !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 12%, var(--surface-color))) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 42%, var(--border-color)) !important;
+  color:var(--text-color) !important;
 }
 .channel-item.active{
-  background:linear-gradient(180deg,#214538,#1a372d) !important;
-  border-color:#69b290 !important;
-  color:#ddf8ea !important;
-  box-shadow:0 4px 14px rgba(0,0,0,.26),inset 0 0 0 1px rgba(111,199,150,.22) !important;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 30%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 22%, var(--surface-color))) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 60%, var(--border-color)) !important;
+  color:color-mix(in srgb, var(--accent-color) 50%, var(--text-color)) !important;
+  box-shadow:0 4px 14px rgba(0,0,0,.26),
+             inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent) !important;
 }
 .channel-item.dragging{
   opacity:.92 !important;
@@ -1149,16 +1166,19 @@ body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[d
 }
 .channel-item .ch-icon,
 #chat-header .room-title-icon{
-  background:#22322d !important;
-  color:#f3ead4 !important;
+  background:color-mix(in srgb, var(--accent-color) 22%, var(--surface-color)) !important;
+  color:var(--text-color) !important;
 }
-.dm-row-preview{color:#9fb7ac !important}
+.dm-row-preview{color:color-mix(in srgb, var(--text-muted) 70%, var(--text-color)) !important}
 .dm-row-preview.missed{color:#e3b3a6 !important}
 .input-wrap{
-  background:#152520 !important;
-  border-color:#2e5245 !important;
+  background:color-mix(in srgb, var(--accent-color) 8%, var(--bg-color)) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 36%, var(--border-color)) !important;
 }
-.input-wrap:focus-within{border-color:#71c99f !important;box-shadow:none !important}
+.input-wrap:focus-within{
+  border-color:var(--accent-color) !important;
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 22%, transparent) !important;
+}
 html{height:100%;height:-webkit-fill-available}
 body{
   min-height:100%;min-height:-webkit-fill-available;
@@ -2091,72 +2111,112 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   width:3px;height:18px;background:#fff;border-radius:2px
 }
 
-/* User self panel at bottom of sidebar */
+/* User self panel at bottom of sidebar (theme-aware; the !important
+   refresh block above already paints the gradient & border — these rules
+   only define layout + retint per accent-color). */
 #self-panel{
   padding:12px;
-  background:linear-gradient(180deg,#0f1f1a 0%,#0c1814 100%);
-  border-top:1px solid #26453a;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 10%, var(--bg-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 6%,  var(--bg-color)) 100%);
+  border-top:1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-color));
   display:flex;flex-wrap:wrap;align-items:center;gap:8px
 }
 .self-avatar{
   width:38px;height:38px;border-radius:50%;
-  background:radial-gradient(circle at 30% 30%,#2b5f4c,#1a3b31);
+  background:radial-gradient(circle at 30% 30%,
+    color-mix(in srgb, var(--accent-color) 55%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 30%, var(--surface-color)));
   display:flex;align-items:center;justify-content:center;font-size:18px;
   cursor:pointer;overflow:hidden;flex-shrink:0;
-  box-shadow:0 0 0 1px rgba(120,194,162,.28),0 4px 10px rgba(0,0,0,.25)
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--accent-color) 35%, transparent),
+             0 4px 10px rgba(0,0,0,.25)
 }
 .self-avatar img{width:100%;height:100%;object-fit:cover}
 .self-info{flex:1;min-width:0;overflow:hidden}
-.self-name{font-size:14px;font-weight:700;color:#e6f6ee;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
-.self-handle{font-size:11px;color:#89a79a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;line-height:1.15}
+.self-name{font-size:14px;font-weight:700;color:var(--text-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.self-handle{font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;line-height:1.15}
 .self-status-display{
-  font-size:11px;color:#7ecfa3;margin-top:5px;
+  font-size:11px;color:var(--accent-color);margin-top:5px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;
   line-height:1.3;pointer-events:none
 }
 .self-quick-menu{
   width:100%;margin-top:4px;padding:8px;
-  background:linear-gradient(135deg,#152d25,#10221c);
-  border:1px solid #2b5142;border-radius:10px;
+  background:linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 10%, var(--surface-color)));
+  border:1px solid color-mix(in srgb, var(--accent-color) 38%, var(--border-color));
+  border-radius:10px;
   display:flex;flex-direction:column;gap:8px
 }
 .sqm-actions{display:flex;gap:6px}
 .sqm-status-btn{
   width:100%;height:34px;border-radius:9px;
-  border:1px solid #387560;
-  background:linear-gradient(180deg,#1f4034,#173126);
-  color:#c9efdb;cursor:pointer;font-size:12px;font-weight:700;
+  border:1px solid color-mix(in srgb, var(--accent-color) 48%, var(--border-color));
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 22%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 14%, var(--surface-color)));
+  color:color-mix(in srgb, var(--accent-color) 35%, var(--text-color));
+  cursor:pointer;font-size:12px;font-weight:700;
   display:flex;align-items:center;justify-content:flex-start;gap:8px;
   padding:0 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   transition:background .15s,border-color .15s,color .15s,transform .1s
 }
 .sqm-status-btn:hover{
-  background:linear-gradient(180deg,#275243,#1d3f33);
-  border-color:#4a9679;color:#e7faf0;transform:translateY(-1px)
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 30%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 20%, var(--surface-color)));
+  border-color:color-mix(in srgb, var(--accent-color) 60%, var(--border-color));
+  color:var(--text-color);transform:translateY(-1px)
 }
 .sqm-action-btn{
-  flex:1;height:32px;border-radius:8px;border:1px solid #2d5545;
-  background:linear-gradient(180deg,#1b362c,#162c24);color:#dff3e9;cursor:pointer;font-size:12px;font-weight:700;
+  flex:1;height:32px;border-radius:8px;
+  border:1px solid color-mix(in srgb, var(--accent-color) 34%, var(--border-color));
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 10%, var(--surface-color)));
+  color:var(--text-color);cursor:pointer;font-size:12px;font-weight:700;
   display:flex;align-items:center;justify-content:center;gap:6px;
   transition:background .15s,border-color .15s,color .15s
 }
-.sqm-action-btn:hover{background:linear-gradient(180deg,#214235,#1b352c);border-color:#3c6d5a;color:#ebfaf4}
-.sqm-action-btn.friends{border-color:#3b6f5a;color:#bcefd1;background:linear-gradient(180deg,#1d3a2f,#173026)}
-.sqm-action-btn.friends:hover{background:linear-gradient(180deg,#264a3c,#1e3d31);border-color:#4f8f76}
+.sqm-action-btn:hover{
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 24%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)));
+  border-color:color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
+  color:var(--text-color)
+}
+.sqm-action-btn.friends{
+  border-color:color-mix(in srgb, var(--accent-color) 44%, var(--border-color));
+  color:color-mix(in srgb, var(--accent-color) 30%, var(--text-color));
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 20%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 14%, var(--surface-color)))
+}
+.sqm-action-btn.friends:hover{
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 28%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 20%, var(--surface-color)));
+  border-color:color-mix(in srgb, var(--accent-color) 60%, var(--border-color))
+}
 .status-picker-popover,
 #status-picker-popover{
-  color:#e8f8ee !important;
-  background:linear-gradient(160deg,#234d3e 0%,#1c3d30 40%,#172f25 100%) !important;
-  border-color:#4f9675 !important;
+  color:var(--text-color) !important;
+  background:linear-gradient(160deg,
+    color-mix(in srgb, var(--accent-color) 26%, var(--surface-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 18%, var(--surface-color)) 40%,
+    color-mix(in srgb, var(--accent-color) 12%, var(--surface-color)) 100%) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 55%, var(--border-color)) !important;
 }
 #status-picker-popover input,
 #status-picker-popover textarea,
 #status-picker-popover select{
-  background:#0f2219 !important;
-  color:#e8f8ee !important;
-  border:1px solid #4a8068 !important;
-  -webkit-text-fill-color:#e8f8ee !important;
-  caret-color:#e8f8ee !important;
+  background:color-mix(in srgb, var(--accent-color) 8%, var(--bg-color)) !important;
+  color:var(--text-color) !important;
+  border:1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color)) !important;
+  -webkit-text-fill-color:var(--text-color) !important;
+  caret-color:var(--text-color) !important;
 }
 #status-picker-popover input::placeholder,
 #status-picker-popover textarea::placeholder{
@@ -2671,16 +2731,24 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #input-area{
   padding:8px 16px calc(12px + var(--safe-bottom));
   flex-shrink:0;
-  background:linear-gradient(180deg,#12231e 0%,#0f1d19 100%);
-  border-top:1px solid #26473b
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 12%, var(--surface-color)) 0%,
+    color-mix(in srgb, var(--accent-color) 7%,  var(--surface-color)) 100%);
+  border-top:1px solid color-mix(in srgb, var(--accent-color) 32%, var(--border-color))
 }
 .input-wrap{
-  background:linear-gradient(180deg,#173028,#132720);
-  border:1px solid #33584b;border-radius:12px;
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)),
+    color-mix(in srgb, var(--accent-color) 10%, var(--surface-color)));
+  border:1px solid color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+  border-radius:12px;
   display:flex;flex-direction:column;gap:4px;padding:6px 8px;
   transition:border-color .2s
 }
-.input-wrap:focus-within{border-color:#6bc29a;box-shadow:none}
+.input-wrap:focus-within{
+  border-color:var(--accent-color);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 22%, transparent)
+}
 .input-tools{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding:0 2px}
 .input-tools::-webkit-scrollbar{display:none}
 .input-row{display:flex;align-items:flex-end;gap:8px;padding:0 2px}
