@@ -82,7 +82,12 @@ def _normalize_base_url(url: str) -> str:
 
 def enqueue_server_event(event_type: str, payload: dict) -> dict:
     local = db.get_or_create_local_server_identity()
-    event_id = f"evt_{int(time.time() * 1000):016x}"
+    # Random suffix prevents same-millisecond collisions when multiple
+    # events are enqueued in quick succession (e.g. burst of bot upserts
+    # or message bridges). Origin+event_id is the idempotency key on
+    # the receiving side, so a duplicate id would silently drop the
+    # second event.
+    event_id = f"evt_{int(time.time() * 1000):016x}_{secrets.token_hex(4)}"
     normalized_type = str(event_type or "").strip()
     if not normalized_type:
         return {"ok": False, "error": "missing_event_type"}
@@ -417,10 +422,13 @@ def _fed_token_ok(token: str | None) -> bool:
     return (token or "").strip() == expected
 
 
-def _current_user_from_header(x_session_token: str | None) -> dict | None:
+async def _current_user_from_header(x_session_token: str | None) -> dict | None:
+    # Threadpool-hop so the sync sqlite lookup doesn't block the event
+    # loop on hot federation routes (peer ping, build verify, etc.
+    # all call this on every request).
     if not x_session_token:
         return None
-    return db.get_user_by_token(x_session_token)
+    return await asyncio.to_thread(db.get_user_by_token, x_session_token)
 
 
 def _load_directory_entries(directory_url: str, timeout_s: float = 4.0) -> list[dict]:
@@ -613,7 +621,7 @@ async def network_verify_peer_builds(
     x_session_token: str | None = Header(default=None),
 ):
     """Verify peer server bundle hash matches this server's current web build."""
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     if not current_user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
@@ -721,7 +729,7 @@ async def network_updates_publish(
     x_session_token: str | None = Header(default=None),
 ):
     """Publish release metadata on main site for all federation nodes."""
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     if not (current_user and current_user.get("is_admin")):
         return JSONResponse(status_code=403, content={"error": "Admin required"})
 
@@ -760,7 +768,7 @@ async def network_update_status():
 async def network_update_check(
     x_session_token: str | None = Header(default=None),
 ):
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     if not (current_user and current_user.get("is_admin")):
         return JSONResponse(status_code=403, content={"error": "Admin required"})
     return _check_update_once(auto_apply=False)
@@ -771,7 +779,7 @@ async def network_update_apply(
     body: UpdateApplyBody,
     x_session_token: str | None = Header(default=None),
 ):
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     if not (current_user and current_user.get("is_admin")):
         return JSONResponse(status_code=403, content={"error": "Admin required"})
     status = _check_update_once(auto_apply=True)
@@ -788,7 +796,7 @@ async def register_network_server(
     x_federation_token: str | None = Header(default=None),
     x_session_token: str | None = Header(default=None),
 ):
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     is_admin = bool(current_user and current_user.get("is_admin"))
     if not (is_admin or _fed_token_ok(x_federation_token)):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
@@ -811,7 +819,7 @@ async def sync_official_directory(
     x_federation_token: str | None = Header(default=None),
     x_session_token: str | None = Header(default=None),
 ):
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     is_admin = bool(current_user and current_user.get("is_admin"))
     if not (is_admin or _fed_token_ok(x_federation_token)):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
@@ -823,7 +831,7 @@ async def sync_official_directory(
 
 @router.get("/identity/me")
 async def identity_me(x_session_token: str | None = Header(default=None)):
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     if not current_user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
     ident = db.get_user_identity(current_user["id"]) or {}
@@ -841,7 +849,7 @@ async def set_identity_pubkey(
     body: IdentityPubKeyBody,
     x_session_token: str | None = Header(default=None),
 ):
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     if not current_user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
     pubkey = (body.identity_pubkey or "").strip()
@@ -856,7 +864,7 @@ async def get_my_identity_claim(
     ttl_seconds: int = 3600,
     x_session_token: str | None = Header(default=None),
 ):
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     if not current_user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
     claim = db.build_signed_profile_claim(current_user["id"], ttl_seconds=ttl_seconds)
@@ -963,7 +971,7 @@ async def emit_federation_event(
     x_session_token: str | None = Header(default=None),
 ):
     """Emit a federation event to local outbox (internal endpoint for app actions)."""
-    current_user = _current_user_from_header(x_session_token)
+    current_user = await _current_user_from_header(x_session_token)
     if not current_user:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 

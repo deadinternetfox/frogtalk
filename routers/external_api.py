@@ -68,17 +68,17 @@ def require_api_key(permissions: List[str] = None):
         if not key_info:
             raise HTTPException(status_code=401, detail="Invalid API key")
         
-        # Check permissions. "admin" and "bot" act as wildcards so that
-        # any key tagged as a bot can use the full external surface
-        # without per-call permission gymnastics (the bot's owner is
-        # always a real user whose own ACLs still apply).
+        # Check permissions. Only "admin" acts as a wildcard. Bot keys
+        # are issued with an explicit permission list (read/write/dm/bot)
+        # at creation time, so treating "bot" as a wildcard would mean
+        # any compromised bot key could call admin-tagged routes too.
         if permissions:
             key_perms = key_info.get("permissions", [])
             if isinstance(key_perms, str):
                 import json
                 key_perms = json.loads(key_perms)
 
-            wildcards = {"admin", "bot"}
+            wildcards = {"admin"}
             has_wildcard = any(w in key_perms for w in wildcards)
 
             if not has_wildcard:
@@ -288,6 +288,13 @@ async def send_channel_message(
     # signal rather than a silent drop.
     if bot and db.is_bot_banned(int(bot["id"])):
         raise HTTPException(status_code=403, detail="Bot is banned on this server")
+
+    # Bot must be an explicit member of the channel before it can post.
+    # Channels have an opt-in install flow (`add_bot_to_channel`); this
+    # prevents a bot key with the global `write` permission from spraying
+    # messages into rooms its owner never installed it into.
+    if bot and not db.bot_in_channel(int(bot["id"]), int(room["id"])):
+        raise HTTPException(status_code=403, detail="Bot is not a member of this channel")
 
     nickname = bot["name"] if bot else owner["nickname"]
     avatar = (bot.get("avatar") if bot else None) or owner.get("avatar")

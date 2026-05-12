@@ -322,7 +322,18 @@ async def get_channel_bots(room_name: str, current_user: dict = Depends(get_curr
 # ---------------------------------------------------------------------------
 
 @router.get("/bots/public")
-async def list_public_bots():
-    """List all public bots."""
-    bots = db.get_public_bots()
+async def list_public_bots(current_user: dict = Depends(get_current_user)):
+    """List all public bots — local + federated.
+
+    Auth-gated so the directory isn't a free unauthenticated enumeration
+    surface for scrapers. The federation `origin_server_id` is only
+    revealed to admins; regular users see local+federated mixed without
+    knowing which peer a bot originated on.
+    """
+    bots = db.get_public_bots() or []
+    if not current_user.get("is_admin"):
+        bots = [
+            {k: v for k, v in b.items() if k != "origin_server_id"}
+            for b in bots
+        ]
     return {"bots": bots}

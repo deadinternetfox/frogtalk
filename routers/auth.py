@@ -17,7 +17,7 @@ from typing import Optional
 _log = logging.getLogger(__name__)
 from fastapi import APIRouter, Request, Depends, Header
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 
 import database as db
@@ -349,12 +349,16 @@ async def _try_federated_login_bootstrap(request: Request, nickname: str, passwo
 
 class RegisterRequest(BaseModel):
     nickname: str
-    password: str
+    # Cap the password length so we don't feed multi-megabyte strings
+    # into bcrypt (each hash is O(n) in the input length and bcrypt is
+    # intentionally slow). 128 bytes is comfortably more than any real
+    # password and matches OWASP guidance.
+    password: str = Field(min_length=1, max_length=128)
 
 
 class LoginRequest(BaseModel):
     nickname: str
-    password: str
+    password: str = Field(min_length=1, max_length=128)
 
 
 class FederationTicketRequest(BaseModel):
@@ -680,9 +684,16 @@ async def federation_provision(request: Request, body: FederationProvisionReques
 
 
 @router.post("/logout")
-async def logout(x_session_token: str = None, current_user: dict = Depends(get_current_user)):
-    from fastapi import Header
-    # Token comes through the dependency — delete it
+async def logout(
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Revoke the caller's current session token and drop it from the
+    auth cache so subsequent requests can't ride the 15 s TTL window."""
+    token = (x_session_token or "").strip()
+    if token:
+        await asyncio.to_thread(db.delete_session, token)
+        invalidate_token_cache(token)
     return {"ok": True}
 
 
@@ -716,6 +727,10 @@ async def revoke_session(
     ok = await asyncio.to_thread(db.delete_session_by_short_id, current_user["id"], short_id, x_session_token or "")
     if not ok:
         return JSONResponse(status_code=404, content={"error": "Session not found"})
+    # We don't know the exact token that was just deleted (we only had a
+    # short id prefix), so nuke the whole token cache. This is rare and
+    # the cache is just a 15 s memoization layer — refilling is cheap.
+    invalidate_token_cache(None)
     return {"ok": True}
 
 
@@ -728,6 +743,9 @@ async def revoke_other_sessions(
     if not x_session_token:
         return JSONResponse(status_code=400, content={"error": "current session required"})
     n = await asyncio.to_thread(db.delete_other_sessions, current_user["id"], x_session_token)
+    # Same rationale as revoke_session: we don't enumerate the deleted
+    # tokens, so flush the whole auth cache.
+    invalidate_token_cache(None)
     return {"ok": True, "removed": int(n or 0)}
 
 

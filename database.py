@@ -4198,6 +4198,18 @@ def get_channel_bots(room_id: int) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def bot_in_channel(bot_id: int, room_id: int) -> bool:
+    """True iff the bot has been explicitly added to the channel.
+    Used by the external API to refuse bot messages into rooms the bot
+    was never installed in."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM bot_channel_members WHERE bot_id=? AND room_id=? LIMIT 1",
+            (int(bot_id), int(room_id)),
+        ).fetchone()
+    return bool(row)
+
+
 def get_public_bots() -> List[Dict]:
     """Get all public bots — local + federated. Federated rows have
     owner_id=-1 so we LEFT JOIN users and fall back to the cached
