@@ -617,7 +617,7 @@ const GIFs = (() => {
       const res = await _fetchGifApi('/api/media/gifs/trending');
       if (reqSeq !== _gifReqSeq) return;
       if (res.status === 503) {
-        grid.innerHTML = '<div class="gif-empty">GIF service not configured<div class="gif-empty-hint">Ask an admin to set <code>TENOR_API_KEY</code> on the server.</div></div>';
+        grid.innerHTML = '<div class="gif-empty">GIF service not configured<div class="gif-empty-hint">Ask an admin to set <code>KLIPY_API_KEY</code> on the server.</div></div>';
         return;
       }
       if (!res.ok) throw new Error('API error');
@@ -642,7 +642,7 @@ const GIFs = (() => {
       const res = await _fetchGifApi(`/api/media/gifs/search?q=${encodeURIComponent(trimmed)}`);
       if (reqSeq !== _gifReqSeq) return;
       if (res.status === 503) {
-        grid.innerHTML = '<div class="gif-empty">GIF service not configured<div class="gif-empty-hint">Ask an admin to set <code>TENOR_API_KEY</code> on the server.</div></div>';
+        grid.innerHTML = '<div class="gif-empty">GIF service not configured<div class="gif-empty-hint">Ask an admin to set <code>KLIPY_API_KEY</code> on the server.</div></div>';
         return;
       }
       if (!res.ok) throw new Error('API error');

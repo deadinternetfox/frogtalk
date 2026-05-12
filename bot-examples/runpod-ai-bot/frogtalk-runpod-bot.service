@@ -1,0 +1,18 @@
+[Unit]
+Description=FrogTalk RunPod AI bot (example bot)
+After=network-online.target frogtalk.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/frogtalk-runpod-bot
+EnvironmentFile=/etc/frogtalk-runpod-bot.env
+ExecStart=/opt/frogtalk-runpod-bot/.venv/bin/python /opt/frogtalk-runpod-bot/bot.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -3182,7 +3182,7 @@ function _showThemePreviewBar(theme) {
     bar = document.createElement('div');
     bar.id = 'theme-preview-bar';
     bar.style.cssText = `position:fixed;bottom:0;left:0;right:0;z-index:9999;
-      background:linear-gradient(135deg,color-mix(in srgb,var(--accent-color) 26%,var(--surface-color)),color-mix(in srgb,var(--accent-color) 14%,var(--surface-color)));border-top:2px solid var(--accent-color);
+      background:linear-gradient(135deg,color-mix(in srgb,var(--accent-color) 55%,var(--surface-color)),color-mix(in srgb,var(--accent-color) 32%,var(--surface-color)));border-top:2px solid var(--accent-color);
       padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;
       box-shadow:0 -4px 24px rgba(0,0,0,.6);animation:slideUpBar .25s ease`;
     document.body.appendChild(bar);
