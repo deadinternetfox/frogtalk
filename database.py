@@ -1192,6 +1192,23 @@ def _migrate():
                 # can't relax a column, so we side-step with a sentinel 0.
         except Exception:
             pass
+
+        # Bot ban list (catalog moderation, see init_db comment).
+        try:
+            con.execute("""CREATE TABLE IF NOT EXISTS banned_bots (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                bot_id            INTEGER,
+                origin_server_id  TEXT,
+                foreign_bot_id    INTEGER,
+                name              TEXT,
+                reason            TEXT DEFAULT '',
+                banned_by         INTEGER,
+                created_at        TEXT DEFAULT (datetime('now')),
+                UNIQUE(bot_id),
+                UNIQUE(origin_server_id, foreign_bot_id)
+            )""")
+        except Exception:
+            pass
         if "media_blur" not in msg_cols:
             con.execute("ALTER TABLE messages ADD COLUMN media_blur INTEGER DEFAULT 0")
         if "view_once" not in msg_cols:
@@ -1583,6 +1600,28 @@ def _migrate():
             FOREIGN KEY (bot_id) REFERENCES bots(id) ON DELETE CASCADE,
             FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
             FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+
+        # Bot ban list — per-node moderation. A banned bot:
+        #   1. is removed from all local channels,
+        #   2. cannot be re-added to any channel on this node,
+        #   3. cannot post messages via the external API,
+        #   4. is hidden from the public bot directory,
+        #   5. if federated, its incoming bot.upsert events are dropped.
+        # We track both the local bot id (snapshot, may go null on
+        # cascade-delete) and origin/foreign_bot_id so federated bans
+        # survive even after the local mirror row is gone.
+        con.execute("""CREATE TABLE IF NOT EXISTS banned_bots (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            bot_id            INTEGER,
+            origin_server_id  TEXT,
+            foreign_bot_id    INTEGER,
+            name              TEXT,
+            reason            TEXT DEFAULT '',
+            banned_by         INTEGER,
+            created_at        TEXT DEFAULT (datetime('now')),
+            UNIQUE(bot_id),
+            UNIQUE(origin_server_id, foreign_bot_id)
         )""")
         
         # ===================================================================
@@ -4120,7 +4159,10 @@ def delete_bot(bot_id: int, owner_id: int) -> bool:
 
 def add_bot_to_channel(bot_id: int, room_id: int, invited_by: int,
                        permissions: List[str] = None) -> bool:
-    """Add a bot to a channel."""
+    """Add a bot to a channel. Blocked if the bot is on this node's
+    banned_bots list."""
+    if is_bot_banned(bot_id):
+        return False
     import json
     perms = json.dumps(permissions or ['read', 'write'])
     with _conn() as con:
@@ -4159,7 +4201,7 @@ def get_channel_bots(room_id: int) -> List[Dict]:
 def get_public_bots() -> List[Dict]:
     """Get all public bots — local + federated. Federated rows have
     owner_id=-1 so we LEFT JOIN users and fall back to the cached
-    owner_nickname column."""
+    owner_nickname column. Banned bots are filtered out."""
     with _conn() as con:
         rows = con.execute("""
             SELECT b.id, b.name, b.avatar, b.description,
@@ -4168,6 +4210,7 @@ def get_public_bots() -> List[Dict]:
             FROM bots b
             LEFT JOIN users u ON b.owner_id = u.id
             WHERE b.is_public=1
+              AND NOT EXISTS (SELECT 1 FROM banned_bots bb WHERE bb.bot_id = b.id)
             ORDER BY (b.origin_server_id IS NOT NULL), b.name
         """).fetchall()
     return [dict(r) for r in rows]
@@ -4246,6 +4289,115 @@ def delete_federated_bot(origin_server_id: str, foreign_bot_id: int) -> bool:
             (origin_server_id, int(foreign_bot_id)),
         )
         return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Bot moderation (per-node ban list)
+# ---------------------------------------------------------------------------
+
+def is_bot_banned(bot_id: int) -> bool:
+    if not bot_id:
+        return False
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM banned_bots WHERE bot_id=? LIMIT 1",
+            (int(bot_id),),
+        ).fetchone()
+    return bool(row)
+
+
+def is_federated_bot_banned(origin_server_id: Optional[str],
+                            foreign_bot_id: Optional[int]) -> bool:
+    if not origin_server_id or not foreign_bot_id:
+        return False
+    with _conn() as con:
+        row = con.execute(
+            "SELECT 1 FROM banned_bots WHERE origin_server_id=? AND foreign_bot_id=? LIMIT 1",
+            (origin_server_id, int(foreign_bot_id)),
+        ).fetchone()
+    return bool(row)
+
+
+def ban_bot(bot_id: int, *, reason: str = "", banned_by: Optional[int] = None) -> bool:
+    """Add a bot to this node's ban list and evict it from every local
+    channel. Idempotent — banning an already-banned bot returns True."""
+    if not bot_id:
+        return False
+    with _conn() as con:
+        row = con.execute(
+            "SELECT id, name, origin_server_id, foreign_bot_id FROM bots WHERE id=?",
+            (int(bot_id),),
+        ).fetchone()
+        name = row["name"] if row else None
+        origin = row["origin_server_id"] if row else None
+        foreign = row["foreign_bot_id"] if row else None
+        try:
+            con.execute(
+                """INSERT INTO banned_bots
+                   (bot_id, origin_server_id, foreign_bot_id, name, reason, banned_by)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (int(bot_id), origin, foreign, name, reason or '', banned_by),
+            )
+        except Exception:
+            # UNIQUE collision — already banned; refresh reason/name.
+            con.execute(
+                """UPDATE banned_bots
+                   SET reason=?, name=COALESCE(?, name)
+                   WHERE bot_id=?""",
+                (reason or '', name, int(bot_id)),
+            )
+        # Evict from every channel on this node.
+        con.execute("DELETE FROM bot_channel_members WHERE bot_id=?", (int(bot_id),))
+    return True
+
+
+def unban_bot(bot_id: int) -> bool:
+    if not bot_id:
+        return False
+    with _conn() as con:
+        cur = con.execute("DELETE FROM banned_bots WHERE bot_id=?", (int(bot_id),))
+        return cur.rowcount > 0
+
+
+def list_banned_bots() -> List[Dict]:
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT bb.id AS ban_id, bb.bot_id, bb.origin_server_id, bb.foreign_bot_id,
+                   bb.name, bb.reason, bb.created_at, bb.banned_by,
+                   b.avatar, b.description, b.is_public,
+                   COALESCE(u.nickname, b.owner_nickname) AS owner_name
+            FROM banned_bots bb
+            LEFT JOIN bots b ON b.id = bb.bot_id
+            LEFT JOIN users u ON u.id = b.owner_id
+            ORDER BY bb.created_at DESC
+        """).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_all_bots_admin() -> List[Dict]:
+    """List every bot known to this node (local + federated mirrors)
+    annotated with a `banned` flag and channel-installation count, for
+    the server-admin moderation UI."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT b.id, b.name, b.avatar, b.description, b.is_public,
+                   b.origin_server_id, b.foreign_bot_id,
+                   b.owner_id,
+                   COALESCE(u.nickname, b.owner_nickname) AS owner_name,
+                   (SELECT COUNT(*) FROM bot_channel_members bcm WHERE bcm.bot_id = b.id) AS channel_count,
+                   (SELECT 1 FROM banned_bots bb WHERE bb.bot_id = b.id) AS banned,
+                   (SELECT bb.reason FROM banned_bots bb WHERE bb.bot_id = b.id) AS ban_reason
+            FROM bots b
+            LEFT JOIN users u ON b.owner_id = u.id
+            ORDER BY (b.origin_server_id IS NOT NULL), b.name
+        """).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["banned"] = bool(d.get("banned"))
+        d["federated"] = bool(d.get("origin_server_id"))
+        out.append(d)
+    return out
 
 
 # ===========================================================================

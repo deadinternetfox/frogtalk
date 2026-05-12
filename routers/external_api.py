@@ -283,6 +283,12 @@ async def send_channel_message(
     owner = auth["owner"]
     bot = db.get_bot_by_api_key_id(auth["key"]["id"]) if auth["is_bot"] else None
 
+    # Per-node bot ban: refuse messages from bots an admin has banned
+    # on this node. Returned as 403 so the bot author sees a clear
+    # signal rather than a silent drop.
+    if bot and db.is_bot_banned(int(bot["id"])):
+        raise HTTPException(status_code=403, detail="Bot is banned on this server")
+
     nickname = bot["name"] if bot else owner["nickname"]
     avatar = (bot.get("avatar") if bot else None) or owner.get("avatar")
     display_name = bot["name"] if bot else owner.get("display_name")

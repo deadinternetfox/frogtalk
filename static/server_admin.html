@@ -919,6 +919,26 @@ input, select {
       </div>
 
       <div class="panel" style="margin-top:12px;">
+        <div class="section-title">Bot Moderation</div>
+        <div class="sub" style="margin-bottom:12px;">
+          Ban specific bots from operating on this node. Banned bots are
+          removed from every channel here, cannot post via the external
+          API, and federated mirrors are blocked from being re-installed.
+          Bans are <b>per-node</b> — peer servers keep their own list.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <input id="bot-mod-search" placeholder="Filter by name or owner..." style="flex:1;min-width:220px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:#bcd4c1;cursor:pointer;">
+            <input type="checkbox" id="bot-mod-only-banned" style="width:16px;height:16px;cursor:pointer;accent-color:#e57373;">
+            Banned only
+          </label>
+          <button class="btn" id="bot-mod-refresh" type="button">Refresh</button>
+        </div>
+        <div id="bot-mod-body" class="nodes-list"></div>
+        <div id="bot-mod-msg" class="msg" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="panel" style="margin-top:12px;">
         <div class="section-title">Node Easter Egg</div>
         <div class="sub" style="margin-bottom:12px">Seven taps on the frog icon can reveal a per-node popup layered above the app or admin panel. Use the rich editor to make it unique for this node.</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">

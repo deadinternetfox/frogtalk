@@ -2099,6 +2099,12 @@ async def _handle_bot_event(event: dict) -> None:
             # Origin flipped it private — drop the mirror.
             db.delete_federated_bot(origin, foreign_bot_id)
             return
+        # Honor this node's ban list — if an admin has already banned
+        # this federated bot, refuse to re-mirror it and ensure any
+        # stale row is gone.
+        if db.is_federated_bot_banned(origin, foreign_bot_id):
+            db.delete_federated_bot(origin, foreign_bot_id)
+            return
         db.upsert_federated_bot(
             origin, foreign_bot_id,
             name=name, avatar=avatar, description=desc,

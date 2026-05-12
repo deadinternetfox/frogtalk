@@ -617,6 +617,74 @@ async def server_admin_unblock_node(server_id: str, request: Request):
     return {"ok": True, "server_id": server_id, "blocked": False}
 
 
+# ---------------------------------------------------------------------------
+# Bot moderation (per-node ban list)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/server-admin/bots")
+async def server_admin_list_bots(request: Request):
+    """Return every bot this node knows about (local catalog rows +
+    federated mirrors) annotated with a `banned` flag. Used by the
+    admin Bot Moderation panel."""
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+    try:
+        bots = db.list_all_bots_admin()
+    except Exception:
+        bots = []
+    return {"bots": bots}
+
+
+@router.post("/api/server-admin/bots/{bot_id}/ban")
+async def server_admin_ban_bot(bot_id: int, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    reason = ""
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            reason = str(body.get("reason") or "")[:280]
+    except Exception:
+        pass
+
+    bot = db.get_bot_by_id(int(bot_id))
+    if not bot:
+        return JSONResponse(status_code=404, content={"error": "Bot not found"})
+
+    db.ban_bot(int(bot_id), reason=reason, banned_by=_actor_user_id())
+    return {
+        "ok": True,
+        "bot_id": int(bot_id),
+        "name": bot.get("name"),
+        "banned": True,
+        "reason": reason,
+    }
+
+
+@router.post("/api/server-admin/bots/{bot_id}/unban")
+async def server_admin_unban_bot(bot_id: int, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    ok = db.unban_bot(int(bot_id))
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "Bot was not banned"})
+    return {"ok": True, "bot_id": int(bot_id), "banned": False}
+
+
 @router.get("/api/server-admin/online-users")
 async def server_admin_online_users(request: Request):
     disabled = _require_enabled()

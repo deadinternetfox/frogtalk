@@ -655,6 +655,140 @@
     }
   }
 
+  // -------------------------------------------------------------------
+  // Bot moderation panel
+  // -------------------------------------------------------------------
+  const botModBody = document.getElementById('bot-mod-body');
+  const botModMsg = document.getElementById('bot-mod-msg');
+  const botModSearch = document.getElementById('bot-mod-search');
+  const botModOnlyBanned = document.getElementById('bot-mod-only-banned');
+  const botModRefreshBtn = document.getElementById('bot-mod-refresh');
+  let botModCache = [];
+  let botModLoadedOnce = false;
+
+  function setBotModMsg(text, isError = false) {
+    if (!botModMsg) return;
+    botModMsg.textContent = text || '';
+    botModMsg.style.color = isError ? '#ff8b8b' : '';
+  }
+
+  function filteredBots() {
+    const q = (botModSearch?.value || '').trim().toLowerCase();
+    const onlyBanned = !!botModOnlyBanned?.checked;
+    return botModCache.filter((b) => {
+      if (onlyBanned && !b.banned) return false;
+      if (!q) return true;
+      const hay = `${b.name || ''} ${b.owner_name || ''} ${b.origin_server_id || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }
+
+  function renderBotModeration() {
+    if (!botModBody) return;
+    const list = filteredBots();
+    if (!list.length) {
+      botModBody.innerHTML = '<div class="node-card"><div style="color:#93ab9a">No bots match this filter.</div></div>';
+      return;
+    }
+    botModBody.innerHTML = list.map((b) => {
+      const avatar = b.avatar
+        ? `<img src="${escHtml(b.avatar)}" alt="" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;">`
+        : `<div style="width:36px;height:36px;border-radius:8px;background:#1f2c22;display:flex;align-items:center;justify-content:center;color:#7d9483;font-weight:700;flex-shrink:0;">${escHtml((b.name || '?').slice(0, 1).toUpperCase())}</div>`;
+      const fed = b.federated
+        ? `<span class="mini-badge">federated</span>`
+        : '<span class="mini-badge mini-badge-local">local</span>';
+      const pub = b.is_public
+        ? '<span class="mini-badge success">public</span>'
+        : '<span class="mini-badge">private</span>';
+      const banStatus = b.banned
+        ? '<span class="mini-badge danger">banned</span>'
+        : '<span class="mini-badge success">allowed</span>';
+      const origin = b.origin_server_id ? `<div class="node-id-row"><span class="node-id-label">Origin</span><code class="node-id">${escHtml(b.origin_server_id)}</code></div>` : '';
+      const reasonRow = b.banned && b.ban_reason
+        ? `<div class="node-meta" style="color:#ff8b8b;">Reason: ${escHtml(b.ban_reason)}</div>`
+        : '';
+      const desc = b.description ? `<div class="node-meta">${escHtml(b.description)}</div>` : '';
+      const action = b.banned
+        ? `<button class="btn" data-bot-unban="${b.id}">Unban</button>`
+        : `<button class="btn danger" data-bot-ban="${b.id}">Ban</button>`;
+      return `
+        <article class="node-card">
+          <div class="node-card-main">
+            <div class="node-name-row" style="gap:10px;align-items:center;">
+              ${avatar}
+              <span class="node-name">${escHtml(b.name || `bot#${b.id}`)}</span>
+              ${fed}
+              ${pub}
+              ${banStatus}
+            </div>
+            <div class="node-meta">Owner: ${escHtml(b.owner_name || 'unknown')} · ${b.channel_count || 0} channel${(b.channel_count || 0) === 1 ? '' : 's'}</div>
+            ${desc}
+            ${origin}
+            ${reasonRow}
+          </div>
+          <div class="node-card-sidebar">
+            <div class="node-actions-cell">${action}</div>
+          </div>
+        </article>
+      `;
+    }).join('');
+    botModBody.querySelectorAll('[data-bot-ban]').forEach((btn) => {
+      btn.addEventListener('click', () => banBotPrompt(Number(btn.getAttribute('data-bot-ban'))));
+    });
+    botModBody.querySelectorAll('[data-bot-unban]').forEach((btn) => {
+      btn.addEventListener('click', () => unbanBot(Number(btn.getAttribute('data-bot-unban'))));
+    });
+  }
+
+  async function refreshBotModeration() {
+    if (!botModBody) return;
+    try {
+      const data = await api('/api/server-admin/bots');
+      botModCache = Array.isArray(data.bots) ? data.bots : [];
+      botModLoadedOnce = true;
+      renderBotModeration();
+    } catch (e) {
+      setBotModMsg(e.message || 'Failed to load bots.', true);
+    }
+  }
+
+  async function banBotPrompt(botId) {
+    if (!botId) return;
+    const bot = botModCache.find((b) => Number(b.id) === Number(botId));
+    const label = bot?.name || `#${botId}`;
+    const reason = window.prompt(`Ban "${label}" from this node?\n\nOptional reason (shown to admins):`, '');
+    if (reason === null) return;
+    setBotModMsg(`Banning ${label}...`);
+    try {
+      await api(`/api/server-admin/bots/${encodeURIComponent(botId)}/ban`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      setBotModMsg(`Banned ${label}. Removed from all channels on this node.`);
+      await refreshBotModeration();
+    } catch (e) {
+      setBotModMsg(e.message || 'Ban failed.', true);
+    }
+  }
+
+  async function unbanBot(botId) {
+    if (!botId) return;
+    const bot = botModCache.find((b) => Number(b.id) === Number(botId));
+    const label = bot?.name || `#${botId}`;
+    setBotModMsg(`Unbanning ${label}...`);
+    try {
+      await api(`/api/server-admin/bots/${encodeURIComponent(botId)}/unban`, { method: 'POST' });
+      setBotModMsg(`Unbanned ${label}.`);
+      await refreshBotModeration();
+    } catch (e) {
+      setBotModMsg(e.message || 'Unban failed.', true);
+    }
+  }
+
+  botModRefreshBtn?.addEventListener('click', () => refreshBotModeration());
+  botModSearch?.addEventListener('input', () => { if (botModLoadedOnce) renderBotModeration(); });
+  botModOnlyBanned?.addEventListener('change', () => { if (botModLoadedOnce) renderBotModeration(); });
+
   async function refreshDashboard() {
     const t0 = performance.now();
     const config = await api('/api/server-admin/config');
@@ -668,6 +802,7 @@
     renderResources(stats);
     renderUsers(users.users || []);
     await refreshNodes();
+    await refreshBotModeration();
     if (!easterEggLoaded) await loadEasterEgg();
   }
 
