@@ -939,6 +939,10 @@ const Rooms = (() => {
     document.getElementById('chtype-music').classList.remove('selected');
     const dirSec = document.getElementById('new-room-directory-section');
     if (dirSec) dirSec.style.display = '';
+    const inviteCard = document.getElementById('new-room-invite-only-card');
+    if (inviteCard) inviteCard.style.display = '';
+    const inviteToggle = document.getElementById('new-room-invite-only');
+    if (inviteToggle) inviteToggle.checked = false;
     setRoomIconPreview('new-room-icon-preview', '', 'public', 'text');
     openModal('modal-create-room');
     setTimeout(() => document.getElementById('new-room-name').focus(), 100);
@@ -954,6 +958,10 @@ const Rooms = (() => {
     if (dirSec) dirSec.style.display = (type === 'public') ? '' : 'none';
     const secretSec = document.getElementById('new-room-secret-section');
     if (secretSec) secretSec.style.display = (type === 'private') ? '' : 'none';
+    // Private channels are invite-only by definition — hide the redundant
+    // toggle so users don't think they have a choice.
+    const inviteCard = document.getElementById('new-room-invite-only-card');
+    if (inviteCard) inviteCard.style.display = (type === 'private') ? 'none' : '';
   }
 
   function selectChannelType(type) {
@@ -967,7 +975,9 @@ const Rooms = (() => {
     const name = document.getElementById('new-room-name').value.trim();
     const desc = document.getElementById('new-room-desc').value.trim();
     const icon = document.getElementById('new-room-icon-input').value.trim();
-    const inviteOnly = document.getElementById('new-room-invite-only')?.checked ? 1 : 0;
+    const inviteOnly = (_selectedRoomType === 'private')
+      ? 1
+      : (document.getElementById('new-room-invite-only')?.checked ? 1 : 0);
     if (!name) return;
     let roomKeyHint = null;
     if (_selectedRoomType === 'private') {
@@ -1090,6 +1100,16 @@ const Rooms = (() => {
     if (dirCatEl) dirCatEl.disabled = isPrivate;
     if (dirTagsEl) dirTagsEl.disabled = isPrivate;
     if (dirDescEl) dirDescEl.disabled = isPrivate;
+
+    // Private channels are invite-only by definition — hide the toggle and
+    // show an explainer card instead. The Permissions tab still loads so
+    // owners can edit "Who Can Create Invites" / forwarding rules.
+    const inviteCard = document.getElementById('ch-invite-only-card');
+    if (inviteCard) inviteCard.style.display = isPrivate ? 'none' : '';
+    const inviteNote = document.getElementById('ch-invite-only-private-note');
+    if (inviteNote) inviteNote.style.display = isPrivate ? '' : 'none';
+    const inviteCheckbox = document.getElementById('ch-invite-only');
+    if (isPrivate && inviteCheckbox) inviteCheckbox.checked = true;
   }
 
   async function openChannelSettings(roomName) {
@@ -1546,7 +1566,9 @@ const Rooms = (() => {
       headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
       body: JSON.stringify({ icon, name, description: desc, slowmode, channel_type: _settingsChannelType,
         banner, about,
-        invite_only: document.getElementById('ch-invite-only')?.checked ? 1 : 0,
+        invite_only: (_currentRoomData?.room?.type === 'private')
+          ? 1
+          : (document.getElementById('ch-invite-only')?.checked ? 1 : 0),
         who_can_invite: document.getElementById('ch-who-can-invite')?.value || 'everyone',
         forwarding_disabled: document.getElementById('ch-forwarding-disabled')?.checked ? 1 : 0,
         channel_theme: JSON.stringify({
