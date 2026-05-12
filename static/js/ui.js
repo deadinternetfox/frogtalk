@@ -5757,28 +5757,43 @@ function showWallReactionDetail(postId) {
 function showWallReactionHover(postId, wrap) {
   try {
     if (!wrap) return;
-    const quickEmojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏'];
     // Cancel any pending hide
     if (wrap._rxHideTimer) { clearTimeout(wrap._rxHideTimer); wrap._rxHideTimer = null; }
-    let pop = wrap.querySelector(':scope > .wall-reaction-picker');
-    if (pop) return;
+    // Already open → nothing to do
+    if (wrap.querySelector(':scope > .wall-reaction-picker')) return;
+    // Touch / coarse-pointer devices: don't open on hover at all — the
+    // click handler already opens the full reaction modal.
+    if (window.matchMedia && !window.matchMedia('(hover:hover) and (pointer:fine)').matches) return;
+    // Debounce: only open if the cursor lingers on the button for
+    // ~260ms. Stops flick-overs from spawning the picker by accident.
+    if (wrap._rxOpenTimer) clearTimeout(wrap._rxOpenTimer);
+    wrap._rxOpenTimer = setTimeout(() => {
+      wrap._rxOpenTimer = null;
+      if (!wrap.matches(':hover')) return;
+      _openWallReactionHover(postId, wrap);
+    }, 260);
+  } catch {}
+}
+
+function _openWallReactionHover(postId, wrap) {
+  try {
+    const quickEmojis = ['❤️','👍','😂','😮','😢','🔥','🐸','👏'];
     const myEmoji = wrap.querySelector('.sf-rx-add')?.dataset?.myEmoji || '';
-    pop = document.createElement('div');
+    const pop = document.createElement('div');
     pop.className = 'wall-reaction-picker';
     // Transparent hover bridge: anchor the popup at `bottom:100%` and
-    // give it `padding-bottom:10px` so the gap between button and pill
-    // is part of the popup's own hit-box. Previously a literal 6px gap
-    // sat outside any hover target and would dismiss the picker if the
-    // cursor crossed it slowly.
-    pop.style.cssText = 'position:absolute;bottom:100%;left:0;display:flex;gap:4px;padding:6px 6px 12px 6px;background:transparent;border:0;box-shadow:none;z-index:50;white-space:nowrap';
+    // pad the bottom so the gap between button and pill is part of the
+    // popup's own hit-box.
+    pop.style.cssText = 'position:absolute;bottom:100%;left:0;display:flex;gap:4px;padding:6px 6px 14px 6px;background:transparent;border:0;box-shadow:none;z-index:50;white-space:nowrap';
     pop.onmouseenter = () => { if (wrap._rxHideTimer) { clearTimeout(wrap._rxHideTimer); wrap._rxHideTimer = null; } };
     pop.onmouseleave = () => scheduleHideWallReactionHover(postId, wrap);
     const removeBtn = myEmoji
-      ? `<button type="button" data-emoji="__remove__" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:999px;padding:4px 10px;font-size:12px;cursor:pointer">Remove ${myEmoji}</button>`
+      ? `<button type="button" data-emoji="__remove__" style="background:#1a2e1a;border:1px solid #2a3a2a;color:#8bd48b;border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;min-height:36px">Remove ${myEmoji}</button>`
       : '';
-    const innerStyle = 'display:flex;gap:4px;padding:6px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5)';
+    // Bigger emoji pills (28px font, larger hit-box) so they're easy to land on.
+    const innerStyle = 'display:flex;gap:6px;padding:8px 10px;background:#101710;border-radius:999px;border:1px solid #2a3a2a;box-shadow:0 6px 18px rgba(0,0,0,.5)';
     pop.innerHTML = `<div style="${innerStyle}">` + removeBtn + quickEmojis.map(e =>
-      `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:20px;cursor:pointer;padding:2px 6px;border-radius:999px;line-height:1;transition:transform .12s,background .12s" onmouseover="this.style.background='#1a2e1a';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
+      `<button type="button" data-emoji="${e}" style="background:none;border:none;font-size:28px;cursor:pointer;padding:4px 8px;border-radius:999px;line-height:1;min-width:40px;min-height:40px;transition:transform .12s,background .12s" onmouseover="this.style.background='#1a2e1a';this.style.transform='scale(1.25)'" onmouseout="this.style.background='none';this.style.transform='scale(1)'">${e}</button>`
     ).join('') + '</div>';
     pop.addEventListener('click', (ev) => {
       const btn = ev.target.closest('button[data-emoji]');
@@ -5789,7 +5804,6 @@ function showWallReactionHover(postId, wrap) {
       if (target) toggleWallReaction(postId, target);
       pop.remove();
     });
-    // Anchor the wrap so absolute popover positions correctly
     const cs = getComputedStyle(wrap);
     if (cs.position === 'static') wrap.style.position = 'relative';
     wrap.appendChild(pop);
@@ -5799,12 +5813,15 @@ function showWallReactionHover(postId, wrap) {
 function scheduleHideWallReactionHover(postId, wrap) {
   try {
     if (!wrap) return;
+    // Cancel any pending open so a flick-over doesn't pop the picker
+    // after the user has already moved on.
+    if (wrap._rxOpenTimer) { clearTimeout(wrap._rxOpenTimer); wrap._rxOpenTimer = null; }
     if (wrap._rxHideTimer) clearTimeout(wrap._rxHideTimer);
     wrap._rxHideTimer = setTimeout(() => {
       const pop = wrap.querySelector(':scope > .wall-reaction-picker');
       if (pop) pop.remove();
       wrap._rxHideTimer = null;
-    }, 280);
+    }, 380);
   } catch {}
 }
 

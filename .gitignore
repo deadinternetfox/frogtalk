@@ -88,3 +88,7 @@ secrets/
 
 # Generated desktop release artifacts (too large for git)
 static/FrogTalk-*-win-x64.zip
+
+# tmp deploy / ship scripts and logs (not part of repo)
+.tmp_*.sh
+.tmp_*.log

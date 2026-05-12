@@ -5412,7 +5412,7 @@ const Social = (() => {
       const card = btn.closest('.reel-card');
       if (card && card.querySelector('.reel-react-picker')) return;
       try { openReelReactPicker(postId, btn); } catch {}
-    }, 180);
+    }, 260);
   }
   function _reelHeartHoverLeave(ev, btn) {
     if (!btn) return;
