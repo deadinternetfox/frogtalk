@@ -31,11 +31,47 @@
     modal.style.display = 'flex';
 
     if (opts.dataUrl) _loadImage(opts.dataUrl);
-    else if (opts.file) {
-      const r = new FileReader();
-      r.onload = e => _loadImage(e.target.result);
-      r.readAsDataURL(opts.file);
+    else if (opts.file) _readFileToDataUrl(opts.file).then(_loadImage).catch(err => {
+      console.error('[cropper] file read failed', err);
+      _notify('Could not read image. Try a different photo.');
+      close();
+    });
+  }
+
+  // iOS Safari / WKWebView sometimes throws "Can't find variable: FileReader"
+  // when FileReader is referenced inside a Promise/closure. Prefer the modern
+  // Blob.arrayBuffer() path (used everywhere else in the app via UI.blobToDataURL)
+  // and only fall back to FileReader if it's actually available.
+  async function _readFileToDataUrl (file) {
+    if (window.UI && typeof window.UI.blobToDataURL === 'function') {
+      return window.UI.blobToDataURL(file);
     }
+    if (file && typeof file.arrayBuffer === 'function') {
+      const buf = await file.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      const CHUNK = 0x8000;
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+      }
+      const mime = file.type || 'image/jpeg';
+      return `data:${mime};base64,${btoa(binary)}`;
+    }
+    return await new Promise((resolve, reject) => {
+      const FR = (typeof FileReader !== 'undefined') ? FileReader : (window && window.FileReader);
+      if (!FR) return reject(new Error('No FileReader available'));
+      const r = new FR();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error || new Error('FileReader failed'));
+      r.readAsDataURL(file);
+    });
+  }
+
+  function _notify (msg) {
+    try {
+      if (window.UI && typeof window.UI.showToast === 'function') return window.UI.showToast(msg, 'error');
+    } catch {}
+    try { alert(msg); } catch {}
   }
 
   function close () {
@@ -48,15 +84,18 @@
     if (document.getElementById('img-crop-modal')) return;
     const m = document.createElement('div');
     m.id = 'img-crop-modal';
-    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:10000;display:none;align-items:center;justify-content:center;padding:10px';
+    // Use 100dvh (dynamic viewport) so iOS Safari's bottom toolbar doesn't
+    // push the Done button out of the visible area. Fallback to 100vh on
+    // browsers that don't support dvh.
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:10000;display:none;align-items:center;justify-content:center;padding:10px;height:100vh;height:100dvh';
     m.innerHTML = `
-      <div style="background:#111;border:1px solid #2a2a2a;border-radius:12px;max-width:560px;width:100%;max-height:94vh;display:flex;flex-direction:column">
+      <div style="background:#111;border:1px solid #2a2a2a;border-radius:12px;max-width:560px;width:100%;max-height:94vh;max-height:94dvh;display:flex;flex-direction:column">
         <div style="padding:10px 14px;border-bottom:1px solid #222;display:flex;align-items:center;justify-content:space-between">
           <strong style="color:#4caf50">✂️ Crop image</strong>
           <button onclick="ImageCropper.close()" style="background:none;border:none;color:#888;font-size:20px;cursor:pointer">✕</button>
         </div>
-        <div id="ic-stage" style="position:relative;background:#000;overflow:hidden;flex:1;min-height:260px;display:flex;align-items:center;justify-content:center;touch-action:none">
-          <canvas id="ic-canvas" style="max-width:100%;max-height:64vh;display:block;cursor:move"></canvas>
+        <div id="ic-stage" style="position:relative;background:#000;overflow:hidden;flex:1;min-height:220px;display:flex;align-items:center;justify-content:center;touch-action:none">
+          <canvas id="ic-canvas" style="max-width:100%;max-height:60vh;max-height:60dvh;display:block;cursor:move;touch-action:none;-webkit-user-select:none;user-select:none"></canvas>
         </div>
         <div style="padding:10px 14px;border-top:1px solid #222;display:flex;gap:8px;align-items:center">
           <label style="color:#888;font-size:12px">Zoom</label>
@@ -108,12 +147,16 @@
     };
     const onUp = () => { dragging = false; };
 
+    // Bind touch events directly on the canvas (not window) so iOS Safari
+    // reliably routes preventDefault on the originating element. mousemove/
+    // mouseup still go on window so desktop drag-outside-then-release works.
     canvas.addEventListener('mousedown', onDown);
     canvas.addEventListener('touchstart', onDown, { passive: false });
+    canvas.addEventListener('touchmove', onMove, { passive: false });
+    canvas.addEventListener('touchend', onUp);
+    canvas.addEventListener('touchcancel', onUp);
     window.addEventListener('mousemove', onMove);
-    window.addEventListener('touchmove', onMove, { passive: false });
     window.addEventListener('mouseup', onUp);
-    window.addEventListener('touchend', onUp);
   }
 
   function _pt (e) {
@@ -143,7 +186,7 @@
       _draw();
     };
     img.onerror = () => {
-      if (typeof toast === 'function') toast('Failed to load image', 'error');
+      _notify('Could not load image. HEIC photos may need to be exported as JPEG.');
       close();
     };
     img.src = src;
