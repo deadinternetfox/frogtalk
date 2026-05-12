@@ -733,8 +733,9 @@ _CSP_DIRECTIVES = (
     "font-src 'self' https://fonts.gstatic.com data:; "
     "img-src 'self' data: blob: https:; "
     "media-src 'self' data: blob: https:; "
-    # WebSockets to same origin + Tenor (gif preview) + tenor.googleapis.com.
-    "connect-src 'self' wss: https://tenor.googleapis.com https://media.tenor.com; "
+    # WebSockets to same origin + KLIPY (primary GIF/sticker CDN) + Tenor
+    # (legacy fallback until 2026-06-30 sunset).
+    "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://tenor.googleapis.com https://media.tenor.com; "
     "frame-ancestors 'self'; "
     "base-uri 'self'; "
     "form-action 'self'; "

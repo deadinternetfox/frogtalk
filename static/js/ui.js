@@ -150,6 +150,12 @@ const UI = (() => {
       disp.title = _nowPlayingActive ? 'Tap to open the playing track' : '';
     }
     renderSelfQuickStatus();
+    // Keep the channel-members row for self in sync with the self-panel.
+    try {
+      if (window.Users && typeof Users.updatePresence === 'function' && State.user) {
+        Users.updatePresence(State.user.id, State.user.nickname, p, msg);
+      }
+    } catch {}
   }
 
   function renderSelfQuickStatus() {

@@ -253,6 +253,124 @@
   box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 18%, transparent) !important;
 }
 *::-webkit-scrollbar-thumb:hover{background:var(--accent-color) !important}
+
+/* ── Theme bridge: areas not previously covered ───────────────────────── */
+/* Force scrollbar accent everywhere (Firefox uses scrollbar-color). */
+html, body, *{
+  scrollbar-color: color-mix(in srgb, var(--accent-color) 45%, transparent) transparent !important;
+}
+/* Sidebar (channels / DMs) background + scrollbar. */
+.sidebar, #sidebar, .left-sidebar{
+  background:var(--surface-color) !important;
+  color:var(--text-color) !important;
+}
+.sidebar-header, .sidebar-server-name{
+  background:color-mix(in srgb, var(--accent-color) 18%, var(--surface-color)) !important;
+  color:var(--text-color) !important;
+  border-bottom:1px solid var(--border-color) !important;
+}
+.sidebar-search, .sidebar-search input{
+  background:color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) !important;
+  border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color)) !important;
+  color:var(--text-color) !important;
+}
+.channel-list, .channel-list *::-webkit-scrollbar-thumb{
+  scrollbar-color: color-mix(in srgb, var(--accent-color) 40%, transparent) transparent !important;
+}
+.channel-list::-webkit-scrollbar-thumb{
+  background: color-mix(in srgb, var(--accent-color) 40%, transparent) !important;
+}
+.channel-item, .channel-item-wrap, .dm-list-item, .dm-item{
+  color:var(--text-color) !important;
+}
+.channel-item.active, .channel-item-wrap.active, .dm-list-item.active, .dm-item.active{
+  background:color-mix(in srgb, var(--accent-color) 22%, var(--surface-color)) !important;
+}
+.channel-item:hover, .dm-list-item:hover, .dm-item:hover{
+  background:color-mix(in srgb, var(--accent-color) 12%, var(--surface-color)) !important;
+}
+/* Self / status panel at bottom-left ("Tsar Frog · Online"). */
+#self-panel, .self-panel, .user-status-bar, .status-bar{
+  background:color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) !important;
+  border-top:1px solid var(--border-color) !important;
+  color:var(--text-color) !important;
+}
+.self-status, .self-presence{
+  color:var(--text-muted) !important;
+}
+/* Right-side members panel. */
+.members-panel, #members-panel, .users-panel, #users-panel, .users-sidebar{
+  background:var(--surface-color) !important;
+  color:var(--text-color) !important;
+  border-left:1px solid var(--border-color) !important;
+}
+.member-section-header, .users-section-header, .users-panel h3, .users-panel h4{
+  color:var(--text-muted) !important;
+}
+.member-row, .user-item{
+  color:var(--text-color) !important;
+}
+.member-row:hover, .user-item:hover{
+  background:color-mix(in srgb, var(--accent-color) 10%, transparent) !important;
+}
+/* Left server-nav rail. */
+.server-list, #server-list, .server-nav{
+  background:color-mix(in srgb, var(--bg-color) 85%, var(--surface-color)) !important;
+  border-right:1px solid var(--border-color) !important;
+}
+.server-icon.active, .server-icon:hover{
+  outline:2px solid var(--accent-color) !important;
+}
+
+/* ── Chat embeds: invite cards, FrogSocial shares, link previews ───────── */
+/* These were originally rendered with inline #173027 / #2f5548 / #dff5e8 /
+   #85a89a greens. !important in a stylesheet beats inline style values
+   that don't carry !important, so we retint them via CSS only \u2014 no
+   per-render code changes required. */
+.invite-card, .share-card,
+.link-preview, .yt-embed, .spotify-embed,
+.chat-share-embed, .chat-share-music, .chat-share-video,
+.chat-share-profile, .chat-share-post, .chat-share-reel{
+  background: linear-gradient(180deg,
+      color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)) 0%,
+      color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) 100%) !important;
+  border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color)) !important;
+  color:var(--text-color) !important;
+}
+.invite-card *, .share-card *,
+.link-preview *, .yt-embed *, .spotify-embed *,
+.chat-share-embed *, .chat-share-music *, .chat-share-video *,
+.chat-share-profile *, .chat-share-post *, .chat-share-reel *{
+  border-color: color-mix(in srgb, var(--accent-color) 28%, var(--border-color)) !important;
+}
+/* Light text inside embeds should track --text-color; muted lines pick up
+   --text-muted. Anchor titles in the legacy markup used #dff5e8. */
+.invite-card a, .share-card a,
+.link-preview a, .yt-embed a, .spotify-embed a,
+.chat-share-embed a, .chat-share-music a, .chat-share-video a{
+  color:var(--text-color) !important;
+}
+.link-preview [style*="#85a89a"], .yt-embed [style*="#85a89a"],
+.chat-share-embed [style*="#85a89a"], .invite-card [style*="#85a89a"]{
+  color:var(--text-muted) !important;
+}
+.link-preview [style*="#dff5e8"], .yt-embed [style*="#dff5e8"],
+.chat-share-embed [style*="#dff5e8"]{
+  color:var(--text-color) !important;
+}
+/* Inline accent-green chips inside embeds (badges, labels). */
+.share-card-label, .chat-share-label, .invite-card-label{
+  color:var(--accent-color) !important;
+}
+/* "Send to side player" button inside link previews. */
+.embed-send-player{
+  background: color-mix(in srgb, var(--accent-color) 80%, var(--surface-color)) !important;
+  border:1px solid var(--accent-color) !important;
+  color: color-mix(in srgb, var(--accent-color) 12%, #000) !important;
+}
+.embed-send-player:hover{
+  background: var(--accent-color) !important;
+}
 /* /Theme bridge ───────────────────────────────────────────────────────── */
 .modal-overlay{background:rgba(0,0,0,.7) !important}
 .modal{
@@ -9724,7 +9842,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/dms.js?v=434"></script>
 <script src="/static/js/calls.js?v=218"></script>
 <script src="/static/js/media.js?v=416"></script>
-<script src="/static/js/gifs.js?v=203"></script>
+<script src="/static/js/gifs.js?v=204"></script>
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=416"></script>
 <!-- cache bump: social share button + story/profile list UX fixes -->

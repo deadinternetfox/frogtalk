@@ -10,6 +10,58 @@ const GIFs = (() => {
   let _stickersById = new Map(); // sticker_id -> { image_data, name }
   let _stickerGridDelegated = false;
   let _gifReqSeq = 0;
+
+  // ─── Themed prompt / confirm ─────────────────────────────────────────
+  // Electron disables window.prompt() (returns null silently) and native
+  // confirm() is unstyled, so build small themed dialogs that match the
+  // sticker manager modal. Returns a Promise that resolves to the user
+  // input string (for prompt) or true/false (for confirm).
+  function _smDialog({ title, message, defaultValue, multiline, placeholder, okLabel, cancelLabel, kind }) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px';
+      const isConfirm = kind === 'confirm';
+      const inputHtml = isConfirm ? '' : (multiline
+        ? `<textarea id="sm-dlg-input" rows="3" placeholder="${placeholder || ''}" style="width:100%;background:var(--bg-color);border:1px solid var(--border-color);color:var(--text-color);padding:10px;border-radius:8px;font:inherit;resize:vertical;min-height:60px">${defaultValue ? String(defaultValue).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) : ''}</textarea>`
+        : `<input id="sm-dlg-input" type="text" placeholder="${placeholder || ''}" value="${defaultValue ? String(defaultValue).replace(/"/g, '&quot;') : ''}" style="width:100%;background:var(--bg-color);border:1px solid var(--border-color);color:var(--text-color);padding:10px;border-radius:8px;font:inherit">`
+      );
+      overlay.innerHTML = `
+        <div style="background:linear-gradient(180deg,
+            color-mix(in srgb, var(--accent-color) 18%, var(--surface-color)) 0%,
+            var(--surface-color) 55%,
+            color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) 100%);
+          border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color));
+          border-radius:12px;width:420px;max-width:100%;box-shadow:0 18px 48px rgba(0,0,0,.6);color:var(--text-color)">
+          <div style="padding:14px 16px;border-bottom:1px solid var(--border-color);font-weight:700">${title || ''}</div>
+          <div style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+            ${message ? `<div style="color:var(--text-muted);font-size:13px;line-height:1.4">${message}</div>` : ''}
+            ${inputHtml}
+          </div>
+          <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end">
+            <button id="sm-dlg-cancel" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">${cancelLabel || 'Cancel'}</button>
+            <button id="sm-dlg-ok" style="background:var(--accent-color);border:1px solid var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700">${okLabel || 'OK'}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const input = overlay.querySelector('#sm-dlg-input');
+      const close = (val) => { try { overlay.remove(); } catch {} resolve(val); };
+      overlay.querySelector('#sm-dlg-cancel').onclick = () => close(isConfirm ? false : null);
+      overlay.querySelector('#sm-dlg-ok').onclick = () => close(isConfirm ? true : (input ? input.value : ''));
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(isConfirm ? false : null); });
+      overlay.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { e.preventDefault(); close(isConfirm ? false : null); }
+        if (e.key === 'Enter' && !multiline) { e.preventDefault(); close(isConfirm ? true : (input ? input.value : '')); }
+      });
+      if (input) setTimeout(() => { try { input.focus(); input.select?.(); } catch {} }, 30);
+      else setTimeout(() => { try { overlay.querySelector('#sm-dlg-ok').focus(); } catch {} }, 30);
+    });
+  }
+  function _smPrompt(title, defaultValue, opts = {}) {
+    return _smDialog({ title, defaultValue, kind: 'prompt', ...opts });
+  }
+  function _smConfirm(title, message, opts = {}) {
+    return _smDialog({ title, message, kind: 'confirm', okLabel: 'OK', cancelLabel: 'Cancel', ...opts });
+  }
   let _gifAbortController = null;
 
   async function _fetchGifApi(url, timeoutMs = 8000) {
@@ -853,7 +905,7 @@ const GIFs = (() => {
         </div>
         <div id="sm-body" style="flex:1;overflow-y:auto;padding:14px 16px;color:var(--text-color);scrollbar-width:thin;scrollbar-color:color-mix(in srgb, var(--accent-color) 40%, transparent) transparent"></div>
         <div style="padding:12px 16px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
-          <button onclick="GIFs.showPublicPacks();GIFs.closeManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Browse Public</button>
+          <button onclick="GIFs.browseFromManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">🌍 Browse Public</button>
           <button onclick="GIFs.closeManager()" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Close</button>
           <button onclick="GIFs.showCreatePack()" style="background:var(--accent-color);border:1px solid var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700">+ New Pack</button>
         </div>
@@ -867,6 +919,14 @@ const GIFs = (() => {
     const m = document.getElementById('sticker-manager-modal');
     if (m) m.style.display = 'none';
     loadStickerPacks();
+  }
+
+  // Close the manager without re-triggering loadStickerPacks (used when
+  // jumping directly into the public-pack browser so it doesn't race).
+  function browseFromManager() {
+    const m = document.getElementById('sticker-manager-modal');
+    if (m) m.style.display = 'none';
+    showPublicPacks();
   }
 
   async function renderManager() {
@@ -939,22 +999,22 @@ const GIFs = (() => {
     }
   }
 
-  function showCreatePack() {
-    const name = prompt('Pack name (2-32 chars):');
-    if (!name) return;
-    const desc = prompt('Description (optional):') || '';
-    apiFetch('/api/media/stickers/packs', 'POST', { name: name.trim(), description: desc.trim() })
-      .then(r => r.json())
-      .then(d => {
-        if (d.error) UI.showToast(d.error, 'error');
-        else { UI.showToast('Pack created', 'success'); renderManager(); }
-      })
-      .catch(() => UI.showToast('Failed to create pack', 'error'));
+  async function showCreatePack() {
+    const name = await _smPrompt('New Sticker Pack', '', { placeholder: 'Pack name (2-32 chars)' });
+    if (!name || !name.trim()) return;
+    const desc = await _smPrompt('Pack Description', '', { placeholder: 'Optional short description', multiline: true });
+    try {
+      const r = await apiFetch('/api/media/stickers/packs', 'POST', { name: name.trim(), description: (desc || '').trim() });
+      const d = await r.json();
+      if (!r.ok || d.error) UI.showToast(d.error || 'Failed to create pack', 'error');
+      else { UI.showToast('Pack created', 'success'); renderManager(); }
+    } catch { UI.showToast('Failed to create pack', 'error'); }
   }
 
   async function editPack(packId) {
-    const newName = prompt('New pack name:');
-    if (!newName) return;
+    const current = (_stickerPacks.find(p => p.id === packId) || {}).name || '';
+    const newName = await _smPrompt('Rename Pack', current, { placeholder: 'New name (2-32 chars)' });
+    if (!newName || !newName.trim()) return;
     const r = await apiFetch(`/api/media/stickers/packs/${packId}`, 'PATCH', { name: newName.trim() });
     if (r.ok) { UI.showToast('Renamed', 'success'); renderManager(); }
     else { const d = await r.json(); UI.showToast(d.error || 'Rename failed', 'error'); }
@@ -967,7 +1027,8 @@ const GIFs = (() => {
   }
 
   async function deletePack(packId) {
-    if (!confirm('Delete this pack and all its stickers? This cannot be undone.')) return;
+    const ok = await _smConfirm('Delete Pack?', 'This will permanently delete the pack and all its stickers. This cannot be undone.', { okLabel: 'Delete' });
+    if (!ok) return;
     const r = await apiFetch(`/api/media/stickers/packs/${packId}`, 'DELETE');
     if (r.ok) { UI.showToast('Pack deleted', 'success'); renderManager(); }
     else UI.showToast('Delete failed', 'error');
@@ -980,7 +1041,8 @@ const GIFs = (() => {
   }
 
   async function deleteSticker(stickerId) {
-    if (!confirm('Delete this sticker?')) return;
+    const ok = await _smConfirm('Delete Sticker?', 'Remove this sticker from the pack?', { okLabel: 'Delete' });
+    if (!ok) return;
     const r = await apiFetch(`/api/media/stickers/${stickerId}`, 'DELETE');
     if (r.ok) { UI.showToast('Deleted', 'success'); renderManager(); }
     else UI.showToast('Delete failed', 'error');
@@ -994,7 +1056,9 @@ const GIFs = (() => {
       const file = inp.files && inp.files[0];
       if (!file) return;
       if (file.size > 500 * 1024) { UI.showToast('Sticker too large (max 500KB)', 'error'); return; }
-      const name = (prompt('Sticker name:', file.name.replace(/\.[^.]+$/, '')) || '').trim();
+      const suggested = file.name.replace(/\.[^.]+$/, '');
+      const raw = await _smPrompt('Sticker Name', suggested, { placeholder: 'Sticker name' });
+      const name = (raw || '').trim();
       if (!name) return;
       const reader = new FileReader();
       reader.onload = async () => {
@@ -1023,6 +1087,7 @@ const GIFs = (() => {
     scrollCats,
     openManager,
     closeManager,
+    browseFromManager,
     showCreatePack,
     editPack,
     togglePublic,

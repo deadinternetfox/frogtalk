@@ -62,7 +62,11 @@ app.on('second-instance', () => {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
-    destroyTray();
+    // NOTE: do NOT destroyTray() here. On Linux (libappindicator) the
+    // indicator can outlive the destroy() call, so the next createTray()
+    // would register a second indicator and the user ends up with two
+    // FrogTalk icons in the tray. Leave the tray persistent for the app's
+    // lifetime instead.
   } catch {}
 });
 
@@ -419,7 +423,11 @@ function createTray() {
   try {
     tray = new Tray(path.join(__dirname, 'icon.png'));
     const contextMenu = Menu.buildFromTemplate([
-      { label: 'Show FrogTalk', click: () => { try { mainWindow?.show(); mainWindow?.focus(); } catch {} destroyTray(); } },
+      // Bringing the window back must NOT destroy the tray on Linux —
+      // libappindicator can leak old indicators on next create() which
+      // causes a duplicate FrogTalk tray icon after close→reopen. Leave
+      // the tray alive for the lifetime of the app.
+      { label: 'Show FrogTalk', click: () => { try { mainWindow?.show(); mainWindow?.focus(); } catch {} } },
       { label: 'Minimize to tray', click: () => mainWindow?.hide() },
       { type: 'separator' },
       { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } }
@@ -428,7 +436,7 @@ function createTray() {
     tray.setContextMenu(contextMenu);
     tray.on('click', () => {
       try { mainWindow?.show(); mainWindow?.focus(); } catch {}
-      destroyTray();
+      // Persistent tray (see note above).
     });
     _creatingTray = false;
     return true;

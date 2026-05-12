@@ -257,7 +257,11 @@ const Users = (() => {
     const isSelf = !!(State.user && _sameUser(u.user_id, u.nickname, State.user.id, State.user.nickname));
     const handleNick = isSelf ? (State.user.nickname || u.nickname) : u.nickname;
     const avatarSrc = u.avatar || (isSelf ? State.user.avatar : null);
-    const effectivePresence = _effectivePresence(u, isOnline);
+    // For self, always trust State.user.presence so the row matches the
+    // status pill in the self-panel (the WS-cached u.presence may be stale).
+    const effectivePresence = isSelf
+      ? _effectivePresence({ presence: (State.user && State.user.presence) || 'online' }, true)
+      : _effectivePresence(u, isOnline);
     const presenceMeta = {
       online: { color: '#4caf50', label: 'Online' },
       away: { color: '#ffc107', label: 'Away' },

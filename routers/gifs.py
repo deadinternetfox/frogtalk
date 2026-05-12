@@ -1,4 +1,4 @@
-"""GIF search (via Tenor) and custom stickers routes."""
+"""GIF search (via KLIPY, with Tenor fallback) and custom stickers routes."""
 import logging
 import os
 import httpx
@@ -13,24 +13,142 @@ from deps import get_current_user
 router = APIRouter(prefix="/media", tags=["media"])
 _log = logging.getLogger("frogtalk.gifs")
 
-# Tenor API key — env-only. If unset, /media/gifs/* responds 503.
-# Do NOT ship a baked-in key: any default in source ends up rate-limited
-# or revoked once it leaks.
+# ─── GIF provider configuration ─────────────────────────────────────────────
+# Google announced Tenor API sunset on June 30 2026 (no new keys after Jan 13
+# 2026). KLIPY is the preferred drop-in replacement; we still honor a Tenor
+# key as a fallback for nodes that haven't migrated yet.
+#
+# Required envs:
+#   KLIPY_API_KEY        — your KLIPY platform key (recommended)
+#   KLIPY_API_BASE       — override base URL (default https://api.klipy.com)
+#   TENOR_API_KEY        — legacy Tenor key (fallback only)
+KLIPY_API_KEY = (os.getenv("KLIPY_API_KEY") or "").strip()
+KLIPY_API_BASE = (os.getenv("KLIPY_API_BASE") or "https://api.klipy.com").rstrip("/")
 TENOR_API_KEY = (os.getenv("TENOR_API_KEY") or "").strip()
-if not TENOR_API_KEY:
-    _log.warning("TENOR_API_KEY is not set — GIF search will return 503 until configured.")
+
+if KLIPY_API_KEY:
+    _log.info("GIF provider: KLIPY (base=%s)", KLIPY_API_BASE)
+elif TENOR_API_KEY:
+    _log.warning(
+        "GIF provider: Tenor (deprecated, shuts down 2026-06-30). "
+        "Set KLIPY_API_KEY to migrate."
+    )
+else:
+    _log.warning(
+        "No GIF provider configured — /media/gifs/* will return 503 until "
+        "KLIPY_API_KEY (preferred) or TENOR_API_KEY is set."
+    )
+
+
+def _klipy_url(path: str) -> str:
+    # KLIPY puts the API key in the URL path: /api/v1/{key}/gifs/...
+    return f"{KLIPY_API_BASE}/api/v1/{KLIPY_API_KEY}/gifs/{path.lstrip('/')}"
+
+
+def _klipy_pick_url(file_obj: dict, *keys: str) -> str:
+    """KLIPY items carry variants under file.{hd,md,sm,xs} (and sometimes
+    gif/mp4 sub-objects). Walk the candidate keys and return the first url
+    we can find."""
+    if not isinstance(file_obj, dict):
+        return ""
+    for k in keys:
+        v = file_obj.get(k)
+        if isinstance(v, str) and v:
+            return v
+        if isinstance(v, dict):
+            url = v.get("url")
+            if url:
+                return url
+            gif = v.get("gif")
+            if isinstance(gif, dict) and gif.get("url"):
+                return gif["url"]
+    return ""
+
+
+def _klipy_to_gif(item: dict) -> Optional[dict]:
+    if not isinstance(item, dict):
+        return None
+    # Skip ad slots — caller handles content only.
+    if str(item.get("type") or "").lower() == "ad":
+        return None
+    f = item.get("file") or item.get("file_meta") or {}
+    full = _klipy_pick_url(f, "hd", "md", "sm", "xs", "gif", "url")
+    preview = _klipy_pick_url(f, "sm", "xs", "md", "hd") or full
+    if not full:
+        return None
+    # Width/height — KLIPY exposes dims under the same variant or top-level.
+    dims = item.get("dims") or {}
+    try:
+        w = int(item.get("width") or dims.get("width") or 0)
+        h = int(item.get("height") or dims.get("height") or 0)
+    except Exception:
+        w = h = 0
+    return {
+        "id": item.get("slug") or item.get("id") or "",
+        "url": full,
+        "preview": preview,
+        "width": w,
+        "height": h,
+        "title": item.get("title") or item.get("alt") or "",
+        "provider": "klipy",
+    }
+
+
+async def _klipy_request(path: str, params: dict) -> Optional[dict]:
+    if not KLIPY_API_KEY:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(_klipy_url(path), params=params)
+            if r.status_code != 200:
+                _log.warning("KLIPY %s -> HTTP %s: %s", path, r.status_code, r.text[:200])
+                return None
+            return r.json()
+    except Exception as e:
+        _log.warning("KLIPY %s error: %s", path, e)
+        return None
+
+
+def _klipy_extract_items(payload: dict) -> list:
+    """KLIPY responses wrap items under {result, data: {data: [...]}}."""
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data") or payload.get("result")
+    if isinstance(data, dict):
+        inner = data.get("data") or data.get("items") or data.get("results")
+        if isinstance(inner, list):
+            return inner
+    if isinstance(data, list):
+        return data
+    return []
 
 
 # ---------------------------------------------------------------------------
-# GIF Search via Tenor
+# GIF Search via KLIPY (preferred) or Tenor (fallback)
 # ---------------------------------------------------------------------------
 
 @router.get("/gifs/search")
 async def search_gifs(
     q: str = Query(..., min_length=1, max_length=100),
-    limit: int = Query(20, le=50)
+    limit: int = Query(20, le=50),
+    user=Depends(get_current_user),
 ):
-    """Search for GIFs via Tenor API."""
+    """Search for GIFs."""
+    # KLIPY path
+    if KLIPY_API_KEY:
+        payload = await _klipy_request("search", {
+            "q": q,
+            "page": 1,
+            "per_page": limit,
+            "customer_id": str(user["id"]),
+        })
+        if payload is not None:
+            gifs = [g for g in (_klipy_to_gif(i) for i in _klipy_extract_items(payload)) if g]
+            return {"gifs": gifs, "query": q, "provider": "klipy"}
+        # KLIPY error → fall through to Tenor if configured, else 502.
+        if not TENOR_API_KEY:
+            return JSONResponse(status_code=502, content={"error": "GIF service unavailable"})
+
     if not TENOR_API_KEY:
         return JSONResponse(status_code=503, content={"error": "GIF service not configured"})
     try:
@@ -64,18 +182,34 @@ async def search_gifs(
                         "preview": preview.get("url", gif_data.get("url")),
                         "width": gif_data.get("dims", [0, 0])[0],
                         "height": gif_data.get("dims", [0, 0])[1],
-                        "title": result.get("title", "")
+                        "title": result.get("title", ""),
+                        "provider": "tenor",
                     })
             
-            return {"gifs": gifs, "query": q}
+            return {"gifs": gifs, "query": q, "provider": "tenor"}
             
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": f"GIF search failed: {str(e)}"})
 
 
 @router.get("/gifs/trending")
-async def trending_gifs(limit: int = Query(20, le=50)):
+async def trending_gifs(
+    limit: int = Query(20, le=50),
+    user=Depends(get_current_user),
+):
     """Get trending GIFs."""
+    if KLIPY_API_KEY:
+        payload = await _klipy_request("trending", {
+            "page": 1,
+            "per_page": limit,
+            "customer_id": str(user["id"]),
+        })
+        if payload is not None:
+            gifs = [g for g in (_klipy_to_gif(i) for i in _klipy_extract_items(payload)) if g]
+            return {"gifs": gifs, "provider": "klipy"}
+        if not TENOR_API_KEY:
+            return JSONResponse(status_code=502, content={"error": "GIF service unavailable"})
+
     if not TENOR_API_KEY:
         return JSONResponse(status_code=503, content={"error": "GIF service not configured"})
     try:
@@ -107,13 +241,50 @@ async def trending_gifs(limit: int = Query(20, le=50)):
                         "url": gif_data.get("url"),
                         "preview": preview.get("url", gif_data.get("url")),
                         "width": gif_data.get("dims", [0, 0])[0],
-                        "height": gif_data.get("dims", [0, 0])[1]
+                        "height": gif_data.get("dims", [0, 0])[1],
+                        "provider": "tenor",
                     })
             
-            return {"gifs": gifs}
+            return {"gifs": gifs, "provider": "tenor"}
             
     except Exception as e:
         return JSONResponse(status_code=502, content={"error": f"Failed to get trending GIFs"})
+
+
+# ---------------------------------------------------------------------------
+# KLIPY engagement signals (best-effort; only fire when KLIPY is configured)
+# ---------------------------------------------------------------------------
+
+@router.post("/gifs/{slug}/share")
+async def gif_share(slug: str, user=Depends(get_current_user)):
+    """Notify KLIPY that the user shared this GIF (improves Recent ranking)."""
+    if not KLIPY_API_KEY or not slug:
+        return {"ok": True, "provider": None}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            await client.post(
+                _klipy_url(f"{slug}/share"),
+                json={"customer_id": str(user["id"])},
+            )
+    except Exception as e:
+        _log.debug("KLIPY share signal failed: %s", e)
+    return {"ok": True, "provider": "klipy"}
+
+
+@router.post("/gifs/{slug}/view")
+async def gif_view(slug: str, user=Depends(get_current_user)):
+    """Notify KLIPY of a long-press / preview view."""
+    if not KLIPY_API_KEY or not slug:
+        return {"ok": True, "provider": None}
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            await client.post(
+                _klipy_url(f"{slug}/view"),
+                json={"customer_id": str(user["id"])},
+            )
+    except Exception as e:
+        _log.debug("KLIPY view signal failed: %s", e)
+    return {"ok": True, "provider": "klipy"}
 
 
 @router.get("/gifs/categories")
