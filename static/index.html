@@ -149,6 +149,111 @@
   background:linear-gradient(180deg,#12231d,#0f1d18) !important;
   border-color:#2f5548 !important;
 }
+/* ── Theme bridge ─────────────────────────────────────────────────────────
+   A lot of legacy components hardcode #4caf50 (and rgba(76,175,80,…)) for
+   accents — that's fine on the default frog theme but stays green on every
+   other theme. Re-map those to var(--accent-color) so themes like midnight
+   / cyberpunk / rose / ocean / sunset retint correctly. Each rule is
+   visually identical on frog (since --accent-color IS #4caf50 there) but
+   automatically picks up the user's accent on any other theme. */
+.send-btn{
+  background:linear-gradient(155deg,
+    color-mix(in srgb, var(--accent-color) 30%, #ffffff) 0%,
+    color-mix(in srgb, var(--accent-color) 75%, #ffffff) 26%,
+    var(--accent-color) 58%,
+    color-mix(in srgb, var(--accent-color) 80%, #000000) 100%) !important;
+  border:1px solid color-mix(in srgb, var(--accent-color) 70%, #ffffff) !important;
+  color:color-mix(in srgb, var(--accent-color) 18%, #000000) !important;
+  box-shadow:
+    0 6px 14px color-mix(in srgb, var(--accent-color) 32%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.45),
+    inset 0 -2px 0 rgba(0,0,0,.22) !important;
+}
+.send-btn:hover{
+  background:linear-gradient(155deg,
+    color-mix(in srgb, var(--accent-color) 22%, #ffffff) 0%,
+    color-mix(in srgb, var(--accent-color) 65%, #ffffff) 24%,
+    color-mix(in srgb, var(--accent-color) 88%, #000000) 58%,
+    color-mix(in srgb, var(--accent-color) 70%, #000000) 100%) !important;
+  border-color:color-mix(in srgb, var(--accent-color) 60%, #ffffff) !important;
+  box-shadow:
+    0 9px 18px color-mix(in srgb, var(--accent-color) 38%, transparent),
+    inset 0 1px 0 rgba(255,255,255,.55),
+    inset 0 -2px 0 rgba(0,0,0,.20) !important;
+}
+.send-btn:focus-visible{
+  outline:2px solid color-mix(in srgb, var(--accent-color) 60%, #ffffff) !important;
+}
+.online-dot,
+.mention-dropdown .mention-presence.online{background:var(--accent-color) !important}
+.modal-btn.primary{
+  background:var(--accent-color) !important;
+  color:color-mix(in srgb, var(--accent-color) 12%, #000000) !important;
+  box-shadow:0 2px 8px color-mix(in srgb, var(--accent-color) 35%, transparent) !important;
+}
+.modal-btn.is-active{
+  background:color-mix(in srgb, var(--accent-color) 28%, var(--bg-color)) !important;
+  color:var(--accent-color) !important;
+}
+.reaction-pill.mine{
+  background:color-mix(in srgb, var(--accent-color) 22%, var(--bg-color)) !important;
+  border-color:var(--accent-color) !important;
+}
+.filter-btn.active{
+  background:color-mix(in srgb, var(--accent-color) 22%, var(--bg-color)) !important;
+  border-color:var(--accent-color) !important;
+  color:var(--accent-color) !important;
+}
+.filter-btn:hover{border-color:var(--accent-color) !important;color:var(--text-color) !important}
+.filter-slider-row input[type=range]{accent-color:var(--accent-color) !important}
+.attach-btn:hover,
+.emoji-btn:hover,
+.gif-btn:hover{color:var(--accent-color) !important;background:color-mix(in srgb, var(--accent-color) 12%, transparent) !important}
+.icon-btn:focus-visible,
+.modal-btn:focus-visible,
+.notif-preview-btn:focus-visible{outline:2px solid var(--accent-color) !important}
+.channel-browse-btn{color:var(--accent-color) !important}
+.channel-item .online-pip,
+.channel-list .online-pip,
+.sidebar .online-pip{background:var(--accent-color) !important}
+#chat-header.is-dm .ch-desc{color:var(--accent-color) !important}
+.in-call-badge.live{color:var(--accent-color) !important}
+.voice-bar-title,
+.voice-bar-status,
+#voice-presence-bar .vp-label{color:var(--accent-color) !important}
+.voice-bar-avatar.speaking{
+  box-shadow:0 0 0 2px var(--accent-color) !important;
+  border-color:var(--accent-color) !important;
+}
+.voice-ctl-btn.active,
+.call-ctl-btn.active{background:var(--accent-color) !important;color:color-mix(in srgb, var(--accent-color) 12%, #000000) !important}
+.call-tile.speaking .call-tile-speaking{
+  background:var(--accent-color) !important;
+  box-shadow:0 0 8px var(--accent-color) !important;
+}
+.media-flag-btn:hover{border-color:var(--accent-color) !important;color:var(--accent-color) !important}
+.media-flag-btn.active{
+  background:color-mix(in srgb, var(--accent-color) 22%, var(--bg-color)) !important;
+  border-color:var(--accent-color) !important;
+  color:var(--accent-color) !important;
+}
+.msg-reply-quote{
+  border-left:3px solid var(--accent-color) !important;
+  background:color-mix(in srgb, var(--accent-color) 14%, var(--bg-color)) !important;
+}
+.reply-quote-nick{color:var(--accent-color) !important}
+.rp-quick-btn.rp-plus:hover,
+.react-picker.rp-expanded .rp-plus{
+  background:color-mix(in srgb, var(--accent-color) 14%, var(--bg-color)) !important;
+  color:var(--accent-color) !important;
+  border-color:var(--accent-color) !important;
+}
+.rp-search-input:focus{
+  border-color:var(--accent-color) !important;
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent-color) 18%, transparent) !important;
+}
+*::-webkit-scrollbar-thumb:hover{background:var(--accent-color) !important}
+/* /Theme bridge ───────────────────────────────────────────────────────── */
 .modal-overlay{background:rgba(0,0,0,.7) !important}
 .modal{
   background:
