@@ -7366,6 +7366,85 @@ def get_federation_server_transport(server_id: str) -> str:
     return row["transport_preference"] if row else "auto"
 
 
+def get_federation_server_pubkey(server_id: str) -> str:
+    """Return the pinned PEM public key for a peer server, or empty string.
+
+    Used by the federation inbox to verify signatures. We pin by
+    ``server_id`` so a peer can't rotate keys without an admin
+    re-registering them; this is intentional given the small number of
+    federated nodes.
+    """
+    sid = str(server_id or "").strip()
+    if not sid:
+        return ""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT server_pubkey FROM federation_servers WHERE server_id=?",
+            (sid,),
+        ).fetchone()
+    if not row:
+        return ""
+    return str(row["server_pubkey"] or "")
+
+
+def get_federation_origin_max_time(origin_server_id: str) -> str:
+    """Return the highest ``origin_time`` we've already accepted from a peer.
+
+    Used as part of replay defence: events strictly older than the max
+    (minus a small clock-skew grace window) are dropped. Empty string
+    means we've never accepted anything from this peer yet.
+    """
+    sid = str(origin_server_id or "").strip()
+    if not sid:
+        return ""
+    with _conn() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_origin_progress (
+                origin_server_id TEXT PRIMARY KEY,
+                max_origin_time  TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        row = con.execute(
+            "SELECT max_origin_time FROM federation_origin_progress WHERE origin_server_id=?",
+            (sid,),
+        ).fetchone()
+    return str(row["max_origin_time"] if row else "")
+
+
+def update_federation_origin_max_time(origin_server_id: str, origin_time: str) -> None:
+    """Bump the per-peer max accepted ``origin_time`` (monotonic).
+
+    Called after a signed event passes verification. Uses an UPSERT so
+    we don't roundtrip twice; the ``MAX(...)`` SQL ensures concurrent
+    inserts can't regress the watermark.
+    """
+    sid = str(origin_server_id or "").strip()
+    ts = str(origin_time or "").strip()
+    if not sid or not ts:
+        return
+    with _conn() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_origin_progress (
+                origin_server_id TEXT PRIMARY KEY,
+                max_origin_time  TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO federation_origin_progress(origin_server_id, max_origin_time)
+            VALUES(?, ?)
+            ON CONFLICT(origin_server_id) DO UPDATE
+               SET max_origin_time = MAX(federation_origin_progress.max_origin_time, excluded.max_origin_time)
+            """,
+            (sid, ts),
+        )
+        con.commit()
+
+
 # ─── Reels ────────────────────────────────────────────────────────────────────
 
 def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",

@@ -4,7 +4,7 @@ import hashlib
 import logging
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 import database as db
@@ -112,16 +112,16 @@ async def delete_api_key(key_id: int, current_user: dict = Depends(get_current_u
 # ---------------------------------------------------------------------------
 
 class CreateBotRequest(BaseModel):
-    name: str
-    description: str = ""
-    avatar: Optional[str] = None
+    name: str = Field(max_length=64)
+    description: str = Field(default="", max_length=2_000)
+    avatar: Optional[str] = Field(default=None, max_length=10_000_000)
     is_public: bool = False
 
 
 class UpdateBotRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    avatar: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=2_000)
+    avatar: Optional[str] = Field(default=None, max_length=10_000_000)
     is_public: Optional[bool] = None
 
 

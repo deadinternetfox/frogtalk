@@ -8,5 +8,7 @@ contextBridge.exposeInMainWorld('desktopApp', {
     ipcRenderer.send('show-notification', { title, body });
   },
   getSettings: () => ipcRenderer.invoke('desktop:get-settings'),
-  setCloseToTray: (enabled) => ipcRenderer.invoke('desktop:set-close-to-tray', !!enabled)
+  setCloseToTray: (enabled) => ipcRenderer.invoke('desktop:set-close-to-tray', !!enabled),
+  getLaunchOnStartup: () => ipcRenderer.invoke('desktop:get-launch-on-startup'),
+  setLaunchOnStartup: (enabled) => ipcRenderer.invoke('desktop:set-launch-on-startup', !!enabled)
 });

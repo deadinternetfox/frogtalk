@@ -371,9 +371,12 @@ class FederationTicketLoginRequest(BaseModel):
 
 
 class ProfileUpdateRequest(BaseModel):
-    avatar: str | None = None
-    banner: str | None = None
-    bio: str | None = None
+    # Avatar/banner are accepted as data URLs or http(s) URLs. Cap at a
+    # generous ceiling so the request body itself can't be used as a
+    # cheap memory-pressure vector before validation runs.
+    avatar: str | None = Field(default=None, max_length=10_000_000)
+    banner: str | None = Field(default=None, max_length=20_000_000)
+    bio: str | None = Field(default=None, max_length=4_000)
     new_password: str | None = None
     current_password: str | None = None
     status_msg: str | None = None

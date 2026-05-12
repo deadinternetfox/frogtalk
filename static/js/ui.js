@@ -2163,24 +2163,27 @@ function _syncApplicationTabVisibility() {
 async function _loadDesktopAppSettingsIntoProfile() {
   const row = document.getElementById('profile-close-to-tray');
   const note = document.getElementById('profile-close-to-tray-note');
-  if (!row) return;
+  const startupRow = document.getElementById('profile-launch-on-startup');
+  const startupNote = document.getElementById('profile-launch-on-startup-note');
+  if (!row && !startupRow) return;
   if (!_isDesktopSettingsRuntime()) {
-    row.checked = false;
-    row.disabled = true;
+    if (row) { row.checked = false; row.disabled = true; }
+    if (startupRow) { startupRow.checked = false; startupRow.disabled = true; }
     return;
   }
-  row.disabled = false;
+  if (row) row.disabled = false;
+  if (startupRow) startupRow.disabled = false;
   try {
     const fallback = localStorage.getItem(_DESKTOP_CLOSE_TO_TRAY_LS_KEY) !== '0';
-    row.checked = fallback;
+    if (row) row.checked = fallback;
   } catch {
-    row.checked = true;
+    if (row) row.checked = true;
   }
   try {
     if (typeof window.desktopApp.getSettings === 'function') {
       const s = await window.desktopApp.getSettings();
       const enabled = !!(s && s.closeToTrayOnX !== false);
-      row.checked = enabled;
+      if (row) row.checked = enabled;
       try {
         localStorage.setItem(_DESKTOP_CLOSE_TO_TRAY_LS_KEY, enabled ? '1' : '0');
       } catch {}
@@ -2189,7 +2192,28 @@ async function _loadDesktopAppSettingsIntoProfile() {
           ? 'Tray is available. Pressing X will minimize to tray when enabled.'
           : 'System tray unavailable right now, so X will close the app.';
       }
-      return;
+    }
+  } catch {}
+  // Reflect the OS-level autostart state. We read straight from the
+  // platform (registry on Windows, LaunchAgents on macOS, ~/.config/
+  // autostart on Linux) so the checkbox can't drift from reality if a
+  // user toggles it via their DE's startup-apps UI.
+  try {
+    if (startupRow && typeof window.desktopApp.getLaunchOnStartup === 'function') {
+      const st = await window.desktopApp.getLaunchOnStartup();
+      startupRow.checked = !!(st && st.enabled);
+      if (startupNote) {
+        const platform = (st && st.platform) || '';
+        if (platform === 'linux') {
+          startupNote.textContent = 'Adds an entry in ~/.config/autostart so FrogTalk launches when you log in.';
+        } else if (platform === 'darwin') {
+          startupNote.textContent = 'Registers FrogTalk as a Login Item in macOS.';
+        } else if (platform === 'win32') {
+          startupNote.textContent = 'Registers FrogTalk under Windows startup. Disable to remove.';
+        } else {
+          startupNote.textContent = '';
+        }
+      }
     }
   } catch {}
 }
@@ -3181,19 +3205,23 @@ function _showThemePreviewBar(theme) {
   if (!bar) {
     bar = document.createElement('div');
     bar.id = 'theme-preview-bar';
+    // Dark surface base so it stops looking like a neon stripe under
+    // the frog theme. Thin accent top-border keeps it themed for every
+    // palette without saturating the bar itself.
     bar.style.cssText = `position:fixed;bottom:0;left:0;right:0;z-index:9999;
-      background:linear-gradient(135deg,
-        var(--accent-color),
-        color-mix(in srgb,var(--accent-color) 78%,var(--surface-color)));
-      border-top:2px solid color-mix(in srgb,var(--accent-color) 70%,white);
+      background:linear-gradient(180deg,
+        color-mix(in srgb,var(--surface-color) 92%,black),
+        color-mix(in srgb,var(--bg-color) 88%,black));
+      border-top:2px solid var(--accent-color);
+      color:var(--text-color);
       padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;
-      box-shadow:0 -6px 28px color-mix(in srgb,var(--accent-color) 35%,black);animation:slideUpBar .25s ease`;
+      box-shadow:0 -6px 28px rgba(0,0,0,.55);animation:slideUpBar .25s ease`;
     document.body.appendChild(bar);
   }
   bar.innerHTML = `
-    <span style="color:#08140b;font-size:14px;font-weight:700;text-shadow:0 1px 0 rgba(255,255,255,.18)">🎨 Previewing <em style="color:#fff;font-style:italic;text-decoration:underline;text-underline-offset:3px">${UI.escHtml(theme)}</em> theme</span>
-    <button onclick="confirmThemePreview()" style="background:#0e1f15;color:#eafff1;border:1px solid rgba(255,255,255,.25);border-radius:8px;padding:8px 20px;font-weight:700;cursor:pointer;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.35)">✓ Save</button>
-    <button onclick="cancelThemePreview()" style="background:rgba(0,0,0,.35);color:#fff;border:1px solid rgba(255,255,255,.28);border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer;font-size:13px">✕ Cancel</button>
+    <span style="color:var(--text-color);font-size:14px;font-weight:700">🎨 Previewing <em style="color:var(--accent-color);font-style:italic;text-decoration:underline;text-underline-offset:3px">${UI.escHtml(theme)}</em> theme</span>
+    <button onclick="confirmThemePreview()" style="background:var(--accent-color);color:#0d0d0d;border:1px solid color-mix(in srgb,var(--accent-color) 70%,black);border-radius:8px;padding:8px 20px;font-weight:700;cursor:pointer;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.45)">✓ Save</button>
+    <button onclick="cancelThemePreview()" style="background:color-mix(in srgb,var(--surface-color) 60%,black);color:var(--text-color);border:1px solid var(--border-color);border-radius:8px;padding:8px 20px;font-weight:600;cursor:pointer;font-size:13px">✕ Cancel</button>
   `;
 }
 
@@ -4759,6 +4787,15 @@ async function saveProfile() {
   try {
     if (_isDesktopSettingsRuntime() && typeof window.desktopApp?.setCloseToTray === 'function') {
       await window.desktopApp.setCloseToTray(closeToTray);
+    }
+  } catch {}
+  // Launch-on-startup is read straight from the checkbox — the platform
+  // layer owns the durable state (registry/LaunchAgent/.desktop file), so
+  // we just hand the new value off and trust the IPC handler.
+  try {
+    const launchOnStartup = document.getElementById('profile-launch-on-startup')?.checked ?? false;
+    if (_isDesktopSettingsRuntime() && typeof window.desktopApp?.setLaunchOnStartup === 'function') {
+      await window.desktopApp.setLaunchOnStartup(launchOnStartup);
     }
   } catch {}
   // Notification settings

@@ -4,9 +4,11 @@ import logging
 import os
 import time
 import asyncio
+import ipaddress
 import json
 import hashlib
 import secrets
+import socket
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -15,12 +17,13 @@ from pathlib import Path
 import tempfile
 import shutil
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import database as db
+import crypto_fed
 
 router = APIRouter(tags=["federation"])
 _log = logging.getLogger(__name__)
@@ -102,6 +105,15 @@ def enqueue_server_event(event_type: str, payload: dict) -> dict:
         "payload": payload or {},
         "signature": "",
     }
+    # Ed25519-sign every event so receivers can prove the origin_server_id
+    # claim. Signature failures here are non-fatal (event still gets
+    # enqueued unsigned) because we'd rather degrade open than drop
+    # legitimate traffic if the local keystore is briefly unreadable;
+    # peers with REQUIRE_SIGS=1 will then reject it.
+    try:
+        crypto_fed.sign_event(event)
+    except Exception:
+        _log.exception("failed to sign outbox event %s", event_id)
     if db.insert_federation_outbox_event(event):
         return {"ok": True, "event_id": event_id}
     return {"ok": False, "error": "enqueue_failed"}
@@ -119,6 +131,66 @@ def _url_uses_tor(url: str) -> bool:
     return host.endswith(".onion")
 
 
+class _UnsafeURLError(ValueError):
+    """Raised when a federation/peer URL fails the SSRF allowlist."""
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuses to auto-follow redirects.
+
+    Otherwise an attacker-controlled peer URL could 302 us to
+    ``http://169.254.169.254/`` after passing the initial IP check.
+    Callers wanting to follow redirects must re-validate the new
+    target URL through ``_assert_safe_url`` before re-issuing.
+    """
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise _UnsafeURLError(f"redirects not allowed (got {code} -> {newurl})")
+
+
+def _assert_safe_url(url: str) -> None:
+    """SSRF allowlist for outbound federation/peer fetches.
+
+    Tor (.onion) hosts skip the IP check — they can't resolve to a
+    routable IP anyway, and we want to be able to talk to peer onions.
+    Everything else: scheme must be http/https and every resolved
+    address has to be a globally routable unicast IP.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except Exception as exc:
+        raise _UnsafeURLError(f"unparseable URL: {exc}") from exc
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise _UnsafeURLError(f"scheme {scheme!r} not allowed")
+    host = (parsed.hostname or "").strip()
+    if not host:
+        raise _UnsafeURLError("missing host")
+    if host.lower().endswith(".onion"):
+        # .onion hosts route via Tor; the IP filter doesn't apply.
+        return
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as exc:
+        raise _UnsafeURLError(f"DNS failed for {host}: {exc}") from exc
+    seen_any = False
+    for family, _stype, _proto, _canon, sockaddr in infos:
+        if not sockaddr:
+            continue
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        seen_any = True
+        # Block any non-globally-routable address. is_global is the most
+        # conservative check available; it rules out private, loopback,
+        # link-local, multicast, reserved and unspecified ranges.
+        if not ip.is_global:
+            raise _UnsafeURLError(f"resolved IP {ip_str} for {host} is not globally routable")
+    if not seen_any:
+        raise _UnsafeURLError(f"no usable IPs for {host}")
+
+
 def _fetch_url_bytes(
     url: str,
     *,
@@ -127,14 +199,21 @@ def _fetch_url_bytes(
     headers: dict | None = None,
     data: bytes | None = None,
 ) -> bytes:
+    # SSRF allowlist runs first regardless of transport. We only do this
+    # for outbound peer fetches — user-supplied URLs (link previews,
+    # imageboard, etc.) have their own checks elsewhere.
+    _assert_safe_url(url)
     if _url_uses_tor(url):
-        with httpx.Client(proxy=_tor_proxy_url(), timeout=timeout_s, follow_redirects=True) as client:
+        # follow_redirects=False so a malicious onion can't bounce us
+        # to a clearnet attacker target after the SSRF check passed.
+        with httpx.Client(proxy=_tor_proxy_url(), timeout=timeout_s, follow_redirects=False) as client:
             resp = client.request(method, url, headers=headers, content=data)
             resp.raise_for_status()
             return resp.content
 
     req = urllib.request.Request(url, headers=headers or {}, data=data, method=method)
-    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    with opener.open(req, timeout=timeout_s) as resp:
         return resp.read()
 
 
@@ -515,6 +594,14 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
 async def network_status():
     local = db.get_or_create_local_server_identity()
     public = _public_server_view(local, onion_only=_tor_mode_enabled())
+    # Expose the local node's federation signing pubkey so peer admins
+    # can pin it when registering us. We never expose the private key.
+    try:
+        local_pubkey_pem = crypto_fed.get_local_public_key_pem()
+        local_pubkey_fp = crypto_fed.get_local_public_key_fingerprint()
+    except Exception:
+        local_pubkey_pem = ""
+        local_pubkey_fp = ""
     return {
         "server": {
             "server_id": public["server_id"],
@@ -523,6 +610,8 @@ async def network_status():
             "onion_url": public["onion_url"],
             "federation_enabled": os.getenv("FROGTALK_FEDERATION_ENABLED", "0") in ("1", "true", "yes"),
             "tor_enabled": os.getenv("FROGTALK_TOR_ENABLED", "0") in ("1", "true", "yes"),
+            "federation_pubkey_pem": local_pubkey_pem,
+            "federation_pubkey_fingerprint": local_pubkey_fp,
         }
     }
 
@@ -890,9 +979,77 @@ async def get_user_identity_claim(
 def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
     accepted = 0
     rejected = 0
+    # Configurable per-deploy. We default to 0 (off) so the next deploy
+    # can roll out signing-capable clients across the federation without
+    # immediately rejecting unsigned events from peers that haven't
+    # upgraded yet. Flip to 1 after one release of soak.
+    require_sigs = (os.getenv("FROGTALK_FEDERATION_REQUIRE_SIGS", "0").strip().lower()
+                    in ("1", "true", "yes", "on"))
+    now = datetime.now(tz=timezone.utc)
+    skew_seconds = 3600   # ±1h max clock skew accepted
+    grace_seconds = 60    # allow tiny re-orderings against the monotonic watermark
+
     for ev in events:
+        origin = str(ev.get("origin_server_id") or "").strip()
+        if not origin:
+            rejected += 1
+            continue
+
+        # ---- Time window check (replay defence, applies even without sigs) ----
+        origin_time_str = str(ev.get("origin_time") or "").strip()
+        if not origin_time_str:
+            rejected += 1
+            continue
+        try:
+            # Normalize the "Z" suffix that enqueue_server_event emits;
+            # fromisoformat in <3.11 doesn't accept it.
+            ts = origin_time_str.replace("Z", "+00:00")
+            origin_dt = datetime.fromisoformat(ts)
+            if origin_dt.tzinfo is None:
+                origin_dt = origin_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            rejected += 1
+            continue
+        if abs((now - origin_dt).total_seconds()) > skew_seconds:
+            rejected += 1
+            continue
+
+        # ---- Monotonic progression per origin ----
+        try:
+            prev_max = db.get_federation_origin_max_time(origin)
+            if prev_max:
+                prev_ts = prev_max.replace("Z", "+00:00")
+                prev_dt = datetime.fromisoformat(prev_ts)
+                if prev_dt.tzinfo is None:
+                    prev_dt = prev_dt.replace(tzinfo=timezone.utc)
+                if (origin_dt - prev_dt).total_seconds() < -grace_seconds:
+                    rejected += 1
+                    continue
+        except Exception:
+            # On any parse error from prior watermark, fall through to
+            # signature/dedup checks rather than reject; watermark gets
+            # overwritten on success below.
+            pass
+
+        # ---- Ed25519 verification (when peer pubkey pinned) ----
+        pubkey_pem = db.get_federation_server_pubkey(origin)
+        if pubkey_pem:
+            if not crypto_fed.verify_event(ev, pubkey_pem):
+                rejected += 1
+                continue
+        elif require_sigs:
+            # No pinned key + strict mode = reject. We never trust a
+            # signer pubkey supplied on the wire (TOFU is too dangerous
+            # with federated bots).
+            rejected += 1
+            continue
+
         if db.insert_federation_inbox_event(ev):
             accepted += 1
+            try:
+                db.update_federation_origin_max_time(origin, origin_time_str)
+            except Exception:
+                _log.exception("failed to bump origin progress for %s", origin)
         else:
             rejected += 1
     return accepted, rejected

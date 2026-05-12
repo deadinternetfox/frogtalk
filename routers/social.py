@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, Query, Request, UploadFile, File, Form, Header
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from typing import Optional
 
@@ -80,10 +80,11 @@ async def _push_social_notif(recipient_id: int, payload: dict) -> None:
 
 
 class CreateStoryRequest(BaseModel):
-    media_data: str
-    media_type: str
-    caption: str = ""
-    privacy: str = "public"
+    # Stories may include short clips. 50MB after base64 expansion.
+    media_data: str = Field(max_length=70_000_000)
+    media_type: str = Field(max_length=128)
+    caption: str = Field(default="", max_length=2_000)
+    privacy: str = Field(default="public", max_length=32)
 
 
 @router.post("/follow/{nickname}")

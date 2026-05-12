@@ -703,12 +703,25 @@ async def global_exception_handler(request: Request, exc: Exception):
 _default_origins = "https://frogtalk.xyz,https://www.frogtalk.xyz"
 ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", _default_origins).split(",") if o.strip()]
 _cors_credentials = "*" not in ALLOWED_ORIGINS
+# Tightened from the wildcard defaults so a misbehaving extension or
+# rogue page can't slip exotic headers/methods into a credentialed
+# request. CONNECT and TRACE in particular are never used by the SPA.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=_cors_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Session-Token",
+        "X-Api-Key",
+        "X-Federation-Token",
+        "X-CSRF-Token",
+        "X-Requested-With",
+    ],
+    expose_headers=["Content-Disposition"],
+    max_age=600,
 )
 
 # Gzip JSON / HTML responses ≥1KB. Skips already-compressed media.

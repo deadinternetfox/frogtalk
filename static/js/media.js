@@ -1044,7 +1044,7 @@ function _camScreenFlashOff () {
    track constraint nor the native bridge works while the camera is open,
    we return false and the caller falls back gracefully. */
 async function _camTorchSet (enable) {
-  const dbg = (...a) => { try { console.log('[torch]', ...a); } catch {} };
+  const dbg = (..._a) => {};
   dbg('request', { enable, facing: _camLiveFacing, hasStream: !!_camLiveStream });
   let ok = false;
   // Path A — applyConstraints on the active track.
@@ -1367,13 +1367,12 @@ async function _camLiveSnap () {
       const supportsFlash = caps && Array.isArray(caps.fillLightMode)
           && caps.fillLightMode.includes('flash');
       if (supportsFlash) {
-        console.log('[flash] using ImageCapture.takePhoto({fillLightMode:flash})');
         const blob = await ic.takePhoto({ fillLightMode: 'flash' });
         await _camFinishSnapFromBlob(blob);
         return;
       }
     }
-  } catch (e) { console.log('[flash] ImageCapture path failed', e && e.message); }
+  } catch (e) { /* ImageCapture flash path failed */ }
 
   // (2) Plain track.applyConstraints({torch:true}) — works on some devices
   //     even when the native bridge doesn't.
@@ -1381,13 +1380,12 @@ async function _camLiveSnap () {
     const track = _camLiveStream && _camLiveStream.getVideoTracks()[0];
     if (track) {
       await track.applyConstraints({ advanced: [{ torch: true }] });
-      console.log('[flash] applyConstraints lit the LED');
       await new Promise(r => setTimeout(r, 400));
       _camFinishSnap(v);
       try { await track.applyConstraints({ advanced: [{ torch: false }] }); } catch {}
       return;
     }
-  } catch (e) { console.log('[flash] applyConstraints failed', e && e.message); }
+  } catch (e) { /* applyConstraints torch path failed */ }
 
   // (3) Close the preview → fire the native torch bridge → reopen camera
   //     (the LED stays lit because setTorchMode is session-independent) →
@@ -1410,7 +1408,6 @@ async function _camLiveSnap () {
       // this — without it setTorchMode returns "insufficient resources".
       await new Promise(r => setTimeout(r, 300));
       const torched = window.Android.torchOn();
-      console.log('[flash] bridge torchOn →', torched);
       if (!torched) {
         if (typeof toast === 'function') toast('Flash unavailable on this device', 'error');
         await _camStartLiveStream();
@@ -1446,7 +1443,7 @@ async function _camLiveSnap () {
       try { hiStream.getTracks().forEach(t => t.stop()); } catch {}
       return;
     } catch (e) {
-      console.log('[flash] bridge cycle failed', e && e.message);
+      /* bridge torch cycle failed */
       try { window.Android.torchOff(); } catch {}
       // Reopen preview so the UI doesn't end up stuck on a black video.
       try { await _camStartLiveStream(); } catch {}

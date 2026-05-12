@@ -118,10 +118,25 @@
     }
   }
 
+  function _readCsrfCookie() {
+    // Double-submit pattern: the server set ``frogtalk_admin_csrf`` as a
+    // non-HttpOnly cookie at login. We echo it in a header so the server
+    // can compare against the session-bound token. A cross-origin
+    // attacker can't read this cookie thanks to SameSite=Strict.
+    const m = (document.cookie || '').match(/(?:^|;\s*)frogtalk_admin_csrf=([^;]+)/);
+    return m ? decodeURIComponent(m[1]) : '';
+  }
+
   async function api(path, opts = {}) {
+    const method = String(opts.method || 'GET').toUpperCase();
+    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+      const csrf = _readCsrfCookie();
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+    }
     const res = await fetch(path, {
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+      headers,
       ...opts,
     });
     let data = {};
@@ -329,6 +344,12 @@
       const res = await fetch('/api/server-admin/easter-egg/upload', {
         method: 'POST',
         credentials: 'include',
+        headers: (() => {
+          const h = {};
+          const csrf = _readCsrfCookie();
+          if (csrf) h['X-CSRF-Token'] = csrf;
+          return h;
+        })(),
         body: form,
       });
       const payload = await res.json().catch(() => ({}));

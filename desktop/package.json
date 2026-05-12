@@ -1,6 +1,6 @@
 {
   "name": "FrogTalk",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "FrogTalk - End-to-end encrypted chat with voice & video calls",
   "main": "main.js",
   "homepage": "https://frogtalk.xyz",

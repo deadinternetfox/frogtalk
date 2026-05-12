@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from fastapi import APIRouter, Request, Depends, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from typing import Optional
 
@@ -24,12 +24,15 @@ ROOM_NAME_RE = re.compile(r"^[a-z0-9_\-]{1,32}$")
 
 
 class CreateRoomRequest(BaseModel):
-    name: str
-    description: str = ""
-    type: str = "public"
-    room_key_hint: Optional[str] = None
-    icon: Optional[str] = None
-    channel_type: str = "text"  # text, music, or voice (legacy)
+    name: str = Field(max_length=64)
+    description: str = Field(default="", max_length=2_000)
+    type: str = Field(default="public", max_length=16)
+    room_key_hint: Optional[str] = Field(default=None, max_length=512)
+    # Icon may be a data:image/* URL; the body-level cap mirrors
+    # ``_normalize_room_icon``'s 3MB ceiling with headroom for base64
+    # padding.
+    icon: Optional[str] = Field(default=None, max_length=5_000_000)
+    channel_type: str = Field(default="text", max_length=16)  # text, music, or voice (legacy)
     invite_only: int = 0  # 0 or 1
 
 
@@ -198,16 +201,16 @@ async def delete_room(room_name: str, current_user: dict = Depends(get_current_u
 # ─── Room settings ────────────────────────────────────────────────────────────
 
 class UpdateRoomRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=64)
+    description: Optional[str] = Field(default=None, max_length=2_000)
+    icon: Optional[str] = Field(default=None, max_length=5_000_000)
     slowmode: Optional[int] = None
-    channel_type: Optional[str] = None  # text, music, or voice (legacy)
-    channel_theme: Optional[str] = None  # JSON theme object
+    channel_type: Optional[str] = Field(default=None, max_length=16)  # text, music, or voice (legacy)
+    channel_theme: Optional[str] = Field(default=None, max_length=20_000)  # JSON theme object
     invite_only: Optional[int] = None  # 0 or 1
-    who_can_invite: Optional[str] = None  # everyone, mods, owner
-    banner: Optional[str] = None  # data URL or image URL
-    about: Optional[str] = None  # rich channel about text
+    who_can_invite: Optional[str] = Field(default=None, max_length=16)  # everyone, mods, owner
+    banner: Optional[str] = Field(default=None, max_length=10_000_000)  # data URL or image URL
+    about: Optional[str] = Field(default=None, max_length=20_000)  # rich channel about text
     forwarding_disabled: Optional[int] = None  # 0 or 1
 
 

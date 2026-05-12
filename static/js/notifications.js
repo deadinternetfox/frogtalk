@@ -25,7 +25,6 @@ const Notifications = (() => {
     }
     try {
       _swReg = await navigator.serviceWorker.register('/sw.js?v=263', { scope: '/' });
-      console.log('[SW] registered, scope:', _swReg.scope);
       // Note: incoming-call accept/decline is handled exclusively by the
       // in-page #incoming-call popup (driven by WS call_offer). The SW
       // notification has no action buttons and posts no ft-call-action.
@@ -83,7 +82,6 @@ const Notifications = (() => {
           },
         }),
       });
-      console.log('[Push] Subscribed successfully');
     } catch (err) {
       console.warn('[Push] subscribe error:', err);
     }
@@ -135,7 +133,6 @@ const Notifications = (() => {
     }
     _installPrompt.prompt();
     const { outcome } = await _installPrompt.userChoice;
-    console.log('[PWA] install outcome:', outcome);
     if (outcome === 'accepted') {
       _installPrompt = null;
       updateInstallButton(false);

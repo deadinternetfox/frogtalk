@@ -1675,7 +1675,7 @@ const Social = (() => {
         painted++;
       }
       if (window._frogtalkStoryRingDebug) {
-        try { console.log('[story-ring] markPosted', { nickname, userId, scanned: els.length, painted }); } catch {}
+        try { /* story-ring marked */ void { nickname, userId, scanned: els.length, painted }; } catch {}
       }
     } catch (e) {
       try { console.warn('[story-ring] markPosted error', e); } catch {}
@@ -2745,7 +2745,6 @@ const Social = (() => {
         return;
       }
     } catch {}
-    console.log('[Story]', type, msg);
   }
 
   function _setAddStoryStatus(msg, type = 'info') {

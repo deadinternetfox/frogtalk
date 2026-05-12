@@ -37,7 +37,6 @@ const WS = (() => {
     _ws = ws;
 
     ws.onopen = () => {
-      console.log(`[WS] connected to ${room}`);
       // Only reset backoff after connection is stable for 5 seconds
       _stableTimer = setTimeout(() => { _reconnectDelay = 1000; }, 5000);
       if (_pingInterval) clearInterval(_pingInterval);
@@ -64,7 +63,6 @@ const WS = (() => {
       if (_ws !== ws) return;
       if (_pingInterval) { clearInterval(_pingInterval); _pingInterval = null; }
       if (_stableTimer) { clearTimeout(_stableTimer); _stableTimer = null; }
-      console.log('[WS] disconnected, reconnecting in', _reconnectDelay, 'ms');
       _reconnectTimer = setTimeout(() => {
         if (_room) connect(_room);
       }, _reconnectDelay);
@@ -439,7 +437,7 @@ const WS = (() => {
       case 'story_posted': {
         try {
           if (window._frogtalkStoryRingDebug) {
-            try { console.log('[story-ring] WS story_posted', data); } catch {}
+            try { /* story_posted ws event */ void data; } catch {}
           }
           if (window.Social) {
             // Optimistic local update (instant ring flip) + background true-up.

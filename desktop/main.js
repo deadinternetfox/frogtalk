@@ -416,6 +416,86 @@ ipcMain.handle('desktop:set-close-to-tray', (_event, enabled) => {
   };
 });
 
+// ── Launch-on-startup ───────────────────────────────────────────────────────
+// On Win/macOS Electron talks to the OS directly via app.setLoginItemSettings.
+// On Linux that API is a no-op, so we write an XDG autostart .desktop file
+// in ~/.config/autostart/ which every major DE (GNOME/KDE/Xfce/Cinnamon)
+// honours. The launcher we wrote there points at process.execPath, which on
+// AppImage is APPIMAGE (the mounted image path) and on .deb is the installed
+// /opt/FrogTalk/frogtalk binary — both correct entry points.
+const LINUX_AUTOSTART_DIR = path.join(app.getPath('home') || '', '.config', 'autostart');
+const LINUX_AUTOSTART_FILE = path.join(LINUX_AUTOSTART_DIR, 'frogtalk.desktop');
+
+function _linuxAutostartExePath() {
+  // AppImage exposes its mount point via APPIMAGE; fall back to the
+  // Electron-resolved exec path for .deb / source runs.
+  return process.env.APPIMAGE || process.execPath || '';
+}
+
+function _readLaunchOnStartup() {
+  try {
+    if (process.platform === 'linux') {
+      return fs.existsSync(LINUX_AUTOSTART_FILE);
+    }
+    const s = app.getLoginItemSettings({});
+    return !!(s && s.openAtLogin);
+  } catch {
+    return false;
+  }
+}
+
+function _writeLaunchOnStartup(enabled) {
+  try {
+    if (process.platform === 'linux') {
+      if (enabled) {
+        try { fs.mkdirSync(LINUX_AUTOSTART_DIR, { recursive: true }); } catch {}
+        const exe = _linuxAutostartExePath();
+        if (!exe) return false;
+        // --hidden tells our main process this was launched at login so
+        // future versions could choose to start minimized to tray.
+        const desktop = [
+          '[Desktop Entry]',
+          'Type=Application',
+          'Name=FrogTalk',
+          'Comment=End-to-end encrypted chat',
+          `Exec=${exe} --hidden`,
+          'Icon=frogtalk',
+          'Terminal=false',
+          'Categories=Network;InstantMessaging;Chat;',
+          'X-GNOME-Autostart-enabled=true',
+          'StartupNotify=false',
+          ''
+        ].join('\n');
+        fs.writeFileSync(LINUX_AUTOSTART_FILE, desktop, { encoding: 'utf8', mode: 0o644 });
+        return true;
+      }
+      try { fs.unlinkSync(LINUX_AUTOSTART_FILE); } catch {}
+      return true;
+    }
+    // Windows + macOS
+    app.setLoginItemSettings({
+      openAtLogin: !!enabled,
+      // Start hidden in the tray so the OS login isn't blocked by a popup.
+      openAsHidden: !!enabled,
+      // On Windows we have to pass the EXE path explicitly when installed.
+      path: process.execPath,
+      args: enabled ? ['--hidden'] : [],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle('desktop:get-launch-on-startup', () => {
+  return { enabled: _readLaunchOnStartup(), platform: process.platform };
+});
+
+ipcMain.handle('desktop:set-launch-on-startup', (_event, enabled) => {
+  const ok = _writeLaunchOnStartup(enabled !== false);
+  return { ok, enabled: _readLaunchOnStartup(), platform: process.platform };
+});
+
 function createTray() {
   if (tray) return true;
   if (_creatingTray) return true;

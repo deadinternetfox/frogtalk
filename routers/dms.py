@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from typing import Optional
 
@@ -33,10 +33,12 @@ def _is_allowed_media_payload(payload: Optional[str]) -> bool:
 
 
 class DMMessageBody(BaseModel):
-    content: str = ""
-    media_data: Optional[str] = None
-    media_type: Optional[str] = None
-    media_name: Optional[str] = None
+    content: str = Field(default="", max_length=64_000)
+    # ~30MB media after base64 expansion. Hard cap at the boundary so
+    # bcrypt/sanitizers/SQLite never see oversize payloads.
+    media_data: Optional[str] = Field(default=None, max_length=40_000_000)
+    media_type: Optional[str] = Field(default=None, max_length=128)
+    media_name: Optional[str] = Field(default=None, max_length=256)
     reply_to: Optional[int] = None
     media_blur: int = 0
     view_once: int = 0

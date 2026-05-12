@@ -9,6 +9,7 @@ import shutil
 import urllib.parse
 from typing import Optional
 
+import bleach
 from fastapi import APIRouter, Request, Response, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -23,7 +24,9 @@ _SERVER_ADMIN_HTML_PATH = "static/server_admin.html"
 _SERVER_ADMIN_JS_PATH = "static/js/server_admin.js"
 
 _COOKIE_NAME = "ft_server_admin"
-_SESSIONS: dict[str, float] = {}
+_CSRF_COOKIE_NAME = "frogtalk_admin_csrf"
+# value: (expires_at: float, csrf_token: str)
+_SESSIONS: dict[str, tuple[float, str]] = {}
 _EASTER_EGG_HTML_MAX = 512_000
 _EASTER_EGG_UPLOAD_MAX = 16 * 1024 * 1024
 _ALLOWED_EASTER_MEDIA = (
@@ -31,6 +34,27 @@ _ALLOWED_EASTER_MEDIA = (
     "video/",
     "audio/",
 )
+
+# ── Bleach allowlist for the easter-egg HTML editor ──────────────────────
+# Keep this tight: only formatting tags + media. No <script>, no <iframe>,
+# no inline event handlers. ``bleach.clean(..., strip=True)`` removes
+# anything outside this allowlist instead of escaping it, so the editor
+# stays readable while attacker-controlled markup gets dropped silently.
+_EASTER_ALLOWED_TAGS = [
+    "p", "br", "strong", "b", "em", "i", "u", "h2", "h3",
+    "blockquote", "ul", "ol", "li", "a", "img", "video",
+    "audio", "source", "figure", "figcaption", "span", "div",
+]
+_EASTER_ALLOWED_ATTRS = {
+    "a": ["href", "title", "rel", "target"],
+    "img": ["src", "alt", "title"],
+    "video": ["src", "controls", "poster", "preload", "loop", "muted"],
+    "audio": ["src", "controls", "preload", "loop"],
+    "source": ["src", "type"],
+    "span": ["style"],
+    "div": ["style"],
+}
+_EASTER_ALLOWED_PROTOCOLS = ["http", "https", "mailto", "data"]
 
 
 def _is_true(value: str | None) -> bool:
@@ -221,7 +245,7 @@ def _local_server_id() -> str:
 
 def _cleanup_sessions() -> None:
     now = time.time()
-    dead = [token for token, exp in _SESSIONS.items() if exp <= now]
+    dead = [token for token, entry in _SESSIONS.items() if entry[0] <= now]
     for token in dead:
         _SESSIONS.pop(token, None)
 
@@ -229,15 +253,37 @@ def _cleanup_sessions() -> None:
 def _is_authenticated(request: Request) -> bool:
     _cleanup_sessions()
     token = request.cookies.get(_COOKIE_NAME, "")
-    exp = _SESSIONS.get(token)
-    if not exp:
+    entry = _SESSIONS.get(token)
+    if not entry:
         return False
+    exp, csrf = entry
     if exp <= time.time():
         _SESSIONS.pop(token, None)
         return False
     # Sliding expiration.
-    _SESSIONS[token] = time.time() + _session_ttl_sec()
+    _SESSIONS[token] = (time.time() + _session_ttl_sec(), csrf)
     return True
+
+
+def _require_csrf(request: Request) -> Optional[JSONResponse]:
+    """Enforce double-submit CSRF on every state-changing admin route.
+
+    Frontend reads the ``frogtalk_admin_csrf`` cookie (non-HttpOnly so JS
+    can see it) and echoes the value back in ``X-CSRF-Token``. We then
+    constant-time compare that against the per-session token stored
+    server-side. A cross-origin attacker can't read the cookie thanks
+    to SameSite=Strict and the host scope, so they can't forge the
+    header.
+    """
+    token = request.cookies.get(_COOKIE_NAME, "")
+    entry = _SESSIONS.get(token)
+    if not entry:
+        return JSONResponse(status_code=403, content={"error": "CSRF: no session"})
+    _, expected_csrf = entry
+    supplied = request.headers.get("x-csrf-token", "") or request.headers.get("X-CSRF-Token", "")
+    if not supplied or not secrets.compare_digest(supplied, expected_csrf):
+        return JSONResponse(status_code=403, content={"error": "CSRF token missing or invalid"})
+    return None
 
 
 def _require_enabled() -> Optional[JSONResponse]:
@@ -249,6 +295,15 @@ def _require_enabled() -> Optional[JSONResponse]:
 def _require_auth(request: Request) -> Optional[JSONResponse]:
     if not _is_authenticated(request):
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+    # Enforce CSRF on every state-changing method. GET/HEAD/OPTIONS are
+    # safe by definition. The /login endpoint is exempt because it has
+    # no session yet \u2014 it gets its own brute-force throttle elsewhere.
+    method = (request.method or "").upper()
+    if method not in ("GET", "HEAD", "OPTIONS"):
+        if not request.url.path.endswith("/api/server-admin/login"):
+            csrf_err = _require_csrf(request)
+            if csrf_err:
+                return csrf_err
     return None
 
 
@@ -287,13 +342,27 @@ def _cfg_easter_html() -> str:
 
 
 def _sanitize_easter_html(html: str) -> str:
-    out = str(html or "")[:_EASTER_EGG_HTML_MAX]
-    out = re.sub(r"<\s*(script|style|object|embed)\b[^>]*>.*?<\s*/\s*\1\s*>", "", out, flags=re.I | re.S)
-    out = re.sub(r"on[a-zA-Z]+\s*=\s*(['\"]).*?\1", "", out, flags=re.I | re.S)
-    out = re.sub(r"on[a-zA-Z]+\s*=\s*[^\s>]+", "", out, flags=re.I)
-    out = re.sub(r"(href|src)\s*=\s*(['\"])\s*javascript:[^\2]*\2", r"\1=\2#\2", out, flags=re.I)
-    out = re.sub(r"(href|src)\s*=\s*(['\"])\s*data:text/html[^\2]*\2", r"\1=\2#\2", out, flags=re.I)
-    return out.strip()
+    raw = str(html or "")[:_EASTER_EGG_HTML_MAX]
+    # bleach handles every category the old regex pile was approximating
+    # (open tags, attribute injection, javascript:/data:text/html URLs,
+    # inline event handlers) with a proper HTML5 parser instead of
+    # regex-guessing on a markup grammar.
+    cleaned = bleach.clean(
+        raw,
+        tags=_EASTER_ALLOWED_TAGS,
+        attributes=_EASTER_ALLOWED_ATTRS,
+        protocols=_EASTER_ALLOWED_PROTOCOLS,
+        strip=True,
+        strip_comments=True,
+    )
+    # Belt + braces: forbid data: URLs that aren't image/audio/video
+    # (bleach allows the whole ``data:`` scheme once you allowlist it).
+    cleaned = re.sub(
+        r'(?i)(src|href)\s*=\s*(["\'])\s*data:(?!(?:image|audio|video)/)[^"\']*\2',
+        r'\1=\2#\2',
+        cleaned,
+    )
+    return cleaned.strip()
 
 
 def _current_easter_egg_payload() -> dict:
@@ -451,7 +520,8 @@ async def server_webui_login(request: Request, body: LoginBody, response: Respon
         return JSONResponse(status_code=401, content={"error": "Invalid credentials"})
 
     token = secrets.token_urlsafe(32)
-    _SESSIONS[token] = time.time() + _session_ttl_sec()
+    csrf_token = secrets.token_urlsafe(32)
+    _SESSIONS[token] = (time.time() + _session_ttl_sec(), csrf_token)
     # Auto-enable Secure on https. The env override stays for local http
     # development where setting Secure would prevent the cookie from being
     # stored at all.
@@ -469,7 +539,19 @@ async def server_webui_login(request: Request, body: LoginBody, response: Respon
         max_age=_session_ttl_sec(),
         path="/",
     )
-    return {"ok": True}
+    # CSRF cookie is intentionally NOT HttpOnly — the frontend reads it
+    # with document.cookie to populate the X-CSRF-Token header. SameSite
+    # + Secure prevent cross-origin theft.
+    response.set_cookie(
+        key=_CSRF_COOKIE_NAME,
+        value=csrf_token,
+        httponly=False,
+        secure=cookie_secure,
+        samesite="strict",
+        max_age=_session_ttl_sec(),
+        path="/",
+    )
+    return {"ok": True, "csrf_token": csrf_token}
 
 
 @router.post("/api/server-admin/logout")
@@ -482,6 +564,7 @@ async def server_webui_logout(request: Request, response: Response):
     if token:
         _SESSIONS.pop(token, None)
     response.delete_cookie(_COOKIE_NAME, path="/")
+    response.delete_cookie(_CSRF_COOKIE_NAME, path="/")
     return {"ok": True}
 
 
