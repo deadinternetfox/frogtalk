@@ -1288,6 +1288,7 @@ function renderDMChat () {
   }
   _dmMessages = _dmMessages.map(m => _normalizeDMMessage(m));
   area.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
+  if (window.Messages && Messages.hydrateStickers) Messages.hydrateStickers(area);
   // One-shot dialog per DM session if any message body is still cipher-shaped
   // after every decrypt path. These messages were encrypted to another
   // device's key and can't be recovered here — reset won't help. Be honest
@@ -1474,7 +1475,17 @@ function renderDMMessage (m) {
     </div>`;
   } else if (mediaUrl) {
     let inner = '';
-    if (mimeType.startsWith('image/') || (!mimeType && mediaUrl.startsWith('data:image'))) {
+    // DM stickers: same Shadow-DOM-isolated render path as room messages.
+    const _dmHasFx = typeof mimeType === 'string' && /;\s*fx=/.test(mimeType);
+    if (_dmHasFx && window.StickerFX && (mimeType.startsWith('image/') || mediaUrl.startsWith('data:image'))) {
+      inner = `<span class="frog-sticker-mount"
+        data-fx-src="${esc(mediaUrl)}"
+        data-fx-mt="${esc(mimeType)}"
+        data-fx-sender="${esc(senderNick || '')}"
+        data-fx-time="${time}"
+        onclick="Messages.openSticker(this)"
+        style="display:inline-block;line-height:0;cursor:pointer"></span>`;
+    } else if (mimeType.startsWith('image/') || (!mimeType && mediaUrl.startsWith('data:image'))) {
       inner = `<img src="${mediaUrl}" class="msg-media" onclick="openLightbox('${mediaUrl}')" loading="lazy">`;
     } else if (mimeType.startsWith('video/') || (!mimeType && mediaUrl.startsWith('data:video'))) {
       const _vSender = esc(senderNick || '');
@@ -1892,10 +1903,17 @@ async function loadDMMedia (msgId, channelId) {
       try { setTimeout(() => { try { ChatVideo?.scan?.(document); } catch {} }, 0); } catch {}
     } else if (mediaType.startsWith('audio')) {
       html = `<audio src="${data.media_data}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
+    } else if (/;\s*fx=/.test(mediaType) && window.StickerFX) {
+      // Deferred-load DM sticker — mount a placeholder and hydrate from
+      // the parent container so the shadow-root sandbox stays in effect.
+      html = `<span class="frog-sticker-mount" data-fx-src="${data.media_data}" data-fx-mt="${mediaType.replace(/"/g,'&quot;')}" onclick="Messages.openSticker(this)" style="display:inline-block;line-height:0;cursor:pointer"></span>`;
     } else {
       html = `<img src="${data.media_data}" class="msg-media" onclick="openLightbox('${data.media_data}')" loading="lazy">`;
     }
     container.outerHTML = html;
+    try {
+      if (window.Messages && Messages.hydrateStickers) Messages.hydrateStickers(document);
+    } catch {}
   } catch {
     container.innerHTML = '<div style="padding:12px;color:#d9a89f;font-size:13px">Failed to load media</div>';
   }
@@ -2306,6 +2324,7 @@ function appendDMMessage (m) {
   const el = tmp.firstElementChild;
   // reaction buttons now use inline onclick → showDMReactMenu
   area.appendChild(el);
+  if (window.Messages && Messages.hydrateStickers) Messages.hydrateStickers(area);
   if (mine || atBottom) _scrollDMToBottomStable();
   const previewUrl = _extractDMPreviewUrl(String(m.content || ''));
   if (previewUrl && !m.preview_suppressed) setTimeout(() => _loadDMPreview(m.id, previewUrl), 180);

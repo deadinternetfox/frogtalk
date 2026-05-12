@@ -1025,7 +1025,26 @@ const Messages = (() => {
       </div>`;
       _probeAudioDuration(msg.id, msg.media_data);
     } else {
-      inner = `<img class="msg-media clickable-media" src="${msg.media_data}" alt="media" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" onclick="Messages.openMedia(this)" loading="lazy">`;
+      // Stickers carry their effects encoded in `media_type` as a
+      // `;fx=<base64url>` suffix. We render those through StickerFX so
+      // the per-sticker CSS is locked inside a closed shadow root and
+      // can NEVER influence the surrounding chat layout. Plain images
+      // continue to render as a regular <img>.
+      const hasFx = typeof msg.media_type === 'string' && /;\s*fx=/.test(msg.media_type);
+      if (hasFx && window.StickerFX) {
+        // The placeholder span gets hydrated by Messages._hydrateStickers()
+        // after the message HTML is mounted. We keep media_type intact so
+        // the decoder can pull the fx blob out at hydration time.
+        inner = `<span class="frog-sticker-mount clickable-media"
+          data-fx-src="${UI.escHtml(msg.media_data)}"
+          data-fx-mt="${UI.escHtml(msg.media_type)}"
+          data-fx-sender="${UI.escHtml(msg.nickname)}"
+          data-fx-time="${time}"
+          onclick="Messages.openSticker(this)"
+          style="display:inline-block;line-height:0;cursor:pointer"></span>`;
+      } else {
+        inner = `<img class="msg-media clickable-media" src="${msg.media_data}" alt="media" data-sender="${UI.escHtml(msg.nickname)}" data-time="${time}" onclick="Messages.openMedia(this)" loading="lazy">`;
+      }
     }
 
     // Spoiler blur (images/video only)
@@ -1677,6 +1696,7 @@ const Messages = (() => {
     if (msgs.length) State.oldestMsgId = msgs[0].id;
     bindLongPress(area);
     observeLazyMedia(area);
+    _hydrateStickers(area);
 
     // Robust scroll-to-bottom: keep pinning to the bottom as long as new content
     // (media, link previews, embeds, reactions) keeps growing the area, for up
@@ -1923,6 +1943,9 @@ const Messages = (() => {
 
     if (!State.messages[room]) State.messages[room] = [];
     State.messages[room].push(msg);
+
+    // Hydrate any sticker-fx mount points the new message added.
+    _hydrateStickers(area);
 
     const newEl = document.getElementById(`msg-${msg.id}`);
     if (newEl && !msg._pending) _attachLongPress(newEl, msg.id);
@@ -2383,6 +2406,49 @@ const Messages = (() => {
     MediaPlayer.open(fakeEl, sender, time, allMedia);
   }
 
+  // ─── Sticker hydration / open ────────────────────────────────────────
+  // Walk every .frog-sticker-mount placeholder currently in the chat and
+  // replace it with a Shadow-DOM-isolated sticker host. We use a
+  // [data-fx-rendered] flag so the same node is never hydrated twice
+  // (cheap to call after every appendMessage / loadHistory).
+  function _hydrateStickers(root) {
+    if (!window.StickerFX) return;
+    const scope = root || document;
+    const nodes = scope.querySelectorAll('.frog-sticker-mount:not([data-fx-rendered])');
+    nodes.forEach(node => {
+      const src = node.getAttribute('data-fx-src') || '';
+      const mt  = node.getAttribute('data-fx-mt') || '';
+      const fx  = StickerFX.decodeFromMediaType(mt);
+      try {
+        const host = StickerFX.buildHost({ src, effects: fx, size: 160, alt: 'sticker' });
+        node.appendChild(host);
+        node.setAttribute('data-fx-rendered', '1');
+      } catch (e) {
+        // Last-resort fallback so a bad fx blob can never blank the bubble.
+        const img = document.createElement('img');
+        img.src = src;
+        img.style.cssText = 'max-width:160px;max-height:160px;object-fit:contain';
+        node.appendChild(img);
+        node.setAttribute('data-fx-rendered', '1');
+      }
+    });
+  }
+
+  function openSticker(el) {
+    const src = el.getAttribute('data-fx-src');
+    if (!src) return;
+    const sender = el.getAttribute('data-fx-sender') || 'Unknown';
+    const time   = el.getAttribute('data-fx-time') || '';
+    // Reuse the existing media viewer with a plain image — the effects
+    // animation continues in the chat bubble; the fullscreen view shows
+    // the un-effected source which is what the user uploaded.
+    const fake = document.createElement('img');
+    fake.src = src;
+    if (window.MediaPlayer && MediaPlayer.open) {
+      MediaPlayer.open(fake, sender, time, []);
+    }
+  }
+
   function revealSpoiler(id) {
     const el = document.getElementById(`sp-${id}`);
     if (!el) return;
@@ -2504,7 +2570,19 @@ const Messages = (() => {
         </div>`;
         _probeAudioDuration(msgId, data.media_data);
       } else {
-        html = `<img class="msg-media clickable-media" src="${data.media_data}" alt="media" data-sender="${UI.escHtml(sender)}" data-time="${time}" onclick="Messages.openMedia(this)" loading="lazy">`;
+        // Lazy-loaded sticker: re-use the .frog-sticker-mount placeholder
+        // path so the shadow-DOM sandbox is preserved on scroll-in too.
+        if (/;\s*fx=/.test(mediaType) && window.StickerFX) {
+          html = `<span class="frog-sticker-mount clickable-media"
+            data-fx-src="${data.media_data}"
+            data-fx-mt="${UI.escHtml(mediaType)}"
+            data-fx-sender="${UI.escHtml(sender)}"
+            data-fx-time="${time}"
+            onclick="Messages.openSticker(this)"
+            style="display:inline-block;line-height:0;cursor:pointer"></span>`;
+        } else {
+          html = `<img class="msg-media clickable-media" src="${data.media_data}" alt="media" data-sender="${UI.escHtml(sender)}" data-time="${time}" onclick="Messages.openMedia(this)" loading="lazy">`;
+        }
       }
       // Re-apply spoiler wrap if this message was marked as a spoiler — the
       // direct-broadcast render path wraps it, but lazy-loaded history was
@@ -2518,6 +2596,7 @@ const Messages = (() => {
         </div>`;
       }
       container.outerHTML = html;
+      try { _hydrateStickers(document); } catch {}
     } catch {
       container.innerHTML = '<div style="padding:12px;color:#d9a89f;font-size:13px">Failed to load media</div>';
     }
@@ -2927,7 +3006,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

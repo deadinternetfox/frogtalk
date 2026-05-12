@@ -1,13 +1,126 @@
 """GIF search (via KLIPY, with Tenor fallback) and custom stickers routes."""
+import json as _json_mod
 import logging
 import os
 import httpx
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import database as db
+
+
+# ─── Sticker effects schema ────────────────────────────────────────────────
+# Strictly whitelisted, no raw CSS is ever stored. The client converts these
+# into a small set of computed `filter` / `transform` / `animation` rules
+# that are rendered inside a Shadow-DOM-isolated sticker element. This makes
+# it impossible for sticker authors to break out of the sticker bounding box
+# or affect any other UI element.
+_STICKER_FX_FILTER_RANGES = {
+    # name           min   max   default
+    "blur":        (0.0,  6.0,  0.0),   # px
+    "brightness":  (0.2,  2.5,  1.0),
+    "contrast":    (0.2,  2.5,  1.0),
+    "saturate":    (0.0,  3.0,  1.0),
+    "grayscale":   (0.0,  1.0,  0.0),
+    "sepia":       (0.0,  1.0,  0.0),
+    "invert":      (0.0,  1.0,  0.0),
+    "hue":         (0.0, 360.0, 0.0),   # degrees
+}
+_STICKER_FX_TRANSFORM_RANGES = {
+    "scale":       (0.5,  2.0,  1.0),
+    "rotate":      (-180.0, 180.0, 0.0),  # degrees
+    "skewX":       (-30.0,  30.0, 0.0),
+    "skewY":       (-30.0,  30.0, 0.0),
+}
+_STICKER_FX_SHADOW_RANGES = {
+    "x":           (-20.0, 20.0, 0.0),   # px
+    "y":           (-20.0, 20.0, 0.0),
+    "blur":        (0.0,   30.0, 0.0),
+    "spread":      (0.0,   1.0,  0.0),   # alpha 0..1
+}
+_STICKER_FX_ANIMATIONS = {
+    "none", "spin", "pulse", "bounce", "shake", "wobble",
+    "float", "glow", "rainbow", "flip", "swing",
+}
+_STICKER_FX_HEX_COLOR = (
+    # simple #rgb / #rgba / #rrggbb / #rrggbbaa whitelist
+    "abcdef0123456789"
+)
+
+
+def _clamp(val: Any, lo: float, hi: float, default: float) -> float:
+    try:
+        v = float(val)
+    except (TypeError, ValueError):
+        return default
+    if v != v:  # NaN
+        return default
+    return max(lo, min(hi, v))
+
+
+def _safe_hex(val: Any, default: str = "#000000") -> str:
+    if not isinstance(val, str):
+        return default
+    s = val.strip().lower()
+    if not s.startswith("#"):
+        return default
+    body = s[1:]
+    if len(body) not in (3, 4, 6, 8):
+        return default
+    if any(c not in _STICKER_FX_HEX_COLOR for c in body):
+        return default
+    return "#" + body
+
+
+def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
+    """Normalize and clamp a user-supplied effects dict.
+
+    Returns the canonical dict (always populated with every known key, with
+    out-of-range values clamped to safe defaults), or None when the input is
+    None / empty / not a dict. The output is the ONLY thing that ever gets
+    persisted; we never store arbitrary user keys.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        return None
+
+    filt_in = raw.get("filter") or {}
+    if not isinstance(filt_in, dict):
+        filt_in = {}
+    filt = {k: _clamp(filt_in.get(k), *r) for k, r in _STICKER_FX_FILTER_RANGES.items()}
+
+    tfm_in = raw.get("transform") or {}
+    if not isinstance(tfm_in, dict):
+        tfm_in = {}
+    tfm = {k: _clamp(tfm_in.get(k), *r) for k, r in _STICKER_FX_TRANSFORM_RANGES.items()}
+
+    sh_in = raw.get("shadow") or {}
+    if not isinstance(sh_in, dict):
+        sh_in = {}
+    shadow = {k: _clamp(sh_in.get(k), *r) for k, r in _STICKER_FX_SHADOW_RANGES.items()}
+    shadow["color"] = _safe_hex(sh_in.get("color"), "#000000")
+
+    anim_name = raw.get("animation")
+    if not isinstance(anim_name, str) or anim_name not in _STICKER_FX_ANIMATIONS:
+        anim_name = "none"
+    anim_duration = _clamp(raw.get("animation_duration"), 0.3, 10.0, 2.0)
+
+    bg = _safe_hex(raw.get("background"), "")  # "" → transparent
+    border_radius = _clamp(raw.get("border_radius"), 0.0, 50.0, 0.0)
+
+    out: Dict[str, Any] = {
+        "filter": filt,
+        "transform": tfm,
+        "shadow": shadow,
+        "animation": anim_name,
+        "animation_duration": anim_duration,
+        "background": bg,
+        "border_radius": border_radius,
+    }
+    return out
 from deps import get_current_user
 
 router = APIRouter(prefix="/media", tags=["media"])
@@ -55,7 +168,7 @@ def _fed_emit_sticker_event(pack_id: int, action: str) -> None:
                 payload["owner_nickname"] = owner["nickname"]
             if action == "upsert":
                 rows = con.execute(
-                    "SELECT id, name, image_data, emoji FROM stickers WHERE pack_id=?",
+                    "SELECT id, name, image_data, emoji, effects FROM stickers WHERE pack_id=?",
                     (pack_id,),
                 ).fetchall()
                 payload["stickers"] = [dict(r) for r in rows]
@@ -378,6 +491,13 @@ class AddStickerRequest(BaseModel):
     name: str
     image_data: str  # Base64 encoded image
     emoji: str = ""  # Associated emoji
+    effects: Optional[Dict[str, Any]] = None  # whitelisted CSS effects spec
+
+
+class UpdateStickerRequest(BaseModel):
+    name: Optional[str] = None
+    emoji: Optional[str] = None
+    effects: Optional[Dict[str, Any]] = None  # pass {} to clear
 
 
 @router.get("/stickers/packs")
@@ -420,9 +540,15 @@ async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
             name TEXT NOT NULL,
             image_data TEXT NOT NULL,
             emoji TEXT DEFAULT '',
+            effects TEXT DEFAULT NULL,
             created_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE
         )""")
+        # Backfill `effects` column on existing DBs (idempotent).
+        try:
+            con.execute("ALTER TABLE stickers ADD COLUMN effects TEXT DEFAULT NULL")
+        except Exception:
+            pass
         
         con.execute("""CREATE TABLE IF NOT EXISTS user_sticker_packs (
             user_id INTEGER NOT NULL,
@@ -506,14 +632,18 @@ async def add_sticker(body: AddStickerRequest, current_user: dict = Depends(get_
         
         if len(body.image_data) > 500 * 1024:  # 500KB limit for stickers
             return JSONResponse(status_code=413, content={"error": "Sticker too large (max 500KB)"})
-        
+
+        fx = validate_sticker_effects(body.effects)
+        fx_json = _json_mod.dumps(fx) if fx else None
+
         cur = con.execute("""
-            INSERT INTO stickers (pack_id, name, image_data, emoji)
-            VALUES (?, ?, ?, ?)
-        """, (body.pack_id, body.name, body.image_data, body.emoji))
-    
+            INSERT INTO stickers (pack_id, name, image_data, emoji, effects)
+            VALUES (?, ?, ?, ?, ?)
+        """, (body.pack_id, body.name, body.image_data, body.emoji, fx_json))
+        new_id = cur.lastrowid
+
     _fed_emit_sticker_event(body.pack_id, "upsert")
-    return {"id": cur.lastrowid, "name": body.name}
+    return {"id": new_id, "name": body.name, "effects": fx}
 
 
 @router.get("/stickers/packs/{pack_id}")
@@ -531,12 +661,27 @@ async def get_sticker_pack(pack_id: int, current_user: dict = Depends(get_curren
             return JSONResponse(status_code=404, content={"error": "Pack not found"})
         
         stickers = con.execute("""
-            SELECT id, name, image_data, emoji FROM stickers WHERE pack_id=?
+            SELECT id, name, image_data, emoji, effects FROM stickers WHERE pack_id=?
         """, (pack_id,)).fetchall()
-    
+
+    out = []
+    for s in stickers:
+        d = dict(s)
+        # Decode persisted effects JSON; never expose raw text from the DB
+        # column if it somehow got corrupted — fall back to no effects.
+        raw = d.pop("effects", None)
+        if raw:
+            try:
+                d["effects"] = validate_sticker_effects(_json_mod.loads(raw))
+            except Exception:
+                d["effects"] = None
+        else:
+            d["effects"] = None
+        out.append(d)
+
     return {
         "pack": dict(pack),
-        "stickers": [dict(s) for s in stickers]
+        "stickers": out,
     }
 
 
@@ -592,6 +737,60 @@ async def delete_sticker(sticker_id: int, current_user: dict = Depends(get_curre
         pack_id_for_emit = int(sticker["pack_id"]) if "pack_id" in sticker.keys() else None
     if pack_id_for_emit:
         _fed_emit_sticker_event(pack_id_for_emit, "upsert")
+    return {"ok": True}
+
+
+@router.patch("/stickers/{sticker_id}")
+async def update_sticker(sticker_id: int, body: UpdateStickerRequest,
+                          current_user: dict = Depends(get_current_user)):
+    """Update a sticker's name / emoji / CSS effects (owner only).
+
+    Effects are run through `validate_sticker_effects` so only whitelisted
+    fields with clamped numeric values are persisted. Pass `effects: {}` to
+    clear all effects on the sticker (resets to the plain image).
+    """
+    with db._conn() as con:
+        sticker = con.execute("""
+            SELECT s.id, s.pack_id FROM stickers s
+            JOIN sticker_packs sp ON s.pack_id = sp.id
+            WHERE s.id=? AND sp.owner_id=?
+        """, (sticker_id, current_user["id"])).fetchone()
+
+        if not sticker:
+            return JSONResponse(status_code=404, content={"error": "Sticker not found or not owned by you"})
+
+        sets = []
+        vals = []
+        if body.name is not None:
+            name = body.name.strip()
+            if not name or len(name) > 64:
+                return JSONResponse(status_code=400, content={"error": "Name must be 1-64 characters"})
+            sets.append("name=?")
+            vals.append(name)
+        if body.emoji is not None:
+            emoji = body.emoji.strip()
+            if len(emoji) > 16:
+                return JSONResponse(status_code=400, content={"error": "Emoji string too long"})
+            sets.append("emoji=?")
+            vals.append(emoji)
+        if body.effects is not None:
+            # Empty dict {} → clear effects. Anything else → validate.
+            if isinstance(body.effects, dict) and not body.effects:
+                sets.append("effects=?")
+                vals.append(None)
+            else:
+                fx = validate_sticker_effects(body.effects)
+                sets.append("effects=?")
+                vals.append(_json_mod.dumps(fx) if fx else None)
+
+        if not sets:
+            return JSONResponse(status_code=400, content={"error": "Nothing to update"})
+
+        vals.append(sticker_id)
+        con.execute(f"UPDATE stickers SET {', '.join(sets)} WHERE id=?", vals)
+        pack_id_for_emit = int(sticker["pack_id"])
+
+    _fed_emit_sticker_event(pack_id_for_emit, "upsert")
     return {"ok": True}
 
 

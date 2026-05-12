@@ -2026,9 +2026,27 @@ async def _handle_sticker_event(event: dict) -> None:
                 pid = int(cur.lastrowid)
             for s in (payload.get("stickers") or []):
                 try:
+                    # Effects come over the wire as either an already-encoded
+                    # JSON string (from the DB column) or a dict (older peers).
+                    # Re-validate before persisting — federation is an
+                    # untrusted boundary; the local `validate_sticker_effects`
+                    # is the only thing that gets to write the column.
+                    fx_raw = s.get("effects")
+                    fx_json = None
+                    try:
+                        from routers.gifs import validate_sticker_effects as _vfx
+                        if isinstance(fx_raw, str) and fx_raw.strip():
+                            import json as _j
+                            fx_raw = _j.loads(fx_raw)
+                        fx_norm = _vfx(fx_raw)
+                        if fx_norm:
+                            import json as _j2
+                            fx_json = _j2.dumps(fx_norm)
+                    except Exception:
+                        fx_json = None
                     con.execute(
-                        "INSERT INTO stickers (pack_id, name, image_data, emoji) VALUES (?, ?, ?, ?)",
-                        (pid, str(s.get("name") or ""), str(s.get("image_data") or ""), str(s.get("emoji") or "")),
+                        "INSERT INTO stickers (pack_id, name, image_data, emoji, effects) VALUES (?, ?, ?, ?, ?)",
+                        (pid, str(s.get("name") or ""), str(s.get("image_data") or ""), str(s.get("emoji") or ""), fx_json),
                     )
                 except Exception:
                     continue

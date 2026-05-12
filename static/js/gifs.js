@@ -7,8 +7,9 @@ const GIFs = (() => {
   let _searchTimeout = null;
   let _currentTab = 'gifs';  // 'gifs' or 'stickers'
   let _stickerPacks = [];
-  let _stickersById = new Map(); // sticker_id -> { image_data, name }
+  let _stickersById = new Map(); // sticker_id -> { image_data, name, effects }
   let _stickerGridDelegated = false;
+  let _smStickerCache = {};      // sticker_id -> full sticker row (used by the FX editor)
   let _gifReqSeq = 0;
 
   // ─── Themed prompt / confirm ─────────────────────────────────────────
@@ -685,6 +686,9 @@ const GIFs = (() => {
       
       let html = '';
       _stickersById.clear();
+      // Track which sticker items need shadow-DOM hosts mounted after
+      // the grid HTML is injected (so we can animate stickers in-place).
+      const _toHydrate = [];
       for (const pack of _stickerPacks) {
         const packRes = await apiFetch(`/api/media/stickers/packs/${pack.id}`);
         if (packRes.ok) {
@@ -692,10 +696,18 @@ const GIFs = (() => {
           if (packData.stickers && packData.stickers.length > 0) {
             html += `<div class="sticker-pack-header">${UI.escHtml(pack.name)}</div>`;
             html += packData.stickers.map(s => {
-              _stickersById.set(String(s.id), { image_data: s.image_data, name: s.name });
+              _stickersById.set(String(s.id), {
+                image_data: s.image_data,
+                name: s.name,
+                effects: s.effects || null,
+              });
+              const hasFx = s.effects && window.StickerFX && !StickerFX.isDefault(s.effects);
+              if (hasFx) _toHydrate.push(String(s.id));
               return `
               <div class="sticker-item" data-sticker-id="${UI.escHtml(String(s.id))}" title="${UI.escHtml(s.name)}">
-                <img src="${UI.escHtml(s.image_data)}" alt="${UI.escHtml(s.name)}" loading="lazy">
+                <div class="sticker-host" data-sticker-id="${UI.escHtml(String(s.id))}">
+                  ${hasFx ? '' : `<img src="${UI.escHtml(s.image_data)}" alt="${UI.escHtml(s.name)}" loading="lazy">`}
+                </div>
               </div>`;
             }).join('');
           }
@@ -703,12 +715,28 @@ const GIFs = (() => {
       }
       
       grid.innerHTML = html || '<div class="gif-empty">No stickers in your packs</div>';
+      // Hydrate animated sticker hosts into the grid. Each host is its
+      // own closed shadow-root sandbox so the per-sticker CSS can never
+      // bleed into the picker UI.
+      if (window.StickerFX) {
+        for (const sid of _toHydrate) {
+          const rec = _stickersById.get(sid);
+          const slot = grid.querySelector(`.sticker-host[data-sticker-id="${CSS.escape(sid)}"]`);
+          if (!rec || !slot) continue;
+          StickerFX.renderInto(slot, {
+            src: rec.image_data,
+            effects: rec.effects,
+            alt: rec.name,
+            size: 96,
+          });
+        }
+      }
       if (!_stickerGridDelegated) {
         grid.addEventListener('click', e => {
           const item = e.target.closest('.sticker-item[data-sticker-id]');
           if (!item) return;
           const rec = _stickersById.get(String(item.dataset.stickerId || ''));
-          if (rec && rec.image_data) sendSticker(rec.image_data);
+          if (rec && rec.image_data) sendSticker(rec.image_data, rec.effects);
         });
         _stickerGridDelegated = true;
       }
@@ -870,14 +898,28 @@ const GIFs = (() => {
     input.focus();
   }
 
-  function sendSticker(imageData) {
-    // Send sticker directly
+  function sendSticker(imageData, effects) {
+    // Sticker effects ride along inside `media_type` as a `;fx=base64url`
+    // suffix. The server passes media_type through untouched, recipients
+    // detect the suffix and render the sticker inside a Shadow-DOM-isolated
+    // host. If StickerFX is missing (extremely old client) we fall back to
+    // a plain image — no breakage, just no animation.
+    let mediaType = 'image/png';
+    // Try to preserve the original MIME from the data URL so GIFs stay
+    // animated even when the user hasn't added any effects.
+    try {
+      const m = (imageData || '').match(/^data:([^;]+);/);
+      if (m && m[1]) mediaType = m[1].toLowerCase();
+    } catch {}
+    if (effects && window.StickerFX && !StickerFX.isDefault(effects)) {
+      mediaType = StickerFX.encodeForMediaType(mediaType, effects);
+    }
     State.pendingAttachment = {
       data: imageData,
-      type: 'image/png',
-      isSticker: true
+      type: mediaType,
+      isSticker: true,
     };
-    
+
     // Auto-send stickers
     sendMessage();
     close();
@@ -987,11 +1029,40 @@ const GIFs = (() => {
             cont.innerHTML = '<div style="font-size:11px;color:var(--text-muted)">No stickers yet</div>';
             continue;
           }
-          cont.innerHTML = d.stickers.map(s => `
-            <div style="position:relative;width:56px;height:56px;background:color-mix(in srgb, var(--surface-color) 70%, transparent);border-radius:8px;overflow:hidden;border:1px solid var(--border-color)" title="${UI.escHtml(s.name)}">
-              <img src="${s.image_data}" style="width:100%;height:100%;object-fit:contain" alt="">
-              <button onclick="GIFs.deleteSticker(${s.id})" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.7);border:none;color:#f0a0a0;width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:10px;line-height:1;padding:0">×</button>
-            </div>`).join('');
+          cont.innerHTML = d.stickers.map(s => {
+            const safeName = UI.escHtml(s.name || '');
+            const hasFx = !!(s.effects && window.StickerFX && !StickerFX.isDefault(s.effects));
+            const fxBadge = hasFx
+              ? '<div style="position:absolute;bottom:2px;left:2px;background:var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);font-size:9px;font-weight:700;padding:1px 5px;border-radius:6px;line-height:1.2;pointer-events:none">FX</div>'
+              : '';
+            return `
+            <div class="sm-sticker-tile" data-sticker-id="${s.id}" style="position:relative;width:64px;height:64px;background:color-mix(in srgb, var(--surface-color) 70%, transparent);border-radius:10px;overflow:hidden;border:1px solid var(--border-color)" title="${safeName}">
+              <div class="sm-sticker-host" data-sticker-id="${s.id}" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center">
+                ${hasFx ? '' : `<img src="${s.image_data}" style="width:100%;height:100%;object-fit:contain" alt="">`}
+              </div>
+              ${fxBadge}
+              <button onclick="GIFs.editStickerFx(${s.id})" title="Edit effects" style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.55);border:none;color:var(--accent-color);width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0">✨</button>
+              <button onclick="GIFs.deleteSticker(${s.id})" title="Delete sticker" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.7);border:none;color:#f0a0a0;width:20px;height:20px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;padding:0">×</button>
+            </div>`;
+          }).join('');
+          // Hydrate animated stickers in the manager.
+          if (window.StickerFX) {
+            for (const s of d.stickers) {
+              if (!s.effects || StickerFX.isDefault(s.effects)) continue;
+              const slot = cont.querySelector(`.sm-sticker-host[data-sticker-id="${s.id}"]`);
+              if (!slot) continue;
+              StickerFX.renderInto(slot, {
+                src: s.image_data,
+                effects: s.effects,
+                alt: s.name,
+                size: 64,
+              });
+            }
+          }
+          // Cache stickers so the editor can read effects/image_data without
+          // an extra round-trip.
+          _smStickerCache = _smStickerCache || {};
+          for (const s of d.stickers) _smStickerCache[s.id] = s;
         } catch {}
       }
     } catch (e) {
@@ -1048,6 +1119,295 @@ const GIFs = (() => {
     else UI.showToast('Delete failed', 'error');
   }
 
+  // ─── Sticker effects editor ──────────────────────────────────────────
+  // Opens a polished modal where the user can dial in filter / transform /
+  // animation effects on a sticker. The live preview is rendered through
+  // StickerFX.buildHost (shadow-DOM isolated) so what they see is exactly
+  // what gets sent to chat. "Save" persists the effects object via PATCH
+  // /api/media/stickers/{id} — we NEVER send raw CSS, only the dict the
+  // server re-clamps against its whitelist.
+  async function editStickerFx(stickerId) {
+    if (!window.StickerFX) {
+      UI.showToast('Sticker FX engine unavailable', 'error');
+      return;
+    }
+    let sticker = _smStickerCache[stickerId];
+    if (!sticker) {
+      // Not in cache yet — fetch the pack list & locate it.
+      try {
+        const r = await apiFetch('/api/media/stickers/packs');
+        if (r.ok) {
+          const d = await r.json();
+          for (const p of [...(d.own_packs || []), ...(d.installed_packs || [])]) {
+            const r2 = await apiFetch(`/api/media/stickers/packs/${p.id}`);
+            if (!r2.ok) continue;
+            const d2 = await r2.json();
+            for (const s of (d2.stickers || [])) {
+              _smStickerCache[s.id] = s;
+              if (s.id === stickerId) sticker = s;
+            }
+            if (sticker) break;
+          }
+        }
+      } catch {}
+    }
+    if (!sticker) { UI.showToast('Sticker not found', 'error'); return; }
+    _openFxEditor(sticker);
+  }
+
+  function _openFxEditor(sticker) {
+    let fx = StickerFX.normalize(sticker.effects) || StickerFX.defaults();
+    const close = () => { const m = document.getElementById('sticker-fx-modal'); if (m) m.remove(); };
+
+    const modal = document.createElement('div');
+    modal.id = 'sticker-fx-modal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:2100;display:flex;align-items:center;justify-content:center;padding:16px';
+    modal.innerHTML = `
+      <div role="dialog" aria-modal="true" style="
+        background:linear-gradient(180deg,
+          color-mix(in srgb, var(--accent-color) 18%, var(--surface-color)) 0%,
+          var(--surface-color) 60%,
+          color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) 100%);
+        border:1px solid color-mix(in srgb, var(--accent-color) 40%, var(--border-color));
+        box-shadow:0 24px 60px rgba(0,0,0,.65), 0 0 0 1px color-mix(in srgb, var(--accent-color) 15%, transparent);
+        border-radius:16px;width:760px;max-width:100%;max-height:92vh;display:flex;flex-direction:column;color:var(--text-color)">
+
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border-color)">
+          <div style="font-weight:700;font-size:15px">✨ Sticker Effects — <span style="color:var(--accent-color)">${UI.escHtml(sticker.name || '')}</span></div>
+          <button id="fx-close" style="background:none;border:none;color:var(--text-muted);font-size:18px;cursor:pointer;width:28px;height:28px;border-radius:6px">✕</button>
+        </div>
+
+        <div style="flex:1;overflow:auto;display:grid;grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.6fr);gap:14px;padding:14px 18px">
+
+          <!-- Live preview ─ rendered through StickerFX (Shadow-DOM isolated) -->
+          <div>
+            <div style="font-size:11px;color:var(--accent-color);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700">Preview</div>
+            <div style="background:
+              repeating-conic-gradient(color-mix(in srgb, var(--bg-color) 75%, transparent) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+              border:1px solid var(--border-color);
+              border-radius:12px;
+              padding:16px;
+              display:flex;align-items:center;justify-content:center;
+              min-height:220px;
+              overflow:hidden;">
+              <div id="fx-preview" style="display:inline-flex"></div>
+            </div>
+            <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+              <button data-fx-preset="none"    class="fx-preset-btn">Plain</button>
+              <button data-fx-preset="spin"    class="fx-preset-btn">🌀 Spin</button>
+              <button data-fx-preset="pulse"   class="fx-preset-btn">💓 Pulse</button>
+              <button data-fx-preset="bounce"  class="fx-preset-btn">⤴ Bounce</button>
+              <button data-fx-preset="shake"   class="fx-preset-btn">📳 Shake</button>
+              <button data-fx-preset="wobble"  class="fx-preset-btn">🌊 Wobble</button>
+              <button data-fx-preset="float"   class="fx-preset-btn">🎈 Float</button>
+              <button data-fx-preset="glow"    class="fx-preset-btn">🔆 Glow</button>
+              <button data-fx-preset="rainbow" class="fx-preset-btn">🌈 Rainbow</button>
+              <button data-fx-preset="flip"    class="fx-preset-btn">🔄 Flip</button>
+              <button data-fx-preset="swing"   class="fx-preset-btn">🪀 Swing</button>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div id="fx-controls" style="display:flex;flex-direction:column;gap:14px;min-width:0"></div>
+
+        </div>
+
+        <div style="padding:12px 18px;border-top:1px solid var(--border-color);display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <button id="fx-reset" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Reset</button>
+          <button id="fx-clear" style="background:rgba(180,40,40,.18);border:1px solid #6b2a2a;color:#f0a0a0;padding:8px 14px;border-radius:8px;cursor:pointer">Clear effects</button>
+          <button id="fx-cancel" style="background:color-mix(in srgb, var(--bg-color) 60%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:8px 14px;border-radius:8px;cursor:pointer">Cancel</button>
+          <button id="fx-save" style="background:var(--accent-color);border:1px solid var(--accent-color);color:color-mix(in srgb, var(--accent-color) 12%, #000);padding:8px 14px;border-radius:8px;cursor:pointer;font-weight:700">Save</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(modal);
+    modal.addEventListener('click', e => { if (e.target === modal) close(); });
+    document.getElementById('fx-close').onclick = close;
+    document.getElementById('fx-cancel').onclick = close;
+    document.getElementById('fx-reset').onclick = () => {
+      fx = StickerFX.defaults();
+      renderControls();
+      renderPreview();
+    };
+    document.getElementById('fx-clear').onclick = async () => {
+      // Persist empty effects ({}) to clear server-side.
+      const r = await apiFetch(`/api/media/stickers/${sticker.id}`, 'PATCH', { effects: {} });
+      if (r.ok) {
+        UI.showToast('Effects cleared', 'success');
+        sticker.effects = null;
+        _smStickerCache[sticker.id] = sticker;
+        close();
+        renderManager();
+      } else {
+        UI.showToast('Failed to clear', 'error');
+      }
+    };
+    document.getElementById('fx-save').onclick = async () => {
+      const r = await apiFetch(`/api/media/stickers/${sticker.id}`, 'PATCH', { effects: fx });
+      if (r.ok) {
+        UI.showToast('Effects saved', 'success');
+        sticker.effects = fx;
+        _smStickerCache[sticker.id] = sticker;
+        close();
+        renderManager();
+      } else {
+        const d = await r.json().catch(() => ({}));
+        UI.showToast(d.error || 'Save failed', 'error');
+      }
+    };
+
+    // Preset buttons set animation only (leave filters as-is).
+    modal.querySelectorAll('.fx-preset-btn').forEach(btn => {
+      btn.style.cssText = 'background:color-mix(in srgb, var(--accent-color) 10%, transparent);border:1px solid var(--border-color);color:var(--text-color);padding:5px 9px;border-radius:6px;cursor:pointer;font-size:11px';
+      btn.onclick = () => {
+        fx.animation = btn.dataset.fxPreset;
+        renderControls();
+        renderPreview();
+      };
+    });
+
+    // ── Controls — sliders built from StickerFX.*_RANGES whitelist ───
+    function renderControls() {
+      const ctr = document.getElementById('fx-controls');
+      if (!ctr) return;
+      const FR = StickerFX.FILTER_RANGES;
+      const TR = StickerFX.TRANSFORM_RANGES;
+      const SR = StickerFX.SHADOW_RANGES;
+
+      const sliderHtml = (label, group, key, min, max, step, value, suffix) => `
+        <label style="display:grid;grid-template-columns:90px 1fr 56px;align-items:center;gap:8px;font-size:12px">
+          <span style="color:var(--text-muted)">${label}</span>
+          <input type="range" min="${min}" max="${max}" step="${step}" value="${value}"
+                 data-fx-group="${group}" data-fx-key="${key}"
+                 style="width:100%;accent-color:var(--accent-color)">
+          <span class="fx-num" data-fx-show="${group}.${key}" style="text-align:right;font-variant-numeric:tabular-nums;color:var(--text-color)">${value}${suffix || ''}</span>
+        </label>`;
+
+      ctr.innerHTML = `
+        <details open style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">Filters</summary>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+            ${sliderHtml('Blur',       'filter', 'blur',       FR.blur[0],       FR.blur[1],       0.1, fx.filter.blur,       'px')}
+            ${sliderHtml('Brightness', 'filter', 'brightness', FR.brightness[0], FR.brightness[1], 0.05, fx.filter.brightness, '×')}
+            ${sliderHtml('Contrast',   'filter', 'contrast',   FR.contrast[0],   FR.contrast[1],   0.05, fx.filter.contrast,   '×')}
+            ${sliderHtml('Saturation', 'filter', 'saturate',   FR.saturate[0],   FR.saturate[1],   0.05, fx.filter.saturate,   '×')}
+            ${sliderHtml('Grayscale',  'filter', 'grayscale',  FR.grayscale[0],  FR.grayscale[1],  0.05, fx.filter.grayscale,  '')}
+            ${sliderHtml('Sepia',      'filter', 'sepia',      FR.sepia[0],      FR.sepia[1],      0.05, fx.filter.sepia,      '')}
+            ${sliderHtml('Invert',     'filter', 'invert',     FR.invert[0],     FR.invert[1],     0.05, fx.filter.invert,     '')}
+            ${sliderHtml('Hue',        'filter', 'hue',        FR.hue[0],        FR.hue[1],        1,    fx.filter.hue,        '°')}
+          </div>
+        </details>
+
+        <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">Transform</summary>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+            ${sliderHtml('Scale',  'transform', 'scale',  TR.scale[0],  TR.scale[1],  0.05, fx.transform.scale,  '×')}
+            ${sliderHtml('Rotate', 'transform', 'rotate', TR.rotate[0], TR.rotate[1], 1,    fx.transform.rotate, '°')}
+            ${sliderHtml('Skew X', 'transform', 'skewX',  TR.skewX[0],  TR.skewX[1],  1,    fx.transform.skewX,  '°')}
+            ${sliderHtml('Skew Y', 'transform', 'skewY',  TR.skewY[0],  TR.skewY[1],  1,    fx.transform.skewY,  '°')}
+          </div>
+        </details>
+
+        <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">Drop Shadow / Glow</summary>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+            ${sliderHtml('Offset X', 'shadow', 'x',      SR.x[0],      SR.x[1],      1,    fx.shadow.x,      'px')}
+            ${sliderHtml('Offset Y', 'shadow', 'y',      SR.y[0],      SR.y[1],      1,    fx.shadow.y,      'px')}
+            ${sliderHtml('Blur',     'shadow', 'blur',   SR.blur[0],   SR.blur[1],   1,    fx.shadow.blur,   'px')}
+            ${sliderHtml('Alpha',    'shadow', 'spread', SR.spread[0], SR.spread[1], 0.05, fx.shadow.spread, '')}
+            <label style="display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px;font-size:12px">
+              <span style="color:var(--text-muted)">Color</span>
+              <input type="color" value="${fx.shadow.color}" data-fx-group="shadow" data-fx-key="color"
+                style="width:60px;height:28px;border:1px solid var(--border-color);background:transparent;border-radius:6px;cursor:pointer">
+            </label>
+          </div>
+        </details>
+
+        <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">Animation</summary>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+            <label style="display:grid;grid-template-columns:90px 1fr;align-items:center;gap:8px;font-size:12px">
+              <span style="color:var(--text-muted)">Style</span>
+              <select data-fx-anim style="background:var(--surface-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:6px;padding:5px 7px">
+                ${StickerFX.ANIMATIONS.map(a => `<option value="${a}" ${a === fx.animation ? 'selected' : ''}>${a}</option>`).join('')}
+              </select>
+            </label>
+            ${sliderHtml('Duration', '_root', 'animation_duration', 0.3, 10, 0.1, fx.animation_duration, 's')}
+          </div>
+        </details>
+
+        <details style="border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));border-radius:10px;padding:10px 12px;background:color-mix(in srgb, var(--bg-color) 55%, transparent)">
+          <summary style="cursor:pointer;font-weight:700;color:var(--accent-color);font-size:12px;text-transform:uppercase;letter-spacing:.4px">Background</summary>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+            <label style="display:grid;grid-template-columns:90px 1fr 56px;align-items:center;gap:8px;font-size:12px">
+              <span style="color:var(--text-muted)">Color</span>
+              <input type="color" value="${fx.background || '#000000'}" data-fx-bg-color
+                style="width:100%;height:28px;border:1px solid var(--border-color);background:transparent;border-radius:6px;cursor:pointer">
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-muted)">
+                <input type="checkbox" data-fx-bg-on ${fx.background ? 'checked' : ''}> on
+              </label>
+            </label>
+            ${sliderHtml('Round', '_root', 'border_radius', 0, 50, 1, fx.border_radius, '%')}
+          </div>
+        </details>
+      `;
+
+      // Wire sliders / inputs.
+      ctr.querySelectorAll('input[type="range"]').forEach(r => {
+        r.addEventListener('input', e => {
+          const group = e.target.dataset.fxGroup;
+          const key = e.target.dataset.fxKey;
+          const val = parseFloat(e.target.value);
+          if (group === '_root') fx[key] = val;
+          else if (fx[group]) fx[group][key] = val;
+          // Update numeric readout.
+          const show = ctr.querySelector(`.fx-num[data-fx-show="${group}.${key}"]`);
+          if (show) {
+            const suffix = (show.textContent.match(/[^\d.\-]+$/) || [''])[0];
+            show.textContent = val + suffix;
+          }
+          renderPreview();
+        });
+      });
+      ctr.querySelectorAll('input[type="color"][data-fx-group]').forEach(c => {
+        c.addEventListener('input', e => {
+          const g = e.target.dataset.fxGroup;
+          const k = e.target.dataset.fxKey;
+          if (fx[g]) fx[g][k] = e.target.value;
+          renderPreview();
+        });
+      });
+      const bgColor = ctr.querySelector('input[data-fx-bg-color]');
+      const bgOn = ctr.querySelector('input[data-fx-bg-on]');
+      if (bgColor) bgColor.addEventListener('input', e => {
+        if (bgOn && bgOn.checked) { fx.background = e.target.value; renderPreview(); }
+      });
+      if (bgOn) bgOn.addEventListener('change', e => {
+        fx.background = e.target.checked ? (bgColor && bgColor.value) || '#000000' : '';
+        renderPreview();
+      });
+      const animSel = ctr.querySelector('select[data-fx-anim]');
+      if (animSel) animSel.addEventListener('change', e => {
+        fx.animation = e.target.value;
+        renderPreview();
+      });
+    }
+
+    function renderPreview() {
+      const host = document.getElementById('fx-preview');
+      if (!host) return;
+      StickerFX.renderInto(host, {
+        src: sticker.image_data,
+        effects: fx,
+        alt: sticker.name,
+        size: 180,
+      });
+    }
+
+    renderControls();
+    renderPreview();
+  }
+
   function uploadStickerTo(packId) {
     const inp = document.createElement('input');
     inp.type = 'file';
@@ -1094,6 +1454,7 @@ const GIFs = (() => {
     deletePack,
     uninstallPack,
     deleteSticker,
+    editStickerFx,
     uploadStickerTo
   };
 })();
