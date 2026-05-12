@@ -1052,6 +1052,8 @@ async def federation_inbox_processor() -> int:
                 await _handle_friend_event(event)
             elif event_type.startswith("server."):
                 await _handle_server_event(event)
+            elif event_type.startswith("sticker."):
+                await _handle_sticker_event(event)
 
             await asyncio.to_thread(db.mark_federation_inbox_event, event_id, "applied")
             processed += 1
@@ -1961,6 +1963,80 @@ async def _handle_social_event(event: dict) -> None:
                     })
                 except Exception:
                     _log.debug("federated unlike notif WS push failed", exc_info=True)
+
+
+async def _handle_sticker_event(event: dict) -> None:
+    """Apply incoming sticker.pack.upsert / sticker.pack.delete events.
+
+    Foreign packs are stored locally with origin_server_id + foreign_pack_id
+    set so subsequent updates/deletes find the same row.
+    """
+    payload = event.get("payload") or {}
+    event_type = str(event.get("event_type") or "")
+    origin = str(event.get("origin_server_id") or "").strip()
+    foreign_pack_id = int(payload.get("pack_id") or 0)
+    if not origin or not foreign_pack_id:
+        return
+
+    def _apply() -> None:
+        with db._conn() as con:
+            # Ensure schema (foreign nodes may have older DB).
+            for _ddl in (
+                "ALTER TABLE sticker_packs ADD COLUMN origin_server_id TEXT DEFAULT NULL",
+                "ALTER TABLE sticker_packs ADD COLUMN foreign_pack_id INTEGER DEFAULT NULL",
+            ):
+                try: con.execute(_ddl)
+                except Exception: pass
+
+            row = con.execute(
+                "SELECT id FROM sticker_packs WHERE origin_server_id=? AND foreign_pack_id=?",
+                (origin, foreign_pack_id),
+            ).fetchone()
+
+            if event_type == "sticker.pack.delete":
+                if row:
+                    pid = int(row["id"])
+                    con.execute("DELETE FROM stickers WHERE pack_id=?", (pid,))
+                    con.execute("DELETE FROM user_sticker_packs WHERE pack_id=?", (pid,))
+                    con.execute("DELETE FROM sticker_packs WHERE id=?", (pid,))
+                return
+
+            # upsert
+            name = str(payload.get("name") or "").strip() or "Imported Pack"
+            desc = str(payload.get("description") or "")[:200]
+            is_public = int(payload.get("is_public") or 1)
+            # Owner mapping: use a synthetic system user (-1) so foreign packs
+            # never appear as a local user's pack but still satisfy the FK
+            # contract loosely via the public-browse path. We don't enforce
+            # FK in stickers tables (no PRAGMA foreign_keys=ON globally).
+            owner_id = -1
+            if row:
+                pid = int(row["id"])
+                con.execute(
+                    "UPDATE sticker_packs SET name=?, description=?, is_public=? WHERE id=?",
+                    (name, desc, is_public, pid),
+                )
+                con.execute("DELETE FROM stickers WHERE pack_id=?", (pid,))
+            else:
+                cur = con.execute(
+                    "INSERT INTO sticker_packs (name, description, owner_id, is_public, "
+                    "origin_server_id, foreign_pack_id) VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, desc, owner_id, is_public, origin, foreign_pack_id),
+                )
+                pid = int(cur.lastrowid)
+            for s in (payload.get("stickers") or []):
+                try:
+                    con.execute(
+                        "INSERT INTO stickers (pack_id, name, image_data, emoji) VALUES (?, ?, ?, ?)",
+                        (pid, str(s.get("name") or ""), str(s.get("image_data") or ""), str(s.get("emoji") or "")),
+                    )
+                except Exception:
+                    continue
+
+    try:
+        await asyncio.to_thread(_apply)
+    except Exception:
+        _log.exception("sticker federation apply failed (origin=%s pack=%s)", origin, foreign_pack_id)
 
 
 async def _handle_server_event(event: dict) -> None:

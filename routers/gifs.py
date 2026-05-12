@@ -13,6 +13,56 @@ from deps import get_current_user
 router = APIRouter(prefix="/media", tags=["media"])
 _log = logging.getLogger("frogtalk.gifs")
 
+# ─── Sticker pack federation ────────────────────────────────────────────────
+# Sticker packs flagged is_public=1 are mirrored to peer servers via the
+# federation event bus. Foreign packs are stored locally with origin_server_id
+# + foreign_pack_id set so we can dedupe and route delete events back to the
+# right row.
+def _fed_emit_sticker_event(pack_id: int, action: str) -> None:
+    """Emit a sticker.pack.* federation event (best-effort).
+
+    action: 'upsert' or 'delete'. Only LOCAL public packs are emitted —
+    re-broadcasting foreign packs would create cycles.
+    """
+    try:
+        from routers import federation as _fed
+        with db._conn() as con:
+            pack = con.execute(
+                "SELECT * FROM sticker_packs WHERE id=?", (pack_id,)
+            ).fetchone()
+            if not pack:
+                return
+            pack = dict(pack)
+            # Never re-emit foreign-origin packs.
+            if pack.get("origin_server_id"):
+                return
+            if action == "upsert" and not pack.get("is_public"):
+                # Private packs aren't federated. If a pack flips public->private
+                # we emit a delete instead (handled by caller).
+                return
+            payload = {
+                "pack_id": pack["id"],
+                "name": pack.get("name"),
+                "description": pack.get("description") or "",
+                "owner_nickname": None,
+                "is_public": int(pack.get("is_public") or 0),
+                "stickers": [],
+            }
+            owner = con.execute(
+                "SELECT nickname FROM users WHERE id=?", (pack.get("owner_id"),)
+            ).fetchone()
+            if owner:
+                payload["owner_nickname"] = owner["nickname"]
+            if action == "upsert":
+                rows = con.execute(
+                    "SELECT id, name, image_data, emoji FROM stickers WHERE pack_id=?",
+                    (pack_id,),
+                ).fetchall()
+                payload["stickers"] = [dict(r) for r in rows]
+        _fed.enqueue_server_event(f"sticker.pack.{action}", payload)
+    except Exception:
+        _log.exception("Federation emit failed (pack=%s action=%s)", pack_id, action)
+
 # ─── GIF provider configuration ─────────────────────────────────────────────
 # Google announced Tenor API sunset on June 30 2026 (no new keys after Jan 13
 # 2026). KLIPY is the preferred drop-in replacement; we still honor a Tenor
@@ -341,9 +391,28 @@ async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
             description TEXT DEFAULT '',
             owner_id INTEGER NOT NULL,
             is_public INTEGER DEFAULT 0,
+            origin_server_id TEXT DEFAULT NULL,
+            foreign_pack_id INTEGER DEFAULT NULL,
             created_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
+        # Backfill columns on old DBs (idempotent).
+        for _col, _ddl in (
+            ("origin_server_id", "ALTER TABLE sticker_packs ADD COLUMN origin_server_id TEXT DEFAULT NULL"),
+            ("foreign_pack_id",  "ALTER TABLE sticker_packs ADD COLUMN foreign_pack_id INTEGER DEFAULT NULL"),
+        ):
+            try:
+                con.execute(_ddl)
+            except Exception:
+                pass
+        try:
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sticker_packs_origin "
+                "ON sticker_packs(origin_server_id, foreign_pack_id) "
+                "WHERE origin_server_id IS NOT NULL"
+            )
+        except Exception:
+            pass
         
         con.execute("""CREATE TABLE IF NOT EXISTS stickers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -371,13 +440,13 @@ async def list_sticker_packs(current_user: dict = Depends(get_current_user)):
             WHERE sp.owner_id=?
         """, (current_user["id"],)).fetchall()
         
-        # Get installed packs
+        # Get installed packs (includes federated packs whose owner_id = -1)
         installed_packs = con.execute("""
-            SELECT sp.*, u.nickname as owner_name,
+            SELECT sp.*, COALESCE(u.nickname, '@federated') as owner_name,
                    (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
             FROM user_sticker_packs usp
             JOIN sticker_packs sp ON usp.pack_id = sp.id
-            JOIN users u ON sp.owner_id = u.id
+            LEFT JOIN users u ON sp.owner_id = u.id
             WHERE usp.user_id=? AND sp.owner_id != ?
         """, (current_user["id"], current_user["id"])).fetchall()
     
@@ -405,6 +474,8 @@ async def create_sticker_pack(body: CreateStickerPackRequest, current_user: dict
             INSERT INTO user_sticker_packs (user_id, pack_id) VALUES (?, ?)
         """, (current_user["id"], pack_id))
     
+    # New pack is private by default — no federation emit yet. It will be
+    # emitted on the first PATCH that flips is_public=1.
     return {"id": pack_id, "name": body.name}
 
 
@@ -441,6 +512,7 @@ async def add_sticker(body: AddStickerRequest, current_user: dict = Depends(get_
             VALUES (?, ?, ?, ?)
         """, (body.pack_id, body.name, body.image_data, body.emoji))
     
+    _fed_emit_sticker_event(body.pack_id, "upsert")
     return {"id": cur.lastrowid, "name": body.name}
 
 
@@ -449,9 +521,9 @@ async def get_sticker_pack(pack_id: int, current_user: dict = Depends(get_curren
     """Get all stickers in a pack."""
     with db._conn() as con:
         pack = con.execute("""
-            SELECT sp.*, u.nickname as owner_name
+            SELECT sp.*, COALESCE(u.nickname, '@federated') as owner_name
             FROM sticker_packs sp
-            JOIN users u ON sp.owner_id = u.id
+            LEFT JOIN users u ON sp.owner_id = u.id
             WHERE sp.id=?
         """, (pack_id,)).fetchone()
         
@@ -508,7 +580,7 @@ async def delete_sticker(sticker_id: int, current_user: dict = Depends(get_curre
     """Delete a sticker (owner only)."""
     with db._conn() as con:
         sticker = con.execute("""
-            SELECT s.id FROM stickers s
+            SELECT s.id, s.pack_id FROM stickers s
             JOIN sticker_packs sp ON s.pack_id = sp.id
             WHERE s.id=? AND sp.owner_id=?
         """, (sticker_id, current_user["id"])).fetchone()
@@ -517,7 +589,9 @@ async def delete_sticker(sticker_id: int, current_user: dict = Depends(get_curre
             return JSONResponse(status_code=404, content={"error": "Sticker not found or not owned by you"})
         
         con.execute("DELETE FROM stickers WHERE id=?", (sticker_id,))
-    
+        pack_id_for_emit = int(sticker["pack_id"]) if "pack_id" in sticker.keys() else None
+    if pack_id_for_emit:
+        _fed_emit_sticker_event(pack_id_for_emit, "upsert")
     return {"ok": True}
 
 
@@ -530,20 +604,20 @@ async def browse_public_sticker_packs(
     with db._conn() as con:
         if q:
             packs = con.execute("""
-                SELECT sp.*, u.nickname as owner_name,
+                SELECT sp.*, COALESCE(u.nickname, '@federated') as owner_name,
                        (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
                 FROM sticker_packs sp
-                JOIN users u ON sp.owner_id = u.id
+                LEFT JOIN users u ON sp.owner_id = u.id
                 WHERE sp.is_public=1 AND (sp.name LIKE ? OR sp.description LIKE ?)
                 ORDER BY sp.created_at DESC
                 LIMIT ?
             """, (f'%{q}%', f'%{q}%', limit)).fetchall()
         else:
             packs = con.execute("""
-                SELECT sp.*, u.nickname as owner_name,
+                SELECT sp.*, COALESCE(u.nickname, '@federated') as owner_name,
                        (SELECT COUNT(*) FROM stickers WHERE pack_id=sp.id) as sticker_count
                 FROM sticker_packs sp
-                JOIN users u ON sp.owner_id = u.id
+                LEFT JOIN users u ON sp.owner_id = u.id
                 WHERE sp.is_public=1
                 ORDER BY sp.created_at DESC
                 LIMIT ?
@@ -577,6 +651,13 @@ async def update_sticker_pack(pack_id: int, body: UpdateStickerPackRequest, curr
             return {"ok": True}
         vals.append(pack_id)
         con.execute(f"UPDATE sticker_packs SET {', '.join(sets)} WHERE id=?", vals)
+    # If the public flag was touched, emit. Going public → upsert; going
+    # private → delete. Other edits (name/description) also propagate via
+    # upsert when the pack is currently public.
+    if body.is_public is not None:
+        _fed_emit_sticker_event(pack_id, "upsert" if body.is_public else "delete")
+    elif body.name is not None or body.description is not None:
+        _fed_emit_sticker_event(pack_id, "upsert")
     return {"ok": True}
 
 
@@ -585,13 +666,22 @@ async def delete_sticker_pack(pack_id: int, current_user: dict = Depends(get_cur
     """Delete a sticker pack (owner only). Cascades stickers + installs."""
     with db._conn() as con:
         pack = con.execute(
-            "SELECT id FROM sticker_packs WHERE id=? AND owner_id=?",
+            "SELECT id, is_public, origin_server_id FROM sticker_packs WHERE id=? AND owner_id=?",
             (pack_id, current_user["id"])
         ).fetchone()
         if not pack:
             return JSONResponse(status_code=404, content={"error": "Pack not found or not owned by you"})
         con.execute("DELETE FROM stickers WHERE pack_id=?", (pack_id,))
         con.execute("DELETE FROM user_sticker_packs WHERE pack_id=?", (pack_id,))
+        was_public = int(pack["is_public"] or 0)
+        is_foreign  = bool(pack["origin_server_id"])
         con.execute("DELETE FROM sticker_packs WHERE id=?", (pack_id,))
+    if was_public and not is_foreign:
+        # Tell peers the pack went away.
+        try:
+            from routers import federation as _fed
+            _fed.enqueue_server_event("sticker.pack.delete", {"pack_id": pack_id})
+        except Exception:
+            pass
     return {"ok": True}
 
