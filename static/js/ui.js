@@ -2188,9 +2188,12 @@ async function _loadDesktopAppSettingsIntoProfile() {
         localStorage.setItem(_DESKTOP_CLOSE_TO_TRAY_LS_KEY, enabled ? '1' : '0');
       } catch {}
       if (note) {
-        note.textContent = s && s.trayAvailable
-          ? 'Tray is available. Pressing X will minimize to tray when enabled.'
-          : 'System tray unavailable right now, so X will close the app.';
+        // The static description above already explains the behavior
+        // when the tray is available, so only surface a note when the
+        // tray is missing and the toggle effectively does nothing.
+        note.textContent = (s && s.trayAvailable)
+          ? ''
+          : 'System tray unavailable on this desktop — X will close the app instead.';
       }
     }
   } catch {}
