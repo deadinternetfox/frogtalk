@@ -831,6 +831,53 @@ input, select {
             <a class="btn primary" id="imageboard-admin-btn" href="/board/admin" target="_blank" rel="noopener">Open Board Admin ↗</a>
           </div>
         </div>
+        <script>
+          // When the Server Admin panel is loaded inside the FrogTalk shell
+          // (in-app iframe via #admin-overlay, or the native Electron/Android
+          // wrapper which itself is just the shell), opening these buttons in
+          // a new tab is a poor UX — popups are blocked in Electron and
+          // Android WebView has no concept of "tabs". Reroute the clicks:
+          //
+          //   • Open Board       → ask the parent FrogTalk shell to open
+          //                        its existing in-app Frog Channel overlay.
+          //   • Open Board Admin → navigate the current iframe in-place to
+          //                        /board/admin so it stays inside the
+          //                        Node Admin overlay (✕ returns to chat).
+          //
+          // If we're not in an iframe (user opened /server directly in a
+          // browser tab via the fail-safe fallback), keep the default
+          // target=_blank behaviour.
+          (function(){
+            try {
+              var inFrame = window.top !== window.self;
+              if (!inFrame) return;
+              var openBtn  = document.getElementById('imageboard-open-btn');
+              var adminBtn = document.getElementById('imageboard-admin-btn');
+              if (openBtn) {
+                openBtn.removeAttribute('target');
+                openBtn.removeAttribute('rel');
+                openBtn.addEventListener('click', function(ev){
+                  ev.preventDefault();
+                  try {
+                    window.parent.postMessage({ type: 'frogtalk:open-board' }, location.origin);
+                  } catch (e) {
+                    window.location.href = '/board/';
+                  }
+                });
+              }
+              if (adminBtn) {
+                adminBtn.removeAttribute('target');
+                adminBtn.removeAttribute('rel');
+                adminBtn.addEventListener('click', function(ev){
+                  ev.preventDefault();
+                  // Stay inside the Node Admin overlay iframe — the ✕ on the
+                  // overlay topbar still returns the user to chat.
+                  window.location.href = '/board/admin';
+                });
+              }
+            } catch (e) { /* non-fatal — buttons keep default behaviour */ }
+          })();
+        </script>
         <div class="grid" id="imageboard-stats-grid"></div>
         <details id="imageboard-identity-editor" style="margin-top:10px;border:1px solid var(--border,#222);border-radius:8px;padding:6px 10px;">
           <summary style="cursor:pointer;font-size:13px;color:var(--muted);">Edit this node's board identity</summary>

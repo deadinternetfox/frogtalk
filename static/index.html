@@ -10115,6 +10115,23 @@ function closeNodeAdmin() {
 // regardless of script ordering / module scope quirks.
 try { window.openNodeAdmin = openNodeAdmin; window.closeNodeAdmin = closeNodeAdmin; } catch (e) {}
 
+// Bridge: the Server Admin iframe (loaded into #admin-overlay) posts
+// 'frogtalk:open-board' when the operator clicks "Open Board ↗". We
+// close the admin overlay and pop the existing in-app Frog Channel
+// overlay instead of opening a new tab (which is broken in Electron /
+// Android WebView). Same-origin only — reject anything else.
+window.addEventListener('message', (ev) => {
+  try {
+    if (ev.origin !== window.location.origin) return;
+    const d = ev.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.type === 'frogtalk:open-board') {
+      try { closeNodeAdmin(); } catch {}
+      if (typeof openFrogBoard === 'function') openFrogBoard();
+    }
+  } catch (e) {}
+});
+
 // Defensive addEventListener fallback: if for any reason the inline
 // onclick attribute on #node-admin-icon doesn't fire (stale cached HTML
 // where the attribute references an undefined function, or a future CSP
