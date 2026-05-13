@@ -750,7 +750,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--auto-channels", action="store_true",
                    default=_env("FROGTALK_AUTO_CHANNELS", "").lower() in {"1", "true", "yes", "on"},
                    help="Auto-discover installed channels from the server. Refreshes every 30s so newly-added channels light up without a restart.")
-    p.add_argument("--runpod-endpoint", default=_env("RUNPOD_ENDPOINT_ID", "9xffis4xtq1uc5"))
+    p.add_argument("--runpod-endpoint", default=_env("RUNPOD_ENDPOINT_ID", "4l8b7h5dbvoqu2"))
     p.add_argument("--runpod-key", default=_env("RUNPOD_API_KEY"))
     p.add_argument("--poll-interval", type=float, default=float(_env("POLL_INTERVAL", "2.0")))
     p.add_argument("--max-context", type=int, default=int(_env("MAX_CONTEXT", "8")))

@@ -38,10 +38,10 @@ any chat model you like.
   to the worker as an OpenAI-style `messages=[{"role":"system",…},
   {"role":"user",…},…]` list, so the vLLM worker applies whatever
   chat template the loaded model needs. That means swapping in a
-  different model (Qwen, Mistral-Small / Cydonia, Llama-3, etc.) does
+  different model (Qwen, Mistral-Small, Llama-2/3, MythoMax, etc.) does
   not require any code changes — the worker handles the templating.
-  Default endpoint id `9xffis4xtq1uc5` points at a vLLM worker running
-  `TheDrummer/Cydonia-24B-v4.3` (a Mistral-Small finetune chosen for
+  Default endpoint id `4l8b7h5dbvoqu2` points at a vLLM worker running
+  `Gryphe/MythoMax-L2-13b` (a Llama-2 roleplay finetune chosen for
   its lack of RLHF refusal behaviour). For raw-completion workers
   there is still a fallback that wraps the prompt in Qwen-style
   ChatML, with `<|im_end|>` / `<|im_start|>` added to the stop list.
@@ -95,7 +95,7 @@ CLI flags. CLI > env > defaults.
 | `FROGTALK_BOT_NAME` | `--bot-name` | *(required)* | Handle the bot was registered as (used to detect `@mentions`) |
 | `FROGTALK_CHANNELS` | `--channels` | *(empty)* | Comma-separated channels to listen in. Leave empty to auto-discover from the server. |
 | `FROGTALK_AUTO_CHANNELS` | `--auto-channels` | `1` when `FROGTALK_CHANNELS` is empty | Pull the bot's installed-channel list from `GET /api/external/me/channels` and refresh every ~30s, so a server owner adding the bot to a new channel takes effect with no restart. |
-| `RUNPOD_ENDPOINT_ID` | `--runpod-endpoint` | `9xffis4xtq1uc5` | RunPod serverless endpoint id (default points at a vLLM worker running `TheDrummer/Cydonia-24B-v4.3`; swap freely) |
+| `RUNPOD_ENDPOINT_ID` | `--runpod-endpoint` | `4l8b7h5dbvoqu2` | RunPod serverless endpoint id (default points at a vLLM worker running `Gryphe/MythoMax-L2-13b`; swap freely) |
 | `RUNPOD_API_KEY` | `--runpod-key` | *(required)* | `rpa_…` API key |
 | `POLL_INTERVAL` | `--poll-interval` | `2.0` | Seconds between polls per channel |
 | `MAX_CONTEXT` | `--max-context` | `8` | Recent messages to send as context |

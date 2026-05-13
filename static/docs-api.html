@@ -541,8 +541,8 @@ while True:
           Sends the conversation to the worker as an OpenAI-style
           <code>messages=[…]</code> list so the vLLM worker applies the model's own chat
           template &mdash; swap in any modern instruct model (Qwen, Mistral-Small /
-          Cydonia, Llama-3, etc.) with no code changes. Default endpoint runs
-          <code>TheDrummer/Cydonia-24B-v4.3</code> (uncensored Mistral-Small finetune).
+          MythoMax, Llama-3, etc.) with no code changes. Default endpoint runs
+          <code>Gryphe/MythoMax-L2-13b</code> (uncensored Llama-2 roleplay finetune).
           Includes a refusal-detection retry that catches canned RLHF safety output
           and re-rolls at higher temperature with a stronger jailbreak preface.</p>
           <ul>
