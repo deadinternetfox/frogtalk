@@ -561,15 +561,15 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         .back-to-node-admin {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            margin: 0 0 12px 0;
-            padding: 5px 10px;
+            gap: 7px;
+            margin: 4px 0 14px 12px;
+            padding: 7px 13px;
             background: rgba(0, 255, 65, 0.04);
             border: 1px solid rgba(0, 255, 65, 0.18);
-            border-radius: 6px;
+            border-radius: 7px;
             color: #6baf6b;
             text-decoration: none;
-            font-size: 10.5px;
+            font-size: 12px;
             font-weight: 500;
             letter-spacing: 0.3px;
             width: fit-content;
@@ -582,7 +582,7 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         }
         .back-to-node-admin .arrow {
             display: inline-block;
-            font-size: 11px;
+            font-size: 13px;
             line-height: 1;
         }
         
