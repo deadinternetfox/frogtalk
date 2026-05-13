@@ -521,6 +521,56 @@
     ].join('');
   }
 
+  function fmtRelative(ts) {
+    const t = Number(ts || 0);
+    if (!t) return 'never';
+    const diff = Math.max(0, Math.floor(Date.now() / 1000) - t);
+    if (diff < 60) return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  }
+
+  function renderImageboardSection(payload) {
+    const grid = document.getElementById('imageboard-stats-grid');
+    const idEl = document.getElementById('imageboard-identity');
+    const msg = document.getElementById('imageboard-msg');
+    if (!grid || !idEl) return;
+    if (!payload || !payload.available) {
+      grid.innerHTML = '';
+      idEl.textContent = 'Imageboard data not found on this node.';
+      if (msg) msg.textContent = payload && payload.data_dir ? `Expected at ${payload.data_dir}` : '';
+      return;
+    }
+    const id = payload.identity || {};
+    const s = payload.stats || {};
+    const torTag = id.tor_only ? ' · 🧅 Tor-only' : '';
+    const lockTag = id.board_locked ? ' · 🔒 LOCKED' : '';
+    const fed = id.federation_enabled ? `${s.federated_peers || 0} federated peer(s)` : 'federation off';
+    idEl.innerHTML = `<b>${escHtml(id.title || '/board/')}</b>${id.node_id ? ` <span style="color:var(--muted)">@${escHtml(id.node_id)}</span>` : ''}${torTag}${lockTag}${id.subtitle ? ` — ${escHtml(id.subtitle)}` : ''} <span style="color:var(--muted)">· ${escHtml(fed)}</span>`;
+    grid.innerHTML = [
+      statCard('Threads', s.threads ?? 0, `${s.threads_24h ?? 0} new in 24h`),
+      statCard('Posts', s.posts ?? 0, `${s.posts_24h ?? 0} new in 24h`),
+      statCard('Total Views', Number(s.views || 0).toLocaleString(), 'Lifetime (incl. pruned)'),
+      statCard('Media Items', s.media ?? 0, `${s.pending_media ?? 0} pending approval`),
+      statCard('Approval Queue', s.approval_queue ?? 0, 'Awaiting moderator'),
+      statCard('Active Bans', s.active_bans ?? 0, 'Currently in effect'),
+      statCard('Chat Messages', s.chat_messages ?? 0, id.chat_enabled ? 'Live chat enabled' : 'Live chat disabled'),
+      statCard('Last Post', fmtRelative(s.last_post_ts), s.sticky_threads ? `${s.sticky_threads} sticky · ${s.locked_threads || 0} locked` : `${s.locked_threads || 0} locked`),
+    ].join('');
+    if (msg) msg.textContent = '';
+  }
+
+  async function refreshImageboard() {
+    try {
+      const data = await api('/api/server-admin/imageboard-stats');
+      renderImageboardSection(data);
+    } catch (e) {
+      const msg = document.getElementById('imageboard-msg');
+      if (msg) msg.textContent = e.message || 'Failed to load imageboard stats';
+    }
+  }
+
   function renderNodeSummary(nodes) {
     if (!nodeSummaryGrid) return;
     const list = Array.isArray(nodes) ? nodes : [];
@@ -824,6 +874,8 @@
     renderUsers(users.users || []);
     await refreshNodes();
     await refreshBotModeration();
+    refreshImageboard();
+    if (!easterEggLoaded) await loadEasterEgg();
     if (!easterEggLoaded) await loadEasterEgg();
   }
 

@@ -42,6 +42,13 @@ require_once __DIR__ . '/board_config.php';
 $settings = loadSettings();
 $ipHash = getIPHash();
 
+// ── Tor-only gateway: clearnet visitors see a "Connect via Tor" screen ──
+if (shouldShowTorGateway()) {
+    $info = getBoardInfo();
+    require __DIR__ . '/board_tor_gateway.php';
+    exit;
+}
+
 // Check if user is banned
 $ban = isIPBanned($ipHash);
 $isBanned = $ban !== false;
@@ -932,7 +939,7 @@ if ($singleThread) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Critical: prevent FOUC white flash before style.css loads -->
     <style>html,body{background:#0a0e0a;color:#00ff41;}</style>
-    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — Frog Channel') : 'Frog Channel' ?></title>
+    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — ' . ($settings['board_title'] ?? 'Frog Channel')) : htmlspecialchars($settings['board_title'] ?? 'Frog Channel') ?></title>
     
     <meta name="title" content="<?= htmlspecialchars($ogTitle) ?>">
     <meta name="description" content="<?= htmlspecialchars($ogDesc) ?>">
@@ -962,6 +969,42 @@ if ($singleThread) {
         .board-header { text-align: center; padding: 20px 15px 20px; }
         .board-header h2 { color: #00ff41; font-family: 'Courier New', monospace; font-size: 2em; text-shadow: 0 0 20px rgba(0,255,65,0.4); margin: 0 0 5px; }
         .board-header .board-subtitle { color: #6baf6b; font-size: 13px; }
+        .board-header .board-node-id { color: #6baf6b; font-size: 11px; font-family: 'Courier New', monospace; margin: 6px 0 0; letter-spacing: 0.5px; opacity: 0.85; }
+        .board-header .node-id-label { color: #3a6f3a; }
+        .board-header .node-id-val { color: #00ff41; }
+        .board-header .node-id-topic { color: #6baf6b; }
+        .board-header .node-id-tor { color: #ffaa33; }
+        .board-header .node-id-sep { color: #2a4a2a; }
+
+        /* ── Federated nav (top-of-board strip with peer boards) ── */
+        .federated-nav { padding: 10px 12px 0; max-width: 100%; }
+        .federated-nav .fed-scroll {
+            display: flex; gap: 8px; overflow-x: auto; padding-bottom: 8px;
+            scrollbar-width: thin; scrollbar-color: #2a4a2a transparent;
+        }
+        .federated-nav .fed-scroll::-webkit-scrollbar { height: 6px; }
+        .federated-nav .fed-scroll::-webkit-scrollbar-thumb { background: #2a4a2a; border-radius: 3px; }
+        .fed-pill {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 12px; border-radius: 999px;
+            background: rgba(0,255,65,0.05);
+            border: 1px solid rgba(0,255,65,0.2);
+            color: #c8ffc8; text-decoration: none;
+            font-family: 'Courier New', monospace; font-size: 12px;
+            white-space: nowrap; transition: all 0.15s;
+        }
+        .fed-pill:hover { background: rgba(0,255,65,0.12); border-color: rgba(0,255,65,0.45); transform: translateY(-1px); }
+        .fed-pill .fed-pill-title { color: #00ff41; font-weight: bold; }
+        .fed-pill .fed-pill-node { color: #6baf6b; font-size: 10px; opacity: 0.85; }
+        .fed-pill .fed-pill-topic { color: #ffaa33; font-size: 10px; }
+        .fed-pill-current {
+            background: rgba(0,255,65,0.15);
+            border-color: rgba(0,255,65,0.55);
+            box-shadow: 0 0 12px rgba(0,255,65,0.18);
+        }
+        .fed-pill-tor { border-color: rgba(255,170,51,0.35); background: rgba(255,170,51,0.06); }
+        .fed-pill-tor:hover { border-color: rgba(255,170,51,0.6); background: rgba(255,170,51,0.12); }
+        .fed-pill-tor-icon { font-size: 11px; }
         .board-stats { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 12px; padding: 8px 16px; background: rgba(0,255,65,0.03); border: 1px solid rgba(0,255,65,0.08); border-radius: 6px; font-size: 12px; color: #4a8f4a; }
         .board-stats .stat-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
         .board-stats .stat-sep { color: #1a3a1a; }
@@ -2703,9 +2746,50 @@ if ($singleThread) {
 
     <main>
         <div class="board-container">
+            <?php
+                $_peers = getFederatedPeers();
+                $_thisInfo = getBoardInfo();
+                $_visitorTor = isTorRequest();
+            ?>
+            <?php if (($settings['federation_enabled'] ?? true) && (!empty($_peers) || true)): ?>
+            <nav class="federated-nav" aria-label="Federated boards">
+                <div class="fed-scroll">
+                    <a class="fed-pill fed-pill-current" href="/board/" title="<?= htmlspecialchars($_thisInfo['subtitle']) ?>">
+                        <span class="fed-pill-title"><?= htmlspecialchars($_thisInfo['title']) ?></span>
+                        <span class="fed-pill-node">@<?= htmlspecialchars($_thisInfo['node_id']) ?></span>
+                    </a>
+                    <?php foreach ($_peers as $_pp): ?>
+                        <a class="fed-pill<?= !empty($_pp['tor_only']) ? ' fed-pill-tor' : '' ?>"
+                           href="<?= htmlspecialchars($_pp['url']) ?>"
+                           target="_blank" rel="noopener"
+                           title="<?= htmlspecialchars($_pp['subtitle']) ?>">
+                            <?php if (!empty($_pp['tor_only'])): ?><span class="fed-pill-tor-icon">🧅</span><?php endif; ?>
+                            <span class="fed-pill-title"><?= htmlspecialchars($_pp['title']) ?></span>
+                            <span class="fed-pill-node">@<?= htmlspecialchars($_pp['node_id']) ?></span>
+                            <?php if (!empty($_pp['topic'])): ?><span class="fed-pill-topic">#<?= htmlspecialchars($_pp['topic']) ?></span><?php endif; ?>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            </nav>
+            <?php endif; ?>
+
             <div class="board-header">
-                <h2>🐸 Frog General</h2>
-                <p class="board-subtitle">Anonymous discussion board. No accounts. No tracking. Speak freely.</p>
+                <h2><?= htmlspecialchars($settings['board_title'] ?? '🐸 Frog General') ?></h2>
+                <?php if (!empty($settings['board_subtitle'])): ?>
+                    <p class="board-subtitle"><?= htmlspecialchars($settings['board_subtitle']) ?></p>
+                <?php endif; ?>
+                <p class="board-node-id">
+                    <span class="node-id-label">node</span>
+                    <span class="node-id-val">@<?= htmlspecialchars($_thisInfo['node_id']) ?></span>
+                    <?php if (!empty($settings['board_topic'])): ?>
+                        <span class="node-id-sep">·</span>
+                        <span class="node-id-topic">#<?= htmlspecialchars($settings['board_topic']) ?></span>
+                    <?php endif; ?>
+                    <?php if (!empty($settings['tor_only'])): ?>
+                        <span class="node-id-sep">·</span>
+                        <span class="node-id-tor">🧅 Tor-only</span>
+                    <?php endif; ?>
+                </p>
                 <div class="board-stats">
                     <span class="stat-item">📋 Threads: <span class="stat-val"><?= $threadCount ?></span></span>
                     <span class="stat-sep">·</span>

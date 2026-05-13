@@ -51,7 +51,16 @@ function loadSettings(): array {
         'replies_preview_count' => 3,
         'views_lifetime' => 0,  // accumulates views from pruned/deleted threads
         'max_media_size_mb' => 100,
-        'op_requires' => 'any'
+        'op_requires' => 'any',
+        // ── Board identity (federated imageboard) ──
+        'board_title' => '🐸 Frog General',
+        'board_subtitle' => 'Anonymous discussion board. No accounts. No tracking. Speak freely.',
+        'board_topic' => 'general',
+        'node_id' => '',           // auto-derived from HTTP_HOST if empty
+        'tor_only' => false,       // when true, clearnet visitors see Tor gateway
+        'tor_onion_url' => '',     // e.g. http://abcd...onion/board/
+        'federation_enabled' => true,
+        'federated_peers' => [],   // [{url,title,subtitle,node_id,topic,tor_only,last_seen}]
     ];
     if (!file_exists($file)) {
         file_put_contents($file, json_encode($defaults, JSON_PRETTY_PRINT));
@@ -602,4 +611,206 @@ function adminLogin(string $user, string $pass): bool {
         return true;
     }
     return false;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Federated Imageboard Helpers (board identity, Tor gating, peers)
+// ──────────────────────────────────────────────────────────────────
+
+/**
+ * Derive a stable, short node id for this board.
+ * If admin set settings.node_id, use it.
+ * Otherwise derive deterministically from the host header.
+ */
+function getNodeId(): string {
+    $s = loadSettings();
+    $id = trim((string)($s['node_id'] ?? ''));
+    if ($id !== '') return preg_replace('/[^A-Za-z0-9_-]/', '', substr($id, 0, 32));
+    $host = $_SERVER['HTTP_HOST'] ?? 'unknown';
+    return substr(hash('sha256', 'frogtalk-node|' . strtolower($host)), 0, 12);
+}
+
+/**
+ * Best-effort detection of whether the current request is over Tor.
+ * Accepts either:
+ *   - Host header ending in .onion
+ *   - nginx-set header X-Tor-Client: 1 (recommended)
+ *   - X-Onion-Host present
+ */
+function isTorRequest(): bool {
+    $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
+    if (str_ends_with($host, '.onion')) return true;
+    $hdr = strtolower((string)($_SERVER['HTTP_X_TOR_CLIENT'] ?? ''));
+    if ($hdr === '1' || $hdr === 'true' || $hdr === 'yes') return true;
+    if (!empty($_SERVER['HTTP_X_ONION_HOST'])) return true;
+    return false;
+}
+
+/**
+ * Returns true when the visitor should see the "Connect via Tor" gateway:
+ * board is configured Tor-only and the request is NOT coming through Tor.
+ */
+function shouldShowTorGateway(): bool {
+    $s = loadSettings();
+    return (bool)($s['tor_only'] ?? false) && !isTorRequest();
+}
+
+/**
+ * Public-facing board info (used by /board/api/info and federated discovery).
+ */
+function getBoardInfo(): array {
+    $s = loadSettings();
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    return [
+        'node_id'      => getNodeId(),
+        'title'        => (string)($s['board_title'] ?? '/board/'),
+        'subtitle'     => (string)($s['board_subtitle'] ?? ''),
+        'topic'        => (string)($s['board_topic'] ?? 'general'),
+        'url'          => $scheme . '://' . $host . '/board/',
+        'tor_only'     => (bool)($s['tor_only'] ?? false),
+        'tor_onion_url'=> (string)($s['tor_onion_url'] ?? ''),
+        'version'      => 1,
+    ];
+}
+
+/**
+ * Return list of federated peer boards, filtered for the current visitor.
+ * If the visitor is NOT on Tor, peers flagged tor_only are stripped.
+ */
+function getFederatedPeers(?bool $visitorTor = null): array {
+    $s = loadSettings();
+    if (!($s['federation_enabled'] ?? true)) return [];
+    $peers = $s['federated_peers'] ?? [];
+    if (!is_array($peers)) return [];
+    if ($visitorTor === null) $visitorTor = isTorRequest();
+    $out = [];
+    foreach ($peers as $p) {
+        if (!is_array($p)) continue;
+        $url = (string)($p['url'] ?? '');
+        if ($url === '') continue;
+        $isTor = (bool)($p['tor_only'] ?? false);
+        if ($isTor && !$visitorTor) continue;     // hide Tor-only nodes from clearnet
+        $out[] = [
+            'url'      => $url,
+            'node_id'  => (string)($p['node_id'] ?? ''),
+            'title'    => (string)($p['title'] ?? $url),
+            'subtitle' => (string)($p['subtitle'] ?? ''),
+            'topic'    => (string)($p['topic'] ?? ''),
+            'tor_only' => $isTor,
+            'tor_onion_url' => (string)($p['tor_onion_url'] ?? ''),
+            'last_seen'=> (int)($p['last_seen'] ?? 0),
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Add or update a federated peer. Returns [ok, message].
+ * Fetches /board/api/info from the peer URL to validate + populate metadata.
+ */
+function upsertFederatedPeer(string $peerUrl): array {
+    $peerUrl = trim($peerUrl);
+    if (!preg_match('#^https?://[^\s/$.?#].[^\s]*$#i', $peerUrl)) {
+        return [false, 'Invalid URL'];
+    }
+    // Normalise: must end with /board/ (or be the api endpoint root)
+    $peerUrl = rtrim($peerUrl, '/');
+    if (!str_ends_with($peerUrl, '/board')) {
+        // accept either https://host or https://host/board — coerce to https://host/board
+        if (str_ends_with($peerUrl, '/board/api/info')) {
+            $peerUrl = substr($peerUrl, 0, -strlen('/api/info'));
+        } else {
+            $peerUrl = $peerUrl . '/board';
+        }
+    }
+    $infoUrl = $peerUrl . '/api/info';
+
+    $ctx = stream_context_create([
+        'http' => ['timeout' => 6, 'header' => "User-Agent: FrogTalk-Federation/1\r\n"],
+        'https'=> ['timeout' => 6, 'header' => "User-Agent: FrogTalk-Federation/1\r\n"],
+    ]);
+    $body = @file_get_contents($infoUrl, false, $ctx);
+    if ($body === false) return [false, 'Could not reach ' . $infoUrl];
+    $info = json_decode($body, true);
+    if (!is_array($info) || empty($info['node_id'])) return [false, 'Peer did not return a valid info document'];
+
+    $s = loadSettings();
+    $peers = is_array($s['federated_peers'] ?? null) ? $s['federated_peers'] : [];
+    $newEntry = [
+        'url'      => $peerUrl . '/',
+        'node_id'  => (string)$info['node_id'],
+        'title'    => (string)($info['title'] ?? $peerUrl),
+        'subtitle' => (string)($info['subtitle'] ?? ''),
+        'topic'    => (string)($info['topic'] ?? ''),
+        'tor_only' => (bool)($info['tor_only'] ?? false),
+        'tor_onion_url' => (string)($info['tor_onion_url'] ?? ''),
+        'last_seen'=> time(),
+    ];
+    // Don't add ourselves
+    if ($newEntry['node_id'] === getNodeId()) return [false, 'That is this node'];
+    // De-dupe by node_id
+    $replaced = false;
+    foreach ($peers as $i => $p) {
+        if (($p['node_id'] ?? '') === $newEntry['node_id']) {
+            $peers[$i] = $newEntry;
+            $replaced = true;
+            break;
+        }
+    }
+    if (!$replaced) $peers[] = $newEntry;
+    $s['federated_peers'] = $peers;
+    saveSettings($s);
+    return [true, ($replaced ? 'Updated' : 'Added') . ' peer ' . $newEntry['title']];
+}
+
+function removeFederatedPeer(string $nodeId): bool {
+    $s = loadSettings();
+    $peers = is_array($s['federated_peers'] ?? null) ? $s['federated_peers'] : [];
+    $out = array_values(array_filter($peers, fn($p) => ($p['node_id'] ?? '') !== $nodeId));
+    if (count($out) === count($peers)) return false;
+    $s['federated_peers'] = $out;
+    saveSettings($s);
+    return true;
+}
+
+/**
+ * Refresh metadata for all peers by re-fetching their /api/info.
+ * Stale peers (failed > 7d) are dropped.
+ */
+function refreshFederatedPeers(): int {
+    $s = loadSettings();
+    $peers = is_array($s['federated_peers'] ?? null) ? $s['federated_peers'] : [];
+    $ctx = stream_context_create([
+        'http' => ['timeout' => 5, 'header' => "User-Agent: FrogTalk-Federation/1\r\n"],
+        'https'=> ['timeout' => 5, 'header' => "User-Agent: FrogTalk-Federation/1\r\n"],
+    ]);
+    $now = time();
+    $updated = 0;
+    foreach ($peers as $i => $p) {
+        $url = rtrim((string)($p['url'] ?? ''), '/');
+        if ($url === '') continue;
+        $body = @file_get_contents($url . '/api/info', false, $ctx);
+        if ($body === false) {
+            // keep but don't bump last_seen; drop if older than 7d
+            if (($now - (int)($p['last_seen'] ?? 0)) > 7 * 86400) {
+                unset($peers[$i]);
+            }
+            continue;
+        }
+        $info = json_decode($body, true);
+        if (!is_array($info) || empty($info['node_id'])) continue;
+        $peers[$i] = array_merge($p, [
+            'title'    => (string)($info['title'] ?? $p['title'] ?? $url),
+            'subtitle' => (string)($info['subtitle'] ?? $p['subtitle'] ?? ''),
+            'topic'    => (string)($info['topic'] ?? $p['topic'] ?? ''),
+            'tor_only' => (bool)($info['tor_only'] ?? false),
+            'tor_onion_url' => (string)($info['tor_onion_url'] ?? ''),
+            'last_seen'=> $now,
+        ]);
+        $updated++;
+    }
+    $s['federated_peers'] = array_values($peers);
+    saveSettings($s);
+    return $updated;
 }

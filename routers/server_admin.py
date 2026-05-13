@@ -601,6 +601,153 @@ async def server_admin_stats(request: Request):
     }
 
 
+def _imageboard_root() -> str:
+    """Locate the imageboard board_data directory.
+
+    Honours FROGTALK_BOARD_DATA_DIR, otherwise probes a few common locations.
+    """
+    env = os.getenv("FROGTALK_BOARD_DATA_DIR", "").strip()
+    if env:
+        return env
+    candidates = [
+        "/opt/frogtalk/board/board_data",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "imageboard", "board_data"),
+        os.path.join(os.getcwd(), "imageboard", "board_data"),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return candidates[0]
+
+
+def _load_board_json(path: str, default):
+    import json as _json
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            v = _json.load(f)
+            return v if v is not None else default
+    except FileNotFoundError:
+        return default
+    except Exception:
+        return default
+
+
+@router.get("/api/server-admin/imageboard-stats")
+async def server_admin_imageboard_stats(request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    root = _imageboard_root()
+    available = os.path.isdir(root)
+
+    threads = _load_board_json(os.path.join(root, "threads.json"), [])
+    settings = _load_board_json(os.path.join(root, "settings.json"), {})
+    bans = _load_board_json(os.path.join(root, "bans.json"), [])
+    approval = _load_board_json(os.path.join(root, "approval_queue.json"), [])
+    chat = _load_board_json(os.path.join(root, "chat.json"), [])
+
+    if not isinstance(threads, list): threads = []
+    if not isinstance(bans, list): bans = []
+    if not isinstance(approval, list): approval = []
+    if not isinstance(chat, list): chat = []
+    if not isinstance(settings, dict): settings = {}
+
+    now = int(time.time())
+    day_ago = now - 86400
+    week_ago = now - 7 * 86400
+
+    total_posts = 0
+    total_views = int(settings.get("views_lifetime") or 0)
+    threads_24h = 0
+    posts_24h = 0
+    last_post_ts = 0
+    media_count = 0
+    pending_media = 0
+    locked_threads = 0
+    sticky_threads = 0
+
+    for t in threads:
+        if not isinstance(t, dict):
+            continue
+        total_posts += 1
+        ts = int(t.get("timestamp") or t.get("time") or 0)
+        if ts >= day_ago:
+            threads_24h += 1
+            posts_24h += 1
+        if ts > last_post_ts:
+            last_post_ts = ts
+        total_views += int(t.get("views") or 0)
+        if t.get("locked"): locked_threads += 1
+        if t.get("sticky"): sticky_threads += 1
+        m = t.get("media")
+        if isinstance(m, dict):
+            media_count += 1
+            if not m.get("approved", True):
+                pending_media += 1
+        for r in (t.get("replies") or []):
+            if not isinstance(r, dict):
+                continue
+            total_posts += 1
+            rts = int(r.get("timestamp") or r.get("time") or 0)
+            if rts >= day_ago:
+                posts_24h += 1
+            if rts > last_post_ts:
+                last_post_ts = rts
+            rm = r.get("media")
+            if isinstance(rm, dict):
+                media_count += 1
+                if not rm.get("approved", True):
+                    pending_media += 1
+
+    active_bans = 0
+    for b in bans:
+        if not isinstance(b, dict):
+            continue
+        exp = int(b.get("expires") or 0)
+        if exp == 0 or exp > now:
+            active_bans += 1
+
+    return {
+        "available": available,
+        "data_dir": root,
+        "identity": {
+            "title": settings.get("board_title") or "/board/",
+            "subtitle": settings.get("board_subtitle") or "",
+            "topic": settings.get("board_topic") or "",
+            "node_id": settings.get("node_id") or "",
+            "tor_only": bool(settings.get("tor_only") or False),
+            "tor_onion_url": settings.get("tor_onion_url") or "",
+            "federation_enabled": bool(settings.get("federation_enabled", True)),
+            "board_locked": bool(settings.get("board_locked") or False),
+            "chat_enabled": bool(settings.get("chat_enabled", True)),
+            "announcement": settings.get("announcement") or "",
+        },
+        "stats": {
+            "threads": len(threads),
+            "posts": total_posts,
+            "views": total_views,
+            "threads_24h": threads_24h,
+            "posts_24h": posts_24h,
+            "media": media_count,
+            "pending_media": pending_media,
+            "approval_queue": len(approval),
+            "active_bans": active_bans,
+            "chat_messages": len(chat),
+            "locked_threads": locked_threads,
+            "sticky_threads": sticky_threads,
+            "last_post_ts": last_post_ts,
+            "federated_peers": len(settings.get("federated_peers") or []),
+        },
+        "admin_url": "/board/admin",
+        "board_url": "/board/",
+        "timestamp": now,
+    }
+
+
 @router.get("/api/server-admin/nodes")
 async def server_admin_nodes(request: Request, include_disabled: int = 1):
     disabled = _require_enabled()

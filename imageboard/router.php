@@ -27,6 +27,12 @@ switch ($uri) {
     case '/board/preview':
         require __DIR__ . '/board_preview.php';
         break;
+    case '/board/api/info':
+    case '/board/api/info/':
+    case '/board/api/peers':
+    case '/board/api/peers/':
+        require __DIR__ . '/board_api.php';
+        break;
     default:
         http_response_code(404);
         echo 'Not Found';

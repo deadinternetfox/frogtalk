@@ -61,9 +61,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $settings['op_requires'] = in_array($_POST['op_requires'] ?? '', ['any','comment','image','image_or_media','comment_and_image']) ? $_POST['op_requires'] : 'any';
             $settings['announcement'] = substr(trim($_POST['announcement'] ?? ''), 0, 500);
             $settings['auto_ban_words'] = substr(trim($_POST['auto_ban_words'] ?? ''), 0, 2000);
+            // ── Board identity / federation ──
+            $settings['board_title']    = substr(trim($_POST['board_title']    ?? ''), 0, 80) ?: '/board/';
+            $settings['board_subtitle'] = substr(trim($_POST['board_subtitle'] ?? ''), 0, 200);
+            $settings['board_topic']    = preg_replace('/[^A-Za-z0-9_\- ]/', '', substr(trim($_POST['board_topic'] ?? ''), 0, 32));
+            $settings['node_id']        = preg_replace('/[^A-Za-z0-9_-]/', '', substr(trim($_POST['node_id'] ?? ''), 0, 32));
+            $settings['tor_only']       = isset($_POST['tor_only']);
+            $settings['federation_enabled'] = isset($_POST['federation_enabled']);
+            $torOnion = trim($_POST['tor_onion_url'] ?? '');
+            if ($torOnion === '' || preg_match('#^https?://[a-z2-7]{16,56}\.onion(/.*)?$#i', $torOnion)) {
+                $settings['tor_onion_url'] = $torOnion;
+            }
             saveSettings($settings);
             logModAction('settings', 'Board settings updated');
             $success = 'Settings saved.';
+            break;
+
+        case 'add_peer':
+            $peerUrl = trim($_POST['peer_url'] ?? '');
+            [$ok, $msg] = upsertFederatedPeer($peerUrl);
+            if ($ok) { $success = $msg; logModAction('federation', 'Added peer: ' . $peerUrl); }
+            else     { $error   = $msg; }
+            break;
+
+        case 'remove_peer':
+            $pid = trim($_POST['peer_node_id'] ?? '');
+            if ($pid !== '' && removeFederatedPeer($pid)) {
+                $success = 'Peer removed.';
+                logModAction('federation', 'Removed peer: ' . $pid);
+            } else {
+                $error = 'Peer not found.';
+            }
+            break;
+
+        case 'refresh_peers':
+            $n = refreshFederatedPeers();
+            $success = "Refreshed {$n} peer(s).";
+            logModAction('federation', 'Refreshed peers');
             break;
 
         case 'approve_media':
@@ -1082,9 +1116,45 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
                 </div>
 
                 <form method="POST" class="admin-form">
+                    <?= csrfField() ?>
                     <input type="hidden" name="action" value="save_settings">
 
-                    <h3 style="color:#00ff41;font-size:13px;margin:0 0 10px;letter-spacing:1px;text-transform:uppercase">🖼️ Allowed Upload Types</h3>
+                    <h3 style="color:#00ff41;font-size:13px;margin:0 0 10px;letter-spacing:1px;text-transform:uppercase">🌐 Board Identity</h3>
+                    <div class="form-group">
+                        <label>Board title (shown at top of <code>/board/</code>)</label>
+                        <input type="text" name="board_title" maxlength="80" value="<?= htmlspecialchars($settings['board_title'] ?? '/board/') ?>" placeholder="🐸 Frog General">
+                        <div class="hint">Free-form. Emoji OK. Up to 80 chars.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Board subtitle</label>
+                        <input type="text" name="board_subtitle" maxlength="200" value="<?= htmlspecialchars($settings['board_subtitle'] ?? '') ?>" placeholder="One line about what this board is for">
+                    </div>
+                    <div class="form-group">
+                        <label>Topic / tag (used in federated nav)</label>
+                        <input type="text" name="board_topic" maxlength="32" value="<?= htmlspecialchars($settings['board_topic'] ?? 'general') ?>" placeholder="general, tech, art, music…">
+                    </div>
+                    <div class="form-group">
+                        <label>Node ID (leave blank to auto-derive from hostname)</label>
+                        <input type="text" name="node_id" maxlength="32" value="<?= htmlspecialchars($settings['node_id'] ?? '') ?>" placeholder="<?= htmlspecialchars(getNodeId()) ?>">
+                        <div class="hint">Short identifier shown under the board title. Current: <code><?= htmlspecialchars(getNodeId()) ?></code></div>
+                    </div>
+
+                    <h3 style="color:#00ff41;font-size:13px;margin:18px 0 10px;letter-spacing:1px;text-transform:uppercase">🧅 Tor &amp; Federation</h3>
+                    <div class="checkbox-row">
+                        <input type="checkbox" name="tor_only" id="tonly" <?= ($settings['tor_only'] ?? false) ? 'checked' : '' ?>>
+                        <label for="tonly">🧅 Tor-only board (clearnet visitors see "Connect via Tor" gateway)</label>
+                    </div>
+                    <div class="form-group">
+                        <label>Tor onion URL (full URL to this board over Tor)</label>
+                        <input type="text" name="tor_onion_url" value="<?= htmlspecialchars($settings['tor_onion_url'] ?? '') ?>" placeholder="http://abcdefghijklmnop.onion/board/">
+                        <div class="hint">Required if Tor-only is enabled. Shown to clearnet visitors and to other federated nodes.</div>
+                    </div>
+                    <div class="checkbox-row">
+                        <input type="checkbox" name="federation_enabled" id="fedon" <?= ($settings['federation_enabled'] ?? true) ? 'checked' : '' ?>>
+                        <label for="fedon">🔗 Enable federation (advertise this board &amp; show peer boards in top nav)</label>
+                    </div>
+
+                    <h3 style="color:#00ff41;font-size:13px;margin:18px 0 10px;letter-spacing:1px;text-transform:uppercase">🖼️ Allowed Upload Types</h3>
                     <div class="checkbox-row">
                         <input type="checkbox" name="allow_images" id="ai" <?= ($settings['allow_images'] ?? true) ? 'checked' : '' ?>>
                         <label for="ai">🖼️ Allow image uploads (JPG/PNG/GIF/WEBP)</label>
@@ -1179,6 +1249,70 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
                     <button class="btn btn-green">💾 SAVE SETTINGS</button>
                 </form>
                 
+                <hr style="border-color: rgba(0,255,65,0.1); margin: 30px 0;">
+
+                <h3 style="color:#00ff41;font-size:14px;margin:0 0 12px;letter-spacing:1px;">🔗 Federated Peer Boards</h3>
+                <p style="color:#6baf6b;font-size:12px;margin:0 0 14px;">
+                    Peers appear in the top-nav strip on <code>/board/</code> so visitors can hop between FrogTalk nodes.
+                    Tor-only peers are automatically hidden from clearnet visitors.
+                </p>
+
+                <form method="POST" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="add_peer">
+                    <input type="text" name="peer_url" placeholder="https://other-frog-node.example/board/" required style="flex:1;min-width:280px;background:#0a1a0a;color:#c8ffc8;border:1px solid rgba(0,255,65,0.25);padding:6px 10px;font-family:monospace;font-size:13px;">
+                    <button class="btn btn-green">➕ Add peer</button>
+                </form>
+                <form method="POST" style="margin-bottom:14px;">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="refresh_peers">
+                    <button class="btn">🔄 Refresh all peer metadata</button>
+                </form>
+
+                <?php
+                    $_peers = $settings['federated_peers'] ?? [];
+                    if (!is_array($_peers)) $_peers = [];
+                ?>
+                <?php if (empty($_peers)): ?>
+                    <div style="color:#3a6f3a;padding:14px;background:rgba(0,0,0,0.3);border-radius:6px;">No federated peers yet. Add one above using its <code>/board/</code> URL.</div>
+                <?php else: ?>
+                <div style="overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                    <thead>
+                        <tr style="text-align:left;color:#00ff41;border-bottom:1px solid rgba(0,255,65,0.2);">
+                            <th style="padding:6px 8px;">Title</th>
+                            <th style="padding:6px 8px;">Node ID</th>
+                            <th style="padding:6px 8px;">Topic</th>
+                            <th style="padding:6px 8px;">URL</th>
+                            <th style="padding:6px 8px;">Tor</th>
+                            <th style="padding:6px 8px;">Last seen</th>
+                            <th style="padding:6px 8px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($_peers as $_p): ?>
+                        <tr style="border-bottom:1px solid rgba(0,255,65,0.08);color:#c8ffc8;">
+                            <td style="padding:6px 8px;"><?= htmlspecialchars($_p['title'] ?? '') ?></td>
+                            <td style="padding:6px 8px;font-family:monospace;color:#6baf6b;"><?= htmlspecialchars($_p['node_id'] ?? '') ?></td>
+                            <td style="padding:6px 8px;"><?= htmlspecialchars($_p['topic'] ?? '') ?></td>
+                            <td style="padding:6px 8px;"><a href="<?= htmlspecialchars($_p['url'] ?? '#') ?>" target="_blank" rel="noopener" style="color:#6baf6b;"><?= htmlspecialchars($_p['url'] ?? '') ?></a></td>
+                            <td style="padding:6px 8px;"><?= !empty($_p['tor_only']) ? '🧅 Tor-only' : '🌐 clearnet' ?></td>
+                            <td style="padding:6px 8px;color:#6baf6b;"><?= !empty($_p['last_seen']) ? date('Y-m-d H:i', (int)$_p['last_seen']) : '—' ?></td>
+                            <td style="padding:6px 8px;">
+                                <form method="POST" onsubmit="return confirm('Remove peer?')" style="display:inline;">
+                                    <?= csrfField() ?>
+                                    <input type="hidden" name="action" value="remove_peer">
+                                    <input type="hidden" name="peer_node_id" value="<?= htmlspecialchars($_p['node_id'] ?? '') ?>">
+                                    <button class="btn btn-red">✕</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div>
+                <?php endif; ?>
+
                 <hr style="border-color: rgba(0,255,65,0.1); margin: 30px 0;">
                 
                 <h3 style="color: #ff4444; margin-bottom: 10px; font-size: 14px;">Danger Zone</h3>
