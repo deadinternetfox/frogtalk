@@ -7314,7 +7314,7 @@ async function generateRecoveryKey() {
   const pwField = document.getElementById('profile-cur-pw');
   let password = (pwField && pwField.value) || '';
   if (!password) {
-    password = window.prompt('Enter your current password to generate a recovery key:') || '';
+    password = await _promptRecoveryKeyPassword();
   }
   if (!password) {
     if (status) status.textContent = 'Cancelled — current password required.';
@@ -7338,6 +7338,49 @@ async function generateRecoveryKey() {
     if (btn) btn.disabled = false;
   }
 }
+
+// Polished password-confirm modal for the recovery-key flow. Replaces
+// window.prompt() which is blocked / unstyled in Electron.
+let _recoveryKeyPasswordResolver = null;
+function _promptRecoveryKeyPassword() {
+  return new Promise(resolve => {
+    _recoveryKeyPasswordResolver = resolve;
+    const input = document.getElementById('recovery-key-password-input');
+    const err   = document.getElementById('recovery-key-password-error');
+    const btn   = document.getElementById('recovery-key-password-submit');
+    if (input) input.value = '';
+    if (err)   { err.style.display = 'none'; err.textContent = ''; }
+    if (btn)   btn.disabled = false;
+    openModal('modal-recovery-key-password');
+    setTimeout(() => { if (input) input.focus(); }, 30);
+  });
+}
+
+function cancelRecoveryKeyPassword() {
+  closeModal('modal-recovery-key-password');
+  const r = _recoveryKeyPasswordResolver;
+  _recoveryKeyPasswordResolver = null;
+  if (r) r('');
+}
+
+function submitRecoveryKeyPassword() {
+  const input = document.getElementById('recovery-key-password-input');
+  const err   = document.getElementById('recovery-key-password-error');
+  const pw = (input && input.value) || '';
+  if (!pw) {
+    if (err) { err.textContent = 'Please enter your password.'; err.style.display = 'block'; }
+    if (input) input.focus();
+    return;
+  }
+  closeModal('modal-recovery-key-password');
+  const r = _recoveryKeyPasswordResolver;
+  _recoveryKeyPasswordResolver = null;
+  if (input) input.value = '';
+  if (r) r(pw);
+}
+
+window.cancelRecoveryKeyPassword = cancelRecoveryKeyPassword;
+window.submitRecoveryKeyPassword = submitRecoveryKeyPassword;
 
 // ----- Recover-account flow (login screen) -----
 let _recoverVerifiedKey = null;

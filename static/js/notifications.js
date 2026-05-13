@@ -104,10 +104,16 @@ const Notifications = (() => {
 
   // ── PWA install prompt ─────────────────────────────────────────────────────
   function setupInstallPrompt() {
+    // Default: hide the section. We'll reveal it only if the browser
+    // actually fires beforeinstallprompt (Chrome/Edge/Brave on Android/desktop
+    // when the PWA is installable). Electron, iOS Safari, Firefox, and the
+    // installed-PWA case all never fire it — and a dead "not available"
+    // button is worse than no button at all.
+    updateInstallButton(false);
+
     window.addEventListener('beforeinstallprompt', e => {
       e.preventDefault();
       _installPrompt = e;
-      // Update install button visibility in settings
       updateInstallButton(true);
     });
 
@@ -116,34 +122,24 @@ const Notifications = (() => {
       updateInstallButton(false);
       toast('FrogTalk installed successfully! 🐸');
     });
-    
-    // Check if running as PWA
-    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
-      updateInstallButton(false);
-    }
   }
-  
+
   function updateInstallButton(canInstall) {
-    const btn = document.getElementById('install-app-btn');
-    const note = document.getElementById('install-app-note');
     const section = document.getElementById('install-app-section');
-    
+    const btn     = document.getElementById('install-app-btn');
+    const note    = document.getElementById('install-app-note');
+    const show = !!(canInstall && _installPrompt);
+    if (section) section.style.display = show ? '' : 'none';
     if (btn) {
-      if (canInstall && _installPrompt) {
-        btn.disabled = false;
-        btn.style.opacity = '1';
-        if (note) note.style.display = 'none';
-      } else {
-        btn.disabled = true;
-        btn.style.opacity = '0.5';
-        if (note) note.style.display = 'block';
-      }
+      btn.disabled = !show;
+      btn.style.opacity = show ? '1' : '0.5';
     }
+    if (note) note.style.display = 'none';
   }
 
   async function promptInstall() {
     if (!_installPrompt) {
-      toast('App install not available', 'error');
+      toast('App install not available in this browser', 'error');
       return;
     }
     _installPrompt.prompt();

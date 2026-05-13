@@ -9249,8 +9249,10 @@ window.ConnErr = (function(){
     </div>
     <!-- Account Tab -->
     <div id="set-pane-account" style="display:none">
-      <!-- Install App Section -->
-      <div id="install-app-section" style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #2a2a2a">
+      <!-- Install App Section (hidden by default; revealed only when the
+           browser fires beforeinstallprompt — Chrome/Edge/Brave on a non-
+           installed PWA. Electron/iOS/Firefox never get it). -->
+      <div id="install-app-section" style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #2a2a2a;display:none">
         <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">📱 Install App</div>
         <div style="font-size:12px;color:#666;margin-bottom:12px">Install FrogTalk as a native app for the best experience. Gets its own icon, works offline, and no browser UI!</div>
         <button class="modal-btn primary" id="install-app-btn" onclick="Notifications.promptInstall()" style="width:100%">🐸 Install FrogTalk App</button>
@@ -9295,6 +9297,35 @@ window.ConnErr = (function(){
 </div>
 
 <!-- ═══════════════════════ RECOVERY KEY MODALS ═══════════════════════ -->
+
+<!-- Password confirmation modal for generating a new recovery key from
+     Settings → Account. Replaces window.prompt() which doesn't work in
+     Electron and looks unpolished in browsers. -->
+<div class="modal-overlay hidden" id="modal-recovery-key-password">
+  <div class="modal" style="max-width:420px">
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:40px;line-height:1;margin-bottom:6px">🔑</div>
+      <div style="font-size:17px;font-weight:700;color:#4caf50">Confirm your password</div>
+      <div style="font-size:12px;color:#7a8a82;margin-top:6px;line-height:1.5">
+        Enter your current password to generate a new recovery key.
+        This invalidates any previous recovery key.
+      </div>
+    </div>
+
+    <label style="display:block;font-size:12px;color:#9dc4b2;margin-bottom:6px">Current password</label>
+    <input type="password" id="recovery-key-password-input" class="modal-input"
+           placeholder="Your account password" maxlength="256" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')submitRecoveryKeyPassword();else if(event.key==='Escape')cancelRecoveryKeyPassword()">
+
+    <div id="recovery-key-password-error" class="auth-error" style="display:none;margin-top:10px"></div>
+
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="modal-btn secondary" onclick="cancelRecoveryKeyPassword()">Cancel</button>
+      <button class="modal-btn primary" id="recovery-key-password-submit"
+              onclick="submitRecoveryKeyPassword()">Generate key</button>
+    </div>
+  </div>
+</div>
 
 <!-- Post-register / on-demand recovery-key download modal.
      Used after successful registration to force the user to save their
