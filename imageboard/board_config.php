@@ -676,7 +676,9 @@ function getBoardInfo(): array {
 
 /**
  * Return list of federated peer boards, filtered for the current visitor.
- * If the visitor is NOT on Tor, peers flagged tor_only are stripped.
+ * Tor-only peers are still listed for clearnet visitors (styled with a Tor
+ * badge); clicking them will only resolve from a Tor-aware client. This makes
+ * the federation visually discoverable across the whole network.
  */
 function getFederatedPeers(?bool $visitorTor = null): array {
     $s = loadSettings();
@@ -690,7 +692,8 @@ function getFederatedPeers(?bool $visitorTor = null): array {
         $url = (string)($p['url'] ?? '');
         if ($url === '') continue;
         $isTor = (bool)($p['tor_only'] ?? false);
-        if ($isTor && !$visitorTor) continue;     // hide Tor-only nodes from clearnet
+        // Note: Tor-only peers are returned for everyone — the fed-pill-tor
+        // styling on the board indicates "this requires Tor to visit".
         $out[] = [
             'url'      => $url,
             'node_id'  => (string)($p['node_id'] ?? ''),
