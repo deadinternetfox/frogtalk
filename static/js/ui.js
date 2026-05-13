@@ -2083,6 +2083,16 @@ async function doAuth() {
     State.token = data.token;
     State.user = { id: data.user_id, nickname: data.nickname, display_name: data.display_name || null, username_change_remaining_seconds: Number(data.username_change_remaining_seconds || 0), avatar: data.avatar, bio: data.bio, is_admin: data.is_admin };
     State.save();
+    // Brand-new accounts: force the user through the recovery-key
+    // download flow before we launch the app. We don't store email, so
+    // this is the only safety net if they lose their password — making
+    // it part of the signup ceremony dramatically improves recovery
+    // success vs. burying it in settings.
+    if (isReg) {
+      try {
+        await _runPostRegisterRecoveryKey(password);
+      } catch (e) { /* if it fails we still launch — user can try again from settings */ }
+    }
     App.launch();
   } catch {
     errEl.textContent = 'Network error. Please try again.';
@@ -7092,3 +7102,279 @@ function doShareToChat() {
   window._pendingShareData = null;
   toast('Profile shared');
 }
+
+// ============================================================
+// Account Recovery Key — UI flows
+// ============================================================
+//
+// Three entry points share a single modal (#modal-recovery-key):
+//   1. Just-registered users (forced; "Skip" hidden)
+//   2. Settings → "Generate & Download Recovery Key" (Skip + Continue both
+//      just close the modal)
+//   3. After a successful "Generate" we always update the in-memory key.
+//
+// The download lives behind a click handler so the file ends up in the
+// user's Downloads folder rather than just being base64 in memory — they
+// won't realise they have it otherwise. The "I've saved it — continue"
+// button only enables after the download click.
+
+window._pendingRecoveryKey = null; // { file_content, filename, recovery_key }
+
+function _setRecoveryKeyError(msg) {
+  const el = document.getElementById('recovery-key-error');
+  if (!el) return;
+  if (msg) { el.textContent = msg; el.style.display = 'block'; }
+  else { el.textContent = ''; el.style.display = 'none'; }
+}
+
+function _populateRecoveryKeyModal(payload, opts = {}) {
+  window._pendingRecoveryKey = payload || null;
+  _setRecoveryKeyError('');
+  const userRow  = document.getElementById('recovery-key-username-row');
+  const userText = document.getElementById('recovery-key-username-text');
+  const skipBtn  = document.getElementById('recovery-key-skip-btn');
+  const contBtn  = document.getElementById('recovery-key-continue-btn');
+  const savedHint = document.getElementById('recovery-key-saved-hint');
+  const subtitle = document.getElementById('recovery-key-subtitle');
+  const dlBtn    = document.getElementById('recovery-key-download-btn');
+  const nick = (State && State.user && State.user.nickname) || '';
+  if (userRow && userText && nick) {
+    userText.textContent = '@' + nick;
+    userRow.style.display = '';
+  }
+  if (savedHint) savedHint.style.display = 'none';
+  if (dlBtn) { dlBtn.disabled = false; dlBtn.style.opacity = '1'; dlBtn.style.cursor = 'pointer'; }
+  if (contBtn) {
+    contBtn.disabled = true;
+    contBtn.style.opacity = '.5';
+    contBtn.style.cursor  = 'not-allowed';
+  }
+  if (skipBtn) skipBtn.style.display = opts.forceSave ? 'none' : '';
+  if (subtitle) {
+    subtitle.innerHTML = opts.forceSave
+      ? 'This file is the <b>only</b> way to recover your account if you lose your password. Save it before continuing.'
+      : 'This file is the <b>only</b> way to recover your account if you lose your password.';
+  }
+}
+
+function downloadRecoveryKeyFile() {
+  const payload = window._pendingRecoveryKey;
+  if (!payload || !payload.file_content) {
+    _setRecoveryKeyError('No recovery file to download. Try again.');
+    return;
+  }
+  try {
+    const a = document.createElement('a');
+    a.href = payload.file_content;
+    a.download = payload.filename || 'frogtalk-recovery.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    const hint = document.getElementById('recovery-key-saved-hint');
+    if (hint) hint.style.display = '';
+    const contBtn = document.getElementById('recovery-key-continue-btn');
+    if (contBtn) {
+      contBtn.disabled = false;
+      contBtn.style.opacity = '1';
+      contBtn.style.cursor  = 'pointer';
+    }
+  } catch (e) {
+    _setRecoveryKeyError('Browser blocked the download. Allow downloads and try again.');
+  }
+}
+
+// Resolved by dismissRecoveryKeyModal() so callers (post-register) can
+// await the user clicking Continue before proceeding.
+let _recoveryKeyResolver = null;
+
+function dismissRecoveryKeyModal(saved) {
+  closeModal('modal-recovery-key');
+  const r = _recoveryKeyResolver;
+  _recoveryKeyResolver = null;
+  if (r) r(!!saved);
+  window._pendingRecoveryKey = null;
+}
+
+function _showRecoveryKeyModalAwait(payload, opts) {
+  _populateRecoveryKeyModal(payload, opts);
+  openModal('modal-recovery-key');
+  return new Promise(resolve => { _recoveryKeyResolver = resolve; });
+}
+
+async function _runPostRegisterRecoveryKey(password) {
+  let payload = null;
+  try {
+    const res = await apiFetch('/api/auth/recovery-key', 'POST', { password });
+    if (!res.ok) return; // Don't block launch on server error
+    payload = await res.json();
+  } catch { return; }
+  if (!payload || !payload.file_content) return;
+  // Force save: hide skip button so the user must download + continue.
+  await _showRecoveryKeyModalAwait(payload, { forceSave: true });
+}
+
+async function generateRecoveryKey() {
+  const status = document.getElementById('recovery-key-status');
+  const btn = document.getElementById('generate-recovery-key-btn');
+  const pwField = document.getElementById('profile-cur-pw');
+  let password = (pwField && pwField.value) || '';
+  if (!password) {
+    password = window.prompt('Enter your current password to generate a recovery key:') || '';
+  }
+  if (!password) {
+    if (status) status.textContent = 'Cancelled — current password required.';
+    return;
+  }
+  if (status) status.textContent = 'Generating…';
+  if (btn) btn.disabled = true;
+  try {
+    const res = await apiFetch('/api/auth/recovery-key', 'POST', { password });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (status) status.textContent = data.error || 'Failed to generate key.';
+      return;
+    }
+    if (status) status.textContent = 'Recovery key generated. Save the file in the next dialog.';
+    await _showRecoveryKeyModalAwait(data, { forceSave: false });
+    if (status) status.textContent = 'Recovery key ready. Old keys are now invalid.';
+  } catch {
+    if (status) status.textContent = 'Network error. Try again.';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ----- Recover-account flow (login screen) -----
+let _recoverVerifiedKey = null;
+
+function showRecoverAccount() {
+  // Reset modal to step 1
+  _recoverVerifiedKey = null;
+  const s1 = document.getElementById('recover-step-1');
+  const s2 = document.getElementById('recover-step-2');
+  const e1 = document.getElementById('recover-step1-error');
+  const e2 = document.getElementById('recover-step2-error');
+  const keyIn = document.getElementById('recover-key-input');
+  const file  = document.getElementById('recover-file-input');
+  const pw1   = document.getElementById('recover-new-pw');
+  const pw2   = document.getElementById('recover-new-pw2');
+  if (s1) s1.style.display = '';
+  if (s2) s2.style.display = 'none';
+  if (e1) { e1.style.display = 'none'; e1.textContent = ''; }
+  if (e2) { e2.style.display = 'none'; e2.textContent = ''; }
+  if (keyIn) keyIn.value = '';
+  if (file)  file.value  = '';
+  if (pw1) pw1.value = '';
+  if (pw2) pw2.value = '';
+  openModal('modal-recover-account');
+}
+window.showRecoverAccount = showRecoverAccount;
+
+function onRecoveryFileChosen(ev) {
+  const f = ev?.target?.files && ev.target.files[0];
+  const keyIn = document.getElementById('recover-key-input');
+  const err   = document.getElementById('recover-step1-error');
+  if (!f || !keyIn) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(String(reader.result || ''));
+      if (!data || typeof data.recovery_key !== 'string') throw new Error('bad');
+      keyIn.value = data.recovery_key;
+      if (err) { err.style.display = 'none'; err.textContent = ''; }
+    } catch {
+      if (err) { err.textContent = 'That file doesn\u2019t look like a FrogTalk recovery file.'; err.style.display = 'block'; }
+    }
+  };
+  reader.onerror = () => {
+    if (err) { err.textContent = 'Could not read file.'; err.style.display = 'block'; }
+  };
+  reader.readAsText(f);
+}
+
+async function verifyRecoveryKey() {
+  const keyIn = document.getElementById('recover-key-input');
+  const err   = document.getElementById('recover-step1-error');
+  const btn   = document.getElementById('recover-verify-btn');
+  const key   = (keyIn && keyIn.value || '').trim();
+  if (!key) {
+    if (err) { err.textContent = 'Paste your recovery key or upload your recovery file.'; err.style.display = 'block'; }
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/auth/verify-recovery-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recovery_key: key })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.valid) {
+      if (err) { err.textContent = (data && data.error) || 'Invalid or already-used recovery key.'; err.style.display = 'block'; }
+      return;
+    }
+    _recoverVerifiedKey = key;
+    const userText = document.getElementById('recover-username-text');
+    if (userText) userText.textContent = '@' + (data.username || '');
+    const s1 = document.getElementById('recover-step-1');
+    const s2 = document.getElementById('recover-step-2');
+    if (s1) s1.style.display = 'none';
+    if (s2) s2.style.display = '';
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    setTimeout(() => { try { document.getElementById('recover-new-pw')?.focus(); } catch {} }, 50);
+  } catch {
+    if (err) { err.textContent = 'Network error. Try again.'; err.style.display = 'block'; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+window.verifyRecoveryKey = verifyRecoveryKey;
+window.onRecoveryFileChosen = onRecoveryFileChosen;
+
+async function doRecover() {
+  const err = document.getElementById('recover-step2-error');
+  const pw1 = (document.getElementById('recover-new-pw')?.value || '');
+  const pw2 = (document.getElementById('recover-new-pw2')?.value || '');
+  const btn = document.getElementById('recover-submit-btn');
+  if (!_recoverVerifiedKey) {
+    if (err) { err.textContent = 'Verify your recovery key first.'; err.style.display = 'block'; }
+    return;
+  }
+  if (pw1.length < 6) {
+    if (err) { err.textContent = 'Password must be at least 6 characters.'; err.style.display = 'block'; }
+    return;
+  }
+  if (pw1 !== pw2) {
+    if (err) { err.textContent = 'Passwords do not match.'; err.style.display = 'block'; }
+    return;
+  }
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/auth/recover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recovery_key: _recoverVerifiedKey, new_password: pw1 })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      if (err) { err.textContent = (data && data.error) || 'Recovery failed.'; err.style.display = 'block'; }
+      return;
+    }
+    // Recovery succeeded — log the user in with the freshly-minted session.
+    State.token = data.token;
+    State.user  = { id: 0, nickname: data.nickname };
+    State.save();
+    closeModal('modal-recover-account');
+    if (typeof showToast === 'function') showToast('Welcome back! Don\u2019t forget to generate a new recovery key in Settings.', 'success', 6000);
+    _recoverVerifiedKey = null;
+    try { App.launch(); } catch {}
+  } catch {
+    if (err) { err.textContent = 'Network error. Try again.'; err.style.display = 'block'; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+window.doRecover = doRecover;
+window.generateRecoveryKey = generateRecoveryKey;
+window.downloadRecoveryKeyFile = downloadRecoveryKeyFile;
+window.dismissRecoveryKeyModal = dismissRecoveryKeyModal;

@@ -1272,7 +1272,16 @@ async def recover_account(request: Request, body: RecoverAccountRequest):
     
     # Create new session
     token = _create_session_with_meta(request, user_id)
-    
+
+    # Security: a recovery means the previous credentials may be compromised.
+    # Invalidate every other active session so an attacker who was logged in
+    # with the old password is kicked out as soon as the legitimate owner
+    # recovers.
+    try:
+        db.delete_other_sessions(user_id, token)
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "token": token,

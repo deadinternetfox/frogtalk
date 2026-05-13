@@ -7859,6 +7859,12 @@ window.ConnErr = (function(){
              onkeydown="if(event.key==='Enter')doAuth()">
     </div>
     <button class="auth-btn" onclick="doAuth()">Continue</button>
+    <div style="text-align:center;margin-top:10px">
+      <a href="#" id="auth-recover-link" onclick="event.preventDefault(); showRecoverAccount();"
+         style="font-size:12px;color:#7a8a82;text-decoration:none;border-bottom:1px dashed #2f5548;padding-bottom:1px">
+        Lost access? Recover account with key
+      </a>
+    </div>
     <div style="font-size:12px;color:#6a8a7c;text-align:center;margin-top:18px;line-height:1.55">
       <span style="display:inline-flex;align-items:center;gap:6px">
         <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#4caf50;box-shadow:0 0 0 3px rgba(76,175,80,.18)"></span>
@@ -9243,6 +9249,26 @@ window.ConnErr = (function(){
       <div style="margin-bottom:16px;font-size:13px;color:#4caf50;font-weight:600">Change Password</div>
       <input class="modal-input" type="password" id="profile-cur-pw" placeholder="Current password">
       <input class="modal-input" type="password" id="profile-new-pw" placeholder="New password (min 6 characters)">
+
+      <!-- Account Recovery -->
+      <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
+        <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">🔑 Account Recovery Key</div>
+        <div style="font-size:12px;color:#888;line-height:1.55;margin-bottom:10px">
+          Generate a one-time <b>recovery file</b> you can use to reset your password if you ever lose access.
+          We don't store your email, so this file is the <b>only</b> way back in.
+        </div>
+        <div style="font-size:11px;color:#7a8a82;line-height:1.55;margin-bottom:12px">
+          • Store it offline — USB stick, password manager, or printed copy.<br>
+          • Anyone who has this file can take over your account — keep it secret.<br>
+          • Generating a new key invalidates the previous one.
+        </div>
+        <button class="modal-btn primary" id="generate-recovery-key-btn"
+                onclick="generateRecoveryKey()" style="width:100%">
+          🔑 Generate &amp; Download Recovery Key
+        </button>
+        <div id="recovery-key-status" style="font-size:11px;color:#7a8a82;margin-top:8px;min-height:14px"></div>
+      </div>
+
       <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
         <div style="font-size:13px;color:#f44336;font-weight:600;margin-bottom:8px">Danger Zone</div>
         <div style="font-size:12px;color:#666;margin-bottom:12px">Once deleted, your account cannot be recovered. All messages will be permanently removed.</div>
@@ -9253,6 +9279,119 @@ window.ConnErr = (function(){
     <div class="modal-actions">
       <button class="modal-btn secondary" onclick="closeModal('modal-profile')">Cancel</button>
       <button class="modal-btn primary" onclick="saveProfile()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ RECOVERY KEY MODALS ═══════════════════════ -->
+
+<!-- Post-register / on-demand recovery-key download modal.
+     Used after successful registration to force the user to save their
+     recovery file before continuing to the app. Also used by the
+     "Generate Recovery Key" button in Settings → Account, in which case
+     the "I've saved it" button just dismisses the modal. -->
+<div class="modal-overlay hidden" id="modal-recovery-key">
+  <div class="modal" style="max-width:480px">
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:48px;line-height:1;margin-bottom:6px">🔑</div>
+      <div style="font-size:18px;font-weight:700;color:#4caf50">Save your Recovery Key</div>
+      <div style="font-size:12px;color:#7a8a82;margin-top:4px" id="recovery-key-subtitle">
+        This file is the <b>only</b> way to recover your account if you lose your password.
+      </div>
+    </div>
+
+    <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:12px;font-size:12px;color:#d0d0d0;line-height:1.6;margin-bottom:14px">
+      <div style="color:#ffb74d;font-weight:600;margin-bottom:6px">⚠️ Important</div>
+      • We don't store your email, so we <b>cannot</b> reset your password for you.<br>
+      • Anyone who has this file can take over your account — keep it secret.<br>
+      • Store it offline: USB stick, password manager, or printed copy.<br>
+      • You can generate a new key anytime in Settings → Account (this invalidates the old one).
+    </div>
+
+    <div id="recovery-key-username-row" style="display:none;font-size:12px;color:#7a8a82;margin-bottom:10px;text-align:center">
+      For account: <span id="recovery-key-username-text" style="color:#4caf50;font-weight:600"></span>
+    </div>
+
+    <div id="recovery-key-error" class="auth-error" style="display:none"></div>
+
+    <button class="modal-btn primary" id="recovery-key-download-btn"
+            onclick="downloadRecoveryKeyFile()" style="width:100%;margin-bottom:8px">
+      ⬇️ Download Recovery File
+    </button>
+
+    <div id="recovery-key-saved-hint" style="font-size:11px;color:#7a8a82;text-align:center;margin-bottom:10px;display:none">
+      ✓ Downloaded. Keep this file somewhere safe before continuing.
+    </div>
+
+    <div class="modal-actions" style="margin-top:6px">
+      <button class="modal-btn secondary" id="recovery-key-skip-btn"
+              onclick="dismissRecoveryKeyModal(false)" style="display:none">
+        Skip for now
+      </button>
+      <button class="modal-btn primary" id="recovery-key-continue-btn"
+              onclick="dismissRecoveryKeyModal(true)" disabled
+              style="opacity:.5;cursor:not-allowed">
+        I've saved it — continue
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Polished recover-account modal opened from the login screen. -->
+<div class="modal-overlay hidden" id="modal-recover-account">
+  <div class="modal" style="max-width:460px">
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:40px;line-height:1;margin-bottom:6px">🔓</div>
+      <div style="font-size:18px;font-weight:700;color:#4caf50">Recover your account</div>
+      <div style="font-size:12px;color:#7a8a82;margin-top:4px">
+        Paste your recovery key or upload the recovery file you downloaded.
+      </div>
+    </div>
+
+    <!-- Step 1: provide the key -->
+    <div id="recover-step-1">
+      <label style="display:block;font-size:12px;color:#9dc4b2;margin-bottom:6px">Recovery file (recommended)</label>
+      <input type="file" id="recover-file-input" accept="application/json,.json"
+             onchange="onRecoveryFileChosen(event)"
+             style="width:100%;padding:8px;background:#0f1d19;border:1px solid #2f5548;border-radius:8px;color:#d0d0d0;font-size:12px;margin-bottom:12px;cursor:pointer">
+
+      <label style="display:block;font-size:12px;color:#9dc4b2;margin-bottom:6px">…or paste the recovery key</label>
+      <textarea id="recover-key-input" class="modal-input" rows="3"
+                placeholder="Paste your recovery key here"
+                style="width:100%;font-family:ui-monospace,Menlo,monospace;font-size:12px;resize:vertical"></textarea>
+
+      <div id="recover-step1-error" class="auth-error" style="display:none"></div>
+
+      <div class="modal-actions">
+        <button class="modal-btn secondary" onclick="closeModal('modal-recover-account')">Cancel</button>
+        <button class="modal-btn primary" id="recover-verify-btn" onclick="verifyRecoveryKey()">Verify key</button>
+      </div>
+    </div>
+
+    <!-- Step 2: set new password -->
+    <div id="recover-step-2" style="display:none">
+      <div style="background:#0f1d19;border:1px solid #2f5548;border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#9dc4b2">
+        ✓ Recovery key verified for <b style="color:#4caf50" id="recover-username-text"></b>
+      </div>
+      <label style="display:block;font-size:12px;color:#9dc4b2;margin-bottom:6px">New password</label>
+      <input type="password" id="recover-new-pw" class="modal-input"
+             placeholder="At least 6 characters" maxlength="128"
+             onkeydown="if(event.key==='Enter')document.getElementById('recover-new-pw2').focus()">
+      <label style="display:block;font-size:12px;color:#9dc4b2;margin:8px 0 6px">Confirm new password</label>
+      <input type="password" id="recover-new-pw2" class="modal-input"
+             placeholder="Re-type password" maxlength="128"
+             onkeydown="if(event.key==='Enter')doRecover()">
+
+      <div id="recover-step2-error" class="auth-error" style="display:none"></div>
+
+      <div style="font-size:11px;color:#7a8a82;margin:10px 0 4px;line-height:1.5">
+        After recovery your existing sessions on other devices will be signed out automatically.
+      </div>
+
+      <div class="modal-actions">
+        <button class="modal-btn secondary" onclick="closeModal('modal-recover-account')">Cancel</button>
+        <button class="modal-btn primary" id="recover-submit-btn" onclick="doRecover()">Recover account</button>
+      </div>
     </div>
   </div>
 </div>

@@ -968,6 +968,20 @@ const GIFs = (() => {
   function browseFromManager() {
     const m = document.getElementById('sticker-manager-modal');
     if (m) m.style.display = 'none';
+    // Ensure the GIF picker is open and on the Stickers tab — otherwise
+    // showPublicPacks() paints into a hidden #gif-grid and the modal just
+    // looks like it closed with nothing happening.
+    try { createPicker(); } catch {}
+    const picker = document.getElementById('gif-picker');
+    if (picker && !picker.classList.contains('open')) {
+      // Mirror toggle()'s open path so positioning + outside-close
+      // handlers match what the GIF button itself would do.
+      try { toggle(); } catch {}
+    }
+    try {
+      if (typeof switchTab === 'function') switchTab('stickers');
+      else if (_currentTab !== 'stickers') _currentTab = 'stickers';
+    } catch {}
     showPublicPacks();
   }
 
