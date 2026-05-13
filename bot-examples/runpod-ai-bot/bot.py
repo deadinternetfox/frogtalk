@@ -142,7 +142,7 @@ class RunPodClient:
     that exceed the sync timeout."""
 
     def __init__(self, endpoint_id: str, api_key: str, *, sync_timeout: int = 25,
-                 async_poll_timeout: int = 90, async_poll_interval: float = 1.5):
+                 async_poll_timeout: int = 240, async_poll_interval: float = 1.5):
         self.endpoint_id = endpoint_id
         self.api_key = api_key
         self.sync_timeout = sync_timeout
@@ -159,37 +159,21 @@ class RunPodClient:
 
     def complete(self, prompt: str, *, system: str | None = None) -> str:
         """Return a single completion string. Worker-specific shape —
-        adjust to taste."""
-        payload = build_runpod_request(prompt, system=system)
-        # 1) Try /runsync.
-        try:
-            r = self._session.post(
-                f"{self.base}/runsync",
-                headers=self._headers(),
-                json=payload,
-                timeout=self.sync_timeout + 5,
-            )
-            if r.status_code < 400:
-                data = r.json()
-                if data.get("status") in (None, "COMPLETED"):
-                    text = extract_runpod_text(data)
-                    if text:
-                        return text
-                # Some workers return IN_QUEUE/IN_PROGRESS even from
-                # /runsync if they hit the sync limit — fall through to
-                # the async path with the job id.
-                job_id = data.get("id")
-                if job_id:
-                    return self._await_async(job_id)
-        except requests.RequestException as e:
-            log.warning("runsync failed (%s), falling back to async", e)
+        adjust to taste.
 
-        # 2) Async /run → /status loop.
+        Note: we go straight to async `/run` → `/status/<id>` polling
+        instead of trying `/runsync` first. On a cold endpoint the
+        runsync HTTP request often times out *without* returning the
+        queued job id, and the fallback to `/run` then enqueues a
+        *second* job — so you get billed for two runs for one reply.
+        Async polling is single-job and works fine for chat-bot latency.
+        """
+        payload = build_runpod_request(prompt, system=system)
         r = self._session.post(
             f"{self.base}/run",
             headers=self._headers(),
             json=payload,
-            timeout=15,
+            timeout=20,
         )
         r.raise_for_status()
         job_id = r.json()["id"]
