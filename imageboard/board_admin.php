@@ -539,10 +539,11 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         .page-header { margin-bottom: 25px; }
         .page-header h1 { color: #00ff41; font-size: 18px; margin-bottom: 5px; }
         .page-header p { color: #4a8f4a; font-size: 12px; }
-        /* Floating "Back to Node Admin" pill (only visible when this page
-           is iframed inside the FrogTalk Server Admin overlay). */
+        /* Top-of-page "Back to Node Admin" pill. Always visible — it is
+           useful both inside the FrogTalk shell iframe (no browser back
+           button) and when /board/admin is loaded directly in a tab. */
         .back-to-node-admin {
-            display: none;
+            display: inline-flex;
             align-items: center;
             gap: 8px;
             margin: 0 0 18px 0;
@@ -571,7 +572,6 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
             line-height: 1;
             transform: translateY(-1px);
         }
-        body.in-frog-shell .back-to-node-admin { display: inline-flex; }
         
         /* Cards */
         .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; }
