@@ -311,6 +311,14 @@ const App = {
     // Render presence + status msg under the name
     try { UI.renderSelfStatus && UI.renderSelfStatus(); } catch {}
 
+    // Reveal the Node Admin shortcut on the server strip for accounts
+    // flagged is_admin=true (typically the node operator, e.g. "frog").
+    // The element ships hidden so non-admins never see it.
+    try {
+      const adminIcon = document.getElementById('node-admin-icon');
+      if (adminIcon) adminIcon.style.display = u && u.is_admin ? '' : 'none';
+    } catch {}
+
     // Build emoji picker
     buildEmojiPicker();
 

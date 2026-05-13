@@ -7899,6 +7899,13 @@ window.ConnErr = (function(){
     </div>
     <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="board-server-icon" onclick="openFrogBoard()">🍀</div>
     <div class="server-divider"></div>
+    <!--
+      Node-admin entry to the Server Admin panel (/server). Only shown to
+      users whose account has is_admin=true. Revealed in App.launch() so
+      it stays hidden while logged out / for regular users. Opens in a
+      new tab so the chat session stays intact behind it.
+    -->
+    <div class="server-icon" data-tip="Node Admin" data-tip-pos="right" id="node-admin-icon" onclick="openNodeAdmin()" style="display:none;background:linear-gradient(135deg,#1a1208,#3a2410);color:#ffb347;font-weight:700">🛡️</div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="showProfile()">⚙️</div>
     <div class="server-spacer"></div>
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
@@ -10036,6 +10043,28 @@ function openFrogBoard() {
   } else if (loading) {
     // Already loaded previously — hide loader after a short fade-friendly tick.
     setTimeout(() => loading.classList.add('hidden'), 120);
+  }
+}
+
+// ─── Node Admin shortcut ───────────────────────────────────────────────
+// Opens the Server Admin Web UI (/server) for the node operator. The
+// sidebar icon that triggers this is hidden unless State.user.is_admin
+// is true, so this is just a click handler — defence-in-depth is still
+// enforced server-side by the /api/server-admin/* routes.
+// Uses a new tab/window so chat state (WebSocket, active call, music
+// listening party) is preserved untouched in the background.
+function openNodeAdmin() {
+  try {
+    if (!window.State || !State.user || !State.user.is_admin) return;
+  } catch (e) { return; }
+  try {
+    const w = window.open('/server', '_blank', 'noopener,noreferrer');
+    if (!w) {
+      // Pop-up blocked — fall back to same-tab navigation.
+      window.location.assign('/server');
+    }
+  } catch (e) {
+    window.location.assign('/server');
   }
 }
 
