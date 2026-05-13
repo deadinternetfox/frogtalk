@@ -853,9 +853,12 @@ input, select {
               if (!inFrame) return;
               var openBtn  = document.getElementById('imageboard-open-btn');
               var adminBtn = document.getElementById('imageboard-admin-btn');
+              // In-shell: drop the ↗ external-tab indicator (we're NOT
+              // opening a new tab) and use an in-app glyph instead.
               if (openBtn) {
                 openBtn.removeAttribute('target');
                 openBtn.removeAttribute('rel');
+                openBtn.textContent = '🐸 Open Board';
                 openBtn.addEventListener('click', function(ev){
                   ev.preventDefault();
                   try {
@@ -868,11 +871,12 @@ input, select {
               if (adminBtn) {
                 adminBtn.removeAttribute('target');
                 adminBtn.removeAttribute('rel');
+                adminBtn.textContent = '🛠 Open Board Admin';
                 adminBtn.addEventListener('click', function(ev){
                   ev.preventDefault();
                   // Stay inside the Node Admin overlay iframe — the ✕ on the
                   // overlay topbar still returns the user to chat.
-                  window.location.href = '/board/admin';
+                  window.location.href = '/board/admin?shell=1';
                 });
               }
             } catch (e) { /* non-fatal — buttons keep default behaviour */ }

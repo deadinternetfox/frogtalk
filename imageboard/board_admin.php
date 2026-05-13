@@ -767,8 +767,45 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
                 </a>
                 <a href="?action=logout" style="margin-top: 20px; color: #ff6b6b;">🚪 Logout</a>
                 <a href="/board" style="color: #4a8f4a;">← Back to Board</a>
+                <a href="/server" id="back-to-node-admin" style="display:none;color:#7ab7ff;">⬅ Back to Node Admin</a>
             </div>
         </nav>
+        <script>
+            // When this admin panel is loaded inside the FrogTalk shell
+            // (via the Node Admin overlay iframe, or with ?shell=1 hint),
+            // there is no browser back button to return to the Server
+            // Admin panel. Expose an explicit "Back to Node Admin" link
+            // and route it in-place so we stay inside the overlay.
+            (function(){
+                try {
+                    var inFrame = window.top !== window.self;
+                    var hinted  = /[?&]shell=1\b/.test(location.search);
+                    if (!inFrame && !hinted) return;
+                    var link = document.getElementById('back-to-node-admin');
+                    if (!link) return;
+                    link.style.display = 'block';
+                    link.addEventListener('click', function(ev){
+                        ev.preventDefault();
+                        // Same-origin navigation inside the existing iframe;
+                        // /server then renders inside the Node Admin overlay
+                        // exactly as before.
+                        window.location.href = '/server';
+                    });
+                    // Also rewrite "Back to Board" to stay in-shell.
+                    var boardLink = document.querySelector('.sidebar-nav a[href="/board"]');
+                    if (boardLink) {
+                        boardLink.addEventListener('click', function(ev){
+                            ev.preventDefault();
+                            try {
+                                window.parent.postMessage({ type: 'frogtalk:open-board' }, location.origin);
+                            } catch (e) {
+                                window.location.href = '/board/';
+                            }
+                        });
+                    }
+                } catch (e) { /* non-fatal */ }
+            })();
+        </script>
         
         <main class="admin-main">
             <?php if ($success): ?><div class="alert alert-success">✅ <?= htmlspecialchars($success) ?></div><?php endif; ?>
