@@ -529,19 +529,90 @@ while True:
             data your bot processes.</li>
           </ul>
 
-          <h3 id="bot-examples">Examples</h3>
-          <p>A complete, runnable reference bot — a channel chat bot that replies to <code>@</code>-mentions
-          and to its own threads, powered by a <a href="https://runpod.io" target="_blank" rel="noopener noreferrer">RunPod</a>
-          serverless endpoint — lives in the FrogTalk repo at
-          <code>bot-examples/runpod-ai-bot/</code>.</p>
+          <h3 id="bot-examples">Examples &amp; SDK</h3>
+          <p>Complete, runnable reference bots live in the FrogTalk repo under
+          <a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples" target="_blank" rel="noopener noreferrer"><code>bot-examples/</code></a>.
+          Clone the repo, drop in your <code>bot_…</code> token, and run.</p>
+
+          <h4 style="margin-top:14px">🤖 runpod-ai-bot &mdash; AI chat bot (Python)</h4>
+          <p>A mention-driven AI chat bot powered by a <a href="https://runpod.io" target="_blank" rel="noopener noreferrer">RunPod</a>
+          serverless LLM endpoint. Polls public channels, replies when <code>@</code>-mentioned or
+          when a user replies to its own message. ~200 lines, no async framework required.</p>
           <ul>
-            <li><a href="https://github.com/deadinternetfox/frogtalk/tree/main/bot-examples" target="_blank" rel="noopener noreferrer">bot-examples/</a> &mdash; all reference bots</li>
-            <li><a href="https://github.com/deadinternetfox/frogtalk/tree/main/bot-examples/runpod-ai-bot" target="_blank" rel="noopener noreferrer">runpod-ai-bot/</a> &mdash; mention-driven AI chat bot with a step-by-step README</li>
-            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/main/bot-examples/runpod-ai-bot/bot.py" target="_blank" rel="noopener noreferrer">bot.py</a> &mdash; the polling + reply loop in ~200 lines of Python</li>
-            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/main/bot-examples/runpod-ai-bot/provision_runpod_bot.py" target="_blank" rel="noopener noreferrer">provision_runpod_bot.py</a> &mdash; one-shot script that creates the bot account and prints the token</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples/runpod-ai-bot" target="_blank" rel="noopener noreferrer">📁 runpod-ai-bot/</a> &mdash; full project folder</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/master/bot-examples/runpod-ai-bot/README.md" target="_blank" rel="noopener noreferrer">📖 README.md</a> &mdash; step-by-step setup &amp; deployment guide</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/master/bot-examples/runpod-ai-bot/bot.py" target="_blank" rel="noopener noreferrer">🐍 bot.py</a> &mdash; the polling + reply loop</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/master/bot-examples/runpod-ai-bot/provision_runpod_bot.py" target="_blank" rel="noopener noreferrer">⚙️ provision_runpod_bot.py</a> &mdash; one-shot script that creates the bot account and prints the token</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/master/bot-examples/runpod-ai-bot/requirements.txt" target="_blank" rel="noopener noreferrer">📦 requirements.txt</a> &mdash; pip dependencies</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/master/bot-examples/runpod-ai-bot/.env.example" target="_blank" rel="noopener noreferrer">🔐 .env.example</a> &mdash; required environment variables</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/master/bot-examples/runpod-ai-bot/frogtalk-runpod-bot.service" target="_blank" rel="noopener noreferrer">🛠️ frogtalk-runpod-bot.service</a> &mdash; systemd unit for production deployment</li>
           </ul>
-          <p class="muted">Clone, copy the example's <code>.env.example</code> to <code>.env</code>, drop in your
-          <code>bot_…</code> token + RunPod endpoint id, and run <code>python bot.py</code>. That's it.</p>
+
+          <h4 style="margin-top:14px">🚀 Quick start (60 seconds)</h4>
+<pre><code class="lang-bash">git clone https://github.com/deadinternetfox/frogtalk.git
+cd frogtalk/bot-examples/runpod-ai-bot
+
+# 1. Install deps
+pip install -r requirements.txt
+
+# 2. Configure
+cp .env.example .env
+$EDITOR .env   # paste your FROGTALK_BOT_TOKEN and RUNPOD_* values
+
+# 3. Run
+python bot.py</code></pre>
+
+          <h4 style="margin-top:14px">🧪 Minimal bot in 20 lines</h4>
+          <p>Don't want the full example? Here's the smallest useful loop &mdash; reads new messages
+          from a channel and replies to mentions:</p>
+<pre><code class="lang-python">import os, time, requests
+
+TOKEN   = os.environ["FROGTALK_BOT_TOKEN"]    # bot_xxx from /api/developer/bots
+BASE    = "https://frogtalk.xyz/api/external"
+CHANNEL = "general"
+HEADERS = {"X-API-Key": TOKEN}
+seen = set()
+
+while True:
+    r = requests.get(f"{BASE}/channels/{CHANNEL}/messages?limit=20", headers=HEADERS, timeout=10)
+    for m in r.json().get("messages", []):
+        if m["id"] in seen: continue
+        seen.add(m["id"])
+        if "@mybot" in (m.get("text") or "").lower():
+            requests.post(
+                f"{BASE}/channels/{CHANNEL}/messages",
+                headers=HEADERS,
+                json={"text": f"hi @{m['nickname']} 👋", "reply_to": m["id"]},
+                timeout=10,
+            )
+    time.sleep(5)</code></pre>
+
+          <h4 style="margin-top:14px">🟦 TypeScript / Node.js</h4>
+<pre><code class="lang-typescript">const TOKEN   = process.env.FROGTALK_BOT_TOKEN!;
+const BASE    = "https://frogtalk.xyz/api/external";
+const CHANNEL = "general";
+const headers = { "X-API-Key": TOKEN, "Content-Type": "application/json" };
+const seen = new Set&lt;number&gt;();
+
+async function tick() {
+  const r = await fetch(`${BASE}/channels/${CHANNEL}/messages?limit=20`, { headers });
+  const { messages = [] } = await r.json();
+  for (const m of messages) {
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+    if ((m.text || "").toLowerCase().includes("@mybot")) {
+      await fetch(`${BASE}/channels/${CHANNEL}/messages`, {
+        method: "POST", headers,
+        body: JSON.stringify({ text: `hi @${m.nickname} 👋`, reply_to: m.id }),
+      });
+    }
+  }
+}
+setInterval(tick, 5000);</code></pre>
+
+          <p class="muted" style="margin-top:14px">Want to contribute another reference bot
+          (TypeScript, Go, Rust, a Discord-style command bot, an RSS poster…)? Open a PR against
+          <a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples" target="_blank" rel="noopener noreferrer">bot-examples/</a>.</p>
         </article>
 
         <article class="panel" id="external">
