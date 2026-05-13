@@ -8792,6 +8792,14 @@ window.ConnErr = (function(){
           <label class="modal-label">Username <span style="font-weight:400;color:#888;font-size:11px">— your unique @handle</span></label>
           <input class="modal-input" id="profile-nickname" autocapitalize="off" autocorrect="off" spellcheck="false">
           <div id="profile-username-cooldown" style="font-size:11px;color:#888;margin:2px 0 0"></div>
+          <!-- Inline confirm-password prompt — revealed by ui.js when the
+               user edits the username field, so they don't have to hunt
+               for the password input on the Account tab to satisfy the
+               "Enter your current password" requirement. -->
+          <div id="profile-nickname-pw-wrap" style="display:none;margin-top:8px">
+            <label class="modal-label" style="font-size:11px;color:#ffb347">Confirm password to change username</label>
+            <input class="modal-input" id="profile-nickname-pw" type="password" autocomplete="current-password" placeholder="Current password">
+          </div>
         </div>
       </div>
       <label class="modal-label">Bio</label>
@@ -10077,7 +10085,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=433"></script>
 <script src="/static/js/ws.js?v=224"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=459"></script>
+<script src="/static/js/ui.js?v=460"></script>
   <script src="/static/js/rooms.js?v=428"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
 <script src="/static/js/messages.js?v=438"></script>

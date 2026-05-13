@@ -4431,9 +4431,32 @@ async function showProfile() {
   switchSettingsTab('profile');
   // Profile tab
   document.getElementById('profile-nickname').value = u.nickname;
+  // Reset + hide the inline username-change password prompt every time
+  // settings opens; it gets revealed live when the nickname field is
+  // edited (see input listener below).
+  try {
+    const pwWrap = document.getElementById('profile-nickname-pw-wrap');
+    const pwIn = document.getElementById('profile-nickname-pw');
+    if (pwWrap) pwWrap.style.display = 'none';
+    if (pwIn) pwIn.value = '';
+  } catch {}
   const dispInput = document.getElementById('profile-display-name');
   if (dispInput) dispInput.value = u.display_name || '';
   if (typeof _refreshUsernameCooldownUI === 'function') _refreshUsernameCooldownUI();
+  // Reveal the inline password prompt as soon as the nickname field is
+  // edited away from its current value. Attaches once per settings open;
+  // the input element is never replaced so we can safely set .oninput.
+  try {
+    const nickIn = document.getElementById('profile-nickname');
+    const pwWrap = document.getElementById('profile-nickname-pw-wrap');
+    if (nickIn && pwWrap) {
+      const original = String(u.nickname || '');
+      nickIn.oninput = () => {
+        const cur = (nickIn.value || '').trim();
+        pwWrap.style.display = (cur && cur !== original) ? '' : 'none';
+      };
+    }
+  } catch {}
   document.getElementById('profile-bio').value = u.bio || '';
   const smEl = document.getElementById('profile-status-msg');
   if (smEl) smEl.value = u.status_msg || '';
@@ -4823,7 +4846,12 @@ async function saveProfile() {
   const nicknameInput = document.getElementById('profile-nickname');
   const nextNickname = (nicknameInput?.value || '').trim();
   const bio = document.getElementById('profile-bio').value.slice(0, 256);
-  const curPw = document.getElementById('profile-cur-pw').value;
+  // Allow the password to come from either the Account-tab "Change Password"
+  // field (legacy) or the inline confirm-password input we now render next
+  // to the username on the Profile tab. The inline one is the one users
+  // actually find when prompted to confirm a username change.
+  const inlinePw = document.getElementById('profile-nickname-pw')?.value || '';
+  const curPw = document.getElementById('profile-cur-pw').value || inlinePw;
   const newPw = document.getElementById('profile-new-pw').value;
   const pal = document.getElementById('profile-avatar-large');
   const newAvatar = pal.dataset.newAvatar || null;
@@ -4904,6 +4932,14 @@ async function saveProfile() {
   const wantsNicknameChange = nextNickname !== (State.user?.nickname || '');
   if (wantsNicknameChange && !curPw) {
     errEl.textContent = 'Enter your current password to save a username change';
+    // Reveal + focus the inline confirm-password input so the user can
+    // act on the error without hunting through tabs.
+    try {
+      const wrap = document.getElementById('profile-nickname-pw-wrap');
+      const pwIn = document.getElementById('profile-nickname-pw');
+      if (wrap) wrap.style.display = '';
+      if (pwIn) { pwIn.focus(); pwIn.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    } catch {}
     return false;
   }
 
