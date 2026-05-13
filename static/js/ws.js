@@ -294,6 +294,17 @@ const WS = (() => {
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
         break;
       }
+      case 'bot_added':
+      case 'bot_removed': {
+        // A bot was installed in or removed from this room. Refresh the
+        // sidebar so the BOT entry appears/disappears live without
+        // requiring a channel close+reopen.
+        if (data.room === room && typeof Users !== 'undefined' && Users.loadChannelMembers) {
+          try { Users.loadChannelMembers(data.room); } catch {}
+        }
+        try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
+        break;
+      }
       case 'room_owner_changed': {
         // Owner transferred. Update locally cached mod list (the
         // outgoing owner just became a moderator) and surface a small

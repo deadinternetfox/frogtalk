@@ -342,6 +342,19 @@ async def add_bot_to_channel(room_name: str, bot_id: int, current_user: dict = D
         return JSONResponse(status_code=404, content={"error": "Bot not found"})
     
     if db.add_bot_to_channel(bot_id, room["id"], current_user["id"]):
+        # Notify everyone currently subscribed to this room so their
+        # member sidebar shows the bot immediately, without requiring
+        # a channel close + reopen to refresh.
+        try:
+            from ws_manager import manager
+            await manager.broadcast_room(room_name, {
+                "type": "bot_added",
+                "room": room_name,
+                "bot_id": int(bot_id),
+                "bot_name": bot.get("name"),
+            })
+        except Exception:
+            pass
         return {"ok": True, "bot": bot["name"]}
     return JSONResponse(status_code=409, content={"error": "Bot already in channel"})
 
@@ -359,6 +372,17 @@ async def remove_bot_from_channel(room_name: str, bot_id: int, current_user: dic
         return JSONResponse(status_code=403, content={"error": "Not authorized"})
     
     if db.remove_bot_from_channel(bot_id, room["id"]):
+        try:
+            from ws_manager import manager
+            bot = db.get_bot_by_id(bot_id) or {}
+            await manager.broadcast_room(room_name, {
+                "type": "bot_removed",
+                "room": room_name,
+                "bot_id": int(bot_id),
+                "bot_name": bot.get("name"),
+            })
+        except Exception:
+            pass
         return {"ok": True}
     return JSONResponse(status_code=404, content={"error": "Bot not in channel"})
 
