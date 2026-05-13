@@ -10051,21 +10051,14 @@ function openFrogBoard() {
 // sidebar icon that triggers this is hidden unless State.user.is_admin
 // is true, so this is just a click handler — defence-in-depth is still
 // enforced server-side by the /api/server-admin/* routes.
-// Uses a new tab/window so chat state (WebSocket, active call, music
-// listening party) is preserved untouched in the background.
+// Navigates in the same tab so popup-blockers don't silently swallow
+// the click (which was the symptom reported on first deploy). Chat
+// session state persists on the server; reopening FrogTalk reconnects.
 function openNodeAdmin() {
   try {
     if (!window.State || !State.user || !State.user.is_admin) return;
   } catch (e) { return; }
-  try {
-    const w = window.open('/server', '_blank', 'noopener,noreferrer');
-    if (!w) {
-      // Pop-up blocked — fall back to same-tab navigation.
-      window.location.assign('/server');
-    }
-  } catch (e) {
-    window.location.assign('/server');
-  }
+  window.location.assign('/server');
 }
 
 function updateBoardSideMenuAuth() {
