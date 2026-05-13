@@ -42,9 +42,12 @@ any chat model you like.
   not require any code changes — the worker handles the templating.
   Default endpoint id `4l8b7h5dbvoqu2` points at a vLLM worker running
   `Gryphe/MythoMax-L2-13b` (a Llama-2 roleplay finetune chosen for
-  its lack of RLHF refusal behaviour). For raw-completion workers
-  there is still a fallback that wraps the prompt in Qwen-style
-  ChatML, with `<|im_end|>` / `<|im_start|>` added to the stop list.
+  its lack of RLHF refusal behaviour). If the worker reports the
+  loaded model has no chat template registered in the tokenizer
+  (vLLM error `Chat template does not exist for this model`), the
+  bot transparently re-submits the same turn as a raw `prompt` using
+  an Alpaca-style `### Instruction: / ### Response:` wrapper, so
+  models like MythoMax or base Llama-2 work out of the box.
 - **Refusal sanitizer + retry:** if the model still emits a canned
   safety refusal (`"I'm here to provide…"`, `"as an AI"`, `"let's keep
   it positive"`, etc.) the bot transparently retries once at higher

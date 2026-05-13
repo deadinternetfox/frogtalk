@@ -181,18 +181,38 @@ class RunPodClient:
         *second* job — so you get billed for two runs for one reply.
         Async polling is single-job and works fine for chat-bot latency.
         """
+        def _submit(_payload: dict) -> str:
+            r = self._session.post(
+                f"{self.base}/run",
+                headers=self._headers(),
+                json=_payload,
+                timeout=20,
+            )
+            r.raise_for_status()
+            return r.json()["id"]
+
         payload = build_runpod_request(prompt, messages=messages,
                                         system=system, stop=stop,
                                         temperature=temperature)
-        r = self._session.post(
-            f"{self.base}/run",
-            headers=self._headers(),
-            json=payload,
-            timeout=20,
-        )
-        r.raise_for_status()
-        job_id = r.json()["id"]
-        return self._await_async(job_id)
+        try:
+            job_id = _submit(payload)
+            return self._await_async(job_id)
+        except RuntimeError as e:
+            # Some vLLM-backed models (e.g. MythoMax-L2, base Llama)
+            # have no chat template registered in the tokenizer, so the
+            # worker rejects the `messages` list with HTTP 400 wrapped
+            # in a FAILED job. Fall back to the raw-prompt path which
+            # uses ChatML wrapping (a reasonable default for most
+            # instruct-tuned models).
+            msg = str(e).lower()
+            if messages and ("chat template" in msg or "single string input" in msg):
+                fallback = build_runpod_request(
+                    prompt or "", messages=None,
+                    system=system, stop=stop, temperature=temperature,
+                )
+                job_id = _submit(fallback)
+                return self._await_async(job_id)
+            raise
 
     def _await_async(self, job_id: str) -> str:
         deadline = time.time() + self.async_poll_timeout
@@ -259,18 +279,24 @@ def build_runpod_request(prompt: str | None = None, *,
             inp["system"] = system
         return {"input": inp}
 
-    # Raw-prompt fallback (legacy).
+    # Raw-prompt fallback (legacy). Uses a plain Alpaca-style wrapper,
+    # which is reasonably model-agnostic for instruct-tuned Llama-2
+    # finetunes (MythoMax, Nous-Hermes, etc.) and base completion
+    # models. Models that prefer ChatML still understand it as
+    # ordinary text and continue coherently.
     if system:
         wrapped = (
-            "<|im_start|>system\n" + system.strip() + "<|im_end|>\n"
-            "<|im_start|>user\n" + (prompt or "").rstrip() + "<|im_end|>\n"
-            "<|im_start|>assistant\n"
+            system.strip() + "\n\n"
+            "### Instruction:\n" + (prompt or "").rstrip() + "\n\n"
+            "### Response:\n"
         )
     else:
         wrapped = prompt or ""
     stop_list = list(stop) if stop else list(RUNPOD_STOP_SEQUENCES)
     if system:
-        for s in CHATML_STOPS:
+        # Stop on the next instruction turn so the model doesn't keep
+        # role-playing a fake user.
+        for s in ("\n### Instruction:", "\n### Response:"):
             if s not in stop_list:
                 stop_list.append(s)
     inp["prompt"] = wrapped

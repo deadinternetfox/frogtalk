@@ -543,6 +543,8 @@ while True:
           template &mdash; swap in any modern instruct model (Qwen, Mistral-Small /
           MythoMax, Llama-3, etc.) with no code changes. Default endpoint runs
           <code>Gryphe/MythoMax-L2-13b</code> (uncensored Llama-2 roleplay finetune).
+          Auto-falls-back to a raw Alpaca-style prompt if the worker reports the
+          loaded model has no chat template registered.
           Includes a refusal-detection retry that catches canned RLHF safety output
           and re-rolls at higher temperature with a stronger jailbreak preface.</p>
           <ul>
