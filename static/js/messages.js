@@ -3161,6 +3161,7 @@ async function sendMessage() {
       display_name: State.user?.display_name,
       user_id: State.user?.id,
       avatar: State.user?.avatar,
+      is_admin: !!State.user?.is_admin,
       content: text,
       media_data: null,
       media_type: null,
