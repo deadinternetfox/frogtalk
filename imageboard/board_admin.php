@@ -4,6 +4,12 @@
  * Moderation: approve images, ban users, delete posts, board settings
  */
 session_start();
+// Never cache the admin HTML — we ship CSS/JS inline, so a stale cached
+// page would mean stale UI. Electron WebView in particular caches GETs
+// aggressively unless told otherwise.
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 require_once __DIR__ . '/board_config.php';
 
 $error = '';
@@ -533,17 +539,19 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         }
         .sidebar-nav .badge.green { background: #00ff41; color: #0a0e0a; }
 
-        /* Themed scrollbars (matches FrogTalk green-on-dark). */
-        html { scrollbar-width: thin; scrollbar-color: #2a5a35 #0a1610; }
-        ::-webkit-scrollbar { width: 10px; height: 10px; }
-        ::-webkit-scrollbar-track { background: #0a1610; }
-        ::-webkit-scrollbar-thumb {
+        /* Themed scrollbars (matches FrogTalk green-on-dark). Applied
+           universally so inner scrollable panels (.log-container, sidebar,
+           tables) all get the green theme — not just the page scrollbar. */
+        * { scrollbar-width: thin; scrollbar-color: #2a5a35 #0a1610; }
+        *::-webkit-scrollbar { width: 10px; height: 10px; background: #0a1610; }
+        *::-webkit-scrollbar-track { background: #0a1610; border-radius: 6px; }
+        *::-webkit-scrollbar-thumb {
             background: linear-gradient(180deg, #2a5a35, #1a3d22);
             border: 2px solid #0a1610;
             border-radius: 6px;
         }
-        ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #3d8048, #2a5a35); }
-        ::-webkit-scrollbar-corner { background: #0a1610; }
+        *::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #3d8048, #2a5a35); }
+        *::-webkit-scrollbar-corner { background: #0a1610; }
 
         /* Main content */
         .admin-main { flex: 1; padding: 25px; overflow-x: auto; }
