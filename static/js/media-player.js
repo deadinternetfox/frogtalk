@@ -350,7 +350,7 @@ const MediaPlayer = (() => {
     document.head.appendChild(style);
   }
 
-  function open(mediaEl, sender, time, allMedia = []) {
+  function open(mediaEl, sender, time, allMedia = [], startTime = 0) {
     init();
     
     const overlay = document.getElementById('media-player-overlay');
@@ -372,8 +372,17 @@ const MediaPlayer = (() => {
     } else {
       return;
     }
-    
-    _currentMedia = { url, type, sender, time };
+
+    // If the caller didn't pass an explicit startTime, fall back to the
+    // source element's own currentTime so opening a chat video into the
+    // fullscreen player picks up where the inline embed left off.
+    if ((!startTime || startTime <= 0)
+        && (mediaEl.tagName === 'VIDEO' || mediaEl.tagName === 'AUDIO')
+        && isFinite(mediaEl.currentTime) && mediaEl.currentTime > 0) {
+      startTime = mediaEl.currentTime;
+    }
+
+    _currentMedia = { url, type, sender, time, startTime };
     _playlist = allMedia.length ? allMedia : [{ url, type, sender, time }];
     _currentIndex = _playlist.findIndex(m => m.url === url) || 0;
     
@@ -382,7 +391,7 @@ const MediaPlayer = (() => {
     document.getElementById('mp-time').textContent = time || '';
     
     // Render media
-    renderMedia(type, url);
+    renderMedia(type, url, startTime);
     
     // Show/hide navigation
     if (_playlist.length > 1) {
@@ -396,7 +405,7 @@ const MediaPlayer = (() => {
     document.body.style.overflow = 'hidden';
   }
 
-  function renderMedia(type, url) {
+  function renderMedia(type, url, startTime = 0) {
     const content = document.getElementById('mp-content');
     const controls = document.getElementById('mp-controls');
     
@@ -406,7 +415,7 @@ const MediaPlayer = (() => {
     } else if (type === 'video') {
       content.innerHTML = `<video id="mp-video" src="${url}" onclick="MediaPlayer.togglePlay()"></video>`;
       controls.classList.remove('hidden');
-      setupVideoControls();
+      setupVideoControls(startTime);
     } else if (type === 'audio') {
       content.innerHTML = `
         <div class="mp-audio-display">
@@ -427,10 +436,26 @@ const MediaPlayer = (() => {
     }
   }
 
-  function setupVideoControls() {
+  function setupVideoControls(startTime = 0) {
     const video = document.getElementById('mp-video');
     if (!video) return;
-    
+
+    // Resume from the inline chat embed's current position so the
+    // fullscreen player picks up the same frame the user was watching.
+    if (startTime && isFinite(startTime) && startTime > 0) {
+      const seekToStart = () => {
+        try { video.currentTime = startTime; } catch {}
+        // Best-effort autoplay so the transition feels seamless. Falls
+        // back to muted autoplay if the browser blocks audible playback.
+        const p = video.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => { try { video.muted = true; video.play().catch(() => {}); } catch {} });
+        }
+      };
+      if (video.readyState >= 1) seekToStart();
+      else video.addEventListener('loadedmetadata', seekToStart, { once: true });
+    }
+
     video.addEventListener('loadedmetadata', () => {
       document.getElementById('mp-duration').textContent = formatTime(video.duration);
     });
