@@ -673,21 +673,38 @@
       const blocked = peerBtn.getAttribute('data-blocked') === '1';
       togglePeerBlock(nid, blocked);
     }
-    // Imageboard "Open Board" / "Open Board Admin" → if this admin page
-    // itself is served from a .onion (i.e. this is a Tor-mode node) and
-    // the user clicks the link from a clearnet client (typically the
-    // desktop Electron app where the OS browser is plain Firefox/Chrome,
-    // not the Tor Browser), shell.openExternal will hand the .onion to a
-    // browser that can't resolve it — silent failure. Intercept and
-    // show a "Tor required" splash with a copyable address + an
-    // "Open anyway" escape hatch.
-    const boardBtn = ev.target && ev.target.closest && ev.target.closest('#imageboard-open-btn, #imageboard-admin-btn');
-    if (boardBtn) {
-      const host = String(location.hostname || '').toLowerCase();
-      if (host.endsWith('.onion')) {
+    // Imageboard "Open Board" / "Open Board Admin" / federated peer cards
+    // — when the link target is a .onion address and the current page is
+    // NOT on .onion (i.e. the admin is using clearnet, typically the
+    // desktop Electron app or a regular browser), shell.openExternal will
+    // hand the unresolvable onion to the system browser and silently
+    // fail. Intercept and show a "Tor required" splash with a copyable
+    // address + an "Open anyway" escape hatch.
+    //
+    // Earlier version checked `location.hostname.endsWith('.onion')` —
+    // that's the inverse of what we want: the splash should fire when
+    // the *target* is onion and the *current host* isn't.
+    const onionAnchor = ev.target && ev.target.closest && ev.target.closest('a[href]');
+    if (onionAnchor && onionAnchor.closest('#imageboard-panel')) {
+      let targetUrl = '';
+      try { targetUrl = new URL(onionAnchor.getAttribute('href') || '', location.href).toString(); }
+      catch { targetUrl = onionAnchor.getAttribute('href') || ''; }
+      let targetHost = '';
+      try { targetHost = new URL(targetUrl, location.href).hostname.toLowerCase(); } catch {}
+      const currentHost = String(location.hostname || '').toLowerCase();
+      const targetIsOnion = targetHost.endsWith('.onion');
+      const currentIsOnion = currentHost.endsWith('.onion');
+      if (targetIsOnion && !currentIsOnion) {
         ev.preventDefault();
-        const url = new URL(boardBtn.getAttribute('href') || '/board/', location.href).toString();
-        showTorRequiredDialog(url, boardBtn.id === 'imageboard-admin-btn' ? 'Board Admin' : 'Imageboard');
+        let label = 'Imageboard';
+        if (onionAnchor.id === 'imageboard-admin-btn') label = 'Board Admin';
+        else if (onionAnchor.id === 'imageboard-open-btn') label = 'Imageboard';
+        else {
+          // Federated peer card — pull the peer's display title if present.
+          const peerTitle = onionAnchor.querySelector('b');
+          if (peerTitle && peerTitle.textContent) label = peerTitle.textContent.trim();
+        }
+        showTorRequiredDialog(targetUrl, label);
       }
     }
   });
