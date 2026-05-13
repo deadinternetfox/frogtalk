@@ -34,6 +34,19 @@ any chat model you like.
   kept narrow: no real-world violence against specific people, no CSAM,
   no doxxing, no targeted malware. Override `_system_prompt()` in
   `bot.py` if you want a tamer persona.
+- **Qwen ChatML prompt format:** the system prompt is delivered inside
+  the worker `prompt` field as `<|im_start|>system … <|im_end|>` —
+  most vLLM RunPod workers silently ignore a sibling `"system"` input
+  field, so embedding it in ChatML is the only reliable way to make the
+  persona actually stick. Stop sequences include `<|im_end|>` /
+  `<|im_start|>` to bound the assistant turn.
+- **Refusal sanitizer + retry:** if the model still emits a canned
+  safety refusal (`"I'm here to provide…"`, `"as an AI"`, `"let's keep
+  it positive"`, etc.) the bot transparently retries once at higher
+  temperature with a stronger jailbreak preface, and falls back to a
+  stock irreverent line only if that also refuses. Stray
+  `<!DOCTYPE>` / `</html>` / `\ufffd` artefacts the model sometimes
+  hallucinates are stripped before posting.
 - Renders with the `BOT` pill in chat (the server stamps `is_bot:true`).
 
 ## Quick start

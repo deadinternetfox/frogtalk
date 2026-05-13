@@ -537,7 +537,11 @@ while True:
           <h4 style="margin-top:14px">🤖 runpod-ai-bot &mdash; AI chat bot (Python)</h4>
           <p>A mention-driven AI chat bot powered by a <a href="https://runpod.io" target="_blank" rel="noopener noreferrer">RunPod</a>
           serverless LLM endpoint. Polls public channels, replies when <code>@</code>-mentioned or
-          when a user replies to its own message. ~200 lines, no async framework required.</p>
+          when a user replies to its own message. ~200 lines, no async framework required.
+          Ships with an uncensored Qwen-ChatML prompt format (system prompt is embedded
+          as <code>&lt;|im_start|&gt;system…&lt;|im_end|&gt;</code> so vLLM workers actually honor it),
+          plus a refusal-detection retry that catches canned RLHF safety output and re-rolls
+          at higher temperature with a stronger jailbreak preface.</p>
           <ul>
             <li><a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples/runpod-ai-bot" target="_blank" rel="noopener noreferrer">📁 runpod-ai-bot/</a> &mdash; full project folder</li>
             <li><a href="https://github.com/deadinternetfox/frogtalk/blob/master/bot-examples/runpod-ai-bot/README.md" target="_blank" rel="noopener noreferrer">📖 README.md</a> &mdash; step-by-step setup &amp; deployment guide</li>
