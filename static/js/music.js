@@ -2233,7 +2233,16 @@ const Music = (() => {
     _muted = false;
     _userPaused = false;
     _userIntentPaused = null;
-    _setAnchor(track, 0);
+    // Optional start offset (seconds) — chat link previews pass this
+    // through so a "Send to player" click resumes at the same point
+    // the user was watching in the inline iframe.
+    const startSec = Math.max(0, Math.floor(Number(opts.startSec) || 0));
+    // _setAnchor refuses regressions when the track key matches an
+    // existing anchor; clear it so a fresh playSolo always seeds
+    // cleanly regardless of session history.
+    _anchorMs = 0;
+    _anchorTrackKey = '';
+    _setAnchor(track, startSec);
 
     // Keep the #music-panel hidden (solo playback runs inside the mini-dock
     // iframe only — we don't want a giant full-screen player covering the
