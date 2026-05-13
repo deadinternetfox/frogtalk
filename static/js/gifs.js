@@ -963,25 +963,45 @@ const GIFs = (() => {
     loadStickerPacks();
   }
 
+  // Lightweight tab UI update without kicking off any data fetch — used
+  // by entry points (e.g. browseFromManager) that want to control which
+  // payload lands in #gif-grid themselves. Calling switchTab() here
+  // would race loadStickerPacks() against the caller's intended load.
+  function _setActiveTabUI(tab) {
+    _currentTab = tab;
+    document.querySelectorAll('.gif-tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    const searchInput  = document.getElementById('gif-search');
+    const categoriesEl = document.getElementById('gif-categories');
+    const manageBtn    = document.getElementById('gif-manage-btn');
+    if (searchInput)  searchInput.placeholder = tab === 'gifs' ? 'Search GIFs...' : 'Search stickers...';
+    if (categoriesEl) categoriesEl.style.display = tab === 'gifs' ? 'flex' : 'none';
+    if (manageBtn)    manageBtn.style.display    = tab === 'gifs' ? 'none'  : '';
+  }
+
   // Close the manager without re-triggering loadStickerPacks (used when
   // jumping directly into the public-pack browser so it doesn't race).
   function browseFromManager() {
     const m = document.getElementById('sticker-manager-modal');
     if (m) m.style.display = 'none';
-    // Ensure the GIF picker is open and on the Stickers tab — otherwise
-    // showPublicPacks() paints into a hidden #gif-grid and the modal just
-    // looks like it closed with nothing happening.
+    // Ensure the GIF picker is open so #gif-grid is actually visible.
+    // The picker's outside-click handler may have closed it the moment
+    // the user clicked anywhere inside the manager modal, so don't
+    // trust the cached _isOpen flag — re-derive from the DOM and force
+    // an open state if needed (without going through toggle(), which
+    // would also race loadStickerPacks).
     try { createPicker(); } catch {}
     const picker = document.getElementById('gif-picker');
     if (picker && !picker.classList.contains('open')) {
-      // Mirror toggle()'s open path so positioning + outside-close
-      // handlers match what the GIF button itself would do.
       try { toggle(); } catch {}
     }
-    try {
-      if (typeof switchTab === 'function') switchTab('stickers');
-      else if (_currentTab !== 'stickers') _currentTab = 'stickers';
-    } catch {}
+    // Force-update the tab UI to "stickers" WITHOUT kicking off
+    // loadStickerPacks — otherwise that fetch races our showPublicPacks
+    // call and the one that completes last wins. We've already
+    // observed the user's own packs (or "no packs yet") overwriting
+    // the public-pack list in production.
+    _setActiveTabUI('stickers');
     showPublicPacks();
   }
 
