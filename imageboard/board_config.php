@@ -685,12 +685,19 @@ function getFederatedPeers(?bool $visitorTor = null): array {
     if (!($s['federation_enabled'] ?? true)) return [];
     $peers = $s['federated_peers'] ?? [];
     if (!is_array($peers)) return [];
+    // Server-admin can block specific peer node_ids; they vanish from the
+    // public nav but stay in settings.json so the operator can re-enable
+    // them. blocked_peer_nodes is a flat list of node_id strings.
+    $blocked = $s['blocked_peer_nodes'] ?? [];
+    $blocked = is_array($blocked) ? array_fill_keys(array_map('strval', $blocked), true) : [];
     if ($visitorTor === null) $visitorTor = isTorRequest();
     $out = [];
     foreach ($peers as $p) {
         if (!is_array($p)) continue;
         $url = (string)($p['url'] ?? '');
         if ($url === '') continue;
+        $nid = (string)($p['node_id'] ?? '');
+        if ($nid !== '' && isset($blocked[$nid])) continue;
         $isTor = (bool)($p['tor_only'] ?? false);
         // Note: Tor-only peers are returned for everyone — the fed-pill-tor
         // styling on the board indicates "this requires Tor to visit".

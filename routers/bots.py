@@ -181,6 +181,33 @@ async def list_bots(current_user: dict = Depends(get_current_user)):
     return {"bots": bots}
 
 
+# NOTE: this MUST be declared before the `/bots/{bot_id}` route below,
+# otherwise FastAPI greedily matches "public" against the int-typed
+# {bot_id} and returns 422 — which is exactly the regression that left
+# the Bot Directory showing "No bots match".
+@router.get("/bots/public")
+async def list_public_bots(current_user: dict = Depends(get_current_user)):
+    """List all public bots — local + federated.
+
+    Auth-gated so the directory isn't a free unauthenticated enumeration
+    surface for scrapers. The federation `origin_server_id` is only
+    revealed to admins; regular users see local+federated mixed without
+    knowing which peer a bot originated on. Federated rows from peers
+    that the local admin has blocked are filtered out here so a
+    blocklist applied on this node hides their bots too — they're
+    typically tied to the peer's identity (channel/board)."""
+    bots = db.get_public_bots() or []
+    blocked = set(db.get_blocked_peer_server_ids()) if hasattr(db, "get_blocked_peer_server_ids") else set()
+    if blocked:
+        bots = [b for b in bots if not b.get("origin_server_id") or b.get("origin_server_id") not in blocked]
+    if not current_user.get("is_admin"):
+        bots = [
+            {k: v for k, v in b.items() if k != "origin_server_id"}
+            for b in bots
+        ]
+    return {"bots": bots}
+
+
 @router.get("/bots/{bot_id}")
 async def get_bot(bot_id: int, current_user: dict = Depends(get_current_user)):
     """Get a single bot's details (must be the owner)."""
@@ -317,23 +344,5 @@ async def get_channel_bots(room_name: str, current_user: dict = Depends(get_curr
     return {"bots": bots}
 
 
-# ---------------------------------------------------------------------------
-# Public Bot Directory
-# ---------------------------------------------------------------------------
-
-@router.get("/bots/public")
-async def list_public_bots(current_user: dict = Depends(get_current_user)):
-    """List all public bots — local + federated.
-
-    Auth-gated so the directory isn't a free unauthenticated enumeration
-    surface for scrapers. The federation `origin_server_id` is only
-    revealed to admins; regular users see local+federated mixed without
-    knowing which peer a bot originated on.
-    """
-    bots = db.get_public_bots() or []
-    if not current_user.get("is_admin"):
-        bots = [
-            {k: v for k, v in b.items() if k != "origin_server_id"}
-            for b in bots
-        ]
-    return {"bots": bots}
+# (Public bot directory route is registered above, before `/bots/{bot_id}`,
+# to avoid the int-coercion 422 trap.)

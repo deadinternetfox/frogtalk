@@ -711,6 +711,31 @@ async def server_admin_imageboard_stats(request: Request):
         if exp == 0 or exp > now:
             active_bans += 1
 
+    # Federated peer list — surfaces both/all boards in the server admin
+    # panel so the operator can see e.g. "Frog General + SpyCraft" without
+    # bouncing through /board/admin on each node.
+    raw_peers = settings.get("federated_peers") or []
+    blocked_nodes = settings.get("blocked_peer_nodes") or []
+    if not isinstance(blocked_nodes, list):
+        blocked_nodes = []
+    blocked_set = {str(x) for x in blocked_nodes if x}
+    peers = []
+    if isinstance(raw_peers, list):
+        for p in raw_peers:
+            if not isinstance(p, dict): continue
+            nid = str(p.get("node_id") or "")
+            peers.append({
+                "node_id":       nid,
+                "title":         str(p.get("title") or ""),
+                "subtitle":      str(p.get("subtitle") or ""),
+                "topic":         str(p.get("topic") or ""),
+                "url":           str(p.get("url") or ""),
+                "tor_only":      bool(p.get("tor_only") or False),
+                "tor_onion_url": str(p.get("tor_onion_url") or ""),
+                "last_seen":     int(p.get("last_seen") or 0),
+                "blocked":       bool(nid and nid in blocked_set),
+            })
+
     return {
         "available": available,
         "data_dir": root,
@@ -726,6 +751,7 @@ async def server_admin_imageboard_stats(request: Request):
             "chat_enabled": bool(settings.get("chat_enabled", True)),
             "announcement": settings.get("announcement") or "",
         },
+        "peers": peers,
         "stats": {
             "threads": len(threads),
             "posts": total_posts,
@@ -746,6 +772,136 @@ async def server_admin_imageboard_stats(request: Request):
         "board_url": "/board/",
         "timestamp": now,
     }
+
+
+@router.put("/api/server-admin/imageboard-identity")
+async def server_admin_imageboard_identity(request: Request):
+    """Update this node's board identity (title / subtitle / topic / node_id).
+
+    Writes directly to ``board_data/settings.json`` so the change takes
+    effect on the next request without needing to touch /board/admin. We
+    deliberately limit the editable fields here — ban lists, federation
+    peers, retention, etc. still live in the dedicated board admin UI.
+    """
+    import json as _json
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"error": "Invalid body"})
+
+    root = _imageboard_root()
+    if not os.path.isdir(root):
+        return JSONResponse(status_code=404, content={"error": f"Board data dir not found: {root}"})
+    path = os.path.join(root, "settings.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            settings = _json.load(f) or {}
+    except FileNotFoundError:
+        settings = {}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to read settings: {e}"})
+    if not isinstance(settings, dict):
+        settings = {}
+
+    import re as _re
+    # Only allow the identity-related fields through.
+    if "board_title" in body:
+        settings["board_title"] = str(body.get("board_title") or "")[:64]
+    if "board_subtitle" in body:
+        settings["board_subtitle"] = str(body.get("board_subtitle") or "")[:200]
+    if "board_topic" in body:
+        # Mirrors imageboard/board_admin.php sanitisation (A-Z0-9_- + space, ≤32 chars).
+        raw = str(body.get("board_topic") or "")
+        settings["board_topic"] = _re.sub(r"[^A-Za-z0-9_\- ]", "", raw)[:32]
+    if "node_id" in body:
+        raw = str(body.get("node_id") or "").strip().lower()
+        # node_id is a slug — lowercased a-z0-9- only, max 40 chars.
+        slug = _re.sub(r"[^a-z0-9\-]", "", raw)[:40]
+        if slug:
+            settings["node_id"] = slug
+
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(settings, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to write settings: {e}"})
+
+    return {
+        "ok": True,
+        "identity": {
+            "title": settings.get("board_title") or "",
+            "subtitle": settings.get("board_subtitle") or "",
+            "topic": settings.get("board_topic") or "",
+            "node_id": settings.get("node_id") or "",
+        },
+    }
+
+
+@router.put("/api/server-admin/imageboard-peer-block")
+async def server_admin_imageboard_peer_block(request: Request):
+    """Toggle whether a federated board peer is hidden from this node's
+    public /board/ navigation. Stored as ``blocked_peer_nodes`` in
+    settings.json (a flat list of node_id strings). Body: {node_id, blocked}."""
+    import json as _json
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse(status_code=400, content={"error": "Invalid body"})
+    node_id = str(body.get("node_id") or "").strip().lower()
+    if not node_id or len(node_id) > 64:
+        return JSONResponse(status_code=400, content={"error": "node_id required"})
+    block = bool(body.get("blocked"))
+
+    root = _imageboard_root()
+    if not os.path.isdir(root):
+        return JSONResponse(status_code=404, content={"error": f"Board data dir not found: {root}"})
+    path = os.path.join(root, "settings.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            settings = _json.load(f) or {}
+    except FileNotFoundError:
+        settings = {}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to read settings: {e}"})
+    if not isinstance(settings, dict):
+        settings = {}
+    blocked = settings.get("blocked_peer_nodes") or []
+    if not isinstance(blocked, list):
+        blocked = []
+    blocked = [str(x) for x in blocked if x]
+    if block:
+        if node_id not in blocked:
+            blocked.append(node_id)
+    else:
+        blocked = [x for x in blocked if x != node_id]
+    settings["blocked_peer_nodes"] = blocked
+
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            _json.dump(settings, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to write settings: {e}"})
+    return {"ok": True, "node_id": node_id, "blocked": block, "blocked_peer_nodes": blocked}
 
 
 @router.get("/api/server-admin/nodes")

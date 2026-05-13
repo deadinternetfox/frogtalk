@@ -535,10 +535,12 @@
     const grid = document.getElementById('imageboard-stats-grid');
     const idEl = document.getElementById('imageboard-identity');
     const msg = document.getElementById('imageboard-msg');
+    const peersEl = document.getElementById('imageboard-peers');
     if (!grid || !idEl) return;
     if (!payload || !payload.available) {
       grid.innerHTML = '';
       idEl.textContent = 'Imageboard data not found on this node.';
+      if (peersEl) peersEl.innerHTML = '';
       if (msg) msg.textContent = payload && payload.data_dir ? `Expected at ${payload.data_dir}` : '';
       return;
     }
@@ -546,8 +548,9 @@
     const s = payload.stats || {};
     const torTag = id.tor_only ? ' · 🧅 Tor-only' : '';
     const lockTag = id.board_locked ? ' · 🔒 LOCKED' : '';
+    const topicTag = id.topic ? ` <span class="ib-pill-topic" style="color:#6baf6b;">#${escHtml(id.topic)}</span>` : '';
     const fed = id.federation_enabled ? `${s.federated_peers || 0} federated peer(s)` : 'federation off';
-    idEl.innerHTML = `<b>${escHtml(id.title || '/board/')}</b>${id.node_id ? ` <span style="color:var(--muted)">@${escHtml(id.node_id)}</span>` : ''}${torTag}${lockTag}${id.subtitle ? ` — ${escHtml(id.subtitle)}` : ''} <span style="color:var(--muted)">· ${escHtml(fed)}</span>`;
+    idEl.innerHTML = `<b>${escHtml(id.title || '/board/')}</b>${id.node_id ? ` <span style="color:var(--muted)">@${escHtml(id.node_id)}</span>` : ''}${topicTag}${torTag}${lockTag}${id.subtitle ? ` — ${escHtml(id.subtitle)}` : ''} <span style="color:var(--muted)">· ${escHtml(fed)}</span>`;
     grid.innerHTML = [
       statCard('Threads', s.threads ?? 0, `${s.threads_24h ?? 0} new in 24h`),
       statCard('Posts', s.posts ?? 0, `${s.posts_24h ?? 0} new in 24h`),
@@ -558,7 +561,84 @@
       statCard('Chat Messages', s.chat_messages ?? 0, id.chat_enabled ? 'Live chat enabled' : 'Live chat disabled'),
       statCard('Last Post', fmtRelative(s.last_post_ts), s.sticky_threads ? `${s.sticky_threads} sticky · ${s.locked_threads || 0} locked` : `${s.locked_threads || 0} locked`),
     ].join('');
+
+    // Hydrate the identity editor (only when it hasn't been touched, so we
+    // don't trample in-progress typing on the next auto-refresh tick).
+    const titleI = document.getElementById('ibid-title');
+    const subI = document.getElementById('ibid-subtitle');
+    const topicI = document.getElementById('ibid-topic');
+    const nodeI = document.getElementById('ibid-node');
+    [['_orig', titleI, id.title], ['_orig', subI, id.subtitle], ['_orig', topicI, id.topic], ['_orig', nodeI, id.node_id]].forEach(([_, el, v]) => {
+      if (!el) return;
+      const fresh = String(v || '');
+      if (el.dataset.dirty !== '1' && el.value !== fresh) el.value = fresh;
+      el.dataset.orig = fresh;
+    });
+
+    // Federated peers list — surfaces "both boards" right here in server admin.
+    if (peersEl) {
+      const peers = Array.isArray(payload.peers) ? payload.peers : [];
+      if (!peers.length) {
+        peersEl.innerHTML = '<span style="color:var(--muted);font-size:12px;">No peers configured. Add them at /board/admin → Federation.</span>';
+      } else {
+        peersEl.innerHTML = peers.map((p) => {
+          const tor = p.tor_only ? '<span style="color:#ffaa33;">🧅 </span>' : '';
+          const t = p.topic ? `<span style="color:#6baf6b;"> #${escHtml(p.topic)}</span>` : '';
+          const seen = p.last_seen ? ` · seen ${escHtml(fmtRelative(p.last_seen))}` : '';
+          const isBlocked = !!p.blocked;
+          const wrapStyle = `display:inline-flex;gap:6px;align-items:center;padding:4px 4px 4px 10px;border:1px solid ${isBlocked ? '#7a3a3a' : 'var(--border,#333)'};border-radius:999px;background:${isBlocked ? 'rgba(180,60,60,.08)' : 'rgba(255,255,255,.02)'};font-size:12px;${isBlocked ? 'opacity:.6;' : ''}`;
+          const blockBtn = `<button type="button" data-peer-block="${escHtml(p.node_id || '')}" data-blocked="${isBlocked ? '1' : '0'}" title="${isBlocked ? 'Unblock — show in nav' : 'Block — hide from /board/ nav'}" style="margin-left:4px;padding:3px 8px;border:1px solid ${isBlocked ? '#7a3a3a' : '#3a5544'};background:${isBlocked ? 'rgba(180,60,60,.18)' : 'rgba(127,210,167,.08)'};color:${isBlocked ? '#ff9b9b' : '#7fd2a7'};border-radius:999px;font-size:11px;cursor:pointer;">${isBlocked ? 'Unblock' : 'Block'}</button>`;
+          const link = `<a href="${escHtml(p.url || '#')}" target="_blank" rel="noopener" style="display:inline-flex;gap:6px;align-items:center;text-decoration:none;color:var(--text,#eee);">${tor}<b>${escHtml(p.title || p.url || 'peer')}</b><span style="color:var(--muted);">@${escHtml(p.node_id || '?')}</span>${t}<span style="color:var(--muted);font-size:11px;">${seen}</span>${isBlocked ? '<span style="color:#ff9b9b;font-size:11px;"> · blocked</span>' : ''}</a>`;
+          return `<span style="${wrapStyle}">${link}${blockBtn}</span>`;
+        }).join('');
+      }
+    }
     if (msg) msg.textContent = '';
+  }
+
+  async function togglePeerBlock(nodeId, currentlyBlocked) {
+    if (!nodeId) return;
+    try {
+      await api('/api/server-admin/imageboard-peer-block', {
+        method: 'PUT',
+        body: JSON.stringify({ node_id: nodeId, blocked: !currentlyBlocked }),
+      });
+      await refreshImageboard();
+    } catch (e) {
+      const msg = document.getElementById('imageboard-msg');
+      if (msg) { msg.textContent = e.message || 'Failed'; msg.style.color = '#f87171'; }
+    }
+  }
+
+  async function saveImageboardIdentity() {
+    const titleI = document.getElementById('ibid-title');
+    const subI = document.getElementById('ibid-subtitle');
+    const topicI = document.getElementById('ibid-topic');
+    const nodeI = document.getElementById('ibid-node');
+    const msg = document.getElementById('ibid-msg');
+    const btn = document.getElementById('ibid-save-btn');
+    if (!titleI || !btn) return;
+    btn.disabled = true;
+    if (msg) { msg.textContent = 'Saving…'; msg.style.color = 'var(--muted)'; }
+    try {
+      const body = {
+        board_title: titleI.value,
+        board_subtitle: subI ? subI.value : '',
+        board_topic: topicI ? topicI.value : '',
+        node_id: nodeI ? nodeI.value : '',
+      };
+      await api('/api/server-admin/imageboard-identity', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      if (msg) { msg.textContent = 'Saved.'; msg.style.color = '#4ade80'; }
+      [titleI, subI, topicI, nodeI].forEach((el) => { if (el) delete el.dataset.dirty; });
+      await refreshImageboard();
+    } catch (e) {
+      if (msg) { msg.textContent = e.message || 'Save failed'; msg.style.color = '#f87171'; }
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function refreshImageboard() {
@@ -570,6 +650,30 @@
       if (msg) msg.textContent = e.message || 'Failed to load imageboard stats';
     }
   }
+
+  // Mark identity inputs dirty so background refresh stops overwriting them.
+  ['ibid-title','ibid-subtitle','ibid-topic','ibid-node'].forEach((id) => {
+    document.addEventListener('input', (ev) => {
+      const t = ev.target;
+      if (t && t.id === id) t.dataset.dirty = '1';
+    });
+  });
+  document.addEventListener('click', (ev) => {
+    if (ev.target && ev.target.id === 'ibid-save-btn') {
+      ev.preventDefault();
+      saveImageboardIdentity();
+      return;
+    }
+    // Per-peer Block/Unblock button on the imageboard panel.
+    const peerBtn = ev.target && ev.target.closest && ev.target.closest('[data-peer-block]');
+    if (peerBtn) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const nid = peerBtn.getAttribute('data-peer-block') || '';
+      const blocked = peerBtn.getAttribute('data-blocked') === '1';
+      togglePeerBlock(nid, blocked);
+    }
+  });
 
   function renderNodeSummary(nodes) {
     if (!nodeSummaryGrid) return;
