@@ -2761,11 +2761,23 @@ if ($singleThread) {
                         <?php if (!empty($_thisInfo['topic'])): ?><span class="fed-pill-topic">#<?= htmlspecialchars($_thisInfo['topic']) ?></span><?php endif; ?>
                     </a>
                     <?php foreach ($_peers as $_pp): ?>
-                        <a class="fed-pill<?= !empty($_pp['tor_only']) ? ' fed-pill-tor' : '' ?>"
+                        <?php
+                            $_peerTorOnly = !empty($_pp['tor_only']);
+                            // Clearnet visitor + Tor-only peer → don't follow the link, show a dialog instead.
+                            $_needsTorDialog = $_peerTorOnly && !$_visitorTor;
+                        ?>
+                        <a class="fed-pill<?= $_peerTorOnly ? ' fed-pill-tor' : '' ?>"
                            href="<?= htmlspecialchars($_pp['url']) ?>"
+                           <?php if ($_needsTorDialog): ?>
+                           onclick="showFedTorDialog(this); return false;"
+                           data-peer-title="<?= htmlspecialchars($_pp['title']) ?>"
+                           data-peer-node="<?= htmlspecialchars($_pp['node_id']) ?>"
+                           data-peer-url="<?= htmlspecialchars($_pp['url']) ?>"
+                           <?php else: ?>
                            target="_blank" rel="noopener"
+                           <?php endif; ?>
                            title="<?= htmlspecialchars($_pp['subtitle']) ?>">
-                            <?php if (!empty($_pp['tor_only'])): ?><span class="fed-pill-tor-icon">🧅</span><?php endif; ?>
+                            <?php if ($_peerTorOnly): ?><span class="fed-pill-tor-icon">🧅</span><?php endif; ?>
                             <span class="fed-pill-title"><?= htmlspecialchars($_pp['title']) ?></span>
                             <span class="fed-pill-node">@<?= htmlspecialchars($_pp['node_id']) ?></span>
                             <?php if (!empty($_pp['topic'])): ?><span class="fed-pill-topic">#<?= htmlspecialchars($_pp['topic']) ?></span><?php endif; ?>
@@ -3672,6 +3684,40 @@ if ($singleThread) {
             </div>
             <div class="gbump-status" id="gbumpStatus"></div>
             <div class="gbump-close" onclick="closeGoyimBump()">Cancel</div>
+        </div>
+    </div>
+
+    <!-- ═══ FED TOR-ONLY PEER DIALOG (shown to clearnet visitors) ═══ -->
+    <div class="tip-modal-overlay" id="fedTorOverlay" onclick="if(event.target===this)closeFedTorDialog()">
+        <div class="tip-modal" style="max-width:460px;border-color:rgba(255,170,51,0.45);">
+            <h3 style="color:#ffaa33;">🧅 Tor-only peer board</h3>
+            <p style="color:#c8ffc8;font-size:12px;margin:0 0 10px;">
+                <strong id="fedTorPeerTitle" style="color:#00ff41;"></strong>
+                <span id="fedTorPeerNode" style="color:#6baf6b;font-size:10px;"></span>
+            </p>
+            <p style="color:#c8d8c8;font-size:12px;line-height:1.55;margin:0 0 12px;">
+                This peer only accepts connections over <strong style="color:#ffaa33;">Tor</strong>. Clearnet
+                browsers can't reach <code style="color:#ffaa33;">.onion</code> addresses directly.
+            </p>
+            <div style="background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.25);border-radius:6px;padding:10px;margin:0 0 12px;">
+                <div style="color:#6a6040;font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">onion address</div>
+                <code id="fedTorOnionUrl" style="color:#ffaa33;font-size:11px;word-break:break-all;display:block;"></code>
+            </div>
+            <p style="color:#6baf6b;font-size:11px;margin:0 0 14px;line-height:1.55;">
+                Install <a href="https://www.torproject.org/download/" target="_blank" rel="noopener" style="color:#ffaa33;">Tor Browser</a>
+                (or use a system Tor proxy) and paste the address above.
+            </p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" onclick="copyFedTorOnion()" id="fedTorCopyBtn"
+                        style="flex:1;padding:9px;background:rgba(255,170,51,0.12);border:1px solid rgba(255,170,51,0.4);color:#ffaa33;border-radius:6px;cursor:pointer;font-family:'Courier New',monospace;font-size:12px;">
+                    📋 Copy onion URL
+                </button>
+                <a href="https://www.torproject.org/download/" target="_blank" rel="noopener"
+                   style="flex:1;padding:9px;background:transparent;border:1px solid rgba(255,170,51,0.3);color:#ffaa33;border-radius:6px;text-align:center;text-decoration:none;font-family:'Courier New',monospace;font-size:12px;">
+                    ⬇ Get Tor Browser
+                </a>
+            </div>
+            <div class="tip-close" onclick="closeFedTorDialog()" style="color:#6baf6b;">Close</div>
         </div>
     </div>
 
@@ -5012,6 +5058,50 @@ if ($singleThread) {
         _gbumpPhantomPubkey = null;
         _gbumpHolderVerified = false;
         _gbumpHolderBalance  = 0;
+    }
+
+    // ── Fed Tor-only peer dialog (clearnet visitors only) ──
+    function showFedTorDialog(anchorEl) {
+        var ov = document.getElementById('fedTorOverlay');
+        if (!ov || !anchorEl) return;
+        var url   = anchorEl.getAttribute('data-peer-url')   || anchorEl.getAttribute('href') || '';
+        var title = anchorEl.getAttribute('data-peer-title') || '';
+        var node  = anchorEl.getAttribute('data-peer-node')  || '';
+        document.getElementById('fedTorPeerTitle').textContent = title;
+        document.getElementById('fedTorPeerNode').textContent  = node ? ' @' + node : '';
+        document.getElementById('fedTorOnionUrl').textContent  = url;
+        var btn = document.getElementById('fedTorCopyBtn');
+        if (btn) btn.textContent = '📋 Copy onion URL';
+        ov.classList.add('active');
+    }
+    function closeFedTorDialog() {
+        var ov = document.getElementById('fedTorOverlay');
+        if (ov) ov.classList.remove('active');
+    }
+    function copyFedTorOnion() {
+        var code = document.getElementById('fedTorOnionUrl');
+        var btn  = document.getElementById('fedTorCopyBtn');
+        if (!code) return;
+        var txt  = code.textContent || '';
+        var done = function() { if (btn) { btn.textContent = '✓ Copied'; setTimeout(function(){ btn.textContent = '📋 Copy onion URL'; }, 1500); } };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(txt).then(done, function(){
+                // fall through
+                try {
+                    var ta = document.createElement('textarea');
+                    ta.value = txt; document.body.appendChild(ta); ta.select();
+                    document.execCommand('copy'); document.body.removeChild(ta);
+                    done();
+                } catch(e) {}
+            });
+        } else {
+            try {
+                var ta = document.createElement('textarea');
+                ta.value = txt; document.body.appendChild(ta); ta.select();
+                document.execCommand('copy'); document.body.removeChild(ta);
+                done();
+            } catch(e) {}
+        }
     }
 
     async function connectPhantomForBump() {

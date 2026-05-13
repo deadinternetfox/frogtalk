@@ -200,13 +200,21 @@ class RunPodClient:
         raise TimeoutError(f"RunPod job {job_id} did not complete in {self.async_poll_timeout}s")
 
 
-def build_runpod_request(prompt: str, *, system: str | None = None) -> dict:
+# Stop sequences keep the model from continuing the transcript past
+# its one assistant turn. Most chat workers (vLLM, TGI, …) accept a
+# `stop` list under `input`.
+RUNPOD_STOP_SEQUENCES = ["\nUser:", "\nuser:", "\nAssistant:", "\nassistant:", "\n<|"]
+
+
+def build_runpod_request(prompt: str, *, system: str | None = None,
+                         stop: list[str] | None = None) -> dict:
     """Shape for an OpenAI-compatible / vLLM RunPod worker. Override
     this function if your worker uses a different input schema."""
     inp: dict = {
         "prompt": prompt,
         "max_tokens": 400,
         "temperature": 0.7,
+        "stop": list(stop) if stop else list(RUNPOD_STOP_SEQUENCES),
     }
     if system:
         inp["system"] = system
@@ -450,6 +458,15 @@ class ChatBot:
             content = (m.get("content") or "").strip()
             if not content:
                 continue
+            # Drop our own previous failure/empty placeholders so the
+            # model doesn't pattern-match on them and keep generating
+            # fresh "(empty reply)" / "(sorry, my AI backend hiccuped)"
+            # turns as raw text continuation.
+            if m.get("is_bot") and (
+                content.startswith("(empty reply)")
+                or content.startswith("(sorry, my AI backend hiccuped")
+            ):
+                continue
             lines.append(f"{nick}{tag}: {content}")
         lines.append(f"{self.bot_name} [bot]:")
         return "\n".join(lines)
@@ -462,6 +479,13 @@ class ChatBot:
         prefix = f"{self.bot_name}:"
         if text.lower().startswith(prefix.lower()):
             text = text[len(prefix):].lstrip()
+        # If the model kept going and started a new transcript turn
+        # ("\nNick:" or "\nNick [bot]:"), cut the reply at that point
+        # so we only post our own first response.
+        turn_re = re.compile(r"\n[^\n:]{1,40}(?:\s\[bot\])?:\s")
+        m = turn_re.search(text)
+        if m:
+            text = text[: m.start()].rstrip()
         # FrogTalk caps at 4000 chars; leave headroom.
         if len(text) > 3500:
             text = text[:3497].rstrip() + "…"

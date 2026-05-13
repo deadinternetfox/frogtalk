@@ -42,10 +42,14 @@ You'll need:
    description (botfather-style).
 2. A **RunPod endpoint id** and **API key** — both visible in your
    RunPod console. The example targets a chat-completion-style worker
-   that accepts `{"input": {"prompt": "..."}}` and returns
-   `{"output": "..."}`. Adjust `build_runpod_request` /
-   `extract_runpod_text` in `bot.py` if your worker uses a different
-   shape.
+   that accepts `{"input": {"prompt": "...", "stop": [...]}}` and
+   returns one of the common output shapes:
+   - `{"output": "text..."}`
+   - `{"output": {"text": "..."}}` / `{"output": {"choices":[{"message":{"content":"..."}}]}}`
+   - `{"output": [{"choices":[{"tokens":["text..."]}]}]}` (vLLM)
+   `extract_runpod_text` in `bot.py` handles all of the above; override
+   `build_runpod_request` / `extract_runpod_text` if your worker uses
+   a different schema.
 
 ## Configuration
 
