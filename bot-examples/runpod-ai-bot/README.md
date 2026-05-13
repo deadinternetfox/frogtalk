@@ -20,6 +20,20 @@ any chat model you like.
 - Calls RunPod via the async `/run` → `/status/<job_id>` polling loop
   (skipping `/runsync` so cold starts don't get double-billed when the
   sync request times out and falls back).
+- **Single-turn reply hardening:** sends per-speaker stop sequences
+  (e.g. `\nTesty:`, ` Testy:`, plus the standard `\nUser:` /
+  `\nAssistant:`) to the worker, AND hard-truncates the model output at
+  any other user's `Nick:` label — so a raw-text completion that
+  hallucinates a multi-turn transcript still surfaces as a clean single
+  reply.
+- Filters its own previous `(empty reply)` / `(sorry, my AI backend
+  hiccuped…)` placeholders out of the prompt so the model doesn't
+  pattern-match on them and keep producing fresh failure stubs.
+- Ships with an **uncensored** default system prompt (wild, no
+  moralizing, no refusals, no "as an AI" disclaimers). Hard limits are
+  kept narrow: no real-world violence against specific people, no CSAM,
+  no doxxing, no targeted malware. Override `_system_prompt()` in
+  `bot.py` if you want a tamer persona.
 - Renders with the `BOT` pill in chat (the server stamps `is_bot:true`).
 
 ## Quick start
