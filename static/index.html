@@ -10085,7 +10085,13 @@ function openNodeAdmin() {
   const ol = document.getElementById('admin-overlay');
   const frame = document.getElementById('admin-frame');
   const loading = document.getElementById('admin-loading');
-  if (!ol || !frame) return;
+  // Fail-safe: if the overlay markup isn't in this DOM (stale cached
+  // HTML from an older deploy), fall back to a hard navigation so the
+  // admin page still loads instead of doing nothing.
+  if (!ol || !frame) {
+    try { window.location.assign('/server'); } catch (e) {}
+    return;
+  }
   ol.classList.remove('hidden');
   document.getElementById('node-admin-icon')?.classList.add('active');
   if (loading) loading.classList.remove('hidden');
@@ -10104,6 +10110,11 @@ function closeNodeAdmin() {
   const frame = document.getElementById('admin-frame');
   if (frame) { try { frame.src = 'about:blank'; } catch (e) {} }
 }
+// Expose globally so the inline onclick on the sidebar icon resolves
+// regardless of script ordering / module scope quirks. (A stale cached
+// page where this assignment runs but the new function body doesn't
+// exist will at least navigate to /server via the fallback above.)
+try { window.openNodeAdmin = openNodeAdmin; window.closeNodeAdmin = closeNodeAdmin; } catch (e) {}
 
 function updateBoardSideMenuAuth() {
   const menu = document.getElementById('board-side-menu');
