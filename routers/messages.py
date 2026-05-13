@@ -134,6 +134,8 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         "display_name": current_user.get("display_name"),
         "user_id": current_user["id"],
         "avatar": current_user.get("avatar"),
+        "is_admin": bool(current_user.get("is_admin")),
+        "is_bot": False,
         "content": content,
         "media_type": body.media_type,
         "media_blur": body.media_blur,

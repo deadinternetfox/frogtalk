@@ -872,7 +872,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                              THEN NULL
                              WHEN b.id IS NOT NULL THEN b.name
                              ELSE u.display_name END AS display_name,
-                          u.is_admin AS is_admin,
+                          CASE WHEN b.id IS NOT NULL THEN 0 ELSE u.is_admin END AS is_admin,
                           (b.id IS NOT NULL) AS is_bot,
                           b.id AS bot_id,
                           r.nickname AS reply_nickname,
@@ -898,7 +898,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                              THEN NULL
                              WHEN b.id IS NOT NULL THEN b.name
                              ELSE u.display_name END AS display_name,
-                          u.is_admin AS is_admin,
+                          CASE WHEN b.id IS NOT NULL THEN 0 ELSE u.is_admin END AS is_admin,
                           (b.id IS NOT NULL) AS is_bot,
                           b.id AS bot_id,
                           r.nickname AS reply_nickname,

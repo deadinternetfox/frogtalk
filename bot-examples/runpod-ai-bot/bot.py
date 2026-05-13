@@ -160,7 +160,8 @@ class RunPodClient:
             "Content-Type": "application/json",
         }
 
-    def complete(self, prompt: str, *, system: str | None = None) -> str:
+    def complete(self, prompt: str, *, system: str | None = None,
+                 stop: list[str] | None = None) -> str:
         """Return a single completion string. Worker-specific shape —
         adjust to taste.
 
@@ -171,7 +172,7 @@ class RunPodClient:
         *second* job — so you get billed for two runs for one reply.
         Async polling is single-job and works fine for chat-bot latency.
         """
-        payload = build_runpod_request(prompt, system=system)
+        payload = build_runpod_request(prompt, system=system, stop=stop)
         r = self._session.post(
             f"{self.base}/run",
             headers=self._headers(),

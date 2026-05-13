@@ -2763,8 +2763,11 @@ if ($singleThread) {
                     <?php foreach ($_peers as $_pp): ?>
                         <?php
                             $_peerTorOnly = !empty($_pp['tor_only']);
-                            // Clearnet visitor + Tor-only peer → don't follow the link, show a dialog instead.
-                            $_needsTorDialog = $_peerTorOnly && !$_visitorTor;
+                            // Tor-only peer → always show the dialog (even if we *think* the
+                            // visitor is on Tor, since X-Tor-Client header detection isn't 100%
+                            // reliable behind proxies / Electron webviews / mis-tagged exits).
+                            // The dialog itself has a "continue anyway" button for real Tor users.
+                            $_needsTorDialog = $_peerTorOnly;
                         ?>
                         <a class="fed-pill<?= $_peerTorOnly ? ' fed-pill-tor' : '' ?>"
                            href="<?= htmlspecialchars($_pp['url']) ?>"

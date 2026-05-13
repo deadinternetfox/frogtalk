@@ -1477,7 +1477,11 @@ const Messages = (() => {
 
   function _msgHtml(msg, isCont) {
     const isOwn = msg.nickname === State.user?.nickname;
-    const isAdmin = msg.nickname === 'admin' || msg.is_admin || msg._is_admin;
+    // Bots inherit their owner's user row, so older payloads could surface
+    // is_admin=1 for a bot owned by an admin. Suppress the crown whenever the
+    // message is flagged as a bot — bots get the BOT pill, never the crown.
+    const isBotMsg = !!(msg.is_bot || msg.bot_id);
+    const isAdmin = !isBotMsg && (msg.nickname === 'admin' || msg.is_admin || msg._is_admin);
     const time = UI.formatTime(msg.created_at);
     const editedTag = msg.edited ? '<span class="msg-edited">(edited)</span>' : '';
     const pinnedTag = msg.pinned ? '<span class="msg-pinned" style="color:#4caf50;font-size:11px;margin-left:4px">📌</span>' : '';
