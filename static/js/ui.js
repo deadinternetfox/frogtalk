@@ -3150,30 +3150,31 @@ async function editBot(botId) {
     return;
   }
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.className = 'modal-overlay';
+  overlay.style.zIndex = 99999;
   overlay.innerHTML = `
-    <div style="background:var(--surface-color, #1e1e1e);border:1px solid var(--border-color, #333);border-radius:14px;padding:20px;max-width:480px;width:100%;color:var(--text-color, #e0e0e0);max-height:90vh;overflow:auto">
-      <div style="font-size:16px;font-weight:700;color:var(--accent-color, #4caf50);margin-bottom:14px;display:flex;align-items:center;gap:8px">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-title" style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
         🤖 Edit Bot <span class="bot-pill">BOT</span>
       </div>
-      <label style="display:block;font-size:12px;color:var(--text-muted, #888);margin-bottom:4px">Name (unique handle)</label>
-      <input id="eb-name" type="text" value="${UI.escHtml(bot.name)}" maxlength="32" style="width:100%;background:var(--bg-color, #0d0d0d);border:1px solid var(--border-color, #333);color:var(--text-color, #e0e0e0);padding:8px;border-radius:6px;font-size:13px;margin-bottom:12px">
-      <label style="display:block;font-size:12px;color:var(--text-muted, #888);margin-bottom:4px">Avatar URL or data-URL</label>
-      <input id="eb-avatar" type="text" value="${UI.escHtml(bot.avatar || '')}" placeholder="https://… or data:image/png;base64,…" style="width:100%;background:var(--bg-color, #0d0d0d);border:1px solid var(--border-color, #333);color:var(--text-color, #e0e0e0);padding:8px;border-radius:6px;font-size:13px;margin-bottom:12px">
-      <label style="display:block;font-size:12px;color:var(--text-muted, #888);margin-bottom:4px">Description</label>
-      <textarea id="eb-desc" rows="3" maxlength="500" placeholder="What does this bot do?" style="width:100%;background:var(--bg-color, #0d0d0d);border:1px solid var(--border-color, #333);color:var(--text-color, #e0e0e0);padding:8px;border-radius:6px;font-size:13px;margin-bottom:12px;resize:vertical;font-family:inherit">${UI.escHtml(bot.description || '')}</textarea>
-      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:16px;cursor:pointer">
+      <label class="modal-label">Name (unique handle)</label>
+      <input id="eb-name" class="modal-input" type="text" value="${UI.escHtml(bot.name)}" maxlength="32">
+      <label class="modal-label">Avatar URL or data-URL</label>
+      <input id="eb-avatar" class="modal-input" type="text" value="${UI.escHtml(bot.avatar || '')}" placeholder="https://… or data:image/png;base64,…">
+      <label class="modal-label">Description</label>
+      <textarea id="eb-desc" class="modal-input" rows="3" maxlength="500" placeholder="What does this bot do?" style="resize:vertical;min-height:64px">${UI.escHtml(bot.description || '')}</textarea>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin:8px 0 16px;cursor:pointer;color:var(--text-color)">
         <input id="eb-public" type="checkbox" ${bot.is_public ? 'checked' : ''} style="accent-color:var(--accent-color, #4caf50)">
         <span>List publicly in the bot directory</span>
       </label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-        <button id="eb-save" style="flex:1;background:var(--accent-color, #4caf50);color:#000;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;min-width:120px">Save</button>
-        <button id="eb-cancel" style="background:var(--surface-color, #2a2a2a);color:var(--text-color, #e0e0e0);border:1px solid var(--border-color, #333);border-radius:8px;padding:10px 16px;cursor:pointer">Cancel</button>
+      <div class="modal-actions" style="margin-bottom:12px">
+        <button id="eb-cancel" class="modal-btn secondary">Cancel</button>
+        <button id="eb-save" class="modal-btn primary">Save</button>
       </div>
       <div style="border-top:1px solid var(--border-color, #2a2a2a);padding-top:12px;margin-top:4px">
         <div style="font-size:12px;color:var(--text-muted, #888);margin-bottom:6px">🔑 Bot API token</div>
-        <div style="font-size:11px;color:#7a8a82;line-height:1.55;margin-bottom:8px">Use this token with the bot SDK to post messages, read DMs, and react to events. We only store the hash — if you lose it, regenerate a new one. Regenerating <b>invalidates the previous token immediately</b>.</div>
-        <button id="eb-regen-key" style="width:100%;background:var(--surface-color, #2a2a2a);color:#ffb84a;border:1px solid #5a4a1a;border-radius:8px;padding:10px;font-weight:600;cursor:pointer;font-size:13px">🔄 Regenerate API key</button>
+        <div style="font-size:11px;color:var(--text-muted, #7a8a82);line-height:1.55;margin-bottom:8px">Use this token with the bot SDK to post messages, read DMs, and react to events. We only store the hash — if you lose it, regenerate a new one. Regenerating <b>invalidates the previous token immediately</b>.</div>
+        <button id="eb-regen-key" class="modal-btn" style="width:100%;color:#ffb84a;border:1px solid #5a4a1a">🔄 Regenerate API key</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -3194,13 +3195,16 @@ async function editBot(botId) {
         return;
       }
       const keyModal = document.createElement('div');
-      keyModal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px';
-      keyModal.innerHTML = `<div style="background:#1e1e1e;border:1px solid #4caf50;border-radius:12px;padding:24px;max-width:500px;width:100%">
-        <div style="font-size:16px;font-weight:700;color:#4caf50;margin-bottom:12px">🔑 New Bot Token</div>
+      keyModal.className = 'modal-overlay';
+      keyModal.style.zIndex = 100000;
+      keyModal.innerHTML = `<div class="modal" style="max-width:500px">
+        <div class="modal-title" style="color:var(--accent-color, #4caf50);margin-bottom:12px">🔑 New Bot Token</div>
         <div style="font-size:12px;color:#f44336;margin-bottom:12px;font-weight:600">Copy this token now — it won't be shown again. The old token is already revoked.</div>
-        <div style="background:#0d0d0d;border:1px solid #333;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;color:#4caf50;word-break:break-all;cursor:pointer" title="Click to copy" onclick="navigator.clipboard.writeText('${data.api_key}');this.style.borderColor='#4caf50';this.nextElementSibling.textContent='Copied!'">${data.api_key}</div>
-        <div style="font-size:11px;color:#7a8a82;margin-top:6px;text-align:center">Click the token to copy</div>
-        <button onclick="this.parentElement.parentElement.remove()" style="margin-top:16px;width:100%;background:#4caf50;color:#000;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer">Done</button>
+        <div style="background:var(--bg-color, #0d0d0d);border:1px solid var(--border-color, #333);border-radius:8px;padding:12px;font-family:monospace;font-size:12px;color:var(--accent-color, #4caf50);word-break:break-all;cursor:pointer" title="Click to copy" onclick="navigator.clipboard.writeText('${data.api_key}');this.style.borderColor='var(--accent-color)';this.nextElementSibling.textContent='Copied!'">${data.api_key}</div>
+        <div style="font-size:11px;color:var(--text-muted, #7a8a82);margin-top:6px;text-align:center">Click the token to copy</div>
+        <div class="modal-actions" style="margin-top:16px">
+          <button class="modal-btn primary" style="width:100%" onclick="this.closest('.modal-overlay').remove()">Done</button>
+        </div>
       </div>`;
       document.body.appendChild(keyModal);
       btn.disabled = false;
