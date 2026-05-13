@@ -611,8 +611,8 @@ def _imageboard_root() -> str:
         return env
     candidates = [
         "/opt/frogtalk/board/board_data",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "imageboard", "board_data"),
-        os.path.join(os.getcwd(), "imageboard", "board_data"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "board", "board_data"),
+        os.path.join(os.getcwd(), "board", "board_data"),
     ]
     for c in candidates:
         if os.path.isdir(c):

@@ -4,12 +4,6 @@
  * Moderation: approve images, ban users, delete posts, board settings
  */
 session_start();
-// Never cache the admin HTML — we ship CSS/JS inline, so a stale cached
-// page would mean stale UI. Electron WebView in particular caches GETs
-// aggressively unless told otherwise.
-header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-header('Pragma: no-cache');
-header('Expires: 0');
 require_once __DIR__ . '/board_config.php';
 
 $error = '';
