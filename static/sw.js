@@ -1,5 +1,5 @@
 /* FrogTalk Service Worker — caching + web push */
-const CACHE_NAME = 'frogtalk-v530';
+const CACHE_NAME = 'frogtalk-v531';
 const STATIC_ASSETS = [
   '/app',
   '/static/js/app.js',
@@ -32,26 +32,9 @@ self.addEventListener('install', event => {
 // CACHE_NAME and only purge older versions.
 self.addEventListener('activate', event => {
   event.waitUntil(
-    (async () => {
-      // Drop stale caches from older SW versions.
-      const keys = await caches.keys();
-      await Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)));
-      // Also evict any previously-cached admin/board responses from the
-      // current cache — those pages are now SW-bypassed but legacy
-      // installs may still have stale copies sitting in storage.
-      try {
-        const cache = await caches.open(CACHE_NAME);
-        const reqs = await cache.keys();
-        await Promise.all(reqs.map(req => {
-          const p = new URL(req.url).pathname;
-          if (p === '/server' || p.startsWith('/server/') ||
-              p === '/board'  || p.startsWith('/board/')) {
-            return cache.delete(req);
-          }
-        }));
-      } catch (e) { /* non-fatal */ }
-      await self.clients.claim();
-    })()
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
 });
 

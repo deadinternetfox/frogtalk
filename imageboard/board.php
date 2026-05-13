@@ -973,18 +973,36 @@ if ($singleThread) {
     <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐸</text></svg>">
     <!-- style.css merged inline -->
     <style>
-        /* Themed scrollbars — applied universally so nested scrollable
-           panels (chat, threads, federated nav) all pick up the theme. */
-        html:not([data-theme="read"]) * { scrollbar-width: thin; scrollbar-color: #2a5a35 #0a1610; }
-        html:not([data-theme="read"]) *::-webkit-scrollbar { width: 10px; height: 10px; background: #0a1610; }
-        html:not([data-theme="read"]) *::-webkit-scrollbar-track { background: #0a1610; border-radius: 6px; }
+        /* Themed scrollbars (dark theme only — read mode keeps parchment).
+           Cover html, body, and every descendant: Chromium uses html OR
+           body for the page scrollbar depending on overflow rules. */
+        html:not([data-theme="read"]),
+        html:not([data-theme="read"]) body {
+            scrollbar-width: thin;
+            scrollbar-color: #2a5a35 #0a1610;
+        }
+        html:not([data-theme="read"])::-webkit-scrollbar,
+        html:not([data-theme="read"]) body::-webkit-scrollbar,
+        html:not([data-theme="read"]) *::-webkit-scrollbar {
+            width: 10px; height: 10px; background: #0a1610;
+        }
+        html:not([data-theme="read"])::-webkit-scrollbar-track,
+        html:not([data-theme="read"]) body::-webkit-scrollbar-track,
+        html:not([data-theme="read"]) *::-webkit-scrollbar-track {
+            background: #0a1610;
+        }
+        html:not([data-theme="read"])::-webkit-scrollbar-thumb,
+        html:not([data-theme="read"]) body::-webkit-scrollbar-thumb,
         html:not([data-theme="read"]) *::-webkit-scrollbar-thumb {
             background: linear-gradient(180deg, #2a5a35, #1a3d22);
             border: 2px solid #0a1610;
             border-radius: 6px;
         }
-        html:not([data-theme="read"]) *::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #3d8048, #2a5a35); }
-        html:not([data-theme="read"]) *::-webkit-scrollbar-corner { background: #0a1610; }
+        html:not([data-theme="read"])::-webkit-scrollbar-thumb:hover,
+        html:not([data-theme="read"]) body::-webkit-scrollbar-thumb:hover,
+        html:not([data-theme="read"]) *::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #3d8048, #2a5a35);
+        }
 
         .board-container { max-width: 960px; margin: 0 auto; padding: 0 15px; }
         .board-header { text-align: center; padding: 20px 15px 20px; }

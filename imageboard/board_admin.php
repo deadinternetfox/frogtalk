@@ -539,19 +539,22 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         }
         .sidebar-nav .badge.green { background: #00ff41; color: #0a0e0a; }
 
-        /* Themed scrollbars (matches FrogTalk green-on-dark). Applied
-           universally so inner scrollable panels (.log-container, sidebar,
-           tables) all get the green theme — not just the page scrollbar. */
-        * { scrollbar-width: thin; scrollbar-color: #2a5a35 #0a1610; }
-        *::-webkit-scrollbar { width: 10px; height: 10px; background: #0a1610; }
-        *::-webkit-scrollbar-track { background: #0a1610; border-radius: 6px; }
-        *::-webkit-scrollbar-thumb {
+        /* Themed scrollbars. Cover html, body, and every descendant. */
+        html, body { scrollbar-width: thin; scrollbar-color: #2a5a35 #0a1610; }
+        html::-webkit-scrollbar, body::-webkit-scrollbar, *::-webkit-scrollbar {
+            width: 10px; height: 10px; background: #0a1610;
+        }
+        html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, *::-webkit-scrollbar-track {
+            background: #0a1610;
+        }
+        html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, *::-webkit-scrollbar-thumb {
             background: linear-gradient(180deg, #2a5a35, #1a3d22);
             border: 2px solid #0a1610;
             border-radius: 6px;
         }
-        *::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #3d8048, #2a5a35); }
-        *::-webkit-scrollbar-corner { background: #0a1610; }
+        html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, *::-webkit-scrollbar-thumb:hover {
+            background: linear-gradient(180deg, #3d8048, #2a5a35);
+        }
 
         /* Main content */
         .admin-main { flex: 1; padding: 25px; overflow-x: auto; }
