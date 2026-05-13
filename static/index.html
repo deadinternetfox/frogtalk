@@ -7905,7 +7905,7 @@ window.ConnErr = (function(){
       it stays hidden while logged out / for regular users. Opens in a
       new tab so the chat session stays intact behind it.
     -->
-    <div class="server-icon" data-tip="Node Admin" data-tip-pos="right" id="node-admin-icon" onclick="openNodeAdmin()" style="display:none;background:linear-gradient(135deg,#1a1208,#3a2410);color:#ffb347;font-weight:700">🛡️</div>
+    <div class="server-icon" data-tip="Node Admin" data-tip-pos="right" id="node-admin-icon" onclick="try{openNodeAdmin()}catch(e){window.location.assign('/server')}" style="display:none;background:linear-gradient(135deg,#1a1208,#3a2410);color:#ffb347;font-weight:700">🛡️</div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="showProfile()">⚙️</div>
     <div class="server-spacer"></div>
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
@@ -10079,9 +10079,10 @@ function openFrogBoard() {
 // calls, and music intact, and works inside the Electron desktop
 // client where popups are blocked.
 function openNodeAdmin() {
-  try {
-    if (!window.State || !State.user || !State.user.is_admin) return;
-  } catch (e) { return; }
+  // Don't gate on State.user.is_admin here — the server enforces auth on
+  // /server itself. Gating here only ever caused silent no-ops when the
+  // client's State.user was stale or hadn't been hydrated yet. If a
+  // non-admin somehow clicks, /server returns 403 in the iframe — safe.
   const ol = document.getElementById('admin-overlay');
   const frame = document.getElementById('admin-frame');
   const loading = document.getElementById('admin-loading');
@@ -10111,10 +10112,23 @@ function closeNodeAdmin() {
   if (frame) { try { frame.src = 'about:blank'; } catch (e) {} }
 }
 // Expose globally so the inline onclick on the sidebar icon resolves
-// regardless of script ordering / module scope quirks. (A stale cached
-// page where this assignment runs but the new function body doesn't
-// exist will at least navigate to /server via the fallback above.)
+// regardless of script ordering / module scope quirks.
 try { window.openNodeAdmin = openNodeAdmin; window.closeNodeAdmin = closeNodeAdmin; } catch (e) {}
+
+// Defensive addEventListener fallback: if for any reason the inline
+// onclick attribute on #node-admin-icon doesn't fire (stale cached HTML
+// where the attribute references an undefined function, or a future CSP
+// tightening that drops inline handlers), this still wires the click.
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('node-admin-icon');
+  if (el && !el.__naBound) {
+    el.__naBound = true;
+    el.addEventListener('click', (e) => {
+      try { e.preventDefault(); e.stopPropagation(); } catch {}
+      try { openNodeAdmin(); } catch (err) { window.location.assign('/server'); }
+    });
+  }
+});
 
 function updateBoardSideMenuAuth() {
   const menu = document.getElementById('board-side-menu');
