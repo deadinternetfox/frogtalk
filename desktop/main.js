@@ -580,9 +580,21 @@ function createTray() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.isQuitting = false;
   readDesktopSettings();
+
+  // Purge any cached responses for admin/board routes on every launch.
+  // Those pages are now served with `Cache-Control: no-store` upstream,
+  // but Electron's HTTP cache may still hold pre-no-cache copies from
+  // earlier app versions. Cookies / localStorage / IndexedDB are left
+  // untouched — login state survives.
+  try {
+    const { session } = require('electron');
+    const sess = session.fromPartition(WEB_PARTITION);
+    await sess.clearCache();
+  } catch {}
+
   createWindow();
 });
 
