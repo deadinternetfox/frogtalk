@@ -9991,6 +9991,30 @@ window.ConnErr = (function(){
   </div>
 </div>
 
+<!-- ═════════════════════ NODE ADMIN OVERLAY ═════════════════════════════════ -->
+<!--
+  In-app iframe for /server (Server Admin Web UI). Mounted only for
+  is_admin accounts via the 🛡️ icon on the server strip — see
+  openNodeAdmin() below. Lives in-app (vs. window.open) so it works in
+  the Electron desktop client where popups are blocked and in browsers
+  that strip target=_blank from script-triggered opens.
+-->
+<div id="admin-overlay" class="board-overlay hidden" role="dialog" aria-modal="true" aria-label="Node Admin">
+  <div class="board-overlay-topbar">
+    <button class="board-menu-btn" onclick="closeNodeAdmin()" title="Back to FrogTalk" aria-label="Close admin panel" style="background:linear-gradient(135deg,#1a1208,#3a2410);color:#ffb347">🛡️</button>
+    <div class="board-overlay-title-wrap">
+      <span class="board-overlay-title">Node Admin</span>
+      <span class="board-overlay-meta">server control panel</span>
+    </div>
+    <button class="board-overlay-close" onclick="closeNodeAdmin()" title="Close">✕</button>
+  </div>
+  <iframe id="admin-frame" src="" class="board-overlay-frame" allow="clipboard-read; clipboard-write"></iframe>
+  <div id="admin-loading" class="board-loading">
+    <div class="board-loading-spinner"></div>
+    <div class="board-loading-text">Loading Node Admin…</div>
+  </div>
+</div>
+
 <!-- ═════════════════════ SCRIPTS ═══════════════════════════════ -->
 <script>
 // Force clear all service worker caches on load
@@ -10047,18 +10071,38 @@ function openFrogBoard() {
 }
 
 // ─── Node Admin shortcut ───────────────────────────────────────────────
-// Opens the Server Admin Web UI (/server) for the node operator. The
-// sidebar icon that triggers this is hidden unless State.user.is_admin
-// is true, so this is just a click handler — defence-in-depth is still
-// enforced server-side by the /api/server-admin/* routes.
-// Navigates in the same tab so popup-blockers don't silently swallow
-// the click (which was the symptom reported on first deploy). Chat
-// session state persists on the server; reopening FrogTalk reconnects.
+// Opens the Server Admin Web UI (/server) as an in-app iframe overlay
+// for the node operator. The 🛡️ sidebar icon that triggers this is
+// hidden unless State.user.is_admin is true; the route itself enforces
+// its own auth server-side. Using an in-app overlay (rather than
+// window.open or window.location) keeps the chat session, active
+// calls, and music intact, and works inside the Electron desktop
+// client where popups are blocked.
 function openNodeAdmin() {
   try {
     if (!window.State || !State.user || !State.user.is_admin) return;
   } catch (e) { return; }
-  window.location.assign('/server');
+  const ol = document.getElementById('admin-overlay');
+  const frame = document.getElementById('admin-frame');
+  const loading = document.getElementById('admin-loading');
+  if (!ol || !frame) return;
+  ol.classList.remove('hidden');
+  document.getElementById('node-admin-icon')?.classList.add('active');
+  if (loading) loading.classList.remove('hidden');
+  // Reload each open so stats are fresh. /server is same-origin and
+  // sends frame-ancestors 'self' + X-Frame-Options: SAMEORIGIN, so the
+  // iframe is permitted by the server's CSP.
+  frame.onload = () => { if (loading) loading.classList.add('hidden'); };
+  frame.src = '/server?ts=' + Date.now();
+}
+
+function closeNodeAdmin() {
+  const ol = document.getElementById('admin-overlay');
+  if (ol) ol.classList.add('hidden');
+  document.getElementById('node-admin-icon')?.classList.remove('active');
+  // Drop the iframe src so it stops polling stats in the background.
+  const frame = document.getElementById('admin-frame');
+  if (frame) { try { frame.src = 'about:blank'; } catch (e) {} }
 }
 
 function updateBoardSideMenuAuth() {
