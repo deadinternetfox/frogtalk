@@ -244,6 +244,24 @@ def extract_runpod_text(data: dict) -> str | None:
                 v = first.get(key)
                 if isinstance(v, str) and v.strip():
                     return v.strip()
+            # vLLM RunPod worker shape:
+            #   output: [{"choices": [{"tokens": ["text..."]}], ...}]
+            # or sometimes  {"choices": [{"text": "..."}]}
+            #         or    {"choices": [{"message": {"content": "..."}}]}
+            choices = first.get("choices")
+            if isinstance(choices, list) and choices:
+                c = choices[0]
+                if isinstance(c, dict):
+                    toks = c.get("tokens")
+                    if isinstance(toks, list) and toks:
+                        joined = "".join(t for t in toks if isinstance(t, str))
+                        if joined.strip():
+                            return joined.strip()
+                    if isinstance(c.get("text"), str) and c["text"].strip():
+                        return c["text"].strip()
+                    msg = c.get("message")
+                    if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+                        return msg["content"].strip() or None
     return None
 
 
