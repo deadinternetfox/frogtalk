@@ -379,6 +379,24 @@ async def send_channel_message(
     import asyncio
     asyncio.create_task(manager.broadcast_room(name, payload))
 
+    # Mirror bot/user messages to any Telegram / Discord bridges
+    # attached to this channel. Without this, AI bot replies posted via
+    # the External API never make it onto the bridges, so users on
+    # Telegram/Discord see their own message but no @-mention response.
+    try:
+        import bridge_outbound
+        bridge_outbound.forward_user_message(
+            name, nickname, body.content, None,
+            sender_avatar=avatar,
+            sender_user_id=owner["id"],
+            ft_msg_id=msg_id,
+            reply_to_ft_id=body.reply_to or None,
+            media_blur=False,
+            display_name=display_name,
+        )
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "message_id": msg_id,
