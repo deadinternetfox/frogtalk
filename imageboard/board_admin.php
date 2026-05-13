@@ -532,7 +532,19 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
             margin-left: auto;
         }
         .sidebar-nav .badge.green { background: #00ff41; color: #0a0e0a; }
-        
+
+        /* Themed scrollbars (matches FrogTalk green-on-dark). */
+        html { scrollbar-width: thin; scrollbar-color: #2a5a35 #0a1610; }
+        ::-webkit-scrollbar { width: 10px; height: 10px; }
+        ::-webkit-scrollbar-track { background: #0a1610; }
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, #2a5a35, #1a3d22);
+            border: 2px solid #0a1610;
+            border-radius: 6px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, #3d8048, #2a5a35); }
+        ::-webkit-scrollbar-corner { background: #0a1610; }
+
         /* Main content */
         .admin-main { flex: 1; padding: 25px; overflow-x: auto; }
         
@@ -778,6 +790,10 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
 <body>
     <div class="admin-layout">
         <nav class="sidebar">
+            <a href="/server" class="back-to-node-admin" id="sidebar-back-to-node-admin"
+               style="margin: 0 0 14px 0;">
+                <span class="arrow">←</span><span>Back to Node Admin</span>
+            </a>
             <div class="sidebar-brand">
                 <h2>🔧 ADMIN PANEL</h2>
                 <p>/board/ moderation</p>
