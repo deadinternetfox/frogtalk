@@ -743,8 +743,17 @@ const App = {
       State.currentRoomOwner = null;
       State.currentRoomType = null;
     } catch {}
-    const hdr = document.getElementById('chat-header-title');
-    if (hdr) hdr.textContent = 'Welcome to FrogTalk';
+    // Replace the transient "Loading…" header set by showChannelLoading()
+    // with a friendly empty-state title + subtitle. New users with zero
+    // channels otherwise sit on "Loading…" forever.
+    const titleEl = document.getElementById('ch-title');
+    if (titleEl) {
+      titleEl.innerHTML =
+        '<span class="room-title-icon">🐸</span>' +
+        '<span class="room-title-text">Welcome to FrogTalk</span>';
+    }
+    const descEl = document.getElementById('ch-desc');
+    if (descEl) descEl.textContent = 'Join a channel or send a DM to get started';
     document.querySelectorAll('#public-channels .channel-item.active').forEach(el => el.classList.remove('active'));
 
     // This is an intro screen, not a real channel — flag the body so CSS can
