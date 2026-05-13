@@ -770,7 +770,23 @@ async def get_channel_members(room_name: str,
         else:
             # Sidebar offline section should always render offline dot/color.
             m["presence"] = "offline"
-    return {"members": members}
+
+    # Bots installed in this channel are surfaced in their own section
+    # at the bottom of the right-hand sidebar so users can see who can
+    # respond + how to @-mention them. We deliberately keep them out of
+    # `members` because the frontend's online/offline split, presence
+    # rules, and DM affordances are user-only.
+    try:
+        bots = db.get_channel_bots(room["id"]) or []
+    except Exception:
+        bots = []
+    bots = [{
+        "id": b.get("id"),
+        "name": b.get("name") or "",
+        "avatar": b.get("avatar") or "",
+        "description": b.get("description") or "",
+    } for b in bots if b.get("name")]
+    return {"members": members, "bots": bots}
 
 
 @router.get("/{room_name}/voice-participants")

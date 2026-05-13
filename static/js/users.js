@@ -6,6 +6,7 @@ const Users = (() => {
   let _allUsers = [];          // online users in the current room (from WS)
   let _channelMembers = [];    // full joined-member list for the room (online+offline)
   let _channelRoom = null;     // which room _channelMembers is for
+  let _channelBots = [];       // bots installed in the current channel
   let _filter = '';
   let _searchInput = null;
   const _displayNameCache = new Map();
@@ -223,7 +224,26 @@ const Users = (() => {
       offlineShown.forEach(u => list.appendChild(_renderUserRow(u, false)));
     }
 
-    if (!onlineShown.length && !offlineShown.length) {
+    // Bots section — installed-in-channel bots sit at the bottom under
+    // their own header so users can see what's mentionable. Filtered by
+    // the same search box as users (matches bot name or description).
+    const botsToShow = onRoom
+      ? _channelBots.filter(b => {
+          if (!_filter) return true;
+          const name = String(b.name || '').toLowerCase();
+          const desc = String(b.description || '').toLowerCase();
+          return name.includes(_filter) || desc.includes(_filter);
+        })
+      : [];
+    if (botsToShow.length) {
+      const header = document.createElement('div');
+      header.className = 'users-section users-section-bots';
+      header.textContent = _filter ? `Bot matches — ${botsToShow.length}` : `Bots — ${botsToShow.length}`;
+      list.appendChild(header);
+      botsToShow.forEach(b => list.appendChild(_renderBotRow(b)));
+    }
+
+    if (!onlineShown.length && !offlineShown.length && !botsToShow.length) {
       const empty = document.createElement('div');
       empty.style.cssText = 'color:#666;font-size:12px;padding:12px;text-align:center';
       empty.textContent = _filter ? 'No members match' : 'No members yet';
@@ -290,6 +310,41 @@ const Users = (() => {
   }
 
 
+  function _renderBotRow(bot) {
+    // Compact row mirroring _renderUserRow's layout but flagged with a
+    // BOT pill and a fixed bot-cyan dot. Clicking inserts an @-mention
+    // at the end of the composer so users can address the bot without
+    // typing the handle manually.
+    const el = document.createElement('div');
+    el.className = 'user-item bot-item';
+    el.title = bot.description || `Bot: ${bot.name}`;
+    el.onclick = () => {
+      try {
+        const input = document.getElementById('message-input');
+        if (input) {
+          const insert = `@${bot.name} `;
+          input.value = (input.value || '').replace(/\s+$/, '');
+          input.value = (input.value ? input.value + ' ' : '') + insert;
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+          if (typeof handleMentionInput === 'function') handleMentionInput(input);
+        }
+      } catch {}
+    };
+    el.innerHTML = `
+      <div class="user-avatar">
+        ${UI.avatarEl(bot.avatar, bot.name, 32)}
+        <span class="online-dot" style="background:#00bcd4" title="Bot"></span>
+      </div>
+      <div class="user-name-wrap">
+        <span class="user-name">${UI.escHtml(bot.name)} <span class="bot-pill" title="Automated bot account">BOT</span></span>
+        ${bot.description ? `<span class="user-handle">${UI.escHtml(String(bot.description).slice(0, 60))}</span>` : `<span class="user-handle">@${UI.escHtml(bot.name)}</span>`}
+      </div>
+    `;
+    return el;
+  }
+
+
   async function loadChannelMembers(roomName) {
     if (!roomName || !State.token) return;
     try {
@@ -300,6 +355,7 @@ const Users = (() => {
       const data = await res.json();
       _channelMembers = _mergeLocalSelfIntoList(data.members || []);
       _channelRoom = roomName;
+      _channelBots = Array.isArray(data.bots) ? data.bots : [];
       // Backfill display_name into any online users that the WS sent without it
       for (const u of _allUsers) {
         if (!u.display_name) {

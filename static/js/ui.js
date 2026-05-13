@@ -6901,13 +6901,16 @@ function handleMentionInput(input) {
     const cls = u._presence || _mentionEffectivePresence(u);
     const labelMap = { online: 'Online', away: 'Away', dnd: 'Busy', offline: 'Offline' };
     const colorMap = { online: '#4caf50', away: '#ffc107', dnd: '#f44336', offline: '#666' };
-    const label = labelMap[cls] || 'Offline';
-    const dotColor = colorMap[cls] || colorMap.offline;
+    const isBot = !!u.is_bot;
+    const label = isBot ? 'Bot' : (labelMap[cls] || 'Offline');
+    const dotColor = isBot ? '#00bcd4' : (colorMap[cls] || colorMap.offline);
+    const dotCls = isBot ? 'bot' : cls;
+    const pill = isBot ? ' <span class="bot-pill" title="Automated bot account">BOT</span>' : '';
     return `
-      <div class="mention-item${i === 0 ? ' selected' : ''}" data-nick="${UI.escHtml(u.nickname)}" onclick="insertMention('${UI.escHtml(u.nickname)}')">
+      <div class="mention-item${i === 0 ? ' selected' : ''}${isBot ? ' mention-item-bot' : ''}" data-nick="${UI.escHtml(u.nickname)}" onclick="insertMention('${UI.escHtml(u.nickname)}')">
         ${UI.avatarEl(u.avatar, u.nickname, 24)}
-        <span class="mention-nick">${UI.escHtml(u.nickname)}</span>
-        <span class="mention-presence ${cls}" title="${label}" style="background:${dotColor}"></span>
+        <span class="mention-nick">${UI.escHtml(u.nickname)}${pill}</span>
+        <span class="mention-presence ${dotCls}" title="${label}" style="background:${dotColor}"></span>
       </div>
     `;
   }).join('');

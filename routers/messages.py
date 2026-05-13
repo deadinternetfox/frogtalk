@@ -446,4 +446,28 @@ async def get_mentionable_users(
         except Exception:
             # Fall back to whatever the DB reported on any error.
             pass
+
+    # Append bots installed in the channel so `@FrogAI` etc. autocompletes
+    # in the message composer. They show as always-available (bots don't
+    # have presence) and are flagged with is_bot=true so the dropdown can
+    # render the BOT pill. Skipped for global (no-room) mentions because
+    # bots are scoped to a specific channel.
+    if room_id is not None:
+        try:
+            existing_nicks = {str(u.get("nickname") or "").lower() for u in users}
+            for b in (db.get_channel_bots(room_id) or []):
+                nick = str(b.get("name") or "").strip()
+                if not nick or nick.lower() in existing_nicks:
+                    continue
+                users.append({
+                    "id": None,
+                    "bot_id": b.get("id"),
+                    "nickname": nick,
+                    "display_name": nick,
+                    "avatar": b.get("avatar") or "",
+                    "presence": "online",
+                    "is_bot": True,
+                })
+        except Exception:
+            pass
     return {"users": users}
