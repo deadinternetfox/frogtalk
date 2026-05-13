@@ -2760,14 +2760,19 @@ if ($singleThread) {
                         <span class="fed-pill-node">@<?= htmlspecialchars($_thisInfo['node_id']) ?></span>
                         <?php if (!empty($_thisInfo['topic'])): ?><span class="fed-pill-topic">#<?= htmlspecialchars($_thisInfo['topic']) ?></span><?php endif; ?>
                     </a>
+                    <?php $_visitorOnTor = isTorRequest(); ?>
                     <?php foreach ($_peers as $_pp): ?>
                         <?php
                             $_peerTorOnly = !empty($_pp['tor_only']);
-                            // Tor-only peer → always show the dialog (even if we *think* the
-                            // visitor is on Tor, since X-Tor-Client header detection isn't 100%
-                            // reliable behind proxies / Electron webviews / mis-tagged exits).
-                            // The dialog itself has a "continue anyway" button for real Tor users.
-                            $_needsTorDialog = $_peerTorOnly;
+                            // Gate semantics:
+                            //   - Clearnet visitor + tor-only peer → show "you need Tor"
+                            //     dialog (the popup), with a "continue anyway" button.
+                            //   - Tor visitor + tor-only peer → no dialog, just open the
+                            //     .onion URL directly in the same tab (already in Tor
+                            //     Browser; new-tab/_blank is awkward there).
+                            //   - Clearnet peer → normal external link, new tab.
+                            $_needsTorDialog = $_peerTorOnly && !$_visitorOnTor;
+                            $_sameTab = $_peerTorOnly && $_visitorOnTor;
                         ?>
                         <a class="fed-pill<?= $_peerTorOnly ? ' fed-pill-tor' : '' ?>"
                            href="<?= htmlspecialchars($_pp['url']) ?>"
@@ -2776,6 +2781,8 @@ if ($singleThread) {
                            data-peer-title="<?= htmlspecialchars($_pp['title']) ?>"
                            data-peer-node="<?= htmlspecialchars($_pp['node_id']) ?>"
                            data-peer-url="<?= htmlspecialchars($_pp['url']) ?>"
+                           <?php elseif ($_sameTab): ?>
+                           rel="noopener"
                            <?php else: ?>
                            target="_blank" rel="noopener"
                            <?php endif; ?>

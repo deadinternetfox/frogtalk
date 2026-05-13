@@ -160,11 +160,19 @@ class RunPodClient:
             "Content-Type": "application/json",
         }
 
-    def complete(self, prompt: str, *, system: str | None = None,
+    def complete(self, prompt: str | None = None, *,
+                 messages: list[dict] | None = None,
+                 system: str | None = None,
                  stop: list[str] | None = None,
                  temperature: float = 0.7) -> str:
         """Return a single completion string. Worker-specific shape —
         adjust to taste.
+
+        Pass either ``messages`` (preferred — OpenAI-style chat list:
+        ``[{"role":"system","content":...},{"role":"user","content":...}]``)
+        or a raw ``prompt`` string. When ``messages`` is given the worker
+        applies the model's own chat template, which makes this bot
+        model-agnostic (Qwen, Mistral/Cydonia, Llama, etc.).
 
         Note: we go straight to async `/run` → `/status/<id>` polling
         instead of trying `/runsync` first. On a cold endpoint the
@@ -173,7 +181,8 @@ class RunPodClient:
         *second* job — so you get billed for two runs for one reply.
         Async polling is single-job and works fine for chat-bot latency.
         """
-        payload = build_runpod_request(prompt, system=system, stop=stop,
+        payload = build_runpod_request(prompt, messages=messages,
+                                        system=system, stop=stop,
                                         temperature=temperature)
         r = self._session.post(
             f"{self.base}/run",
@@ -208,46 +217,64 @@ class RunPodClient:
 # `stop` list under `input`.
 RUNPOD_STOP_SEQUENCES = ["\nUser:", "\nuser:", "\nAssistant:", "\nassistant:", "\n<|"]
 
-# Qwen ChatML markers. Used to wrap the raw prompt so that the model
-# actually sees our system prompt (most vLLM RunPod workers ignore a
-# sibling `"system"` key on /run input — only ChatML inside `prompt`
-# is reliably honored).
+# ChatML markers (Qwen, some Llama tunes). Only emitted when we have to
+# fall back to a raw `prompt`-shaped request; the preferred path is the
+# OpenAI-style `messages` list which lets the worker apply whichever
+# chat template the loaded model needs.
 CHATML_STOPS = ["<|im_end|>", "<|im_start|>"]
 
 
-def build_runpod_request(prompt: str, *, system: str | None = None,
+def build_runpod_request(prompt: str | None = None, *,
+                         messages: list[dict] | None = None,
+                         system: str | None = None,
                          stop: list[str] | None = None,
                          temperature: float = 0.7) -> dict:
     """Shape for an OpenAI-compatible / vLLM RunPod worker. Override
     this function if your worker uses a different input schema.
 
-    When ``system`` is provided we emit Qwen-style ChatML directly in
-    the prompt: ``<|im_start|>system\\n…<|im_end|>\\n<|im_start|>user\\n
-    …<|im_end|>\\n<|im_start|>assistant\\n``. This bypasses worker
-    quirks where the OpenAI-shaped ``messages`` array isn't supported
-    and a top-level ``system`` field is silently dropped.
+    Two modes:
+
+    * ``messages=[...]`` (preferred) — sent as OpenAI chat-completions
+      so the worker applies the model's correct chat template. This
+      works for any modern instruct model (Qwen, Mistral-Small /
+      Cydonia, Llama-3, etc.) without per-model prompt fiddling.
+    * ``prompt="..."`` — raw completion. When a ``system`` is supplied
+      alongside a raw prompt we wrap the whole thing in Qwen-style
+      ChatML as a best-effort default; for non-Qwen models prefer the
+      ``messages`` path.
     """
+    inp: dict = {
+        "max_tokens": 400,
+        "temperature": temperature,
+    }
+    if messages:
+        # Prepend system as a proper role:system message if provided.
+        msgs = list(messages)
+        if system and not any(m.get("role") == "system" for m in msgs):
+            msgs = [{"role": "system", "content": system}] + msgs
+        inp["messages"] = msgs
+        inp["stop"] = list(stop) if stop else list(RUNPOD_STOP_SEQUENCES)
+        # Belt-and-suspenders for workers that key off a top-level system.
+        if system:
+            inp["system"] = system
+        return {"input": inp}
+
+    # Raw-prompt fallback (legacy).
     if system:
         wrapped = (
             "<|im_start|>system\n" + system.strip() + "<|im_end|>\n"
-            "<|im_start|>user\n" + prompt.rstrip() + "<|im_end|>\n"
+            "<|im_start|>user\n" + (prompt or "").rstrip() + "<|im_end|>\n"
             "<|im_start|>assistant\n"
         )
     else:
-        wrapped = prompt
+        wrapped = prompt or ""
     stop_list = list(stop) if stop else list(RUNPOD_STOP_SEQUENCES)
     if system:
         for s in CHATML_STOPS:
             if s not in stop_list:
                 stop_list.append(s)
-    inp: dict = {
-        "prompt": wrapped,
-        "max_tokens": 400,
-        "temperature": temperature,
-        "stop": stop_list,
-    }
-    # Belt-and-suspenders: some workers DO honor a top-level system
-    # field — pass it through too. Harmless when ignored.
+    inp["prompt"] = wrapped
+    inp["stop"] = stop_list
     if system:
         inp["system"] = system
     return {"input": inp}
@@ -452,12 +479,14 @@ class ChatBot:
             time.sleep(self.min_send_gap - (now - self.last_send_at))
 
         prompt = self._build_prompt(trigger, history)
+        messages = self._build_messages(trigger, history)
         speakers = self._known_speakers(trigger, history)
         log.info("#%s ← @%s (msg %s): generating reply",
                  channel, trigger.get("nickname"), trigger.get("id"))
         try:
             reply = self.rp.complete(
                 prompt,
+                messages=messages,
                 system=self._system_prompt(),
                 stop=self._stop_sequences(speakers),
             )
@@ -480,6 +509,7 @@ class ChatBot:
                 )
                 retry = self.rp.complete(
                     prompt,
+                    messages=messages,
                     system=self._system_prompt() + "\n\n" + hard,
                     stop=self._stop_sequences(speakers),
                     temperature=1.0,
@@ -545,6 +575,43 @@ class ChatBot:
             lines.append(f"{nick}{tag}: {content}")
         lines.append(f"{self.bot_name} [bot]:")
         return "\n".join(lines)
+
+    def _build_messages(self, trigger: dict, history: list[dict]) -> list[dict]:
+        """OpenAI-style chat-completions message list. The worker
+        applies the model's own chat template, so this works for any
+        modern instruct model without per-model prompt tweaking.
+
+        Our own past messages become ``role:assistant``; everything
+        else is ``role:user`` with the speaker's nickname prefixed to
+        the content so the model can address people by name.
+        """
+        msgs: list[dict] = []
+        ctx = history[-self.max_context:]
+        for m in ctx:
+            content = (m.get("content") or "").strip()
+            if not content:
+                continue
+            nick = m.get("nickname") or "user"
+            is_self = (
+                m.get("is_bot")
+                and nick.lower() == self.bot_name_lower
+            )
+            # Same filter as _build_prompt: don't feed our own
+            # placeholder failures back to the model.
+            if is_self and (
+                content.startswith("(empty reply)")
+                or content.startswith("(sorry, my AI backend hiccuped")
+            ):
+                continue
+            if is_self:
+                msgs.append({"role": "assistant", "content": content})
+            else:
+                tag = " [bot]" if m.get("is_bot") else ""
+                msgs.append({
+                    "role": "user",
+                    "content": f"{nick}{tag}: {content}",
+                })
+        return msgs
 
     def _known_speakers(self, trigger: dict, history: list[dict]) -> list[str]:
         """Collect distinct speaker nicknames seen in the recent transcript
@@ -683,7 +750,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--auto-channels", action="store_true",
                    default=_env("FROGTALK_AUTO_CHANNELS", "").lower() in {"1", "true", "yes", "on"},
                    help="Auto-discover installed channels from the server. Refreshes every 30s so newly-added channels light up without a restart.")
-    p.add_argument("--runpod-endpoint", default=_env("RUNPOD_ENDPOINT_ID", "d92r5x0kegzqpi"))
+    p.add_argument("--runpod-endpoint", default=_env("RUNPOD_ENDPOINT_ID", "9xffis4xtq1uc5"))
     p.add_argument("--runpod-key", default=_env("RUNPOD_API_KEY"))
     p.add_argument("--poll-interval", type=float, default=float(_env("POLL_INTERVAL", "2.0")))
     p.add_argument("--max-context", type=int, default=int(_env("MAX_CONTEXT", "8")))

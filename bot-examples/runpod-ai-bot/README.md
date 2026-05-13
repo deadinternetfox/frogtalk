@@ -34,12 +34,17 @@ any chat model you like.
   kept narrow: no real-world violence against specific people, no CSAM,
   no doxxing, no targeted malware. Override `_system_prompt()` in
   `bot.py` if you want a tamer persona.
-- **Qwen ChatML prompt format:** the system prompt is delivered inside
-  the worker `prompt` field as `<|im_start|>system … <|im_end|>` —
-  most vLLM RunPod workers silently ignore a sibling `"system"` input
-  field, so embedding it in ChatML is the only reliable way to make the
-  persona actually stick. Stop sequences include `<|im_end|>` /
-  `<|im_start|>` to bound the assistant turn.
+- **Model-agnostic chat-completions:** the bot sends the conversation
+  to the worker as an OpenAI-style `messages=[{"role":"system",…},
+  {"role":"user",…},…]` list, so the vLLM worker applies whatever
+  chat template the loaded model needs. That means swapping in a
+  different model (Qwen, Mistral-Small / Cydonia, Llama-3, etc.) does
+  not require any code changes — the worker handles the templating.
+  Default endpoint id `9xffis4xtq1uc5` points at a vLLM worker running
+  `TheDrummer/Cydonia-24B-v4.3` (a Mistral-Small finetune chosen for
+  its lack of RLHF refusal behaviour). For raw-completion workers
+  there is still a fallback that wraps the prompt in Qwen-style
+  ChatML, with `<|im_end|>` / `<|im_start|>` added to the stop list.
 - **Refusal sanitizer + retry:** if the model still emits a canned
   safety refusal (`"I'm here to provide…"`, `"as an AI"`, `"let's keep
   it positive"`, etc.) the bot transparently retries once at higher
@@ -90,7 +95,7 @@ CLI flags. CLI > env > defaults.
 | `FROGTALK_BOT_NAME` | `--bot-name` | *(required)* | Handle the bot was registered as (used to detect `@mentions`) |
 | `FROGTALK_CHANNELS` | `--channels` | *(empty)* | Comma-separated channels to listen in. Leave empty to auto-discover from the server. |
 | `FROGTALK_AUTO_CHANNELS` | `--auto-channels` | `1` when `FROGTALK_CHANNELS` is empty | Pull the bot's installed-channel list from `GET /api/external/me/channels` and refresh every ~30s, so a server owner adding the bot to a new channel takes effect with no restart. |
-| `RUNPOD_ENDPOINT_ID` | `--runpod-endpoint` | `d92r5x0kegzqpi` | RunPod serverless endpoint id |
+| `RUNPOD_ENDPOINT_ID` | `--runpod-endpoint` | `9xffis4xtq1uc5` | RunPod serverless endpoint id (default points at a vLLM worker running `TheDrummer/Cydonia-24B-v4.3`; swap freely) |
 | `RUNPOD_API_KEY` | `--runpod-key` | *(required)* | `rpa_…` API key |
 | `POLL_INTERVAL` | `--poll-interval` | `2.0` | Seconds between polls per channel |
 | `MAX_CONTEXT` | `--max-context` | `8` | Recent messages to send as context |
