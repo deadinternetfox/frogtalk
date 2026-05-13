@@ -3007,15 +3007,24 @@ async function loadApiKeys() {
       list.innerHTML = '<div style="color:#666;font-size:13px;text-align:center;padding:8px">No API keys yet</div>';
       return;
     }
-    list.innerHTML = keys.map(k => `
+    list.innerHTML = keys.map(k => {
+      // Keys created for bots are auto-named `Bot: <name>` — hide them
+      // from the developer key list to keep this panel focused on
+      // user-issued integration keys. Bot keys are managed from the
+      // "Your Bots" section via the Regenerate API key button.
+      const isBotKey = typeof k.name === 'string' && k.name.startsWith('Bot: ');
+      if (isBotKey) return '';
+      const created = (k.created_at || '').toString().substring(0, 10);
+      const lastUsed = k.last_used ? `last used ${k.last_used.toString().substring(0,10)}` : 'never used';
+      return `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:6px;border-bottom:1px solid #1a1a1a">
-        <div>
+        <div style="min-width:0">
           <div style="color:#e0e0e0;font-size:13px;font-weight:600">${UI.escHtml(k.name)}</div>
-          <div style="color:#666;font-size:11px">${k.key_hash ? k.key_hash.substring(0,12) + '...' : 'Created ' + (k.created_at || '').substring(0,10)}</div>
+          <div style="color:#666;font-size:11px">Created ${created} · ${lastUsed}</div>
         </div>
         <button onclick="revokeApiKey(${k.id})" style="background:#333;border:none;color:#f44336;padding:4px 8px;border-radius:4px;font-size:12px;cursor:pointer">Revoke</button>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('') || '<div style="color:#666;font-size:13px;text-align:center;padding:8px">No API keys yet</div>';
   } catch {
     list.innerHTML = '<div style="color:#f44336;font-size:13px;text-align:center">Failed to load</div>';
   }
@@ -3157,14 +3166,51 @@ async function editBot(botId) {
         <input id="eb-public" type="checkbox" ${bot.is_public ? 'checked' : ''} style="accent-color:var(--accent-color, #4caf50)">
         <span>List publicly in the bot directory</span>
       </label>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
         <button id="eb-save" style="flex:1;background:var(--accent-color, #4caf50);color:#000;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;min-width:120px">Save</button>
         <button id="eb-cancel" style="background:var(--surface-color, #2a2a2a);color:var(--text-color, #e0e0e0);border:1px solid var(--border-color, #333);border-radius:8px;padding:10px 16px;cursor:pointer">Cancel</button>
+      </div>
+      <div style="border-top:1px solid var(--border-color, #2a2a2a);padding-top:12px;margin-top:4px">
+        <div style="font-size:12px;color:var(--text-muted, #888);margin-bottom:6px">🔑 Bot API token</div>
+        <div style="font-size:11px;color:#7a8a82;line-height:1.55;margin-bottom:8px">Use this token with the bot SDK to post messages, read DMs, and react to events. We only store the hash — if you lose it, regenerate a new one. Regenerating <b>invalidates the previous token immediately</b>.</div>
+        <button id="eb-regen-key" style="width:100%;background:var(--surface-color, #2a2a2a);color:#ffb84a;border:1px solid #5a4a1a;border-radius:8px;padding:10px;font-weight:600;cursor:pointer;font-size:13px">🔄 Regenerate API key</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
   overlay.querySelector('#eb-cancel').onclick = close;
+  overlay.querySelector('#eb-regen-key').onclick = async () => {
+    if (!confirm('Regenerate this bot\'s API token? The current token will stop working immediately and any running bot using it must be restarted with the new token.')) return;
+    const btn = overlay.querySelector('#eb-regen-key');
+    btn.disabled = true;
+    btn.textContent = 'Rotating…';
+    try {
+      const res = await apiFetch(`/api/developer/bots/${botId}/regenerate-key`, 'POST', {});
+      const data = await res.json();
+      if (!res.ok || !data.api_key) {
+        UI.showToast(data.error || 'Failed to rotate key', 'error');
+        btn.disabled = false;
+        btn.textContent = '🔄 Regenerate API key';
+        return;
+      }
+      const keyModal = document.createElement('div');
+      keyModal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px';
+      keyModal.innerHTML = `<div style="background:#1e1e1e;border:1px solid #4caf50;border-radius:12px;padding:24px;max-width:500px;width:100%">
+        <div style="font-size:16px;font-weight:700;color:#4caf50;margin-bottom:12px">🔑 New Bot Token</div>
+        <div style="font-size:12px;color:#f44336;margin-bottom:12px;font-weight:600">Copy this token now — it won't be shown again. The old token is already revoked.</div>
+        <div style="background:#0d0d0d;border:1px solid #333;border-radius:8px;padding:12px;font-family:monospace;font-size:12px;color:#4caf50;word-break:break-all;cursor:pointer" title="Click to copy" onclick="navigator.clipboard.writeText('${data.api_key}');this.style.borderColor='#4caf50';this.nextElementSibling.textContent='Copied!'">${data.api_key}</div>
+        <div style="font-size:11px;color:#7a8a82;margin-top:6px;text-align:center">Click the token to copy</div>
+        <button onclick="this.parentElement.parentElement.remove()" style="margin-top:16px;width:100%;background:#4caf50;color:#000;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer">Done</button>
+      </div>`;
+      document.body.appendChild(keyModal);
+      btn.disabled = false;
+      btn.textContent = '🔄 Regenerate API key';
+    } catch {
+      UI.showToast('Network error', 'error');
+      btn.disabled = false;
+      btn.textContent = '🔄 Regenerate API key';
+    }
+  };
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('#eb-save').onclick = async () => {
     const patch = {

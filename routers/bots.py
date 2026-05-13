@@ -290,6 +290,36 @@ async def delete_bot(bot_id: int, current_user: dict = Depends(get_current_user)
     return JSONResponse(status_code=404, content={"error": "Bot not found"})
 
 
+@router.post("/bots/{bot_id}/regenerate-key")
+async def regenerate_bot_key(bot_id: int, current_user: dict = Depends(get_current_user)):
+    """Rotate the API token attached to a bot.
+
+    The previous token is invalidated immediately — any running
+    integration using it will start getting 401s and must be restarted
+    with the new token. We surface the new raw key exactly once so the
+    user can copy it to their bot runtime; we only ever store the hash.
+    """
+    bot = db.get_bot_by_id(bot_id)
+    if not bot or bot.get("owner_id") != current_user["id"]:
+        return JSONResponse(status_code=404, content={"error": "Bot not found"})
+    if bot.get("origin_server_id"):
+        # Federated mirror rows have no local key; the owning node owns
+        # the secret. Refuse rather than silently no-op.
+        return JSONResponse(
+            status_code=400,
+            content={"error": "This bot is federated from another node; rotate the key on its home node."},
+        )
+    raw_key = f"bot_{secrets.token_urlsafe(32)}"
+    new_key_id = db.rotate_bot_api_key(bot_id, current_user["id"], hash_key(raw_key))
+    if new_key_id is None:
+        return JSONResponse(status_code=500, content={"error": "Failed to rotate key"})
+    return {
+        "ok": True,
+        "api_key": raw_key,
+        "message": "Save the new bot token! The previous token has been revoked.",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Bot Channel Management
 # ---------------------------------------------------------------------------
@@ -303,7 +333,7 @@ async def add_bot_to_channel(room_name: str, bot_id: int, current_user: dict = D
     
     # Check if user is owner or mod
     is_owner = room["owner_id"] == current_user["id"]
-    is_mod = db.is_room_mod(room["id"], current_user["id"])
+    is_mod = db.is_room_moderator(room_name, current_user["id"])
     if not is_owner and not is_mod and not current_user.get("is_admin"):
         return JSONResponse(status_code=403, content={"error": "Not authorized"})
     
@@ -324,7 +354,7 @@ async def remove_bot_from_channel(room_name: str, bot_id: int, current_user: dic
         return JSONResponse(status_code=404, content={"error": "Channel not found"})
     
     is_owner = room["owner_id"] == current_user["id"]
-    is_mod = db.is_room_mod(room["id"], current_user["id"])
+    is_mod = db.is_room_moderator(room_name, current_user["id"])
     if not is_owner and not is_mod and not current_user.get("is_admin"):
         return JSONResponse(status_code=403, content={"error": "Not authorized"})
     

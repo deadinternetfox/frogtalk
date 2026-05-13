@@ -4169,6 +4169,51 @@ def delete_bot(bot_id: int, owner_id: int) -> bool:
         return cur.rowcount > 0
 
 
+def rotate_bot_api_key(bot_id: int, owner_id: int, new_key_hash: str) -> Optional[int]:
+    """Atomically replace the api_keys row attached to a bot.
+
+    Returns the new key id, or None if the bot doesn't exist / isn't
+    owned by `owner_id`. The old api_keys row is hard-deleted so the
+    previous raw token stops authenticating immediately — callers MUST
+    surface the new raw token to the user (it's the only time they'll
+    see it).
+
+    Done in a single transaction so we never end up with a bot whose
+    api_key_id points at a deleted row."""
+    import json
+    with _conn() as con:
+        row = con.execute(
+            "SELECT api_key_id, name FROM bots WHERE id=? AND owner_id=?",
+            (bot_id, owner_id),
+        ).fetchone()
+        if not row:
+            return None
+        old_key_id = row["api_key_id"]
+        bot_name = row["name"]
+        # Preserve original permissions so the new key keeps whatever
+        # scopes were granted (bots default to read/write/dm/bot).
+        perms_row = con.execute(
+            "SELECT permissions FROM api_keys WHERE id=?", (old_key_id,)
+        ).fetchone()
+        perms_json = perms_row["permissions"] if perms_row else json.dumps(
+            ["read", "write", "dm", "bot"]
+        )
+        cur = con.execute(
+            "INSERT INTO api_keys (user_id, key_hash, name, permissions) VALUES (?, ?, ?, ?)",
+            (owner_id, new_key_hash, f"Bot: {bot_name}", perms_json),
+        )
+        new_key_id = cur.lastrowid
+        con.execute(
+            "UPDATE bots SET api_key_id=? WHERE id=? AND owner_id=?",
+            (new_key_id, bot_id, owner_id),
+        )
+        # Drop the old key row last so a partial failure above never
+        # leaves the bot pointing at nothing.
+        if old_key_id:
+            con.execute("DELETE FROM api_keys WHERE id=?", (old_key_id,))
+        return new_key_id
+
+
 def add_bot_to_channel(bot_id: int, room_id: int, invited_by: int,
                        permissions: List[str] = None) -> bool:
     """Add a bot to a channel. Blocked if the bot is on this node's
@@ -4229,7 +4274,7 @@ def get_public_bots() -> List[Dict]:
     with _conn() as con:
         rows = con.execute("""
             SELECT b.id, b.name, b.avatar, b.description,
-                   COALESCE(u.nickname, b.owner_nickname) AS owner_name,
+                   CASE WHEN b.origin_server_id IS NULL THEN COALESCE(u.nickname, b.owner_nickname) ELSE COALESCE(b.owner_nickname, u.nickname) END AS owner_name,
                    b.origin_server_id
             FROM bots b
             LEFT JOIN users u ON b.owner_id = u.id
@@ -4408,7 +4453,7 @@ def list_banned_bots() -> List[Dict]:
             SELECT bb.id AS ban_id, bb.bot_id, bb.origin_server_id, bb.foreign_bot_id,
                    bb.name, bb.reason, bb.created_at, bb.banned_by,
                    b.avatar, b.description, b.is_public,
-                   COALESCE(u.nickname, b.owner_nickname) AS owner_name
+                   CASE WHEN b.origin_server_id IS NULL THEN COALESCE(u.nickname, b.owner_nickname) ELSE COALESCE(b.owner_nickname, u.nickname) END AS owner_name
             FROM banned_bots bb
             LEFT JOIN bots b ON b.id = bb.bot_id
             LEFT JOIN users u ON u.id = b.owner_id
@@ -4426,7 +4471,7 @@ def list_all_bots_admin() -> List[Dict]:
             SELECT b.id, b.name, b.avatar, b.description, b.is_public,
                    b.origin_server_id, b.foreign_bot_id,
                    b.owner_id,
-                   COALESCE(u.nickname, b.owner_nickname) AS owner_name,
+                   CASE WHEN b.origin_server_id IS NULL THEN COALESCE(u.nickname, b.owner_nickname) ELSE COALESCE(b.owner_nickname, u.nickname) END AS owner_name,
                    (SELECT COUNT(*) FROM bot_channel_members bcm WHERE bcm.bot_id = b.id) AS channel_count,
                    (SELECT 1 FROM banned_bots bb WHERE bb.bot_id = b.id) AS banned,
                    (SELECT bb.reason FROM banned_bots bb WHERE bb.bot_id = b.id) AS ban_reason
