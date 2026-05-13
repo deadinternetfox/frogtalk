@@ -539,6 +539,39 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         .page-header { margin-bottom: 25px; }
         .page-header h1 { color: #00ff41; font-size: 18px; margin-bottom: 5px; }
         .page-header p { color: #4a8f4a; font-size: 12px; }
+        /* Floating "Back to Node Admin" pill (only visible when this page
+           is iframed inside the FrogTalk Server Admin overlay). */
+        .back-to-node-admin {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin: 0 0 18px 0;
+            padding: 9px 14px;
+            background: linear-gradient(135deg, #112a1a 0%, #0d1f12 100%);
+            border: 1px solid #2a5a35;
+            border-radius: 8px;
+            color: #9be0a8;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            width: fit-content;
+            transition: background .15s, border-color .15s, transform .08s;
+            cursor: pointer;
+        }
+        .back-to-node-admin:hover {
+            background: linear-gradient(135deg, #18432a 0%, #112a1a 100%);
+            border-color: #4a8f4a;
+            color: #c6ffd6;
+        }
+        .back-to-node-admin:active { transform: translateY(1px); }
+        .back-to-node-admin .arrow {
+            display: inline-block;
+            font-size: 14px;
+            line-height: 1;
+            transform: translateY(-1px);
+        }
+        body.in-frog-shell .back-to-node-admin { display: inline-flex; }
         
         /* Cards */
         .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 25px; }
@@ -767,30 +800,29 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
                 </a>
                 <a href="?action=logout" style="margin-top: 20px; color: #ff6b6b;">🚪 Logout</a>
                 <a href="/board" style="color: #4a8f4a;">← Back to Board</a>
-                <a href="/server" id="back-to-node-admin" style="display:none;color:#7ab7ff;">⬅ Back to Node Admin</a>
             </div>
         </nav>
         <script>
             // When this admin panel is loaded inside the FrogTalk shell
             // (via the Node Admin overlay iframe, or with ?shell=1 hint),
             // there is no browser back button to return to the Server
-            // Admin panel. Expose an explicit "Back to Node Admin" link
-            // and route it in-place so we stay inside the overlay.
+            // Admin panel. Tag <body> so the floating "Back to Node Admin"
+            // pill (rendered at the top of <main>) becomes visible, and
+            // reroute its click + the sidebar "Back to Board" link to
+            // stay inside the shell.
             (function(){
                 try {
                     var inFrame = window.top !== window.self;
                     var hinted  = /[?&]shell=1\b/.test(location.search);
                     if (!inFrame && !hinted) return;
+                    document.body.classList.add('in-frog-shell');
                     var link = document.getElementById('back-to-node-admin');
-                    if (!link) return;
-                    link.style.display = 'block';
-                    link.addEventListener('click', function(ev){
-                        ev.preventDefault();
-                        // Same-origin navigation inside the existing iframe;
-                        // /server then renders inside the Node Admin overlay
-                        // exactly as before.
-                        window.location.href = '/server';
-                    });
+                    if (link) {
+                        link.addEventListener('click', function(ev){
+                            ev.preventDefault();
+                            window.location.href = '/server';
+                        });
+                    }
                     // Also rewrite "Back to Board" to stay in-shell.
                     var boardLink = document.querySelector('.sidebar-nav a[href="/board"]');
                     if (boardLink) {
@@ -808,6 +840,9 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         </script>
         
         <main class="admin-main">
+            <a href="/server" id="back-to-node-admin" class="back-to-node-admin" role="button">
+                <span class="arrow">←</span><span>Back to Node Admin</span>
+            </a>
             <?php if ($success): ?><div class="alert alert-success">✅ <?= htmlspecialchars($success) ?></div><?php endif; ?>
             <?php if ($error): ?><div class="alert alert-error">⚠️ <?= htmlspecialchars($error) ?></div><?php endif; ?>
             
