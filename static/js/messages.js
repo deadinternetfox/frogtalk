@@ -2406,22 +2406,8 @@ const Messages = (() => {
     // Create fake element for MediaPlayer
     const fakeEl = document.createElement(type === 'image' ? 'img' : type === 'video' ? 'video' : 'audio');
     fakeEl.src = url;
-
-    // If the user was already watching this video inline, hand the
-    // fullscreen player the current playback position and pause the
-    // inline copy so we don't end up with two audio tracks playing.
-    let startTime = 0;
-    if (type === 'video' && el.tagName === 'VIDEO'
-        && isFinite(el.currentTime) && el.currentTime > 0) {
-      startTime = el.currentTime;
-      try { el.pause(); } catch {}
-    } else if (type === 'audio' && el.tagName === 'AUDIO'
-        && isFinite(el.currentTime) && el.currentTime > 0) {
-      startTime = el.currentTime;
-      try { el.pause(); } catch {}
-    }
-
-    MediaPlayer.open(fakeEl, sender, time, allMedia, startTime);
+    
+    MediaPlayer.open(fakeEl, sender, time, allMedia);
   }
 
   // ─── Sticker hydration / open ────────────────────────────────────────
