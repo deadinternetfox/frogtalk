@@ -137,9 +137,12 @@ class FrogTalkClient:
 # RunPod client
 # ---------------------------------------------------------------------------
 class RunPodClient:
-    """Calls a RunPod serverless endpoint. Tries `/runsync` first and
-    falls back to async `/run` → `/status/<id>` polling for endpoints
-    that exceed the sync timeout."""
+    """Calls a RunPod serverless endpoint via the async
+    `/run` → `/status/<id>` polling loop. We deliberately skip
+    `/runsync` because on a cold endpoint the sync request often
+    times out *without* returning the queued job id, and the
+    fallback to `/run` then enqueues a *second* job (double billing
+    for one reply)."""
 
     def __init__(self, endpoint_id: str, api_key: str, *, sync_timeout: int = 25,
                  async_poll_timeout: int = 240, async_poll_interval: float = 1.5):
@@ -467,7 +470,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--auto-channels", action="store_true",
                    default=_env("FROGTALK_AUTO_CHANNELS", "").lower() in {"1", "true", "yes", "on"},
                    help="Auto-discover installed channels from the server. Refreshes every 30s so newly-added channels light up without a restart.")
-    p.add_argument("--runpod-endpoint", default=_env("RUNPOD_ENDPOINT_ID", "n9y6u6rkv73ayv"))
+    p.add_argument("--runpod-endpoint", default=_env("RUNPOD_ENDPOINT_ID", "d92r5x0kegzqpi"))
     p.add_argument("--runpod-key", default=_env("RUNPOD_API_KEY"))
     p.add_argument("--poll-interval", type=float, default=float(_env("POLL_INTERVAL", "2.0")))
     p.add_argument("--max-context", type=int, default=int(_env("MAX_CONTEXT", "8")))

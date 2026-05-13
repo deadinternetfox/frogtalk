@@ -17,8 +17,9 @@ any chat model you like.
   back-and-forth without re-tagging it every turn).
 - Sends each turn as a proper `reply_to` so the UI shows the quoted
   parent.
-- Calls RunPod via `/runsync` and falls back to the async `/run` →
-  `/status/<job_id>` polling loop for endpoints that take longer.
+- Calls RunPod via the async `/run` → `/status/<job_id>` polling loop
+  (skipping `/runsync` so cold starts don't get double-billed when the
+  sync request times out and falls back).
 - Renders with the `BOT` pill in chat (the server stamps `is_bot:true`).
 
 ## Quick start
@@ -58,7 +59,7 @@ CLI flags. CLI > env > defaults.
 | `FROGTALK_BOT_NAME` | `--bot-name` | *(required)* | Handle the bot was registered as (used to detect `@mentions`) |
 | `FROGTALK_CHANNELS` | `--channels` | *(empty)* | Comma-separated channels to listen in. Leave empty to auto-discover from the server. |
 | `FROGTALK_AUTO_CHANNELS` | `--auto-channels` | `1` when `FROGTALK_CHANNELS` is empty | Pull the bot's installed-channel list from `GET /api/external/me/channels` and refresh every ~30s, so a server owner adding the bot to a new channel takes effect with no restart. |
-| `RUNPOD_ENDPOINT_ID` | `--runpod-endpoint` | `n9y6u6rkv73ayv` | RunPod serverless endpoint id |
+| `RUNPOD_ENDPOINT_ID` | `--runpod-endpoint` | `d92r5x0kegzqpi` | RunPod serverless endpoint id |
 | `RUNPOD_API_KEY` | `--runpod-key` | *(required)* | `rpa_…` API key |
 | `POLL_INTERVAL` | `--poll-interval` | `2.0` | Seconds between polls per channel |
 | `MAX_CONTEXT` | `--max-context` | `8` | Recent messages to send as context |
