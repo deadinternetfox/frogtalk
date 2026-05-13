@@ -673,7 +673,78 @@
       const blocked = peerBtn.getAttribute('data-blocked') === '1';
       togglePeerBlock(nid, blocked);
     }
+    // Imageboard "Open Board" / "Open Board Admin" → if this admin page
+    // itself is served from a .onion (i.e. this is a Tor-mode node) and
+    // the user clicks the link from a clearnet client (typically the
+    // desktop Electron app where the OS browser is plain Firefox/Chrome,
+    // not the Tor Browser), shell.openExternal will hand the .onion to a
+    // browser that can't resolve it — silent failure. Intercept and
+    // show a "Tor required" splash with a copyable address + an
+    // "Open anyway" escape hatch.
+    const boardBtn = ev.target && ev.target.closest && ev.target.closest('#imageboard-open-btn, #imageboard-admin-btn');
+    if (boardBtn) {
+      const host = String(location.hostname || '').toLowerCase();
+      if (host.endsWith('.onion')) {
+        ev.preventDefault();
+        const url = new URL(boardBtn.getAttribute('href') || '/board/', location.href).toString();
+        showTorRequiredDialog(url, boardBtn.id === 'imageboard-admin-btn' ? 'Board Admin' : 'Imageboard');
+      }
+    }
   });
+
+  // Self-contained "Tor required" splash for the server-admin page so we
+  // don't have to drag the full app's ui.js into this surface. Renders a
+  // dark backdrop, an explanation, the .onion address (click-to-copy),
+  // and two actions: copy or open-anyway. Open-anyway routes through
+  // window.open so Electron's setWindowOpenHandler -> shell.openExternal
+  // still fires; the user has at least been warned.
+  function showTorRequiredDialog(url, label) {
+    const existing = document.getElementById('tor-required-overlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'tor-required-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:14000;background:rgba(3,8,6,.78);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.innerHTML = `
+      <div style="max-width:520px;width:100%;background:#0f1410;color:#e6f1ea;border:1px solid #2a3a30;border-radius:14px;padding:22px;box-shadow:0 18px 48px rgba(0,0,0,.55);font-family:inherit">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="display:inline-flex;align-items:center;gap:6px;background:#3a2a14;color:#ffb84a;border:1px solid #5a4a1a;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;letter-spacing:.6px">🧅 TOR REQUIRED</span>
+        </div>
+        <div style="font-size:18px;font-weight:700;margin-bottom:6px">${label} runs on a Tor hidden service</div>
+        <div style="font-size:13px;color:#bcd1c4;line-height:1.55;margin-bottom:14px">
+          This node lives at a <b>.onion</b> address. To open <b>${escHtml(label)}</b> you need a
+          Tor-connected browser &mdash; either the <a href="https://www.torproject.org/download/" target="_blank" rel="noopener" style="color:#ffb84a;text-decoration:underline">Tor Browser</a>
+          or a system that proxies all traffic through Tor. Regular Chrome/Firefox/Safari can't reach this address.
+        </div>
+        <div style="font-size:11px;color:#7a8a82;margin-bottom:6px;letter-spacing:.4px">ONION ADDRESS</div>
+        <div id="tor-required-addr" title="Click to copy" style="background:#070a08;border:1px solid #1f2a23;border-radius:8px;padding:10px;font-family:monospace;font-size:12px;color:#7be0a8;word-break:break-all;cursor:pointer;margin-bottom:14px">${escHtml(url)}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <button type="button" id="tor-required-close" style="background:transparent;color:#bcd1c4;border:1px solid #2a3a30;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer">Cancel</button>
+          <button type="button" id="tor-required-copy" style="background:#1a2820;color:#7be0a8;border:1px solid #2a4a35;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer">Copy address</button>
+          <button type="button" id="tor-required-open" style="background:#ffb84a;color:#1a1206;border:0;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer">Open anyway ↗</button>
+        </div>
+        <div style="font-size:11px;color:#7a8a82;margin-top:12px;line-height:1.55">
+          Tip: paste the address into Tor Browser. If you frequently moderate this node, run FrogTalk Desktop
+          inside a Tor-routed environment (e.g. Whonix or a SOCKS5 wrapper).
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    const copy = () => {
+      try { navigator.clipboard.writeText(url); } catch {}
+      const b = overlay.querySelector('#tor-required-copy');
+      if (b) { b.textContent = 'Copied ✓'; setTimeout(() => { if (b.isConnected) b.textContent = 'Copy address'; }, 1600); }
+    };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('#tor-required-close').addEventListener('click', close);
+    overlay.querySelector('#tor-required-copy').addEventListener('click', copy);
+    overlay.querySelector('#tor-required-addr').addEventListener('click', copy);
+    overlay.querySelector('#tor-required-open').addEventListener('click', () => {
+      // Use window.open so Electron's window-open handler -> shell.openExternal
+      // still routes through the OS. The user has acknowledged the warning.
+      try { window.open(url, '_blank', 'noopener,noreferrer'); } catch {}
+      close();
+    });
+  }
 
   function renderNodeSummary(nodes) {
     if (!nodeSummaryGrid) return;
