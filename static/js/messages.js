@@ -745,7 +745,7 @@ const Messages = (() => {
       // Always pause the inline embed afterwards so the chat iframe and
       // the player don't double-play out of sync.
       return `<button type="button" class="embed-send-player" data-payload="${payload}"
-        onclick="event.preventDefault();event.stopPropagation();window._sendChatTrackToPlayer&&window._sendChatTrackToPlayer(this)"
+        onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));var M=window.Music;var inMedia=!!(M&&M.isMediaChannelContext&&M.isMediaChannelContext());var canQ=inMedia&&!!(M&&M.canQueueInCurrentRoom&&M.canQueueInCurrentRoom());if(inMedia&&canQ&&M.queueFromUrl){M.queueFromUrl(p.url).then(function(ok){try{UI&&UI.showToast&&UI.showToast(ok?'Added to channel queue':'Could not queue — playing in side player','info');}catch(_){}if(!ok&&M.playSolo){try{M.playSolo(p);}catch(_){}}});}else if(inMedia&&!canQ){try{UI&&UI.showToast&&UI.showToast('You don\\u0027t have queue permission in this channel','error');}catch(_){}return;}else if(M&&M.playSolo){M.playSolo(p);try{UI&&UI.showToast&&UI.showToast('Playing in side player');}catch(_){}}try{window._pauseChatEmbed&&window._pauseChatEmbed(b);}catch(_){}}catch(e){}})(this)"
         onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
         title="Send this track to the player"
         style="background:transparent;border:0;padding:2px 8px;font-size:11px;font-weight:500;color:rgba(76,175,80,.72);cursor:pointer;border-radius:4px;line-height:1.4;letter-spacing:.2px;flex:0 0 auto;transition:color .15s,background .15s"
@@ -3740,108 +3740,6 @@ function handleRoomBan(data) {
   }
 }
 window.handleRoomBan = handleRoomBan;
-
-// ─── Inline YouTube chat embeds: track currentTime so "Send to player"
-//    can resume at the same point in the side player. We register one
-//    global postMessage listener that records `info.currentTime` from
-//    any YouTube iframe the page contains. To make YT actually send
-//    those infoDelivery events we kick a "listening" handshake just
-//    before reading so we always have a fresh value.
-(function _wireChatYtTimeTracking() {
-  if (window._ytChatTimeWired) return;
-  window._ytChatTimeWired = true;
-  const map = new WeakMap();
-  window._ytChatTimeMap = map;
-  try {
-    window.addEventListener('message', (ev) => {
-      try {
-        const host = (() => { try { return new URL(String(ev.origin || '')).host; } catch { return ''; } })();
-        if (!/(?:^|\.)youtube(?:-nocookie)?\.com$/i.test(host)) return;
-        const raw = ev.data;
-        if (typeof raw !== 'string' || raw.charAt(0) !== '{') return;
-        const d = JSON.parse(raw);
-        const t = (d && d.info && typeof d.info.currentTime === 'number')
-          ? d.info.currentTime : null;
-        if (t == null || !isFinite(t) || t < 0) return;
-        document.querySelectorAll('iframe').forEach(f => {
-          if (f.contentWindow === ev.source) map.set(f, t);
-        });
-      } catch {}
-    });
-  } catch {}
-})();
-
-function _ytChatHandshake(iframe) {
-  try {
-    iframe?.contentWindow?.postMessage(
-      JSON.stringify({ event: 'listening', id: 0, channel: 'widget' }), '*');
-    iframe?.contentWindow?.postMessage(
-      JSON.stringify({ event: 'command', func: 'getCurrentTime', args: [] }), '*');
-  } catch {}
-}
-
-// Click handler for the chat preview's "▸ Send to player" button.
-// Routes to the channel queue when the user is in a media channel they
-// can queue into; otherwise hands the track to the side player. If we
-// have a tracked YouTube currentTime for the adjacent inline iframe,
-// we pass it as `startSec` so playback resumes at the same timestamp
-// the user was watching.
-window._sendChatTrackToPlayer = function _sendChatTrackToPlayer(btn) {
-  if (!btn) return;
-  try {
-    const payload = JSON.parse(btn.getAttribute('data-payload') || '{}');
-    const M = window.Music;
-    const inMedia = !!(M && M.isMediaChannelContext && M.isMediaChannelContext());
-    const canQ   = inMedia && !!(M && M.canQueueInCurrentRoom && M.canQueueInCurrentRoom());
-
-    // YT only — Spotify/SoundCloud embeds don't expose a reliable
-    // cross-provider progress API, so we don't try to resume those.
-    const wrap = btn.closest('.yt-embed, .chat-share-music-yt');
-    const iframe = wrap && wrap.querySelector('iframe');
-    const isYt = !!(iframe && /youtube(?:-nocookie)?\.com/.test(iframe.src || ''));
-    if (isYt) _ytChatHandshake(iframe);
-    const readTime = () => {
-      if (!isYt) return 0;
-      const t = window._ytChatTimeMap && window._ytChatTimeMap.get(iframe);
-      return (typeof t === 'number' && t >= 1) ? Math.floor(t) : 0;
-    };
-    const finish = () => { try { window._pauseChatEmbed && window._pauseChatEmbed(btn); } catch {} };
-
-    if (inMedia && canQ && M && M.queueFromUrl) {
-      // Channel queue doesn't accept a start offset — just queue.
-      M.queueFromUrl(payload.url).then((ok) => {
-        try { UI && UI.showToast && UI.showToast(ok
-          ? 'Added to channel queue'
-          : 'Could not queue — playing in side player', 'info'); } catch {}
-        if (!ok && M.playSolo) {
-          try { M.playSolo(Object.assign({}, payload, { startSec: readTime() })); } catch {}
-        }
-        finish();
-      });
-      return;
-    }
-    if (inMedia && !canQ) {
-      try { UI && UI.showToast && UI.showToast("You don't have queue permission in this channel", 'error'); } catch {}
-      return;
-    }
-    if (M && M.playSolo) {
-      const launch = () => {
-        const s = readTime();
-        try { M.playSolo(Object.assign({}, payload, { startSec: s })); } catch {}
-        try {
-          UI && UI.showToast && UI.showToast(
-            s ? `Playing from ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}` : 'Playing in side player'
-          );
-        } catch {}
-        finish();
-      };
-      // Wait briefly so YT's reply to the handshake can land before we
-      // mount the side player. Skip the wait if we already have a value.
-      if (readTime()) launch();
-      else setTimeout(launch, 180);
-    }
-  } catch {}
-};
 
 // Pause the chat-embedded player adjacent to the given Send-to-player
 // button so the inline iframe and the Music side-player don't double-
