@@ -6,6 +6,21 @@ const Notifications = (() => {
   let _swReg = null;
   let _installPrompt = null;
   let _audioPrimed = false;
+
+  // Word-boundary @mention detector. Prevents @frog matching inside @frogai
+  // and similar prefix collisions (the original substring check fired a
+  // self-mention notification when a bot whose name started with the
+  // owner's nickname was @-mentioned by a third party).
+  function _isMentionOf(text, nick) {
+    if (!text || !nick) return false;
+    try {
+      const esc = String(nick).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp('(^|[^A-Za-z0-9_-])@' + esc + '(?![A-Za-z0-9_-])', 'i');
+      return re.test(String(text));
+    } catch {
+      return false;
+    }
+  }
   const _audioDebugEnabled = () => {
     try { return window.localStorage?.getItem('ft_sound_debug') === '1'; }
     catch { return false; }
@@ -936,7 +951,10 @@ const Notifications = (() => {
       if (_isDndActive()) return;
       const myNick = State.user?.nickname || '';
       const contentText = (msg.content || '').replace(/<[^>]+>/g, '');
-      let isMention = myNick && contentText.toLowerCase().includes('@' + myNick.toLowerCase());
+      // Word-boundary check — substring matches caused @frogai to also
+      // trigger a self-mention for user @frog. Nickname charset matches
+      // the server NICKNAME_RE (letters, digits, underscore, hyphen).
+      let isMention = !!(myNick && _isMentionOf(contentText, myNick));
       // notify_mentions toggle: when off, demote a mention to a regular message
       // notification (no mention-boost sound, no "@you" title).
       if (isMention && !_pref('notify_mentions', true)) isMention = false;

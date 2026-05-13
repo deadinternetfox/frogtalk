@@ -12,6 +12,21 @@ const WS = (() => {
   const _historyInFlight = new Map();
   const _historyLastApplied = new Map();
 
+  // Word-boundary @mention detector. Allows letters, digits, underscore and
+  // hyphen (NICKNAME_RE on the server), and refuses to fire when the
+  // nickname is a strict prefix of a longer handle (so @frog won't match
+  // @frogai). Case-insensitive; escapes the nickname for regex safety.
+  function _isMentionOf(text, nick) {
+    if (!text || !nick) return false;
+    try {
+      const esc = String(nick).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp('(^|[^A-Za-z0-9_-])@' + esc + '(?![A-Za-z0-9_-])', 'i');
+      return re.test(String(text));
+    } catch {
+      return false;
+    }
+  }
+
   function connect(room) {
     if (_ws && _room === room) {
       if (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN) {
@@ -169,7 +184,10 @@ const WS = (() => {
         const dm = await decryptMsg(data, room);
         Messages.appendMessage(room, dm);
         const myNick = State.user?.nickname || '';
-        const isMention = myNick && (dm.content || '').toLowerCase().includes('@' + myNick.toLowerCase());
+        // Use a word-boundary mention check so e.g. @frog doesn't also match
+        // inside @frogai (substring fired a self-notif when our bot was
+        // mentioned and the bot's name shared a prefix with the owner).
+        const isMention = !!(myNick && _isMentionOf(dm.content, myNick));
         // Skip sounds / desktop notifications for muted users or muted rooms.
         const mutedAuthor = typeof Mute !== 'undefined' && Mute.isUserMuted(dm.nickname);
         const mutedRoom = typeof Mute !== 'undefined' && Mute.isRoomMuted(room);
