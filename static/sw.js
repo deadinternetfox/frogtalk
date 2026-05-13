@@ -1,5 +1,5 @@
 /* FrogTalk Service Worker — caching + web push */
-const CACHE_NAME = 'frogtalk-v529';
+const CACHE_NAME = 'frogtalk-v530';
 const STATIC_ASSETS = [
   '/app',
   '/static/js/app.js',
@@ -32,9 +32,26 @@ self.addEventListener('install', event => {
 // CACHE_NAME and only purge older versions.
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    (async () => {
+      // Drop stale caches from older SW versions.
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)));
+      // Also evict any previously-cached admin/board responses from the
+      // current cache — those pages are now SW-bypassed but legacy
+      // installs may still have stale copies sitting in storage.
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        const reqs = await cache.keys();
+        await Promise.all(reqs.map(req => {
+          const p = new URL(req.url).pathname;
+          if (p === '/server' || p.startsWith('/server/') ||
+              p === '/board'  || p.startsWith('/board/')) {
+            return cache.delete(req);
+          }
+        }));
+      } catch (e) { /* non-fatal */ }
+      await self.clients.claim();
+    })()
   );
 });
 
@@ -68,6 +85,21 @@ self.addEventListener('fetch', event => {
     url.pathname.startsWith('/app/') ||
     url.pathname === '/static/index.html' ||
     url.pathname.startsWith('/static/js/')
+  ) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
+
+  // Admin / board pages: bypass the SW entirely so the upstream
+  // Cache-Control: no-store headers from FastAPI (/server) and PHP
+  // (/board, /board/admin) are honoured. Without this the SW kept
+  // serving the previous render after a deploy, making CSS/HTML
+  // changes invisible until the next sw.js bump.
+  if (
+    url.pathname === '/server' ||
+    url.pathname.startsWith('/server/') ||
+    url.pathname === '/board' ||
+    url.pathname.startsWith('/board/')
   ) {
     event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
