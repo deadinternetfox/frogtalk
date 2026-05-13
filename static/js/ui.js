@@ -6827,6 +6827,16 @@ function _normalizeMentionPresence(raw) {
 
 function _mentionEffectivePresence(user) {
   const nick = String(user?.nickname || '').toLowerCase();
+  // Bots don't participate in the WS presence map (no client session) so
+  // the live-presence lookups below would always come back "offline"
+  // and override the API's reported state. Short-circuit on the
+  // is_bot flag and trust whatever presence the /mentionable endpoint
+  // attached — the server marks installed bots as "online" since the
+  // daemon polls regardless of whether anyone is logged in.
+  if (user && user.is_bot) {
+    const botPresence = _normalizeMentionPresence(user.presence);
+    return botPresence || 'online';
+  }
   try {
     const fromMap = State?.presenceByNick && State.presenceByNick[nick];
     const p = _normalizeMentionPresence(fromMap);

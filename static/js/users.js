@@ -334,7 +334,7 @@ const Users = (() => {
     el.innerHTML = `
       <div class="user-avatar">
         ${UI.avatarEl(bot.avatar, bot.name, 32)}
-        <span class="online-dot" style="background:#00bcd4" title="Bot"></span>
+        <span class="online-dot" style="background:#6fbf7e;box-shadow:0 0 4px rgba(76,175,80,.45)" title="Bot — online"></span>
       </div>
       <div class="user-name-wrap">
         <span class="user-name">${UI.escHtml(bot.name)} <span class="bot-pill" title="Automated bot account">BOT</span></span>
