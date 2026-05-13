@@ -556,38 +556,34 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         .page-header { margin-bottom: 25px; }
         .page-header h1 { color: #00ff41; font-size: 18px; margin-bottom: 5px; }
         .page-header p { color: #4a8f4a; font-size: 12px; }
-        /* Top-of-page "Back to Node Admin" pill. Always visible — it is
-           useful both inside the FrogTalk shell iframe (no browser back
-           button) and when /board/admin is loaded directly in a tab. */
+        /* Compact "Back to Node Admin" pill placed at the top of the sidebar.
+           Subtle — meant to be a quiet escape hatch, not a banner. */
         .back-to-node-admin {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            margin: 0 0 18px 0;
-            padding: 9px 14px;
-            background: linear-gradient(135deg, #112a1a 0%, #0d1f12 100%);
-            border: 1px solid #2a5a35;
-            border-radius: 8px;
-            color: #9be0a8;
+            gap: 6px;
+            margin: 0 0 12px 0;
+            padding: 5px 10px;
+            background: rgba(0, 255, 65, 0.04);
+            border: 1px solid rgba(0, 255, 65, 0.18);
+            border-radius: 6px;
+            color: #6baf6b;
             text-decoration: none;
-            font-size: 12px;
-            font-weight: 600;
-            letter-spacing: 0.4px;
+            font-size: 10.5px;
+            font-weight: 500;
+            letter-spacing: 0.3px;
             width: fit-content;
-            transition: background .15s, border-color .15s, transform .08s;
-            cursor: pointer;
+            transition: background .15s, border-color .15s, color .15s;
         }
         .back-to-node-admin:hover {
-            background: linear-gradient(135deg, #18432a 0%, #112a1a 100%);
-            border-color: #4a8f4a;
-            color: #c6ffd6;
+            background: rgba(0, 255, 65, 0.08);
+            border-color: rgba(0, 255, 65, 0.35);
+            color: #9be0a8;
         }
-        .back-to-node-admin:active { transform: translateY(1px); }
         .back-to-node-admin .arrow {
             display: inline-block;
-            font-size: 14px;
+            font-size: 11px;
             line-height: 1;
-            transform: translateY(-1px);
         }
         
         /* Cards */
@@ -795,9 +791,8 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
 <body>
     <div class="admin-layout">
         <nav class="sidebar">
-            <a href="/server" class="back-to-node-admin" id="sidebar-back-to-node-admin"
-               style="margin: 0 0 14px 0;">
-                <span class="arrow">←</span><span>Back to Node Admin</span>
+            <a href="/server" class="back-to-node-admin" id="sidebar-back-to-node-admin">
+                <span class="arrow">←</span><span>Node Admin</span>
             </a>
             <div class="sidebar-brand">
                 <h2>🔧 ADMIN PANEL</h2>
@@ -827,19 +822,17 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
             // When this admin panel is loaded inside the FrogTalk shell
             // (via the Node Admin overlay iframe, or with ?shell=1 hint),
             // there is no browser back button to return to the Server
-            // Admin panel. Tag <body> so the floating "Back to Node Admin"
-            // pill (rendered at the top of <main>) becomes visible, and
-            // reroute its click + the sidebar "Back to Board" link to
-            // stay inside the shell.
+            // Admin panel. Reroute the sidebar "Back to Board" link so it
+            // stays inside the shell.
             (function(){
                 try {
                     var inFrame = window.top !== window.self;
                     var hinted  = /[?&]shell=1\b/.test(location.search);
                     if (!inFrame && !hinted) return;
                     document.body.classList.add('in-frog-shell');
-                    var link = document.getElementById('back-to-node-admin');
-                    if (link) {
-                        link.addEventListener('click', function(ev){
+                    var sideLink = document.getElementById('sidebar-back-to-node-admin');
+                    if (sideLink) {
+                        sideLink.addEventListener('click', function(ev){
                             ev.preventDefault();
                             window.location.href = '/server';
                         });
@@ -861,9 +854,6 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
         </script>
         
         <main class="admin-main">
-            <a href="/server" id="back-to-node-admin" class="back-to-node-admin" role="button">
-                <span class="arrow">←</span><span>Back to Node Admin</span>
-            </a>
             <?php if ($success): ?><div class="alert alert-success">✅ <?= htmlspecialchars($success) ?></div><?php endif; ?>
             <?php if ($error): ?><div class="alert alert-error">⚠️ <?= htmlspecialchars($error) ?></div><?php endif; ?>
             
