@@ -179,6 +179,39 @@ async def get_me(
     }
 
 
+@router.get("/me/channels")
+@limiter.limit("60/minute")
+async def get_my_channels(
+    request: Request,
+    auth: dict = Depends(require_api_key(["read"])),
+):
+    """List channels this *bot* has been installed in (via owner add-to-channel
+    flow). Lets a bot daemon auto-discover its memberships instead of hard-
+    coding a channel list in env — when an owner adds the bot to a new
+    channel, the daemon picks it up on the next call to this endpoint.
+
+    For non-bot keys (user API keys), returns the channels the user is a
+    member of."""
+    if auth.get("is_bot"):
+        bot = db.get_bot_by_api_key_id(auth["key"]["id"])
+        if not bot:
+            return {"channels": []}
+        rows = db.get_bot_channel_names(bot["id"])
+        return {
+            "bot_id": bot["id"],
+            "bot_name": bot.get("name", ""),
+            "channels": rows,
+        }
+    # User key — return rooms they're a member of.
+    rooms = db.get_user_rooms(auth["owner"]["id"]) if hasattr(db, "get_user_rooms") else []
+    return {
+        "channels": [
+            {"name": r["name"], "description": r.get("description", "")}
+            for r in rooms
+        ]
+    }
+
+
 # ---------------------------------------------------------------------------
 # Channels
 # ---------------------------------------------------------------------------

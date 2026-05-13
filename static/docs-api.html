@@ -622,6 +622,7 @@ setInterval(tick, 5000);</code></pre>
 <pre><code>GET    /api/external/docs
 GET    /api/external/health
 GET    /api/external/me
+GET    /api/external/me/channels
 GET    /api/external/channels
 GET    /api/external/channels/{name}/messages
 POST   /api/external/channels/{name}/messages
@@ -630,6 +631,7 @@ POST   /api/external/dms/{user_id}
 POST   /api/external/webhooks</code></pre>
           <pre><code>curl -X GET https://frogtalk.xyz/api/external/me \
   -H "X-API-Key: frog_your_key_here"</code></pre>
+          <p class="muted"><strong>Bot keys only:</strong> <code>GET /api/external/me/channels</code> returns the list of channels the bot has been installed in (via Settings → Bots → Add to channel). Auto-discovery clients should poll this every ~30s instead of hardcoding a channel list.</p>
         </article>
 
         <article class="panel" id="bridge">

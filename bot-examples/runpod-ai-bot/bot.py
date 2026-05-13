@@ -119,6 +119,19 @@ class FrogTalkClient:
         r.raise_for_status()
         return r.json().get("bots", [])
 
+    def get_my_channels(self) -> list[str]:
+        """Channels this bot has been installed in. Lets the daemon
+        auto-discover instead of hardcoding FROGTALK_CHANNELS — when an
+        owner installs the bot in a new channel, the next refresh
+        picks it up."""
+        r = self._session.get(
+            f"{self.server}/api/external/me/channels",
+            headers=self._bot_headers(), timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json() or {}
+        return [c["name"] for c in (data.get("channels") or []) if c.get("name")]
+
 
 # ---------------------------------------------------------------------------
 # RunPod client
@@ -256,12 +269,14 @@ MENTION_RE_TEMPLATE = r"(?:^|[\s(])@{handle}(?=$|[\s.,!?;:)\u2026])"
 class ChatBot:
     def __init__(self, frogtalk: FrogTalkClient, runpod: RunPodClient,
                  *, bot_name: str, channels: Iterable[str],
-                 poll_interval: float = 2.0, max_context: int = 8):
+                 poll_interval: float = 2.0, max_context: int = 8,
+                 auto_channels: bool = False):
         self.ft = frogtalk
         self.rp = runpod
         self.bot_name = bot_name
         self.bot_name_lower = bot_name.lower()
         self.channels = list(channels)
+        self.auto_channels = auto_channels
         self.poll_interval = poll_interval
         self.max_context = max_context
         # message ids the bot itself posted, so we know what counts as
@@ -270,6 +285,8 @@ class ChatBot:
         # per-channel last_seen id so we don't replay history on
         # restart or on each poll
         self.last_seen: dict[str, int] = {ch: 0 for ch in self.channels}
+        self._channel_refresh_at = 0.0
+        self._channel_refresh_interval = 30.0
         self.mention_re = re.compile(
             MENTION_RE_TEMPLATE.format(handle=re.escape(bot_name)),
             re.IGNORECASE,
@@ -277,8 +294,53 @@ class ChatBot:
         self.last_send_at = 0.0
         self.min_send_gap = 1.0  # client-side cooldown
 
+    def _refresh_channels(self) -> None:
+        """Pull the bot's installed channel list from the server. New
+        channels get a last_seen seeded from latest history so we don't
+        flood them with replies to old messages. Removed channels are
+        dropped from rotation."""
+        if not self.auto_channels:
+            return
+        try:
+            fresh = self.ft.get_my_channels()
+        except Exception:
+            log.exception("auto-channel refresh failed")
+            return
+        new_set = set(fresh)
+        old_set = set(self.channels)
+        added = new_set - old_set
+        removed = old_set - new_set
+        for ch in added:
+            try:
+                hist = self.ft.get_channel_messages(ch, limit=1)
+                self.last_seen[ch] = hist[-1]["id"] if hist else 0
+                log.info("auto-discovered new channel #%s (last_seen=%s)", ch, self.last_seen[ch])
+            except Exception:
+                log.exception("failed to seed new channel #%s", ch)
+                self.last_seen[ch] = 0
+        for ch in removed:
+            self.last_seen.pop(ch, None)
+            log.info("dropped channel #%s (no longer installed)", ch)
+        if added or removed:
+            self.channels = list(new_set)
+
     # ----- main loop -----
     def run(self) -> None:
+        # Auto-discover channels on first run if enabled. Falls back to
+        # whatever was passed in via --channels / FROGTALK_CHANNELS so
+        # operators can still pin a fixed list when they need to.
+        if self.auto_channels:
+            try:
+                discovered = self.ft.get_my_channels()
+                if discovered:
+                    self.channels = discovered
+                    self.last_seen = {ch: 0 for ch in self.channels}
+                    log.info("auto-channels enabled — discovered %d channel(s)", len(discovered))
+                else:
+                    log.warning("auto-channels enabled but bot is not installed in any channel yet")
+            except Exception:
+                log.exception("initial auto-channel discovery failed; falling back to env list")
+
         # Seed last_seen so we don't immediately reply to old messages
         # on startup.
         for ch in self.channels:
@@ -292,7 +354,12 @@ class ChatBot:
 
         log.info("ready — bot=%s channels=%s", self.bot_name, self.channels)
         while True:
-            for ch in self.channels:
+            # Refresh installed-channel list periodically so the daemon
+            # picks up new memberships without a restart.
+            if self.auto_channels and time.time() - self._channel_refresh_at > self._channel_refresh_interval:
+                self._refresh_channels()
+                self._channel_refresh_at = time.time()
+            for ch in list(self.channels):
                 try:
                     self._poll_channel(ch)
                 except Exception:
@@ -304,7 +371,7 @@ class ChatBot:
         if not msgs:
             return
         # Server returns ascending; filter to genuinely new ones.
-        new = [m for m in msgs if m["id"] > self.last_seen[channel]]
+        new = [m for m in msgs if m["id"] > self.last_seen.get(channel, 0)]
         if not new:
             return
         self.last_seen[channel] = max(m["id"] for m in new)
@@ -411,8 +478,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--server-url", default=_env("FROGTALK_SERVER", "https://frogtalk.xyz"))
     p.add_argument("--bot-token", default=_env("FROGTALK_BOT_TOKEN"))
     p.add_argument("--bot-name", default=_env("FROGTALK_BOT_NAME"))
-    p.add_argument("--channels", default=_env("FROGTALK_CHANNELS", "general"),
-                   help="Comma-separated channel names")
+    p.add_argument("--channels", default=_env("FROGTALK_CHANNELS", ""),
+                   help="Comma-separated channel names. Leave empty (or set FROGTALK_AUTO_CHANNELS=1) to auto-discover via /api/external/me/channels.")
+    p.add_argument("--auto-channels", action="store_true",
+                   default=_env("FROGTALK_AUTO_CHANNELS", "").lower() in {"1", "true", "yes", "on"},
+                   help="Auto-discover installed channels from the server. Refreshes every 30s so newly-added channels light up without a restart.")
     p.add_argument("--runpod-endpoint", default=_env("RUNPOD_ENDPOINT_ID", "n9y6u6rkv73ayv"))
     p.add_argument("--runpod-key", default=_env("RUNPOD_API_KEY"))
     p.add_argument("--poll-interval", type=float, default=float(_env("POLL_INTERVAL", "2.0")))
@@ -482,12 +552,14 @@ def main(argv: list[str] | None = None) -> int:
     rp = RunPodClient(args.runpod_endpoint, args.runpod_key)
 
     channels = [c.strip() for c in args.channels.split(",") if c.strip()]
+    auto = bool(args.auto_channels) or not channels
     bot = ChatBot(
         ft, rp,
         bot_name=args.bot_name,
         channels=channels,
         poll_interval=args.poll_interval,
         max_context=args.max_context,
+        auto_channels=auto,
     )
     try:
         bot.run()

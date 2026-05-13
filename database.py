@@ -4255,6 +4255,27 @@ def get_channel_bots(room_id: int) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def get_bot_channel_names(bot_id: int) -> List[Dict]:
+    """Channels a bot has been installed in. Returned in a shape close
+    to /api/external/channels so a bot daemon can swap a hardcoded
+    `FROGTALK_CHANNELS=foo,bar` list for `GET /api/external/me/channels`
+    without restructuring its loop."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT r.id AS room_id,
+                   r.name,
+                   COALESCE(r.description, '') AS description,
+                   COALESCE(r.icon, '💬') AS icon,
+                   COALESCE(r.is_public, 0) AS is_public,
+                   bcm.permissions
+            FROM bot_channel_members bcm
+            JOIN rooms r ON r.id = bcm.room_id
+            WHERE bcm.bot_id = ?
+            ORDER BY r.name
+        """, (int(bot_id),)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def bot_in_channel(bot_id: int, room_id: int) -> bool:
     """True iff the bot has been explicitly added to the channel.
     Used by the external API to refuse bot messages into rooms the bot

@@ -673,41 +673,77 @@
       const blocked = peerBtn.getAttribute('data-blocked') === '1';
       togglePeerBlock(nid, blocked);
     }
-    // Imageboard "Open Board" / "Open Board Admin" / federated peer cards
-    // — when the link target is a .onion address and the current page is
-    // NOT on .onion (i.e. the admin is using clearnet, typically the
-    // desktop Electron app or a regular browser), shell.openExternal will
-    // hand the unresolvable onion to the system browser and silently
-    // fail. Intercept and show a "Tor required" splash with a copyable
-    // address + an "Open anyway" escape hatch.
-    //
-    // Earlier version checked `location.hostname.endsWith('.onion')` —
-    // that's the inverse of what we want: the splash should fire when
-    // the *target* is onion and the *current host* isn't.
-    const onionAnchor = ev.target && ev.target.closest && ev.target.closest('a[href]');
-    if (onionAnchor && onionAnchor.closest('#imageboard-panel')) {
-      let targetUrl = '';
-      try { targetUrl = new URL(onionAnchor.getAttribute('href') || '', location.href).toString(); }
-      catch { targetUrl = onionAnchor.getAttribute('href') || ''; }
-      let targetHost = '';
-      try { targetHost = new URL(targetUrl, location.href).hostname.toLowerCase(); } catch {}
-      const currentHost = String(location.hostname || '').toLowerCase();
-      const targetIsOnion = targetHost.endsWith('.onion');
-      const currentIsOnion = currentHost.endsWith('.onion');
-      if (targetIsOnion && !currentIsOnion) {
-        ev.preventDefault();
-        let label = 'Imageboard';
-        if (onionAnchor.id === 'imageboard-admin-btn') label = 'Board Admin';
-        else if (onionAnchor.id === 'imageboard-open-btn') label = 'Imageboard';
-        else {
-          // Federated peer card — pull the peer's display title if present.
-          const peerTitle = onionAnchor.querySelector('b');
-          if (peerTitle && peerTitle.textContent) label = peerTitle.textContent.trim();
-        }
-        showTorRequiredDialog(targetUrl, label);
-      }
-    }
   });
+
+  // Tor-required splash intercept. Registered separately at CAPTURE phase
+  // on the document so we fire BEFORE any bubble-phase or target-attached
+  // listeners (and well before the browser's default-action navigation /
+  // Electron's setWindowOpenHandler -> shell.openExternal). Also covers
+  // middle-click (auxclick) and right-click "Open in new tab".
+  //
+  // Fires when a clicked anchor's target host is `.onion` AND the current
+  // page host is not — i.e. the operator is on clearnet and the link
+  // points at a hidden service their browser can't reach.
+  function _onionInterceptHandler(ev) {
+    try {
+      // Ignore modifier/key combos that should still go through if user
+      // really wants to copy URL, etc. We DO want to intercept plain
+      // clicks and middle-clicks though.
+      if (ev.type === 'auxclick' && ev.button !== 1) return;
+      const anchor = ev.target && ev.target.closest && ev.target.closest('a[href]');
+      if (!anchor) return;
+      // Scope to the imageboard panel + any element flagged data-onion-link.
+      const scoped = anchor.closest('#imageboard-panel') || anchor.hasAttribute('data-onion-link');
+      if (!scoped) return;
+      const href = anchor.getAttribute('href') || '';
+      if (!href || href.startsWith('#')) return;
+      let targetUrl, targetHost;
+      try {
+        const u = new URL(href, location.href);
+        targetUrl = u.toString();
+        targetHost = u.hostname.toLowerCase();
+      } catch { return; }
+      if (!targetHost.endsWith('.onion')) return;
+      const currentHost = String(location.hostname || '').toLowerCase();
+      if (currentHost.endsWith('.onion')) return;
+      // Block the navigation in every form the browser/Electron knows.
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+      let label = 'Imageboard';
+      if (anchor.id === 'imageboard-admin-btn') label = 'Board Admin';
+      else if (anchor.id === 'imageboard-open-btn') label = 'Imageboard';
+      else {
+        const peerTitle = anchor.querySelector('b');
+        if (peerTitle && peerTitle.textContent) label = peerTitle.textContent.trim();
+      }
+      showTorRequiredDialog(targetUrl, label);
+    } catch (err) {
+      try { console.error('[ft] onion intercept failed', err); } catch {}
+    }
+  }
+  document.addEventListener('click', _onionInterceptHandler, true);
+  document.addEventListener('auxclick', _onionInterceptHandler, true);
+  // Defensive: also neuter the href on the buttons themselves so even if
+  // the listener somehow misses (e.g. CSP, extension), the buttons can't
+  // open the onion directly. We restore behaviour through the splash's
+  // explicit window.open call.
+  function _neuterOnionAnchors() {
+    document.querySelectorAll('#imageboard-panel a[href]').forEach((a) => {
+      try {
+        const u = new URL(a.getAttribute('href') || '', location.href);
+        if (u.hostname.toLowerCase().endsWith('.onion')
+            && !location.hostname.toLowerCase().endsWith('.onion')) {
+          a.dataset.onionHref = u.toString();
+          a.setAttribute('href', 'javascript:void(0)');
+          a.removeAttribute('target');
+        }
+      } catch {}
+    });
+  }
+  // Run on next tick + observe so re-renders re-neuter.
+  setTimeout(_neuterOnionAnchors, 250);
+  setInterval(_neuterOnionAnchors, 4000);
 
   // Self-contained "Tor required" splash for the server-admin page so we
   // don't have to drag the full app's ui.js into this surface. Renders a

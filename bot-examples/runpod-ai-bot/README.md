@@ -56,7 +56,8 @@ CLI flags. CLI > env > defaults.
 | `FROGTALK_SERVER` | `--server-url` | `https://frogtalk.xyz` | Base URL of the FrogTalk server |
 | `FROGTALK_BOT_TOKEN` | `--bot-token` | *(required)* | `bot_…` token issued in the app |
 | `FROGTALK_BOT_NAME` | `--bot-name` | *(required)* | Handle the bot was registered as (used to detect `@mentions`) |
-| `FROGTALK_CHANNELS` | `--channels` | `general` | Comma-separated channels to listen in |
+| `FROGTALK_CHANNELS` | `--channels` | *(empty)* | Comma-separated channels to listen in. Leave empty to auto-discover from the server. |
+| `FROGTALK_AUTO_CHANNELS` | `--auto-channels` | `1` when `FROGTALK_CHANNELS` is empty | Pull the bot's installed-channel list from `GET /api/external/me/channels` and refresh every ~30s, so a server owner adding the bot to a new channel takes effect with no restart. |
 | `RUNPOD_ENDPOINT_ID` | `--runpod-endpoint` | `n9y6u6rkv73ayv` | RunPod serverless endpoint id |
 | `RUNPOD_API_KEY` | `--runpod-key` | *(required)* | `rpa_…` API key |
 | `POLL_INTERVAL` | `--poll-interval` | `2.0` | Seconds between polls per channel |

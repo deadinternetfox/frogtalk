@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, Tray, Notification, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, Notification, shell, ipcMain, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -329,10 +329,61 @@ function createWindow() {
   // Open external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (!url.startsWith(APP_URL)) {
+      // Backstop for the .onion Tor splash: the renderer-side intercept
+      // in static/js/server_admin.js calls preventDefault on the click,
+      // but if for any reason it didn't run (stale cache, CSP weirdness,
+      // future regression) we still must NOT pass .onion to the OS — the
+      // default browser cannot resolve it and the user gets nothing.
+      // Show an Electron-native dialog explaining Tor Browser is needed.
+      try {
+        const u = new URL(url);
+        if (u.hostname.toLowerCase().endsWith('.onion')) {
+          const choice = dialog.showMessageBoxSync(mainWindow, {
+            type: 'info',
+            buttons: ['Copy address', 'Open anyway', 'Cancel'],
+            defaultId: 0,
+            cancelId: 2,
+            title: 'Tor required',
+            message: 'This link is a Tor hidden service (.onion).',
+            detail: `${url}\n\nThe FrogTalk imageboard is reachable only through Tor Browser. Open Tor Browser, paste the address, and try again.`,
+            noLink: true,
+          });
+          if (choice === 0) {
+            try { require('electron').clipboard.writeText(url); } catch {}
+          } else if (choice === 1) {
+            shell.openExternal(url);
+          }
+          return { action: 'deny' };
+        }
+      } catch {}
       shell.openExternal(url);
       return { action: 'deny' };
     }
     return { action: 'allow' };
+  });
+
+  // Same backstop for in-window navigations to .onion (e.g. an <a> click
+  // that somehow slipped past the renderer's capture-phase preventDefault).
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    try {
+      const u = new URL(url);
+      if (u.hostname.toLowerCase().endsWith('.onion')) {
+        event.preventDefault();
+        dialog.showMessageBox(mainWindow, {
+          type: 'info',
+          buttons: ['Copy address', 'OK'],
+          defaultId: 0,
+          title: 'Tor required',
+          message: 'This link is a Tor hidden service (.onion).',
+          detail: `${url}\n\nOpen Tor Browser, paste the address, and try again.`,
+          noLink: true,
+        }).then((res) => {
+          if (res && res.response === 0) {
+            try { require('electron').clipboard.writeText(url); } catch {}
+          }
+        }).catch(() => {});
+      }
+    } catch {}
   });
 
   // Allow camera/mic + notifications permissions needed by calls and alerts.
