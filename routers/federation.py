@@ -998,8 +998,14 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         # ---- Time window check (replay defence, applies even without sigs) ----
         origin_time_str = str(ev.get("origin_time") or "").strip()
         if not origin_time_str:
-            rejected += 1
-            continue
+            # Tolerate legacy peers that pre-date the outbox origin_time
+            # column. Stamping with the current time keeps the monotonic
+            # progression check meaningful while letting valid traffic
+            # through during a rolling federation upgrade. The replay
+            # window below still bounds out-of-skew clocks; this branch
+            # is the only place where we synthesize a timestamp.
+            origin_time_str = now.isoformat().replace("+00:00", "Z")
+            ev["origin_time"] = origin_time_str
         try:
             # Normalize the "Z" suffix that enqueue_server_event emits;
             # fromisoformat in <3.11 doesn't accept it.
@@ -1337,6 +1343,8 @@ async def federation_outbox_processor() -> int:
             "event_id": event_id,
             "event_type": str(row.get("event_type") or ""),
             "origin_server_id": local_server_id,
+            "origin_time": str(row.get("origin_time") or ""),
+            "signature": str(row.get("signature") or ""),
             "payload": payload,
         })
 

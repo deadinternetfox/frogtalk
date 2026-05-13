@@ -2755,8 +2755,10 @@ if ($singleThread) {
             <nav class="federated-nav" aria-label="Federated boards">
                 <div class="fed-scroll">
                     <a class="fed-pill fed-pill-current" href="/board/" title="<?= htmlspecialchars($_thisInfo['subtitle']) ?>">
+                        <?php if (!empty($_thisInfo['tor_only'])): ?><span class="fed-pill-tor-icon">🧅</span><?php endif; ?>
                         <span class="fed-pill-title"><?= htmlspecialchars($_thisInfo['title']) ?></span>
                         <span class="fed-pill-node">@<?= htmlspecialchars($_thisInfo['node_id']) ?></span>
+                        <?php if (!empty($_thisInfo['topic'])): ?><span class="fed-pill-topic">#<?= htmlspecialchars($_thisInfo['topic']) ?></span><?php endif; ?>
                     </a>
                     <?php foreach ($_peers as $_pp): ?>
                         <a class="fed-pill<?= !empty($_pp['tor_only']) ? ' fed-pill-tor' : '' ?>"

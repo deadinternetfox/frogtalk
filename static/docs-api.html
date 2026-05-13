@@ -104,9 +104,46 @@
     top: 72px;
     height: fit-content;
   }
-  .toc h3 { margin: .1rem 0 .55rem; font-size: .95rem; color: var(--blue); }
-  .toc a { display: block; color: var(--muted); text-decoration: none; padding: .18rem 0; font-size: .87rem; }
-  .toc a:hover { color: var(--text); }
+  .toc h3 { margin: .1rem 0 .55rem; font-size: .95rem; color: var(--green); }
+  .toc a { display: block; color: var(--muted); text-decoration: none; padding: .18rem 0; font-size: .87rem; border-left: 2px solid transparent; padding-left: .5rem; transition: color .12s, border-color .12s; }
+  .toc a:hover { color: var(--text); border-left-color: var(--green); }
+  .toc .sub { margin: .15rem 0 .35rem .65rem; padding-left: .35rem; border-left: 1px dashed var(--line); }
+  .toc .sub a { font-size: .8rem; color: #8b9bab; padding: .12rem 0 .12rem .55rem; }
+  .toc .sub a:hover { color: var(--text); border-left-color: var(--green); }
+
+  /* Inline content links — soft mint, not browser-default electric blue. */
+  .panel p a,
+  .panel li a,
+  .panel td a,
+  .panel h2 a,
+  .panel h3 a {
+    color: #7ee2a8;
+    text-decoration: none;
+    border-bottom: 1px dotted rgba(126,226,168,.45);
+    transition: color .12s, border-color .12s, background-color .12s;
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+  .panel p a:hover,
+  .panel li a:hover,
+  .panel td a:hover,
+  .panel h2 a:hover,
+  .panel h3 a:hover {
+    color: #c5f5d8;
+    border-bottom-color: #c5f5d8;
+    background: rgba(74,222,128,.08);
+  }
+  .panel a:focus-visible {
+    outline: 2px solid var(--green);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  /* Section anchor target highlight (when arriving via #hash). */
+  .panel:target,
+  .panel h3:target {
+    scroll-margin-top: 88px;
+  }
+  .panel h3 { scroll-margin-top: 88px; }
 
   .panel {
     border: 1px solid var(--line);
@@ -178,6 +215,15 @@
         <a href="#social">Social / Wall / Directory / Invites</a>
         <a href="#bots">Developer + Bots</a>
         <a href="#building-a-bot">Building a Bot</a>
+        <div class="sub">
+          <a href="#bot-step-create">1. Create the bot</a>
+          <a href="#bot-step-auth">2. Authenticate</a>
+          <a href="#bot-step-poll">3. Poll for messages</a>
+          <a href="#bot-step-reply">4. Reply</a>
+          <a href="#bot-step-profile">5. Profile</a>
+          <a href="#bot-step-etiquette">Etiquette &amp; limits</a>
+          <a href="#bot-examples">Examples</a>
+        </div>
         <a href="#external">External Token API</a>
         <a href="#bridge">Bridge API</a>
         <a href="#federation">Federation / Network / Updates</a>
@@ -411,7 +457,7 @@ GET    /api/developer/bots/public</code></pre>
           stamped <code>is_bot: true</code> on the wire, so clients render a <strong>BOT</strong> pill next
           to the author name in chat. There is no way to disguise a bot as a human.</p>
 
-          <h3>1. Create the bot</h3>
+          <h3 id="bot-step-create">1. Create the bot</h3>
           <ol>
             <li>Open <strong>Settings → Developer → Bots</strong> in the FrogTalk app.</li>
             <li>Click <strong>+ Create Bot</strong> and pick a unique handle. This handle is the name
@@ -421,13 +467,13 @@ GET    /api/developer/bots/public</code></pre>
             it appears in the public directory (botfather-style).</li>
           </ol>
 
-          <h3>2. Authenticate</h3>
+          <h3 id="bot-step-auth">2. Authenticate</h3>
           <p>Send the bot token on every request:</p>
 <pre><code>X-API-Key: bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 # or
 Authorization: Bearer bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx</code></pre>
 
-          <h3>3. Poll for messages</h3>
+          <h3 id="bot-step-poll">3. Poll for messages</h3>
           <p>Bots <strong>cannot</strong> open a WebSocket — they poll. Keep track of the highest
           message id you've seen, and act on anything newer:</p>
 <pre><code>import requests, time
@@ -451,7 +497,7 @@ while True:
         # … your logic …
     time.sleep(2)</code></pre>
 
-          <h3>4. Reply</h3>
+          <h3 id="bot-step-reply">4. Reply</h3>
 <pre><code>requests.post(
     f"{SERVER}/api/external/channels/{CHANNEL}/messages",
     headers={"X-API-Key": BOT_TOKEN},
@@ -460,7 +506,7 @@ while True:
 )</code></pre>
           <p>Setting <code>reply_to</code> threads the bot's reply under the trigger message so users see the quoted parent.</p>
 
-          <h3>5. Profile (botfather-style)</h3>
+          <h3 id="bot-step-profile">5. Profile (botfather-style)</h3>
           <p><code>PUT /api/developer/bots/{bot_id}</code> updates the bot's profile. Uses your user
           session (not the bot key), so typically you'll use the in-app <strong>Edit</strong> dialog.</p>
           <table>
@@ -471,15 +517,7 @@ while True:
             <tr><td><code>is_public</code></td><td>bool</td><td>list publicly</td></tr>
           </table>
 
-          <h3>Reference implementation</h3>
-          <p>A complete, runnable example bot — a channel chat bot that replies to <code>@</code>-mentions
-          and replies-to-its-own-messages, powered by a <a href="https://runpod.io">RunPod</a> serverless
-          endpoint — lives at
-          <code>bot-examples/runpod-ai-bot/</code> in the FrogTalk repo. See
-          <a href="https://github.com/FrogTalk/frogtalk-app/tree/main/bot-examples">bot-examples/</a>
-          on GitHub for the source and a step-by-step README.</p>
-
-          <h3>Etiquette &amp; limits</h3>
+          <h3 id="bot-step-etiquette">Etiquette &amp; limits</h3>
           <ul>
             <li><strong>Rate limit:</strong> <code>POST /channels/{name}/messages</code> is capped at
             30 req/min per bot key. Stay well under it.</li>
@@ -490,6 +528,20 @@ while True:
             <li><strong>Be transparent:</strong> set a useful description so users understand what
             data your bot processes.</li>
           </ul>
+
+          <h3 id="bot-examples">Examples</h3>
+          <p>A complete, runnable reference bot — a channel chat bot that replies to <code>@</code>-mentions
+          and to its own threads, powered by a <a href="https://runpod.io" target="_blank" rel="noopener noreferrer">RunPod</a>
+          serverless endpoint — lives in the FrogTalk repo at
+          <code>bot-examples/runpod-ai-bot/</code>.</p>
+          <ul>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/tree/main/bot-examples" target="_blank" rel="noopener noreferrer">bot-examples/</a> &mdash; all reference bots</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/tree/main/bot-examples/runpod-ai-bot" target="_blank" rel="noopener noreferrer">runpod-ai-bot/</a> &mdash; mention-driven AI chat bot with a step-by-step README</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/main/bot-examples/runpod-ai-bot/bot.py" target="_blank" rel="noopener noreferrer">bot.py</a> &mdash; the polling + reply loop in ~200 lines of Python</li>
+            <li><a href="https://github.com/deadinternetfox/frogtalk/blob/main/bot-examples/runpod-ai-bot/provision_runpod_bot.py" target="_blank" rel="noopener noreferrer">provision_runpod_bot.py</a> &mdash; one-shot script that creates the bot account and prints the token</li>
+          </ul>
+          <p class="muted">Clone, copy the example's <code>.env.example</code> to <code>.env</code>, drop in your
+          <code>bot_…</code> token + RunPod endpoint id, and run <code>python bot.py</code>. That's it.</p>
         </article>
 
         <article class="panel" id="external">

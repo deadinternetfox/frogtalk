@@ -832,6 +832,31 @@ input, select {
           </div>
         </div>
         <div class="grid" id="imageboard-stats-grid"></div>
+        <details id="imageboard-identity-editor" style="margin-top:10px;border:1px solid var(--border,#222);border-radius:8px;padding:6px 10px;">
+          <summary style="cursor:pointer;font-size:13px;color:var(--muted);">Edit this node's board identity</summary>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;margin-top:10px;">
+            <label style="font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px;">Title
+              <input id="ibid-title" type="text" maxlength="64" placeholder="🐸 Frog General">
+            </label>
+            <label style="font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px;">Node slug (@handle)
+              <input id="ibid-node" type="text" maxlength="40" placeholder="frog-general">
+            </label>
+            <label style="font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px;">Topic (#tag in pill)
+              <input id="ibid-topic" type="text" maxlength="32" placeholder="general">
+            </label>
+            <label style="font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:3px;grid-column:1/-1;">Subtitle
+              <input id="ibid-subtitle" type="text" maxlength="200" placeholder="Anonymous discussion board.">
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+            <button class="btn primary" id="ibid-save-btn" type="button">Save identity</button>
+            <span id="ibid-msg" class="msg" style="font-size:12px;"></span>
+          </div>
+        </details>
+        <div style="margin-top:12px;">
+          <div class="section-sub" style="font-size:12px;color:var(--muted);margin-bottom:6px;">Federated peer boards</div>
+          <div id="imageboard-peers" style="display:flex;gap:8px;flex-wrap:wrap;"></div>
+        </div>
         <div id="imageboard-msg" class="msg" style="margin-top:8px;"></div>
       </div>
 

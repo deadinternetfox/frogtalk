@@ -1414,10 +1414,22 @@ def _migrate():
                 event_type       TEXT NOT NULL,
                 payload_json     TEXT NOT NULL,
                 created_at       TEXT DEFAULT (datetime('now')),
-                status           TEXT DEFAULT 'pending'
+                status           TEXT DEFAULT 'pending',
+                origin_time      TEXT DEFAULT '',
+                signature        TEXT DEFAULT ''
             )
             """
         )
+        # Migrate older deployments that pre-date origin_time/signature columns.
+        # Without origin_time the receiving peer's skew/monotonic checks reject
+        # every event (silent rejected += 1), which is exactly the regression
+        # that froze bot.upsert and other replication after May 2026.
+        for _ddl in (
+            "ALTER TABLE federation_outbox_events ADD COLUMN origin_time TEXT DEFAULT ''",
+            "ALTER TABLE federation_outbox_events ADD COLUMN signature  TEXT DEFAULT ''",
+        ):
+            try: con.execute(_ddl)
+            except Exception: pass
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS federation_user_profiles (
@@ -4250,6 +4262,25 @@ def upsert_federated_bot(origin_server_id: str, foreign_bot_id: int, *,
     if not origin_server_id or not foreign_bot_id:
         return None
     with _conn() as con:
+        # bots has two FOREIGN KEYs that the federated mirror rows must
+        # satisfy when PRAGMA foreign_keys=ON: owner_id -> users(id) and
+        # api_key_id -> api_keys(id). We use synthetic sentinel rows
+        # (id=-1 user, id=0 api_key) so the mirror has somewhere to
+        # point. Without these the INSERT silently fails inside the
+        # broad ``except Exception`` below and the helper returns None
+        # — which is exactly the regression that prevented federated
+        # bots from appearing in peer bot directories.
+        try:
+            con.execute(
+                "INSERT OR IGNORE INTO users (id, nickname, password_hash, bio, is_admin) "
+                "VALUES (-1, '__federated__', '', 'Federated bot owner sentinel', 0)"
+            )
+            con.execute(
+                "INSERT OR IGNORE INTO api_keys (id, user_id, key_hash, name, permissions) "
+                "VALUES (0, -1, '', '__federated__', '[]')"
+            )
+        except Exception:
+            pass
         row = con.execute(
             "SELECT id FROM bots WHERE origin_server_id=? AND foreign_bot_id=?",
             (origin_server_id, int(foreign_bot_id)),
@@ -7017,17 +7048,26 @@ def insert_federation_outbox_event(event: dict) -> bool:
             return False
     try:
         with _conn() as con:
+            # Idempotent column-add for legacy databases (pre-origin_time/signature).
+            for _ddl in (
+                "ALTER TABLE federation_outbox_events ADD COLUMN origin_time TEXT DEFAULT ''",
+                "ALTER TABLE federation_outbox_events ADD COLUMN signature  TEXT DEFAULT ''",
+            ):
+                try: con.execute(_ddl)
+                except Exception: pass
             con.execute(
                 """
                 INSERT INTO federation_outbox_events
-                (event_id, target_server_id, event_type, payload_json, created_at, status)
-                VALUES (?, ?, ?, ?, datetime('now'), 'pending')
+                (event_id, target_server_id, event_type, payload_json, created_at, status, origin_time, signature)
+                VALUES (?, ?, ?, ?, datetime('now'), 'pending', ?, ?)
                 """,
                 (
                     event.get("event_id"),
                     "",  # Broadcast to all servers
                     event.get("event_type"),
                     payload_json,
+                    str(event.get("origin_time") or ""),
+                    str(event.get("signature") or ""),
                 ),
             )
             con.commit()
