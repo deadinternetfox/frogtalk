@@ -939,7 +939,15 @@ if ($singleThread) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <!-- Critical: prevent FOUC white flash before style.css loads -->
     <style>html,body{background:#0a0e0a;color:#00ff41;}</style>
-    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — ' . ($settings['board_title'] ?? 'Frog Channel')) : htmlspecialchars($settings['board_title'] ?? 'Frog Channel') ?></title>
+    <?php
+        // Strip emoji / pictographs from the board title for the browser tab
+        // (the on-page <h2> still uses the full title with emoji). Some
+        // browsers render emoji + tab-icon side by side which looks like a
+        // duplicate icon — keep the <title> text-only.
+        $_tabTitle = preg_replace('/[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]/u', '', (string)($settings['board_title'] ?? 'Frog Channel'));
+        $_tabTitle = trim($_tabTitle) ?: 'Frog Channel';
+    ?>
+    <title><?= $singleThread ? htmlspecialchars(($singleThread['subject'] ?: 'Thread') . ' — ' . $_tabTitle) : htmlspecialchars($_tabTitle) ?></title>
     
     <meta name="title" content="<?= htmlspecialchars($ogTitle) ?>">
     <meta name="description" content="<?= htmlspecialchars($ogDesc) ?>">
