@@ -985,22 +985,42 @@ const GIFs = (() => {
   function browseFromManager() {
     const m = document.getElementById('sticker-manager-modal');
     if (m) m.style.display = 'none';
-    // Ensure the GIF picker is open so #gif-grid is actually visible.
-    // The picker's outside-click handler may have closed it the moment
-    // the user clicked anywhere inside the manager modal, so don't
-    // trust the cached _isOpen flag — re-derive from the DOM and force
-    // an open state if needed (without going through toggle(), which
-    // would also race loadStickerPacks).
+    // Open the GIF picker WITHOUT going through toggle(), because
+    // toggle()'s open path auto-fires loadStickerPacks() for the
+    // stickers tab — that fetch races showPublicPacks() and the loser
+    // overwrites #gif-grid (typically the user sees their own packs or
+    // an empty state appear and then nothing else). We replicate the
+    // small subset of toggle() that handles positioning + outside-close,
+    // and skip the auto-load.
     try { createPicker(); } catch {}
     const picker = document.getElementById('gif-picker');
     if (picker && !picker.classList.contains('open')) {
-      try { toggle(); } catch {}
+      picker.classList.add('open');
+      _isOpen = true;
+      try { if (typeof toggleEmojiPicker === 'function') toggleEmojiPicker(true); } catch {}
+      try {
+        const btn = document.querySelector('.gif-btn');
+        if (btn) {
+          const r  = btn.getBoundingClientRect();
+          const pw = Math.min(320, window.innerWidth - 16);
+          const bottomGap = Math.max(8, window.innerHeight - r.top + 4);
+          const avail = r.top - 12;
+          const ph = Math.max(260, Math.min(360, avail));
+          let left = r.right - pw;
+          if (left < 8) left = 8;
+          if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+          picker.style.top    = 'auto';
+          picker.style.bottom = bottomGap + 'px';
+          picker.style.left   = left + 'px';
+          picker.style.right  = 'auto';
+          picker.style.width  = pw + 'px';
+          picker.style.height = ph + 'px';
+        }
+      } catch {}
+      try { _attachOutsideClose(); } catch {}
     }
     // Force-update the tab UI to "stickers" WITHOUT kicking off
-    // loadStickerPacks — otherwise that fetch races our showPublicPacks
-    // call and the one that completes last wins. We've already
-    // observed the user's own packs (or "no packs yet") overwriting
-    // the public-pack list in production.
+    // loadStickerPacks (see comment above).
     _setActiveTabUI('stickers');
     showPublicPacks();
   }
