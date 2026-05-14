@@ -7431,11 +7431,11 @@ const Social = (() => {
     return `
     <div class="sf-post" data-post-id="${p.id}">
       ${repostContextHtml}
-      <div class="sf-post-header">
-        <div class="sf-post-avatar" onclick="Social.openProfile('${escNick}')">${UI.avatarEl(p.avatar, p.nickname, 36)}</div>
-        <div class="sf-post-info" onclick="Social.openProfile('${escNick}')">
-          <span class="sf-post-nick">${escDisplayName}</span>
-          ${p.display_name ? `<span class="sf-post-handle">@${escNick}</span>` : ''}
+      <div class="sf-post-header"${detailMode ? '' : ` onclick="Social._headerOpenPost(event,${Number(p.id)||0})" style="cursor:pointer"`}>
+        <div class="sf-post-avatar" onclick="event.stopPropagation();Social.openProfile('${escNick}')">${UI.avatarEl(p.avatar, p.nickname, 36)}</div>
+        <div class="sf-post-info">
+          <span class="sf-post-nick" onclick="event.stopPropagation();Social.openProfile('${escNick}')" style="cursor:pointer">${escDisplayName}</span>
+          ${p.display_name ? `<span class="sf-post-handle" onclick="event.stopPropagation();Social.openProfile('${escNick}')" style="cursor:pointer">@${escNick}</span>` : ''}
           <span class="sf-post-time">${timeAgo(displayTime)}</span>
         </div>
         <button class="sf-post-menu" title="More options" aria-label="Post options"
@@ -9021,6 +9021,24 @@ const Social = (() => {
     viewPostDetail(postId);
   }
 
+  // Wrapper-level click handler for the post header (avatar/nick row).
+  // Tapping the empty area of the header — between the avatar and the
+  // ⋯ menu — should open the post detail. The avatar, nickname, and
+  // handle each have their own onclick that calls stopPropagation and
+  // navigates to the profile, so those don't reach here. As a defence
+  // against any synthesized event that does slip through, we also bail
+  // if the actual target sits inside one of those controls or the menu
+  // button.
+  function _headerOpenPost(ev, postId) {
+    try {
+      const t = ev && ev.target;
+      if (t && t.closest && t.closest('.sf-post-avatar, .sf-post-nick, .sf-post-handle, .sf-post-menu')) {
+        return;
+      }
+    } catch {}
+    viewPostDetail(postId);
+  }
+
   async function viewPostDetail(postId) {
     // Show a single post in a modal-like overlay
     let overlay = document.getElementById('social-post-detail');
@@ -9546,6 +9564,7 @@ const Social = (() => {
     loadFeed, loadExplore, refreshExplore, loadProfile, moveToWall, previewMedia,
     viewPostDetail, closePostDetail, openPostComments,
     _mediaOpenPost,
+    _headerOpenPost,
     viewStories, nextStory, prevStory, closeStoryViewer, openStoryProfileFromViewer,
     viewProfileStories,
     getChatStoryStatus, decorateChatAvatars, refreshChatStoryCache: _refreshChatStoryCache,
