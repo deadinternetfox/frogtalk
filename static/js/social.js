@@ -477,6 +477,14 @@ const Social = (() => {
             _ftVideoBind(video);
             try { video.play().catch(() => setBuffering(false)); } catch { setBuffering(false); }
           };
+          // Belt-and-suspenders: on touch devices a synthesized click can
+          // race against the wrapper's onclick. Stop the touch/pointer
+          // sequence before it can reach the .sf-media parent, so tapping
+          // ▶ never opens the detail overlay.
+          const _stopProp = (e) => { e.stopPropagation(); };
+          play.addEventListener('pointerdown', _stopProp);
+          play.addEventListener('mousedown', _stopProp);
+          play.addEventListener('touchstart', _stopProp, { passive: true });
           host.appendChild(play);
           video.addEventListener('click', (e) => {
             e.preventDefault();
@@ -7333,7 +7341,7 @@ const Social = (() => {
       } else if (p.media_type.startsWith('video/')) {
         mediaHtml = detailMode
           ? `<div class="sf-media"><video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`
-          : `<div class="sf-media" onclick="Social.viewPostDetail(${Number(p.id) || 0})" style="cursor:pointer"><video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
+          : `<div class="sf-media" onclick="Social._mediaOpenPost(event,${Number(p.id) || 0})" style="cursor:pointer"><video src="${esc(_authMediaSrc(p.media_data))}" poster="${esc(_authMediaThumb(p.media_data))}" preload="metadata" playsinline onerror="this.closest('.sf-media')?.remove()"></video></div>`;
       } else if (p.media_type.startsWith('music/')) {
         mediaHtml = _renderMusicCard(p);
         isMusicPost = true;
@@ -8992,6 +9000,27 @@ const Social = (() => {
     }, 500);
   }
 
+  // Wrapper-level click handler for video media tiles in the feed. A tap
+  // on empty media area should open the post detail, but a tap on the
+  // play button or the video element itself should NOT — the play
+  // button just plays. Both inner listeners already call
+  // stopPropagation, but on some touch devices a synthesized click can
+  // bubble before they attach (or the wrapper's inline onclick fires
+  // first). Guard explicitly by inspecting the event target so the play
+  // button is bulletproof.
+  function _mediaOpenPost(ev, postId) {
+    try {
+      const t = ev && ev.target;
+      if (t && (
+        (t.closest && (t.closest('.ft-video-play') || t.closest('.ft-video-buffer'))) ||
+        (t.tagName === 'VIDEO')
+      )) {
+        return;
+      }
+    } catch {}
+    viewPostDetail(postId);
+  }
+
   async function viewPostDetail(postId) {
     // Show a single post in a modal-like overlay
     let overlay = document.getElementById('social-post-detail');
@@ -9516,6 +9545,7 @@ const Social = (() => {
     showFollowers, showFollowing, closeUserList, openProfileFromUserList, expandPost,
     loadFeed, loadExplore, refreshExplore, loadProfile, moveToWall, previewMedia,
     viewPostDetail, closePostDetail, openPostComments,
+    _mediaOpenPost,
     viewStories, nextStory, prevStory, closeStoryViewer, openStoryProfileFromViewer,
     viewProfileStories,
     getChatStoryStatus, decorateChatAvatars, refreshChatStoryCache: _refreshChatStoryCache,

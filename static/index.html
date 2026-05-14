@@ -5664,24 +5664,22 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 .ft-video-poster.ready{opacity:.5}
 .ft-video-host.is-playing .ft-video-poster{opacity:0}
 .ft-video-play{
-  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+  position:absolute;inset:0;margin:auto;z-index:2;
   width:62px;height:62px;border-radius:50%;border:2px solid rgba(255,255,255,.86);
   background:linear-gradient(145deg,rgba(88,219,126,.95),rgba(54,154,85,.92));
-  color:#041509;font-size:28px;line-height:1;
+  color:#041509;font-size:28px;line-height:1;padding:0;
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   box-shadow:0 10px 24px rgba(0,0,0,.55),0 0 0 8px rgba(76,175,80,.16);
-  transition:opacity .14s ease,background .12s ease;
-  will-change:opacity;
+  transition:opacity .14s ease,background .12s ease,transform .12s ease;
+  will-change:opacity,transform;transform:scale(1);
   -webkit-tap-highlight-color:transparent;
 }
-.ft-video-play:hover{background:#7ad491}
-.ft-video-play:active{background:#7ad491}
-.ft-video-host.is-playing .ft-video-play{opacity:0;pointer-events:none}
-.ft-video-host.is-buffering .ft-video-play{opacity:0;pointer-events:none}
-.ft-video-host.is-playing .ft-video-play,
-.ft-video-host.is-buffering .ft-video-play{transform:translate(-50%,-50%) !important}
+.ft-video-play:hover{background:#7ad491;transform:scale(1.06)}
+.ft-video-play:active{background:#7ad491;transform:scale(.94)}
+.ft-video-host.is-playing .ft-video-play{opacity:0;pointer-events:none;transform:scale(.9) !important}
+.ft-video-host.is-buffering .ft-video-play{opacity:0;pointer-events:none;transform:scale(.9) !important}
 .ft-video-buffer{
-  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  position:absolute;inset:0;margin:auto;
   width:34px;height:34px;border-radius:50%;
   border:2.5px solid rgba(123,214,141,.24);
   border-top-color:rgba(146,255,171,.86);
@@ -10238,7 +10236,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=416"></script>
 <!-- cache bump: social share button + story/profile list UX fixes -->
-<script src="/static/js/social.js?v=1017"></script>
+<script src="/static/js/social.js?v=1018"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>
