@@ -298,13 +298,7 @@ const App = {
 
     // Populate self panel
     const u = State.user;
-    const selfName = document.getElementById('self-name');
-    const selfHandle = document.getElementById('self-handle');
-    if (selfName) selfName.textContent = u.display_name || u.nickname;
-    if (selfHandle) {
-      const showHandle = !!(u.display_name && u.display_name !== u.nickname);
-      selfHandle.textContent = showHandle ? `@${u.nickname}` : '';
-    }
+    UI.setSelfNameAndHandle();
     const sa = document.getElementById('self-avatar-el');
     sa.innerHTML = UI.avatarEl(u.avatar, u.nickname, 36);
     this.bindEasterEggTriggers();

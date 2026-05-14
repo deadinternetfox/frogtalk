@@ -116,6 +116,38 @@ const UI = (() => {
     renderSelfStatus();
   }
 
+  // Render the self-panel name+handle, including the admin crown when
+  // the user is an admin. Centralized so all four callers (initial
+  // populate in app.js, username change, display-name change, profile
+  // save, and WS display_name updates) render the crown consistently.
+  // Builds DOM nodes instead of innerHTML so untrusted display names
+  // can never become HTML.
+  function setSelfNameAndHandle() {
+    const u = State?.user || {};
+    const name = u.display_name || u.nickname || '';
+    const showHandle = !!(u.display_name && u.display_name !== u.nickname);
+    const selfName = document.getElementById('self-name');
+    const selfHandle = document.getElementById('self-handle');
+    if (selfName) {
+      // Wipe and rebuild — clears any prior crown so toggling admin
+      // status (or just re-renders) never leaves a stale glyph.
+      while (selfName.firstChild) selfName.removeChild(selfName.firstChild);
+      if (u.is_admin) {
+        const crown = document.createElement('span');
+        crown.className = 'sf-admin-crown';
+        crown.title = 'FrogTalk Admin';
+        crown.setAttribute('aria-label', 'Admin');
+        crown.textContent = '👑';
+        selfName.appendChild(crown);
+        selfName.appendChild(document.createTextNode(' '));
+      }
+      selfName.appendChild(document.createTextNode(name));
+    }
+    if (selfHandle) {
+      selfHandle.textContent = showHandle ? `@${u.nickname}` : '';
+    }
+  }
+
   // Render "presence + status message" on the self panel. Preserves offline/
   // reconnecting overrides so the connection indicator still wins when needed.
   function renderSelfStatus() {
@@ -1155,7 +1187,7 @@ const UI = (() => {
     });
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, updateTypingBar, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled };
+  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, updateTypingBar, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled, setSelfNameAndHandle };
 })();
 
 // ─── ChatVideo: themed inline video player for chat ──────────────────────────
@@ -4778,13 +4810,7 @@ async function changeNickname() {
     State.user.nickname = data.nickname;
     State.user.username_change_remaining_seconds = 7 * 86400;
     State.save();
-    const selfName = document.getElementById('self-name');
-    const selfHandle = document.getElementById('self-handle');
-    if (selfName) selfName.textContent = State.user.display_name || data.nickname;
-    if (selfHandle) {
-      const showHandle = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
-      selfHandle.textContent = showHandle ? `@${State.user.nickname}` : '';
-    }
+    UI.setSelfNameAndHandle();
     _refreshUsernameCooldownUI();
     UI.showToast('Username changed to @' + data.nickname, 'success');
   } catch { UI.showToast('Network error', 'error'); }
@@ -4806,13 +4832,7 @@ async function changeDisplayName() {
         Users.updateDisplayName(State.user.id, State.user.nickname, State.user.display_name);
       }
     } catch {}
-    const selfName = document.getElementById('self-name');
-    const selfHandle = document.getElementById('self-handle');
-    if (selfName) selfName.textContent = State.user.display_name || State.user.nickname;
-    if (selfHandle) {
-      const showHandle = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
-      selfHandle.textContent = showHandle ? `@${State.user.nickname}` : '';
-    }
+    UI.setSelfNameAndHandle();
     try {
       if (typeof Users !== 'undefined') {
         if (Users.updateList) Users.updateList(State.onlineUsers || []);
@@ -5072,13 +5092,7 @@ async function saveProfile() {
         });
       } catch {}
     }
-    const selfName = document.getElementById('self-name');
-    const selfHandle = document.getElementById('self-handle');
-    if (selfName) selfName.textContent = State.user.display_name || State.user.nickname;
-    if (selfHandle) {
-      const showHandle = !!(State.user.display_name && State.user.display_name !== State.user.nickname);
-      selfHandle.textContent = showHandle ? `@${State.user.nickname}` : '';
-    }
+    UI.setSelfNameAndHandle();
     try {
       if (typeof Users !== 'undefined') {
         if (Users.updateList) Users.updateList(State.onlineUsers || []);
