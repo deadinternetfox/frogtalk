@@ -3638,7 +3638,7 @@ if ($singleThread) {
             <?php endif; ?><!-- /singleThread check -->
 
             <div class="board-footer">
-                <a href="/" style="font-weight:700;font-size:14px;">🐸 Frog Channel</a>
+                <a href="/" style="font-weight:700;font-size:14px;">🐸 <?= htmlspecialchars($settings['board_title'] ?? 'Frog Channel') ?></a>
                 <?php if ($isAdmin): ?> · <a href="/board/admin" style="color: #ff8c00;">🔧 Admin</a><?php endif; ?>
                 <br>
                 <span style="font-size:11px;color:#6baf6b;letter-spacing:.2px;">powered by <a href="https://frogtalk.xyz">FrogTalk</a></span>
