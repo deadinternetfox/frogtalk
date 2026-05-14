@@ -3573,7 +3573,7 @@ const Social = (() => {
           </div>
           <div class="sp-info">
             <div class="sp-name-row">
-              <span class="sp-nick">${u.is_admin ? '<span style="color:#ffd700">👑</span> ' : ''}${esc(u.display_name || u.nickname)}${isSelf && u.profile_public === false ? ' <span class="sp-privacy-badge" title="Your profile is private — only friends can view it">🔒 Private</span>' : ''}</span>
+              <span class="sp-nick">${u.is_admin ? '<span class="sf-admin-crown" title="FrogTalk Admin" aria-label="Admin">👑</span> ' : ''}${esc(u.display_name || u.nickname)}${isSelf && u.profile_public === false ? ' <span class="sp-privacy-badge" title="Your profile is private — only friends can view it">🔒 Private</span>' : ''}</span>
             </div>
             <div class="sp-handle-row" style="margin-top:3px;margin-bottom:8px">
               <span class="sp-handle">@${esc(u.nickname)}</span>
@@ -5627,6 +5627,7 @@ const Social = (() => {
     const postPrivacy = String(post.privacy || 'public').toLowerCase();
     const shareEnabled = Number(post.share_enabled ?? 1) === 1;
     const canShare = shareEnabled && postPrivacy !== 'friends' && postPrivacy !== 'private';
+    const reelAdminCrown = post.is_admin ? '<span class="sf-admin-crown" title="FrogTalk Admin" aria-label="Admin">👑</span> ' : '';
 
     return `
       <div class="reel-card${thumbSrc ? ' has-thumb' : ''}" data-post-id="${post.id}">
@@ -5642,7 +5643,7 @@ const Social = (() => {
         <div class="reel-author" onclick="Social.openProfile('${nick}')">
           ${avatarHtml}
           <div class="reel-author-info">
-            <span class="reel-author-display-name">${displayName}</span>
+            <span class="reel-author-display-name">${reelAdminCrown}${displayName}</span>
             <span class="reel-author-nick">@${nick}</span>
             ${friendLabel}
             ${reactionsStack}
@@ -7420,6 +7421,10 @@ const Social = (() => {
     const iReposted = Number(p.i_reposted || 0) === 1;
     const escNick = esc(p.nickname);
     const escDisplayName = esc(p.display_name || p.nickname);
+    // Admin badge — render the crown next to the display name on every
+    // surface (wall, feed, explore, detail). Server populates `is_admin`
+    // on each post row alongside nickname/avatar/display_name.
+    const adminCrown = p.is_admin ? '<span class="sf-admin-crown" title="FrogTalk Admin" aria-label="Admin">👑</span> ' : '';
     const repostContextHtml = isRepostCard
       ? `<div class="sf-repost-context">
            <span class="sf-repost-icon">🔁</span>
@@ -7445,7 +7450,7 @@ const Social = (() => {
       <div class="sf-post-header"${detailMode ? '' : ` onclick="Social._headerOpenPost(event,${Number(p.id)||0})" style="cursor:pointer"`}>
         <div class="sf-post-avatar" onclick="event.stopPropagation();Social.openProfile('${escNick}')">${UI.avatarEl(p.avatar, p.nickname, 36)}</div>
         <div class="sf-post-info">
-          <span class="sf-post-nick" onclick="event.stopPropagation();Social.openProfile('${escNick}')" style="cursor:pointer">${escDisplayName}</span>
+          <span class="sf-post-nick" onclick="event.stopPropagation();Social.openProfile('${escNick}')" style="cursor:pointer">${adminCrown}${escDisplayName}</span>
           ${p.display_name ? `<span class="sf-post-handle" onclick="event.stopPropagation();Social.openProfile('${escNick}')" style="cursor:pointer">@${escNick}</span>` : ''}
           <span class="sf-post-time">${timeAgo(displayTime)}</span>
         </div>
