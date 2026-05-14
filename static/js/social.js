@@ -796,6 +796,17 @@ const Social = (() => {
   }
 
   function openProfile(nickname) {
+    // If the post-detail overlay is open (user tapped @username from
+    // inside a popped-up post), close it first so we don't leave the
+    // post sitting in the background while the profile renders behind
+    // it. closePostDetail is hoisted (function declaration) but may
+    // not be defined yet in odd load orders — guard with typeof.
+    try {
+      const ov = document.getElementById('social-post-detail');
+      if (ov && ov.style.display !== 'none' && typeof closePostDetail === 'function') {
+        closePostDetail();
+      }
+    } catch {}
     _profileUser = nickname;
     _currentTab = 'profile';
     open('profile');
