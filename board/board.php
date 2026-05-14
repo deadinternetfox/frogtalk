@@ -3643,7 +3643,7 @@ if ($singleThread) {
                 <br>
                 <span style="font-size:11px;color:#6baf6b;letter-spacing:.2px;">powered by <a href="https://frogtalk.xyz">FrogTalk</a></span>
                 <br>
-                <span class="footer-online"><span class="footer-views">👁 <?= number_format($totalViews) ?> views</span> · <span class="online-dot footer-dot"></span> <span class="footer-online-count"><?= $onlineCount ?> online</span></span>
+                <span class="footer-online"><?php if ($singleThread): ?><span class="footer-views">👁 <?= number_format($viewC) ?> thread views</span><?php else: ?><span class="footer-views">👁 <?= number_format($totalViews) ?> views</span><?php endif; ?> · <span class="online-dot footer-dot"></span> <span class="footer-online-count"><?= $onlineCount ?> online</span></span>
             </div>
         </div>
     </main>
