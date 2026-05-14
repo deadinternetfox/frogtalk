@@ -9013,7 +9013,23 @@ const Social = (() => {
       p.reactions = p.reactions || [];
       overlay.innerHTML = `<div class="spd-inner"><button class="social-close-btn" onclick="Social.closePostDetail()" style="position:absolute;top:8px;right:8px;z-index:1">✕</button>${renderFeedPost(p, { detailMode: true })}</div>`;
       overlay.style.display = 'flex';
+      // Hydrate now so the custom .ft-video-play button + .ft-video-buffer
+      // ring get attached. Then on the next frame, force-bind the video src
+      // and re-run hydrate as a safety net — IntersectionObserver can be
+      // flaky for elements that were just inserted into a freshly-shown
+      // top-level overlay (#social-post-detail lives outside the
+      // #social-overlay MutationObserver scope), so without this the feed
+      // detail view fell back to the browser's default ▶ icon with no
+      // buffering ring.
       try { _hydrateVideoThumbs(overlay); } catch {}
+      requestAnimationFrame(() => {
+        try { _hydrateVideoThumbs(overlay); } catch {}
+        try {
+          overlay.querySelectorAll('.sf-media video').forEach(v => {
+            try { _ftVideoBind(v); } catch {}
+          });
+        } catch {}
+      });
     } catch {
       overlay.innerHTML = `<div class="spd-inner" style="padding:24px;color:#a1a1a1">Could not load post</div>`;
     }
