@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "xyz.frogtalk.app"
-    compileSdk = 34
+    compileSdk = 35
 
     signingConfigs {
         create("release") {
@@ -20,8 +20,8 @@ android {
     defaultConfig {
         applicationId = "xyz.frogtalk.app"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 223
+        targetSdk = 35
+        versionCode = 224
         versionName = "1.6.19"
     }
 
@@ -34,6 +34,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
         debug {
             isMinifyEnabled = false
