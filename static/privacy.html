@@ -92,22 +92,29 @@
     border-bottom: 1px solid var(--border);
   }
   .nav-logo {
-    display: flex; align-items: center; gap: .5rem;
-    font-weight: 700; font-size: 1.1rem; color: var(--text);
+    display: flex; align-items: center; gap: .6rem;
+    font-size: 1.25rem; font-weight: 700; color: var(--green);
     text-decoration: none;
   }
   .nav-logo .frog { font-size: 1.5rem; }
-  .nav-links { display: flex; align-items: center; gap: 1.25rem; }
-  .nav-links a { color: var(--text-muted); text-decoration: none; font-size: .92rem; transition: color .15s; }
-  .nav-links a:hover { color: var(--text); }
-  .btn {
-    padding: .55rem 1.1rem; border-radius: 8px; font-weight: 600; font-size: .9rem;
-    text-decoration: none; display: inline-flex; align-items: center; gap: .35rem;
-    transition: transform .15s, box-shadow .15s, background .15s;
-    border: 1px solid transparent;
+  .nav-links { display: flex; align-items: center; gap: 1.2rem; }
+  .nav-links a {
+    color: var(--text); text-decoration: none; font-size: .9rem;
+    font-weight: 500; transition: color .2s;
   }
-  .btn-ghost { color: var(--text); border-color: var(--border); }
-  .btn-ghost:hover { background: var(--bg2); }
+  .nav-links a:hover { color: var(--green); }
+  .btn {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .55rem 1.25rem;
+    border-radius: 8px; font-size: .9rem; font-weight: 600;
+    cursor: pointer; text-decoration: none; border: none;
+    transition: all .2s;
+  }
+  .btn-ghost {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { border-color: var(--green); color: var(--green); }
   .btn-primary,
   .btn-primary:visited {
     background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
@@ -115,7 +122,6 @@
     font-weight: 700;
     text-shadow: 0 1px 2px rgba(0,0,0,.2);
     box-shadow: 0 4px 14px rgba(34,197,94,.35);
-    border-color: transparent;
   }
   .btn-primary:hover {
     background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
