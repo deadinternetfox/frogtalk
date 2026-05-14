@@ -80,7 +80,7 @@ requests.post(
 The server stamps the message with `is_bot: true` so the client renders
 the `BOT` pill next to the bot's name in chat.
 
-### 5. Profile (botfather-style)
+### 5. Profile 
 
 `PUT /api/developer/bots/{bot_id}` accepts:
 
