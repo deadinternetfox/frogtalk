@@ -9855,6 +9855,8 @@ window.ConnErr = (function(){
     <div class="server-divider"></div>
     <div class="server-icon" data-tip="Frog Channel" data-tip-pos="right" id="social-board-server-icon" onclick="Social.close();Social.closeSideMenu();openFrogBoard()">🍀</div>
     <div class="server-divider"></div>
+    <!-- Node Admin entry — revealed in App.launch() only for is_admin accounts. -->
+    <div class="server-icon" data-tip="Node Admin" data-tip-pos="right" id="social-admin-icon" onclick="Social.close();Social.closeSideMenu();try{openNodeAdmin()}catch(e){window.location.assign('/server')}" style="display:none;background:linear-gradient(135deg,#1a1208,#3a2410);color:#ffb347;font-weight:700">🛡️</div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="Social.navTo('profile')">⚙️</div>
     <div class="ssm-spacer"></div>
     <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="Social.close();Social.closeSideMenu()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
@@ -9988,6 +9990,8 @@ window.ConnErr = (function(){
       <div class="server-divider"></div>
       <div class="server-icon" data-tip="Frog Social" data-tip-pos="right" onclick="closeFrogBoard();Social.open('feed')">🤳🏼</div>
       <div class="server-divider"></div>
+      <!-- Node Admin entry — revealed in App.launch() only for is_admin accounts. -->
+      <div class="server-icon" data-tip="Node Admin" data-tip-pos="right" id="board-side-admin-icon" onclick="closeFrogBoard();try{openNodeAdmin()}catch(e){window.location.assign('/server')}" style="display:none;background:linear-gradient(135deg,#1a1208,#3a2410);color:#ffb347;font-weight:700">🛡️</div>
       <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="closeFrogBoard();showProfile()">⚙️</div>
       <div class="server-icon" data-tip="Back to FrogTalk" data-tip-pos="right" onclick="closeFrogBoard()" style="background:#1a3a1a;color:#4caf50;font-size:20px">⬅️</div>
       <div class="server-divider"></div>

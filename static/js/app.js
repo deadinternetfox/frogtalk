@@ -309,8 +309,16 @@ const App = {
     // flagged is_admin=true (typically the node operator, e.g. "frog").
     // The element ships hidden so non-admins never see it.
     try {
+      const showAdmin = !!(u && u.is_admin);
+      // Main server strip
       const adminIcon = document.getElementById('node-admin-icon');
-      if (adminIcon) adminIcon.style.display = u && u.is_admin ? '' : 'none';
+      if (adminIcon) adminIcon.style.display = showAdmin ? '' : 'none';
+      // FrogSocial side menu
+      const socialAdminIcon = document.getElementById('social-admin-icon');
+      if (socialAdminIcon) socialAdminIcon.style.display = showAdmin ? '' : 'none';
+      // FrogChannel (board overlay) side menu
+      const boardSideAdminIcon = document.getElementById('board-side-admin-icon');
+      if (boardSideAdminIcon) boardSideAdminIcon.style.display = showAdmin ? '' : 'none';
     } catch {}
 
     // Build emoji picker
