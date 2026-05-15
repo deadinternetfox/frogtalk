@@ -6159,7 +6159,9 @@ const Social = (() => {
       }
     } catch {}
     const t = _parseMusicTrack(trackUrl, prov);
-    const cachedTitle = _musicTitleCache.get(`${String(t.provider || '').toLowerCase()}|${trackUrl}`) || '';
+    const cachedMeta = _musicTitleCache.get(`${String(t.provider || '').toLowerCase()}|${trackUrl}`);
+    const cachedTitle = (cachedMeta && typeof cachedMeta === 'object') ? (cachedMeta.title || '') : (typeof cachedMeta === 'string' ? cachedMeta : '');
+    const cachedThumb = (cachedMeta && typeof cachedMeta === 'object') ? (cachedMeta.thumbnail || '') : '';
     // Try to pluck a title from the post content (we store the track title
     // on its own line after "🎵 Now playing …: ").
     let title = metaTitle || cachedTitle;
@@ -6180,7 +6182,8 @@ const Social = (() => {
               : t.provider === 'spotify' ? 'Spotify'
               : t.provider === 'soundcloud' ? 'SoundCloud' : 'Music';
     const chipIcon = t.provider === 'youtube' ? '▶' : t.provider === 'spotify' ? '♫' : t.provider === 'soundcloud' ? '☁️' : '🎵';
-    const artBg = t.thumb ? `style="background-image:url('${esc(t.thumb)}')"` : '';
+    const effectiveThumb = t.thumb || cachedThumb || '';
+    const artBg = effectiveThumb ? `style="background-image:url('${esc(effectiveThumb)}')"` : '';
     const sharer = p.nickname || p.author_nick || p.author || '';
     const fullUrl = trackUrl;
     // Tapping the cover always routes through the unified Music mini-player,
@@ -6204,8 +6207,8 @@ const Social = (() => {
     const playTitle = initialState === 'playing' ? 'Pause'
                     : initialState === 'paused'  ? 'Resume' : 'Play';
     return `
-      <div class="sf-music-card ${stateCls}" data-provider="${esc(t.provider)}" data-track-url="${esc(fullUrl)}" data-track-title-pending="${needsHydrate ? '1' : '0'}">
-        <div class="sfmc-cover ${t.thumb ? '' : 'no-art'}" ${artBg}
+      <div class="sf-music-card ${stateCls}" data-provider="${esc(t.provider)}" data-track-url="${esc(fullUrl)}" data-track-title="${esc(title)}" data-track-thumb="${esc(effectiveThumb)}" data-track-title-pending="${needsHydrate ? '1' : '0'}">
+        <div class="sfmc-cover ${effectiveThumb ? '' : 'no-art'}" ${artBg}
              onclick="${coverAction}">
           <span class="sfmc-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
           <button type="button" class="sfmc-play" title="${playTitle}" aria-label="${playTitle}"

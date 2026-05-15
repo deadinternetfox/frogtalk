@@ -672,9 +672,20 @@ const UI = (() => {
       if (_nowPlayingActive || looksLikeMusic) {
         _nowPlayingActive = false;
         const persisted = _readSavedMsg();
-        const restore = (_nowPlayingSavedMsg != null) ? _nowPlayingSavedMsg
-                       : (persisted != null) ? persisted
-                       : '';
+        const hasKnownBaseline = (_nowPlayingSavedMsg != null) || (persisted != null);
+        // Cross-device safety: if THIS client has no record of what the
+        // user's manual status was before the takeover (no in-memory
+        // baseline, no localStorage baseline), the 🎵 status almost
+        // certainly came from another device that's still authoritative
+        // for the takeover. Blanking the server-side status_msg in that
+        // case wipes the user's status across every device. Leave it
+        // alone and let the originating device issue the restore when
+        // its music actually stops.
+        if (!hasKnownBaseline) {
+          _nowPlayingLastTitle = '';
+          return;
+        }
+        const restore = (_nowPlayingSavedMsg != null) ? _nowPlayingSavedMsg : persisted;
         _nowPlayingSavedMsg = null;
         _writeSavedMsg(null);
         _nowPlayingLastTitle = '';
@@ -723,9 +734,18 @@ const UI = (() => {
       // reload-recovery branch as the toggle-off path: even if the
       // in-memory takeover flag is false, a stuck 🎵 status from a
       // previous session should be cleared.
+      const wasActiveLocally = _nowPlayingActive;
       _nowPlayingActive = false;
       _nowPlayingLastTitle = '';
       const persisted = _readSavedMsg();
+      const hasKnownBaseline = (_nowPlayingSavedMsg != null) || (persisted != null);
+      // If THIS client never recorded a baseline (cross-device takeover,
+      // or 🎵 status pre-dates the LS key), don't overwrite the server
+      // status_msg with an empty string. The other device — which IS
+      // authoritative for the takeover — will issue the real restore.
+      if (!wasActiveLocally && !hasKnownBaseline) {
+        return;
+      }
       const restore = (_nowPlayingSavedMsg != null) ? _nowPlayingSavedMsg
                      : (persisted != null) ? persisted
                      : '';

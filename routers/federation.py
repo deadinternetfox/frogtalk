@@ -1610,8 +1610,9 @@ async def _handle_user_event(event: dict) -> None:
     payload = event.get("payload") or {}
     if event.get("event_type") not in ("user.profile.updated", "user.created"):
         return
+    gid = str(payload.get("global_user_id") or "").strip()
     db.upsert_federation_user_profile(
-        global_user_id=str(payload.get("global_user_id") or "").strip(),
+        global_user_id=gid,
         nickname=str(payload.get("nickname") or "").strip(),
         display_name=str(payload.get("display_name") or ""),
         avatar=str(payload.get("avatar") or ""),
@@ -1620,32 +1621,67 @@ async def _handle_user_event(event: dict) -> None:
         origin_server_id=str(event.get("origin_server_id") or ""),
     )
 
-    nick = str(payload.get("nickname") or "").strip()
-    if not nick:
+    # Only mirror profile fields into the local `users` table when the
+    # event's global_user_id matches an EXISTING local user. We deliberately
+    # do NOT match by nickname (which would let a federated peer with the
+    # same nickname as a real local account silently rewrite that account's
+    # status_msg / bio / avatar) and we deliberately do NOT auto-create
+    # local users from profile events (the federation_user_profiles
+    # directory above is the proper home for foreign user records — the
+    # local `users` table should only hold real accounts on this node).
+    if not gid:
         return
-    user = _ensure_local_user_by_nickname(nick)
-    if not user:
+    local_user = None
+    try:
+        with db._conn() as con:
+            row = con.execute(
+                "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                (gid,),
+            ).fetchone()
+            if row:
+                local_user = {"id": row["id"] if hasattr(row, "keys") else row[0]}
+    except Exception:
+        local_user = None
+    if not local_user:
         return
 
     allowed_presence = {"online", "away", "dnd", "invisible"}
     presence = str(payload.get("presence") or "").strip().lower()
     if presence not in allowed_presence:
         presence = None
-    display_name = "".join(ch for ch in str(payload.get("display_name") or "") if ch == " " or ch.isprintable()).strip()[:32]
+    display_name_raw = "".join(
+        ch for ch in str(payload.get("display_name") or "")
+        if ch == " " or ch.isprintable()
+    ).strip()[:32]
+
+    # Use COALESCE/NULLIF semantics so an empty/missing field in the
+    # payload doesn't blow away an existing local value. This is
+    # critical for status_msg: a brief moment where the originating
+    # device sends an empty status (e.g. between a music-takeover
+    # restore and the next manual edit) would otherwise propagate the
+    # blank to every reflecting peer.
+    status_msg_in = str(payload.get("status_msg") or "")[:128]
+    mood_in = str(payload.get("mood") or "")[:100]
+    avatar_in = str(payload.get("avatar") or "")
+    bio_in = str(payload.get("bio") or "")
 
     with db._conn() as con:
         base_sql = """
             UPDATE users
-            SET display_name=?, avatar=?, bio=?, status_msg=?, mood=?,
-                presence=COALESCE(?, presence),
-                identity_pubkey=COALESCE(NULLIF(?, ''), identity_pubkey)
+            SET display_name = COALESCE(NULLIF(?, ''), display_name),
+                avatar       = COALESCE(NULLIF(?, ''), avatar),
+                bio          = COALESCE(NULLIF(?, ''), bio),
+                status_msg   = COALESCE(NULLIF(?, ''), status_msg),
+                mood         = COALESCE(NULLIF(?, ''), mood),
+                presence     = COALESCE(?, presence),
+                identity_pubkey = COALESCE(NULLIF(?, ''), identity_pubkey)
         """
         params = [
-            display_name or None,
-            str(payload.get("avatar") or ""),
-            str(payload.get("bio") or ""),
-            str(payload.get("status_msg") or "")[:128],
-            str(payload.get("mood") or "")[:100],
+            display_name_raw,
+            avatar_in,
+            bio_in,
+            status_msg_in,
+            mood_in,
             presence,
             str(payload.get("identity_pubkey") or ""),
         ]
@@ -1658,22 +1694,26 @@ async def _handle_user_event(event: dict) -> None:
             params.append(css)
 
         base_sql += " WHERE id=?"
-        params.append(user["id"])
+        params.append(local_user["id"])
         con.execute(base_sql, params)
         con.commit()
 
     # Push live profile changes (including presence/status) to connected clients
-    # so channel member sidebars update without a manual refresh.
+    # so channel member sidebars update without a manual refresh. Only fire
+    # this when the event actually corresponds to a local user (matched by
+    # global_user_id above); otherwise we'd be broadcasting profile updates
+    # for foreign users that local clients can't render via the local-user
+    # id channel anyway.
     try:
         from ws_manager import manager
         await manager.broadcast_all({
             "type": "profile_update",
-            "user_id": user["id"],
-            "nickname": nick,
-            "display_name": display_name or None,
-            "avatar": str(payload.get("avatar") or ""),
+            "user_id": local_user["id"],
+            "nickname": str(payload.get("nickname") or "").strip(),
+            "display_name": display_name_raw or None,
+            "avatar": avatar_in,
             "presence": (presence or str(payload.get("presence") or "").strip().lower() or "online"),
-            "status_msg": str(payload.get("status_msg") or "")[:128],
+            "status_msg": status_msg_in,
         })
     except Exception:
         pass
