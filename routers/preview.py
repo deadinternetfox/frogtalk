@@ -239,14 +239,39 @@ async def _do_fetch_og(url: str) -> dict:
     sp_info = extract_spotify_info(url)
     if sp_info:
         sp_type, sp_id = sp_info
-        return {
+        result = {
             "type": "spotify",
             "spotify_type": sp_type,
             "spotify_id": sp_id,
+            "title": "",
             "site_name": "Spotify",
             "embed_url": f"https://open.spotify.com/embed/{sp_type}/{sp_id}",
             "url": url,
         }
+        # Pull the real track/album/playlist title via Spotify's public
+        # oEmbed endpoint so the FrogSocial mini-dock can show
+        # "Hymne à l'amour" instead of the generic "Spotify track"
+        # placeholder. Best-effort: any failure leaves title empty and
+        # the embed itself still loads its own metadata.
+        try:
+            oresp = await client.get(
+                f"https://open.spotify.com/oembed?url={url}",
+                timeout=3.0,
+            )
+            if oresp.status_code == 200:
+                odata = oresp.json()
+                otitle = str(odata.get("title") or "").strip()
+                if otitle:
+                    result["title"] = otitle
+                othumb = str(odata.get("thumbnail_url") or "").strip()
+                if othumb:
+                    result["image"] = othumb
+                oauthor = str(odata.get("provider_name") or "").strip()
+                if oauthor:
+                    result["author"] = oauthor
+        except Exception:
+            pass
+        return result
 
     # Standard OG fetch
     try:
