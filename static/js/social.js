@@ -6057,27 +6057,30 @@ const Social = (() => {
     return 'Track';
   }
 
-  async function _fetchMusicTitle(trackUrl, provider) {
+  async function _fetchMusicMeta(trackUrl, provider) {
     const url = String(trackUrl || '').trim();
-    if (!url) return '';
+    if (!url) return { title: '', thumbnail: '' };
     const key = `${String(provider || '').toLowerCase()}|${url}`;
     const cached = _musicTitleCache.get(key);
-    if (typeof cached === 'string') return cached;
+    if (cached && typeof cached === 'object') return cached;
     if (_musicTitleInflight.has(key)) return _musicTitleInflight.get(key);
 
     const req = (async () => {
       try {
         const res = await api(`/api/preview?url=${encodeURIComponent(url)}`);
-        if (!res.ok) return '';
+        if (!res.ok) return { title: '', thumbnail: '' };
         const data = await res.json().catch(() => ({}));
         const preview = data.preview || {};
         const title = String(preview.title || '').trim();
-        const normalized = title && !/^youtube video$/i.test(title) ? title : '';
-        _musicTitleCache.set(key, normalized);
-        return normalized;
+        const normalizedTitle = title && !/^youtube video$/i.test(title) ? title : '';
+        const thumbnail = String(preview.image || '').trim();
+        const meta = { title: normalizedTitle, thumbnail };
+        _musicTitleCache.set(key, meta);
+        return meta;
       } catch {
-        _musicTitleCache.set(key, '');
-        return '';
+        const meta = { title: '', thumbnail: '' };
+        _musicTitleCache.set(key, meta);
+        return meta;
       } finally {
         _musicTitleInflight.delete(key);
       }
@@ -6085,6 +6088,12 @@ const Social = (() => {
 
     _musicTitleInflight.set(key, req);
     return req;
+  }
+
+  // Back-compat helper: lots of call sites only care about the title.
+  async function _fetchMusicTitle(trackUrl, provider) {
+    const meta = await _fetchMusicMeta(trackUrl, provider);
+    return (meta && meta.title) || '';
   }
 
   function _hydrateMusicCardTitles(scope) {
@@ -6096,22 +6105,38 @@ const Social = (() => {
         card.dataset.trackTitlePending = '0';
         return;
       }
-      _fetchMusicTitle(url, provider).then(title => {
-        if (!title) return;
-        const safe = esc(title);
+      _fetchMusicMeta(url, provider).then(meta => {
+        const title = meta && meta.title ? meta.title : '';
+        const thumb = meta && meta.thumbnail ? meta.thumbnail : '';
+        if (!title && !thumb) return;
         card.dataset.trackTitlePending = '0';
-        card.setAttribute('data-track-title', title);
-        const titleEl = card.querySelector('.sfmc-title');
-        if (titleEl) {
-          titleEl.textContent = title;
-          titleEl.setAttribute('title', title);
+        if (title) {
+          card.setAttribute('data-track-title', title);
+          const titleEl = card.querySelector('.sfmc-title');
+          if (titleEl) {
+            // Preserve the inner anchor (Open on Spotify ↗ click target)
+            const anchor = titleEl.querySelector('a');
+            if (anchor) {
+              anchor.textContent = title;
+            } else {
+              titleEl.textContent = title;
+            }
+            titleEl.setAttribute('title', title);
+          }
+          const playEls = [card.querySelector('.sfmc-play')];
+          playEls.forEach(el => {
+            if (el) el.setAttribute('aria-label', (el.getAttribute('aria-label') || 'Play').replace(/\s+.*$/, ''));
+          });
         }
-        const playEls = [card.querySelector('.sfmc-play')];
-        playEls.forEach(el => {
-          if (el) el.setAttribute('aria-label', (el.getAttribute('aria-label') || 'Play').replace(/\s+.*$/, ''));
-        });
         const cover = card.querySelector('.sfmc-cover');
-        if (cover) cover.setAttribute('title', title);
+        if (cover) {
+          if (thumb) {
+            cover.style.backgroundImage = `url('${thumb.replace(/'/g, "\\'")}')`;
+            cover.classList.remove('no-art');
+            card.setAttribute('data-track-thumb', thumb);
+          }
+          if (title) cover.setAttribute('title', title);
+        }
       }).catch(() => {});
     });
   }
@@ -6529,6 +6554,7 @@ const Social = (() => {
     // data-track-title carries the real title — pick it up so the
     // mini-dock shows real metadata instead of the placeholder.
     let resolvedTitle = title || '';
+    let resolvedThumb = '';
     try {
       const card = document.querySelector(
         `.sf-music-card[data-track-url="${(window.CSS && CSS.escape) ? CSS.escape(theUrl) : theUrl.replace(/"/g, '\\"')}"]`
@@ -6536,42 +6562,51 @@ const Social = (() => {
       if (card) {
         const live = String(card.getAttribute('data-track-title') || '').trim();
         if (live) resolvedTitle = live;
+        const liveThumb = String(card.getAttribute('data-track-thumb') || '').trim();
+        if (liveThumb) resolvedThumb = liveThumb;
       }
     } catch {}
     const fallbackTitles = new Set(['Music', 'Track', 'YouTube video', 'Spotify track', 'SoundCloud track']);
-    const needsFetch = !resolvedTitle || fallbackTitles.has(resolvedTitle);
-    const startWith = (finalTitle) => {
+    const needsFetch = !resolvedTitle || fallbackTitles.has(resolvedTitle) || !resolvedThumb;
+    const startWith = (finalTitle, finalThumb) => {
       const pidNum = postId != null && String(postId).length
         ? (Number.isFinite(Number(postId)) ? Number(postId) : null)
         : null;
       const ok = M.playSolo({
         url: theUrl,
         title: finalTitle || resolvedTitle || 'Music',
+        thumbnail: finalThumb || resolvedThumb || '',
         provider: provider || '',
         sharer: sharer || '',
         postId: pidNum,
       });
       if (ok) _applyMusicState();
     };
-    if (needsFetch && typeof _fetchMusicTitle === 'function') {
+    if (needsFetch && typeof _fetchMusicMeta === 'function') {
       // Fire the network call but don't block the user — start playback
       // immediately with the best title we have, then update the dock
       // once the real title resolves. Spotify/SoundCloud iframes load
       // their own cover art and title inside the embed regardless.
-      startWith(resolvedTitle);
-      _fetchMusicTitle(theUrl, provider).then(realTitle => {
-        if (!realTitle) return;
+      startWith(resolvedTitle, resolvedThumb);
+      _fetchMusicMeta(theUrl, provider).then(meta => {
+        if (!meta) return;
+        const realTitle = meta.title || '';
+        const realThumb = meta.thumbnail || '';
+        if (!realTitle && !realThumb) return;
         try {
           const cur = typeof M.getCurrent === 'function' ? M.getCurrent() : null;
           if (!cur || !cur.active || cur.url !== theUrl) return;
           if (typeof M.updateCurrentMeta === 'function') {
-            M.updateCurrentMeta({ title: realTitle });
+            const update = {};
+            if (realTitle) update.title = realTitle;
+            if (realThumb) update.thumbnail = realThumb;
+            M.updateCurrentMeta(update);
           }
         } catch {}
       }).catch(() => {});
       return;
     }
-    startWith(resolvedTitle);
+    startWith(resolvedTitle, resolvedThumb);
   }
 
   // Back-compat: older markup calls Social.playMusicInTab(embed, provider, title, url, sharer, ...)
