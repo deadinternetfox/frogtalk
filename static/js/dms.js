@@ -2085,6 +2085,7 @@ async function sendDMMessage () {
       sender_nick: _me.nickname,
       sender_display_name: _me.display_name,
       sender_avatar: _me.avatar,
+      sender_is_admin: !!_me.is_admin,
       content    : content,            // plaintext \u2014 what the user typed
       created_at : new Date().toISOString().replace('Z',''),
       reply_to   : _dmReplyTo?.id || null,
@@ -2206,6 +2207,21 @@ function handleWSDMMessage (data) {
       pend.removeAttribute('data-nonce');
       pend.id = `msg-${data.id}`;
       pend.setAttribute('data-dmid', data.id);
+      // Sync crown from server echo so the user's own freshly-sent DM
+      // shows the admin crown immediately instead of waiting for a fresh
+      // history fetch on next channel switch.
+      try {
+        const wantCrown = !!data.sender_is_admin;
+        const authorEl = pend.querySelector('.msg-author');
+        if (authorEl) {
+          const hasCrown = authorEl.textContent.trim().startsWith('👑');
+          if (wantCrown && !hasCrown) {
+            authorEl.insertBefore(document.createTextNode('👑 '), authorEl.firstChild);
+          } else if (!wantCrown && hasCrown) {
+            authorEl.textContent = authorEl.textContent.replace(/^👑\s*/, '');
+          }
+        }
+      } catch {}
       if (_oldMsgId && _oldMsgId !== String(data.id)) {
         try {
           const _newMsgId = String(data.id);

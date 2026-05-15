@@ -1843,6 +1843,27 @@ const Messages = (() => {
           pendingEl.removeAttribute('data-own');
           pendingEl.removeAttribute('data-nonce');
           pendingEl.id = `msg-${msg.id}`;
+          // Sync crown from the server echo. The optimistic bubble used
+          // State.user.is_admin which can lag (e.g. account just promoted
+          // but State not refreshed yet, or undefined during a hot reload).
+          // Without this, the user's own freshly-sent message would render
+          // without the crown until they tab-switched the channel to force
+          // a fresh history fetch.
+          try {
+            const isBotMsg = !!(msg.is_bot || msg.bot_id);
+            const wantCrown = !isBotMsg && (msg.nickname === 'admin' || !!msg.is_admin);
+            const authorEl = pendingEl.querySelector('.msg-author');
+            if (authorEl) {
+              const hasCrown = authorEl.textContent.trim().startsWith('👑');
+              if (wantCrown && !hasCrown) {
+                authorEl.classList.add('admin');
+                authorEl.insertBefore(document.createTextNode('👑 '), authorEl.firstChild);
+              } else if (!wantCrown && hasCrown) {
+                authorEl.classList.remove('admin');
+                authorEl.textContent = authorEl.textContent.replace(/^👑\s*/, '');
+              }
+            }
+          } catch {}
           // Rewrite any onclick / data-rid that referenced the temp id so the
           // ⋯ menu, Reply, Edit, Delete, React, Copy buttons all work right
           // away on this freshly-reconciled bubble.
