@@ -784,11 +784,32 @@ const Social = (() => {
     } catch {}
     // Stop any embedded YouTube / Spotify / SoundCloud iframes — without
     // this, leaving FrogSocial for FrogChannel leaves a Spotify preview
-    // playing in the background until the tab is reloaded.
+    // playing in the background until the tab is reloaded. The
+    // post-detail overlay lives OUTSIDE #social-overlay (it's a
+    // top-level modal), so we close it explicitly here too.
     try {
-      document.querySelectorAll('#social-overlay .sf-link-embed iframe').forEach(f => {
-        try { f.src = 'about:blank'; } catch {}
-      });
+      if (typeof closePostDetail === 'function') closePostDetail();
+    } catch {}
+    try {
+      document
+        .querySelectorAll('#social-overlay .sf-link-embed iframe, #social-post-detail iframe')
+        .forEach(f => { try { f.src = 'about:blank'; } catch {} });
+    } catch {}
+    // Also rip out the inline embed wrappers entirely so they don't
+    // resurrect when the user reopens FrogSocial — the post will
+    // re-render its embed fresh on next view.
+    try {
+      document
+        .querySelectorAll('#social-overlay .sf-link-embed')
+        .forEach(w => { try { w.remove(); } catch {} });
+    } catch {}
+    // Tear down the music player + mini dock too. The "now playing"
+    // strip (#social-nowplaying) is inside #social-overlay so it
+    // already disappears, but the persistent #music-mini-dock in the
+    // sidebar would keep the previous track visible/playing after
+    // leaving FrogSocial. Music.close() handles both surfaces.
+    try {
+      if (window.Music && typeof Music.close === 'function') Music.close();
     } catch {}
     // Tear down all the long-lived observers / sockets so closing the
     // social overlay actually frees memory + connection slots.
