@@ -782,6 +782,14 @@ const Social = (() => {
         try { el.currentTime = el.currentTime; } catch {}
       });
     } catch {}
+    // Stop any embedded YouTube / Spotify / SoundCloud iframes — without
+    // this, leaving FrogSocial for FrogChannel leaves a Spotify preview
+    // playing in the background until the tab is reloaded.
+    try {
+      document.querySelectorAll('#social-overlay .sf-link-embed iframe').forEach(f => {
+        try { f.src = 'about:blank'; } catch {}
+      });
+    } catch {}
     // Tear down all the long-lived observers / sockets so closing the
     // social overlay actually frees memory + connection slots.
     try { _socialVideoObserverInstance?.disconnect(); } catch {}
@@ -7483,18 +7491,25 @@ const Social = (() => {
         if (urlMatch) {
           const u = urlMatch[0];
           const m = _parseMusicTrack(u);
+          // Shared close (✕) button — kills the iframe so the embed
+          // can't keep playing audio after the user scrolls away or
+          // switches surfaces (e.g. Social → FrogChannel).
+          const _embedCloseBtn = `<button type="button" class="sf-link-embed-close" title="Close preview" aria-label="Close preview" onclick="event.stopPropagation();Social._closeLinkEmbed(this)" style="position:absolute;top:6px;right:6px;z-index:2;width:24px;height:24px;border-radius:50%;border:none;background:rgba(0,0,0,.65);color:#fff;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">✕</button>`;
           if (m && m.embed && m.provider === 'youtube') {
-            linkEmbedHtml = `<div class="sf-link-embed sf-yt-embed" style="margin-top:10px;max-width:560px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027,#102018);border:1px solid #2f5548">
+            linkEmbedHtml = `<div class="sf-link-embed sf-yt-embed" style="position:relative;margin-top:10px;max-width:560px;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027,#102018);border:1px solid #2f5548">
+              ${_embedCloseBtn}
               <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
                 <iframe src="${esc(m.embed)}" loading="lazy" style="position:absolute;inset:0;width:100%;height:100%;border:0" allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture" allowfullscreen></iframe>
               </div>
             </div>`;
           } else if (m && m.embed && m.provider === 'spotify') {
-            linkEmbedHtml = `<div class="sf-link-embed sf-sp-embed" style="margin-top:10px;max-width:480px;border-radius:12px;overflow:hidden">
+            linkEmbedHtml = `<div class="sf-link-embed sf-sp-embed" style="position:relative;margin-top:10px;max-width:480px;border-radius:12px;overflow:hidden">
+              ${_embedCloseBtn}
               <iframe src="${esc(m.embed)}?theme=0" loading="lazy" width="100%" height="152" frameBorder="0" allow="autoplay;clipboard-write;encrypted-media;fullscreen;picture-in-picture" style="border-radius:12px"></iframe>
             </div>`;
           } else if (m && m.embed && m.provider === 'soundcloud') {
-            linkEmbedHtml = `<div class="sf-link-embed sf-sc-embed" style="margin-top:10px;max-width:480px;border-radius:8px;overflow:hidden">
+            linkEmbedHtml = `<div class="sf-link-embed sf-sc-embed" style="position:relative;margin-top:10px;max-width:480px;border-radius:8px;overflow:hidden">
+              ${_embedCloseBtn}
               <iframe src="${esc(m.embed)}" loading="lazy" width="100%" height="166" frameBorder="0" allow="autoplay" style="border-radius:8px"></iframe>
             </div>`;
           }
@@ -9663,11 +9678,24 @@ const Social = (() => {
     _setSidebarBadge(0);
   }
 
+  // Close button handler for inline link embeds (Spotify / YouTube /
+  // SoundCloud) rendered inside posts. Removes the iframe entirely so
+  // it stops playing and can't leak audio across surfaces.
+  function _closeLinkEmbed(btn) {
+    try {
+      const wrap = btn && btn.closest ? btn.closest('.sf-link-embed') : null;
+      if (!wrap) return;
+      wrap.querySelectorAll('iframe').forEach(f => { try { f.src = 'about:blank'; } catch {} });
+      wrap.remove();
+    } catch {}
+  }
+
   return {
     open, close, openProfile, openProfileMusic, switchTab, switchProfileTab,
     invalidateProfileCache: _invalidateProfileCache,
     switchProfileMediaMode, loadProfileMediaCombined,
     openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
+    _closeLinkEmbed,
     toggleFollow, reactPost, showReactPicker, showReactionDetail, toggleComments,
     toggleRepost,
     openQuoteRepost, closeQuoteRepost, submitQuoteRepost,
