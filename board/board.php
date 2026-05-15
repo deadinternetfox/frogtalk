@@ -1038,6 +1038,27 @@ if ($singleThread) {
         .fed-pill-tor { border-color: rgba(255,170,51,0.35); background: rgba(255,170,51,0.06); }
         .fed-pill-tor:hover { border-color: rgba(255,170,51,0.6); background: rgba(255,170,51,0.12); }
         .fed-pill-tor-icon { font-size: 11px; }
+        /* Mobile: shrink the federated strip so it never gets cropped against
+           the board-container padding, give it a right-edge fade so users see
+           it's horizontally scrollable, and add scroll-snap for tidier swipes. */
+        @media (max-width: 768px) {
+            .federated-nav { padding: 8px 0 0; margin: 0 -15px; position: relative; }
+            .federated-nav::after {
+                content: ''; position: absolute; top: 0; right: 0; bottom: 8px;
+                width: 22px; pointer-events: none;
+                background: linear-gradient(90deg, rgba(10,14,10,0) 0%, rgba(10,14,10,0.85) 100%);
+            }
+            .federated-nav .fed-scroll {
+                padding: 0 15px 8px; gap: 6px;
+                scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+            }
+            .fed-pill { padding: 5px 10px; font-size: 11px; gap: 5px; scroll-snap-align: start; }
+            .fed-pill .fed-pill-node, .fed-pill .fed-pill-topic { font-size: 9px; }
+        }
+        @media (max-width: 460px) {
+            .fed-pill { padding: 4px 9px; font-size: 10.5px; }
+            .fed-pill .fed-pill-node { display: none; } /* drop @handle on tiny screens to keep title + topic visible */
+        }
         .board-stats { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; margin-top: 12px; padding: 8px 16px; background: rgba(0,255,65,0.03); border: 1px solid rgba(0,255,65,0.08); border-radius: 6px; font-size: 12px; color: #4a8f4a; }
         .board-stats .stat-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
         .board-stats .stat-sep { color: #1a3a1a; }
@@ -1321,6 +1342,11 @@ if ($singleThread) {
         /* custom audio player */
         .mrb-aplayer { display:block; background:rgba(0,255,65,0.04); border:1px solid rgba(0,255,65,0.18); border-radius:5px; padding:4px 6px; width:100%; box-sizing:border-box; }
         .mrb-aplayer audio, .mrb-aplayer video { display:block; width:100%; border-radius:3px; }
+        /* Audio variant: drop the generic chrome so the embedded
+           .post-voice-note card (the same one used by posted voice notes)
+           is the only visible surface — preview now matches the posted look. */
+        .mrb-aplayer-voice { background:transparent !important; border:none !important; padding:0 !important; }
+        .mrb-aplayer-voice .post-voice-note { max-width:100%; width:100%; min-width:0; }
         /* legacy custom-player elements (kept for old cached DOM) */
         .mrb-aplay { flex-shrink:0; background:none; border:1px solid rgba(0,255,65,0.5); color:#00ff41; border-radius:50%; width:28px; height:28px; cursor:pointer; font-size:10px; display:flex; align-items:center; justify-content:center; transition:all 0.15s; padding:0; }
         .mrb-aplay:hover { background:rgba(0,255,65,0.12); }
@@ -7286,18 +7312,24 @@ if ($singleThread) {
 
     /* Shared helper: build the preview widget — uses native browser media element
        for maximum cross-platform / iOS compatibility.
-       mimeHint = base mime type e.g. audio/webm or audio/mp4 */
+       mimeHint = base mime type e.g. audio/webm or audio/mp4
+       For audio previews we render the same `.post-voice-note` card the
+       board uses for posted voice notes, so the composer preview matches
+       the look the user will see once it's submitted (🎤 + audio + label). */
     function _mrbMakePlayer(url, type, mimeHint) {
+        var isAudio = (type === 'audio');
         var wrap = document.createElement('div');
-        wrap.className = 'mrb-aplayer';
+        // Keep the .mrb-aplayer class so existing cleanup queries
+        // (`prevWrap.querySelector('.mrb-aplayer, ...')`) still work.
+        wrap.className = isAudio ? 'mrb-aplayer mrb-aplayer-voice' : 'mrb-aplayer';
         wrap._blobUrl = url;
 
-        var media = document.createElement(type === 'audio' ? 'audio' : 'video');
+        var media = document.createElement(isAudio ? 'audio' : 'video');
         media.controls = true;
         media.setAttribute('playsinline', '');
         media.preload = 'metadata';
-        if (type === 'audio') {
-            media.style.cssText = 'flex:1;min-width:0;width:100%;';
+        if (isAudio) {
+            media.style.cssText = 'width:100%;height:32px;display:block;';
         } else {
             media.style.cssText = 'width:100%;max-height:110px;display:block;border-radius:4px;';
         }
@@ -7314,7 +7346,30 @@ if ($singleThread) {
             wrap.appendChild(notice);
         };
 
-        wrap.appendChild(media);
+        if (isAudio) {
+            // Build the same DOM that posted voice notes render so the
+            // preview is visually identical (🎤 icon + audio + label).
+            var card = document.createElement('div');
+            card.className = 'post-voice-note';
+            var row = document.createElement('div');
+            row.className = 'pvn-row';
+            var icon = document.createElement('span');
+            icon.className = 'pvn-icon';
+            icon.textContent = '🎤';
+            var audioWrap = document.createElement('div');
+            audioWrap.className = 'pvn-audio';
+            audioWrap.appendChild(media);
+            row.appendChild(icon);
+            row.appendChild(audioWrap);
+            var label = document.createElement('div');
+            label.className = 'pvn-label';
+            label.textContent = 'voice note (preview)';
+            card.appendChild(row);
+            card.appendChild(label);
+            wrap.appendChild(card);
+        } else {
+            wrap.appendChild(media);
+        }
 
         /* _init(): set src directly — setting src already triggers auto-load, no need to call load() */
         wrap._init = function() {
