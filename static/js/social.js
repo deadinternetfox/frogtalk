@@ -6521,18 +6521,57 @@ const Social = (() => {
         return;
       }
     } catch {}
-    const pidNum = postId != null && String(postId).length
-      ? (Number.isFinite(Number(postId)) ? Number(postId) : null)
-      : null;
-    const ok = M.playSolo({
-      url: theUrl,
-      title: title || 'Music',
-      provider: provider || '',
-      sharer: sharer || '',
-      postId: pidNum,
-    });
-    if (!ok) return;
-    _applyMusicState();
+    // Prefer the live, hydrated title from the card DOM. The onclick
+    // handler captures whatever was baked into the markup at render
+    // time, which for non-music-tab posts is the "Spotify track" /
+    // "SoundCloud track" fallback. By the time the user actually clicks,
+    // _hydrateMusicCardTitles has usually finished and the card's
+    // data-track-title carries the real title — pick it up so the
+    // mini-dock shows real metadata instead of the placeholder.
+    let resolvedTitle = title || '';
+    try {
+      const card = document.querySelector(
+        `.sf-music-card[data-track-url="${(window.CSS && CSS.escape) ? CSS.escape(theUrl) : theUrl.replace(/"/g, '\\"')}"]`
+      );
+      if (card) {
+        const live = String(card.getAttribute('data-track-title') || '').trim();
+        if (live) resolvedTitle = live;
+      }
+    } catch {}
+    const fallbackTitles = new Set(['Music', 'Track', 'YouTube video', 'Spotify track', 'SoundCloud track']);
+    const needsFetch = !resolvedTitle || fallbackTitles.has(resolvedTitle);
+    const startWith = (finalTitle) => {
+      const pidNum = postId != null && String(postId).length
+        ? (Number.isFinite(Number(postId)) ? Number(postId) : null)
+        : null;
+      const ok = M.playSolo({
+        url: theUrl,
+        title: finalTitle || resolvedTitle || 'Music',
+        provider: provider || '',
+        sharer: sharer || '',
+        postId: pidNum,
+      });
+      if (ok) _applyMusicState();
+    };
+    if (needsFetch && typeof _fetchMusicTitle === 'function') {
+      // Fire the network call but don't block the user — start playback
+      // immediately with the best title we have, then update the dock
+      // once the real title resolves. Spotify/SoundCloud iframes load
+      // their own cover art and title inside the embed regardless.
+      startWith(resolvedTitle);
+      _fetchMusicTitle(theUrl, provider).then(realTitle => {
+        if (!realTitle) return;
+        try {
+          const cur = typeof M.getCurrent === 'function' ? M.getCurrent() : null;
+          if (!cur || !cur.active || cur.url !== theUrl) return;
+          if (typeof M.updateCurrentMeta === 'function') {
+            M.updateCurrentMeta({ title: realTitle });
+          }
+        } catch {}
+      }).catch(() => {});
+      return;
+    }
+    startWith(resolvedTitle);
   }
 
   // Back-compat: older markup calls Social.playMusicInTab(embed, provider, title, url, sharer, ...)

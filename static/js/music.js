@@ -1760,6 +1760,7 @@ const Music = (() => {
       }
       panel.classList.remove('active');
       panel.classList.remove('mini');
+      panel.classList.remove('solo-embed');
       panel.style.display = 'none';
       document.body.removeAttribute('data-music');
       document.body.removeAttribute('data-music-mini');
@@ -1773,6 +1774,7 @@ const Music = (() => {
     }
     _room = roomName;
     panel.classList.remove('mini');
+    panel.classList.remove('solo-embed');
     panel.classList.add('active');
     panel.classList.toggle('collapsed', _collapsed);
     panel.style.display = 'flex';
@@ -2119,6 +2121,7 @@ const Music = (() => {
     if (panel) {
       panel.classList.remove('active');
       panel.classList.remove('mini');
+      panel.classList.remove('solo-embed');
       panel.style.display = 'none';
       panel.innerHTML = '';
       delete panel.dataset.mountedRoom;
@@ -2235,18 +2238,32 @@ const Music = (() => {
     _userIntentPaused = null;
     _setAnchor(track, 0);
 
-    // Keep the #music-panel hidden (solo playback runs inside the mini-dock
-    // iframe only — we don't want a giant full-screen player covering the
-    // Social view). Build a hidden host div that holds the iframe.
+    // YouTube can autoplay reliably from an off-screen iframe (the .mini
+    // class parks the panel at left:-9999px so the audio plays but the
+    // player doesn't cover the Social view). Spotify and SoundCloud
+    // embeds are different beasts:
+    //   • Spotify: free-tier embed will NOT autoplay programmatically —
+    //     the user has to click the embed's own play button. Keeping the
+    //     iframe off-screen meant they had no UI to click → silent.
+    //   • SoundCloud: auto_play=true works in theory but Chromium's
+    //     autoplay policy blocks media in iframes that are visually
+    //     hidden (opacity:0/z-index:-1 trip the heuristic), so it would
+    //     load metadata but never start audio.
+    // For these providers we mount the iframe inside a small floating
+    // .solo-embed panel anchored bottom-left, so it's a real visible
+    // player the user can interact with — same iframe, same dock, just
+    // not hidden.
     const panel = $('music-panel');
     if (panel) {
       panel.classList.remove('active');
-      panel.classList.add('mini');
+      panel.classList.remove('mini');
+      panel.classList.remove('solo-embed');
+      const useSoloEmbed = (provider === 'spotify' || provider === 'soundcloud');
+      panel.classList.add(useSoloEmbed ? 'solo-embed' : 'mini');
       panel.style.display = 'flex';
       // _renderMini writes #mp-player-wrap into the panel. That's where the
       // togglePause/seek code looks for the iframe, so we need it mounted
-      // even if visually hidden. The existing CSS for `.mini` collapses
-      // the panel to just the mini-bar footprint.
+      // either visibly (solo-embed) or off-screen (mini).
       _renderMini(track);
       document.body.setAttribute('data-music', '1');
     }
@@ -2776,10 +2793,30 @@ const Music = (() => {
     } catch { return false; }
   }
 
+  // Update display metadata (title/thumbnail) for the currently-playing
+  // solo track without rebuilding the iframe. Used when a Social card
+  // hydrates its real title after playback already started, so the
+  // mini-dock shows the real song name instead of "Spotify track".
+  function updateCurrentMeta(meta) {
+    if (!meta || !_state || !Array.isArray(_state.queue) || !_state.queue.length) return false;
+    const cur = _state.queue[0];
+    let changed = false;
+    if (typeof meta.title === 'string' && meta.title.trim() && meta.title !== cur.title) {
+      cur.title = meta.title.trim(); changed = true;
+    }
+    if (typeof meta.thumbnail === 'string' && meta.thumbnail && meta.thumbnail !== cur.thumbnail) {
+      cur.thumbnail = meta.thumbnail; changed = true;
+    }
+    if (!changed) return false;
+    try { _renderDock(cur); } catch {}
+    try { _emitState(); } catch {}
+    return true;
+  }
+
   return { mount, submit, skip, skipNext, clearQueue, removeTrack, toggleDJOnly,
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
-           resyncNow, shareToWall, playSolo,
+           resyncNow, shareToWall, playSolo, updateCurrentMeta,
            toggleAutoNext,
            toggleAutoFill,
            _syncAutoNextButtons,

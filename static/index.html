@@ -1415,6 +1415,26 @@ body{
 #music-panel.mini #mp-player-wrap{margin:0;width:100%;height:100%}
 #music-panel.mini .mp-frame{width:100%;height:100%;max-height:none;aspect-ratio:auto;border:0;border-radius:0}
 #music-panel.mini::before{display:none}
+/* Visible floating embed used for Spotify / SoundCloud solo playback.
+   These providers can't autoplay reliably from an off-screen iframe
+   (Spotify's free-tier embed needs a click on its own play button;
+   Chromium blocks media in iframes hidden via opacity:0/z-index:-1),
+   so we anchor a small player to the bottom-left corner where the user
+   can both hear it and tap play if the embed needs the gesture. */
+#music-panel.solo-embed{
+  display:flex;position:fixed;left:14px;bottom:14px;
+  width:340px;height:170px;padding:0;margin:0;gap:0;
+  border:1px solid rgba(160,80,216,0.45);border-radius:12px;overflow:hidden;
+  box-shadow:0 12px 32px rgba(0,0,0,0.45),0 0 0 1px rgba(255,255,255,0.04) inset;
+  z-index:1500;background:#0f0a1f;
+}
+#music-panel.solo-embed #mp-meta-wrap{display:none}
+#music-panel.solo-embed #mp-player-wrap{margin:0;width:100%;height:100%}
+#music-panel.solo-embed .mp-frame{width:100%;height:100%;max-height:none;aspect-ratio:auto;border:0;border-radius:0;box-shadow:none}
+#music-panel.solo-embed::before{display:none}
+@media (max-width:560px){
+  #music-panel.solo-embed{left:8px;right:8px;bottom:8px;width:auto;height:160px}
+}
 /* Legacy inner mini-bar no longer used — we render controls in
    #music-mini-dock instead. */
 #music-panel .mp-mini-bar,
@@ -10235,9 +10255,9 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/media.js?v=416"></script>
 <script src="/static/js/gifs.js?v=205"></script>
 <script src="/static/js/media-player.js?v=191"></script>
-<script src="/static/js/music.js?v=416"></script>
+<script src="/static/js/music.js?v=417"></script>
 <!-- cache bump: social share button + story/profile list UX fixes -->
-<script src="/static/js/social.js?v=1022"></script>
+<script src="/static/js/social.js?v=1023"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>
