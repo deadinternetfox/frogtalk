@@ -8238,6 +8238,23 @@ const Social = (() => {
     return `${window.location.origin}/r/${safeId}`;
   }
 
+  // Prefer the in-app "copy link + toast" path on desktop. The native
+  // navigator.share sheet on Linux/KDE / Windows lists installed share
+  // targets (Twitter, KDE Connect, etc.) but does NOT include a plain
+  // "Copy link" entry — which is what users almost always want from a
+  // desktop. Only fall back to navigator.share on touch devices where the
+  // OS share sheet is actually useful (Android / iOS / mobile PWA).
+  function _shouldUseNativeShare() {
+    try {
+      if (!navigator.share) return false;
+      // Coarse pointer = phone/tablet primary input. Treat hybrid laptops
+      // (mouse + touch) as desktop so the share button stays predictable.
+      const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      const noHover = window.matchMedia && window.matchMedia('(hover: none)').matches;
+      return !!(coarse && noHover);
+    } catch { return false; }
+  }
+
   async function sharePostUrl(postId, meta = {}) {
     const privacy = String(meta.privacy || 'public').toLowerCase();
     const shareEnabled = Number(meta.shareEnabled ?? 1) === 1;
@@ -8260,7 +8277,7 @@ const Social = (() => {
       try { UI.showToast('Followers-only link copied: viewer must be logged in with access', 'info'); } catch {}
     }
     try {
-      if (navigator.share) {
+      if (_shouldUseNativeShare()) {
         await navigator.share({
           title: `Post by @${nick} on FrogTalk`,
           text: shareText,
@@ -8301,7 +8318,7 @@ const Social = (() => {
       try { UI.showToast('Followers-only reel link copied: viewer must be logged in with access', 'info'); } catch {}
     }
     try {
-      if (navigator.share) {
+      if (_shouldUseNativeShare()) {
         await navigator.share({
           title: `Reel by @${nick} on FrogTalk`,
           text: shareText,
@@ -8372,7 +8389,7 @@ const Social = (() => {
       try { UI.showToast('Your profile is private \u2014 only friends will see it via this link', 'info'); } catch {}
     }
     try {
-      if (navigator.share) {
+      if (_shouldUseNativeShare()) {
         await navigator.share({
           title: `@${nickname} on FrogTalk`,
           text: `Check out @${nickname} on FrogTalk`,
