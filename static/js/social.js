@@ -5982,9 +5982,16 @@ const Social = (() => {
   // ── render a single feed post ──────────────────────────────────────────
   function _formatPostContent(text) {
     let html = esc(text);
-    // URLs — themed link (green accent, no default blue)
-    html = html.replace(/https?:\/\/[^\s<>"]+/g, url =>
-      `<a href="${url}" target="_blank" rel="noopener noreferrer" class="sf-link">${url}</a>`);
+    // Extract URLs to placeholders BEFORE running mention/channel regexes.
+    // Otherwise URLs that legitimately contain "@" (TikTok, GitHub raw,
+    // youtube.com/@channel, mailto-like paths) would get their path turned
+    // into a fake @mention pill — breaking both the link text and the
+    // href. We restore the URLs as <a> tags after the other transforms.
+    const urlSlots = [];
+    html = html.replace(/https?:\/\/[^\s<>"]+/g, url => {
+      const i = urlSlots.push(url) - 1;
+      return `\x00URL${i}\x00`;
+    });
     // @mentions — match the full nickname charset (letters, digits, _, -)
     // so hyphenated names highlight as one pill, not just the prefix.
     html = html.replace(/@([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)/g, (match, nick) =>
@@ -5994,6 +6001,11 @@ const Social = (() => {
     // a "deleted" toast if the channel is gone).
     html = html.replace(/(^|[\s(\[>])#([a-zA-Z0-9][a-zA-Z0-9_-]{1,31})\b/g,
       (m, pre, name) => `${pre}<span class="room-mention sf-room-mention" data-room="${esc(name)}" onclick="event.stopPropagation();if(window.Rooms&&Rooms.openChannelLink){Rooms.openChannelLink('${esc(name).replace(/'/g,"\\'")}')}">#${esc(name)}</span>`);
+    // Restore URL placeholders as themed link (green accent, no default blue).
+    html = html.replace(/\x00URL(\d+)\x00/g, (_m, i) => {
+      const url = urlSlots[+i];
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="sf-link">${url}</a>`;
+    });
     return html;
   }
 

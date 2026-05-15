@@ -133,7 +133,17 @@ const Messages = (() => {
     // Basic URL linkification
     const urlRe = /https?:\/\/[^\s<>"]+/g;
     let escaped = UI.escHtml(text);
-    
+
+    // Extract URLs to placeholders BEFORE the @mention / #channel passes.
+    // Otherwise URLs that legitimately contain "@" (TikTok profile links,
+    // youtube.com/@channel, etc.) would have their path turned into a
+    // mention pill, breaking both the link text and the href.
+    const urlSlots = [];
+    escaped = escaped.replace(urlRe, url => {
+      const i = urlSlots.push(url) - 1;
+      return `\x00URL${i}\x00`;
+    });
+
     // Highlight @mentions. Server NICKNAME_RE allows letters, digits,
     // underscore and hyphen, so `\w` (no `-`) would truncate names like
     // "foo-bar" at the hyphen and only highlight "@foo". Match the full
@@ -152,20 +162,18 @@ const Messages = (() => {
     escaped = escaped.replace(/(^|[\s(\[>])#([a-zA-Z0-9][a-zA-Z0-9_-]{1,31})\b/g,
       (m, pre, name) => `${pre}<span class="room-mention" data-room="${UI.escHtml(name)}" onclick="Rooms.openChannelLink('${UI.escHtml(name).replace(/'/g,"\\'")}')">#${UI.escHtml(name)}</span>`);
 
-    // FrogTalk invite URLs → render a card placeholder instead of a plain link.
-    // Accepts both the legacy /invite/<8-16 chars> form and the new short
-    // /i/<code-or-vanity> form. Vanities are 2–32 chars, [a-z0-9_-], so the
-    // unified pattern just allows 2–32 [A-Za-z0-9_-] and lets the server
-    // resolve which kind it is.
-    const inviteRe = /https?:\/\/(?:www\.)?(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})/g;
-    escaped = escaped.replace(inviteRe, (url, code) =>
-      `<span class="invite-card-placeholder" data-invite-code="${UI.escHtml(code)}">` +
-      `<span class="invite-card-loading">🐸 Loading invite…</span></span>`
-    );
-
-    escaped = escaped.replace(urlRe, url => {
-      // Skip invite URLs — already replaced above
-      if (/\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}/.test(url)) return url;
+    // Restore URL placeholders, running the invite-card / social-card /
+    // generic-link transforms on the original URL strings.
+    escaped = escaped.replace(/\x00URL(\d+)\x00/g, (_m, i) => {
+      const url = urlSlots[+i];
+      // FrogTalk invite URLs → render a card placeholder instead of a
+      // plain link. Accepts both the legacy /invite/<8-16 chars> form and
+      // the new short /i/<code-or-vanity> form (2–32 [A-Za-z0-9_-]).
+      const inviteMatch = url.match(/^https?:\/\/(?:www\.)?(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})/);
+      if (inviteMatch) {
+        return `<span class="invite-card-placeholder" data-invite-code="${UI.escHtml(inviteMatch[1])}">` +
+          `<span class="invite-card-loading">🐸 Loading invite…</span></span>`;
+      }
       const social = _parseFrogSocialUrl(url);
       if (social?.type === 'profile') {
         return `<span class="social-profile-card-placeholder" data-social-profile="${UI.escHtml(social.nickname)}">` +
@@ -181,7 +189,7 @@ const Messages = (() => {
       }
       return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${UI.escHtml(url)}">${url}</a>`;
     });
-    
+
     // Render custom emojis
     if (typeof renderCustomEmojisInText === 'function') {
       escaped = renderCustomEmojisInText(escaped);

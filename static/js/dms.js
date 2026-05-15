@@ -1554,11 +1554,20 @@ function renderDMMessage (m) {
   if (safeContent) {
     contentHtml = esc(safeContent);
     const urlRe = /https?:\/\/[^\s<>"]+/g;
+    // Extract URLs to placeholders BEFORE the @mention pass so URLs that
+    // legitimately contain "@" (e.g. https://www.tiktok.com/@frogtalkxyz)
+    // don't get their path mistaken for a mention pill.
+    const _urlSlots = [];
+    contentHtml = contentHtml.replace(urlRe, url => {
+      const i = _urlSlots.push(url) - 1;
+      return `\x00URL${i}\x00`;
+    });
     contentHtml = contentHtml.replace(/@(\w+)/g, (match, nick) => {
       const isSelf = nick.toLowerCase() === STATE.user?.nickname?.toLowerCase();
       return `<span class="mention${isSelf ? ' mention-self' : ''}">@${nick}</span>`;
     });
-    contentHtml = contentHtml.replace(urlRe, url => {
+    contentHtml = contentHtml.replace(/\x00URL(\d+)\x00/g, (_m, i) => {
+      const url = _urlSlots[+i];
       // FrogTalk channel-invite URLs → reuse the same loader as channels.
       // Match host: frogtalk.xyz, frogtalk.app, or localhost; accept both
       // legacy /invite/<code> and the short /i/<code-or-vanity> form.
