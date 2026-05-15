@@ -31,7 +31,7 @@ modules:
         url: https://github.com/deadinternetfox/frogtalk/archive/refs/tags/v1.4.3.tar.gz
         sha256: d85e61feb564aa591dd41889467c8910e3d30f9085dddb7abac5866c05c7280a
         dest: source
-      - generated-sources.json
+      - io.github.deadinternetfox.frogtalk-sources.json
     build-commands:
       - cd source/desktop
       - npm ci --offline
