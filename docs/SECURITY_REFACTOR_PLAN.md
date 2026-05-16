@@ -10,7 +10,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 |---|---|---|---|
 | A — DM crypto (Signal) | 1: dark backend (tables, endpoints, federation events, flag OFF) | ✅ shipped | `5ea7378` |
 | A — DM crypto (Signal) | 2: vendor libsignal (pure-JS bundle), write `signal_store.js` + `signal.js`, wire `dms.js` receive path | ✅ shipped (sends still v1) | `1854ea8` |
-| A — DM crypto (Signal) | 3: flip per-DM v2 send + sunset v1; safety numbers UI | ⏳ next | — |
+| A — DM crypto (Signal) | 3: flip per-DM v2 send + Signal safety number in encryption modal; FROGTALK_DM_ENC_V2=1 on both nodes; v1 fallback retained for 2-week soak | ✅ shipped | _pending_a3 |
 | B — Custom CSS | 1: `_css_inline.py` sanitiser + tests + `custom_style` column | ✅ shipped | `5ea7378` |
 | B — Custom CSS | 2: wire sanitiser through writers, federation, renderer; backfill | ✅ shipped | `310e8ec` |
 | B — Custom CSS | 3: delete `_css_safety.py`, add grep CI guard | ✅ shipped | `1854ea8` |

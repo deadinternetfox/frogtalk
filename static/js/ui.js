@@ -5278,8 +5278,39 @@ function toggleEncryptionInfo() {
       // useful instead of the scary "Crypto module not ready" string.
       _computeFpFallback().then(_renderEncDeviceFp).catch(() => _renderEncDeviceFp(''));
     }
+
+    // Track A Phase 3 — Signal v2 safety number card. Shown only when
+    // libsignal is initialised on this device AND we can reach the
+    // peer's published bundle. Falls back to hiding the card silently.
+    _populateSignalSafetyCard(peer).catch(() => {
+      const card = document.getElementById('enc-signal-card');
+      if (card) card.style.display = 'none';
+    });
   } catch (e) {
     UI.showToast('Could not open encryption settings.', 'error');
+  }
+}
+
+// Track A Phase 3 — Signal v2 safety number card populator.
+async function _populateSignalSafetyCard(peer) {
+  const card = document.getElementById('enc-signal-card');
+  const out  = document.getElementById('enc-signal-safety-number');
+  if (!card || !out) return;
+  if (!peer || !window.Signal || !Signal.isReady?.()) { card.style.display = 'none'; return; }
+  const peerUid = peer?.user_id
+    || (typeof _dmChannels !== 'undefined'
+        && _dmChannels.find(c => c.id === peer?.id)?.with_user_id)
+    || 0;
+  if (!peerUid) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  out.innerHTML = '<span style="color:#666">Loading…</span>';
+  try {
+    const num = await Signal.safetyNumberWith(peerUid);
+    if (!num) { card.style.display = 'none'; return; }
+    const groups = String(num).split(' ');
+    out.innerHTML = groups.slice(0, 6).join(' ') + '<br>' + groups.slice(6).join(' ');
+  } catch (e) {
+    card.style.display = 'none';
   }
 }
 

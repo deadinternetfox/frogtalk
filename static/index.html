@@ -8812,6 +8812,28 @@ window.ConnErr = (function(){
       Derived from both nicknames · Server only sees ciphertext.
     </p>
 
+    <!-- Signal v2 Safety Number card (Track A Phase 3) -->
+    <div id="enc-signal-card" style="display:none;margin:14px 0 6px;padding:12px 14px;background:rgba(127,216,165,.04);
+                border:1px solid #2f5f48;border-radius:12px;text-align:left">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+                     border-radius:6px;background:#1a3a2a;border:1px solid #2f5f48;font-size:12px">🛡️</span>
+        <div style="display:flex;flex-direction:column;line-height:1.2;flex:1;min-width:0">
+          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Signal safety number</span>
+          <span style="font-size:11px;color:#6a7a72">Compare in person · 60 digits</span>
+        </div>
+      </div>
+      <div id="enc-signal-safety-number"
+           style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;color:#d8e8de;
+                  background:#0a0f0c;padding:10px 12px;border-radius:8px;border:1px solid #1f2a23;
+                  letter-spacing:1px;line-height:1.7;text-align:center">
+        <span style="color:#666">Loading…</span>
+      </div>
+      <div style="font-size:11px;color:#7a8a82;margin-top:9px;line-height:1.5">
+        Both people should see identical 60 digits. If they don't match — or change unexpectedly — your session may have been tampered with.
+      </div>
+    </div>
+
     <!-- This device card -->
     <div style="margin:14px 0 12px;padding:12px 14px;background:rgba(255,255,255,.02);
                 border:1px solid #2a3a2a;border-radius:12px;text-align:left">
@@ -10397,14 +10419,14 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=433"></script>
 <script src="/static/js/ws.js?v=225"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=467"></script>
+<script src="/static/js/ui.js?v=468"></script>
   <script src="/static/js/rooms.js?v=428"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
 <script src="/static/js/messages.js?v=441"></script>
 <script src="/static/js/users.js?v=201"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=440"></script>
+<script src="/static/js/dms.js?v=441"></script>
 <script src="/static/js/calls.js?v=220"></script>
 <script src="/static/js/media.js?v=416"></script>
 <script src="/static/js/gifs.js?v=205"></script>

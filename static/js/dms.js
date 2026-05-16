@@ -2053,9 +2053,28 @@ async function sendDMMessage () {
 
   if (!content && !fileData) return;
 
-  // E2E encrypt if shared secret available
+  // Resolve peer for v2 (Signal/libsignal) encryption preference.
+  const _dmChanEntry = _dmChannels.find(c => c.id === _activeDM?.id);
+  const _peerUidForEnc = _activeDM?.user_id || _dmChanEntry?.with_user_id || 0;
+
+  // Track A Phase 3 — prefer v2 (Signal Double-Ratchet) when the peer
+  // has a published bundle. Falls back transparently to the legacy v1
+  // shared-secret path if anything in the X3DH chain fails (no bundle,
+  // server flag off, libsignal missing). Envelope is JSON-stringified
+  // and stored verbatim in dm_messages.content — the server is opaque.
   let encryptedContent = content;
-  if (content && STATE.sharedSecret) {
+  let _v2EnvelopeUsed = false;
+  if (content && _peerUidForEnc && window.Signal && Signal.isReady?.()) {
+    try {
+      const env = await Signal.encryptDM(_peerUidForEnc, content);
+      encryptedContent = JSON.stringify(env);
+      _v2EnvelopeUsed = true;
+    } catch (e) {
+      // Soak/diagnostics only — not user-facing.
+      console.warn('[dms][v2] encryptDM failed, falling back to v1:', e?.message || e);
+    }
+  }
+  if (!_v2EnvelopeUsed && content && STATE.sharedSecret) {
     try { encryptedContent = await encryptMsg(content); } catch {}
   }
 
@@ -2545,7 +2564,24 @@ async function submitDMEdit(id) {
   }
 
   let enc = newContent;
-  if (STATE.sharedSecret) { try { enc = await encryptMsg(newContent); } catch {} }
+  let _editV2Used = false;
+  if (window.Signal && Signal.isReady?.()) {
+    const _peerUidEdit = _activeDM?.user_id
+      || _dmChannels.find(c => c.id === _activeDM?.id)?.with_user_id
+      || 0;
+    if (_peerUidEdit) {
+      try {
+        const env = await Signal.encryptDM(_peerUidEdit, newContent);
+        enc = JSON.stringify(env);
+        _editV2Used = true;
+      } catch (e) {
+        console.warn('[dms][v2] edit encryptDM failed, falling back to v1:', e?.message || e);
+      }
+    }
+  }
+  if (!_editV2Used && STATE.sharedSecret) {
+    try { enc = await encryptMsg(newContent); } catch {}
+  }
   const r = await apiFetch(`/api/dms/${_activeDM.id}/messages/${id}`, 'PUT', { content: enc });
   if (!r.ok) {
     toast('Could not edit message', 'error');
