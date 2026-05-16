@@ -157,6 +157,12 @@ function _looksEncryptedBlob(content) {
     try {
       const obj = JSON.parse(s);
       if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        // Track A/C v2 wire envelopes: DM Double-Ratchet ({v:2,t:'pre'|'msg',b:…})
+        // and room Sender-Key ({v:2,t:'sk',b:…}). When decrypt fails (peer
+        // hasn't shared keys yet, cold device, etc.) the raw envelope used
+        // to leak into the bubble and render as plaintext JSON. Treat it
+        // as cipher so the lock placeholder shows instead.
+        if (obj.v === 2 && typeof obj.b === 'string' && (obj.t === 'pre' || obj.t === 'msg' || obj.t === 'sk')) return true;
         const keys = Object.keys(obj).map(k => String(k).toLowerCase());
         const hasEncKeys = keys.includes('iv') || keys.includes('ciphertext') || keys.includes('ct') || keys.includes('tag') || keys.includes('salt');
         if (hasEncKeys) return true;

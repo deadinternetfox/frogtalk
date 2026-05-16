@@ -114,6 +114,20 @@ const Messages = (() => {
 
   function _formatContent(text) {
     if (!text) return '';
+    // Track A/C v2 wire envelopes: when the receiver cannot decrypt (peer
+    // hasn't distributed sender-key, cold device, ratchet step lost, etc.)
+    // the upstream decrypt fall-through returns the raw {v:2,t:'sk'|'pre'|'msg',b:'…'}
+    // JSON so the renderer can show a lock placeholder rather than leaking
+    // ciphertext.  Without this guard the JSON would render verbatim.
+    if (text.length >= 9 && text[0] === '{') {
+      try {
+        const _env = JSON.parse(text);
+        if (_env && _env.v === 2 && typeof _env.b === 'string'
+            && (_env.t === 'pre' || _env.t === 'msg' || _env.t === 'sk')) {
+          return '<em style="color:var(--text-muted,#888)">\uD83D\uDD12 Encrypted message</em>';
+        }
+      } catch {}
+    }
     // Profile share card
     if (text.startsWith('{"_type":"profile_share"')) {
       try {
