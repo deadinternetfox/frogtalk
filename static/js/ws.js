@@ -315,6 +315,9 @@ const WS = (() => {
                       if (typeof Messages !== 'undefined' && Messages._ptCachePutById && data.id) {
                         Messages._ptCachePutById(room, data.id, p2);
                       }
+                      if (typeof Messages !== 'undefined' && Messages._msgPtSetById && data.id) {
+                        Messages._msgPtSetById(room, data.id, p2);
+                      }
                     } catch {}
                   }
                 }
@@ -861,6 +864,9 @@ const WS = (() => {
                   if (msg.id && Messages._ptCachePutById) {
                     Messages._ptCachePutById(room, msg.id, _cached);
                   }
+                  if (msg.id && Messages._msgPtSetById) {
+                    Messages._msgPtSetById(room, msg.id, _cached);
+                  }
                 } catch {}
                 return { ...msg, content: _cached, _decrypted: true, _v2: true };
               }
@@ -871,6 +877,7 @@ const WS = (() => {
                   // ciphertext arrivals (different msg.id, e.g. federation
                   // copy) hit on the primary key path.
                   try { Messages._ptCachePut(raw, _cachedById); } catch {}
+                  try { if (Messages._msgPtSetById) Messages._msgPtSetById(room, msg.id, _cachedById); } catch {}
                   return { ...msg, content: _cachedById, _decrypted: true, _v2: true };
                 }
               }
@@ -896,6 +903,9 @@ const WS = (() => {
                     }
                     if (typeof Messages !== 'undefined' && Messages._ptCachePutById && msg.id) {
                       Messages._ptCachePutById(room, msg.id, p);
+                    }
+                    if (typeof Messages !== 'undefined' && Messages._msgPtSetById && msg.id) {
+                      Messages._msgPtSetById(room, msg.id, p);
                     }
                   } catch {}
                 }
@@ -940,11 +950,19 @@ const WS = (() => {
               if (typeof Messages !== 'undefined' && Messages._ptCacheGet) {
                 const _late = Messages._ptCacheGet(raw);
                 if (typeof _late === 'string') {
+                  try {
+                    if (msg.id && Messages._ptCachePutById) Messages._ptCachePutById(room, msg.id, _late);
+                    if (msg.id && Messages._msgPtSetById) Messages._msgPtSetById(room, msg.id, _late);
+                  } catch {}
                   return { ...msg, content: _late, _decrypted: true, _v2: true };
                 }
                 if (msg.id && Messages._ptCacheGetById) {
                   const _lateById = Messages._ptCacheGetById(room, msg.id);
                   if (typeof _lateById === 'string') {
+                    try {
+                      if (Messages._msgPtSetById) Messages._msgPtSetById(room, msg.id, _lateById);
+                      if (Messages._ptCachePut) Messages._ptCachePut(raw, _lateById);
+                    } catch {}
                     return { ...msg, content: _lateById, _decrypted: true, _v2: true };
                   }
                 }

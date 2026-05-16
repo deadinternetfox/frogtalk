@@ -75,7 +75,23 @@ const Messages = (() => {
     // were stored before normalization landed.
     return _rmPtCache.get(k) ?? _rmPtCache.get(cipher);
   }
+  // Defensive guard: a string "looks like ciphertext" if it parses as a
+  // v2 envelope {v:2,t:'sk'|'pre'|'msg',b:'…'}. We must NEVER store such
+  // a value as cached plaintext — that would poison the cache and cause
+  // _formatContent's self-heal to render ciphertext as if it were the
+  // decrypted message. Returns true when the value is ciphertext-shaped.
+  function _looksLikeCiphertext(s) {
+    if (typeof s !== 'string' || s.length < 9 || s[0] !== '{') return false;
+    try {
+      const e = JSON.parse(s);
+      return !!(e && e.v === 2 && typeof e.b === 'string'
+                && (e.t === 'sk' || e.t === 'pre' || e.t === 'msg'));
+    } catch { return false; }
+  }
+
   function _ptCachePut(cipher, plain) {
+    // Reject ciphertext-shaped values — see _looksLikeCiphertext.
+    if (typeof plain !== 'string' || _looksLikeCiphertext(plain)) return;
     _rmPtLoad();
     const k = _ptCacheKey(cipher);
     if (_rmPtCache.has(k)) _rmPtCache.delete(k);
@@ -122,6 +138,7 @@ const Messages = (() => {
   }
   function _ptCachePutById(room, id, plain) {
     if (!room || !id || typeof plain !== 'string') return;
+    if (_looksLikeCiphertext(plain)) return;
     _rmPtLoad();
     const k = 'id:' + room + ':' + id;
     if (_rmPtCache.has(k)) _rmPtCache.delete(k);
@@ -135,6 +152,34 @@ const Messages = (() => {
     if (!_rmPtSaveT) {
       _rmPtSaveT = setTimeout(() => { _rmPtSaveT = 0; _rmPtSave(); }, 250);
     }
+  }
+
+  // Session-scoped, in-memory plaintext map keyed by `<room>:<msg.id>`.
+  // Belt-and-braces companion to the localStorage caches above. The
+  // localStorage caches can be lost across sessions (and in theory
+  // raced/overwritten by a second tab writing its own stale snapshot),
+  // but this Map lives in the page's JS heap for the lifetime of the
+  // tab and survives every loadHistory rebuild + channel switch within
+  // the same session. ws.decryptMsg fills it on every successful
+  // decrypt OR cache hit, and _formatContent consults it before
+  // rendering the 🔒 placeholder.
+  const _msgPlainById = new Map();
+  function _msgPtSetById(room, id, plain) {
+    if (!room || !id || typeof plain !== 'string') return;
+    // Never store ciphertext-shaped values — see _looksLikeCiphertext.
+    if (_looksLikeCiphertext(plain)) return;
+    // Sticky: once we have plaintext for <room,id>, never overwrite.
+    // This Map is session-scoped and is the last line of defense for
+    // own-message self-heal across channel switches. If a later code
+    // path tries to set a different (or worse) value for the same id,
+    // we keep the first known-good plaintext.
+    const k = room + ':' + id;
+    if (_msgPlainById.has(k)) return;
+    _msgPlainById.set(k, plain);
+  }
+  function _msgPtGetById(room, id) {
+    if (!room || !id) return undefined;
+    return _msgPlainById.get(room + ':' + id);
   }
 
   // Inline SVG logos for bridge origin badge (tiny, monochrome, currentColor).
@@ -255,13 +300,24 @@ const Messages = (() => {
           // upstream decrypt path didn't substitute plaintext. If we
           // have plaintext cached under the ciphertext, render it now
           // — formatted as if it had been decrypted in the first place.
+          // Three lookup tiers in priority order:
+          //   1. envelope-key localStorage cache (`v2:t:b`)
+          //   2. id-key in-memory session map (survives loadHistory)
+          //   3. id-key localStorage cache (survives reload)
           try {
             const _cached = _ptCacheGet(text);
             if (typeof _cached === 'string' && _cached.length) {
-              // Recurse with the plaintext so URL/markdown/etc handling
-              // still runs. Guarded against re-entrancy because the
-              // plaintext won't parse as a v2 envelope.
               return _formatContent(_cached, opts);
+            }
+            if (opts && opts.msgId && opts.room) {
+              const _byIdMem = _msgPtGetById(opts.room, opts.msgId);
+              if (typeof _byIdMem === 'string' && _byIdMem.length) {
+                return _formatContent(_byIdMem, opts);
+              }
+              const _byIdLs = _ptCacheGetById(opts.room, opts.msgId);
+              if (typeof _byIdLs === 'string' && _byIdLs.length) {
+                return _formatContent(_byIdLs, opts);
+              }
             }
           } catch {}
           // Own historic messages we can never decrypt locally (libsignal
@@ -270,22 +326,37 @@ const Messages = (() => {
           // cache existed). Render a clearer indicator instead of the
           // generic lock so the user knows it's not a peer-side failure.
           if (opts && opts.isOwn) {
-            // One-shot diagnostic per session so we can confirm whether
-            // the placeholder is firing for a real cross-device send or
-            // because the cache lookup is genuinely missing data we
-            // should have. Logs the lookup key + map size + a small
-            // sample of stored keys.
+            // Diagnostic: log every own-message placeholder render with
+            // enough context to root-cause stubborn cache misses. Rate
+            // limited per msg.id so a stuck channel doesn't spam the
+            // console, but no longer one-shot — we need data across
+            // multiple messages to see whether some IDs hit and others
+            // miss within the same session.
             try {
-              if (!window._ownPtMissLogged) {
-                window._ownPtMissLogged = true;
+              window._ownPtMissLogged = window._ownPtMissLogged || new Set();
+              const _diagKey = (opts.room || '?') + ':' + (opts.msgId || '?');
+              if (!window._ownPtMissLogged.has(_diagKey)) {
+                window._ownPtMissLogged.add(_diagKey);
                 const _k = _ptCacheKey(text);
                 const _sample = [];
+                let _idKeyCount = 0, _envKeyCount = 0;
                 for (const _kk of _rmPtCache.keys()) {
-                  _sample.push(_kk.slice(0, 40));
-                  if (_sample.length >= 5) break;
+                  if (_kk.startsWith('id:')) _idKeyCount++;
+                  else _envKeyCount++;
+                  if (_sample.length < 6) _sample.push(_kk.slice(0, 56));
                 }
-                console.warn('[messages._formatContent] own placeholder; cache miss',
-                  { lookup: _k.slice(0, 40), size: _rmPtCache.size, sample: _sample });
+                let _lsRaw = '';
+                try { _lsRaw = (localStorage.getItem(_RM_PT_CACHE_KEY) || ''); } catch {}
+                console.warn('[messages._formatContent] own placeholder; cache miss', {
+                  msgId: opts.msgId, room: opts.room,
+                  lookup: _k.slice(0, 56),
+                  contentPrefix: String(text).slice(0, 56),
+                  mapSize: _rmPtCache.size,
+                  envKeys: _envKeyCount, idKeys: _idKeyCount,
+                  memMapSize: _msgPlainById.size,
+                  lsBytes: _lsRaw.length,
+                  sample: _sample,
+                });
               }
             } catch {}
             return '<em style="color:var(--text-muted,#888)" title="This message was sent from another device and cannot be decrypted here">\uD83D\uDD12 This message was sent from another device and cannot be decrypted</em>';
@@ -1708,7 +1779,7 @@ const Messages = (() => {
     // Muted-user collapse: if this author is on the local mute list, render a
     // tiny click-to-reveal placeholder instead of the real content/media.
     const isMutedAuthor = !isOwn && typeof Mute !== 'undefined' && Mute.isUserMuted(msg.nickname);
-    const contentHtml = msg.content ? _formatContent(msg.content, { isOwn }) : '<em style="color:#444">Media</em>';
+    const contentHtml = msg.content ? _formatContent(msg.content, { isOwn, msgId: msg.id, room: State.currentRoom }) : '<em style="color:#444">Media</em>';
     const mediaHtml = _buildMediaHtml(msg);
     const fwdBadge = _forwardedBadgeHtml(msg);
     const isForwarded = !!(msg && msg.forwarded_from);
@@ -2331,6 +2402,8 @@ const Messages = (() => {
         // consumed' — the SK chain advanced during this decrypt and
         // refuses to re-consume the same iteration.
         try { _ptCachePut(c, plain); } catch {}
+        try { _ptCachePutById(room, m.id, plain); } catch {}
+        try { _msgPtSetById(room, m.id, plain); } catch {}
         m.content = plain;
         m._decrypted = true;
         m._v2 = true;
@@ -3385,7 +3458,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, _ptCacheGet, _ptCachePut, _ptCacheFlush, _ptCacheGetById, _ptCachePutById, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, _ptCacheGet, _ptCachePut, _ptCacheFlush, _ptCacheGetById, _ptCachePutById, _msgPtSetById, _msgPtGetById, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
