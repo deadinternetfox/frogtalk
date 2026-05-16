@@ -312,7 +312,14 @@
     const ck     = _b64ToBytes(skdmPayload.ck);
     const pk     = _b64ToBytes(skdmPayload.pk);
     if (ck.length !== 32) throw new Error('bad SKDM: chain_key length');
-    if (pk.length !== 32) throw new Error('bad SKDM: sign_pub length');
+    // libsignal's Curve.generateKeyPair() returns the DJB-formatted public
+    // key (33 bytes: 0x05 prefix || 32-byte X25519). Older comments here
+    // said "32 bytes Curve25519 signing pub" but that was wrong — we accept
+    // both 32 (raw) and 33 (DJB-prefixed) so the sig verifier (which is
+    // happy with either) can do its job.
+    if (pk.length !== 32 && pk.length !== 33) {
+      throw new Error('bad SKDM: sign_pub length ' + pk.length);
+    }
     await _putPeerState(roomId, senderUid, did, {
       chain_id:  (skdmPayload.c | 0) >>> 0,
       iteration: (skdmPayload.i | 0) >>> 0,
