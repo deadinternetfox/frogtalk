@@ -651,15 +651,16 @@
     root.textContent = '';
 
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;' +
-                          'padding:14px 0 6px;border-top:1px solid #1e1e1e;margin-top:6px';
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:16px;' +
+                          'flex-wrap:wrap;padding:14px 0 10px;border-top:1px solid #1e1e1e;margin-top:6px';
     const headerLeft = document.createElement('div');
+    headerLeft.style.cssText = 'flex:1 1 200px;min-width:0;padding-right:8px';
     const h = document.createElement('div');
     h.textContent = 'App PIN';
     h.style.cssText = 'font-size:14px;color:#e0e0e0';
     headerLeft.appendChild(h);
     const status = document.createElement('div');
-    status.style.cssText = 'font-size:12px;margin-top:2px';
+    status.style.cssText = 'font-size:12px;margin-top:2px;line-height:1.35';
     if (_cfg.has_pin) {
       status.textContent = 'Active — locks the app on idle, after auto-login, and before admin areas.';
       status.style.color = '#7ed27e';
@@ -673,6 +674,7 @@
     btn.type = 'button';
     btn.className = 'modal-btn ' + (_cfg.has_pin ? 'secondary' : 'primary');
     btn.textContent = _cfg.has_pin ? 'Change / Disable' : 'Set PIN';
+    btn.style.cssText = 'flex:0 0 auto;white-space:nowrap;min-width:120px';
     btn.addEventListener('click', openSettings);
     header.appendChild(btn);
     root.appendChild(header);
