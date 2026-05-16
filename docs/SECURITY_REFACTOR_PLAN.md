@@ -21,6 +21,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 | E — Voice/video integrity | 2b: Safety Number panel + identity-rotation toast | ✅ shipped | `2af34e6` |
 | F — Linked devices | not started | — | — |
 | G — Sealed Sender + metadata | not started | — | — |
+| H — Cleanup (transitional code) | not started | — | — |
 
 This document is the single source of truth for the hardening tracks
 raised by an external pentester. All tracks are in scope; they are
@@ -1265,3 +1266,135 @@ yet, or live outside the FrogTalk codebase entirely:
   by design exfiltrate plaintext to a third-party server, so they will
   always be the weakest link in their thread. Document this clearly
   in the bridge UI; do not pretend bridged DMs are E2E.
+
+---
+
+## Track H — Cleanup (transitional code)
+
+Once a track is fully migrated (v2 enabled, soak passed, no v1 traffic
+observed in metrics), the v1 fallbacks, sanitiser shims, and migration
+helpers should be deleted so the codebase stops carrying two ways of
+doing the same job. Carrying transitional code forever is how
+"transitional" becomes "permanent" and how security regressions sneak
+back in: a hot-path bug forces a roll-back to the legacy branch, and
+suddenly we're shipping the homegrown crypto we already retired.
+
+### Red line
+
+The only invariant: **accounts, friends graph, room membership,
+public keys, and bot/integration state must survive every cleanup
+pass.** Message *content* is fair game:
+
+- DM history loss is explicitly OK. User confirmed 2026-05-17. v1
+  envelopes that can't be re-decrypted under v2 may be deleted in
+  bulk; the row can stay (with content nulled and a tombstone string)
+  or be removed outright.
+- Room message history loss is OK for the same reason — pre-v2
+  ciphertext under the legacy AES key path can be dropped.
+- Wall posts, profile metadata, attachments index: keep (these are
+  not under v1 crypto and have no analogue in Track A/C).
+
+In other words: every cleanup phase can `UPDATE … SET content=''`
+or `DELETE FROM dm_messages WHERE …` for legacy rows. Just don't
+`DROP TABLE users` and don't blow away the friends graph.
+
+### Phase 1 — Track B cleanup (already half done)
+
+- ✅ `_css_safety.py` deleted at Track B Phase 3.
+- ⏳ Audit: remove any board / wall renderer that still has the
+  legacy `<style>` strip-but-allow path. Grep for `style[^>]*=` in PHP
+  board and template files; replace with the same `_css_inline`
+  sanitiser used elsewhere.
+
+### Phase 2 — Track A cleanup (DM v1 → v2)
+
+Trigger: 2-week soak post-`48ad904` with `FROGTALK_DM_ENC_V2=1` on
+both nodes, and zero `dm_decrypt_v1_fallback` counter hits in the
+last 7 days.
+
+To delete:
+- `dms.js` v1 encrypt path (`encryptDMv1`, static-ECDH key derivation,
+  legacy envelope writer) — keep only the `{v:2,t:'sig',b:…}` writer.
+- `dms.js` v1 decrypt fallback branch — delete outright. Per user
+  decision 2026-05-17, breaking pre-v2 DM history is acceptable.
+  Migration: one-shot `UPDATE dm_messages SET content='' WHERE
+  content NOT LIKE '{"v":2%'` so legacy ciphertext stops sitting
+  on disk indefinitely. Render shows "Older message (pre-v2,
+  unreadable)" tombstone.
+- Server-side `dm_v1_pubkey` column on `users` → drop via migration
+  (no longer referenced by anything once dms.js v1 is gone).
+- Drop the `FROGTALK_DM_ENC_V2` flag from `routers/signal.py`
+  `/config` and from the systemd drop-in (v2 becomes unconditional).
+- Tests in `tests/test_dm_v1_compat.py` (if present) → delete.
+
+### Phase 3 — Track C cleanup (room v1 → v2)
+
+Trigger: 2-week soak post-Track C Phase 3 ship with `FROGTALK_ROOM_ENC_V2=1` on
+both nodes, and zero `room_decrypt_v1_fallback` counter hits in 7 days.
+
+To delete:
+- `messages.js` legacy room-AES path and the legacy room key derivation.
+- The legacy "join → fetch room key from server" REST endpoint
+  (route enumerated at Phase 3 land-time).
+- Server-side per-room AES key column on `rooms`, IF it exists —
+  audit `database.py` for `room_key`/`room_secret`/etc. and drop the
+  column via a one-shot migration. Per user decision 2026-05-17,
+  pre-v2 room history loss is acceptable; bulk tombstone the
+  affected rows (`UPDATE messages SET content='' WHERE content NOT
+  LIKE '{"v":2%'`) and ship.
+- Drop `FROGTALK_ROOM_ENC_V2` flag.
+
+### Phase 4 — Track E cleanup (calls)
+
+Trigger: 2-week soak post-`2af34e6` with no `call_fp_unverified`
+counter hits.
+
+To delete:
+- WebRTC connection paths that still accept an unsigned fingerprint
+  in `calls.js` (currently kept as a fallback for cross-version
+  calls). Replace with a hard reject + toast.
+- Cold-resume "no signature in offer" branch in `routers/calls.py` —
+  the signed-fingerprint requirement becomes unconditional.
+
+### Phase 5 — Schema migration consolidation
+
+After all of A/C/D/E/F/G have shipped and soaked:
+
+- `database.py` is currently a long chain of idempotent
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` blocks accumulated over
+  years. None of them are needed once every live DB has been through
+  every migration. They are *kept* because the read-path is harmless
+  (an `ALTER` that finds the column already-present is a no-op) but
+  they make the file unreadable.
+- Strategy:
+  1. Snapshot the current schema by running `sqlite3 frogtalk.db
+     '.schema' > schema_current.sql`.
+  2. Replace the `_init_schema()` function with a single
+     `CREATE TABLE IF NOT EXISTS …` block per table, matching the
+     snapshot exactly.
+  3. Keep a small `_migrate_pre_2026()` function that only handles
+     pre-2026 → current schema gaps, and which deletes itself after
+     a release cycle (track with TODO + ship-date).
+  4. Old `ALTER TABLE` lines deleted; a `migrations/` folder added
+     so future schema deltas have a single home.
+- This is the only Track H phase that touches every user account, so
+  it ships behind a `--migrate-only` CLI mode first (`python -m main
+  --migrate-only`) which an op can dry-run before flipping the
+  systemd unit.
+
+### Phase 6 — Codebase audit
+
+Once 1–5 land, sweep for:
+
+- `# TODO(security):` / `# FIXME(crypto):` / `# legacy` /
+  `# transitional` comments → delete the line OR open an issue if
+  the work is real.
+- `*_v1` function names / `legacy_*` route names → rename or remove.
+- Dead imports introduced by the transitional code paths.
+
+### Tracking
+
+Each phase lands as its own commit prefixed `cleanup:` and updates
+the Status snapshot. Track H is **soak-gated**: we never schedule a
+cleanup phase before its trigger fires. The plan doc records the
+soak start-date in the row, then the cleanup commit hash once shipped.
