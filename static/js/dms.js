@@ -601,6 +601,36 @@ async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
   if (!raw) return '';
   if (_parseDMCallLog(raw)) return raw;
 
+  // Track A — v2 Signal envelope path. The wire format is a JSON
+  // object `{v:2,t:'pre'|'msg',b:'<base64>'}`. When we see one of these
+  // we try the Signal session. Failure falls through to v1 paths so
+  // legacy AES-GCM history still renders.
+  if (raw.length >= 9 && raw[0] === '{') {
+    try {
+      const env = JSON.parse(raw);
+      if (env && env.v === 2 && typeof env.b === 'string' && window.Signal) {
+        try {
+          if (!window.Signal.isReady()) {
+            const meId = STATE?.user?.id;
+            if (meId) {
+              await window.Signal.init(meId);
+            }
+          }
+          if (window.Signal.isReady()) {
+            const out = await window.Signal.decryptDM(peerId, env);
+            if (typeof out === 'string') return out;
+          }
+        } catch (e) {
+          // Drop into legacy paths \u2014 may be cold-history that this
+          // device's IndexedDB store can't decrypt, or Signal not yet
+          // initialised.
+        }
+      }
+    } catch {
+      // Not a JSON envelope; fall through.
+    }
+  }
+
   // Primary path: ECDH shared key for this peer.
   try {
     const key = await _getDMSharedKey(peerId);
