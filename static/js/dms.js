@@ -1616,7 +1616,12 @@ function renderDMMessage (m) {
   // Reply quote
   const replyPreviewRaw = String(m.reply_content || '…');
   const replyPreviewSafe = _looksEncryptedBlob(replyPreviewRaw) ? 'Encrypted message' : replyPreviewRaw;
-  const replyNick = m.reply_nickname || m.reply_nick || senderNick || '?';
+  // SECURITY/UX: never fall back to senderNick — a quote whose author is
+  // the same as the message author is meaningless and used to render the
+  // current user's own (truncated) name (e.g. "Frog…") as the "replied-to"
+  // label on optimistic pending bubbles. Show '?' if we genuinely don't
+  // know who was being replied to.
+  const replyNick = m.reply_nickname || m.reply_nick || '?';
   const replyQuote = m.reply_to
     ? `<div class="msg-reply-quote" onclick="document.querySelector('[data-dmid=&quot;${m.reply_to}&quot;]')?.scrollIntoView({behavior:'smooth',block:'center'})">
         <span class="reply-quote-nick">${esc(replyNick)}</span>
@@ -2107,9 +2112,15 @@ async function sendDMMessage () {
       sender_display_name: _me.display_name,
       sender_avatar: _me.avatar,
       sender_is_admin: !!_me.is_admin,
-      content    : content,            // plaintext \u2014 what the user typed
+      content    : content,            // plaintext — what the user typed
       created_at : new Date().toISOString().replace('Z',''),
       reply_to   : _dmReplyTo?.id || null,
+      // Carry the reply snapshot into the optimistic bubble so the quote
+      // shows the actual replied-to author / preview instead of falling
+      // back to '?' (or, before the fix, to the current user's own nick).
+      reply_nickname: _dmReplyTo?.nick || null,
+      reply_nick    : _dmReplyTo?.nick || null,
+      reply_content : _dmReplyTo?.content || null,
       _pending   : true,
     };
     _dmMessages.push(_tempMsg);

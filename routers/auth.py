@@ -506,7 +506,7 @@ def _ensure_local_user_from_ticket(payload: dict) -> dict | None:
 
 
 @router.post("/register")
-@limiter.limit("10/hour")
+@limiter.limit("3/hour")
 async def register(
     request: Request,
     body: RegisterRequest,
@@ -514,9 +514,15 @@ async def register(
 ):
     # Gate the legacy plaintext-password registration route. Default mode
     # "secure" forces clients to use /register-secure (CAPTCHA-protected) and
-    # blocks bot account farming. Federation relays bypass this gate because
-    # they replicate accounts that were already validated on the issuing node.
-    is_relay = (x_federation_relay or "").strip() == "1"
+    # blocks bot account farming.
+    #
+    # SECURITY: we used to honour `X-Federation-Relay: 1` as a CAPTCHA bypass
+    # for "federation peers replicating accounts", but the header was
+    # unauthenticated — any bot could set it and farm accounts. Federation
+    # replication now MUST use /federation-provision (HMAC-signed ticket);
+    # the legacy plaintext-relay path is therefore disabled unless the
+    # operator also flips FEDERATION_LEGACY_PLAINTEXT=1 explicitly.
+    is_relay = (x_federation_relay or "").strip() == "1" and _federation_legacy_plaintext_enabled()
     if not is_relay and _signups_mode() != "open":
         return JSONResponse(status_code=403, content={"error": "Registration is closed; use /api/auth/register-secure"})
     if not NICKNAME_RE.match(body.nickname):
@@ -525,7 +531,7 @@ async def register(
         })
     if len(body.password) < 6:
         return JSONResponse(status_code=400, content={"error": "Password must be at least 6 characters"})
-    user_id = db.create_user(body.nickname, body.password)
+    user_id = db.create_user(body.nickname, body.password, registration_ip=client_ip(request))
     if user_id is None:
         # Username taken (or another integrity error). Surface a few
         # available alternatives so the client can offer one-click
@@ -1147,13 +1153,18 @@ class RegisterWithCaptchaRequest(BaseModel):
 
 
 @router.post("/register-secure")
-@limiter.limit("10/hour")
+@limiter.limit("3/hour")
 async def register_with_captcha(
     request: Request,
     body: RegisterWithCaptchaRequest,
     x_federation_relay: str | None = Header(default=None),
 ):
-    """Register with CAPTCHA verification (bot-proof)."""
+    """Register with CAPTCHA verification (bot-proof).
+
+    SECURITY: never honour `X-Federation-Relay: 1` here — there is no
+    authenticated relay path on this endpoint. Federation peers replicate
+    accounts via /federation-provision (HMAC-signed ticket).
+    """
     # Verify CAPTCHA first
     if not db.verify_captcha(body.captcha_id, body.captcha_answer):
         return JSONResponse(status_code=400, content={"error": "Invalid or expired CAPTCHA"})
@@ -1166,7 +1177,7 @@ async def register_with_captcha(
     if len(body.password) < 6:
         return JSONResponse(status_code=400, content={"error": "Password must be at least 6 characters"})
     
-    user_id = db.create_user(body.nickname, body.password)
+    user_id = db.create_user(body.nickname, body.password, registration_ip=client_ip(request))
     if user_id is None:
         suggestions = db.suggest_available_usernames(body.nickname, count=5)
         return JSONResponse(status_code=409, content={

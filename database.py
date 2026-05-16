@@ -358,18 +358,36 @@ def init_db():
 # User helpers
 # ---------------------------------------------------------------------------
 
-def create_user(nickname: str, password: str) -> Optional[int]:
-    """Return new user id or None if nickname taken."""
+def create_user(nickname: str, password: str, registration_ip: Optional[str] = None) -> Optional[int]:
+    """Return new user id or None if nickname taken.
+
+    `registration_ip` is best-effort \u2014 the column was added in a later
+    migration so older installs may not have it. Stored verbatim (no
+    geolookup) so admins can spot bot-farm bursts of accounts created from
+    the same IP.
+    """
     try:
         with _conn() as con:
-            cur = con.execute(
-                "INSERT INTO users (nickname, password_hash, global_user_id) VALUES (?, ?, ?)",
-                (
-                    nickname,
-                    _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode(),
-                    str(uuid.uuid4()),
+            try:
+                cur = con.execute(
+                    "INSERT INTO users (nickname, password_hash, global_user_id, registration_ip) VALUES (?, ?, ?, ?)",
+                    (
+                        nickname,
+                        _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode(),
+                        str(uuid.uuid4()),
+                        registration_ip,
+                    )
                 )
-            )
+            except sqlite3.OperationalError:
+                # Column may not exist on pre-migration databases; fall back.
+                cur = con.execute(
+                    "INSERT INTO users (nickname, password_hash, global_user_id) VALUES (?, ?, ?)",
+                    (
+                        nickname,
+                        _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode(),
+                        str(uuid.uuid4()),
+                    )
+                )
             con.commit()
             return cur.lastrowid
     except sqlite3.IntegrityError:
@@ -1110,6 +1128,11 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN profile_public INTEGER DEFAULT 1")
         if "allow_friend_requests" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN allow_friend_requests INTEGER DEFAULT 1")
+        if "registration_ip" not in cols:
+            # Captured at /register-secure to make bot-farm bursts (one IP
+            # creating dozens of randomly-named accounts) visible to admins.
+            # NULL for older accounts that pre-date this migration.
+            con.execute("ALTER TABLE users ADD COLUMN registration_ip TEXT")
         # User settings columns
         if "theme" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'frog'")
