@@ -2500,6 +2500,38 @@ def _migrate():
             pass
 
         # ──────────────────────────────────────────────────────────────────
+        # Security refactor Track F Phase 1 — linked devices (dark backend).
+        # One row per (user_id, device_id). device_id is a client-generated
+        # UUID. `device_identity_pub` is the per-device Curve25519 identity
+        # the secondary publishes; `primary_sig` is an XEdDSA signature by
+        # the user's *primary* identity key over (device_id || identity_pub
+        # || created_at), so any receiver can verify the device enrolment
+        # against the primary key it already trusts. The server never
+        # verifies the signature itself — it is dumb transit, exactly like
+        # the bundle endpoints. Bundle-shape change and client fanout are
+        # deferred to Phase 2; this phase only stores the data so that the
+        # device-management UI can be built against a real backend.
+        # ──────────────────────────────────────────────────────────────────
+        con.execute("""CREATE TABLE IF NOT EXISTS user_devices (
+            user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            device_id            TEXT    NOT NULL,
+            name                 TEXT    NOT NULL DEFAULT '',
+            device_identity_pub  BLOB    NOT NULL,
+            primary_sig          BLOB    NOT NULL,
+            created_at           INTEGER NOT NULL,
+            last_seen_at         INTEGER,
+            revoked_at           INTEGER,
+            PRIMARY KEY (user_id, device_id)
+        )""")
+        try:
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_devices_active "
+                "ON user_devices(user_id) WHERE revoked_at IS NULL"
+            )
+        except Exception:
+            pass
+
+        # ──────────────────────────────────────────────────────────────────
         # Security refactor Track E — signed DTLS fingerprint blob carried
         # alongside the call SDP. Opaque base64 JSON; server is just a
         # passthrough. Stored on the pending offer so a cold-resumed
@@ -2726,6 +2758,131 @@ def signal_skdm_drain(recipient_id: int) -> list:
             )
         con.commit()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Linked devices — Track F Phase 1 (dark backend)
+# ---------------------------------------------------------------------------
+
+# Hard cap on devices per user. Signal allows 5 secondaries + 1 primary;
+# we cap at 6 active rows total. A revoked row stays around so the audit
+# trail survives — only *active* (revoked_at IS NULL) rows count.
+_MAX_ACTIVE_DEVICES = 6
+
+
+def signal_device_link(*, user_id: int, device_id: str, name: str,
+                       device_identity_pub: bytes, primary_sig: bytes) -> dict:
+    """Persist a new linked device for `user_id`.
+
+    The server does not verify `primary_sig` itself — peers verify the
+    sig with the user's primary identity key on read. We do enforce
+    structural constraints (bytes lengths, device_id shape, cap).
+
+    Raises ValueError for structural errors and a `cap` error when the
+    user already has _MAX_ACTIVE_DEVICES active devices.
+    """
+    if not isinstance(device_id, str) or not (8 <= len(device_id) <= 64):
+        raise ValueError("device_id_bad_length")
+    if any((c not in "0123456789abcdefABCDEF-") for c in device_id):
+        raise ValueError("device_id_bad_chars")
+    if not isinstance(device_identity_pub, (bytes, bytearray)) or len(device_identity_pub) != 32:
+        raise ValueError("device_identity_pub_bad_length")
+    if not isinstance(primary_sig, (bytes, bytearray)) or len(primary_sig) != 64:
+        raise ValueError("primary_sig_bad_length")
+    safe_name = (name or "").strip()[:64]
+    now = int(time.time())
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        active = con.execute(
+            "SELECT COUNT(*) AS n FROM user_devices "
+            "WHERE user_id=? AND revoked_at IS NULL",
+            (user_id,),
+        ).fetchone()
+        if active and int(active["n"]) >= _MAX_ACTIVE_DEVICES:
+            con.commit()
+            raise ValueError("device_cap_reached")
+        con.execute(
+            "INSERT OR REPLACE INTO user_devices "
+            "(user_id, device_id, name, device_identity_pub, primary_sig, "
+            " created_at, last_seen_at, revoked_at) "
+            "VALUES (?,?,?,?,?,?,?,NULL)",
+            (int(user_id), device_id, safe_name,
+             bytes(device_identity_pub), bytes(primary_sig), now, now),
+        )
+        con.commit()
+    return {
+        "user_id":     int(user_id),
+        "device_id":   device_id,
+        "name":        safe_name,
+        "created_at":  now,
+        "last_seen_at": now,
+        "revoked_at":  None,
+    }
+
+
+def signal_devices_for_user(user_id: int, *, include_revoked: bool = False) -> list:
+    """Return all devices for `user_id`. Each dict has:
+        device_id, name, device_identity_pub (bytes), primary_sig (bytes),
+        created_at, last_seen_at, revoked_at
+    """
+    with _conn() as con:
+        if include_revoked:
+            rows = con.execute(
+                "SELECT device_id, name, device_identity_pub, primary_sig, "
+                "       created_at, last_seen_at, revoked_at "
+                "FROM user_devices WHERE user_id=? ORDER BY created_at ASC",
+                (int(user_id),),
+            ).fetchall()
+        else:
+            rows = con.execute(
+                "SELECT device_id, name, device_identity_pub, primary_sig, "
+                "       created_at, last_seen_at, revoked_at "
+                "FROM user_devices WHERE user_id=? AND revoked_at IS NULL "
+                "ORDER BY created_at ASC",
+                (int(user_id),),
+            ).fetchall()
+    out = []
+    for r in rows:
+        out.append({
+            "device_id":           str(r["device_id"]),
+            "name":                str(r["name"] or ""),
+            "device_identity_pub": bytes(r["device_identity_pub"]),
+            "primary_sig":         bytes(r["primary_sig"]),
+            "created_at":          int(r["created_at"]),
+            "last_seen_at":        int(r["last_seen_at"] or 0) or None,
+            "revoked_at":          int(r["revoked_at"]) if r["revoked_at"] else None,
+        })
+    return out
+
+
+def signal_device_revoke(user_id: int, device_id: str) -> bool:
+    """Mark a device as revoked. Returns True if a row was changed.
+
+    Idempotent: revoking an already-revoked device is a no-op success.
+    """
+    now = int(time.time())
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        cur = con.execute(
+            "UPDATE user_devices SET revoked_at=? "
+            "WHERE user_id=? AND device_id=? AND revoked_at IS NULL",
+            (now, int(user_id), str(device_id)),
+        )
+        changed = cur.rowcount
+        con.commit()
+    return changed > 0
+
+
+def signal_device_touch(user_id: int, device_id: str) -> None:
+    """Bump last_seen_at for an active device. No-op for revoked/unknown rows."""
+    now = int(time.time())
+    with _conn() as con:
+        con.execute(
+            "UPDATE user_devices SET last_seen_at=? "
+            "WHERE user_id=? AND device_id=? AND revoked_at IS NULL",
+            (now, int(user_id), str(device_id)),
+        )
+        con.commit()
 
 
 # ---------------------------------------------------------------------------

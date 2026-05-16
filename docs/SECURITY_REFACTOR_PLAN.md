@@ -22,7 +22,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 | E — Voice/video integrity | 1: dark backend (fp_sig column on `pending_call_offers`, WS payload passthrough, REST cold-resume), `Signal.signCallFingerprint` / `verifyCallFingerprint` helpers | ✅ shipped (not yet wired into calls.js) | `13e4ced` |
 | E — Voice/video integrity | 2: wire calls.js to sign on offer/answer + verify on receive + Safety Numbers UI | ✅ shipped | `fb3175a` |
 | E — Voice/video integrity | 2b: Safety Number panel + identity-rotation toast | ✅ shipped | `2af34e6` |
-| F — Linked devices | not started | — | — |
+| F — Linked devices | phase 1: dark backend — `user_devices` table (PK `(user_id, device_id)`, 32-byte device identity pub + 64-byte XEdDSA primary signature + name + created_at/last_seen_at/revoked_at, partial index on active rows, 6-active cap); `signal_device_link`/`signal_devices_for_user`/`signal_device_revoke`/`signal_device_touch` helpers; `GET /api/signal/devices/me`, `POST /api/signal/devices/link`, `POST /api/signal/devices/{device_id}/revoke` (idempotent); bundle shape and federation events deferred to phase 2 | ✅ shipped | — | — |
 | G — Sealed Sender + metadata | not started | — | — |
 | H — Cleanup (transitional code) | not started | — | — |
 | H — Cleanup (transitional code) | doc refresh: marketing/security copy on `static/home.html` + `static/privacy.html` rewritten for Signal Protocol DMs + Sender-Keys rooms + DTLS-fingerprint calls; `README.md` Encryption Model section rewritten; `docs-api.html`/`docs-node.html` had no stale crypto copy | ✅ shipped | — | — |

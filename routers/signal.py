@@ -271,3 +271,115 @@ async def relay_skdm(
         )
 
     return {"ok": True, "delivered": delivered}
+
+
+# ---------------------------------------------------------------------------
+# Linked devices — Track F Phase 1 (dark backend)
+# ---------------------------------------------------------------------------
+#
+# Phase 1 ships only the storage + management endpoints. The bundle-shape
+# change (one bundle per device, fanout encrypt on the client) is Phase 2.
+# This lets us build and ship the Settings -> Devices UI against a real
+# backend without flipping the on-wire DM format. Existing single-device
+# Signal sessions keep working exactly as they did before.
+
+class DeviceLinkBody(BaseModel):
+    """Primary device enrolling a secondary.
+
+    `device_id` is a client-generated UUID-ish string (8..64 hex/dash
+    chars). `identity_pub` is the secondary's Curve25519 identity key
+    (base64, 32 bytes). `primary_sig` is the primary's XEdDSA signature
+    over the bytes (device_id || identity_pub || created_at) — server
+    treats this as opaque, peers verify on read.
+    """
+    device_id:    str = Field(..., min_length=8, max_length=64)
+    name:         str = Field("", max_length=64)
+    identity_pub: str = Field(..., min_length=1, max_length=128)
+    primary_sig:  str = Field(..., min_length=1, max_length=128)
+
+
+@router.get("/devices/me")
+@limiter.limit("60/minute")
+async def devices_me(
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Return this user's own active devices (revoked rows omitted)."""
+    rows = await run_in_threadpool(
+        db.signal_devices_for_user, int(user["id"]), include_revoked=False,
+    )
+    return {
+        "ok": True,
+        "devices": [
+            {
+                "device_id":     d["device_id"],
+                "name":          d["name"],
+                "identity_pub":  _b64_encode(d["device_identity_pub"]),
+                "primary_sig":   _b64_encode(d["primary_sig"]),
+                "created_at":    d["created_at"],
+                "last_seen_at":  d["last_seen_at"],
+            }
+            for d in rows
+        ],
+    }
+
+
+@router.post("/devices/link")
+@limiter.limit("10/minute")
+async def devices_link(
+    request: Request,
+    body: DeviceLinkBody,
+    user: dict = Depends(get_current_user),
+):
+    """Primary device enrols a new secondary.
+
+    Returns ``{ok, device}`` on success. Errors surface as 400 with a
+    short detail string the UI can map to a localized message.
+    """
+    identity_pub = _b64_decode(body.identity_pub, expected_len=32, field="identity_pub")
+    primary_sig  = _b64_decode(body.primary_sig,  expected_len=64, field="primary_sig")
+
+    try:
+        row = await run_in_threadpool(
+            db.signal_device_link,
+            user_id=int(user["id"]),
+            device_id=body.device_id,
+            name=body.name,
+            device_identity_pub=identity_pub,
+            primary_sig=primary_sig,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "ok": True,
+        "device": {
+            "device_id":    row["device_id"],
+            "name":         row["name"],
+            "created_at":   row["created_at"],
+            "last_seen_at": row["last_seen_at"],
+        },
+    }
+
+
+@router.post("/devices/{device_id}/revoke")
+@limiter.limit("30/minute")
+async def devices_revoke(
+    request: Request,
+    device_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Mark one of the caller's devices as revoked.
+
+    Idempotent. Returns ``{ok: true, changed: bool}``. The client should
+    refresh its device list after a revoke. Once Phase 2 ships, peers
+    will stop encrypting to the revoked device on their next bundle
+    refresh; until then the rest of the system is unaffected.
+    """
+    if not isinstance(device_id, str) or not (8 <= len(device_id) <= 64):
+        raise HTTPException(status_code=400, detail="device_id_bad_length")
+    changed = await run_in_threadpool(
+        db.signal_device_revoke, int(user["id"]), device_id,
+    )
+    return {"ok": True, "changed": bool(changed)}
+
