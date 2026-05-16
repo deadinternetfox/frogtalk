@@ -2153,29 +2153,24 @@ const Messages = (() => {
     if (!newContent) return;
 
     const key = State.roomKeys[State.currentRoom];
-    // Track C Phase 3: edits follow the same envelope choice as send.
-    // If we have a sender-key chain for this room (and the room isn't
-    // bridge-outbound), emit a v2 envelope. Otherwise fall back to
-    // legacy AES.
-    let encrypted;
-    let v2Used = false;
+    // Track H: edits follow the same envelope choice as send. Bridge-
+    // outbound rooms keep the transitional AES key (so the bridge can
+    // still forward); everything else MUST use Sender Keys.
     const hasOutbound = !!(State.bridgeOut && State.bridgeOut[State.currentRoom]);
-    try {
-      if (!hasOutbound
-          && window.Signal && window.Signal.room
-          && window.Signal.room.isAvailable
-          && window.Signal.room.isAvailable()
-          && await window.Signal.room.hasSelfKey(State.currentRoom)) {
-        const env = await window.Signal.room.encryptMessage(State.currentRoom, newContent);
-        encrypted = JSON.stringify(env);
-        v2Used = true;
-      }
-    } catch (e) {
-      try { console.warn('[messages] v2 edit-encrypt failed, falling back', e); } catch {}
-      v2Used = false;
-    }
-    if (!v2Used) {
+    let encrypted;
+    if (hasOutbound) {
       encrypted = key ? await Crypto.encrypt(newContent, key) : newContent;
+    } else {
+      if (!window.Signal || !window.Signal.room || !window.Signal.room.isAvailable
+          || !window.Signal.room.isAvailable()) {
+        UI.showToast('Encryption layer not ready — please refresh.', 'error');
+        throw new Error('signal_room_unavailable');
+      }
+      if (!await window.Signal.room.hasSelfKey(State.currentRoom)) {
+        await window.Signal.room.rotateSenderKey(State.currentRoom);
+      }
+      const env = await window.Signal.room.encryptMessage(State.currentRoom, newContent);
+      encrypted = JSON.stringify(env);
     }
 
     WS.send({ type: 'edit', id, content: encrypted });
@@ -3327,31 +3322,29 @@ async function sendMessage() {
       State._bridgePrivacyNotice[State.currentRoom] = true;
       UI.showToast('Outbound bridge active: new room messages in this channel are sent without E2EE.', 'info');
     }
-    // ── Track C Phase 3: prefer Sender Keys v2 if we have a chain ────────
-    // hasOutbound rooms intentionally stay on legacy AES (so the bridge
-    // can still forward readable text). Plain media-only sends (text="")
-    // still take the legacy path; the v2 envelope is only used for text.
+    // ── Track H: Sender Keys v2 is mandatory for non-bridge rooms ────────
+    // Bridge-outbound rooms intentionally keep the transitional symmetric
+    // AES key so the bridge can forward readable text to Discord/Telegram.
+    // Everything else MUST go through Signal Sender Keys; if the chain
+    // isn't ready, we rotate before sending so the message is never
+    // silently emitted as plaintext.
     let encrypted;
-    let v2Used = false;
-    try {
-      if (text && !hasOutbound
-          && window.Signal && window.Signal.room
-          && window.Signal.room.isAvailable
-          && window.Signal.room.isAvailable()
-          && await window.Signal.room.hasSelfKey(State.currentRoom)) {
-        const env = await window.Signal.room.encryptMessage(State.currentRoom, text);
-        encrypted = JSON.stringify(env);
-        v2Used = true;
+    if (hasOutbound) {
+      encrypted = (key && text) ? await Crypto.encrypt(text, key) : text;
+    } else if (text) {
+      if (!window.Signal || !window.Signal.room || !window.Signal.room.isAvailable
+          || !window.Signal.room.isAvailable()) {
+        UI.showToast('Encryption layer not ready — please refresh.', 'error');
+        throw new Error('signal_room_unavailable');
       }
-    } catch (e) {
-      // Fall through to legacy AES on any v2 encrypt failure so the user
-      // is never blocked from sending. The receive path will simply use
-      // the AES branch.
-      try { console.warn('[messages] v2 encrypt failed, falling back', e); } catch {}
-      v2Used = false;
-    }
-    if (!v2Used) {
-      encrypted = (key && text && !hasOutbound) ? await Crypto.encrypt(text, key) : text;
+      if (!await window.Signal.room.hasSelfKey(State.currentRoom)) {
+        await window.Signal.room.rotateSenderKey(State.currentRoom);
+      }
+      const env = await window.Signal.room.encryptMessage(State.currentRoom, text);
+      encrypted = JSON.stringify(env);
+    } else {
+      // Media-only send: no text body to encrypt.
+      encrypted = text;
     }
     if (mediaData && key && !hasOutbound && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
       UI.showProgressToast('Encrypting…', 22);

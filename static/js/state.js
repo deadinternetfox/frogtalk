@@ -298,30 +298,9 @@ function scrollChatBottom () {
   if (area) area.scrollTop = area.scrollHeight;
 }
 
-// deriveSharedSecret — stub (calls crypto.js ECDH if available)
-async function deriveSharedSecret (peerPubKey) {
-  try {
-    if (typeof Crypto !== 'undefined' && Crypto.deriveShared) {
-      State.sharedSecret = await Crypto.deriveShared(peerPubKey);
-    }
-  } catch {}
-}
-
-// encryptMsg / decryptMsg for DMs (uses shared ECDH secret if available)
-async function encryptMsg (plain) {
-  if (typeof Crypto !== 'undefined' && State.sharedSecret) {
-    return Crypto.encrypt(plain, State.sharedSecret);
-  }
-  return plain;
-}
-
-async function decryptMsg (cipher) {
-  if (typeof Crypto !== 'undefined' && State.sharedSecret) {
-    const out = await Crypto.decrypt(cipher, State.sharedSecret);
-    return out !== null ? out : cipher;
-  }
-  return cipher;
-}
+// Track H cleanup: deriveSharedSecret / encryptMsg / decryptMsg were
+// helpers for the legacy v1 ECDH DM path; Signal Protocol (window.Signal)
+// is now the only DM crypto. Removed.
 
 // Inject toast fade-in keyframe
 const _toastStyle = document.createElement('style');

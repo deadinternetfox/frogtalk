@@ -652,7 +652,7 @@ def get_user_by_token(token: str) -> Optional[Dict]:
             SELECT u.id, u.nickname, u.display_name, u.username_changed_at,
                    u.avatar, u.bio, u.is_admin,
                    u.presence, u.status_msg, u.profile_public,
-                   u.allow_friend_requests, u.banner, u.ecdh_pub_key,
+                   u.allow_friend_requests, u.banner,
                    u.global_user_id, u.identity_pubkey,
                    u.theme, u.notify_sounds, u.notify_desktop,
                    u.notify_dms, u.notify_mentions, u.allow_dms_from,
@@ -673,7 +673,7 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                 SELECT u.id, u.nickname, u.display_name, u.username_changed_at,
                        u.avatar, u.bio, u.is_admin,
                        u.presence, u.status_msg, u.profile_public,
-                       u.allow_friend_requests, u.banner, u.ecdh_pub_key,
+                       u.allow_friend_requests, u.banner,
                        u.global_user_id, u.identity_pubkey,
                        u.theme, u.notify_sounds, u.notify_desktop,
                        u.notify_dms, u.notify_mentions, u.allow_dms_from,
@@ -1372,8 +1372,10 @@ def _migrate():
             con.execute("ALTER TABLE users ADD COLUMN status_msg TEXT DEFAULT ''")
         if "presence" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN presence TEXT DEFAULT 'online'")
-        if "ecdh_pub_key" not in cols:
-            con.execute("ALTER TABLE users ADD COLUMN ecdh_pub_key TEXT")
+        # Track H cleanup: the legacy `ecdh_pub_key` column (static-ECDH DM
+        # crypto) was retired with v1 DM crypto. The column may still
+        # exist on older databases but we no longer reference it; SQLite
+        # has no portable DROP COLUMN so we leave it as a tombstone.
         if "banner" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN banner TEXT")
         if "last_seen" not in cols:
@@ -3178,12 +3180,6 @@ def update_last_seen(user_id: int):
         con.commit()
 
 
-def set_ecdh_pub_key(user_id: int, pub_key: str):
-    with _conn() as con:
-        con.execute("UPDATE users SET ecdh_pub_key=? WHERE id=?", (pub_key, user_id))
-        con.commit()
-
-
 def set_identity_pub_key(user_id: int, pub_key: str):
     with _conn() as con:
         con.execute("UPDATE users SET identity_pubkey=? WHERE id=?", (pub_key, user_id))
@@ -3259,9 +3255,10 @@ def build_signed_profile_claim(user_id: int, ttl_seconds: int = 3600) -> Optiona
 
 
 def get_pubkey(user_id: int) -> Optional[str]:
-    with _conn() as con:
-        row = con.execute("SELECT ecdh_pub_key FROM users WHERE id=?", (user_id,)).fetchone()
-    return row["ecdh_pub_key"] if row else None
+    # Track H cleanup: the legacy ECDH pubkey column was dropped along
+    # with v1 DM crypto. Callers should use the Signal bundle endpoints
+    # instead. Returning None keeps any remaining call sites graceful.
+    return None
 
 
 def search_users(query: str, limit: int = 20, requester_id: int = 0) -> List[Dict]:
@@ -3292,7 +3289,7 @@ def get_user_profile(nickname: str) -> Optional[Dict]:
         row = con.execute(
             """SELECT id, nickname, display_name, username_changed_at,
                       avatar, banner, bio, status_msg,
-                      presence, last_seen, is_admin, ecdh_pub_key,
+                      presence, last_seen, is_admin,
                       mood, custom_css, custom_style,
                       wall_enabled, wall_comments_enabled,
                       show_last_seen, show_read_receipts, profile_public,

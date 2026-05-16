@@ -562,49 +562,24 @@ function _renderDMPreview(msgId, preview) {
 
 
 
-async function _getDMSharedKey(peerId, opts = {}) {
-  const id = Number(peerId || 0);
-  if (!id) return null;
-  const force = !!opts.force;
-  if (!force && _dmSharedKeyCache.has(id)) return _dmSharedKeyCache.get(id);
-  let peerPub = (!force && _dmPeerPubKeyCache.get(id)) || null;
-  if (!peerPub) {
-    try {
-      const r = await apiFetch(`/api/users/${id}/pubkey`);
-      if (!r.ok) return null;
-      const d = await r.json();
-      peerPub = d.ecdh_pub_key || d.pub_key || null;
-      if (peerPub) _dmPeerPubKeyCache.set(id, peerPub);
-    } catch {
-      return null;
-    }
-  }
-  if (!peerPub || typeof Crypto === 'undefined' || !Crypto.deriveShared) return null;
-  try {
-    const key = await Crypto.deriveShared(peerPub);
-    if (key) _dmSharedKeyCache.set(id, key);
-    return key || null;
-  } catch {
-    return null;
-  }
+async function _getDMSharedKey(_peerId, _opts = {}) {
+  // Track H cleanup: legacy v1 ECDH shared-key derivation is gone. All
+  // new DM crypto goes through Signal Protocol (`window.Signal`). This
+  // stub is kept so callers don't crash; it always returns null.
+  return null;
 }
 
-function _invalidateDMPeerKey(peerId) {
-  const id = Number(peerId || 0);
-  if (!id) return;
-  _dmSharedKeyCache.delete(id);
-  _dmPeerPubKeyCache.delete(id);
+function _invalidateDMPeerKey(_peerId) {
+  // Track H cleanup: no caches left to invalidate.
 }
 
-async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
+async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
   const raw = String(cipher || '');
   if (!raw) return '';
   if (_parseDMCallLog(raw)) return raw;
 
-  // Track A — v2 Signal envelope path. The wire format is a JSON
-  // object `{v:2,t:'pre'|'msg',b:'<base64>'}`. When we see one of these
-  // we try the Signal session. Failure falls through to v1 paths so
-  // legacy AES-GCM history still renders.
+  // Track A v2 Signal envelope is the ONLY supported DM crypto path
+  // after Track H cleanup. Wire format: `{v:2,t:'pre'|'msg',b:'<b64>'}`.
   if (raw.length >= 9 && raw[0] === '{') {
     try {
       const env = JSON.parse(raw);
@@ -637,45 +612,14 @@ async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
             }
           }
         } catch (e) {
-          // Drop into legacy paths \u2014 may be cold-history that this
-          // device's IndexedDB store can't decrypt, or Signal not yet
-          // initialised.
+          // Cold history this device's IndexedDB can't decrypt, or
+          // Signal not yet initialised. Fall through to raw.
         }
       }
     } catch {
       // Not a JSON envelope; fall through.
     }
   }
-
-  // Primary path: ECDH shared key for this peer.
-  try {
-    const key = await _getDMSharedKey(peerId);
-    if (key && typeof Crypto !== 'undefined' && Crypto.decrypt) {
-      const out = await Crypto.decrypt(raw, key);
-      if (out !== null) return out;
-    }
-  } catch {}
-
-  // Re-fetch the peer's pubkey once and retry. Covers the case where the
-  // peer logged in from another device and rotated their server pubkey
-  // mid-session: our cached shared key would otherwise stay stale forever.
-  try {
-    _invalidateDMPeerKey(peerId);
-    const key2 = await _getDMSharedKey(peerId, { force: true });
-    if (key2 && typeof Crypto !== 'undefined' && Crypto.decrypt) {
-      const out = await Crypto.decrypt(raw, key2);
-      if (out !== null) return out;
-    }
-  } catch {}
-
-  // Legacy fallback: deterministic DM key derivation.
-  try {
-    if (typeof Crypto !== 'undefined' && Crypto.getDMKey && Crypto.decrypt && STATE?.user?.nickname && peerNick) {
-      const legacyKey = await Crypto.getDMKey(STATE.user.nickname, peerNick);
-      const out = await Crypto.decrypt(raw, legacyKey);
-      if (out !== null) return out;
-    }
-  } catch {}
 
   // If decrypt fails, keep the raw payload so message rendering can still
   // show a lock placeholder instead of an empty bubble.
@@ -988,58 +932,10 @@ async function openDMChannel (id, nickname, avatar) {
       // only mutate state if we're still on the same conversation.
       if (!_activeDM || _activeDM.id !== _openId) return;
       _activeDM.user_id = peerUserId;
-      const rk = await withTimeout(apiFetch('/api/users/' + peerUserId + '/pubkey'), 5000);
-      if (!rk || !rk.ok) return;
-      const kd = await rk.json();
-      const peerPubKey = kd.ecdh_pub_key || kd.pub_key || null;
-      if (!peerPubKey) return;
-      if (!_activeDM || _activeDM.id !== _openId) return;
-      STATE.dmPeerPubKey = peerPubKey;
-      await deriveSharedSecret(peerPubKey);
-      try {
-        const _enc = document.getElementById('encrypt-indicator');
-        if (_enc && _activeDM && _activeDM.id === _openId) {
-          _enc.style.display = STATE.sharedSecret ? '' : 'none';
-        }
-      } catch {}
-      // Cold-start race: loadDMMessages ran in parallel and may have decrypted
-      // *before* the ECDH key was ready, leaving cipher-blobs in m.content
-      // (which renderDMMessage now shows as "🔒 Encrypted message"). Now
-      // that the shared key is derived, retry decryption on every still-
-      // encrypted message and re-render so the chat shows real plaintext.
-      if (_activeDM && _activeDM.id === _openId && Array.isArray(_dmMessages) && _dmMessages.length) {
-        const _peerNk2 = _activeDM?.nickname || '';
-        let _changed = false;
-        for (const m of _dmMessages) {
-          if (!m || typeof m.content !== 'string') continue;
-          if (_looksEncryptedBlob(m.content)) {
-            try {
-              const dec = await _decryptDMPreviewContent(m.content, peerUserId, _peerNk2);
-              if (dec && dec !== m.content && !_looksEncryptedBlob(dec)) {
-                m.content = dec; _changed = true;
-                _rememberDMPlaintext(_activeDM.id, m.id, dec);
-              } else {
-                // Still cipher — try the per-device plaintext cache so we
-                // at least show history that was decrypted on this browser
-                // before. Avoids the alarming 🔒 across the whole feed when
-                // a single re-render happens before keys settle.
-                const cached = _recallDMPlaintext(_activeDM.id, m.id);
-                if (cached) { m.content = cached; _changed = true; }
-              }
-            } catch {}
-          }
-          if (m.reply_content && typeof m.reply_content === 'string' && _looksEncryptedBlob(m.reply_content)) {
-            try {
-              const dec = await _decryptDMPreviewContent(m.reply_content, peerUserId, _peerNk2);
-              if (dec && dec !== m.reply_content) { m.reply_content = dec; _changed = true; }
-            } catch {}
-          }
-        }
-        if (_changed && _activeDM && _activeDM.id === _openId) {
-          if (_activeDM.id) _dmHistoryCache.set(_activeDM.id, _dmMessages.map(x => ({ ...x })));
-          renderDMChat();
-        }
-      }
+      // Track H cleanup: legacy ECDH pubkey publish/fetch (used to seed
+      // STATE.sharedSecret for v1 DM AES-GCM) was retired. Signal
+      // Protocol prekey bundles do this job now and are fetched lazily
+      // by Signal.encryptDM() the first time we send to this peer.
     } catch (e) { /* silent — encryption is best-effort */ }
   })();
 
@@ -2073,25 +1969,27 @@ async function sendDMMessage () {
   const _dmChanEntry = _dmChannels.find(c => c.id === _activeDM?.id);
   const _peerUidForEnc = _activeDM?.user_id || _dmChanEntry?.with_user_id || 0;
 
-  // Track A Phase 3 — prefer v2 (Signal Double-Ratchet) when the peer
-  // has a published bundle. Falls back transparently to the legacy v1
-  // shared-secret path if anything in the X3DH chain fails (no bundle,
-  // server flag off, libsignal missing). Envelope is JSON-stringified
-  // and stored verbatim in dm_messages.content — the server is opaque.
+  // Track A — Signal Double-Ratchet v2 envelope is now the ONLY DM
+  // crypto. Envelope is JSON-stringified and stored verbatim in
+  // dm_messages.content — the server is opaque. If Signal isn't ready
+  // or has no bundle for this peer, we hard-fail rather than silently
+  // sending plaintext.
   let encryptedContent = content;
-  let _v2EnvelopeUsed = false;
-  if (content && _peerUidForEnc && window.Signal && Signal.isReady?.()) {
+  if (content && _peerUidForEnc) {
+    if (!window.Signal || !window.Signal.isReady || !window.Signal.isReady()) {
+      try { UI.showToast('Encryption layer not ready — please refresh.', 'error'); } catch {}
+      _dmSending = false;
+      return;
+    }
     try {
       const env = await Signal.encryptDM(_peerUidForEnc, content);
       encryptedContent = JSON.stringify(env);
-      _v2EnvelopeUsed = true;
     } catch (e) {
-      // Soak/diagnostics only — not user-facing.
-      console.warn('[dms][v2] encryptDM failed, falling back to v1:', e?.message || e);
+      console.error('[dms] Signal.encryptDM failed:', e);
+      try { UI.showToast('Could not encrypt message — peer may need to open the app.', 'error'); } catch {}
+      _dmSending = false;
+      return;
     }
-  }
-  if (!_v2EnvelopeUsed && content && STATE.sharedSecret) {
-    try { encryptedContent = await encryptMsg(content); } catch {}
   }
 
   const payload = {
@@ -2579,24 +2477,22 @@ async function submitDMEdit(id) {
     return;
   }
 
+  // Track H: Signal Double-Ratchet is the only DM crypto path.
   let enc = newContent;
-  let _editV2Used = false;
-  if (window.Signal && Signal.isReady?.()) {
-    const _peerUidEdit = _activeDM?.user_id
-      || _dmChannels.find(c => c.id === _activeDM?.id)?.with_user_id
-      || 0;
-    if (_peerUidEdit) {
-      try {
-        const env = await Signal.encryptDM(_peerUidEdit, newContent);
-        enc = JSON.stringify(env);
-        _editV2Used = true;
-      } catch (e) {
-        console.warn('[dms][v2] edit encryptDM failed, falling back to v1:', e?.message || e);
-      }
-    }
+  const _peerUidEdit = _activeDM?.user_id
+    || _dmChannels.find(c => c.id === _activeDM?.id)?.with_user_id
+    || 0;
+  if (!_peerUidEdit || !window.Signal || !window.Signal.isReady || !window.Signal.isReady()) {
+    toast('Encryption layer not ready — please refresh.', 'error');
+    return;
   }
-  if (!_editV2Used && STATE.sharedSecret) {
-    try { enc = await encryptMsg(newContent); } catch {}
+  try {
+    const env = await Signal.encryptDM(_peerUidEdit, newContent);
+    enc = JSON.stringify(env);
+  } catch (e) {
+    console.error('[dms] edit Signal.encryptDM failed:', e);
+    toast('Could not encrypt edit.', 'error');
+    return;
   }
   const r = await apiFetch(`/api/dms/${_activeDM.id}/messages/${id}`, 'PUT', { content: enc });
   if (!r.ok) {

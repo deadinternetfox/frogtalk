@@ -526,6 +526,19 @@
     // Diagnostics:
     async _stats() { return _store ? _store._stats() : null; },
     async _wipe() { if (_store) await _store._wipe(); },
+    // Track H: full identity reset — wipes local Signal state and
+    // publishes a fresh prekey bundle. Used by Settings → "Reset
+    // encryption keys".
+    async resetIdentity() {
+      if (_store) {
+        try { await _store._wipe(); } catch (e) { console.warn('[Signal] wipe failed', e); }
+      }
+      _store = null;
+      _ready = false;
+      _bundleHealthy = false;
+      await init();
+      await ensureMyBundleFresh();
+    },
   };
 
   try {

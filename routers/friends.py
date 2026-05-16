@@ -127,26 +127,9 @@ async def get_profile(nickname: str, _: dict = Depends(get_current_user)):
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
     return JSONResponse(
-        content={k: v for k, v in profile.items() if k != "ecdh_pub_key"},
+        content=profile,
         headers={"Cache-Control": "no-store, max-age=0, must-revalidate"},
     )
-
-
-@users_router.get("/{user_id}/pubkey")
-async def get_pubkey(user_id: int, _: dict = Depends(get_current_user)):
-    key = db.get_pubkey(user_id)
-    if key is None:
-        return JSONResponse(status_code=404, content={"error": "No public key set"})
-    return {"pub_key": key, "ecdh_pub_key": key}
-
-
-@users_router.post("/pubkey")
-async def set_pubkey(body: dict, current_user: dict = Depends(get_current_user)):
-    key = str(body.get("pub_key") or body.get("ecdh_pub_key") or "")
-    if not key:
-        return JSONResponse(status_code=400, content={"error": "pub_key required"})
-    db.set_ecdh_pub_key(current_user["id"], key)
-    return {"ok": True}
 
 
 # ── Tags ─────────────────────────────────────────────────────────────────────

@@ -542,78 +542,10 @@ const App = {
     // Refresh blocked-users cache so rooms/DMs/feed filters take effect
     if (typeof refreshBlockedCache === 'function') refreshBlockedCache();
 
-    // Publish ECDH public key for E2E DM encryption.
-    // Single-device-at-a-time model: whichever browser logs in last becomes
-    // the active DM device. We compare local pubkey to whatever the server
-    // currently has — if it differs, another device of ours was active;
-    // we're now taking over. Republishing makes new DMs work here
-    // automatically; we only inform the user (no action required).
-    if (typeof Crypto !== 'undefined' && Crypto.getPublicKey) {
-      let localPub = null;
-      try {
-        localPub = await Crypto.getPublicKey();
-      } catch (e) {
-        // Local keypair is genuinely corrupted/unloadable. Auto-reset so
-        // the user isn't stuck — this is the one case where reset actually
-        // fixes things, since there are no recoverable messages tied to
-        // an unreadable key anyway.
-        console.warn('[Crypto] getPublicKey failed, auto-resetting:', e);
-        try {
-          if (Crypto.resetIdentityKey) await Crypto.resetIdentityKey();
-          localPub = await Crypto.getPublicKey();
-          if (typeof UI !== 'undefined' && UI.showToast) {
-            UI.showToast('🔑 Encryption keys were reset (previous keys were unreadable).', 'info', 5000);
-          }
-        } catch (e2) {
-          console.error('[Crypto] Auto-reset failed:', e2);
-        }
-      }
-      if (localPub) {
-        let serverPub = null;
-        try {
-          const myId = State?.user?.id;
-          if (myId) {
-            const r = await apiFetch('/api/users/' + myId + '/pubkey');
-            if (r.ok) {
-              const d = await r.json();
-              serverPub = d.ecdh_pub_key || d.pub_key || null;
-            }
-          }
-        } catch {}
-        // Takeover: server has a different key than this device. Only
-        // show the "another device is signed in" dialog if there is
-        // actually another active session — otherwise the mismatch is just
-        // a reinstall / cleared-data / fresh-keypair on this same device
-        // and we should silently rotate without spooking the user.
-        if (serverPub && serverPub !== localPub) {
-          let otherSessionCount = 0;
-          try {
-            const sr = await apiFetch('/api/auth/sessions');
-            if (sr && sr.ok) {
-              const sd = await sr.json();
-              otherSessionCount = (sd.sessions || []).filter(s => !s.is_current).length;
-            }
-          } catch {}
-          if (otherSessionCount > 0) {
-            try {
-              if (typeof showActiveDevicesDialog === 'function') {
-                await showActiveDevicesDialog({ takeover: true });
-              }
-            } catch (e) { console.warn('active devices dialog', e); }
-          }
-          try {
-            if (Crypto.resetIdentityKey) await Crypto.resetIdentityKey();
-            localPub = await Crypto.getPublicKey();
-          } catch (e) {
-            console.error('[Crypto] Takeover reset failed:', e);
-          }
-        }
-        // Publish (or republish) this device's pubkey so new DMs land here.
-        if (localPub) {
-          apiFetch('/api/users/pubkey', 'POST', { pub_key: localPub, ecdh_pub_key: localPub }).catch(() => {});
-        }
-      }
-    }
+    // Track H cleanup: the legacy /api/users/pubkey publish/fetch flow was
+    // retired with v1 DM crypto. Signal Protocol bundle publication is
+    // handled by Signal.ensureMyBundleFresh() during init; no per-login
+    // ECDH key sync is needed any more.
 
     // Recover pending story uploads (if app was closed during upload)
     if (typeof Social !== 'undefined' && Social._initUploadRecovery) {

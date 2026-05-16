@@ -5466,7 +5466,7 @@ async function resetEncryptionKeys() {
   const ok = (typeof UI !== 'undefined' && UI.confirm)
     ? await UI.confirm({
         title: 'Reset encryption keys?',
-        message: 'Generates a new keypair and republishes it. New DMs will work right away.\n\nOnly use this if encryption seems broken on this device. It will not recover messages that already show as unreadable — those were encrypted to a key we no longer have.',
+        message: 'Wipes the Signal identity on this device and re-publishes a fresh prekey bundle. New DMs will work right away.\n\nOnly use this if encryption seems broken on this device. It will not recover messages that already show as unreadable — those were encrypted to a key we no longer have.',
         confirmLabel: 'Reset keys',
         cancelLabel: 'Cancel',
         danger: true,
@@ -5474,17 +5474,16 @@ async function resetEncryptionKeys() {
     : window.confirm('Reset encryption keys on this device?');
   if (!ok) return;
   try {
-    if (typeof Crypto === 'undefined' || !Crypto.resetIdentityKey) {
+    // Track H cleanup: wipe Signal identity and re-publish a fresh
+    // bundle. The legacy ECDH publish endpoint is gone.
+    if (window.Signal && typeof window.Signal.resetIdentity === 'function') {
+      await window.Signal.resetIdentity();
+    } else if (typeof Crypto !== 'undefined' && Crypto.resetIdentityKey) {
+      // Fallback for builds that ship before Signal.resetIdentity.
+      await Crypto.resetIdentityKey();
+    } else {
       UI.showToast('Crypto module not ready.', 'error');
       return;
-    }
-    await Crypto.resetIdentityKey();
-    // Generate + publish a fresh key.
-    if (Crypto.getPublicKey) {
-      const pub = await Crypto.getPublicKey();
-      if (pub) {
-        try { await apiFetch('/api/users/pubkey', 'POST', { pub_key: pub, ecdh_pub_key: pub }); } catch {}
-      }
     }
     UI.showToast('Keys reset. Reloading…', 'success');
     setTimeout(() => location.reload(), 600);

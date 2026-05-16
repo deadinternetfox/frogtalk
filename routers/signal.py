@@ -1,11 +1,9 @@
 """Signal Protocol (X3DH + Double Ratchet) prekey bundle endpoints.
 
-Track A, Phase 1 of the security refactor (see
-docs/SECURITY_REFACTOR_PLAN.md). These endpoints are gated behind the
-`FROGTALK_DM_ENC_V2` env flag — when the flag is off (default) the
-router refuses publish/fetch with 503. The schema (signal_identity_keys,
-signal_signed_prekeys, signal_one_time_prekeys) is created
-unconditionally so a later flag flip needs no further migration.
+Track A of the security refactor (see docs/SECURITY_REFACTOR_PLAN.md).
+These endpoints are always live — the original FROGTALK_DM_ENC_V2 /
+FROGTALK_ROOM_ENC_V2 flags were removed in Track H cleanup once Signal
+became the only supported DM and room crypto.
 
 Security notes:
 - Keys are validated as raw bytes of the expected length. The server
@@ -25,10 +23,9 @@ from __future__ import annotations
 
 import base64
 import binascii
-import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from starlette.concurrency import run_in_threadpool
@@ -38,20 +35,6 @@ from deps import client_ip, get_current_user
 
 router = APIRouter(prefix="/signal", tags=["signal"])
 limiter = Limiter(key_func=client_ip)
-
-
-def _flag_enabled() -> bool:
-    return os.getenv("FROGTALK_DM_ENC_V2", "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def _require_flag() -> None:
-    if not _flag_enabled():
-        # 503 (not 404) so clients can distinguish "endpoint not deployed"
-        # from "feature off on this node" and decide whether to retry.
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="signal_v2_disabled",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +103,6 @@ async def publish_bundle(
     Replaces the identity key + signed prekey, appends up to 100 OTPKs.
     Idempotent: re-publishing the same key material is a no-op.
     """
-    _require_flag()
-
     identity_pub = _b64_decode(body.identity_pub, expected_len=32, field="identity_pub")
     spk_pub = _b64_decode(body.signed_prekey.pub, expected_len=32, field="signed_prekey.pub")
     spk_sig = _b64_decode(body.signed_prekey.sig, expected_len=64, field="signed_prekey.sig")
@@ -163,7 +144,6 @@ async def fetch_bundle(
     user: dict = Depends(get_current_user),
 ):
     """Return one prekey bundle for `user_id` and atomically consume one OTPK."""
-    _require_flag()
     if user_id <= 0:
         raise HTTPException(status_code=400, detail="bad_user_id")
 
@@ -198,28 +178,22 @@ async def otpk_count(
 
     Clients top up the pool when this falls below their threshold (typ. 10).
     """
-    _require_flag()
     n = await run_in_threadpool(db.signal_otpk_count, int(user["id"]))
     return {"available": int(n)}
-
-
-def _room_v2_flag_enabled() -> bool:
-    return os.getenv("FROGTALK_ROOM_ENC_V2", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
 
 
 @router.get("/config")
 async def signal_config():
     """Public capability advertisement.
 
-    Lets the client know whether DM v2 and Room v2 (Sender Keys) are
-    enabled on this node so it can decide whether to publish bundles
-    and emit v2 envelopes. Unauthenticated and cheap to call.
+    Track H cleanup removed the FROGTALK_DM_ENC_V2 / FROGTALK_ROOM_ENC_V2
+    flags — Signal DMs and Sender-Keys rooms are now the only supported
+    crypto path. The capability endpoint is kept (clients still poll it)
+    and unconditionally reports both features as enabled.
     """
     return {
-        "dm_v2_enabled":    _flag_enabled(),
-        "room_v2_enabled":  _room_v2_flag_enabled(),
+        "dm_v2_enabled":    True,
+        "room_v2_enabled":  True,
     }
 
 
@@ -259,9 +233,6 @@ async def relay_skdm(
 
     Returns ``{"ok": true, "delivered": "live"|"spooled"}``.
     """
-    _require_flag()
-    if not _room_v2_flag_enabled():
-        raise HTTPException(status_code=503, detail="room_v2_disabled")
     if recipient_uid <= 0:
         raise HTTPException(status_code=400, detail="bad_recipient")
     if int(recipient_uid) == int(user["id"]):
