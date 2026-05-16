@@ -2410,7 +2410,193 @@ def _migrate():
         except Exception:
             pass
 
+        # ──────────────────────────────────────────────────────────────────
+        # Security refactor — Phase 1 schema (dark by default).
+        #
+        # See docs/SECURITY_REFACTOR_PLAN.md.
+        #
+        #   Track A — Signal Protocol prekey bundle storage. These tables
+        #   sit idle until FROGTALK_DM_ENC_V2 is enabled and clients start
+        #   publishing bundles. Existing v1 ECDH path is unaffected.
+        #
+        #   Track B — `users.custom_style` is the sanitised inline-style
+        #   declaration list. `users.custom_css` keeps the raw user input
+        #   for the editor round-trip; only `custom_style` is ever applied
+        #   to the DOM (and never as a <style> block).
+        # ──────────────────────────────────────────────────────────────────
+        try:
+            if "custom_style" not in cols:
+                con.execute("ALTER TABLE users ADD COLUMN custom_style TEXT DEFAULT ''")
+        except Exception:
+            pass
+
+        con.execute("""CREATE TABLE IF NOT EXISTS signal_identity_keys (
+            user_id         INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            registration_id INTEGER NOT NULL,
+            identity_pub    BLOB    NOT NULL,
+            created_at      INTEGER NOT NULL,
+            updated_at      INTEGER NOT NULL
+        )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS signal_signed_prekeys (
+            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            prekey_id   INTEGER NOT NULL,
+            public_key  BLOB    NOT NULL,
+            signature   BLOB    NOT NULL,
+            created_at  INTEGER NOT NULL,
+            PRIMARY KEY (user_id, prekey_id)
+        )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS signal_one_time_prekeys (
+            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            prekey_id   INTEGER NOT NULL,
+            public_key  BLOB    NOT NULL,
+            consumed_at INTEGER,
+            PRIMARY KEY (user_id, prekey_id)
+        )""")
+        # Hot path: "pick an unconsumed OTPK for user X" — partial index on
+        # the NULL consumed_at rows keeps the lookup O(log N) regardless of
+        # how many historical OTPKs have been consumed.
+        try:
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_otpk_avail "
+                "ON signal_one_time_prekeys(user_id) WHERE consumed_at IS NULL"
+            )
+        except Exception:
+            pass
+
         con.commit()
+
+
+# ---------------------------------------------------------------------------
+# Signal Protocol (Track A) — prekey bundle storage
+# ---------------------------------------------------------------------------
+# Thin helpers used by routers/signal.py. Kept here so the single _conn()
+# pool is reused and so the OTPK consume can run inside a BEGIN IMMEDIATE
+# transaction (SQLite's exclusive write lock) without the router needing
+# to know the connection plumbing.
+
+def signal_publish_bundle(user_id: int, registration_id: int,
+                          identity_pub: bytes,
+                          signed_prekey_id: int, signed_prekey_pub: bytes,
+                          signed_prekey_sig: bytes,
+                          one_time_prekeys: List[Dict]) -> Dict:
+    """Replace the user's identity + signed-prekey, append OTPKs.
+
+    `one_time_prekeys` is a list of `{"id": int, "pub": bytes}`. The
+    signed prekey is always replaced (one-per-user model — old signed
+    prekey IDs are kept for in-flight session establishment but a future
+    cleanup task may sweep them).
+
+    Returns counts so the caller can surface them in the response.
+    """
+    if not isinstance(identity_pub, (bytes, bytearray)) or len(identity_pub) != 32:
+        raise ValueError("identity_pub must be 32 bytes")
+    if not isinstance(signed_prekey_pub, (bytes, bytearray)) or len(signed_prekey_pub) != 32:
+        raise ValueError("signed_prekey_pub must be 32 bytes")
+    if not isinstance(signed_prekey_sig, (bytes, bytearray)) or len(signed_prekey_sig) != 64:
+        raise ValueError("signed_prekey_sig must be 64 bytes (Ed25519)")
+    now = int(time.time())
+    appended = 0
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        con.execute("""
+            INSERT INTO signal_identity_keys (user_id, registration_id, identity_pub, created_at, updated_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                registration_id=excluded.registration_id,
+                identity_pub=excluded.identity_pub,
+                updated_at=excluded.updated_at
+        """, (user_id, int(registration_id), bytes(identity_pub), now, now))
+        con.execute("""
+            INSERT INTO signal_signed_prekeys (user_id, prekey_id, public_key, signature, created_at)
+            VALUES (?,?,?,?,?)
+            ON CONFLICT(user_id, prekey_id) DO UPDATE SET
+                public_key=excluded.public_key,
+                signature=excluded.signature,
+                created_at=excluded.created_at
+        """, (user_id, int(signed_prekey_id), bytes(signed_prekey_pub),
+              bytes(signed_prekey_sig), now))
+        for otpk in (one_time_prekeys or [])[:100]:
+            try:
+                pid = int(otpk["id"])
+                pub = otpk["pub"]
+                if not isinstance(pub, (bytes, bytearray)) or len(pub) != 32:
+                    continue
+                con.execute(
+                    "INSERT OR IGNORE INTO signal_one_time_prekeys "
+                    "(user_id, prekey_id, public_key, consumed_at) VALUES (?,?,?,NULL)",
+                    (user_id, pid, bytes(pub))
+                )
+                if con.total_changes:
+                    appended += 1
+            except (KeyError, TypeError, ValueError):
+                continue
+        con.commit()
+    return {"ok": True, "otpks_added": appended}
+
+
+def signal_fetch_bundle(user_id: int) -> Optional[Dict]:
+    """Return one bundle for `user_id` and atomically consume one OTPK.
+
+    Returns None if the user has not published an identity. Returns a
+    dict with `one_time_prekey: None` when the OTPK pool is empty — the
+    Signal protocol permits this and clients must handle the null.
+    """
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        ident = con.execute(
+            "SELECT registration_id, identity_pub FROM signal_identity_keys WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+        if not ident:
+            con.commit()
+            return None
+        sp = con.execute(
+            "SELECT prekey_id, public_key, signature FROM signal_signed_prekeys "
+            "WHERE user_id=? ORDER BY prekey_id DESC LIMIT 1",
+            (user_id,)
+        ).fetchone()
+        if not sp:
+            con.commit()
+            return None
+        otpk_row = con.execute(
+            "SELECT prekey_id, public_key FROM signal_one_time_prekeys "
+            "WHERE user_id=? AND consumed_at IS NULL ORDER BY prekey_id LIMIT 1",
+            (user_id,)
+        ).fetchone()
+        otpk: Optional[Dict] = None
+        if otpk_row:
+            # Hard delete (rather than marking consumed_at) keeps the table
+            # bounded and means a leaked DB snapshot can't replay used OTPKs.
+            con.execute(
+                "DELETE FROM signal_one_time_prekeys WHERE user_id=? AND prekey_id=?",
+                (user_id, int(otpk_row["prekey_id"]))
+            )
+            otpk = {
+                "id": int(otpk_row["prekey_id"]),
+                "pub": bytes(otpk_row["public_key"]),
+            }
+        con.commit()
+    return {
+        "registration_id": int(ident["registration_id"]),
+        "identity_pub": bytes(ident["identity_pub"]),
+        "signed_prekey": {
+            "id": int(sp["prekey_id"]),
+            "pub": bytes(sp["public_key"]),
+            "sig": bytes(sp["signature"]),
+        },
+        "one_time_prekey": otpk,
+    }
+
+
+def signal_otpk_count(user_id: int) -> int:
+    """Return the count of unconsumed OTPKs for this user."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COUNT(*) AS n FROM signal_one_time_prekeys "
+            "WHERE user_id=? AND consumed_at IS NULL",
+            (user_id,)
+        ).fetchone()
+    return int(row["n"]) if row else 0
 
 
 # ---------------------------------------------------------------------------

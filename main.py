@@ -58,6 +58,9 @@ from routers import admin as admin_mod
 from routers import federation as federation_mod
 from routers import server_admin as server_admin_mod
 from routers import bug_reports as bug_reports_mod
+# Track A — Signal Protocol prekey bundle endpoints (Phase 1, dark by
+# default; gated inside the router on FROGTALK_DM_ENC_V2).
+from routers import signal as signal_mod
 
 import asyncio
 from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories, cleanup_inactive_public_rooms, wal_checkpoint_truncate
@@ -826,6 +829,10 @@ app.include_router(friends_mod.users_router, prefix="/api", dependencies=_PIN_GA
 app.include_router(users.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(friends_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(dms.router, prefix="/api", dependencies=_PIN_GATED)
+# Signal Protocol prekey bundles. PIN-gated like DMs — these endpoints
+# only matter to a logged-in user managing their own key material. The
+# router itself returns 503 when FROGTALK_DM_ENC_V2 is off.
+app.include_router(signal_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(push_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(emojis.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(preview_mod.router, prefix="/api")
