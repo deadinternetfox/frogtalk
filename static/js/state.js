@@ -145,7 +145,22 @@ const Css = (() => {
     'behavior:', '-moz-binding', '</style', '<script', '\\',
     'position:fixed', 'position:sticky',
   ];
-  const BARE_SELECTORS = new Set(['*', ':root', 'html', 'body', ':host', ':where(*)']);
+  const BARE_TAG_HEADS = new Set(['*', 'html', 'body']);
+  const ROOT_PSEUDO_PREFIXES = [':root', ':host', ':scope', ':target'];
+  // :defined / :is / :where / :has / :not / :matches / :any can broaden
+  // a match to elements the attacker doesn't otherwise have grounds to
+  // touch — reject them anywhere in the first compound selector.
+  const BROADENING_PSEUDO_RE = /:(defined|is|where|has|not|matches|any)\b/;
+
+  function _isBroadSelectorPart(p) {
+    const first = (p || '').split(/[\s>+~]/)[0].toLowerCase();
+    if (!first) return true;
+    if (BROADENING_PSEUDO_RE.test(first)) return true;
+    if (ROOT_PSEUDO_PREFIXES.some(pref => first.startsWith(pref))) return true;
+    const m = first.match(/^([*a-z][a-z0-9-]*)/);
+    const headTag = m ? m[1] : '';
+    return BARE_TAG_HEADS.has(headTag);
+  }
 
   function _normalize(s) {
     let out = String(s || '').toLowerCase()
@@ -184,8 +199,7 @@ const Css = (() => {
       let badPart = false;
       const mapped = [];
       for (const p of parts) {
-        const head = p.split(/[\s>+~]/)[0].toLowerCase();
-        if (BARE_SELECTORS.has(head)) { badPart = true; break; }
+        if (_isBroadSelectorPart(p)) { badPart = true; break; }
         const m = typeof selectorMapper === 'function'
           ? selectorMapper(p) : `${scope} ${p}`;
         if (!m) { badPart = true; break; }

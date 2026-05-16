@@ -113,9 +113,24 @@ def _sanitize_channel_css(raw: str) -> str:
             raise ValueError("CSS selector list has empty part (leading/trailing comma?)")
         # Reject bare universal / root / html / body selectors — they'd
         # still hit everything once they slip past the #main prefix.
+        # We strip pseudo-classes/elements first so ``body:defined`` and
+        # ``*:defined`` don't sneak past the equality check (the original
+        # bypass used by the pentester to render the room blank).
         for p in parts:
-            head = re.split(r"[\s>+~]", p, maxsplit=1)[0].lower()
-            if head in ("*", ":root", "html", "body"):
+            first = re.split(r"[\s>+~]", p, maxsplit=1)[0].lower()
+            # Reject broadening pseudo-classes anywhere in the first
+            # compound selector — these can match arbitrary elements
+            # regardless of the tag prefix.
+            if re.search(r":(defined|is|where|has|not|matches|any)\b", first):
+                raise ValueError(f"CSS selector '{p}' uses a broadening pseudo-class")
+            # Reject root-level pseudo-classes outright (no tag prefix).
+            if first.startswith((":root", ":host", ":scope", ":target")):
+                raise ValueError(f"CSS selector '{p}' targets the document root")
+            # Extract just the leading element/universal token, ignoring
+            # any trailing pseudo-class / class / id / attribute selector.
+            m = re.match(r"^([*a-z][a-z0-9-]*)", first)
+            head_tag = m.group(1) if m else ""
+            if head_tag in ("*", "html", "body"):
                 raise ValueError(f"CSS selector '{p}' is too broad")
         body_norm = _normalize_css_for_check(body_raw)
         for tok in _CSS_DANGEROUS_TOKENS:
