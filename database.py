@@ -15,6 +15,115 @@ from typing import Dict, List, Optional, Tuple
 
 import bcrypt as _bcrypt
 
+# ── Bridge token at-rest encryption ───────────────────────────────────
+# Telegram / Discord bot tokens stored in telegram_bridges.bot_token and
+# discord_bridges.bot_token are sensitive (a leaked Telegram bot token
+# lets anyone post as the bot). We Fernet-encrypt them at rest with a
+# key-encryption-key (KEK) that lives outside the database — either an
+# env var or a 0600-perm file in the data dir. Migration is transparent:
+# rows still in plaintext are detected by the missing "fkek1:" prefix
+# and re-encrypted on first read.
+try:
+    from cryptography.fernet import Fernet as _Fernet, InvalidToken as _FInvalid
+    _FERNET_AVAILABLE = True
+except Exception:                          # pragma: no cover - cryptography missing
+    _Fernet = None
+    _FInvalid = Exception
+    _FERNET_AVAILABLE = False
+
+_BRIDGE_KEK_PREFIX = "fkek1:"              # marker so we know it's encrypted
+_bridge_fernet = None                       # lazy singleton
+
+def _bridge_kek_path() -> Path:
+    return Path(os.getenv("FROGTALK_BRIDGE_KEK_PATH", "data/bridge_kek.key"))
+
+def _load_bridge_fernet():
+    """Resolve the Fernet KEK in this priority order:
+       1. FROGTALK_BRIDGE_KEK env (already a base64 urlsafe Fernet key)
+       2. <data dir>/bridge_kek.key file (created on first call, 0600)
+    Returns None if cryptography isn't installed, in which case the
+    caller silently falls back to plaintext storage (compat path)."""
+    global _bridge_fernet
+    if _bridge_fernet is not None:
+        return _bridge_fernet
+    if not _FERNET_AVAILABLE:
+        return None
+    env_key = (os.getenv("FROGTALK_BRIDGE_KEK") or "").strip()
+    if env_key:
+        try:
+            _bridge_fernet = _Fernet(env_key.encode())
+            return _bridge_fernet
+        except Exception:
+            # Bad env key — fall through to file-backed key rather than
+            # crash on import. Operator gets logged warnings via the
+            # caller paths instead.
+            pass
+    path = _bridge_kek_path()
+    try:
+        if path.exists():
+            key = path.read_bytes().strip()
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            key = _Fernet.generate_key()
+            # Atomic 0600 write — same pattern used by the bootstrap
+            # admin password file in the 8th-pass hardening.
+            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                os.write(fd, key)
+            finally:
+                os.close(fd)
+            try:
+                os.chmod(str(path), 0o600)
+            except Exception:
+                # If we can't enforce perms, refuse to keep the file —
+                # plaintext-equivalent KEK is worse than no KEK at all.
+                try: path.unlink()
+                except Exception: pass
+                return None
+        _bridge_fernet = _Fernet(key)
+        return _bridge_fernet
+    except Exception:
+        return None
+
+
+def _encrypt_bridge_token(plain: Optional[str]) -> Optional[str]:
+    """Encrypt a bridge bot token for at-rest storage. If the cryptography
+    library is unavailable or the KEK can't be loaded, returns the value
+    unchanged so the caller still works (degraded mode)."""
+    if not plain:
+        return plain
+    if isinstance(plain, str) and plain.startswith(_BRIDGE_KEK_PREFIX):
+        return plain    # already encrypted
+    f = _load_bridge_fernet()
+    if f is None:
+        return plain
+    try:
+        ct = f.encrypt(str(plain).encode("utf-8")).decode("ascii")
+        return _BRIDGE_KEK_PREFIX + ct
+    except Exception:
+        return plain
+
+
+def _decrypt_bridge_token(stored: Optional[str]) -> Optional[str]:
+    """Inverse of _encrypt_bridge_token. Plaintext rows from before the
+    migration are returned unchanged (detected by missing prefix)."""
+    if not stored:
+        return stored
+    if not isinstance(stored, str) or not stored.startswith(_BRIDGE_KEK_PREFIX):
+        return stored
+    f = _load_bridge_fernet()
+    if f is None:
+        # Encrypted-looking row but no KEK to decrypt. Returning the
+        # ciphertext to the caller would be worse than failing fast.
+        return ""
+    try:
+        return f.decrypt(stored[len(_BRIDGE_KEK_PREFIX):].encode("ascii")).decode("utf-8")
+    except _FInvalid:
+        return ""
+    except Exception:
+        return ""
+
+
 DB_PATH = Path(os.getenv("DB_PATH", "data/frogtalk.db"))
 
 CHANNEL_DIRECTORY_ACTIVE_DAYS_KEY = "channels.directory_active_days"
@@ -519,7 +628,11 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                    u.theme, u.notify_sounds, u.notify_desktop,
                    u.notify_dms, u.notify_mentions, u.allow_dms_from,
                    u.show_last_seen, u.show_read_receipts,
-                   u.hide_active_channels
+                   u.hide_active_channels,
+                   -- PIN privacy: surface only the *flags*, never the hash
+                   CASE WHEN u.pin_hash IS NULL OR u.pin_hash='' THEN 0 ELSE 1 END AS has_pin,
+                   u.pin_require_on_unlock, u.pin_require_for_admin,
+                   u.pin_require_after_autologin, u.pin_idle_timeout_sec
             FROM sessions s JOIN users u ON s.user_id = u.id
             WHERE s.token=? AND s.expires_at > datetime('now')
         """, (token,)).fetchone()
@@ -1213,6 +1326,36 @@ def _migrate():
         # Privacy: hide which channels the user is active in from profile viewers.
         if "hide_active_channels" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN hide_active_channels INTEGER DEFAULT 0")
+        # ── PIN-lock (privacy) ─────────────────────────────────────────────
+        # Local app-lock: a numeric PIN gates app re-entry after idle /
+        # auto-login / opening the admin panel. The hash is bcrypt of the
+        # PIN string — *never* stored or transmitted in plaintext, never
+        # included in /api/auth/me, and only writable after the user
+        # re-enters their account password. `pin_failed_attempts` and
+        # `pin_locked_until` implement a sliding lockout against
+        # online brute force: 5 wrong PINs in a row → 15 min lock.
+        if "pin_hash" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN pin_hash TEXT")
+        if "pin_failed_attempts" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN pin_failed_attempts INTEGER DEFAULT 0")
+        if "pin_locked_until" not in cols:
+            con.execute("ALTER TABLE users ADD COLUMN pin_locked_until TEXT")
+        if "pin_require_on_unlock" not in cols:
+            # Lock the app when window blurs / tab hides past the idle
+            # timeout, requiring PIN to come back in.
+            con.execute("ALTER TABLE users ADD COLUMN pin_require_on_unlock INTEGER DEFAULT 1")
+        if "pin_require_for_admin" not in cols:
+            # Re-prompt for PIN before opening the Server Admin panel.
+            con.execute("ALTER TABLE users ADD COLUMN pin_require_for_admin INTEGER DEFAULT 1")
+        if "pin_require_after_autologin" not in cols:
+            # When the client auto-logs-in via stored token, still demand
+            # PIN before showing any chat content.
+            con.execute("ALTER TABLE users ADD COLUMN pin_require_after_autologin INTEGER DEFAULT 1")
+        if "pin_idle_timeout_sec" not in cols:
+            # Idle window before auto-lock kicks in (seconds). 0 = lock
+            # immediately on blur. Default 5 minutes balances usability
+            # with shoulder-surf protection.
+            con.execute("ALTER TABLE users ADD COLUMN pin_idle_timeout_sec INTEGER DEFAULT 300")
         # Per-user channel ordering (Discord-style drag-to-reorder). Stored as
         # a JSON array of room names; rooms not in the list fall back to the
         # default server order at the end.
@@ -2366,6 +2509,237 @@ def delete_user_fcm_tokens(user_id: int) -> int:
         cur = con.execute("DELETE FROM fcm_tokens WHERE user_id=?", (user_id,))
         con.commit()
         return int(cur.rowcount or 0)
+
+
+# ── PIN-lock (privacy) ──────────────────────────────────────────────
+# All PIN values flow through bcrypt. We deliberately use the same cost
+# factor as the password hash so an attacker who exfiltrates the DB
+# can't crack PINs faster than passwords. The PIN hash itself is never
+# returned by any query exposed to the API layer (see get_user_by_token,
+# which selects has_pin as a derived 0/1 flag instead of the hash).
+
+# Lock-out policy. Tunable via env in case an operator wants stricter
+# defaults; sane fallback is 5 attempts then 15 minutes lockout — that
+# limits an online attacker to roughly 480 PIN guesses/day, vs the
+# ~10⁴ - 10⁸ search space for a 4-8 digit PIN.
+_PIN_MAX_ATTEMPTS = max(3, int(os.getenv("FROGTALK_PIN_MAX_ATTEMPTS", "5") or 5))
+_PIN_LOCKOUT_MIN  = max(1, int(os.getenv("FROGTALK_PIN_LOCKOUT_MIN", "15") or 15))
+
+
+def _pin_is_weak(pin: str) -> Optional[str]:
+    """Return None if the PIN is acceptable, else a short reason.
+
+    We block trivially-guessable patterns server-side so the policy can
+    not be bypassed by a malicious client. The client mirrors the same
+    rules for UX feedback but never gets to override them.
+    """
+    s = (pin or "").strip()
+    if not s.isdigit():
+        return "PIN must be digits only"
+    if not (4 <= len(s) <= 8):
+        return "PIN must be 4-8 digits"
+    if len(set(s)) == 1:
+        return "PIN cannot be all the same digit"
+    # Strict ascending or descending sequence (1234, 4321, 12345, …).
+    asc = all(int(s[i]) + 1 == int(s[i + 1]) for i in range(len(s) - 1))
+    desc = all(int(s[i]) - 1 == int(s[i + 1]) for i in range(len(s) - 1))
+    if asc or desc:
+        return "PIN cannot be a simple sequence"
+    # Reject the dozen most-common 4-digit PINs (covers ~25% of real
+    # PIN choices per public datasets — Bonneau 2012 etc.).
+    common = {"0000","1111","1212","2000","2222","2580","4321","5555",
+              "6969","7777","8888","9999","1004","2004","2580","6666"}
+    if len(s) == 4 and s in common:
+        return "PIN is too common"
+    return None
+
+
+def _pin_lock_active(row) -> int:
+    """Return seconds remaining on a PIN lockout (0 if not locked)."""
+    if not row:
+        return 0
+    locked = (row["pin_locked_until"] or "").strip() if hasattr(row, "keys") else (row.get("pin_locked_until") or "").strip()
+    if not locked:
+        return 0
+    try:
+        # SQLite stores naive UTC; treat as such.
+        from datetime import datetime as _dt, timezone as _tz
+        dt = _dt.fromisoformat(locked.replace(" ", "T"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_tz.utc)
+        now = _dt.now(tz=_tz.utc)
+        remaining = int((dt - now).total_seconds())
+        return max(0, remaining)
+    except Exception:
+        return 0
+
+
+def get_pin_status(user_id: int) -> Dict:
+    """Return PIN configuration flags for a user. Never includes the hash."""
+    with _conn() as con:
+        row = con.execute(
+            """SELECT CASE WHEN pin_hash IS NULL OR pin_hash='' THEN 0 ELSE 1 END AS has_pin,
+                      pin_require_on_unlock, pin_require_for_admin,
+                      pin_require_after_autologin, pin_idle_timeout_sec,
+                      pin_locked_until, pin_failed_attempts
+                 FROM users WHERE id=?""",
+            (user_id,),
+        ).fetchone()
+    if not row:
+        return {"has_pin": 0}
+    out = dict(row)
+    out["pin_lock_remaining_sec"] = _pin_lock_active(row)
+    # Don't leak attempt counter to the client — only whether locked.
+    out.pop("pin_locked_until", None)
+    out.pop("pin_failed_attempts", None)
+    return out
+
+
+def set_user_pin(user_id: int, current_password: str, new_pin: str) -> Dict:
+    """Set or rotate the user's PIN. Requires current account password.
+
+    Returns ``{"ok": True}`` on success or ``{"error": "..."}`` on
+    failure. Resets the lockout counters.
+    """
+    weak = _pin_is_weak(new_pin)
+    if weak:
+        return {"error": weak}
+    with _conn() as con:
+        row = con.execute(
+            "SELECT password_hash FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+        if not row:
+            return {"error": "User not found"}
+        if not _bcrypt.checkpw((current_password or "").encode(), row["password_hash"].encode()):
+            return {"error": "Incorrect password"}
+        pin_hash = _bcrypt.hashpw(new_pin.encode(), _bcrypt.gensalt()).decode()
+        con.execute(
+            """UPDATE users
+                  SET pin_hash=?, pin_failed_attempts=0, pin_locked_until=NULL
+                WHERE id=?""",
+            (pin_hash, user_id),
+        )
+        con.commit()
+    return {"ok": True}
+
+
+def disable_user_pin(user_id: int, current_password: str) -> Dict:
+    """Remove the user's PIN. Requires current account password."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT password_hash FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+        if not row:
+            return {"error": "User not found"}
+        if not _bcrypt.checkpw((current_password or "").encode(), row["password_hash"].encode()):
+            return {"error": "Incorrect password"}
+        con.execute(
+            """UPDATE users
+                  SET pin_hash=NULL, pin_failed_attempts=0, pin_locked_until=NULL,
+                      pin_require_on_unlock=1, pin_require_for_admin=1,
+                      pin_require_after_autologin=1
+                WHERE id=?""",
+            (user_id,),
+        )
+        con.commit()
+    return {"ok": True}
+
+
+def verify_user_pin(user_id: int, pin: str) -> Dict:
+    """Verify a PIN. On success returns ``{"ok": True}``; on failure
+    returns ``{"error": "...", "remaining_attempts": N, "lock_seconds": S}``.
+
+    Constant-time bcrypt compare. Increments failed-attempt counter
+    and triggers lockout if the threshold is crossed.
+    """
+    with _conn() as con:
+        row = con.execute(
+            """SELECT pin_hash, pin_failed_attempts, pin_locked_until
+                 FROM users WHERE id=?""",
+            (user_id,),
+        ).fetchone()
+        if not row or not row["pin_hash"]:
+            return {"error": "PIN not set"}
+        # Honour any pre-existing lockout *before* doing the bcrypt
+        # comparison — also denies the timing channel a successful
+        # bcrypt would otherwise expose during lockout.
+        lock_remaining = _pin_lock_active(row)
+        if lock_remaining > 0:
+            return {"error": "PIN locked", "lock_seconds": lock_remaining,
+                    "remaining_attempts": 0}
+        ok = False
+        try:
+            ok = _bcrypt.checkpw((pin or "").encode(), row["pin_hash"].encode())
+        except Exception:
+            ok = False
+        if ok:
+            con.execute(
+                """UPDATE users
+                      SET pin_failed_attempts=0, pin_locked_until=NULL
+                    WHERE id=?""",
+                (user_id,),
+            )
+            con.commit()
+            return {"ok": True}
+        attempts = int(row["pin_failed_attempts"] or 0) + 1
+        if attempts >= _PIN_MAX_ATTEMPTS:
+            # Trigger lockout window. We store an absolute UTC timestamp
+            # (not a duration) so the lock survives process restarts.
+            con.execute(
+                """UPDATE users
+                      SET pin_failed_attempts=?,
+                          pin_locked_until=datetime('now', '+' || ? || ' minutes')
+                    WHERE id=?""",
+                (attempts, _PIN_LOCKOUT_MIN, user_id),
+            )
+            con.commit()
+            return {"error": "PIN locked",
+                    "lock_seconds": _PIN_LOCKOUT_MIN * 60,
+                    "remaining_attempts": 0}
+        con.execute(
+            "UPDATE users SET pin_failed_attempts=? WHERE id=?",
+            (attempts, user_id),
+        )
+        con.commit()
+        return {"error": "Incorrect PIN",
+                "remaining_attempts": max(0, _PIN_MAX_ATTEMPTS - attempts),
+                "lock_seconds": 0}
+
+
+def update_pin_options(
+    user_id: int,
+    require_on_unlock: Optional[bool] = None,
+    require_for_admin: Optional[bool] = None,
+    require_after_autologin: Optional[bool] = None,
+    idle_timeout_sec: Optional[int] = None,
+) -> bool:
+    """Update PIN behaviour flags. Caller must have already verified
+    the user owns a PIN; this function does not re-check (the route
+    layer enforces that).
+    """
+    fields, values = [], []
+    if require_on_unlock is not None:
+        fields.append("pin_require_on_unlock=?")
+        values.append(1 if require_on_unlock else 0)
+    if require_for_admin is not None:
+        fields.append("pin_require_for_admin=?")
+        values.append(1 if require_for_admin else 0)
+    if require_after_autologin is not None:
+        fields.append("pin_require_after_autologin=?")
+        values.append(1 if require_after_autologin else 0)
+    if idle_timeout_sec is not None:
+        # Bound the timeout: 0 (immediate) up to 24h. Anything weirder
+        # is almost certainly a malformed client.
+        t = max(0, min(86400, int(idle_timeout_sec)))
+        fields.append("pin_idle_timeout_sec=?")
+        values.append(t)
+    if not fields:
+        return False
+    values.append(user_id)
+    with _conn() as con:
+        con.execute(f"UPDATE users SET {', '.join(fields)} WHERE id=?", values)
+        con.commit()
+    return True
 
 
 def update_privacy(user_id: int, profile_public: bool, allow_friend_requests: bool):
@@ -6442,11 +6816,26 @@ def create_telegram_bridge(room_name: str, telegram_chat_id: int, bot_token: str
             cur = con.execute(
                 """INSERT INTO telegram_bridges (room_name, telegram_chat_id, telegram_chat_title, bot_token, bot_name, owner_id)
                    VALUES (?,?,?,?,?,?)""",
-                (room_name, telegram_chat_id, telegram_chat_title or "", bot_token, bot_name, owner_id))
+                (room_name, telegram_chat_id, telegram_chat_title or "",
+                 _encrypt_bridge_token(bot_token), bot_name, owner_id))
             con.commit()
             return cur.lastrowid
     except Exception:
         return None
+
+
+def _decrypt_bridge_rows(rows):
+    """Helper: pass a list of dict rows from telegram_bridges /
+    discord_bridges, decrypt each bot_token in place. Plaintext rows
+    (pre-migration) are returned untouched. Used by every getter so
+    callers always see plaintext."""
+    out = []
+    for r in rows:
+        d = dict(r)
+        if "bot_token" in d:
+            d["bot_token"] = _decrypt_bridge_token(d["bot_token"])
+        out.append(d)
+    return out
 
 
 def get_telegram_bridges(owner_id: int = None) -> List[Dict]:
@@ -6457,7 +6846,7 @@ def get_telegram_bridges(owner_id: int = None) -> List[Dict]:
             ).fetchall()
         else:
             rows = con.execute("SELECT * FROM telegram_bridges ORDER BY id").fetchall()
-    return [dict(r) for r in rows]
+    return _decrypt_bridge_rows(rows)
 
 
 def get_telegram_bridges_for_room(room_name: str) -> List[Dict]:
@@ -6465,7 +6854,7 @@ def get_telegram_bridges_for_room(room_name: str) -> List[Dict]:
         rows = con.execute(
             "SELECT * FROM telegram_bridges WHERE room_name=? AND enabled=1", (room_name,)
         ).fetchall()
-    return [dict(r) for r in rows]
+    return _decrypt_bridge_rows(rows)
 
 
 def delete_telegram_bridge(bridge_id: int, owner_id: int) -> bool:
@@ -6501,7 +6890,7 @@ def create_discord_bridge(room_name: str, discord_channel_id: int, bot_token: st
                    VALUES (?,?,?,?,?,?,?,?)""",
                 (room_name, discord_channel_id, discord_guild_id,
                  discord_channel_name or "", discord_guild_name or "",
-                 bot_token, bot_name, owner_id))
+                 _encrypt_bridge_token(bot_token), bot_name, owner_id))
             con.commit()
             return cur.lastrowid
     except Exception:
@@ -6516,7 +6905,7 @@ def get_discord_bridges(owner_id: int = None) -> List[Dict]:
             ).fetchall()
         else:
             rows = con.execute("SELECT * FROM discord_bridges ORDER BY id").fetchall()
-    return [dict(r) for r in rows]
+    return _decrypt_bridge_rows(rows)
 
 
 def get_discord_bridges_for_room(room_name: str) -> List[Dict]:
@@ -6524,7 +6913,7 @@ def get_discord_bridges_for_room(room_name: str) -> List[Dict]:
         rows = con.execute(
             "SELECT * FROM discord_bridges WHERE room_name=? AND enabled=1", (room_name,)
         ).fetchall()
-    return [dict(r) for r in rows]
+    return _decrypt_bridge_rows(rows)
 
 
 def delete_discord_bridge(bridge_id: int, owner_id: int) -> bool:

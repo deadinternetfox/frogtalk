@@ -224,6 +224,22 @@ const App = {
           const fresh = await res.json();
           State.user = fresh;
           State.save();
+          // Hand the freshly-fetched PIN flags to pin.js so its gate
+          // decisions don't need a second roundtrip.
+          try { if (window.Pin) Pin.adoptFromMe(fresh); } catch {}
+          // Privacy PIN: when the user has enabled "Require PIN after
+          // auto-login", block the launch behind the lock screen. The
+          // promise resolves true once the correct PIN is entered (or
+          // immediately if the gate is off / not configured).
+          try {
+            if (window.Pin && typeof Pin.gateAutoLogin === 'function') {
+              hideSplash();
+              const ok = await Pin.gateAutoLogin();
+              if (!ok) { showAuth(); return; }
+              try { await this.launch(); } catch (e) { console.error('[App] launch failed', e); }
+              return;
+            }
+          } catch {}
           // Hide splash early so a thrown error inside launch() doesn't leave it stuck
           hideSplash();
           try { await this.launch(); } catch (e) { console.error('[App] launch failed', e); }

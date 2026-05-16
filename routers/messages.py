@@ -13,6 +13,7 @@ from typing import Optional
 import database as db
 from deps import get_current_user, client_ip
 from ws_manager import manager
+from routers._media_safety import safe_reencode as _media_reencode
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 limiter = Limiter(key_func=client_ip)
@@ -87,6 +88,13 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
             return JSONResponse(status_code=413, content={"error": "File too large (max 20MB)"})
         if not _is_allowed_media_payload(body.media_data):
             return JSONResponse(status_code=400, content={"error": "Unsupported file type"})
+        # 9th-pass: re-encode plaintext image attachments through Pillow
+        # to strip EXIF / IPTC / XMP / ICC and refuse polyglot payloads.
+        # E2E-encrypted blobs (ftenc:) and video/audio pass through
+        # untouched since the server can't introspect them.
+        if (body.media_data.startswith("data:image/")
+                and not body.media_data.startswith("data:image/svg")):
+            body.media_data = await asyncio.to_thread(_media_reencode, body.media_data)
 
     # Forwarding source-side check: if the message is being forwarded, make
     # sure the SOURCE conversation hasn't disabled forwarding. Defence in

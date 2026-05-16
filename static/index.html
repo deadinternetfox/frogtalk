@@ -8941,6 +8941,8 @@ window.ConnErr = (function(){
         </div>
         <input type="checkbox" id="profile-auto-login" checked style="width:18px;height:18px;cursor:pointer;accent-color:#4caf50">
       </label>
+      <!-- App-PIN section: rendered by Pin.js (pin.js manages its own DOM). -->
+      <div id="pin-privacy-section"></div>
       <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1e1e1e;cursor:pointer">
         <div>
           <div style="font-size:14px;color:#e0e0e0">Public Profile</div>
@@ -10102,6 +10104,20 @@ function openFrogBoard() {
 // calls, and music intact, and works inside the Electron desktop
 // client where popups are blocked.
 function openNodeAdmin() {
+  // Privacy PIN gate: when the user has set a PIN and toggled
+  // "Require PIN for admin areas", demand re-auth before opening the
+  // admin iframe. Pin.gateAdmin() is a no-op (resolves true) when the
+  // gate is disabled or the user already unlocked recently, so this
+  // line is safe to keep unconditional.
+  try {
+    if (window.Pin && typeof Pin.gateAdmin === 'function') {
+      Pin.gateAdmin().then((ok) => { if (ok) _openNodeAdminImpl(); });
+      return;
+    }
+  } catch (e) {}
+  _openNodeAdminImpl();
+}
+function _openNodeAdminImpl() {
   // Don't gate on State.user.is_admin here — the server enforces auth on
   // /server itself. Gating here only ever caused silent no-ops when the
   // client's State.user was stale or hadn't been hydrated yet. If a
@@ -10262,6 +10278,8 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/music.js?v=417"></script>
 <!-- cache bump: social share button + story/profile list UX fixes -->
 <script src="/static/js/social.js?v=1028"></script>
+<!-- Privacy PIN lock (auto-lock on idle, admin gate, autologin gate) -->
+<script src="/static/js/pin.js?v=1"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>

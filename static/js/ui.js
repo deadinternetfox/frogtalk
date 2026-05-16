@@ -2380,6 +2380,9 @@ function switchSettingsTab(tab) {
   });
   // Load blocked users when privacy tab opened
   if (tab === 'privacy') loadBlockedUsers();
+  // Privacy tab also owns the App-PIN section — refresh server-side
+  // status so toggles reflect what the server actually has.
+  if (tab === 'privacy') { try { window.Pin && Pin.refreshFromServer(); } catch {} }
   // Load API keys / bots when dev tab opened
   if (tab === 'dev') { loadApiKeys(); loadBots(); }
   // Load social stats

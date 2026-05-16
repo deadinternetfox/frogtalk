@@ -144,6 +144,12 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
         if len(body.media_data) > limit:
             label = "100MB" if is_video else "10MB"
             return JSONResponse(status_code=413, content={"error": f"Media too large (max {label})"})
+        # 9th-pass: strip EXIF / IPTC / XMP and reject polyglot payloads
+        # for image uploads. Video / music URLs are left untouched.
+        if media_type.startswith('image/') and media_type != 'image/svg+xml':
+            from routers._media_safety import safe_reencode as _media_reencode
+            import asyncio as _asyncio
+            body.media_data = await _asyncio.to_thread(_media_reencode, body.media_data)
     
     if body.privacy not in ("public", "followers", "friends", "private"):
         return JSONResponse(status_code=400, content={"error": "Invalid privacy setting"})

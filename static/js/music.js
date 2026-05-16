@@ -9,6 +9,36 @@
  *   - Anyone can submit unless `dj_only` is set; then only DJs/owner/admin/mod
  */
 const Music = (() => {
+  // Tighten cross-frame postMessage targetOrigin: when we know the iframe
+  // is loaded from one of the three audio providers we embed, send the
+  // message to that provider's exact origin instead of the wildcard '*'.
+  // Falls back to '*' for blob:/about: URLs (e.g. our own dock controls)
+  // where there's no meaningful origin. This closes a tiny but real
+  // attack surface where a malicious frame swap could observe the
+  // contents of our outgoing player commands.
+  const _PROVIDER_ORIGINS = [
+    'https://www.youtube.com',
+    'https://www.youtube-nocookie.com',
+    'https://w.soundcloud.com',
+    'https://api.soundcloud.com',
+    'https://open.spotify.com',
+    'https://player.vimeo.com',
+  ];
+  function _frameOrigin (frame) {
+    try {
+      const src = (frame && frame.src) || '';
+      if (!src || src.startsWith('about:') || src.startsWith('blob:')) return '*';
+      const o = new URL(src, window.location.href).origin;
+      return _PROVIDER_ORIGINS.indexOf(o) >= 0 ? o : '*';
+    } catch { return '*'; }
+  }
+  function _postToFrame (frame, msg) {
+    if (!frame || !frame.contentWindow) return;
+    const target = _frameOrigin(frame);
+    const payload = (typeof msg === 'string') ? msg : JSON.stringify(msg);
+    try { frame.contentWindow.postMessage(payload, target); } catch {}
+  }
+
   let _room = null;       // active music room name
   let _state = null;      // { queue, djs, dj_only, can_submit, can_control, is_dj }
   let _soloMode = false;  // true when playing a track via Music.playSolo (no room)
@@ -119,7 +149,7 @@ const Music = (() => {
     try {
       ['play', 'pause', 'finish'].forEach(ev => {
         frame.contentWindow.postMessage(
-          JSON.stringify({ method: 'addEventListener', value: ev }), '*');
+          JSON.stringify({ method: 'addEventListener', value: ev }), _frameOrigin(frame));
       });
     } catch {}
   }
@@ -137,11 +167,11 @@ const Music = (() => {
           if (frame && frame.contentWindow) {
             try {
               frame.contentWindow.postMessage(
-                JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
+                JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), _frameOrigin(frame));
               // Asking for currentTime triggers an infoDelivery reply
               // which carries playerState. Free state-truth refresh.
               frame.contentWindow.postMessage(
-                JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
+                JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), _frameOrigin(frame));
             } catch {}
           }
         } else if (cur && cur.provider === 'soundcloud') {
@@ -152,7 +182,7 @@ const Music = (() => {
               // {method:"isPaused", value:bool} which the listener
               // reconciles into _paused.
               frame.contentWindow.postMessage(
-                JSON.stringify({ method: 'isPaused' }), '*');
+                JSON.stringify({ method: 'isPaused' }), _frameOrigin(frame));
             } catch {}
           }
         }
@@ -429,8 +459,8 @@ const Music = (() => {
       const cur = _state && _state.queue && _state.queue[0];
       if (frame && frame.contentWindow && cur && cur.provider === 'youtube') {
         try {
-          frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
-          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), _frameOrigin(frame));
+          frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), _frameOrigin(frame));
         } catch {}
       }
     } catch {}
@@ -769,14 +799,14 @@ const Music = (() => {
       if (src.includes('youtube.com')) {
         frame.contentWindow.postMessage(
           JSON.stringify({ event: 'command', func: 'seekTo', args: [posSec, true] }),
-          '*'
+          _frameOrigin(frame)
         );
         return true;
       }
       if (src.includes('soundcloud.com')) {
         frame.contentWindow.postMessage(
           JSON.stringify({ method: 'seekTo', value: posSec * 1000 }),
-          '*'
+          _frameOrigin(frame)
         );
         return true;
       }
@@ -1200,14 +1230,14 @@ const Music = (() => {
           // 'listening' handshake registers us with the YouTube embed so
           // it accepts our 'command' messages. Idempotent.
           frame.contentWindow.postMessage(
-            JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
+            JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), _frameOrigin(frame));
           frame.contentWindow.postMessage(
-            JSON.stringify({ event: 'command', func: 'getCurrentTime', args: [] }), '*');
+            JSON.stringify({ event: 'command', func: 'getCurrentTime', args: [] }), _frameOrigin(frame));
         } catch { _syncProbePending = false; }
       } else if (cur.provider === 'soundcloud') {
         try {
           frame.contentWindow.postMessage(
-            JSON.stringify({ method: 'getPosition' }), '*');
+            JSON.stringify({ method: 'getPosition' }), _frameOrigin(frame));
         } catch { _syncProbePending = false; }
       } else {
         _syncProbePending = false;
@@ -1266,7 +1296,7 @@ const Music = (() => {
 
       // Helper that survives any cross-origin oddity.
       const send = (msg) => {
-        try { win.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg), '*'); }
+        try { win.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg), _frameOrigin(frame)); }
         catch { /* nothing we can do */ }
       };
 
@@ -1420,8 +1450,8 @@ const Music = (() => {
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       const cur = _state && _state.queue && _state.queue[0];
       if (frame && frame.contentWindow && cur && cur.provider === 'youtube') {
-        frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), '*');
-        frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), '*');
+        frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 'frogtalk-music' }), _frameOrigin(frame));
+        frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: 'getPlayerState', args: [] }), _frameOrigin(frame));
       }
     } catch {}
     // Keep _paused as-is for now. The bounded retry ladder below will
@@ -1997,12 +2027,12 @@ const Music = (() => {
       if (src.includes('youtube.com')) {
         frame.contentWindow.postMessage(
           JSON.stringify({ event: 'command', func: playing ? 'pauseVideo' : 'playVideo', args: [] }),
-          '*'
+          _frameOrigin(frame)
         );
       } else if (src.includes('soundcloud.com')) {
         frame.contentWindow.postMessage(
           JSON.stringify({ method: playing ? 'pause' : 'play' }),
-          '*'
+          _frameOrigin(frame)
         );
       } else {
         return;
@@ -2544,13 +2574,13 @@ const Music = (() => {
       if (src.includes('youtube.com')) {
         // Seek to 0, then play. YT iframe accepts both messages back to back.
         frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: 'seekTo', args: [0, true] }), '*');
+          JSON.stringify({ event: 'command', func: 'seekTo', args: [0, true] }), _frameOrigin(frame));
         frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), '*');
+          JSON.stringify({ event: 'command', func: 'playVideo', args: [] }), _frameOrigin(frame));
         return true;
       } else if (src.includes('soundcloud.com')) {
-        frame.contentWindow.postMessage(JSON.stringify({ method: 'seekTo', value: 0 }), '*');
-        frame.contentWindow.postMessage(JSON.stringify({ method: 'play' }), '*');
+        frame.contentWindow.postMessage(JSON.stringify({ method: 'seekTo', value: 0 }), _frameOrigin(frame));
+        frame.contentWindow.postMessage(JSON.stringify({ method: 'play' }), _frameOrigin(frame));
         return true;
       }
     } catch {}

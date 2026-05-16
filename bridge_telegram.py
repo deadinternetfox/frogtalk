@@ -719,19 +719,16 @@ def load_bridges():
     global _bridges
     try:
         import database as db
-        with db._conn() as con:
-            rows = con.execute("""
-                SELECT telegram_chat_id, room_name, bot_token, bot_name, enabled,
-                       COALESCE(direction, 'both') AS direction
-                FROM telegram_bridges WHERE enabled=1
-            """).fetchall()
+        # Use the high-level getter so bot_token is decrypted by the
+        # KEK-aware DB layer (Fernet-encrypted at rest since 9th-pass).
+        rows = [r for r in db.get_telegram_bridges() if r.get("enabled")]
         _bridges = {
             row["telegram_chat_id"]: {
                 "room": row["room_name"],
                 "token": row["bot_token"],
                 "bot_name": row["bot_name"],
                 "enabled": bool(row["enabled"]),
-                "direction": row["direction"] or "both",
+                "direction": row.get("direction") or "both",
             }
             for row in rows
         }

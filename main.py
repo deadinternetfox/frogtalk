@@ -13,6 +13,16 @@ logging.basicConfig(
 )
 _log = logging.getLogger("frogtalk.main")
 
+# 9th-pass: scrub tokens / passwords / PINs / bot tokens / raw IPs from
+# every log line before they reach disk or journalctl. Filter is attached
+# at the root logger plus a few uvicorn/slowapi loggers that sometimes
+# bypass propagation. Idempotent + cheap (compiled regexes).
+try:
+    import log_redaction as _log_redaction
+    _log_redaction.install()
+except Exception as _e:                      # pragma: no cover
+    _log.warning("log redaction filter not installed: %s", _e)
+
 _PUBLIC_HTML_NO_CACHE = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
     "Pragma": "no-cache",

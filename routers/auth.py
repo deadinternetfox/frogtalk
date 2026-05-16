@@ -23,6 +23,7 @@ from slowapi import Limiter
 import database as db
 import geoip
 from deps import get_current_user, client_ip, invalidate_token_cache
+from routers._media_safety import safe_reencode as _media_reencode
 from ws_manager import manager
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -860,7 +861,124 @@ async def me(current_user: dict = Depends(get_current_user)):
         )
     except Exception:
         out["username_change_remaining_seconds"] = 0
+    # PIN-lock status: defence-in-depth, surface the live lockout
+    # remaining seconds so the client lock screen can show a countdown
+    # even if the user reloads mid-lockout.
+    try:
+        pin_status = db.get_pin_status(current_user["id"])
+        out["has_pin"] = int(pin_status.get("has_pin") or 0)
+        out["pin_require_on_unlock"] = int(pin_status.get("pin_require_on_unlock") or 0)
+        out["pin_require_for_admin"] = int(pin_status.get("pin_require_for_admin") or 0)
+        out["pin_require_after_autologin"] = int(pin_status.get("pin_require_after_autologin") or 0)
+        out["pin_idle_timeout_sec"] = int(pin_status.get("pin_idle_timeout_sec") or 300)
+        out["pin_lock_remaining_sec"] = int(pin_status.get("pin_lock_remaining_sec") or 0)
+    except Exception:
+        # Never let a PIN-status failure break /me — the user can still
+        # use the app without the PIN feature.
+        out.setdefault("has_pin", 0)
     return out
+
+
+# ──────────────────────────────────────────────────────────────────────
+# PIN-lock (privacy)
+# ──────────────────────────────────────────────────────────────────────
+# These endpoints implement the optional app-lock PIN. Security model:
+#   * Setting / disabling the PIN requires the account password.
+#   * Verifying the PIN is rate-limited per-IP at the slowapi layer
+#     AND per-user via the bcrypt-cost + DB-backed lockout in
+#     db.verify_user_pin (5 wrong PINs → 15 min lock).
+#   * Toggling the *behaviour* flags (auto-lock on idle, admin gate,
+#     autologin gate, idle timeout) requires an active PIN — flipping
+#     them off without a PIN would just leave them flipped on by
+#     default at first set, which is the policy we want.
+#   * The PIN hash is never returned by any endpoint.
+
+class PinSetRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    pin: str = Field(min_length=4, max_length=8)
+
+
+class PinVerifyRequest(BaseModel):
+    pin: str = Field(min_length=1, max_length=16)
+
+
+class PinDisableRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+
+
+class PinOptionsRequest(BaseModel):
+    require_on_unlock: bool | None = None
+    require_for_admin: bool | None = None
+    require_after_autologin: bool | None = None
+    # Min 0 (lock immediately on blur), max 86400 (24 h). Anything
+    # outside that range is clamped server-side in db.update_pin_options.
+    idle_timeout_sec: int | None = Field(default=None, ge=0, le=86400)
+
+
+@router.get("/pin/status")
+@limiter.limit("60/minute")
+async def pin_status(request: Request, current_user: dict = Depends(get_current_user)):
+    return await asyncio.to_thread(db.get_pin_status, current_user["id"])
+
+
+@router.post("/pin/set")
+@limiter.limit("10/hour")
+async def pin_set(request: Request, body: PinSetRequest,
+                  current_user: dict = Depends(get_current_user)):
+    """Set or rotate the user's PIN. Requires the account password."""
+    res = await asyncio.to_thread(
+        db.set_user_pin, current_user["id"], body.current_password, body.pin
+    )
+    if not res.get("ok"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@router.post("/pin/verify")
+@limiter.limit("20/minute")
+async def pin_verify(request: Request, body: PinVerifyRequest,
+                     current_user: dict = Depends(get_current_user)):
+    """Verify the user's PIN. Per-user lockout after _PIN_MAX_ATTEMPTS
+    consecutive failures; per-IP slowapi limit is the secondary layer."""
+    res = await asyncio.to_thread(
+        db.verify_user_pin, current_user["id"], body.pin
+    )
+    if not res.get("ok"):
+        return JSONResponse(status_code=401, content=res)
+    return res
+
+
+@router.delete("/pin")
+@limiter.limit("10/hour")
+async def pin_disable(request: Request, body: PinDisableRequest,
+                      current_user: dict = Depends(get_current_user)):
+    """Disable PIN protection. Requires the account password."""
+    res = await asyncio.to_thread(
+        db.disable_user_pin, current_user["id"], body.current_password
+    )
+    if not res.get("ok"):
+        return JSONResponse(status_code=400, content=res)
+    return res
+
+
+@router.patch("/pin/options")
+@limiter.limit("30/hour")
+async def pin_options(request: Request, body: PinOptionsRequest,
+                      current_user: dict = Depends(get_current_user)):
+    """Toggle PIN behaviour flags. PIN must already be set (you cannot
+    enable auto-lock without a PIN to unlock with)."""
+    status = await asyncio.to_thread(db.get_pin_status, current_user["id"])
+    if not int(status.get("has_pin") or 0):
+        return JSONResponse(status_code=400, content={"error": "PIN not set"})
+    await asyncio.to_thread(
+        db.update_pin_options,
+        current_user["id"],
+        body.require_on_unlock,
+        body.require_for_admin,
+        body.require_after_autologin,
+        body.idle_timeout_sec,
+    )
+    return await asyncio.to_thread(db.get_pin_status, current_user["id"])
 
 
 @router.patch("/profile")
@@ -885,6 +1003,15 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
                      'data:image/webp;base64,', 'data:image/gif;base64,')
         if not any(body.banner.startswith(p) for p in allowed_b):
             return JSONResponse(status_code=400, content={"error": "Invalid banner format"})
+
+    # 9th-pass: re-encode through Pillow to strip EXIF / IPTC / XMP /
+    # ICC profiles and to refuse polyglot payloads (e.g. SVG/HTML bytes
+    # disguised as image/png). safe_reencode degrades to passthrough if
+    # Pillow is unavailable rather than rejecting the upload.
+    if body.avatar:
+        body.avatar = await asyncio.to_thread(_media_reencode, body.avatar)
+    if body.banner:
+        body.banner = await asyncio.to_thread(_media_reencode, body.banner)
 
     # Require current password to change password
     if body.new_password:

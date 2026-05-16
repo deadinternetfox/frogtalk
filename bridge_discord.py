@@ -533,19 +533,15 @@ def load_bridges():
     global _bridges
     try:
         import database as db
-        with db._conn() as con:
-            rows = con.execute("""
-                SELECT discord_channel_id, room_name, bot_token, bot_name, enabled,
-                       COALESCE(direction, 'both') AS direction
-                FROM discord_bridges WHERE enabled=1
-            """).fetchall()
+        # High-level getter handles the KEK Fernet-decryption for us.
+        rows = [r for r in db.get_discord_bridges() if r.get("enabled")]
         _bridges = {
             row["discord_channel_id"]: {
                 "room": row["room_name"],
                 "token": row["bot_token"],
                 "bot_name": row["bot_name"],
                 "enabled": bool(row["enabled"]),
-                "direction": row["direction"] or "both",
+                "direction": row.get("direction") or "both",
             }
             for row in rows
         }

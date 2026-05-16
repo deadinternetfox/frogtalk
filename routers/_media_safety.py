@@ -163,4 +163,152 @@ __all__ = [
     "safe_filename",
     "media_response_headers",
     "is_safe_data_url",
+    "reencode_data_url",
+    "safe_reencode",
 ]
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Pillow re-encode + EXIF strip pipeline (9th-pass hardening, item #12)
+# ─────────────────────────────────────────────────────────────────────
+# Every user-supplied image (avatar, banner, story, wall, DM attachment)
+# can be passed through reencode_data_url() before storage. The pass:
+#  - Decodes the data URL.
+#  - Forces a Pillow decode so polyglot SVG/HTML payloads dressed up as
+#    "image/png" fail loudly instead of silently round-tripping.
+#  - Drops EXIF / IPTC / XMP / ICC by re-saving without the `info` dict.
+#  - Caps dimensions so a 50000x50000 PNG bomb can't blow up the client.
+#  - Re-encodes to the original codec (PNG/JPEG/WEBP/GIF), animated
+#    GIF/WEBP frames are walked individually so per-frame metadata is
+#    also dropped.
+# Pillow is the only new dep; if it's missing we degrade to passthrough.
+import base64 as _b64
+import io as _io
+import logging as _logging
+
+_log = _logging.getLogger("frogtalk.media")
+try:
+    from PIL import Image as _Image, ImageSequence as _ImageSequence
+    _PIL_OK = True
+except Exception:                            # pragma: no cover
+    _Image = None                            # type: ignore[assignment]
+    _ImageSequence = None                    # type: ignore[assignment]
+    _PIL_OK = False
+
+_RE_MAX_PIXELS = 25_000_000                  # ~5000x5000
+_RE_MAX_EDGE   = 4096
+_RE_FORMAT_BY_MIME = {
+    "image/png":  "PNG",
+    "image/jpeg": "JPEG",
+    "image/jpg":  "JPEG",
+    "image/webp": "WEBP",
+    "image/gif":  "GIF",
+}
+_RE_MIME_BY_FORMAT = {v: k for k, v in _RE_FORMAT_BY_MIME.items()}
+
+
+def _re_split_data_url(data_url: str):
+    if not isinstance(data_url, str) or not data_url.startswith("data:"):
+        return None
+    try:
+        header, _, payload = data_url.partition(",")
+        if not header or not payload or ";base64" not in header:
+            return None
+        mime = header[5:].split(";", 1)[0].strip().lower()
+        if not mime.startswith("image/"):
+            return None
+        return mime, _b64.b64decode(payload, validate=True)
+    except Exception:
+        return None
+
+
+def _re_resize(im):
+    w, h = im.size
+    if w <= _RE_MAX_EDGE and h <= _RE_MAX_EDGE:
+        return im
+    scale = _RE_MAX_EDGE / float(max(w, h))
+    return im.resize((max(1, int(w * scale)), max(1, int(h * scale))), _Image.LANCZOS)
+
+
+def reencode_data_url(data_url):
+    """Return a sanitised copy of *data_url*. Empty / non-image inputs
+    pass through unchanged (so callers can hand us http(s):// URLs and
+    None without special-casing). Raises ValueError when the bytes
+    claim image/* but Pillow refuses to decode — caller turns that into
+    HTTP 400.
+
+    GIF/WEBP that re-encode to a non-animated codec (rare) still keep
+    the original mime in the data URL header.
+    """
+    if not data_url or not _PIL_OK:
+        return data_url
+    parts = _re_split_data_url(data_url)
+    if parts is None:
+        return data_url
+    mime, raw = parts
+    if not raw:
+        raise ValueError("empty image payload")
+    fmt = _RE_FORMAT_BY_MIME.get(mime, "PNG")
+    try:
+        im = _Image.open(_io.BytesIO(raw))
+        im.load()
+    except Exception as e:
+        raise ValueError(f"invalid image: {e}") from e
+    w, h = im.size
+    if w * h > _RE_MAX_PIXELS:
+        raise ValueError("image dimensions exceed safety cap")
+    out = _io.BytesIO()
+    save_kwargs: dict = {}
+    is_animated = bool(getattr(im, "is_animated", False))
+    if is_animated and fmt in ("GIF", "WEBP"):
+        frames, durations = [], []
+        for fr in _ImageSequence.Iterator(im):
+            f = fr.convert("RGBA" if fmt == "WEBP" else "P")
+            f = _re_resize(f)
+            frames.append(f.copy())
+            durations.append(fr.info.get("duration", 100))
+        if not frames:
+            raise ValueError("empty animated image")
+        save_kwargs.update({
+            "save_all": True,
+            "append_images": frames[1:],
+            "duration": durations,
+            "loop": im.info.get("loop", 0),
+            "disposal": 2,
+        })
+        frames[0].save(out, format=fmt, **save_kwargs)
+    else:
+        if fmt == "JPEG" and im.mode in ("RGBA", "LA", "P"):
+            bg = _Image.new("RGB", im.size, (255, 255, 255))
+            try:
+                rgba = im.convert("RGBA")
+                bg.paste(rgba, mask=rgba.split()[-1])
+            except Exception:
+                bg.paste(im.convert("RGB"))
+            im = bg
+        elif im.mode == "P":
+            im = im.convert("RGBA")
+        im = _re_resize(im)
+        if fmt == "JPEG":
+            save_kwargs.update({"quality": 85, "optimize": True, "progressive": True})
+        elif fmt == "PNG":
+            save_kwargs.update({"optimize": True})
+        elif fmt == "WEBP":
+            save_kwargs.update({"quality": 85, "method": 4})
+        # NB: we deliberately do not forward `exif=` or `icc_profile=`
+        # — that's the metadata strip step.
+        im.save(out, format=fmt, **save_kwargs)
+    encoded = _b64.b64encode(out.getvalue()).decode("ascii")
+    return f"data:{_RE_MIME_BY_FORMAT.get(fmt, mime)};base64,{encoded}"
+
+
+def safe_reencode(data_url):
+    """Best-effort wrapper that never raises. Used on legacy paths
+    where rejecting a bad image would be more disruptive than letting
+    it through. New endpoints should call reencode_data_url() and
+    convert ValueError to HTTP 400."""
+    try:
+        return reencode_data_url(data_url)
+    except Exception as e:
+        _log.warning("image re-encode failed, passing through: %s", e)
+        return data_url
