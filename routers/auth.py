@@ -348,7 +348,7 @@ async def _try_federated_login_bootstrap(request: Request, nickname: str, passwo
 
 
 class RegisterRequest(BaseModel):
-    nickname: str
+    nickname: str = Field(min_length=1, max_length=64)
     # Cap the password length so we don't feed multi-megabyte strings
     # into bcrypt (each hash is O(n) in the input length and bcrypt is
     # intentionally slow). 128 bytes is comfortably more than any real
@@ -357,17 +357,17 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    nickname: str
+    nickname: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=128)
 
 
 class FederationTicketRequest(BaseModel):
-    target_base_url: str | None = None
-    target_url: str | None = None
+    target_base_url: str | None = Field(default=None, max_length=512)
+    target_url: str | None = Field(default=None, max_length=512)
 
 
 class FederationTicketLoginRequest(BaseModel):
-    ticket: str
+    ticket: str = Field(min_length=1, max_length=8192)
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -377,20 +377,20 @@ class ProfileUpdateRequest(BaseModel):
     avatar: str | None = Field(default=None, max_length=10_000_000)
     banner: str | None = Field(default=None, max_length=20_000_000)
     bio: str | None = Field(default=None, max_length=4_000)
-    new_password: str | None = None
-    current_password: str | None = None
-    status_msg: str | None = None
-    presence: str | None = None
+    new_password: str | None = Field(default=None, max_length=128)
+    current_password: str | None = Field(default=None, max_length=128)
+    status_msg: str | None = Field(default=None, max_length=200)
+    presence: str | None = Field(default=None, max_length=32)
     profile_public: bool | None = None
     allow_friend_requests: bool | None = None
     # New settings fields
-    theme: str | None = None
+    theme: str | None = Field(default=None, max_length=64)
     notify_sounds: bool | None = None
     notify_desktop: bool | None = None
     notify_dms: bool | None = None
     notify_mentions: bool | None = None
-    allow_dms_from: str | None = None
-    show_last_seen: str | None = None
+    allow_dms_from: str | None = Field(default=None, max_length=32)
+    show_last_seen: str | None = Field(default=None, max_length=32)
     show_read_receipts: bool | None = None
     hide_active_channels: bool | None = None
 
@@ -759,8 +759,8 @@ async def revoke_other_sessions(
 
 
 class NicknameChangeRequest(BaseModel):
-    nickname: str
-    password: str
+    nickname: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
 
 
 @router.patch("/nickname")
@@ -802,7 +802,7 @@ async def change_nickname(request: Request, body: NicknameChangeRequest, current
 
 
 class DisplayNameUpdateRequest(BaseModel):
-    display_name: Optional[str] = None  # None or "" clears it
+    display_name: Optional[str] = Field(default=None, max_length=64)  # None or "" clears it
 
 
 @router.patch("/display-name")
@@ -1008,7 +1008,7 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
 
 
 class DeleteAccountRequest(BaseModel):
-    password: str
+    password: str = Field(min_length=1, max_length=128)
 
 
 @router.delete("/account")

@@ -5,7 +5,7 @@ import time
 import uuid
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from typing import Optional
 
@@ -32,36 +32,36 @@ MAX_VIDEO_BYTES  = 150 * 1024 * 1024   # videos (base64 of ~100 MB raw)
 
 
 class CreatePostRequest(BaseModel):
-    content: str = ""
-    media_data: Optional[str] = None
-    media_type: Optional[str] = None
+    content: str = Field(default="", max_length=10_000)
+    media_data: Optional[str] = Field(default=None, max_length=140_000_000)
+    media_type: Optional[str] = Field(default=None, max_length=128)
     # public | followers | friends | private (default: private — only me)
-    privacy: str = "private"
+    privacy: str = Field(default="private", max_length=32)
     share_enabled: bool = True
     allow_comments: bool = True
     # Optional track metadata for music/* posts — surfaced on the FrogSocial
     # music card so the title renders instead of a generic "YouTube track".
-    track_title: Optional[str] = None
-    track_room: Optional[str] = None
+    track_title: Optional[str] = Field(default=None, max_length=200)
+    track_room: Optional[str] = Field(default=None, max_length=128)
     # Vibe tag for music shares ("chill", "hype", "focus", …). Purely
     # cosmetic on the card but also drives the mood filter chips on
     # the Music tab.
-    track_mood: Optional[str] = None
+    track_mood: Optional[str] = Field(default=None, max_length=32)
 
 
 class UpdatePostRequest(BaseModel):
-    content: Optional[str] = None
-    privacy: Optional[str] = None
+    content: Optional[str] = Field(default=None, max_length=10_000)
+    privacy: Optional[str] = Field(default=None, max_length=32)
     share_enabled: Optional[bool] = None
     allow_comments: Optional[bool] = None
 
 
 class AddCommentRequest(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=4_000)
 
 
 class AddReactionRequest(BaseModel):
-    emoji: str
+    emoji: str = Field(min_length=1, max_length=16)
 
 
 ALLOWED_WALL_REACTION_EMOJIS = {
@@ -71,7 +71,7 @@ ALLOWED_WALL_REACTION_EMOJIS = {
 
 
 class ToggleRepostRequest(BaseModel):
-    quote: Optional[str] = None
+    quote: Optional[str] = Field(default=None, max_length=4_000)
 
 
 # ---------------------------------------------------------------------------

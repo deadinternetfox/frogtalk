@@ -381,6 +381,13 @@ async def websocket_endpoint(
                     tracker_key = (user["id"], room_name)
                     now = time.time()
                     last_msg = _slowmode_tracker.get(tracker_key, 0)
+                    # Fall back to a DB lookup so a server restart does
+                    # not reset the user's slowmode window.
+                    if last_msg <= 0:
+                        try:
+                            last_msg = db.get_user_last_message_epoch(room_name, user["id"]) or 0
+                        except Exception:
+                            last_msg = 0
                     remaining = slowmode - (now - last_msg)
                     if remaining > 0:
                         await manager.send_personal(websocket, {

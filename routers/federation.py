@@ -1052,6 +1052,19 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         # ---- Ed25519 verification (when peer pubkey pinned) ----
         pubkey_pem = db.get_federation_server_pubkey(origin)
         if pubkey_pem:
+            # Fingerprint pinning: refuse the event if the signer
+            # advertises a different key than the one we have on file
+            # for this origin. This makes silent key rotation explicit
+            # (admin must re-pin) and blocks cross-peer signature
+            # replay where an attacker copies a valid signed event
+            # from peer A and re-submits it claiming to come from
+            # peer B.
+            claimed_fp = str(ev.get("signer_pubkey_fingerprint") or "").strip().lower()
+            if claimed_fp:
+                expected_fp = crypto_fed.fingerprint_for_pem(pubkey_pem).lower()
+                if claimed_fp != expected_fp:
+                    rejected += 1
+                    continue
             if not crypto_fed.verify_event(ev, pubkey_pem):
                 rejected += 1
                 continue

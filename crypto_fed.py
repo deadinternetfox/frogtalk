@@ -98,6 +98,17 @@ def get_local_public_key_fingerprint() -> str:
     return hashlib.sha256(pub_pem.encode("ascii")).hexdigest()[:32]
 
 
+def fingerprint_for_pem(pem: str) -> str:
+    """Compute the same 32-hex fingerprint for an arbitrary PEM.
+
+    Used by inbox verification to check that an event's claimed
+    ``signer_pubkey_fingerprint`` matches the pinned peer key before
+    we even attempt the Ed25519 verification. Catches accidental key
+    rotation as well as deliberate cross-peer signature replay.
+    """
+    return hashlib.sha256(pem.encode("ascii")).hexdigest()[:32]
+
+
 def canonical_event_bytes(event: dict) -> bytes:
     """Build the byte string that gets signed for a federation event.
 

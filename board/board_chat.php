@@ -52,6 +52,14 @@ if ($action === 'fetch') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'send') {
+    // CSRF: chat send must come from a same-origin form/JS that knows
+    // the per-session token; without this an attacker page could
+    // ride a logged-in admin's session to spam the live chat.
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid session']);
+        exit;
+    }
     $message = trim($_POST['message'] ?? '');
     
     if (empty($message)) {
@@ -97,6 +105,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'send') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'voice') {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid session']);
+        exit;
+    }
     $now = time();
     if (isset($_SESSION['last_chat_time']) && ($now - $_SESSION['last_chat_time']) < 3) {
         echo json_encode(['error' => 'Slow down (3s cooldown)']);

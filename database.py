@@ -780,6 +780,30 @@ def delete_room(room_name: str, requester_id: int, is_admin: bool) -> bool:
 # Message helpers
 # ---------------------------------------------------------------------------
 
+def get_user_last_message_epoch(room_name: str, user_id: int) -> float:
+    """Return the unix timestamp of the user's most recent message in
+    ``room_name``, or 0.0 if none. Used by slowmode enforcement so that
+    a process restart cannot reset a user's slowmode timer (the
+    in-memory ``_slowmode_tracker`` would otherwise let them post
+    immediately again).
+    """
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT strftime('%s', created_at) AS ts FROM messages "
+                "WHERE room_name=? AND user_id=? ORDER BY id DESC LIMIT 1",
+                (room_name, user_id),
+            ).fetchone()
+    except Exception:
+        return 0.0
+    if not row or row["ts"] is None:
+        return 0.0
+    try:
+        return float(row["ts"])
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def save_message(room_name: str, user_id: int, nickname: str, content: str,
                  media_data: Optional[str] = None,
                  media_type: Optional[str] = None,

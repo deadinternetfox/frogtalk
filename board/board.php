@@ -73,6 +73,26 @@ function checkBanWords(string $text): bool {
 // ═══ TEMP UPLOAD (preview before posting) — must be before main POST handler to bypass rate limit ═══
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'temp_upload') {
     header('Content-Type: application/json');
+    // CSRF: refuse cross-site preview uploads so the endpoint can't be
+    // weaponised as a write-anywhere staging area from a malicious page.
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid session']);
+        exit;
+    }
+    // Per-session sliding-window quota so an attacker can't fill the
+    // disk by hammering preview uploads (these bypass the post rate
+    // limit by design but still need a bound).
+    $now = time();
+    $bucket = $_SESSION['temp_upload_bucket'] ?? [];
+    $bucket = array_values(array_filter($bucket, fn($t) => ($now - $t) < 60));
+    if (count($bucket) >= 10) {
+        http_response_code(429);
+        echo json_encode(['error' => 'Too many uploads, slow down']);
+        exit;
+    }
+    $bucket[] = $now;
+    $_SESSION['temp_upload_bucket'] = $bucket;
     $tempDir = UPLOAD_DIR . '/temp';
     if (!is_dir($tempDir)) mkdir($tempDir, 0755, true);
     foreach (glob($tempDir . '/*') ?: [] as $tf) {
@@ -5758,6 +5778,8 @@ if ($singleThread) {
             var _ext = (mimeHint||'').includes('ogg') ? '.ogg' : (mimeHint||'').includes('mp4') ? '.m4a' : '.webm';
             var _fd = new FormData();
             _fd.append('file', new File([blob], 'chat_prev' + _ext, { type: blob.type }));
+            var _csrfTU = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            if (_csrfTU) _fd.append('csrf_token', _csrfTU);
             fetch('?action=temp_upload', { method: 'POST', body: _fd })
                 .then(function(r){ return r.json(); })
                 .then(function(d){ if (d && d.url) { audio.src = d.url; } })
@@ -5798,6 +5820,8 @@ if ($singleThread) {
         var fd = new FormData();
         fd.append('action', 'voice');
         fd.append('audio', new File([_chatVoiceBlob], fname, { type: _chatVoiceBlob.type }));
+        var _csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        if (_csrf) fd.append('csrf_token', _csrf);
         try {
             var res = await fetch('/board_chat.php', { method: 'POST', body: fd });
             var data = await res.json();
@@ -5836,6 +5860,8 @@ if ($singleThread) {
             const formData = new FormData();
             formData.append('action', 'send');
             formData.append('message', msg);
+            const _csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            if (_csrf) formData.append('csrf_token', _csrf);
             
             const res = await fetch('/board_chat.php', { method: 'POST', body: formData });
             const data = await res.json();
@@ -7429,6 +7455,8 @@ if ($singleThread) {
         prevWrap.classList.add('visible');
         var fd = new FormData();
         fd.append('file', blobOrNull ? new File([blobOrNull], 'preview.' + (type === 'audio' ? 'webm' : 'mp4'), { type: blobOrNull.type }) : file);
+        var _csrfMrb = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        if (_csrfMrb) fd.append('csrf_token', _csrfMrb);
         fetch('?action=temp_upload', { method: 'POST', body: fd })
             .then(function(r) { return r.json(); })
             .then(function(data) {

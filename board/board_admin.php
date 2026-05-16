@@ -428,7 +428,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // If a return URL was provided (inline approve/reject from board), redirect back there
     $returnUrl = $_POST['return_url'] ?? '';
-    if (!empty($returnUrl) && str_starts_with($returnUrl, '/board')) {
+    // Strict allow-list to prevent open-redirect: must be a relative URL
+    // starting with /board/ (not //evil.com, not /board@evil, not
+    // backslash variants), no scheme, no NUL/CR/LF.
+    if ($returnUrl !== ''
+        && strpbrk($returnUrl, "\0\r\n\\") === false
+        && preg_match('#^/board(/[A-Za-z0-9_\-./?&=#]*)?$#', $returnUrl)) {
         header('Location: ' . $returnUrl);
         exit;
     }
