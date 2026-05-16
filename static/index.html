@@ -1200,6 +1200,8 @@ body{
     radial-gradient(700px 500px at 50% 50%, rgba(127,210,167,.06), transparent 70%),
     linear-gradient(160deg,#0c2018 0%,#0f2a20 45%,#091c14 100%);
   z-index:1000;overflow-y:auto;
+  padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  box-sizing:border-box;
   -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)
 }
 #auth-overlay::before{
@@ -3693,7 +3695,7 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 .spoiler-rehide:active{transform:scale(.92)}
 .spoiler-wrap.revealed .spoiler-rehide{display:inline-flex}
 /* Telegram-style fullscreen view-once overlay */
-.vo-overlay{position:fixed;inset:0;z-index:10000;background:radial-gradient(circle at 50% 20%,rgba(255,120,32,.12),rgba(0,0,0,.95) 40%);backdrop-filter:blur(2px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;animation:voFade .18s ease}
+.vo-overlay{position:fixed;inset:0;z-index:10000;background:radial-gradient(circle at 50% 20%,rgba(255,120,32,.12),rgba(0,0,0,.95) 40%);backdrop-filter:blur(2px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);box-sizing:border-box;animation:voFade .18s ease}
 @keyframes voFade{from{opacity:0}to{opacity:1}}
 .vo-overlay .vo-media{max-width:min(92vw,820px);max-height:72vh;border-radius:14px;border:1px solid rgba(255,255,255,.12);box-shadow:0 16px 50px rgba(0,0,0,.62);animation:voPop .2s ease}
 @keyframes voPop{from{opacity:.85;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
@@ -4692,7 +4694,7 @@ body[data-theme="frog"] .invite-card-icon{
 }
 
 /* ─── Social / Instagram-style ─────────────────────────────────── */
-#social-overlay{position:fixed;inset:0;background:#0a0a0a;z-index:600;display:flex;flex-direction:column;overflow:hidden}
+#social-overlay{position:fixed;inset:0;background:#0a0a0a;z-index:600;display:flex;flex-direction:column;overflow:hidden;padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);box-sizing:border-box}
 #social-overlay.hidden{display:none}
 .social-topbar{display:flex;align-items:center;gap:12px;padding:12px 16px;background:linear-gradient(180deg,#12231e 0%,#101f1b 55%,#0d1a16 100%);border-bottom:1px solid #1f3a30;flex-shrink:0}
 .social-topbar-title-wrap{display:flex;flex-direction:column;justify-content:center;gap:1px;flex:0 0 auto;min-width:0;max-width:240px}
@@ -4985,7 +4987,7 @@ body[data-theme="frog"] .invite-card-icon{
 }
 
 /* Post detail overlay */
-#social-post-detail{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;animation:fadeIn .15s ease}
+#social-post-detail{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:max(20px,var(--safe-top)) max(20px,var(--safe-right)) max(20px,var(--safe-bottom)) max(20px,var(--safe-left));box-sizing:border-box;animation:fadeIn .15s ease}
 #social-post-detail.hidden{display:none}
 .spd-inner{background:#111;border-radius:14px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;position:relative;padding:16px;animation:slideUp .2s ease}
 .spd-inner .social-close-btn{position:absolute;top:8px;right:8px;z-index:1}
@@ -5504,7 +5506,7 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 
 /* Story viewer overlay */
-#story-viewer{display:none;position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:1000;align-items:center;justify-content:center}
+#story-viewer{display:none;position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:1000;align-items:center;justify-content:center;padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);box-sizing:border-box}
 .story-viewer-inner{position:relative;width:100%;max-width:420px;height:100%;max-height:100vh;display:flex;flex-direction:column;background:#000}
 .story-progress{display:flex;gap:3px;padding:8px 12px;position:absolute;top:0;left:0;right:0;z-index:2}
 .story-prog-seg{flex:1;height:3px;background:rgba(255,255,255,.3);border-radius:2px;overflow:hidden;position:relative}
