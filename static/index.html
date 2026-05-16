@@ -4048,7 +4048,7 @@ body[data-theme="frog"] .invite-card-icon{
 /* ─── Responsive: collapse panels on small screens ──────────── */
 @media(max-width:900px){
   #server-list{
-    position:fixed;left:0;top:0;bottom:0;z-index:310;
+    position:fixed;left:0;top:var(--safe-top);bottom:var(--safe-bottom);z-index:310;
     transform:translateX(-100%);transition:transform .25s;
   }
   #server-list.open{transform:translateX(0)}
@@ -4057,7 +4057,7 @@ body[data-theme="frog"] .invite-card-icon{
 }
 @media(max-width:640px){
   #sidebar{
-    position:fixed;left:0;top:0;bottom:0;z-index:300;
+    position:fixed;left:0;top:var(--safe-top);bottom:var(--safe-bottom);z-index:300;
     transform:translateX(-100%);transition:transform .25s;
     width:260px;max-width:85vw
   }
@@ -4065,7 +4065,7 @@ body[data-theme="frog"] .invite-card-icon{
   #mobile-menu-btn{display:flex !important}
   #users-panel{
     display:flex !important;
-    position:fixed;right:0;top:0;bottom:0;z-index:300;
+    position:fixed;right:0;top:var(--safe-top);bottom:var(--safe-bottom);z-index:300;
     transform:translateX(100%);transition:transform .25s;
     width:260px;max-width:85vw
   }
