@@ -7431,20 +7431,53 @@ function onRecoveryFileChosen(ev) {
   const f = ev?.target?.files && ev.target.files[0];
   const keyIn = document.getElementById('recover-key-input');
   const err   = document.getElementById('recover-step1-error');
+  const nameEl = document.getElementById('recover-file-name');
   if (!f || !keyIn) return;
+  // Defence-in-depth: a recovery file is a tiny JSON blob (one key
+  // string + a bit of metadata). Reject anything larger than 64 KB
+  // BEFORE reading it into memory so a hostile/oversized file (a
+  // multi-GB binary renamed to .json from the file picker) can't
+  // pin the WebView or crash the page.
+  const MAX_BYTES = 64 * 1024;
+  if (typeof f.size === 'number' && f.size > MAX_BYTES) {
+    if (err) { err.textContent = 'That file is too large to be a recovery file.'; err.style.display = 'block'; }
+    try { ev.target.value = ''; } catch {}
+    if (nameEl) nameEl.textContent = '';
+    return;
+  }
   const reader = new FileReader();
   reader.onload = () => {
     try {
-      const data = JSON.parse(String(reader.result || ''));
-      if (!data || typeof data.recovery_key !== 'string') throw new Error('bad');
-      keyIn.value = data.recovery_key;
+      const raw = String(reader.result || '');
+      // Belt-and-braces size check on the decoded text — File.size
+      // is bytes-on-disk; decoded UTF-8 can technically grow.
+      if (raw.length > MAX_BYTES) throw new Error('too-large');
+      const data = JSON.parse(raw);
+      if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('bad-shape');
+      const rk = data.recovery_key;
+      if (typeof rk !== 'string') throw new Error('bad-key');
+      // Recovery keys are short opaque tokens; cap aggressively so
+      // a crafted file can't fill the textarea/network call with a
+      // multi-megabyte string.
+      if (rk.length < 8 || rk.length > 512) throw new Error('bad-len');
+      // Strip any whitespace and ensure it's printable ASCII —
+      // server expects a single token; rejecting control chars
+      // protects against terminal-escape style payloads if anyone
+      // ever logs the raw value.
+      const clean = rk.trim();
+      if (!/^[\x21-\x7e]+$/.test(clean)) throw new Error('bad-chars');
+      keyIn.value = clean;
+      if (nameEl) nameEl.textContent = f.name || '';
       if (err) { err.style.display = 'none'; err.textContent = ''; }
     } catch {
       if (err) { err.textContent = 'That file doesn\u2019t look like a FrogTalk recovery file.'; err.style.display = 'block'; }
+      if (nameEl) nameEl.textContent = '';
+      try { ev.target.value = ''; } catch {}
     }
   };
   reader.onerror = () => {
     if (err) { err.textContent = 'Could not read file.'; err.style.display = 'block'; }
+    if (nameEl) nameEl.textContent = '';
   };
   reader.readAsText(f);
 }
