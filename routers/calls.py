@@ -32,6 +32,7 @@ async def get_pending_call(call_id: int, current_user: dict = Depends(get_curren
         "from_avatar": row.get("from_avatar") or "",
         "call_type": row["call_type"],
         "sdp": row["sdp"],
+        "fp_sig": row.get("fp_sig") or "",
     }
 
 
@@ -50,6 +51,7 @@ async def get_latest_pending_call(current_user: dict = Depends(get_current_user)
         "from_avatar": row.get("from_avatar") or "",
         "call_type": row["call_type"],
         "sdp": row["sdp"],
+        "fp_sig": row.get("fp_sig") or "",
     }
 
 

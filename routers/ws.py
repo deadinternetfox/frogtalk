@@ -787,6 +787,10 @@ async def websocket_endpoint(
                         "from_nickname": user["nickname"],
                         "call_type": call_type,
                         "sdp": data.get("sdp"),
+                        # Track E: signed DTLS fingerprint envelope. Server
+                        # is opaque transport — it never inspects or
+                        # mutates this field, just forwards verbatim.
+                        "fp_sig": data.get("fp_sig") or "",
                         "renegotiate": True,
                         "force_relay": bool(data.get("force_relay")),
                         "call_id": int(data.get("call_id") or 0),
@@ -814,6 +818,8 @@ async def websocket_endpoint(
                     "call_type": call_type,
                     "call_id": call_id_db,
                     "sdp": data.get("sdp"),
+                    # Track E: signed DTLS fingerprint envelope (opaque).
+                    "fp_sig": data.get("fp_sig") or "",
                 }
                 db.save_pending_call_offer(
                     call_id_db,
@@ -823,6 +829,7 @@ async def websocket_endpoint(
                     user.get("avatar"),
                     call_type,
                     data.get("sdp") or "",
+                    fp_sig=(data.get("fp_sig") or ""),
                 )
                 delivered = await manager.send_to_user(to_id, payload_offer)
                 # Tell caller their call_id so call_end can reference it even
@@ -903,6 +910,8 @@ async def websocket_endpoint(
                     "from_nickname": user["nickname"],
                     "call_id": call_id,
                     "sdp": data.get("sdp"),
+                    # Track E: callee's signed DTLS fingerprint envelope.
+                    "fp_sig": data.get("fp_sig") or "",
                     "renegotiate": is_renegotiate,
                 }
                 delivered_ans = await manager.send_to_user(to_id, answer_payload)

@@ -310,6 +310,106 @@
     await _store.removeSession(addr.toString());
   }
 
+  // ── Track E — signed DTLS fingerprint envelope ───────────────────────
+  //
+  // Signal-identity-signed binding of {call_id, peer_user_id,
+  // fingerprint_sha256, ts} → guards against a malicious signalling
+  // server substituting its own DTLS fingerprint into the SDP and
+  // bridging the media. Envelope is base64-JSON for opaque transport
+  // through the existing call_offer / call_answer WS frames.
+  //
+  // Wire format (after base64 decode):
+  //   { p: <payload JSON string>, s: <b64 sig>, i: <b64 identity_pub> }
+  //
+  // Verify side fetches the *advertised* identity_pub from the peer's
+  // /api/signal/bundle/<peerId> response and refuses to verify against
+  // the one embedded in `i` if they disagree — otherwise a MITM could
+  // sign with its own key and self-attest.
+
+  const CALL_FP_MAX_AGE_MS = 60 * 1000;  // 1-minute freshness window
+
+  async function signCallFingerprint(payload) {
+    if (!_libsignal || !_store) throw new Error('Signal not initialised');
+    if (!payload || typeof payload !== 'object') throw new Error('payload required');
+    const required = ['call_id', 'peer_user_id', 'fingerprint_sha256'];
+    for (const k of required) {
+      if (payload[k] === undefined || payload[k] === null || payload[k] === '') {
+        throw new Error('missing field: ' + k);
+      }
+    }
+    // Canonicalise: stable JSON with sorted keys so caller and callee
+    // sign / verify byte-identical messages.
+    const canon = {
+      call_id: Number(payload.call_id) || 0,
+      peer_user_id: Number(payload.peer_user_id) || 0,
+      fingerprint_sha256: String(payload.fingerprint_sha256).toLowerCase(),
+      ts: Number(payload.ts) || Date.now(),
+    };
+    const message = JSON.stringify(canon, Object.keys(canon).sort());
+    const idKey = await _store.getIdentityKeyPair();
+    const msgBuf = new TextEncoder().encode(message).buffer;
+    const curve = (_libsignal.Curve && _libsignal.Curve.async) ? _libsignal.Curve.async : _libsignal.Curve;
+    const sig = await curve.calculateSignature(idKey.privKey, msgBuf);
+    const env = {
+      p: message,
+      s: _abToB64(sig),
+      i: _abToB64(idKey.pubKey),
+    };
+    return btoa(JSON.stringify(env));
+  }
+
+  async function verifyCallFingerprint(envelopeB64, opts) {
+    // opts: { expectedFingerprint, expectedCallId, expectedPeerUserId,
+    //         expectedIdentityPub /* b64 */ }
+    if (!_libsignal) throw new Error('libsignal not loaded');
+    if (!envelopeB64 || typeof envelopeB64 !== 'string') {
+      return { ok: false, reason: 'no_envelope' };
+    }
+    let env;
+    try { env = JSON.parse(atob(envelopeB64)); }
+    catch { return { ok: false, reason: 'envelope_malformed' }; }
+    if (!env || typeof env.p !== 'string' || typeof env.s !== 'string' || typeof env.i !== 'string') {
+      return { ok: false, reason: 'envelope_malformed' };
+    }
+    // If caller supplied an out-of-band identity key (the trusted
+    // bundle), demand the envelope advertise the *same* key. Otherwise
+    // an attacker could sign with its own key and pass verification.
+    if (opts && opts.expectedIdentityPub && env.i !== opts.expectedIdentityPub) {
+      return { ok: false, reason: 'identity_mismatch' };
+    }
+    let payload;
+    try { payload = JSON.parse(env.p); }
+    catch { return { ok: false, reason: 'payload_malformed' }; }
+    // Bind-check fields. Each mismatch is a distinct refusal reason so
+    // the UI can surface "signalling tampering detected" precisely.
+    if (opts && opts.expectedCallId !== undefined &&
+        Number(payload.call_id) !== Number(opts.expectedCallId)) {
+      return { ok: false, reason: 'call_id_mismatch' };
+    }
+    if (opts && opts.expectedPeerUserId !== undefined &&
+        Number(payload.peer_user_id) !== Number(opts.expectedPeerUserId)) {
+      return { ok: false, reason: 'peer_mismatch' };
+    }
+    if (opts && opts.expectedFingerprint &&
+        String(payload.fingerprint_sha256 || '').toLowerCase() !==
+        String(opts.expectedFingerprint).toLowerCase()) {
+      return { ok: false, reason: 'fingerprint_mismatch' };
+    }
+    if (Math.abs(Date.now() - (Number(payload.ts) || 0)) > CALL_FP_MAX_AGE_MS) {
+      return { ok: false, reason: 'stale' };
+    }
+    try {
+      const pub = _b64ToAb(env.i);
+      const sig = _b64ToAb(env.s);
+      const msg = new TextEncoder().encode(env.p).buffer;
+      const curve = (_libsignal.Curve && _libsignal.Curve.async) ? _libsignal.Curve.async : _libsignal.Curve;
+      await curve.verifySignature(pub, msg, sig);
+    } catch {
+      return { ok: false, reason: 'bad_signature' };
+    }
+    return { ok: true, payload };
+  }
+
   function isReady() {
     return !!(_libsignal && _store);
   }
@@ -328,6 +428,9 @@
     encryptDM,
     decryptDM,
     resetSessionWith,
+    // Track E:
+    signCallFingerprint,
+    verifyCallFingerprint,
     // Diagnostics:
     async _stats() { return _store ? _store._stats() : null; },
     async _wipe() { if (_store) await _store._wipe(); },

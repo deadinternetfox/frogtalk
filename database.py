@@ -2463,6 +2463,20 @@ def _migrate():
         except Exception:
             pass
 
+        # ──────────────────────────────────────────────────────────────────
+        # Security refactor Track E — signed DTLS fingerprint blob carried
+        # alongside the call SDP. Opaque base64 JSON; server is just a
+        # passthrough. Stored on the pending offer so a cold-resumed
+        # callee still gets the signed payload to verify against the
+        # received SDP. Empty string means "v1 unverified call".
+        # ──────────────────────────────────────────────────────────────────
+        try:
+            pco_cols = {r["name"] for r in con.execute("PRAGMA table_info(pending_call_offers)").fetchall()}
+            if pco_cols and "fp_sig" not in pco_cols:
+                con.execute("ALTER TABLE pending_call_offers ADD COLUMN fp_sig TEXT DEFAULT ''")
+        except Exception:
+            pass
+
         con.commit()
 
     # Track B one-shot backfill: ensure every existing user has their
@@ -3962,42 +3976,81 @@ def create_call(caller_id: int, callee_id: int, call_type: str,
 
 def save_pending_call_offer(call_id: int, caller_id: int, callee_id: int,
                             from_nickname: str, from_avatar: Optional[str],
-                            call_type: str, sdp: str):
+                            call_type: str, sdp: str,
+                            fp_sig: Optional[str] = None):
+    # `fp_sig` is the Track E signed-fingerprint blob — opaque base64
+    # JSON the caller's client built and signed with its Signal identity
+    # key. Server stores verbatim and replays it when the callee
+    # cold-starts so the integrity check survives a push-wake.
     with _conn() as con:
-        con.execute(
-            """INSERT OR REPLACE INTO pending_call_offers
-               (call_id, caller_id, callee_id, from_nickname, from_avatar, call_type, sdp)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (call_id, caller_id, callee_id, from_nickname, from_avatar or "", call_type, sdp),
-        )
+        try:
+            con.execute(
+                """INSERT OR REPLACE INTO pending_call_offers
+                   (call_id, caller_id, callee_id, from_nickname, from_avatar, call_type, sdp, fp_sig)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (call_id, caller_id, callee_id, from_nickname, from_avatar or "",
+                 call_type, sdp, fp_sig or ""),
+            )
+        except sqlite3.OperationalError:
+            # Pre-migration schema (no fp_sig column). Fall back so we
+            # never block call setup on a stale DB.
+            con.execute(
+                """INSERT OR REPLACE INTO pending_call_offers
+                   (call_id, caller_id, callee_id, from_nickname, from_avatar, call_type, sdp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (call_id, caller_id, callee_id, from_nickname, from_avatar or "",
+                 call_type, sdp),
+            )
         con.commit()
 
 
 def get_pending_call_offer(call_id: int, callee_id: int) -> Optional[Dict]:
     with _conn() as con:
-        row = con.execute(
-            """SELECT p.call_id, p.caller_id, p.callee_id, p.from_nickname, p.from_avatar,
-                      p.call_type, p.sdp, c.status
-               FROM pending_call_offers p
-               JOIN calls c ON c.id = p.call_id
-               WHERE p.call_id=? AND p.callee_id=?""",
-            (call_id, callee_id),
-        ).fetchone()
+        try:
+            row = con.execute(
+                """SELECT p.call_id, p.caller_id, p.callee_id, p.from_nickname, p.from_avatar,
+                          p.call_type, p.sdp, COALESCE(p.fp_sig, '') AS fp_sig, c.status
+                   FROM pending_call_offers p
+                   JOIN calls c ON c.id = p.call_id
+                   WHERE p.call_id=? AND p.callee_id=?""",
+                (call_id, callee_id),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = con.execute(
+                """SELECT p.call_id, p.caller_id, p.callee_id, p.from_nickname, p.from_avatar,
+                          p.call_type, p.sdp, '' AS fp_sig, c.status
+                   FROM pending_call_offers p
+                   JOIN calls c ON c.id = p.call_id
+                   WHERE p.call_id=? AND p.callee_id=?""",
+                (call_id, callee_id),
+            ).fetchone()
     return dict(row) if row else None
 
 
 def get_latest_pending_call_offer(callee_id: int) -> Optional[Dict]:
     with _conn() as con:
-        row = con.execute(
-            """SELECT p.call_id, p.caller_id, p.callee_id, p.from_nickname, p.from_avatar,
-                      p.call_type, p.sdp, c.status
-               FROM pending_call_offers p
-               JOIN calls c ON c.id = p.call_id
-               WHERE p.callee_id=? AND c.status='ringing'
-               ORDER BY p.call_id DESC
-               LIMIT 1""",
-            (callee_id,),
-        ).fetchone()
+        try:
+            row = con.execute(
+                """SELECT p.call_id, p.caller_id, p.callee_id, p.from_nickname, p.from_avatar,
+                          p.call_type, p.sdp, COALESCE(p.fp_sig, '') AS fp_sig, c.status
+                   FROM pending_call_offers p
+                   JOIN calls c ON c.id = p.call_id
+                   WHERE p.callee_id=? AND c.status='ringing'
+                   ORDER BY p.call_id DESC
+                   LIMIT 1""",
+                (callee_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = con.execute(
+                """SELECT p.call_id, p.caller_id, p.callee_id, p.from_nickname, p.from_avatar,
+                          p.call_type, p.sdp, '' AS fp_sig, c.status
+                   FROM pending_call_offers p
+                   JOIN calls c ON c.id = p.call_id
+                   WHERE p.callee_id=? AND c.status='ringing'
+                   ORDER BY p.call_id DESC
+                   LIMIT 1""",
+                (callee_id,),
+            ).fetchone()
     return dict(row) if row else None
 
 
