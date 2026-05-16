@@ -822,10 +822,26 @@ const WS = (() => {
         if (env && env.v === 2 && env.t === 'sk'
             && window.Signal && window.Signal.room
             && (msg.user_id || msg.user_id === 0)) {
+          // Plaintext cache: short-circuit when we've already decrypted
+          // this envelope (history reload, retransmit) OR when we sent
+          // it ourselves (sender chain can't decrypt own ciphertext).
+          try {
+            if (typeof Messages !== 'undefined' && Messages._ptCacheGet) {
+              const _cached = Messages._ptCacheGet(raw);
+              if (typeof _cached === 'string') {
+                return { ...msg, content: _cached, _decrypted: true, _v2: true };
+              }
+            }
+          } catch {}
           try {
             const plain = await window.Signal.room.decryptMessage(room, msg.user_id, env);
             try { console.log('[ws.decryptMsg] v2-sk', room, 'from', msg.user_id, 'ok=', typeof plain === 'string'); } catch {}
             if (typeof plain === 'string') {
+              try {
+                if (typeof Messages !== 'undefined' && Messages._ptCachePut) {
+                  Messages._ptCachePut(raw, plain);
+                }
+              } catch {}
               const out = { ...msg, content: plain, _decrypted: true, _v2: true };
               if (msg.reply_content && typeof msg.reply_content === 'string'
                   && msg.reply_content[0] === '{') {

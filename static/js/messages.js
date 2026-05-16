@@ -11,6 +11,65 @@ const Messages = (() => {
   let _previewCache = {};
   let _replyTo = null; // { id, nickname, content }
 
+  // ── Room v2-sk plaintext cache ───────────────────────────────────────
+  //
+  // Sender-Key ratchets advance state on every successful decrypt; replay
+  // of the same envelope (history reload, WS retransmit, retrySKDecrypt
+  // after a late SKDM) then fails with "replay — iteration already
+  // consumed" or "skipped iteration". We also can never decrypt our own
+  // outgoing ciphertext from our SENDING chain — but we *do* know the
+  // plaintext at send time. Cache by ciphertext-envelope-JSON, persisted
+  // to localStorage so reloads pick it up.
+  const _RM_PT_CACHE_KEY = 'ft_room_pt_v1';
+  const _RM_PT_CACHE_CAP = 6000;
+  const _rmPtCache       = new Map();
+  let   _rmPtLoaded      = false;
+  let   _rmPtDirty       = false;
+  let   _rmPtSaveT       = 0;
+  function _rmPtLoad() {
+    if (_rmPtLoaded) return;
+    _rmPtLoaded = true;
+    try {
+      const raw = localStorage.getItem(_RM_PT_CACHE_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object') {
+        for (const k of Object.keys(obj)) _rmPtCache.set(k, String(obj[k] || ''));
+      }
+    } catch {}
+  }
+  function _rmPtSave() {
+    if (!_rmPtDirty) return;
+    _rmPtDirty = false;
+    try {
+      const out = {};
+      let n = 0;
+      for (const [k, v] of _rmPtCache) {
+        if (++n > _RM_PT_CACHE_CAP) break;
+        out[k] = v;
+      }
+      localStorage.setItem(_RM_PT_CACHE_KEY, JSON.stringify(out));
+    } catch {}
+  }
+  function _ptCacheGet(cipher) {
+    _rmPtLoad();
+    return _rmPtCache.get(cipher);
+  }
+  function _ptCachePut(cipher, plain) {
+    _rmPtLoad();
+    if (_rmPtCache.has(cipher)) _rmPtCache.delete(cipher);
+    _rmPtCache.set(cipher, String(plain));
+    while (_rmPtCache.size > _RM_PT_CACHE_CAP) {
+      const k0 = _rmPtCache.keys().next().value;
+      if (k0 === undefined) break;
+      _rmPtCache.delete(k0);
+    }
+    _rmPtDirty = true;
+    if (!_rmPtSaveT) {
+      _rmPtSaveT = setTimeout(() => { _rmPtSaveT = 0; _rmPtSave(); }, 250);
+    }
+  }
+
   // Inline SVG logos for bridge origin badge (tiny, monochrome, currentColor).
   const _TG_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg>';
   const _DC_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z"/></svg>';
@@ -2250,6 +2309,7 @@ const Messages = (() => {
       }
       const env = await window.Signal.room.encryptMessage(State.currentRoom, newContent);
       encrypted = JSON.stringify(env);
+      try { _ptCachePut(encrypted, newContent); } catch {}
     }
 
     WS.send({ type: 'edit', id, content: encrypted });
@@ -3168,7 +3228,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, _ptCacheGet, _ptCachePut, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
@@ -3432,6 +3492,10 @@ async function sendMessage() {
       }
       const env = await window.Signal.room.encryptMessage(State.currentRoom, text);
       encrypted = JSON.stringify(env);
+      // Seed plaintext cache so when the server echoes this message back
+      // (or we reload history) ws.decryptMsg returns the cached text
+      // instead of replaying the chain on our sending side and failing.
+      try { _ptCachePut(encrypted, text); } catch {}
     } else {
       // Media-only send: no text body to encrypt.
       encrypted = text;

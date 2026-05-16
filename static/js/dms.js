@@ -2086,6 +2086,12 @@ async function sendDMMessage () {
     try {
       const env = await Signal.encryptDM(_peerUidForEnc, content);
       encryptedContent = JSON.stringify(env);
+      // Seed plaintext cache: we can NEVER decrypt our own outgoing
+      // ciphertext (libsignal has a sending chain only). When the server
+      // echoes this message back on history reload, _decryptDMPreviewContent
+      // will look it up by ciphertext and return the cached plaintext
+      // instead of failing with 'Tried to decrypt on a sending chain'.
+      try { _dmPtCachePut(encryptedContent, content); } catch {}
     } catch (e) {
       console.error('[dms] Signal.encryptDM failed:', e);
       try { UI.showToast('Could not encrypt message — peer may need to open the app.', 'error'); } catch {}
@@ -2608,6 +2614,7 @@ async function submitDMEdit(id) {
   try {
     const env = await Signal.encryptDM(_peerUidEdit, newContent);
     enc = JSON.stringify(env);
+    try { _dmPtCachePut(enc, newContent); } catch {}
   } catch (e) {
     console.error('[dms] edit Signal.encryptDM failed:', e);
     toast('Could not encrypt edit.', 'error');
