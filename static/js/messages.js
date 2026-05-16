@@ -2003,18 +2003,32 @@ const Messages = (() => {
           const contentEl = pendingEl.querySelector('.msg-content');
           // If the server echo is still a v2 sender-key envelope (the
           // sender's own message can't be decrypted because we never
-          // store a peer state for ourselves), keep the optimistic
-          // plaintext rather than overwriting the bubble with raw JSON.
+          // store a peer state for ourselves), recover the original
+          // plaintext from the send-time cache. textContent fallback is
+          // poison here: the optimistic bubble has already rendered the
+          // invite/preview placeholder span ("🐸 Loading invite…"), so
+          // reading textContent and re-formatting STRIPS the URL,
+          // destroying invite/link/share hydration. With the cache hit
+          // we get the true plaintext URL back and the placeholder is
+          // regenerated correctly.
           let _echoContent = msg.content || '';
+          let _skipContentRewrite = false;
           if (typeof _echoContent === 'string' && _echoContent[0] === '{') {
             try {
               const _env = JSON.parse(_echoContent);
-              if (_env && _env.v === 2 && _env.t === 'sk' && contentEl) {
-                _echoContent = contentEl.textContent || '';
+              if (_env && _env.v === 2 && _env.t === 'sk') {
+                const _cached = _ptCacheGet(_echoContent);
+                if (typeof _cached === 'string' && _cached) {
+                  _echoContent = _cached;
+                } else {
+                  // No cache hit — leave the optimistic innerHTML
+                  // intact (it already has the right placeholder).
+                  _skipContentRewrite = true;
+                }
               }
             } catch {}
           }
-          if (contentEl) contentEl.innerHTML = _formatContent(_echoContent);
+          if (contentEl && !_skipContentRewrite) contentEl.innerHTML = _formatContent(_echoContent);
           const timeEl = pendingEl.querySelector('.msg-time');
           if (timeEl) timeEl.textContent = UI.formatTime(msg.created_at);
           // Optimistic bubble had no media (temp msg always sets media_data:null);
