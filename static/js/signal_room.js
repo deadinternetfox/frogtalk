@@ -467,6 +467,67 @@
     } catch { return false; }
   }
 
+  // ── SKDM transport over the backend relay (Track C Phase 3) ──────────
+  //
+  // The recipient's identity is already established by Track A. We:
+  //   1. Wrap the SKDM payload in a marker JSON so the receiver can
+  //      distinguish it from a real DM body.
+  //   2. Encrypt that JSON to the recipient using `Signal.encryptDM`.
+  //   3. POST the resulting opaque envelope to `/api/signal/skdm/{uid}`
+  //      together with the target room id.
+  //
+  // The server cannot read the envelope. If the recipient is offline it
+  // spools the row and the WS connect handler drains it on next login.
+  async function sendSKDMTo(peerUserId, skdmPayload) {
+    if (!skdmPayload || typeof skdmPayload !== 'object') {
+      throw new Error('sendSKDMTo: bad payload');
+    }
+    if (!(window.Signal && typeof window.Signal.encryptDM === 'function')) {
+      throw new Error('sendSKDMTo: Signal DM transport unavailable');
+    }
+    const peer = Number(peerUserId) | 0;
+    if (peer <= 0) throw new Error('sendSKDMTo: bad recipient');
+    const roomId = String(skdmPayload.r || '');
+    if (!roomId) throw new Error('sendSKDMTo: missing room id in payload');
+
+    const marker = JSON.stringify({ __skdm: 1, p: skdmPayload });
+    const env = await window.Signal.encryptDM(peer, marker);
+
+    const resp = await fetch(`/api/signal/skdm/${peer}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        room_id: roomId,
+        envelope: JSON.stringify(env),
+      }),
+    });
+    if (!resp.ok) {
+      let detail = '';
+      try { detail = (await resp.json())?.detail || ''; } catch {}
+      throw new Error(`sendSKDMTo: server ${resp.status}${detail ? ' ' + detail : ''}`);
+    }
+    return await resp.json().catch(() => ({ ok: true }));
+  }
+
+  // Convenience: fan the current chain's SKDM to a list of peer uids
+  // (excluding self). Failures per-peer are swallowed and reported in
+  // the result so callers can retry only the failing recipients.
+  async function fanSKDMTo(roomId, peerUids) {
+    const skdm = await buildSKDMForCurrentChain(roomId);
+    if (!skdm) throw new Error('fanSKDMTo: no self chain — rotate first');
+    const results = [];
+    for (const uid of (peerUids || [])) {
+      try {
+        await sendSKDMTo(uid, skdm);
+        results.push({ uid, ok: true });
+      } catch (e) {
+        results.push({ uid, ok: false, error: String(e && e.message || e) });
+      }
+    }
+    return results;
+  }
+
   // ── Public surface ───────────────────────────────────────────────────
 
   const Room = {
@@ -480,6 +541,8 @@
     hasSelfKey,
     epoch,
     describeRoom,
+    sendSKDMTo,
+    fanSKDMTo,
   };
 
   try {

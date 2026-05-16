@@ -706,6 +706,62 @@ const Rooms = (() => {
       State.bridgeOut[name] = false;
     }
 
+    // ── Track C Phase 3: ensure sender-keys session for this room ───────
+    // Gated by:
+    //   • Signal.room being available (libsignal + WebCrypto loaded)
+    //   • This being a real channel (not DM / not welcome-screen)
+    //   • The channel NOT being bridge-outbound (those rooms intentionally
+    //     stay legacy-AES so the bridge can read+forward plaintext server
+    //     side; v2 would defeat the bridge).
+    //
+    // Fire-and-forget: failures here must NEVER block the room switch.
+    try {
+      if (type !== 'dm'
+          && window.Signal
+          && window.Signal.room
+          && window.Signal.room.isAvailable
+          && window.Signal.room.isAvailable()) {
+        (async () => {
+          // Wait one microtask so the bridgeOut probe above has a chance
+          // to settle. If it's still pending, default to "not bridged".
+          await Promise.resolve();
+          if (State.bridgeOut && State.bridgeOut[name]) return;
+          try {
+            const had = await window.Signal.room.hasSelfKey(name);
+            if (!had) {
+              await window.Signal.room.rotateSenderKey(name);
+            }
+            // Fan SKDM to all current members (minus self). Use the
+            // server's member listing so offline peers get spooled
+            // copies via the relay's offline path.
+            const myId = Number(State.user?.id || 0) | 0;
+            const r = await fetch(
+              `/api/rooms/${encodeURIComponent(name)}/members`,
+              { credentials: 'same-origin',
+                headers: State.token
+                  ? { 'X-Session-Token': State.token } : {} }
+            );
+            if (!r.ok) return;
+            const j = await r.json().catch(() => ({}));
+            const peers = (j.members || [])
+              .map(m => Number(m.user_id) | 0)
+              .filter(uid => uid > 0 && uid !== myId);
+            if (!peers.length) return;
+            const skdm = await window.Signal.room.buildSKDMForCurrentChain(name);
+            if (!skdm) return;
+            // Best-effort fan; per-peer failures are returned in results
+            // but we don't surface them — catch-up flow handles laggards.
+            for (const uid of peers) {
+              try { await window.Signal.room.sendSKDMTo(uid, skdm); }
+              catch (e) { /* ignored: handled on receive-side decrypt */ }
+            }
+          } catch (e) {
+            try { console.warn('[rooms] SKDM bootstrap failed', name, e); } catch {}
+          }
+        })();
+      }
+    } catch {}
+
     // Refresh the Discord-style "who's in voice" bar above chat for this room.
     try {
       if (type !== 'dm' && typeof refreshVoicePresenceBar === 'function') {

@@ -180,6 +180,36 @@ const WS = (() => {
         }
         break;
       }
+      // Sender-Key Distribution Message (Track C Phase 3). The server
+      // relays an opaque Track-A v2 DM envelope from `from_id`. We
+      // decrypt it locally and feed the inner SKDM payload to the
+      // room sender-keys store. Failures are swallowed: the worst case
+      // is that we silently can't decrypt that sender's next message
+      // and the catch-up flow re-fans.
+      case 'skdm': {
+        try {
+          const fromId   = Number(data.from_id) | 0;
+          const roomId   = String(data.room_id || '');
+          const envStr   = String(data.envelope || '');
+          if (!fromId || !roomId || !envStr) break;
+          if (!(window.Signal && typeof window.Signal.decryptDM === 'function')) break;
+          let env;
+          try { env = JSON.parse(envStr); }
+          catch { break; }
+          let plain;
+          try { plain = await window.Signal.decryptDM(fromId, env); }
+          catch { break; }
+          let inner;
+          try { inner = JSON.parse(plain); }
+          catch { break; }
+          if (!inner || inner.__skdm !== 1 || !inner.p) break;
+          if (!(window.Signal?.room?.isAvailable?.())) break;
+          await window.Signal.room.processSKDM(fromId, inner.p);
+        } catch (e) {
+          try { console.warn('[ws] skdm processing failed', e); } catch {}
+        }
+        break;
+      }
       case 'message': {
         const dm = await decryptMsg(data, room);
         Messages.appendMessage(room, dm);
@@ -307,6 +337,31 @@ const WS = (() => {
           try { Users.loadChannelMembers(data.room); } catch {}
         }
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
+
+        // Track C Phase 3: if WE have a sender-key chain for this room,
+        // ship the new member our current SKDM so they can decrypt our
+        // next message immediately. Best-effort, fire-and-forget.
+        try {
+          const newUid = Number(data.user_id) | 0;
+          const myUid  = Number(State.user?.id) | 0;
+          if (newUid && newUid !== myUid
+              && data.room === room
+              && window.Signal && window.Signal.room
+              && window.Signal.room.isAvailable
+              && window.Signal.room.isAvailable()
+              && !(State.bridgeOut && State.bridgeOut[data.room])) {
+            (async () => {
+              try {
+                if (!(await window.Signal.room.hasSelfKey(data.room))) return;
+                const skdm = await window.Signal.room.buildSKDMForCurrentChain(data.room);
+                if (!skdm) return;
+                await window.Signal.room.sendSKDMTo(newUid, skdm);
+              } catch (e) {
+                try { console.warn('[ws] member_joined SKDM fan failed', e); } catch {}
+              }
+            })();
+          }
+        } catch {}
         break;
       }
       case 'bot_added':
@@ -639,6 +694,56 @@ const WS = (() => {
         try {
           if (data.room && data.room === State.currentRoom && data.nickname) {
             UI.showToast(`@${data.nickname} was banned from #${data.room}`, 'info');
+          }
+        } catch {}
+
+        // Track C Phase 3: a banned member must NOT be able to decrypt
+        // future messages even if they retained their device. Rotate
+        // our sender key for this room and re-fan to the remaining
+        // members. Best-effort; on failure we surface a console warn
+        // but keep going (the next room-enter will re-fan anyway).
+        try {
+          if (data.room
+              && window.Signal && window.Signal.room
+              && window.Signal.room.isAvailable
+              && window.Signal.room.isAvailable()
+              && !(State.bridgeOut && State.bridgeOut[data.room])) {
+            (async () => {
+              try {
+                if (!(await window.Signal.room.hasSelfKey(data.room))) return;
+                await window.Signal.room.rotateSenderKey(data.room);
+
+                // Also forget the banned user's known chain so we won't
+                // accept any future messages signed by their old key.
+                const bannedUid = Number(data.user_id) | 0;
+                if (bannedUid) {
+                  try { await window.Signal.room.forgetSender(data.room, bannedUid); } catch {}
+                }
+
+                // Re-fan the new SKDM to everyone else.
+                const myUid = Number(State.user?.id) | 0;
+                const r = await fetch(
+                  `/api/rooms/${encodeURIComponent(data.room)}/members`,
+                  { credentials: 'same-origin',
+                    headers: State.token
+                      ? { 'X-Session-Token': State.token } : {} }
+                );
+                if (!r.ok) return;
+                const j = await r.json().catch(() => ({}));
+                const peers = (j.members || [])
+                  .map(m => Number(m.user_id) | 0)
+                  .filter(uid => uid > 0 && uid !== myUid && uid !== bannedUid);
+                if (!peers.length) return;
+                const skdm = await window.Signal.room.buildSKDMForCurrentChain(data.room);
+                if (!skdm) return;
+                for (const uid of peers) {
+                  try { await window.Signal.room.sendSKDMTo(uid, skdm); }
+                  catch (e) { /* per-peer failures handled by catch-up */ }
+                }
+              } catch (e) {
+                try { console.warn('[ws] user_banned re-fan failed', e); } catch {}
+              }
+            })();
           }
         } catch {}
         break;

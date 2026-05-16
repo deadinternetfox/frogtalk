@@ -221,3 +221,82 @@ async def signal_config():
         "dm_v2_enabled":    _flag_enabled(),
         "room_v2_enabled":  _room_v2_flag_enabled(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Sender-Key Distribution Message (SKDM) relay — Track C Phase 3
+# ---------------------------------------------------------------------------
+#
+# Design:
+#   • Sender encrypts a JSON SKDM payload as a Track-A v2 DM envelope to
+#     the recipient (X3DH+Ratchet, just like any other DM body), then
+#     POSTs it here together with the target room id.
+#   • Server is OPAQUE to the envelope contents — it cannot read the
+#     sender key. It simply hands the envelope to the recipient over WS
+#     if online, otherwise spools it in `signal_pending_skdms` for
+#     drain on next WS connect.
+#   • This is structurally distinct from a real DM: no `dms` row, no
+#     conversation listing, no notification, no preview update. The
+#     recipient handles it silently inside `Signal.room.processSKDM`.
+
+class SkdmRelayBody(BaseModel):
+    room_id:  str = Field(..., min_length=1, max_length=128)
+    # The opaque DM-v2 envelope JSON string. We don't parse it — the
+    # recipient does. Caps at 16 KiB which is comfortably above a
+    # realistic SKDM (≈ 1-2 KiB) but stops obvious abuse.
+    envelope: str = Field(..., min_length=8, max_length=16 * 1024)
+
+
+@router.post("/skdm/{recipient_uid}")
+@limiter.limit("120/minute")
+async def relay_skdm(
+    request: Request,
+    recipient_uid: int,
+    body: SkdmRelayBody,
+    user: dict = Depends(get_current_user),
+):
+    """Deliver an SKDM envelope to `recipient_uid`.
+
+    Returns ``{"ok": true, "delivered": "live"|"spooled"}``.
+    """
+    _require_flag()
+    if not _room_v2_flag_enabled():
+        raise HTTPException(status_code=503, detail="room_v2_disabled")
+    if recipient_uid <= 0:
+        raise HTTPException(status_code=400, detail="bad_recipient")
+    if int(recipient_uid) == int(user["id"]):
+        # An SKDM-to-self is a client bug; cheap to reject.
+        raise HTTPException(status_code=400, detail="self_skdm")
+
+    sender_id = int(user["id"])
+    room_id   = body.room_id.strip()
+    envelope  = body.envelope
+
+    # Lazy import to avoid a circular import at router-registration time
+    # (ws_manager pulls from database which pulls from .env which …)
+    from ws_manager import manager
+
+    payload = {
+        "type":      "skdm",
+        "from_id":   sender_id,
+        "room_id":   room_id,
+        "envelope":  envelope,
+    }
+
+    delivered = "spooled"
+    if manager.is_user_online(int(recipient_uid)):
+        try:
+            await manager.send_to_user(int(recipient_uid), payload)
+            delivered = "live"
+        except Exception:
+            # Fall back to spool on any send error so the recipient
+            # still picks it up on next connect.
+            delivered = "spooled"
+
+    if delivered != "live":
+        await run_in_threadpool(
+            db.signal_skdm_enqueue,
+            int(recipient_uid), sender_id, room_id, envelope,
+        )
+
+    return {"ok": True, "delivered": delivered}

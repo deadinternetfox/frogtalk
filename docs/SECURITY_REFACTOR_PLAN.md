@@ -17,6 +17,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 | C — Rooms (Sender Keys) | phase 1 ✅ dark backend | `f14cc01` | — |
 | C — Rooms (Sender Keys) | phase 2: receive path — ws.js + messages.js detect `{v:2,t:'sk'}` and route through `Signal.room.decryptMessage`; dms.js recognises SKDM-over-DM `{__skdm:1,p:{…}}` and feeds `Signal.room.processSKDM` | ✅ shipped (dark — no senders yet) | (this commit) |
 | C — Rooms (Sender Keys) | phase 2b: Encryption-info UI — modal switches DM vs room context; new room card shows Sender-Keys mode, local epoch, self/peer chain state; mode-line auto-toggles "AES-256-GCM" ⇄ "Signal Sender Keys"; exposes `Signal.room.describeRoom(roomId)` diagnostics surface | ✅ shipped | (this commit) |
+| C — Rooms (Sender Keys) | phase 3: send flip + SKDM fan-out — backend `POST /api/signal/skdm/{recipient_uid}` relay + `signal_pending_skdms` offline spool (drained on WS connect, FIFO per-recipient cap + age cap); frontend `Signal.room.sendSKDMTo`/`fanSKDMTo`; room-enter rotates self key when absent and fans to current members; send path + edit path emit `{v:2,t:'sk'}` envelopes when `hasSelfKey` and room is not bridge-outbound (media stays under legacy AES for transition); `member_joined` ships current SKDM to new joiner; `user_banned` rotates self key + forgets banned sender + re-fans to remaining members; WS `case 'skdm'` decrypts envelope via `Signal.decryptDM` and feeds `processSKDM`; failures everywhere fall through to legacy AES so sends never block | ✅ shipped | (this commit) |
 | D — Wall posts + media at rest | not started | — | — |
 | E — Voice/video integrity | 1: dark backend (fp_sig column on `pending_call_offers`, WS payload passthrough, REST cold-resume), `Signal.signCallFingerprint` / `verifyCallFingerprint` helpers | ✅ shipped (not yet wired into calls.js) | `13e4ced` |
 | E — Voice/video integrity | 2: wire calls.js to sign on offer/answer + verify on receive + Safety Numbers UI | ✅ shipped | `fb3175a` |
@@ -24,6 +25,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 | F — Linked devices | not started | — | — |
 | G — Sealed Sender + metadata | not started | — | — |
 | H — Cleanup (transitional code) | not started | — | — |
+| H — Cleanup (transitional code) | doc refresh: update marketing/security copy on `static/home.html` + `static/privacy.html`, surface Signal + Sender-Keys in `README.md`, refresh `static/docs-api.html`/`static/docs-node.html` where they describe encryption; bump version refs | not started | — | — |
 
 This document is the single source of truth for the hardening tracks
 raised by an external pentester. All tracks are in scope; they are

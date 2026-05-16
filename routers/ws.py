@@ -239,6 +239,25 @@ async def websocket_endpoint(
     except Exception:
         logger.exception("drain_pending_call_signals failed")
 
+    # Drain any pending SKDMs (Track C Phase 3) queued while this user
+    # was offline. Each row is an opaque Track-A v2 DM envelope that the
+    # recipient decrypts client-side via Signal.decryptDM, then feeds to
+    # Signal.room.processSKDM. Server is just the relay.
+    try:
+        pending_skdms = db.signal_skdm_drain(int(user["id"]))
+        for row in pending_skdms:
+            try:
+                await manager.send_personal(websocket, {
+                    "type":     "skdm",
+                    "from_id":  int(row.get("sender_id") or 0),
+                    "room_id":  str(row.get("room_id") or ""),
+                    "envelope": str(row.get("envelope") or ""),
+                })
+            except Exception:
+                pass
+    except Exception:
+        logger.exception("signal_skdm_drain failed")
+
     # Auto-add to room_members on connect so they appear in the offline list
     # when they're not connected. Skip DM channels (prefixed with "dm-").
     if not room_name.startswith("dm-"):

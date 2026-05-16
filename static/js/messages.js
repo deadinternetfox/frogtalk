@@ -2153,7 +2153,30 @@ const Messages = (() => {
     if (!newContent) return;
 
     const key = State.roomKeys[State.currentRoom];
-    const encrypted = key ? await Crypto.encrypt(newContent, key) : newContent;
+    // Track C Phase 3: edits follow the same envelope choice as send.
+    // If we have a sender-key chain for this room (and the room isn't
+    // bridge-outbound), emit a v2 envelope. Otherwise fall back to
+    // legacy AES.
+    let encrypted;
+    let v2Used = false;
+    const hasOutbound = !!(State.bridgeOut && State.bridgeOut[State.currentRoom]);
+    try {
+      if (!hasOutbound
+          && window.Signal && window.Signal.room
+          && window.Signal.room.isAvailable
+          && window.Signal.room.isAvailable()
+          && await window.Signal.room.hasSelfKey(State.currentRoom)) {
+        const env = await window.Signal.room.encryptMessage(State.currentRoom, newContent);
+        encrypted = JSON.stringify(env);
+        v2Used = true;
+      }
+    } catch (e) {
+      try { console.warn('[messages] v2 edit-encrypt failed, falling back', e); } catch {}
+      v2Used = false;
+    }
+    if (!v2Used) {
+      encrypted = key ? await Crypto.encrypt(newContent, key) : newContent;
+    }
 
     WS.send({ type: 'edit', id, content: encrypted });
     // Optimistic update
@@ -3304,7 +3327,32 @@ async function sendMessage() {
       State._bridgePrivacyNotice[State.currentRoom] = true;
       UI.showToast('Outbound bridge active: new room messages in this channel are sent without E2EE.', 'info');
     }
-    const encrypted = (key && text && !hasOutbound) ? await Crypto.encrypt(text, key) : text;
+    // ── Track C Phase 3: prefer Sender Keys v2 if we have a chain ────────
+    // hasOutbound rooms intentionally stay on legacy AES (so the bridge
+    // can still forward readable text). Plain media-only sends (text="")
+    // still take the legacy path; the v2 envelope is only used for text.
+    let encrypted;
+    let v2Used = false;
+    try {
+      if (text && !hasOutbound
+          && window.Signal && window.Signal.room
+          && window.Signal.room.isAvailable
+          && window.Signal.room.isAvailable()
+          && await window.Signal.room.hasSelfKey(State.currentRoom)) {
+        const env = await window.Signal.room.encryptMessage(State.currentRoom, text);
+        encrypted = JSON.stringify(env);
+        v2Used = true;
+      }
+    } catch (e) {
+      // Fall through to legacy AES on any v2 encrypt failure so the user
+      // is never blocked from sending. The receive path will simply use
+      // the AES branch.
+      try { console.warn('[messages] v2 encrypt failed, falling back', e); } catch {}
+      v2Used = false;
+    }
+    if (!v2Used) {
+      encrypted = (key && text && !hasOutbound) ? await Crypto.encrypt(text, key) : text;
+    }
     if (mediaData && key && !hasOutbound && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
       UI.showProgressToast('Encrypting…', 22);
       mediaData = await Crypto.encryptPayload(mediaData, key);
