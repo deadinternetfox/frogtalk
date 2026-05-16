@@ -579,10 +579,89 @@ function _invalidateDMPeerKey(_peerId) {
   // Track H cleanup: no caches left to invalidate.
 }
 
+// ── Decrypted-plaintext cache ──────────────────────────────────────────
+//
+// Signal Double-Ratchet advances state on the FIRST successful decrypt.
+// If we then try to decrypt the same envelope again (e.g. sidebar preview
+// load, then channel-open history reload, then a WS retransmit), libsignal
+// returns "Bad MAC" / "Message key not found" because the chain has moved.
+// Fix: remember the plaintext we computed, keyed by the ciphertext itself,
+// and short-circuit any subsequent decrypt attempt for the same envelope.
+// Backed by localStorage so the cache survives reloads (the DM history we
+// pull from the server is what re-triggers the duplicate decrypts).
+const _DM_PT_CACHE_KEY  = 'ft_dm_pt_v1';
+const _DM_PT_CACHE_CAP  = 4000;          // entries
+const _dmPtCache        = new Map();     // ciphertext → plaintext
+let   _dmPtCacheLoaded  = false;
+let   _dmPtCacheDirty   = false;
+let   _dmPtCacheSaveT   = 0;
+
+function _dmPtCacheLoad() {
+  if (_dmPtCacheLoaded) return;
+  _dmPtCacheLoaded = true;
+  try {
+    const raw = localStorage.getItem(_DM_PT_CACHE_KEY);
+    if (!raw) return;
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object') {
+      for (const k of Object.keys(obj)) {
+        _dmPtCache.set(k, String(obj[k] || ''));
+      }
+    }
+  } catch {}
+}
+
+function _dmPtCacheSave() {
+  if (!_dmPtCacheDirty) return;
+  _dmPtCacheDirty = false;
+  try {
+    const out = {};
+    // Insertion order = LRU-ish (we re-insert on every hit).
+    let n = 0;
+    for (const [k, v] of _dmPtCache) {
+      if (++n > _DM_PT_CACHE_CAP) break;
+      out[k] = v;
+    }
+    localStorage.setItem(_DM_PT_CACHE_KEY, JSON.stringify(out));
+  } catch {}
+}
+
+function _dmPtCacheGet(cipher) {
+  _dmPtCacheLoad();
+  return _dmPtCache.get(cipher);
+}
+
+function _dmPtCachePut(cipher, plain) {
+  _dmPtCacheLoad();
+  // Refresh insertion order.
+  if (_dmPtCache.has(cipher)) _dmPtCache.delete(cipher);
+  _dmPtCache.set(cipher, String(plain));
+  // Evict oldest if over cap.
+  while (_dmPtCache.size > _DM_PT_CACHE_CAP) {
+    const firstKey = _dmPtCache.keys().next().value;
+    if (firstKey === undefined) break;
+    _dmPtCache.delete(firstKey);
+  }
+  _dmPtCacheDirty = true;
+  if (!_dmPtCacheSaveT) {
+    _dmPtCacheSaveT = setTimeout(() => {
+      _dmPtCacheSaveT = 0;
+      _dmPtCacheSave();
+    }, 250);
+  }
+}
+
 async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
   const raw = String(cipher || '');
   if (!raw) return '';
   if (_parseDMCallLog(raw)) return raw;
+
+  // Plaintext cache: if we've previously decrypted this exact envelope,
+  // return the cached plaintext without touching the ratchet. This is
+  // essential because libsignal advances state on first decrypt and
+  // any second call would fail with "Bad MAC".
+  const _cached = _dmPtCacheGet(raw);
+  if (_cached !== undefined) return _cached;
 
   // Track A v2 Signal envelope is the ONLY supported DM crypto path
   // after Track H cleanup. Wire format: `{v:2,t:'pre'|'msg',b:'<b64>'}`.
@@ -615,6 +694,9 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
                   }
                 }
               } catch { /* not an SKDM */ }
+              // Cache plaintext so subsequent attempts on the same
+              // envelope skip the ratchet (and don't fail with Bad MAC).
+              _dmPtCachePut(raw, out);
               return out;
             }
           }
