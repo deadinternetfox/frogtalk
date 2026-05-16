@@ -401,6 +401,25 @@ const App = {
     // Build emoji picker
     buildEmojiPicker();
 
+    // Signal Protocol bootstrap. `Signal.init` is idempotent and only
+    // touches IndexedDB; the heavier bundle publish (signed prekey +
+    // OTPK top-up + POST /api/signal/bundle) is fired-and-forgotten so
+    // we don't block the UI. Without this, the first DM/room send on a
+    // fresh login fails with "Encryption layer not ready" because the
+    // only other call site is a lazy init buried in the v2-receive
+    // path.
+    try {
+      if (window.Signal && typeof Signal.init === 'function' && State.user && State.user.id) {
+        Signal.init(State.user.id)
+          .then(() => {
+            if (typeof Signal.ensureMyBundleFresh === 'function') {
+              return Signal.ensureMyBundleFresh();
+            }
+          })
+          .catch(e => console.warn('[Signal] boot init failed', e));
+      }
+    } catch (e) { console.warn('[Signal] boot init threw', e); }
+
     // Show a loading UI in the messages area & channel title immediately so
     // we don't flash the "Welcome to FrogTalk" default header before the
     // last channel has a chance to open. This is cleared by switchToRoom()
