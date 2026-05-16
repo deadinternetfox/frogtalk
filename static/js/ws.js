@@ -859,7 +859,19 @@ const WS = (() => {
               return out;
             }
           } catch (_e) {
-            try { console.warn('[ws.decryptMsg] v2-sk FAIL', room, 'from', msg.user_id, _e && _e.message ? _e.message : _e); } catch {}
+            // Silence self-fails — our own ciphertext from a sending
+            // chain is *expected* to fail decrypt locally. The plaintext
+            // cache handles in-session recovery; historic own messages
+            // (sent from another device or before the cache existed)
+            // fall back to the "📬 Sent elsewhere" placeholder in
+            // _formatContent, which is the correct UX.
+            try {
+              const _myIdL = Number(State.user && State.user.id) | 0;
+              const _peerIdL = Number(msg.user_id) | 0;
+              if (_peerIdL !== _myIdL) {
+                console.warn('[ws.decryptMsg] v2-sk FAIL', room, 'from', msg.user_id, _e && _e.message ? _e.message : _e);
+              }
+            } catch {}
             // Recovery: ask the sender to re-fan their SKDM. Throttle per
             // (room, sender) so we send at most one request every 15s
             // even if many ciphertext bubbles arrive in a burst.

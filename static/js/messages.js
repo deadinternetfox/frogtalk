@@ -171,7 +171,7 @@ const Messages = (() => {
     return '';
   }
 
-  function _formatContent(text) {
+  function _formatContent(text, opts) {
     if (!text) return '';
     // Track A/C v2 wire envelopes: when the receiver cannot decrypt (peer
     // hasn't distributed sender-key, cold device, ratchet step lost, etc.)
@@ -183,6 +183,14 @@ const Messages = (() => {
         const _env = JSON.parse(text);
         if (_env && _env.v === 2 && typeof _env.b === 'string'
             && (_env.t === 'pre' || _env.t === 'msg' || _env.t === 'sk')) {
+          // Own historic messages we can never decrypt locally (libsignal
+          // has no receive chain for our own sender-key, and no plaintext
+          // cache hit — e.g. sent from another device, or before the
+          // cache existed). Render a clearer indicator instead of the
+          // generic lock so the user knows it's not a peer-side failure.
+          if (opts && opts.isOwn) {
+            return '<em style="color:var(--text-muted,#888)" title="Sent from another device or older session — plaintext is not available on this device.">\uD83D\uDCEC Sent elsewhere</em>';
+          }
           return '<em style="color:var(--text-muted,#888)">\uD83D\uDD12 Encrypted message</em>';
         }
       } catch {}
@@ -1601,7 +1609,7 @@ const Messages = (() => {
     // Muted-user collapse: if this author is on the local mute list, render a
     // tiny click-to-reveal placeholder instead of the real content/media.
     const isMutedAuthor = !isOwn && typeof Mute !== 'undefined' && Mute.isUserMuted(msg.nickname);
-    const contentHtml = msg.content ? _formatContent(msg.content) : '<em style="color:#444">Media</em>';
+    const contentHtml = msg.content ? _formatContent(msg.content, { isOwn }) : '<em style="color:#444">Media</em>';
     const mediaHtml = _buildMediaHtml(msg);
     const fwdBadge = _forwardedBadgeHtml(msg);
     const isForwarded = !!(msg && msg.forwarded_from);
