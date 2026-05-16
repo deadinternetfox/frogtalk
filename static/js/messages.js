@@ -1934,6 +1934,25 @@ const Messages = (() => {
     _lastBridge = null;
     _lastBridgeSource = null;
     _lastDate = null;
+    // Snapshot the previous per-room cache by id BEFORE we clear it.
+    // A second loadHistory pass (cached-paint then WS-history re-paint)
+    // may receive msgs whose content is the raw v2 envelope because the
+    // upstream decryptMsg fell through (LS plaintext cache evicted +
+    // sender-chain self-fail). If we already had plaintext for this id
+    // in the previous render pass, prefer that — don't downgrade the
+    // bubble back to a 🔒 placeholder.
+    const _prevById = new Map();
+    try {
+      const _prev = State.messages[room];
+      if (Array.isArray(_prev)) {
+        for (const _pm of _prev) {
+          if (_pm && _pm.id && typeof _pm.content === 'string'
+              && !_looksLikeCiphertext(_pm.content)) {
+            _prevById.set(_pm.id, _pm.content);
+          }
+        }
+      }
+    } catch {}
     // Reset room cache before rebuilding so repeated loadHistory calls
     // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
     State.messages[room] = [];
@@ -1973,6 +1992,30 @@ const Messages = (() => {
         _lastBridgeSource = null;
       }
       const isCont = _shouldContinue(msg);
+      // Plaintext-promotion: if this render pass got a ciphertext-shaped
+      // envelope but a previous pass (cached-paint, WS echo) already had
+      // plaintext for this id, restore it before _msgHtml runs. This
+      // prevents the visible "plaintext → 🔒 flash" on channel switch-back.
+      try {
+        if (msg && msg.id && typeof msg.content === 'string'
+            && _looksLikeCiphertext(msg.content)) {
+          const _prevPlain = _prevById.get(msg.id);
+          if (typeof _prevPlain === 'string' && _prevPlain.length) {
+            msg = { ...msg, content: _prevPlain, _decrypted: true, _v2: true };
+          }
+        }
+      } catch {}
+      // Seed the in-memory plaintext map from any msg we KNOW is
+      // plaintext (either decryptMsg succeeded, cache hit, or the
+      // promotion above). This guarantees that if a later re-render
+      // pass receives ciphertext for the same id, _formatContent's
+      // self-heal will recover the plaintext from the sticky Map.
+      try {
+        if (msg && msg.id && typeof msg.content === 'string'
+            && !_looksLikeCiphertext(msg.content)) {
+          _msgPtSetById(room, msg.id, msg.content);
+        }
+      } catch {}
       html += _msgHtml(msg, isCont);
       _lastNick = msg.nickname;
       _lastBridge = msg.bridge_platform || null;
