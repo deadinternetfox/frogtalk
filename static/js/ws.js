@@ -829,14 +829,41 @@ const WS = (() => {
               }
             }
           } catch {}
-          try {
-            const plain = await window.Signal.room.decryptMessage(room, msg.user_id, env);
-            if (typeof plain === 'string') {
+          // In-flight coalesce: history reload runs `Promise.all(incoming.map(decryptMsg))`,
+          // so two copies of the same envelope (server retransmit, live
+          // WS msg + history overlap, or duplicate id) race the libsignal
+          // sender-key chain. First wins, second throws
+          // "iteration already consumed". Coalesce by envelope key so
+          // all waiters share the same plaintext result.
+          const _coalKey = 'v2sk:' + room + ':' + (msg.user_id | 0) + ':' + env.b;
+          window._v2skInflight = window._v2skInflight || new Map();
+          let _inflight = window._v2skInflight.get(_coalKey);
+          if (!_inflight) {
+            _inflight = (async () => {
               try {
-                if (typeof Messages !== 'undefined' && Messages._ptCachePut) {
-                  Messages._ptCachePut(raw, plain);
+                const p = await window.Signal.room.decryptMessage(room, msg.user_id, env);
+                if (typeof p === 'string') {
+                  try {
+                    if (typeof Messages !== 'undefined' && Messages._ptCachePut) {
+                      Messages._ptCachePut(raw, p);
+                    }
+                  } catch {}
                 }
-              } catch {}
+                return p;
+              } finally {
+                // Keep the entry briefly so any straggler that started
+                // after we resolved still finds the cached plaintext via
+                // _ptCacheGet on next tick; then drop to bound memory.
+                setTimeout(() => {
+                  try { window._v2skInflight && window._v2skInflight.delete(_coalKey); } catch {}
+                }, 500);
+              }
+            })();
+            window._v2skInflight.set(_coalKey, _inflight);
+          }
+          try {
+            const plain = await _inflight;
+            if (typeof plain === 'string') {
               const out = { ...msg, content: plain, _decrypted: true, _v2: true };
               if (msg.reply_content && typeof msg.reply_content === 'string'
                   && msg.reply_content[0] === '{') {
@@ -854,6 +881,19 @@ const WS = (() => {
               return out;
             }
           } catch (_e) {
+            // Before warning/falling-through, re-check the plaintext
+            // cache. A sibling decrypt of the same envelope (different
+            // code path: retrySKDecrypt after SKDM, or a coalesce
+            // winner that landed after our await) may have populated it
+            // while we were awaiting.
+            try {
+              if (typeof Messages !== 'undefined' && Messages._ptCacheGet) {
+                const _late = Messages._ptCacheGet(raw);
+                if (typeof _late === 'string') {
+                  return { ...msg, content: _late, _decrypted: true, _v2: true };
+                }
+              }
+            } catch {}
             // Self-fails are expected (no receive chain for our own
             // sender-key); UI shows "🔒 This message was sent from
             // another device and cannot be decrypted" via _formatContent.
