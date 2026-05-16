@@ -951,10 +951,31 @@ const Messages = (() => {
   }
 
   function _reactionHtml(reactions, msgId) {
-    if (!reactions || typeof reactions === 'string') return '';
-    const entries = typeof reactions === 'object' && !Array.isArray(reactions)
-      ? Object.entries(reactions)
-      : [];
+    if (!reactions) return '';
+    // Server returns reactions in THREE different shapes depending on the
+    // path:
+    //   • toggle_reaction REST → {"👍": 2, "🐸": 1}                (dict)
+    //   • get_messages history → "[{\"emoji\":\"👍\",\"count\":2}]"   (JSON string of list)
+    //   • WS live echo         → already a parsed object (either of above)
+    // The original renderer bailed out the moment it saw a string, which is
+    // why reactions vanished on history reload — leave a server, come back,
+    // and they were gone until the user re-reacted. Normalise everything to
+    // a single [[emoji, count], …] entry list here.
+    let parsed = reactions;
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch { return ''; }
+      if (!parsed) return '';
+    }
+    let entries;
+    if (Array.isArray(parsed)) {
+      entries = parsed
+        .map(r => r && typeof r === 'object' ? [r.emoji, r.count] : null)
+        .filter(e => e && e[0] && Number(e[1]) > 0);
+    } else if (typeof parsed === 'object') {
+      entries = Object.entries(parsed).filter(([k, v]) => k && Number(v) > 0);
+    } else {
+      return '';
+    }
     if (!entries.length) return '';
     // SECURITY: emoji is server-stored but originates from user input; treat
     // as untrusted. Store in data-emoji (HTML-escape via escHtml) and read

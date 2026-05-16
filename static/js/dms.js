@@ -14,50 +14,55 @@ let _dmLoadReqSeq = 0;
 const _dmHistoryCache = new Map();
 const _dmHistoryMeta = new Map();
 
-// Persistent per-message plaintext cache. Once a message has been
-// successfully decrypted on this device we remember it so re-renders,
-// reloads and tab-restores stay readable even if the ECDH shared key
-// later becomes briefly unavailable (e.g. parallel race during cold
-// start). Keyed by channelId; value is {msgId: plaintext}. Capped per
-// channel to keep localStorage bounded.
-const _DM_PLAINTEXT_CACHE_PREFIX = 'frogtalk-dm-plain-v1:';
+// In-memory per-message plaintext cache. Once a message has been
+// successfully decrypted on this device we remember it so re-renders
+// stay readable even if the ECDH shared key later becomes briefly
+// unavailable (e.g. parallel race during cold start).
+//
+// SECURITY: previously persisted to localStorage, which made the entire
+// DM history XSS-exfiltratable. Now lives only in this tab's memory and
+// dies on reload. The ciphertext is still on the server and re-decrypts
+// at the next history fetch — so a reload only costs one decrypt pass,
+// not the user's privacy. Sweep any pre-existing localStorage entries
+// from older versions on module load.
 const _DM_PLAINTEXT_CACHE_MAX = 500;
+const _DM_PLAINTEXT_CACHE = new Map(); // channelId -> Map<msgId, plaintext>
 const _cannotDecryptToastShown = new Set();
-function _dmPlainCacheKey(channelId) {
-  return _DM_PLAINTEXT_CACHE_PREFIX + String(channelId || 0);
-}
-function _readDMPlaintextCache(channelId) {
-  try {
-    const raw = localStorage.getItem(_dmPlainCacheKey(channelId));
-    if (!raw) return {};
-    const obj = JSON.parse(raw);
-    return (obj && typeof obj === 'object') ? obj : {};
-  } catch { return {}; }
-}
-function _writeDMPlaintextCache(channelId, map) {
-  try {
-    // Trim oldest by msg id if we exceed the cap.
-    const ids = Object.keys(map);
-    if (ids.length > _DM_PLAINTEXT_CACHE_MAX) {
-      ids.sort((a, b) => Number(a) - Number(b));
-      const drop = ids.slice(0, ids.length - _DM_PLAINTEXT_CACHE_MAX);
-      for (const k of drop) delete map[k];
-    }
-    localStorage.setItem(_dmPlainCacheKey(channelId), JSON.stringify(map));
-  } catch {}
+try {
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('frogtalk-dm-plain-v1:')) localStorage.removeItem(k);
+  }
+} catch {}
+function _getChannelPlainMap(channelId) {
+  const key = String(channelId || 0);
+  let m = _DM_PLAINTEXT_CACHE.get(key);
+  if (!m) { m = new Map(); _DM_PLAINTEXT_CACHE.set(key, m); }
+  return m;
 }
 function _rememberDMPlaintext(channelId, msgId, plaintext) {
   if (!channelId || !msgId || typeof plaintext !== 'string' || !plaintext) return;
   if (_looksEncryptedBlob(plaintext)) return;
-  const map = _readDMPlaintextCache(channelId);
-  if (map[msgId] === plaintext) return;
-  map[msgId] = plaintext;
-  _writeDMPlaintextCache(channelId, map);
+  const map = _getChannelPlainMap(channelId);
+  const key = String(msgId);
+  if (map.get(key) === plaintext) return;
+  map.set(key, plaintext);
+  if (map.size > _DM_PLAINTEXT_CACHE_MAX) {
+    // Drop oldest insertion(s) — Map preserves insertion order.
+    const overflow = map.size - _DM_PLAINTEXT_CACHE_MAX;
+    let i = 0;
+    for (const k of map.keys()) {
+      if (i++ >= overflow) break;
+      map.delete(k);
+    }
+  }
 }
 function _recallDMPlaintext(channelId, msgId) {
   if (!channelId || !msgId) return null;
-  const map = _readDMPlaintextCache(channelId);
-  return Object.prototype.hasOwnProperty.call(map, msgId) ? map[msgId] : null;
+  const map = _DM_PLAINTEXT_CACHE.get(String(channelId));
+  if (!map) return null;
+  const v = map.get(String(msgId));
+  return (typeof v === 'string') ? v : null;
 }
 const _dmPreviewCache = {};
 

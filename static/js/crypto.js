@@ -47,6 +47,71 @@ const Crypto = (() => {
     return `frogtalk-ecdh-v1:${scope}`;
   }
 
+  // ──────────────────────────────────────────────────────────────────
+  // IndexedDB layer for ECDH keypair storage.
+  //
+  // Previously the keypair was JSON.stringify(JWK) in localStorage —
+  // any XSS could grab the private key in plaintext. CryptoKey objects
+  // are structured-cloneable, so IndexedDB lets us persist a private
+  // key with `extractable: false` and the raw key material is never
+  // exposed to JS again. localStorage is only consulted once for the
+  // one-shot migration of legacy keypairs.
+  // ──────────────────────────────────────────────────────────────────
+  const _IDB_NAME = 'frogtalk-keys';
+  const _IDB_STORE = 'ecdh';
+  const _IDB_VERSION = 1;
+
+  function _openIDB() {
+    return new Promise((resolve, reject) => {
+      try {
+        const req = indexedDB.open(_IDB_NAME, _IDB_VERSION);
+        req.onupgradeneeded = () => {
+          try { req.result.createObjectStore(_IDB_STORE); } catch {}
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error('idb_open_failed'));
+      } catch (e) { reject(e); }
+    });
+  }
+
+  async function _idbGet(scope) {
+    const db = await _openIDB();
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(_IDB_STORE, 'readonly');
+        const req = tx.objectStore(_IDB_STORE).get(scope);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    } finally { try { db.close(); } catch {} }
+  }
+
+  async function _idbPut(scope, value) {
+    const db = await _openIDB();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(_IDB_STORE, 'readwrite');
+        tx.objectStore(_IDB_STORE).put(value, scope);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    } finally { try { db.close(); } catch {} }
+  }
+
+  async function _idbDelete(scope) {
+    const db = await _openIDB();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(_IDB_STORE, 'readwrite');
+        tx.objectStore(_IDB_STORE).delete(scope);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    } finally { try { db.close(); } catch {} }
+  }
+
   async function _loadOrCreateECDHPair() {
     const scope = _getIdentityScope();
     if (_ecdhPairCache.has(scope)) return _ecdhPairCache.get(scope);
@@ -64,7 +129,28 @@ const Crypto = (() => {
   }
 
   async function _loadOrCreateECDHPairUnsafe(scope) {
-    const existingRaw = localStorage.getItem(_ecdhStorageKey(scope));
+    // Preferred: keypair already in IndexedDB. Private key was stored
+    // with extractable:false so it cannot be exfiltrated by XSS.
+    try {
+      const stored = await _idbGet(scope);
+      if (stored && stored.publicKey && stored.privateKey) {
+        const pair = { publicKey: stored.publicKey, privateKey: stored.privateKey };
+        _ecdhPairCache.set(scope, pair);
+        return pair;
+      }
+    } catch (e) {
+      // IndexedDB unavailable (private mode / quota / etc). Fall through
+      // to legacy load and finally fresh generation. We deliberately do
+      // not throw here so the app still works without IDB.
+      console.warn('[Crypto] IndexedDB unavailable, falling back', e);
+    }
+
+    // Legacy: keypair from older localStorage JWK layout. Import the
+    // private half as non-extractable, migrate into IDB, then wipe the
+    // localStorage entry so the raw JWK never persists again.
+    const existingRaw = (() => {
+      try { return localStorage.getItem(_ecdhStorageKey(scope)); } catch { return null; }
+    })();
     if (existingRaw) {
       try {
         const parsed = JSON.parse(existingRaw);
@@ -79,10 +165,18 @@ const Crypto = (() => {
           'jwk',
           parsed.privateJwk,
           { name: 'ECDH', namedCurve: 'P-256' },
-          false,
+          false, // non-extractable from here on
           ['deriveBits']
         );
         const pair = { publicKey, privateKey };
+        try {
+          await _idbPut(scope, { publicKey, privateKey });
+          // Only purge the localStorage copy once the IDB write succeeds;
+          // otherwise a quota error in IDB would brick the keypair.
+          try { localStorage.removeItem(_ecdhStorageKey(scope)); } catch {}
+        } catch (e2) {
+          console.warn('[Crypto] IDB migration write failed; keeping legacy entry', e2);
+        }
         _ecdhPairCache.set(scope, pair);
         return pair;
       } catch (e) {
@@ -97,16 +191,50 @@ const Crypto = (() => {
       }
     }
 
-    const pair = await crypto.subtle.generateKey(
+    // Fresh keypair. We need an extractable public half (so it can be
+    // exported to JWK and published to the server) but a non-extractable
+    // private half (so XSS cannot pull it back out). Web Crypto's
+    // generateKey applies one `extractable` flag to both halves of an
+    // ECDH pair, so we generate with extractable=true, immediately
+    // export+re-import the private side as non-extractable, and drop
+    // the original extractable handle on the floor.
+    const tmpPair = await crypto.subtle.generateKey(
       { name: 'ECDH', namedCurve: 'P-256' },
       true,
       ['deriveBits']
     );
-    const publicJwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
-    const privateJwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
-    localStorage.setItem(_ecdhStorageKey(scope), JSON.stringify({ publicJwk, privateJwk }));
-    _ecdhPairCache.set(scope, pair);
-    return pair;
+    const publicJwk = await crypto.subtle.exportKey('jwk', tmpPair.publicKey);
+    const privateJwk = await crypto.subtle.exportKey('jwk', tmpPair.privateKey);
+    const publicKey = await crypto.subtle.importKey(
+      'jwk', publicJwk, { name: 'ECDH', namedCurve: 'P-256' }, true, []
+    );
+    const privateKey = await crypto.subtle.importKey(
+      'jwk', privateJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']
+    );
+    const finalPair = { publicKey, privateKey };
+    let idbOk = false;
+    try {
+      await _idbPut(scope, finalPair);
+      idbOk = true;
+    } catch (e) {
+      // IDB write failed → fall back to (extractable) localStorage so
+      // the user isn't locked out. Anything worse than this would brick
+      // the device the moment IDB hiccups in private mode.
+      try {
+        localStorage.setItem(_ecdhStorageKey(scope), JSON.stringify({
+          publicJwk,
+          privateJwk,
+        }));
+      } catch {}
+    }
+    // Best-effort scrub of the transient JWK that briefly carried the
+    // private scalar — only safe to do AFTER the localStorage fallback
+    // (which still needs the JWK) has either succeeded or been skipped.
+    if (idbOk) {
+      try { for (const k of Object.keys(privateJwk)) delete privateJwk[k]; } catch {}
+    }
+    _ecdhPairCache.set(scope, finalPair);
+    return finalPair;
   }
 
   // Deliberate, user-initiated key reset. Wipes the local ECDH keypair AND
@@ -117,7 +245,8 @@ const Crypto = (() => {
       const scope = _getIdentityScope();
       _ecdhPairCache.delete(scope);
       _ecdhPairPending.delete(scope);
-      localStorage.removeItem(_ecdhStorageKey(scope));
+      try { await _idbDelete(scope); } catch {}
+      try { localStorage.removeItem(_ecdhStorageKey(scope)); } catch {}
       // Wipe DM plaintext caches — old ciphertext is no longer decryptable.
       for (let i = localStorage.length - 1; i >= 0; i--) {
         const k = localStorage.key(i);
