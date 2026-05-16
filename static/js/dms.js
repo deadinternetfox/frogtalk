@@ -1362,13 +1362,28 @@ function renderDMChat () {
   area.innerHTML = _dmMessages.map(m => renderDMMessage(m)).join('');
   if (window.Messages && Messages.hydrateStickers) Messages.hydrateStickers(area);
   // One-shot dialog per DM session if any message body is still cipher-shaped
-  // after every decrypt path. These messages were encrypted to another
-  // device's key and can't be recovered here — reset won't help. Be honest
-  // about it; offer a "Learn more" path into the encryption modal.
+  // after every decrypt path AND has no plaintext cached locally. Cache
+  // hits self-heal in _formatContent/_dmRenderContent, so those don't
+  // count as "can't be read" — only true cache-miss undecryptables do.
+  // These messages were encrypted to another device's key and can't be
+  // recovered here — reset won't help. Be honest about it; offer a
+  // "Learn more" path into the encryption modal.
   try {
     const cid = _activeDM?.id;
     if (cid && !_cannotDecryptToastShown.has(cid)) {
-      const undec = _dmMessages.filter(m => typeof m?.content === 'string' && _looksEncryptedBlob(m.content)).length;
+      const undec = _dmMessages.filter(m => {
+        if (typeof m?.content !== 'string') return false;
+        if (!_looksEncryptedBlob(m.content)) return false;
+        // Self-heal candidate? If we have plaintext cached under the
+        // ciphertext key, the render path will resolve it — not undec.
+        try {
+          if (typeof _dmPtCacheGet === 'function') {
+            const _pt = _dmPtCacheGet(m.content);
+            if (typeof _pt === 'string' && _pt.length) return false;
+          }
+        } catch {}
+        return true;
+      }).length;
       if (undec > 0) {
         _cannotDecryptToastShown.add(cid);
         if (typeof UI !== 'undefined' && UI.notice) {
