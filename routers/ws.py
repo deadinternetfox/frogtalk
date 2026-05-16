@@ -321,12 +321,27 @@ async def websocket_endpoint(
         "users": manager.online_nicknames(room_name),
     })
 
+    # Hard cap on per-frame size BEFORE json.loads so a peer can't burn
+    # CPU/RAM by streaming a multi-megabyte JSON object. Anything legitimate
+    # (message text, reactions, typing, presence) fits comfortably under
+    # 256 KB; encrypted media goes through the HTTP /api/messages path.
+    _WS_MAX_FRAME = 262_144  # 256 KB
     try:
         while True:
             try:
                 raw = await websocket.receive_text()
             except RuntimeError:
                 break
+            if len(raw) > _WS_MAX_FRAME:
+                # Drop oversize frames silently; logging the body would
+                # itself be a memory amplifier under flood.
+                try:
+                    await manager.send_personal(websocket, {
+                        "type": "error", "text": "Frame too large",
+                    })
+                except Exception:
+                    pass
+                continue
             try:
                 data = json.loads(raw)
             except json.JSONDecodeError:

@@ -250,8 +250,59 @@ def _cleanup_sessions() -> None:
         _SESSIONS.pop(token, None)
 
 
+def _client_ip_for_admin(request: Request) -> str:
+    """Best-effort client IP for the admin allowlist. Honours
+    X-Forwarded-For *only* when an upstream proxy is expected (we sit
+    behind nginx + Cloudflare in prod), otherwise falls back to the
+    socket peer."""
+    fwd = (request.headers.get("x-forwarded-for") or "").strip()
+    if fwd:
+        # Left-most entry is the original client per RFC 7239.
+        return fwd.split(",")[0].strip()
+    return (request.client.host if request.client else "") or ""
+
+
+def _admin_ip_allowed(request: Request) -> bool:
+    """Optional IP allowlist for the admin panel.
+
+    Set ``FROGTALK_ADMIN_IP_ALLOWLIST`` to a comma-separated list of IPs
+    or CIDRs (e.g. ``"203.0.113.4,2001:db8::/32"``). When unset, all
+    IPs are allowed (current behaviour). When set, requests from
+    addresses outside the allowlist are rejected before the password /
+    CSRF check, so an attacker who steals admin credentials still
+    can't sign in from outside the operator's network.
+    """
+    raw = (os.getenv("FROGTALK_ADMIN_IP_ALLOWLIST", "") or "").strip()
+    if not raw:
+        return True
+    import ipaddress as _ipa
+    peer = _client_ip_for_admin(request)
+    if not peer:
+        return False
+    try:
+        peer_ip = _ipa.ip_address(peer)
+    except ValueError:
+        return False
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            if "/" in entry:
+                if peer_ip in _ipa.ip_network(entry, strict=False):
+                    return True
+            else:
+                if peer_ip == _ipa.ip_address(entry):
+                    return True
+        except ValueError:
+            continue
+    return False
+
+
 def _is_authenticated(request: Request) -> bool:
     _cleanup_sessions()
+    if not _admin_ip_allowed(request):
+        return False
     token = request.cookies.get(_COOKIE_NAME, "")
     entry = _SESSIONS.get(token)
     if not entry:
@@ -508,6 +559,12 @@ async def server_webui_login(request: Request, body: LoginBody, response: Respon
     disabled = _require_enabled()
     if disabled:
         return disabled
+
+    # Enforce IP allowlist BEFORE the credential check so a brute-force
+    # from outside the allowlist can't even tell whether the username is
+    # valid (and can't poke the password-compare timing channel either).
+    if not _admin_ip_allowed(request):
+        return JSONResponse(status_code=403, content={"error": "Forbidden"})
 
     expected_user = _webui_username()
     expected_password = _webui_password()

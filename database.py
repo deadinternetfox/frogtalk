@@ -321,21 +321,52 @@ def init_db():
             admin_pw = os.getenv("ADMIN_PASSWORD", "").strip()
             if not admin_pw:
                 admin_pw = secrets.token_urlsafe(24)
+                # Write 0600 atomically: open with O_CREAT|O_EXCL|O_WRONLY
+                # at mode 0600 so the file is *never* world-readable, not
+                # even for a microsecond between create() and chmod().
+                # If we can't satisfy that — read-only mount, lost-race,
+                # FS that ignores chmod — DO NOT silently fall back to a
+                # potentially world-readable file with the admin password
+                # in it; print to the operator and bail out of the
+                # write attempt entirely so they see the password in the
+                # journal and can act.
+                boot_path = DB_PATH.parent / ".bootstrap_admin_password"
+                _wrote = False
                 try:
-                    boot_path = DB_PATH.parent / ".bootstrap_admin_password"
-                    boot_path.write_text(admin_pw + "\n", encoding="utf-8")
+                    fd = os.open(
+                        str(boot_path),
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_TRUNC,
+                        0o600,
+                    )
                     try:
-                        os.chmod(boot_path, 0o600)
-                    except OSError:
-                        pass
+                        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                            fh.write(admin_pw + "\n")
+                        # Defence in depth — confirm permissions on disk.
+                        st = os.stat(boot_path)
+                        if st.st_mode & 0o077:
+                            os.chmod(boot_path, 0o600)
+                            st = os.stat(boot_path)
+                            if st.st_mode & 0o077:
+                                raise OSError("could not enforce 0600")
+                        _wrote = True
+                    except Exception:
+                        # Best effort: remove the file rather than leave a
+                        # partial / wrong-perms password file behind.
+                        try:
+                            os.remove(boot_path)
+                        except OSError:
+                            pass
+                        raise
+                except (OSError, FileExistsError) as _e:
+                    print(
+                        f"[DB] Could not write bootstrap admin password file securely "
+                        f"({_e}). Generated password (set ADMIN_PASSWORD env immediately): "
+                        f"{admin_pw}"
+                    )
+                if _wrote:
                     print(
                         f"[DB] Seeded admin user with random password; "
-                        f"see {boot_path} (chmod 600). Set ADMIN_PASSWORD env and remove the file."
-                    )
-                except OSError as _e:
-                    print(
-                        f"[DB] Could not write bootstrap admin password file: {_e}. "
-                        f"Generated password (set in env immediately): {admin_pw}"
+                        f"see {boot_path} (mode 0600). Set ADMIN_PASSWORD env and remove the file."
                     )
             con.execute(
                 "INSERT INTO users (nickname, password_hash, is_admin) VALUES (?, ?, 1)",
@@ -2322,6 +2353,19 @@ def delete_fcm_token(token: str):
         _ensure_fcm_tokens_table(con)
         con.execute("DELETE FROM fcm_tokens WHERE token=?", (token,))
         con.commit()
+
+
+def delete_user_fcm_tokens(user_id: int) -> int:
+    """Drop every FCM/push token for a user. Used on logout so a stolen
+    device token cannot keep receiving the user's push notifications
+    after they've signed out."""
+    if not user_id:
+        return 0
+    with _conn() as con:
+        _ensure_fcm_tokens_table(con)
+        cur = con.execute("DELETE FROM fcm_tokens WHERE user_id=?", (user_id,))
+        con.commit()
+        return int(cur.rowcount or 0)
 
 
 def update_privacy(user_id: int, profile_public: bool, allow_friend_requests: bool):

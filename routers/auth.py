@@ -698,11 +698,18 @@ async def logout(
     current_user: dict = Depends(get_current_user),
 ):
     """Revoke the caller's current session token and drop it from the
-    auth cache so subsequent requests can't ride the 15 s TTL window."""
+    auth cache so subsequent requests can't ride the 15 s TTL window.
+
+    Also drops the user's FCM/push tokens so a stolen device push token
+    can't keep receiving notifications after the user signs out."""
     token = (x_session_token or "").strip()
     if token:
         await asyncio.to_thread(db.delete_session, token)
         invalidate_token_cache(token)
+    try:
+        await asyncio.to_thread(db.delete_user_fcm_tokens, current_user["id"])
+    except Exception:
+        _log.exception("logout: fcm token purge failed for user_id=%s", current_user.get("id"))
     return {"ok": True}
 
 

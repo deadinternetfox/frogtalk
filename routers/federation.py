@@ -998,7 +998,11 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
     require_sigs = (os.getenv("FROGTALK_FEDERATION_REQUIRE_SIGS", "0").strip().lower()
                     in ("1", "true", "yes", "on"))
     now = datetime.now(tz=timezone.utc)
-    skew_seconds = 3600   # ±1h max clock skew accepted
+    # Tightened from ±1h to ±5min after audit: an attacker who captures a
+    # signed event has only a 5-minute window to replay it before our
+    # clock-skew check rejects it. Peers running NTP have far less drift
+    # than this, so legitimate traffic is unaffected.
+    skew_seconds = 300    # ±5min max clock skew accepted
     grace_seconds = 60    # allow tiny re-orderings against the monotonic watermark
 
     for ev in events:
@@ -1086,6 +1090,32 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
     return accepted, rejected
 
 
+# Per-peer token bucket guarding /federation/events/inbox. A misbehaving
+# (or compromised) peer cannot exceed _INBOX_RATE_MAX events per
+# _INBOX_RATE_WINDOW seconds, regardless of route-level slowapi limits
+# (which key on IP and would let a single peer behind a load balancer
+# bypass the throttle). Keyed by the origin_server_id reported in each
+# event; events with no origin are accounted under "_unknown".
+_INBOX_RATE_WINDOW = 60.0
+_INBOX_RATE_MAX = 600        # 10 events/s sustained per peer is plenty
+_INBOX_BODY_MAX = 1000        # hard cap on events per single POST
+_inbox_buckets: dict[str, list[float]] = {}
+
+
+def _peer_inbox_allowed(origin: str) -> bool:
+    """Return True if this peer is under the per-peer event quota."""
+    now = time.time()
+    bucket = _inbox_buckets.setdefault(origin or "_unknown", [])
+    cutoff = now - _INBOX_RATE_WINDOW
+    # Cheap in-place prune; bucket stays bounded by _INBOX_RATE_MAX.
+    while bucket and bucket[0] < cutoff:
+        bucket.pop(0)
+    if len(bucket) >= _INBOX_RATE_MAX:
+        return False
+    bucket.append(now)
+    return True
+
+
 @router.post("/federation/events/inbox")
 async def federation_inbox(
     body: FederationInboxBody,
@@ -1094,10 +1124,28 @@ async def federation_inbox(
     if not _fed_token_ok(x_federation_token):
         return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
 
+    # Bound the per-request payload so a peer can't ship a million-event
+    # batch and tie up the worker thread (combined with WS-frame and
+    # request body limits this caps total memory pressure).
+    if not isinstance(body.events, list) or len(body.events) > _INBOX_BODY_MAX:
+        return JSONResponse(status_code=413, content={"error": "Event batch too large"})
+
+    # Per-peer rate limit. Drop events whose origin is over quota; we
+    # don't reject the whole batch because a benign peer can still ship
+    # mixed-origin batches when relaying.
+    filtered: list[dict] = []
+    rejected_rate = 0
+    for ev in body.events:
+        origin = str((ev or {}).get("origin_server_id") or "").strip()
+        if _peer_inbox_allowed(origin):
+            filtered.append(ev)
+        else:
+            rejected_rate += 1
+
     # Run all SQLite writes on a worker thread so the event loop stays
     # responsive to user requests even when peers spam events.
-    accepted, rejected = await asyncio.to_thread(_insert_inbox_events_sync, body.events)
-    return {"accepted": accepted, "rejected": rejected}
+    accepted, rejected = await asyncio.to_thread(_insert_inbox_events_sync, filtered)
+    return {"accepted": accepted, "rejected": rejected + rejected_rate}
 
 
 # ──────────────────────────────────────────────────────────────
