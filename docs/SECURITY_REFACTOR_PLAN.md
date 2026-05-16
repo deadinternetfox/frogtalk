@@ -16,7 +16,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 | B — Custom CSS | 3: delete `_css_safety.py`, add grep CI guard | ✅ shipped | `1854ea8` |
 | C — Rooms (Sender Keys) | not started | — | — |
 | D — Wall posts + media at rest | not started | — | — |
-| E — Voice/video integrity | 1: dark backend (fp_sig column on `pending_call_offers`, WS payload passthrough, REST cold-resume), `Signal.signCallFingerprint` / `verifyCallFingerprint` helpers | ✅ shipped (not yet wired into calls.js) | _pending_ |
+| E — Voice/video integrity | 1: dark backend (fp_sig column on `pending_call_offers`, WS payload passthrough, REST cold-resume), `Signal.signCallFingerprint` / `verifyCallFingerprint` helpers | ✅ shipped (not yet wired into calls.js) | `13e4ced` |
 | E — Voice/video integrity | 2: wire calls.js to sign on offer/answer + verify on receive + Safety Numbers UI | ⏳ next | — |
 | F — Linked devices | not started | — | — |
 | G — Sealed Sender + metadata | not started | — | — |
