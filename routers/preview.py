@@ -37,6 +37,13 @@ def _client() -> httpx.AsyncClient:
         _http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(5.0, connect=3.0),
             follow_redirects=True,
+            # Cap the redirect chain. The SSRF guard at the route checks
+            # the *initial* hostname; without a hop limit a hostile server
+            # could chain redirects through dozens of public hosts looking
+            # for a final leg that resolves to a private IP (the redirect
+            # follow re-uses our HTTP client and bypasses the route-level
+            # check). Each hop is also validated below.
+            max_redirects=5,
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             headers={
                 'User-Agent': (
@@ -283,6 +290,24 @@ async def _do_fetch_og(url: str) -> dict:
         _OG_FETCH_CAP = 256 * 1024
         async with client.stream("GET", url) as resp:
             if resp.status_code != 200:
+                return {}
+            # SSRF re-check after redirects. The route-level check
+            # validated the initial URL, but `follow_redirects=True` means
+            # the final response may have come from a host the caller
+            # never gave us. Resolve the final URL's hostname here and
+            # bail if it points anywhere private.
+            try:
+                import ipaddress as _ipa, socket as _sock
+                from urllib.parse import urlparse as _up
+                _final_host = (_up(str(resp.url)).hostname or "").strip()
+                if not _final_host:
+                    return {}
+                for _info in _sock.getaddrinfo(_final_host, None):
+                    _ip = _ipa.ip_address(_info[4][0])
+                    if (_ip.is_private or _ip.is_loopback or _ip.is_link_local
+                            or _ip.is_multicast or _ip.is_reserved or _ip.is_unspecified):
+                        return {}
+            except Exception:
                 return {}
             ctype = (resp.headers.get("content-type") or "").lower()
             # Refuse non-HTML payloads — saves us pulling down e.g. a 4 GB

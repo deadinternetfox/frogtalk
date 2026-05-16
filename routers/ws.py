@@ -23,6 +23,50 @@ ALLOWED_MEDIA = (
 _slowmode_tracker: dict = {}
 
 
+def _ws_origin_allowed(websocket: WebSocket) -> bool:
+    """Block cross-site WebSocket hijacking (CSWSH).
+
+    Browsers do not enforce the Same-Origin Policy on WS upgrades the way
+    they do on XHR/fetch — a malicious page at https://evil.example can
+    open `new WebSocket('wss://frogtalk.xyz/ws/general?token=…')` and, if
+    the victim's auth token has leaked via any other vector, drive their
+    session. The defence is to reject upgrades whose `Origin` header is
+    not one of our own front-ends.
+
+    Allowed: same host as the Host header, or any entry from the
+    `FROGTALK_ALLOWED_ORIGINS` env var (comma-separated). Native mobile
+    clients (iOS/Android WebSocket libraries, Electron desktop) typically
+    omit the Origin header — we accept those because there is no
+    browser-driven cross-site risk.
+    """
+    import os as _os
+    origin = (websocket.headers.get("origin") or "").strip()
+    if not origin:
+        # Non-browser client — no cross-site risk in the CSWSH sense.
+        return True
+    host = (websocket.headers.get("host") or "").strip().lower()
+    try:
+        from urllib.parse import urlparse as _urlparse
+        oh = (_urlparse(origin).hostname or "").lower()
+    except Exception:
+        return False
+    if not oh:
+        return False
+    # Strip any :port from Host for the comparison.
+    host_only = host.split(":", 1)[0]
+    if oh == host_only:
+        return True
+    extra = [s.strip().lower() for s in (_os.getenv("FROGTALK_ALLOWED_ORIGINS") or "").split(",") if s.strip()]
+    for e in extra:
+        try:
+            eh = (_urlparse(e if "://" in e else f"https://{e}").hostname or "").lower()
+        except Exception:
+            continue
+        if eh and eh == oh:
+            return True
+    return False
+
+
 def _resolve_to_id(data: dict) -> int:
     """Get target user_id from to_id or to_nickname field.
     Nickname lookup is case-insensitive."""
@@ -118,6 +162,12 @@ async def websocket_endpoint(
     room_name: str,
     token: str = Query(...),
 ):
+    # CSWSH defence: refuse browser upgrades that didn't come from one of
+    # our own origins. Non-browser clients (mobile, Electron) generally
+    # omit Origin and are allowed through.
+    if not _ws_origin_allowed(websocket):
+        await websocket.close(code=4007)
+        return
     user = db.get_user_by_token(token)
     if not user:
         await websocket.close(code=4001)

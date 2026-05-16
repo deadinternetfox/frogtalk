@@ -895,6 +895,20 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         new_password=body.new_password,
         banner=body.banner,
     )
+    # When the password actually changed, kick every OTHER active session
+    # off this account. The current session (identified by the X-Session-Token
+    # header on this request) is kept so the user isn't logged out of the tab
+    # they just used. Also flush our in-memory token cache so a revoked
+    # session can't keep working for up to 15 s on its old auth lookup.
+    if body.new_password:
+        try:
+            current_token = (request.headers.get("x-session-token") or "").strip()
+            if current_token:
+                db.delete_other_sessions(current_user["id"], current_token)
+            from deps import invalidate_token_cache as _invalidate_token_cache
+            _invalidate_token_cache(None)
+        except Exception:
+            pass
     status_or_presence_changed = (body.status_msg is not None or body.presence is not None)
     if status_or_presence_changed:
         with db._conn() as con:

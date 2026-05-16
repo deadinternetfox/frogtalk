@@ -5806,19 +5806,32 @@ def create_recovery_key(user_id: int, key_hash: str) -> int:
 
 
 def use_recovery_key(key_hash: str) -> Optional[int]:
-    """Use recovery key, return user_id if valid."""
+    """Use recovery key, return user_id if valid.
+
+    Atomic claim: the UPDATE itself filters on `used_at IS NULL` and we
+    accept the redemption only when SQLite reports rowcount == 1. This
+    closes a TOCTOU race where two parallel /recover requests with the
+    same key could both read NULL and both mark themselves successful.
+    """
     with _conn() as con:
-        row = con.execute("""
-            SELECT id, user_id FROM recovery_keys
-            WHERE key_hash=? AND used_at IS NULL
-        """, (key_hash,)).fetchone()
-        if row:
-            con.execute(
-                "UPDATE recovery_keys SET used_at=datetime('now') WHERE id=?",
-                (row['id'],)
-            )
-            return row['user_id']
-        return None
+        # First locate the row id and owner so we can issue a single
+        # conditional UPDATE that only succeeds for the first caller.
+        row = con.execute(
+            "SELECT id, user_id FROM recovery_keys WHERE key_hash=? AND used_at IS NULL",
+            (key_hash,),
+        ).fetchone()
+        if not row:
+            return None
+        cur = con.execute(
+            "UPDATE recovery_keys SET used_at=datetime('now') "
+            "WHERE id=? AND used_at IS NULL",
+            (row["id"],),
+        )
+        con.commit()
+        if cur.rowcount != 1:
+            # Another concurrent /recover already claimed this key.
+            return None
+        return row["user_id"]
 
 
 # ===========================================================================
