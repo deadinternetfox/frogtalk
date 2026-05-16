@@ -570,10 +570,21 @@ async def get_channel_theme_bg(room_name: str):
         return JSONResponse(status_code=404, content={"error": "No background"})
     media_type = "image/webp" if p.suffix == ".webp" else "image/jpeg"
     # Cache for a day — clients busted via ?v=<mtime> on update.
+    # Pillow already re-encoded the bytes during upload (so SVG/PDF
+    # cannot land here), but defence-in-depth: nosniff + sandbox CSP
+    # mean the response stays inert even if the stored file is later
+    # tampered with on disk.
+    from routers._media_safety import media_response_headers
     return FileResponse(
         p,
         media_type=media_type,
-        headers={"Cache-Control": "public, max-age=86400, immutable"},
+        headers={
+            **media_response_headers(
+                media_type,
+                filename=f"channel-bg-{room['id']}",
+                cache_control="public, max-age=86400, immutable",
+            ),
+        },
     )
 
 

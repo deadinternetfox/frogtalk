@@ -19,9 +19,19 @@ limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/dms", tags=["dms"])
 
 MAX_MEDIA_BYTES = 20 * 1024 * 1024
+# Whitelist of acceptable data: URL prefixes for inbound DM media. See
+# routers/messages.py for the rationale — same allow-list, narrowed
+# from the historical `data:image/*` wildcard so SVG/HTML/PDF blobs
+# cannot enter the database in the first place.
 ALLOWED_MEDIA = (
-    'data:image/', 'data:video/', 'data:audio/',
-    'data:application/pdf', 'data:application/octet-stream',
+    'data:image/jpeg', 'data:image/jpg', 'data:image/png',
+    'data:image/gif', 'data:image/webp', 'data:image/avif',
+    'data:image/heic', 'data:image/heif',
+    'data:video/mp4', 'data:video/webm', 'data:video/ogg',
+    'data:video/quicktime', 'data:video/x-matroska',
+    'data:audio/mpeg', 'data:audio/mp3', 'data:audio/mp4',
+    'data:audio/aac', 'data:audio/ogg', 'data:audio/webm',
+    'data:audio/wav', 'data:audio/x-wav', 'data:audio/flac',
 )
 ENCRYPTED_MEDIA_PREFIX = 'ftenc:'
 
@@ -201,7 +211,18 @@ async def get_dm_media(channel_id: int, msg_id: int,
         return JSONResponse(status_code=410, content={"error": "View once already consumed", "viewed_by_me": 1})
     if not row or not row["media_data"]:
         return JSONResponse(status_code=404, content={"error": "No media"})
-    return {"media_data": row["media_data"], "media_type": row["media_type"]}
+    # Force the advertised media_type into the safe whitelist so the
+    # client never receives `image/svg+xml` (or any HTML-ish mime) it
+    # might inline. E2E-encrypted payloads are passed through unchanged
+    # because the client must decrypt before any rendering decision.
+    from routers._media_safety import safe_media_type
+    raw_md = row["media_data"] or ""
+    raw_mt = row["media_type"]
+    if isinstance(raw_md, str) and raw_md.startswith(ENCRYPTED_MEDIA_PREFIX):
+        out_mt = raw_mt
+    else:
+        out_mt = safe_media_type(raw_mt)
+    return {"media_data": raw_md, "media_type": out_mt}
 
 
 @router.post("/{channel_id}/messages")
@@ -260,6 +281,12 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
                             (src_cid,)).fetchone()
                     if _r and int(_r["f"]):
                         return JSONResponse(status_code=403, content={"error": "Forwarding disabled in source DM"})
+    # Strip RTL-override and other bidi/control characters from the
+    # filename before storage so the chat bubble can never be tricked
+    # into rendering `evil.exe\u202egnp.png`.
+    from routers._media_safety import safe_filename as _safe_fn
+    if body.media_name:
+        body.media_name = _safe_fn(body.media_name, default="file")
     msg_id = db.send_dm_message(
         channel_id, current_user["id"],
         body.content, body.media_data, body.media_type, body.media_name, body.reply_to,

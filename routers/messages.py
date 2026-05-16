@@ -19,9 +19,22 @@ limiter = Limiter(key_func=client_ip)
 _log = logging.getLogger(__name__)
 
 MAX_MEDIA_BYTES = 20 * 1024 * 1024  # 20 MB
+# Whitelist of acceptable data: URL prefixes for inbound media uploads.
+# Deliberately narrower than the full IANA registry — we only render
+# image/audio/video inline, so accepting application/pdf or
+# application/octet-stream just gives an attacker a place to park
+# arbitrary bytes that the browser may later sniff. SVG is excluded by
+# the absence of `data:image/svg`; the serve-time `_media_safety`
+# whitelist is the second layer that catches any historical rows.
 ALLOWED_MEDIA = (
-    'data:image/', 'data:video/', 'data:audio/',
-    'data:application/pdf', 'data:application/octet-stream',
+    'data:image/jpeg', 'data:image/jpg', 'data:image/png',
+    'data:image/gif', 'data:image/webp', 'data:image/avif',
+    'data:image/heic', 'data:image/heif',
+    'data:video/mp4', 'data:video/webm', 'data:video/ogg',
+    'data:video/quicktime', 'data:video/x-matroska',
+    'data:audio/mpeg', 'data:audio/mp3', 'data:audio/mp4',
+    'data:audio/aac', 'data:audio/ogg', 'data:audio/webm',
+    'data:audio/wav', 'data:audio/x-wav', 'data:audio/flac',
 )
 ENCRYPTED_MEDIA_PREFIX = 'ftenc:'
 

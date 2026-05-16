@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse, Response
 
 import database as db
 from deps import get_current_user
+from routers._media_safety import safe_media_type, media_response_headers
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -55,6 +56,12 @@ async def get_user_avatar_image(user_id: int):
     raw = (user.get("avatar") or "").strip()
     if not raw:
         return _frog_redirect()
+    # Public-cacheable headers — must be safe even if the stored avatar
+    # claims a script-renderable mime. safe_media_type() collapses any
+    # non-image/audio/video claim to application/octet-stream, and the
+    # response carries nosniff + a sandbox CSP so the browser can never
+    # execute the bytes as HTML/SVG/PDF.
+    pub_cache = "public, max-age=86400, immutable"
     m = _DATA_URL_RE.match(raw)
     if not m:
         # Already an http(s) URL — redirect so callers can cache the
@@ -72,10 +79,13 @@ async def get_user_avatar_image(user_id: int):
                     mime = head[5:].split(";", 1)[0] or mime
                 cleaned = "".join(tail.split())
                 data = base64.b64decode(cleaned, validate=False)
+                ct = safe_media_type(mime)
                 return Response(
                     content=data,
-                    media_type=mime,
-                    headers={"Cache-Control": "public, max-age=86400, immutable"},
+                    media_type=ct,
+                    headers=media_response_headers(
+                        ct, filename=f"avatar-{user_id}", cache_control=pub_cache
+                    ),
                 )
             except Exception:
                 pass
@@ -84,16 +94,13 @@ async def get_user_avatar_image(user_id: int):
         data = base64.b64decode(m.group("b64"), validate=False)
     except Exception:
         return _frog_redirect()
-    mime = m.group("mime") or "image/png"
+    ct = safe_media_type(m.group("mime") or "image/png")
     return Response(
         content=data,
-        media_type=mime,
-        headers={
-            # Long cache so Discord and other clients don't hammer us.
-            # Avatars get a fresh URL when the user changes them via
-            # the cache-bust query param the bridge appends.
-            "Cache-Control": "public, max-age=86400, immutable",
-        },
+        media_type=ct,
+        headers=media_response_headers(
+            ct, filename=f"avatar-{user_id}", cache_control=pub_cache
+        ),
     )
 
 

@@ -555,13 +555,16 @@ async def get_post_media(
         return JSONResponse(status_code=500, content={"error": "Decode failed"})
 
     if kind == "bytes":
+        from routers._media_safety import safe_media_type, media_response_headers
         raw = payload["raw"]
-        ct = payload["ct"]
+        # Force the served Content-Type through the safe whitelist so a
+        # legacy row with `image/svg+xml` or `text/html` cannot be
+        # echoed back to the browser as active content.
+        ct = safe_media_type(payload["ct"])
         total = len(raw)
         base_headers = {
-            "Cache-Control": "private, max-age=86400, immutable",
+            **media_response_headers(ct, filename=f"post-{post_id}"),
             "Accept-Ranges": "bytes",
-            "X-Content-Type-Options": "nosniff",
             "Vary": "X-Session-Token, Authorization",
         }
         if range_header.lower().startswith("bytes=") and total > 0:
@@ -949,6 +952,14 @@ async def create_story(request: Request, body: CreateStoryRequest, current_user:
         return JSONResponse(status_code=400, content={"error": "Media required"})
     if len(body.media_data) > 100 * 1024 * 1024:
         return JSONResponse(status_code=413, content={"error": "Media too large (max 100MB)"})
+    # Reject SVG/HTML/PDF/etc. at upload time. The serve-time guard in
+    # _media_safety would already collapse the served Content-Type, but
+    # refusing the row entirely keeps the database clean and avoids
+    # storing attacker-controlled bytes that we'd then have to defend
+    # against on every read path (federation export, etc.).
+    from routers._media_safety import safe_media_type as _safe_mt
+    if _safe_mt(body.media_type) == "application/octet-stream":
+        return JSONResponse(status_code=400, content={"error": "Unsupported media type"})
     privacy = body.privacy if body.privacy in ("public", "followers") else "public"
     story_id = db.create_story(current_user["id"], body.media_data, body.media_type, body.caption, privacy)
     try:
@@ -991,6 +1002,12 @@ async def create_story_upload(
 
     raw = await media.read()
     media_type = media.content_type or "application/octet-stream"
+    # The browser-sent multipart Content-Type is attacker-controllable,
+    # so screen it through the safe whitelist before we even base64
+    # the bytes. Same rationale as the JSON create_story path above.
+    from routers._media_safety import safe_media_type as _safe_mt
+    if _safe_mt(media_type) == "application/octet-stream":
+        return JSONResponse(status_code=400, content={"error": "Unsupported media type"})
     max_bytes = 100 * 1024 * 1024
     if len(raw) > max_bytes:
         return JSONResponse(
@@ -1057,8 +1074,16 @@ async def get_story_media(story_id: int, current_user: dict = Depends(get_curren
         if privacy == "followers" and not db.is_following(current_user["id"], owner_id):
             return JSONResponse(status_code=403, content={"error": "Followers only"})
     headers = {"Cache-Control": "private, max-age=86400"}
+    # Sanitize the advertised media_type before handing it to the
+    # client — same defence as get_dm_media: the stored mime is
+    # attacker-controllable and we never want the client to inline
+    # an `image/svg+xml` blob that may carry script.
+    from routers._media_safety import safe_media_type
     return JSONResponse(
-        content={"media_data": row["media_data"], "media_type": row["media_type"]},
+        content={
+            "media_data": row["media_data"],
+            "media_type": safe_media_type(row["media_type"]),
+        },
         headers=headers,
     )
 

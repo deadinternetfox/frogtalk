@@ -128,6 +128,13 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
         media_type = (body.media_type or '').strip().lower()
         if not (media_type.startswith('image/') or media_type.startswith('video/') or media_type.startswith('music/')):
             return JSONResponse(status_code=400, content={"error": "Unsupported media type"})
+        # Tighten the image/video allow-list to the safe whitelist so
+        # SVG, HTML-as-image, PDF-as-image, etc. are refused at upload
+        # time instead of relying solely on the serve-time guard.
+        if media_type.startswith('image/') or media_type.startswith('video/'):
+            from routers._media_safety import safe_media_type as _safe_mt
+            if _safe_mt(media_type) == "application/octet-stream":
+                return JSONResponse(status_code=400, content={"error": "Unsupported media type"})
         if (media_type.startswith('image/') or media_type.startswith('video/')) and not str(body.media_data).startswith('data:'):
             return JSONResponse(status_code=400, content={"error": "Media payload must be a data URI"})
         if media_type.startswith('music/') and not re.match(r'^https?://', str(body.media_data), flags=re.IGNORECASE):
@@ -267,8 +274,17 @@ async def get_wall_post_media_inline(post_id: int, current_user: dict = Depends(
 
 def _decode_data_uri_response(data_uri: str, fallback_mime: Optional[str] = None) -> Response:
     """Convert `data:<mime>;base64,<b64>` to a Response of raw bytes.
-    For non-data values, redirects so the browser fetches the URL directly."""
+    For non-data values, redirects so the browser fetches the URL directly.
+
+    SECURITY: the served Content-Type is forced through the media-safety
+    whitelist so an attacker cannot upload `data:text/html;base64,...`
+    or `data:image/svg+xml,...` and have us echo it back with the
+    original mime — anything outside the image/audio/video allow-list
+    becomes `application/octet-stream` + `Content-Disposition: attachment`.
+    The response also carries `X-Content-Type-Options: nosniff` and a
+    sandbox CSP so even a future bug serving HTML cannot run script."""
     import base64 as _b64
+    from routers._media_safety import safe_media_type, media_response_headers
     s = data_uri or ""
     if not s.startswith("data:"):
         # Music URL or other plain URL — redirect
@@ -280,11 +296,10 @@ def _decode_data_uri_response(data_uri: str, fallback_mime: Optional[str] = None
         raw = _b64.b64decode(payload) if is_b64 else payload.encode()
     except Exception:
         return Response(status_code=415)
-    headers = {
-        "Cache-Control": "private, max-age=86400, immutable",
-        "Content-Length": str(len(raw)),
-    }
-    return Response(content=raw, media_type=(mime or fallback_mime or "application/octet-stream"), headers=headers)
+    ct = safe_media_type(mime or fallback_mime)
+    headers = media_response_headers(ct, filename="wall-media")
+    headers["Content-Length"] = str(len(raw))
+    return Response(content=raw, media_type=ct, headers=headers)
 
 
 @router.put("/posts/{post_id}")
