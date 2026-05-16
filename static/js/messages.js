@@ -163,11 +163,65 @@ const Messages = (() => {
   // the same session. ws.decryptMsg fills it on every successful
   // decrypt OR cache hit, and _formatContent consults it before
   // rendering the 🔒 placeholder.
+  //
+  // Persistence: also mirrored to its OWN localStorage key (separate
+  // from the LRU `_rmPtCache`), so it survives a hard page reload AND
+  // an LRU eviction that may have purged the corresponding id-keyed
+  // entry from the main cache. No size cap is enforced here — entries
+  // are tiny (just plaintext strings keyed by `<room>:<id>`) and the
+  // worst case is a few MB of LS over a year of heavy use. Sticky
+  // semantics still apply: once set for an id, we never overwrite.
+  const _MSG_PT_STICKY_KEY = 'ft_pt_sticky_v1';
   const _msgPlainById = new Map();
+  let   _msgPtStickyLoaded = false;
+  let   _msgPtStickyDirty  = false;
+  let   _msgPtStickyT      = 0;
+  function _msgPtStickyLoad() {
+    if (_msgPtStickyLoaded) return;
+    _msgPtStickyLoaded = true;
+    try {
+      const raw = localStorage.getItem(_MSG_PT_STICKY_KEY);
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object') {
+        for (const k of Object.keys(obj)) {
+          const v = obj[k];
+          if (typeof v === 'string' && !_looksLikeCiphertext(v)) {
+            _msgPlainById.set(k, v);
+          }
+        }
+      }
+    } catch {}
+  }
+  function _msgPtStickySave() {
+    if (!_msgPtStickyDirty) return;
+    _msgPtStickyDirty = false;
+    try {
+      const out = {};
+      for (const [k, v] of _msgPlainById) out[k] = v;
+      localStorage.setItem(_MSG_PT_STICKY_KEY, JSON.stringify(out));
+    } catch {}
+  }
+  function _msgPtStickyFlush() {
+    try {
+      if (_msgPtStickyT) { clearTimeout(_msgPtStickyT); _msgPtStickyT = 0; }
+      _msgPtStickySave();
+    } catch {}
+  }
+  try {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', _msgPtStickyFlush);
+      window.addEventListener('beforeunload', _msgPtStickyFlush);
+    }
+  } catch {}
+  // Eager hydrate on module init so the very first _formatContent call
+  // (cached-paint pass before any WS history arrives) can self-heal.
+  _msgPtStickyLoad();
   function _msgPtSetById(room, id, plain) {
     if (!room || !id || typeof plain !== 'string') return;
     // Never store ciphertext-shaped values — see _looksLikeCiphertext.
     if (_looksLikeCiphertext(plain)) return;
+    _msgPtStickyLoad();
     // Sticky: once we have plaintext for <room,id>, never overwrite.
     // This Map is session-scoped and is the last line of defense for
     // own-message self-heal across channel switches. If a later code
@@ -176,9 +230,14 @@ const Messages = (() => {
     const k = room + ':' + id;
     if (_msgPlainById.has(k)) return;
     _msgPlainById.set(k, plain);
+    _msgPtStickyDirty = true;
+    if (!_msgPtStickyT) {
+      _msgPtStickyT = setTimeout(() => { _msgPtStickyT = 0; _msgPtStickySave(); }, 250);
+    }
   }
   function _msgPtGetById(room, id) {
     if (!room || !id) return undefined;
+    _msgPtStickyLoad();
     return _msgPlainById.get(room + ':' + id);
   }
 
