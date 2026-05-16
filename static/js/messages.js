@@ -90,6 +90,21 @@ const Messages = (() => {
       _rmPtSaveT = setTimeout(() => { _rmPtSaveT = 0; _rmPtSave(); }, 250);
     }
   }
+  // Flush any pending debounced cache write synchronously. Called on
+  // pagehide/beforeunload so a send → logout → login sequence within
+  // the 250ms debounce window doesn't lose the just-cached plaintext.
+  function _ptCacheFlush() {
+    try {
+      if (_rmPtSaveT) { clearTimeout(_rmPtSaveT); _rmPtSaveT = 0; }
+      _rmPtSave();
+    } catch {}
+  }
+  try {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', _ptCacheFlush);
+      window.addEventListener('beforeunload', _ptCacheFlush);
+    }
+  } catch {}
 
   // Inline SVG logos for bridge origin badge (tiny, monochrome, currentColor).
   const _TG_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg>';
@@ -3321,7 +3336,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, _ptCacheGet, _ptCachePut, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, _ptCacheGet, _ptCachePut, _ptCacheFlush, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

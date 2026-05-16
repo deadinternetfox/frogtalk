@@ -671,6 +671,22 @@ function _dmPtCachePut(cipher, plain) {
   }
 }
 
+// Flush any pending debounced DM-cache write synchronously. Called on
+// pagehide/beforeunload and on logout so a send → logout → login within
+// the 250ms save debounce window doesn't lose own-message plaintext.
+function _dmPtCacheFlush() {
+  try {
+    if (_dmPtCacheSaveT) { clearTimeout(_dmPtCacheSaveT); _dmPtCacheSaveT = 0; }
+    _dmPtCacheSave();
+  } catch {}
+}
+try {
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pagehide', _dmPtCacheFlush);
+    window.addEventListener('beforeunload', _dmPtCacheFlush);
+  }
+} catch {}
+
 async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
   const raw = String(cipher || '');
   if (!raw) return '';
