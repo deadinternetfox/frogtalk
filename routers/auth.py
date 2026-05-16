@@ -1199,6 +1199,17 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
             })
         except Exception:
             pass
+    # Flush this token's cached user record so the next /me (or any other
+    # authed request) re-reads the freshly-written row instead of serving
+    # the 15 s-stale copy from the deps.py in-memory cache. Without this
+    # the Settings panel reopens with the *old* privacy / notify / theme
+    # values and the user thinks the save silently failed.
+    try:
+        current_token = (request.headers.get("x-session-token") or "").strip()
+        if current_token:
+            invalidate_token_cache(current_token)
+    except Exception:
+        pass
     return {"ok": True}
 
 
