@@ -8862,6 +8862,7 @@ window.ConnErr = (function(){
       <button class="settings-tab active" id="set-tab-profile" onclick="switchSettingsTab('profile')">Profile</button>
       <button class="settings-tab" id="set-tab-social" onclick="switchSettingsTab('social')">Social</button>
       <button class="settings-tab" id="set-tab-privacy" onclick="switchSettingsTab('privacy')">Privacy</button>
+      <button class="settings-tab" id="set-tab-security" onclick="switchSettingsTab('security')">Security</button>
       <button class="settings-tab" id="set-tab-notif" onclick="switchSettingsTab('notif')">Notifications</button>
       <button class="settings-tab" id="set-tab-appear" onclick="switchSettingsTab('appear')">Appearance</button>
       <button class="settings-tab" id="set-tab-network" onclick="switchSettingsTab('network')">Network</button>
@@ -9014,8 +9015,6 @@ window.ConnErr = (function(){
         </div>
         <input type="checkbox" id="profile-auto-login" checked style="width:18px;height:18px;cursor:pointer;accent-color:#4caf50">
       </label>
-      <!-- App-PIN section: rendered by Pin.js (pin.js manages its own DOM). -->
-      <div id="pin-privacy-section"></div>
       <label style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #1e1e1e;cursor:pointer">
         <div>
           <div style="font-size:14px;color:#e0e0e0">Public Profile</div>
@@ -9348,21 +9347,17 @@ window.ConnErr = (function(){
         </div>
       </div>
     </div>
-    <!-- Account Tab -->
-    <div id="set-pane-account" style="display:none">
-      <!-- Install App Section (hidden by default; revealed only when the
-           browser fires beforeinstallprompt — Chrome/Edge/Brave on a non-
-           installed PWA. Electron/iOS/Firefox never get it). -->
-      <div id="install-app-section" style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #2a2a2a;display:none">
-        <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">📱 Install App</div>
-        <div style="font-size:12px;color:#666;margin-bottom:12px">Install FrogTalk as a native app for the best experience. Gets its own icon, works offline, and no browser UI!</div>
-        <button class="modal-btn primary" id="install-app-btn" onclick="Notifications.promptInstall()" style="width:100%">🐸 Install FrogTalk App</button>
-        <div id="install-app-note" style="font-size:11px;color:#666;margin-top:6px;text-align:center;display:none">Already installed or not supported in this browser</div>
-      </div>
-      
-      <div style="margin-bottom:16px;font-size:13px;color:#4caf50;font-weight:600">Change Password</div>
-      <input class="modal-input" type="password" id="profile-cur-pw" placeholder="Current password">
-      <input class="modal-input" type="password" id="profile-new-pw" placeholder="New password (min 6 characters)">
+    <!-- Security Tab — password, App PIN, recovery key. Moved out of the
+         Account tab so it lives next to other security-sensitive controls,
+         and out of the Privacy tab so the PIN settings don't compete with
+         visibility toggles. -->
+    <div id="set-pane-security" style="display:none">
+      <div style="margin-bottom:12px;font-size:13px;color:#4caf50;font-weight:600">🔒 Change Password</div>
+      <input class="modal-input" type="password" id="profile-cur-pw" placeholder="Current password" autocomplete="current-password">
+      <input class="modal-input" type="password" id="profile-new-pw" placeholder="New password (min 6 characters)" autocomplete="new-password">
+
+      <!-- App PIN section: rendered by Pin.js (pin.js manages its own DOM). -->
+      <div id="pin-security-section"></div>
 
       <!-- Account Recovery -->
       <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
@@ -9381,6 +9376,25 @@ window.ConnErr = (function(){
           🔑 Generate &amp; Download Recovery Key
         </button>
         <div id="recovery-key-status" style="font-size:11px;color:#7a8a82;margin-top:8px;min-height:14px"></div>
+      </div>
+    </div>
+
+    <!-- Account Tab — install-app prompt + delete-account only. All
+         password / PIN / recovery-key controls now live on the Security tab. -->
+    <div id="set-pane-account" style="display:none">
+      <!-- Install App Section (hidden by default; revealed only when the
+           browser fires beforeinstallprompt — Chrome/Edge/Brave on a non-
+           installed PWA. Electron/iOS/Firefox never get it). -->
+      <div id="install-app-section" style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #2a2a2a;display:none">
+        <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">📱 Install App</div>
+        <div style="font-size:12px;color:#666;margin-bottom:12px">Install FrogTalk as a native app for the best experience. Gets its own icon, works offline, and no browser UI!</div>
+        <button class="modal-btn primary" id="install-app-btn" onclick="Notifications.promptInstall()" style="width:100%">🐸 Install FrogTalk App</button>
+        <div id="install-app-note" style="font-size:11px;color:#666;margin-top:6px;text-align:center;display:none">Already installed or not supported in this browser</div>
+      </div>
+
+      <div style="font-size:12px;color:#7a8a82;line-height:1.55;margin-bottom:16px;padding:10px 12px;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px">
+        Password, App PIN and recovery-key controls have moved to the
+        <a href="#" onclick="switchSettingsTab('security');return false" style="color:#4caf50;font-weight:600;text-decoration:none">Security</a> tab.
       </div>
 
       <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
@@ -10350,7 +10364,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=433"></script>
 <script src="/static/js/ws.js?v=225"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=464"></script>
+<script src="/static/js/ui.js?v=465"></script>
   <script src="/static/js/rooms.js?v=428"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
 <script src="/static/js/messages.js?v=441"></script>
@@ -10366,7 +10380,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <!-- cache bump: social share button + story/profile list UX fixes -->
 <script src="/static/js/social.js?v=1028"></script>
 <!-- Privacy PIN lock (auto-lock on idle, admin gate, autologin gate) -->
-<script src="/static/js/pin.js?v=8"></script>
+<script src="/static/js/pin.js?v=9"></script>
 <!-- Context-aware screenshot blocker: only engages in DMs / private rooms / disappearing threads -->
 <script src="/static/js/screenshot_guard.js?v=1"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>

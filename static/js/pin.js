@@ -787,11 +787,12 @@
   }
 
   // ── Privacy panel sub-options ──────────────────────────────────────
-  // The privacy tab in index.html contains a #pin-privacy-section div.
+  // The Security tab in index.html contains a #pin-security-section div.
+  // (Was #pin-privacy-section before the Settings → Security refactor.)
   // We render its contents here so the source of truth for the PIN
   // option block lives entirely in this file.
   function _renderOptionsPanel () {
-    const root = $('pin-privacy-section');
+    const root = $('pin-security-section') || $('pin-privacy-section');
     if (!root) return;
     root.textContent = '';
 

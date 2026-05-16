@@ -2392,7 +2392,7 @@ function switchSettingsTab(tab) {
   const tabBtn = document.getElementById(`set-tab-${tab}`);
   if (tabBtn) tabBtn.classList.add('active');
   // Show/hide panes with animation
-  ['profile', 'social', 'privacy', 'notif', 'appear', 'network', 'application', 'dev', 'account'].forEach(p => {
+  ['profile', 'social', 'privacy', 'security', 'notif', 'appear', 'network', 'application', 'dev', 'account'].forEach(p => {
     const pane = document.getElementById(`set-pane-${p}`);
     if (pane) {
       if (p === tab) {
@@ -2410,9 +2410,9 @@ function switchSettingsTab(tab) {
   });
   // Load blocked users when privacy tab opened
   if (tab === 'privacy') loadBlockedUsers();
-  // Privacy tab also owns the App-PIN section — refresh server-side
+  // Security tab owns the App-PIN section — refresh server-side
   // status so toggles reflect what the server actually has.
-  if (tab === 'privacy') { try { window.Pin && Pin.refreshFromServer(); } catch {} }
+  if (tab === 'security') { try { window.Pin && Pin.refreshFromServer(); } catch {} }
   // Load API keys / bots when dev tab opened
   if (tab === 'dev') { loadApiKeys(); loadBots(); }
   // Load social stats
