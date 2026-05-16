@@ -398,6 +398,63 @@
     return (await _idbGet(STORE_EPOCHS, String(roomId))) | 0;
   }
 
+  // Diagnostics for the Encryption-info UI. Returns a compact snapshot
+  // of local Sender-Keys state for a room. Never throws.
+  async function describeRoom(roomId) {
+    const out = {
+      available: false,
+      hasSelfKey: false,
+      epoch: 0,
+      self: null,       // { chain_id, iteration, device_id }
+      peerCount: 0,     // number of known sender peers (devices)
+      peers: [],        // [{ uid, deviceId, chain_id, iteration }]
+    };
+    try {
+      out.available = isAvailable();
+      out.epoch = (await _idbGet(STORE_EPOCHS, String(roomId))) | 0;
+      const self = await _getSelfState(roomId);
+      if (self) {
+        out.hasSelfKey = true;
+        out.self = {
+          chain_id:  self.chain_id  >>> 0,
+          iteration: self.iteration >>> 0,
+          device_id: self.device_id | 0,
+        };
+      }
+      // Walk the sender_keys store, filtering by roomId prefix.
+      try {
+        const db = await _openDb();
+        const tx = db.transaction(STORE_SENDER_KEYS, 'readonly');
+        const store = tx.objectStore(STORE_SENDER_KEYS);
+        const prefix = String(roomId) + '|';
+        await new Promise((resolve) => {
+          const req = store.openCursor();
+          req.onsuccess = (ev) => {
+            const cur = ev.target.result;
+            if (!cur) { resolve(); return; }
+            const k = String(cur.key || '');
+            if (k.startsWith(prefix)) {
+              const rest = k.slice(prefix.length).split('|');
+              const uid = rest[0] || '';
+              const deviceId = (rest[1] | 0) || 1;
+              const v = cur.value || {};
+              out.peers.push({
+                uid,
+                deviceId,
+                chain_id:  (v.chain_id  | 0) >>> 0,
+                iteration: (v.iteration | 0) >>> 0,
+              });
+            }
+            cur.continue();
+          };
+          req.onerror = () => resolve();
+        });
+        out.peerCount = out.peers.length;
+      } catch {}
+    } catch {}
+    return out;
+  }
+
   // ── Capability probe ─────────────────────────────────────────────────
   // Returns true iff the libsignal Curve primitives we depend on are
   // loaded and the WebCrypto subset we need is present.
@@ -422,6 +479,7 @@
     forgetSender,
     hasSelfKey,
     epoch,
+    describeRoom,
   };
 
   try {

@@ -5257,17 +5257,51 @@ function toggleEncryptionInfo() {
     const slot = document.getElementById('enc-verify-emojis');
     const peerEl = document.getElementById('enc-verify-peer');
     const fpEl = document.getElementById('enc-device-fp');
+    const dmWrap = document.getElementById('enc-dm-emoji-wrap');
+    const roomCard = document.getElementById('enc-room-card');
+    const modeLine = document.getElementById('enc-mode-line');
+    const isRoom = !peer;
+
+    // Show/hide DM vs Room cards based on context.
+    if (dmWrap) dmWrap.style.display = isRoom ? 'none' : '';
+    if (roomCard) roomCard.style.display = isRoom ? '' : 'none';
+
     if (peerEl) peerEl.textContent = them ? '@' + them : 'this chat';
     if (slot) slot.textContent = them ? '· · · ·' : '— — — —';
     if (fpEl) fpEl.innerHTML = '<span style="color:#666">Loading…</span>';
+    if (modeLine) {
+      // Default header; the room populator may upgrade this to "Signal
+      // Sender Keys" once it confirms the v2 path is active.
+      modeLine.textContent = isRoom
+        ? 'End-to-end · AES-256-GCM'
+        : (window.Signal && Signal.isReady?.() ? 'End-to-end · Signal v2' : 'End-to-end · AES-256-GCM');
+    }
     openModal('modal-encrypt-verify');
-    if (them && me && Crypto.fingerprint) {
-      Crypto.fingerprint(me, them).then(emojis => {
-        if (slot) slot.textContent = emojis.join(' ');
-      }).catch(() => {
-        if (slot) slot.textContent = '—';
+
+    if (!isRoom) {
+      if (them && me && Crypto.fingerprint) {
+        Crypto.fingerprint(me, them).then(emojis => {
+          if (slot) slot.textContent = emojis.join(' ');
+        }).catch(() => {
+          if (slot) slot.textContent = '—';
+        });
+      }
+      // Track A Phase 3 — Signal v2 safety number card. Shown only when
+      // libsignal is initialised on this device AND we can reach the
+      // peer's published bundle. Falls back to hiding the card silently.
+      _populateSignalSafetyCard(peer).catch(() => {
+        const card = document.getElementById('enc-signal-card');
+        if (card) card.style.display = 'none';
+      });
+    } else {
+      // Track C — populate the room sender-keys card.
+      const sigCard = document.getElementById('enc-signal-card');
+      if (sigCard) sigCard.style.display = 'none';
+      _populateRoomEncCard().catch(() => {
+        if (roomCard) roomCard.style.display = 'none';
       });
     }
+
     if (Crypto.publicKeyFingerprint) {
       Crypto.publicKeyFingerprint().then(fp => {
         _renderEncDeviceFp(fp);
@@ -5278,17 +5312,69 @@ function toggleEncryptionInfo() {
       // useful instead of the scary "Crypto module not ready" string.
       _computeFpFallback().then(_renderEncDeviceFp).catch(() => _renderEncDeviceFp(''));
     }
-
-    // Track A Phase 3 — Signal v2 safety number card. Shown only when
-    // libsignal is initialised on this device AND we can reach the
-    // peer's published bundle. Falls back to hiding the card silently.
-    _populateSignalSafetyCard(peer).catch(() => {
-      const card = document.getElementById('enc-signal-card');
-      if (card) card.style.display = 'none';
-    });
   } catch (e) {
     UI.showToast('Could not open encryption settings.', 'error');
   }
+}
+
+// Track C — populate the Room Sender-Keys card for the current room.
+async function _populateRoomEncCard() {
+  const card   = document.getElementById('enc-room-card');
+  const nameEl = document.getElementById('enc-room-name');
+  const modeEl = document.getElementById('enc-room-mode');
+  const detail = document.getElementById('enc-room-detail');
+  const modeLine = document.getElementById('enc-mode-line');
+  if (!card || !modeEl || !detail) return;
+  const room = (typeof State !== 'undefined' && State.currentRoom) ? String(State.currentRoom) : '';
+  if (nameEl) nameEl.textContent = room ? '#' + room : '—';
+  if (!room) { card.style.display = 'none'; return; }
+
+  const escape = (s) => String(s).replace(/[&<>"']/g, c => (
+    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+  ));
+
+  // No Signal.room module loaded → legacy AES only.
+  if (!window.Signal || !window.Signal.room || !window.Signal.room.isAvailable
+      || !window.Signal.room.isAvailable()) {
+    modeEl.innerHTML = '<span style="color:#d8b88a">🔐 Legacy AES-256-GCM (per-room shared key)</span>';
+    detail.innerHTML = '<span style="color:#7a8a82">Signal Sender Keys not yet enabled for this device. Messages still travel encrypted, just not under per-device sending keys.</span>';
+    return;
+  }
+
+  let snap = null;
+  try { snap = await window.Signal.room.describeRoom(room); } catch {}
+  if (!snap) {
+    modeEl.innerHTML = '<span style="color:#d8b88a">🔐 Legacy AES-256-GCM</span>';
+    detail.textContent = '';
+    return;
+  }
+
+  if (snap.hasSelfKey) {
+    modeEl.innerHTML = '🛡️ <strong style="color:#7fd8a5">Signal Sender Keys (v2)</strong>';
+    if (modeLine) modeLine.textContent = 'End-to-end · Signal Sender Keys';
+  } else {
+    modeEl.innerHTML = '<span style="color:#d8b88a">🔐 Legacy AES-256-GCM</span> '
+      + '<span style="color:#7a8a82;font-size:11px">(Sender Keys will activate once your device sends in this room)</span>';
+  }
+
+  const rows = [];
+  rows.push(`<div>Local epoch · <strong>${snap.epoch | 0}</strong></div>`);
+  if (snap.self) {
+    rows.push(`<div>This device · chain ${snap.self.chain_id} · iter ${snap.self.iteration} · dev ${snap.self.device_id}</div>`);
+  } else {
+    rows.push(`<div style="color:#7a8a82">This device has not yet generated a sender key for this room.</div>`);
+  }
+  rows.push(`<div>Known senders · <strong>${snap.peerCount | 0}</strong></div>`);
+  if (snap.peers && snap.peers.length) {
+    const list = snap.peers.slice(0, 8).map(p =>
+      `<div style="color:#9ab8a8">· uid ${escape(p.uid)} · dev ${p.deviceId} · chain ${p.chain_id} · iter ${p.iteration}</div>`
+    ).join('');
+    rows.push(list);
+    if (snap.peers.length > 8) {
+      rows.push(`<div style="color:#7a8a82">…and ${snap.peers.length - 8} more</div>`);
+    }
+  }
+  detail.innerHTML = rows.join('');
 }
 
 // Track A Phase 3 — Signal v2 safety number card populator.

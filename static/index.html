@@ -8785,11 +8785,12 @@ window.ConnErr = (function(){
         style="background:none;border:none;color:#888;font-size:20px;cursor:pointer;line-height:1;padding:4px 8px"
         aria-label="Close">✕</button>
     </div>
-    <div style="color:#7aa890;font-size:11.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;margin:0 0 14px">
+    <div id="enc-mode-line" style="color:#7aa890;font-size:11.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;margin:0 0 14px">
       End-to-end · AES-256-GCM
     </div>
 
-    <!-- Emoji safety code -->
+    <!-- Emoji safety code (DM-only) -->
+    <div id="enc-dm-emoji-wrap">
     <div id="enc-verify-emojis"
          onclick="copyEncVerifyEmojis()"
          title="Tap to copy"
@@ -8811,6 +8812,30 @@ window.ConnErr = (function(){
     <p style="color:#888;font-size:11px;margin:0 0 14px;line-height:1.45">
       Derived from both nicknames · Server only sees ciphertext.
     </p>
+    </div>
+
+    <!-- Room Sender-Keys card (Track C) -->
+    <div id="enc-room-card" style="display:none;margin:6px 0 14px;padding:12px 14px;background:rgba(127,216,165,.04);
+                border:1px solid #2f5f48;border-radius:12px;text-align:left">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+                     border-radius:6px;background:#1a3a2a;border:1px solid #2f5f48;font-size:12px">🗝️</span>
+        <div style="display:flex;flex-direction:column;line-height:1.2;flex:1;min-width:0">
+          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Room encryption</span>
+          <span id="enc-room-name" style="font-size:11px;color:#6a7a72">—</span>
+        </div>
+      </div>
+      <div id="enc-room-mode" style="font-size:13px;color:#d8e8de;margin-bottom:8px">
+        <span style="color:#666">Loading…</span>
+      </div>
+      <div id="enc-room-detail"
+           style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#cfd8d2;
+                  background:#0a0f0c;padding:10px 12px;border-radius:8px;border:1px solid #1f2a23;
+                  line-height:1.6"></div>
+      <div style="font-size:11px;color:#7a8a82;margin-top:9px;line-height:1.5">
+        Each member's device holds its own sending key. The server only ever sees ciphertext, and keys auto-rotate when membership changes.
+      </div>
+    </div>
 
     <!-- Signal v2 Safety Number card (Track A Phase 3) -->
     <div id="enc-signal-card" style="display:none;margin:14px 0 6px;padding:12px 14px;background:rgba(127,216,165,.04);
@@ -10414,13 +10439,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/signal_store.js?v=1"></script>
 <script src="/static/js/signal.js?v=4"></script>
-<script src="/static/js/signal_room.js?v=1"></script>
+<script src="/static/js/signal_room.js?v=2"></script>
 <script src="/static/js/state.js?v=196"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=433"></script>
 <script src="/static/js/ws.js?v=226"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=468"></script>
+<script src="/static/js/ui.js?v=469"></script>
   <script src="/static/js/rooms.js?v=428"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
 <script src="/static/js/messages.js?v=442"></script>
