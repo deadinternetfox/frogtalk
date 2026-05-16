@@ -460,10 +460,12 @@
   // loaded and the WebCrypto subset we need is present.
   function isAvailable() {
     try {
-      return !!(window.libsignal
-        && window.libsignal.Curve
-        && (window.libsignal.Curve.async || window.libsignal.Curve).calculateSignature
-        && crypto && crypto.subtle && crypto.getRandomValues);
+      const C = window.libsignal && window.libsignal.Curve;
+      const hasSign = !!(C && (
+        (C.async && typeof C.async.calculateSignature === 'function')
+        || typeof C.calculateSignature === 'function'
+      ));
+      return !!(hasSign && crypto && crypto.subtle && crypto.getRandomValues);
     } catch { return false; }
   }
 

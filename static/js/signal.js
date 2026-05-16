@@ -89,6 +89,53 @@
     throw new Error('expected ArrayBuffer / view / b64 string');
   }
 
+  // ── DJB type-byte normalisation ──────────────────────────────────────
+  // libsignal-protocol-typescript stores Curve25519 public keys with a
+  // leading 0x05 "DJB type" byte (so they're 33 bytes). Our wire format
+  // / server validation expects raw 32-byte X25519 keys. Strip on
+  // publish, prepend on consume — keeps the public bundle endpoints
+  // strict (32 bytes exactly) while letting libsignal keep its native
+  // 33-byte representation internally.
+  const _DJB_TYPE = 0x05;
+
+  function _stripDjbType(buf) {
+    const ab = _toAb(buf);
+    const u8 = new Uint8Array(ab);
+    if (u8.length === 33 && u8[0] === _DJB_TYPE) {
+      return u8.slice(1).buffer;
+    }
+    return ab;
+  }
+
+  function _prependDjbType(buf) {
+    const ab = _toAb(buf);
+    const u8 = new Uint8Array(ab);
+    if (u8.length === 33 && u8[0] === _DJB_TYPE) return ab;
+    if (u8.length !== 32) {
+      // Out-of-spec; pass through unchanged so libsignal raises a clear
+      // error instead of us silently corrupting bytes.
+      return ab;
+    }
+    const out = new Uint8Array(33);
+    out[0] = _DJB_TYPE;
+    out.set(u8, 1);
+    return out.buffer;
+  }
+
+  // ── libsignal Curve resolver ──────────────────────────────────────
+  // In some libsignal builds `Curve.async` is a thin wrapper that only
+  // exposes the keypair / DH methods and *not* calculateSignature /
+  // verifySignature — so the old `(Curve.async || Curve)` fallback
+  // resolved to a value where `.calculateSignature` was undefined.
+  // Probe per-method and prefer whichever object actually has it.
+  function _curveFn(name) {
+    const C = _libsignal && _libsignal.Curve;
+    if (!C) throw new Error('libsignal Curve missing');
+    if (C.async && typeof C.async[name] === 'function') return C.async[name].bind(C.async);
+    if (typeof C[name] === 'function') return C[name].bind(C);
+    throw new Error('libsignal Curve.' + name + ' is not a function');
+  }
+
   // ── Module loader ────────────────────────────────────────────────────
 
   async function _loadLibsignal() {
@@ -188,13 +235,16 @@
 
       const body = {
         registration_id: regId,
-        identity_pub: _abToB64(idKey.pubKey),
+        identity_pub: _abToB64(_stripDjbType(idKey.pubKey)),
         signed_prekey: {
           id: signed.id,
-          pub: _abToB64(signed.pubKey),
+          pub: _abToB64(_stripDjbType(signed.pubKey)),
           sig: _abToB64(signed.signature),
         },
-        one_time_prekeys: fresh.map(k => ({ id: k.id, pub: _abToB64(k.pubKey) })),
+        one_time_prekeys: fresh.map(k => ({
+          id: k.id,
+          pub: _abToB64(_stripDjbType(k.pubKey)),
+        })),
       };
       const apiFetch = window.apiFetch || ((u, m, b) => fetch(u, {
         method: m || 'GET',
@@ -238,17 +288,20 @@
     if (existing) return;
     // No session yet \u2014 fetch a bundle and run X3DH.
     const bundle = await _fetchPeerBundle(peerUserId);
+    // Re-attach the DJB type byte stripped at publish time so
+    // libsignal's processPreKey accepts the 33-byte representation it
+    // expects internally.
     const remote = {
-      identityKey: _toAb(bundle.identity_pub),
+      identityKey: _prependDjbType(_b64ToAb(bundle.identity_pub)),
       registrationId: bundle.registration_id,
       preKey: bundle.one_time_prekey ? {
         keyId: bundle.one_time_prekey.id,
-        publicKey: _toAb(bundle.one_time_prekey.pub),
+        publicKey: _prependDjbType(_b64ToAb(bundle.one_time_prekey.pub)),
       } : undefined,
       signedPreKey: {
         keyId: bundle.signed_prekey.id,
-        publicKey: _toAb(bundle.signed_prekey.pub),
-        signature: _toAb(bundle.signed_prekey.sig),
+        publicKey: _prependDjbType(_b64ToAb(bundle.signed_prekey.pub)),
+        signature: _b64ToAb(bundle.signed_prekey.sig),
       },
     };
     const builder = new _libsignal.SessionBuilder(_store, addr);
@@ -336,7 +389,9 @@
   async function getMyIdentityPubB64() {
     if (!_store) throw new Error('Signal not initialised');
     const idKey = await _store.getIdentityKeyPair();
-    return _abToB64(idKey.pubKey);
+    // Strip the DJB type byte so the published wire format matches
+    // /api/signal/bundle/<peer>.identity_pub exactly (32-byte raw key).
+    return _abToB64(_stripDjbType(idKey.pubKey));
   }
 
   async function signWithIdentity(bytes) {
@@ -346,8 +401,8 @@
       : (bytes && bytes.buffer instanceof ArrayBuffer ? bytes.buffer : null);
     if (!buf) throw new Error('bytes must be ArrayBuffer or Uint8Array');
     const idKey = await _store.getIdentityKeyPair();
-    const curve = (_libsignal.Curve && _libsignal.Curve.async) ? _libsignal.Curve.async : _libsignal.Curve;
-    const sig = await curve.calculateSignature(idKey.privKey, buf);
+    const calculateSignature = _curveFn('calculateSignature');
+    const sig = await calculateSignature(idKey.privKey, buf);
     return _abToB64(sig);
   }
 
@@ -371,12 +426,15 @@
     const message = JSON.stringify(canon, Object.keys(canon).sort());
     const idKey = await _store.getIdentityKeyPair();
     const msgBuf = new TextEncoder().encode(message).buffer;
-    const curve = (_libsignal.Curve && _libsignal.Curve.async) ? _libsignal.Curve.async : _libsignal.Curve;
-    const sig = await curve.calculateSignature(idKey.privKey, msgBuf);
+    const calculateSignature = _curveFn('calculateSignature');
+    const sig = await calculateSignature(idKey.privKey, msgBuf);
     const env = {
       p: message,
       s: _abToB64(sig),
-      i: _abToB64(idKey.pubKey),
+      // Strip DJB type byte so `env.i` matches the wire format used by
+      // /api/signal/bundle.identity_pub — the verifier compares this
+      // against the cached bundle key directly.
+      i: _abToB64(_stripDjbType(idKey.pubKey)),
     };
     return btoa(JSON.stringify(env));
   }
@@ -422,11 +480,14 @@
       return { ok: false, reason: 'stale' };
     }
     try {
-      const pub = _b64ToAb(env.i);
+      // `env.i` is the 32-byte raw key (matching our published wire
+      // format). Prepend the DJB type byte before handing it to
+      // libsignal's verifySignature which expects 33-byte pubkeys.
+      const pub = _prependDjbType(_b64ToAb(env.i));
       const sig = _b64ToAb(env.s);
       const msg = new TextEncoder().encode(env.p).buffer;
-      const curve = (_libsignal.Curve && _libsignal.Curve.async) ? _libsignal.Curve.async : _libsignal.Curve;
-      await curve.verifySignature(pub, msg, sig);
+      const verifySignature = _curveFn('verifySignature');
+      await verifySignature(pub, msg, sig);
     } catch {
       return { ok: false, reason: 'bad_signature' };
     }
@@ -478,7 +539,10 @@
     let myPub;
     try {
       const idKey = await _store.getIdentityKeyPair();
-      myPub = new Uint8Array(idKey.pubKey);
+      // Use the same 32-byte raw representation we publish in our
+      // bundle so this hash agrees with what the peer computes from
+      // OUR published identity_pub (and vice versa).
+      myPub = new Uint8Array(_stripDjbType(idKey.pubKey));
     } catch { return null; }
     const peerB64 = await getPeerIdentityKey(peerUserId);
     if (!peerB64) return null;
