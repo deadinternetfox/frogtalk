@@ -54,11 +54,48 @@ Track A puts in place.
   sender-identity from the outer envelope the server sees; cut
   per-request logging of participant graph and IP.
 
-Both nodes (MAIN `31.220.92.120`, Tor `161.97.182.73`) are operated by
-the same team, so federation can treat the peer as fully trusted for
-key-material transit purposes. That simplifies the X3DH bundle
-distribution path materially. Track G is still worth doing because of
-log-subpoena and DB-compromise threat models even when the server is us.
+### Federation trust model (updated 2026-05-17)
+
+Earlier phases of this plan assumed federation peers were mutually
+trusted because MAIN and Tor were both operated by us. **That
+assumption is retired.** The published self-host guide invites third
+parties to run their own FrogTalk nodes and federate, so every track
+from here on treats a federated peer as **semi-trusted transport**:
+
+- A peer node can be pinned at the operator level (Ed25519 host key)
+  so we know *which* node sent us a federation event, but we no longer
+  treat that node as authoritative about the **content** of the event.
+- All identity-bound facts (user identity keys, signed prekeys, device
+  enrolments, sender certificates, sender-key distribution messages)
+  must be **signed by the user's own identity key**, and the receiving
+  node verifies that chain before persisting or surfacing the data.
+- A peer node can withhold or reorder events but cannot inject keys
+  for a user it does not own, cannot decrypt DM/room ciphertext, and
+  cannot impersonate a user in a way that survives the client's
+  signature check.
+- OTPK consumption is **monotone and non-replayable**: a foreign node
+  asks the home node to consume an OTPK, the home node returns a
+  signed consumption token, and the home node refuses to ever
+  re-issue that prekey id. Foreign nodes cannot exhaust a user's pool
+  beyond the rate the home node serves.
+- Sealed-sender server signing keys (Track G) are gossiped as a
+  cross-signed key history so any node can verify a sender cert
+  issued by any other node, without trusting that node's current
+  state.
+
+Concretely this means:
+
+- Every track's data model adds at least one *identity-key signature*
+  on the payload that crosses federation.
+- Every federation inbox handler **re-verifies** signatures rather
+  than trusting the peer's transport-level signature alone.
+- Rate limits, abuse, and ban propagation remain operator-trust:
+  operators set their own policies, and a hostile peer can only DoS
+  its own outbound queue.
+
+Track G still does additional work for the log-subpoena and
+DB-compromise threat models that exist even when the operator is
+honest.
 
 ---
 
@@ -193,9 +230,22 @@ signal.otpk.consumed       body: {user_id, prekey_id}   -- so the home node can 
 
 A user's **home node** owns their OTPK pool. The other node forwards
 `GET /api/signal/bundle/{user_id}` requests to the home node when the
-user is non-local. This keeps OTPK consumption atomic at exactly one
-SQL row in exactly one DB. Both nodes are mutually trusted, so we don't
-need cryptographic OTPK consumption tokens.
+user is non-local. OTPK consumption is therefore always serialised at
+one SQL row in one DB.
+
+Because foreign nodes are now treated as semi-trusted (see *Federation
+trust model* above), the home node:
+
+- Signs every bundle response with a per-user **bundle signature**
+  produced by the user's own identity key, so the receiving client can
+  verify the bundle without trusting either node.
+- Issues an **OTPK consumption token** (`{user_id, prekey_id, ts}` +
+  Ed25519 signature by the home node's host key) when a foreign node
+  requests a bundle for one of its local users. The token is the
+  receipt the foreign node hands back to its caller; the home node
+  refuses to ever re-issue that `prekey_id` even on replay.
+- Rate-limits cross-node bundle fetches per-foreign-node so a hostile
+  peer can't pool-drain a user faster than the home node tops up.
 
 ### Frontend changes
 
@@ -1192,11 +1242,20 @@ identified-sender limit.
 
 ### Federation
 
-Federation peers are mutually trusted, so they receive *unsealed*
-relay copies internally for ratelimit/abuse purposes — but the
-plaintext sender identity never leaves the trusted pair. From the
-client's perspective the path looks the same as a single-node sealed
-sender.
+Under the updated federation trust model, foreign peers are no longer
+trusted to see sender identities for abuse/ratelimit purposes. The
+rate-limiting moves entirely to the **recipient's home node** (which
+is the only node that ever has to decide whether to deliver to its
+local user). The sender's home node sees only that its user posted an
+opaque outbound envelope to recipient `R@peer` and applies its own
+outbound rate limit. The sealed-sender envelope itself is opaque end
+to end — it is never unsealed by any node, not even ours.
+
+Server signing keys (for issuing sender certificates) are gossiped as
+a cross-signed key history (`server.signing-key.published` event with
+an Ed25519 signature by both the issuing host key *and* the previous
+active server signing key). Any node can verify a cert issued by any
+other node without trusting that other node's current state.
 
 ### Acceptance criteria
 
@@ -1247,6 +1306,50 @@ Each tracked deploy follows the standing checklist:
 - `scp` to both nodes, `systemctl restart frogtalk`, `systemctl is-active`.
 - Bump `static/sw.js` CACHE_NAME and `?v=` on any changed JS.
 - Commit with a single-purpose message, push to master.
+
+---
+
+## UI conventions (applies to every new surface in this plan)
+
+Any new UI introduced by D / F / G / safety-numbers / cert prompts /
+audience pickers / device managers / QR flows must obey the existing
+FrogTalk visual language and work cleanly on **both** desktop and
+mobile-portrait. Concretely:
+
+- **Theme tokens only.** Use the existing CSS custom properties:
+  `--bg-color`, `--bg-deeper`, `--surface-color`, `--text-color`,
+  `--accent-color` (#4caf50), `--accent-dim`, `--border-color`,
+  `--toast-*`. Never hard-code a hex outside the existing palette.
+- **Modal pattern.** Reuse `.modal-overlay` + the same backdrop
+  `rgba(0,0,0,.7)`, the `.modal-input` form controls, and the existing
+  primary/secondary button styles already used by the Encryption-info
+  modal. Don't roll a parallel modal style.
+- **Mobile breakpoints.** Cards and modals must collapse cleanly at
+  the existing `@media (max-width:560px)` and `@media (max-width:420px)`
+  breakpoints. Buttons stack vertical-full-width on mobile, no
+  horizontal scroll, no fixed widths that overflow a 360px viewport.
+- **Touch targets.** Minimum 44×44 CSS px for any tap target on a
+  touch surface. QR scanner / camera UI uses the existing
+  `getUserMedia` wrapper used by the friend-add flow.
+- **System feedback.** Successes show a green toast (`--toast-*`
+  tokens, ~2.5 s); errors show a red toast and a persistent inline
+  message. Never use `alert()` / `confirm()`.
+- **Keyboard + a11y.** Modals trap focus, `Esc` closes, every form
+  control has a `<label>` or `aria-label`, contrast ≥ 4.5:1 against
+  `--bg-color`.
+- **PWA / native parity.** Any new screen has to render correctly
+  inside the Electron desktop shell and inside the iOS/Android
+  WebView wrapper — i.e. no APIs gated only behind the browser-tab
+  fullscreen permission, no fixed viewport-vh assumptions.
+- **Self-host friendliness.** Every flow has to work on a fresh
+  third-party-operated instance. Branding strings/colours come from
+  the theme tokens, not hard-coded "FrogTalk"; instance name comes
+  from the existing `/api/instance/info` endpoint.
+
+A track is **not shippable** until its UI passes a manual mobile
+audit at 360 × 740 (smallest realistic Android viewport) and at
+1280 × 800 desktop. The cleanup commit for each track explicitly
+states "mobile audit: pass" in its message.
 
 ---
 
