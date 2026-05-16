@@ -51,14 +51,35 @@ const Messages = (() => {
       localStorage.setItem(_RM_PT_CACHE_KEY, JSON.stringify(out));
     } catch {}
   }
+  // The cipher string is the v2 envelope JSON, but cache hits on history
+  // reload must survive a server JSON-roundtrip (Python json.dumps key
+  // ordering / whitespace may differ from JS JSON.stringify). Normalize
+  // by keying on the inner `b` ciphertext (base64, unique per envelope).
+  // Non-v2 inputs fall back to the raw string.
+  function _ptCacheKey(cipher) {
+    if (!cipher || typeof cipher !== 'string') return String(cipher || '');
+    if (cipher.length < 9 || cipher[0] !== '{') return cipher;
+    try {
+      const env = JSON.parse(cipher);
+      if (env && env.v === 2 && typeof env.b === 'string'
+          && (env.t === 'sk' || env.t === 'pre' || env.t === 'msg')) {
+        return 'v2:' + env.t + ':' + env.b;
+      }
+    } catch {}
+    return cipher;
+  }
   function _ptCacheGet(cipher) {
     _rmPtLoad();
-    return _rmPtCache.get(cipher);
+    const k = _ptCacheKey(cipher);
+    // Back-compat: also probe the legacy raw-string key for entries that
+    // were stored before normalization landed.
+    return _rmPtCache.get(k) ?? _rmPtCache.get(cipher);
   }
   function _ptCachePut(cipher, plain) {
     _rmPtLoad();
-    if (_rmPtCache.has(cipher)) _rmPtCache.delete(cipher);
-    _rmPtCache.set(cipher, String(plain));
+    const k = _ptCacheKey(cipher);
+    if (_rmPtCache.has(k)) _rmPtCache.delete(k);
+    _rmPtCache.set(k, String(plain));
     while (_rmPtCache.size > _RM_PT_CACHE_CAP) {
       const k0 = _rmPtCache.keys().next().value;
       if (k0 === undefined) break;

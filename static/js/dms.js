@@ -626,16 +626,36 @@ function _dmPtCacheSave() {
   } catch {}
 }
 
+function _dmPtCacheKey(cipher) {
+  // Server JSON-roundtrip may reorder envelope keys / change whitespace
+  // vs the client-side JSON.stringify used at send time, so keying on
+  // the raw string misses on history reload. Normalize v2 envelopes to
+  // their inner `b` ciphertext (base64, identity-unique per message).
+  if (!cipher || typeof cipher !== 'string') return String(cipher || '');
+  if (cipher.length < 9 || cipher[0] !== '{') return cipher;
+  try {
+    const env = JSON.parse(cipher);
+    if (env && env.v === 2 && typeof env.b === 'string'
+        && (env.t === 'sk' || env.t === 'pre' || env.t === 'msg')) {
+      return 'v2:' + env.t + ':' + env.b;
+    }
+  } catch {}
+  return cipher;
+}
+
 function _dmPtCacheGet(cipher) {
   _dmPtCacheLoad();
-  return _dmPtCache.get(cipher);
+  const k = _dmPtCacheKey(cipher);
+  // Back-compat: also probe the legacy raw-string key.
+  return _dmPtCache.get(k) ?? _dmPtCache.get(cipher);
 }
 
 function _dmPtCachePut(cipher, plain) {
   _dmPtCacheLoad();
+  const k = _dmPtCacheKey(cipher);
   // Refresh insertion order.
-  if (_dmPtCache.has(cipher)) _dmPtCache.delete(cipher);
-  _dmPtCache.set(cipher, String(plain));
+  if (_dmPtCache.has(k)) _dmPtCache.delete(k);
+  _dmPtCache.set(k, String(plain));
   // Evict oldest if over cap.
   while (_dmPtCache.size > _DM_PT_CACHE_CAP) {
     const firstKey = _dmPtCache.keys().next().value;
