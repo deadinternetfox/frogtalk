@@ -12,7 +12,10 @@ from typing import Optional
 import database as db
 from deps import get_current_user, client_ip
 from ws_manager import manager
-from routers._css_safety import sanitize_scoped_css
+# Track B — declaration-list inline sanitiser. The old
+# `_css_safety.sanitize_scoped_css` (selector-aware <style> sanitiser)
+# is no longer used: we never emit a <style> block from user data.
+from routers._css_inline import sanitize_inline_style
 
 _log = logging.getLogger(__name__)
 limiter = Limiter(key_func=client_ip)
@@ -109,7 +112,12 @@ async def get_user_wall(
             "nickname": user["nickname"],
             "avatar": user.get("avatar"),
             "mood": user.get("mood", ""),
-            "custom_css": user.get("custom_css", "")
+            # `custom_css` is the raw user input (for the editor on
+            # "my own profile" only — never used by the renderer).
+            # `custom_style` is the sanitised inline declaration list
+            # the front-end applies via el.style.setProperty().
+            "custom_css": user.get("custom_css", ""),
+            "custom_style": user.get("custom_style", "") or "",
         }
     }
 
@@ -759,16 +767,20 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
             params.append(body.mood)
         
         if body.custom_css is not None:
-            # Shared hardened sanitiser. Rejects comma-bridge selectors,
-            # @-rules, url()/@import/@font-face/expression(), encoded
-            # variants, position:fixed/sticky and </style breakouts. See
-            # routers/_css_safety.py for the full rule set.
-            try:
-                css = sanitize_scoped_css(body.custom_css)
-            except ValueError as e:
-                return JSONResponse(status_code=400, content={"error": f"Invalid CSS: {e}"})
+            # Track B: store the raw input verbatim (capped) so the
+            # editor can round-trip exactly what the user typed; also
+            # compute and store the sanitised declaration list in
+            # `custom_style`, which is the ONLY column the renderer
+            # reads. The sanitiser is total — bad input becomes an
+            # empty style, never an error — so we don't 400 on CSS.
+            raw_css = body.custom_css or ""
+            if len(raw_css) > 10240:
+                raw_css = raw_css[:10240]
+            sanitised = sanitize_inline_style(raw_css)
             updates.append("custom_css=?")
-            params.append(css)
+            params.append(raw_css)
+            updates.append("custom_style=?")
+            params.append(sanitised)
         
         if not updates:
             return JSONResponse(status_code=400, content={"error": "Nothing to update"})
@@ -776,7 +788,7 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
         params.append(current_user["id"])
         con.execute(f"UPDATE users SET {', '.join(updates)} WHERE id=?", params)
         row = con.execute("""
-            SELECT wall_enabled, wall_comments_enabled, mood, custom_css,
+            SELECT wall_enabled, wall_comments_enabled, mood, custom_css, custom_style,
                    global_user_id, nickname, display_name, avatar, bio, status_msg, presence, identity_pubkey
             FROM users WHERE id=?
         """, (current_user["id"],)).fetchone()
@@ -795,7 +807,12 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
                     "status_msg": row["status_msg"] or "",
                     "presence": row["presence"] or "online",
                     "mood": row["mood"] or "",
-                    "custom_css": row["custom_css"] or "",
+                    # Federation carries only the sanitised inline-style
+                    # declaration list. Raw `custom_css` stays local —
+                    # the peer has no editor UI that needs it, and we
+                    # don't want to ship un-validated bytes between
+                    # nodes.
+                    "custom_style": row["custom_style"] or "",
                     "identity_pubkey": row["identity_pubkey"] or "",
                 },
             })
@@ -810,7 +827,7 @@ async def get_wall_settings(current_user: dict = Depends(get_current_user)):
     """Get user's wall settings."""
     with db._conn() as con:
         row = con.execute("""
-            SELECT wall_enabled, wall_comments_enabled, mood, custom_css
+            SELECT wall_enabled, wall_comments_enabled, mood, custom_css, custom_style
             FROM users WHERE id=?
         """, (current_user["id"],)).fetchone()
     

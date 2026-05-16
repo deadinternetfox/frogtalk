@@ -3680,9 +3680,12 @@ const Social = (() => {
         </div>
       </div>`;
 
-      // Apply custom CSS from user if it exists (AFTER HTML is rendered).
+      // Apply custom style from user if it exists (AFTER HTML is rendered).
       // For self-profile, fall back to local state to avoid transient stale payloads.
-      const _effectiveCss = u.custom_css || (u.is_self ? (State.user?.custom_css || '') : '');
+      // Track B: prefer the server-sanitised `custom_style` declaration list;
+      // fall back to the legacy raw `custom_css` field (which the apply
+      // function will extract declarations from on the fly).
+      const _effectiveCss = u.custom_style || u.custom_css || (u.is_self ? (State.user?.custom_style || State.user?.custom_css || '') : '');
       if (_effectiveCss && typeof window.applySocialProfileCustomCss === 'function') {
         try { window.applySocialProfileCustomCss(_effectiveCss); } catch (e) { console.warn('CSS apply error:', e); }
       } else if (typeof window.clearSocialProfileCustomCss === 'function') {
@@ -3707,7 +3710,12 @@ const Social = (() => {
     const _reapplyProfileCss = () => {
       try {
         const isSelf = String(nickname || '').toLowerCase() === String(State.user?.nickname || '').toLowerCase();
-        const css = String(_profileData?.custom_css || (isSelf ? (State.user?.custom_css || '') : '') || '');
+        const css = String(
+          _profileData?.custom_style
+          || _profileData?.custom_css
+          || (isSelf ? (State.user?.custom_style || State.user?.custom_css || '') : '')
+          || ''
+        );
         if (css && typeof window.applySocialProfileCustomCss === 'function') {
           window.applySocialProfileCustomCss(css);
         } else if (typeof window.clearSocialProfileCustomCss === 'function') {

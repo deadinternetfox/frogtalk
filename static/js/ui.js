@@ -3925,80 +3925,139 @@ async function confirmDeleteAccount() {
   setTimeout(() => pwInp?.focus(), 30);
 }
 
-let _profileCustomCssEl = null;
+// ── Custom profile CSS — inline-style application (Track B) ───────────────
+//
+// Track B (see docs/SECURITY_REFACTOR_PLAN.md) eliminates every <style>
+// block built from user data. Instead, we apply one inline `style`
+// attribute to one container element via el.style.setProperty(), which
+// the browser parses in property-value context (never HTML context).
+//
+// `applyUserStyleToContainer(el, raw)` accepts either:
+//   1. A sanitised declaration list ("color: red; padding: 8px") from
+//      the server's `custom_style` column — the normal render path.
+//   2. A legacy rule-shaped string ("body { color: red }") from the
+//      editor's live-preview button. The rule body is extracted and the
+//      selector is dropped — selectors are exactly the surface we close.
+//
+// Property and value validation lives server-side in
+// `routers/_css_inline.py` and runs on every write + every federated
+// inbound. Client-side we only do the structural split, then trust
+// setProperty's own value parser. Anything the browser doesn't recognise
+// is silently dropped by setProperty — no exceptions, no HTML escape.
 
-function clearProfileCustomCss() {
-  if (_profileCustomCssEl) {
-    _profileCustomCssEl.remove();
-    _profileCustomCssEl = null;
+function _extractDeclarationListFromLegacy(raw) {
+  // If no `{` is present we already have a declaration list.
+  const s = String(raw || '');
+  if (!s.includes('{')) return s;
+  let out = '';
+  let depth = 0;
+  let buf = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '{') {
+      if (depth === 0) buf = '';
+      else buf += ch;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth <= 0) { depth = 0; out += buf + ';'; buf = ''; }
+      else buf += ch;
+    } else if (depth > 0) {
+      buf += ch;
+    }
   }
+  return out;
 }
 
-function scopeProfileCustomCss(css) {
-  // See Css.sanitizeScopedCss in state.js. Used to be a naive
-  // split(',').filter(Boolean) join — comma-bridge + position:fixed in the
-  // body let any user's profile CSS overlay the whole viewport whenever
-  // someone opened their profile modal.
-  try { return window.Css?.sanitizeScopedCss?.(css, '#modal-user-info') || ''; }
-  catch { return ''; }
+// Tokens that have no legitimate place in a declaration value once the
+// server-side allowlist has run. We defensively reject any value
+// containing one of these substrings, even though the rendering path
+// uses setProperty (not innerHTML). This is one extra layer in case the
+// editor's live preview tries to apply attacker-shaped input before the
+// user has even saved.
+const _STYLE_FORBIDDEN_SUBSTR = [
+  'url(', 'var(', 'env(', 'attr(', 'calc(', 'min(', 'max(', 'clamp(',
+  'image(', 'image-set(', 'cross-fade(', 'element(',
+  'counter(', 'counters(',
+  'expression(', 'behavior(',
+  '@', 'javascript:', 'data:',
+  '\\',
+  '/*', '*/', '//',
+  '<', '>', '{', '}',
+  '"', "'", '`',
+];
+
+const _STYLE_ALLOWED_PROP_RE = /^[a-z][a-z-]{1,40}$/;
+
+function applyUserStyleToContainer(el, raw) {
+  if (!el || !raw) return;
+  const decls = _extractDeclarationListFromLegacy(raw);
+  // Clear any prior inline style we applied, but leave non-user styles
+  // (set via el.classList etc.) alone. We mark our applied properties
+  // on a hidden dataset list so we can remove only those on next call.
+  try {
+    const prev = (el.dataset.userStyleProps || '').split(',').filter(Boolean);
+    for (const p of prev) { try { el.style.removeProperty(p); } catch {} }
+  } catch {}
+  const applied = [];
+  for (const decl of String(decls).split(';')) {
+    const idx = decl.indexOf(':');
+    if (idx <= 0) continue;
+    const prop = decl.slice(0, idx).trim().toLowerCase();
+    const val = decl.slice(idx + 1).trim();
+    if (!prop || !val) continue;
+    if (prop.startsWith('-')) continue;          // no vendor prefixes
+    if (!_STYLE_ALLOWED_PROP_RE.test(prop)) continue;
+    const lowv = val.toLowerCase();
+    let bad = false;
+    for (const tok of _STYLE_FORBIDDEN_SUBSTR) {
+      if (lowv.includes(tok)) { bad = true; break; }
+    }
+    if (bad) continue;
+    try {
+      el.style.setProperty(prop, val);
+      applied.push(prop);
+    } catch {}
+  }
+  try { el.dataset.userStyleProps = applied.join(','); } catch {}
+}
+
+function clearUserStyleFromContainer(el) {
+  if (!el) return;
+  try {
+    const prev = (el.dataset.userStyleProps || '').split(',').filter(Boolean);
+    for (const p of prev) { try { el.style.removeProperty(p); } catch {} }
+    delete el.dataset.userStyleProps;
+  } catch {}
+}
+
+function clearProfileCustomCss() {
+  const el = document.getElementById('modal-user-info');
+  if (el) clearUserStyleFromContainer(el);
 }
 
 function applyProfileCustomCss(css) {
-  clearProfileCustomCss();
-  const scopedCss = scopeProfileCustomCss(css || '');
-  if (!scopedCss) return;
-  const styleEl = document.createElement('style');
-  styleEl.id = 'profile-custom-style';
-  styleEl.textContent = scopedCss;
-  document.head.appendChild(styleEl);
-  _profileCustomCssEl = styleEl;
+  // Apply inline-style to the user-info modal container.
+  const el = document.getElementById('modal-user-info');
+  if (!el) return;
+  clearUserStyleFromContainer(el);
+  if (!css) return;
+  applyUserStyleToContainer(el, css);
 }
 
-// Apply custom CSS to a social profile (scoped to .social-profile instead of #modal-user-info)
-let _socialProfileCssEl = null;
 function applySocialProfileCustomCss(css) {
-  // Remove old style if exists
-  if (_socialProfileCssEl) {
-    _socialProfileCssEl.remove();
-    _socialProfileCssEl = null;
-  }
+  // Apply inline-style to the social-profile container. There can be
+  // more than one `.social-profile` element in the DOM if multiple
+  // profile cards are mounted (e.g., during navigation transitions);
+  // apply to each.
+  const els = document.querySelectorAll('.social-profile');
+  els.forEach(el => clearUserStyleFromContainer(el));
   if (!css) return;
-  // Scope CSS to .social-profile container via the shared hardened
-  // sanitiser. Selector aliasing (.wall-post → .sf-post,
-  // .userinfo-nick → .sp-nick) is preserved via the mapper callback.
-  const expandSocialSelectorAliases = (selector) => {
-    const base = String(selector || '').trim();
-    if (!base) return [];
-    const expanded = new Set([base]);
-    if (base.includes('.wall-post')) {
-      expanded.add(base.replace(/\.wall-post\b/g, '.sf-post'));
-    }
-    if (base.includes('.userinfo-nick')) {
-      expanded.add(base.replace(/\.userinfo-nick\b/g, '.sp-nick'));
-    }
-    return Array.from(expanded);
-  };
-  let scoped = '';
-  try {
-    scoped = window.Css?.sanitizeScopedCss?.(css, '.social-profile', (p) => {
-      const variants = expandSocialSelectorAliases(p);
-      if (!variants.length) return '';
-      return variants.map(v => `.social-profile ${v}`).join(', ');
-    }) || '';
-  } catch { scoped = ''; }
-  if (!scoped) return;
-  const styleEl = document.createElement('style');
-  styleEl.id = 'social-profile-custom-style';
-  styleEl.textContent = scoped;
-  document.head.appendChild(styleEl);
-  _socialProfileCssEl = styleEl;
+  els.forEach(el => applyUserStyleToContainer(el, css));
 }
 
 function clearSocialProfileCustomCss() {
-  if (_socialProfileCssEl) {
-    _socialProfileCssEl.remove();
-    _socialProfileCssEl = null;
-  }
+  document.querySelectorAll('.social-profile').forEach(el => clearUserStyleFromContainer(el));
 }
 
 // Backward-compatible alias: keep callers working but use in-settings modal preview.
@@ -4433,6 +4492,11 @@ async function _saveWallStyleOnly(customCss, mood) {
     }
     State.user.mood = String(mood || '').slice(0, 100);
     State.user.custom_css = String(customCss || '').slice(0, 10240);
+    // Track B: surface the freshly-sanitised inline style to renderers
+    // immediately (the server returns it in the PATCH response body).
+    if (typeof wallData.custom_style === 'string') {
+      State.user.custom_style = wallData.custom_style;
+    }
     State.user.wall_enabled = wallData.wall_enabled ?? State.user.wall_enabled ?? 1;
     State.user.wall_comments_enabled = wallData.wall_comments_enabled ?? State.user.wall_comments_enabled ?? 1;
     try { State.save(); } catch {}
@@ -4655,6 +4719,9 @@ async function showProfile() {
     try { _highlightCurrentPreset(); } catch {}
     State.user.mood = data.mood || '';
     State.user.custom_css = data.custom_css || '';
+    // Track B: also keep the sanitised inline declaration list around
+    // so the renderer has it without waiting for a profile fetch.
+    State.user.custom_style = data.custom_style || '';
     State.user.wall_enabled = data.wall_enabled;
     State.user.wall_comments_enabled = data.wall_comments_enabled;
     // Populate social tab checkboxes
@@ -5640,7 +5707,13 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
             smEl.textContent = [status, mood].filter(Boolean).join(' · ');
           }
         }
-        const _effectiveCss = (u.custom_css || (isSelf ? (State.user?.custom_css || '') : ''));
+        // Track B: prefer the sanitised inline declaration list, fall
+        // back to the raw `custom_css` field for legacy peers' payloads.
+        const _effectiveCss = (
+          u.custom_style
+          || u.custom_css
+          || (isSelf ? (State.user?.custom_style || State.user?.custom_css || '') : '')
+        );
         applyProfileCustomCss(_effectiveCss);
         if (tagsEl && Array.isArray(u.tags) && u.tags.length > 0) {
           tagsEl.innerHTML = u.tags.map(t =>

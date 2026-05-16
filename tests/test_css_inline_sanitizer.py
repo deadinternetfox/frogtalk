@@ -199,3 +199,41 @@ def test_output_never_contains_semicolon_inside_value():
         # but assert end-to-end too).
         prop, val = p.split(":", 1)
         assert ";" not in val
+
+
+# ---------------------------------------------------------------------------
+# Legacy migration shim — `selector { decls }` → declarations only
+# ---------------------------------------------------------------------------
+
+def test_legacy_rule_body_extracted():
+    out = sanitize_inline_style("body { color: red; padding: 8px }")
+    assert "color: red" in out
+    assert "padding: 8px" in out
+
+
+def test_legacy_multi_rule_bodies_concatenated_selectors_dropped():
+    src = ".social-profile { color: blue } .x .y { font-size: 14px }"
+    out = sanitize_inline_style(src)
+    assert "color: blue" in out
+    assert "font-size: 14px" in out
+    # Selector text must not survive
+    assert "social-profile" not in out
+    assert ".x" not in out
+
+
+def test_legacy_text_outside_braces_ignored():
+    # Anything between rules (selectors, junk, hostile bytes) is dropped
+    # by the extractor and never reaches the per-property validators.
+    out = sanitize_inline_style("</style><script>alert(1)</script> body { color: red }")
+    assert out == "color: red"
+
+
+def test_legacy_nested_braces_safe():
+    # We don't accept nested grammar — extractor just walks depth.
+    # The point: no exception, no escape, no surviving hostile token.
+    out = sanitize_inline_style("body { color: red; @media (min-width: 1px) { color: blue } }")
+    # `@` is in forbidden tokens so even if depth tracking salvaged the
+    # inner body, it would be dropped. Net: only the outer color: red.
+    assert "@" not in out
+    # The outer "color: red" must survive (it precedes the nested @rule).
+    assert "color: red" in out

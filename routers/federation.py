@@ -24,7 +24,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import database as db
-from routers._css_safety import sanitize_scoped_css as _sanitize_scoped_css
+# Track B \u2014 inline-style sanitiser, applied to every federated
+# profile update before it reaches the local DB. Replaces the previous
+# selector-aware <style> sanitiser; the local renderer no longer emits
+# any <style> block from user data.
+from routers._css_inline import sanitize_inline_style as _sanitize_inline_style
 import crypto_fed
 
 router = APIRouter(tags=["federation"])
@@ -1924,20 +1928,19 @@ async def _handle_user_event(event: dict) -> None:
 
         # Only apply CSS when explicitly present in payload to avoid
         # wiping an existing style from profile updates that don't carry it.
-        if "custom_css" in payload:
-            # Federated CSS is fully untrusted — a hostile peer could ship
-            # a payload that overlays our own UI when rendered. Run the
-            # same hardened sanitiser used on first-party submissions; on
-            # any rejection, store an empty string rather than dropping
-            # the whole profile update.
-            raw_css = str(payload.get("custom_css") or "")[:10240]
-            try:
-                css = _sanitize_scoped_css(raw_css)
-            except ValueError as _e:
-                _log.warning("Federated custom_css rejected for user %s: %s", local_user["id"], _e)
-                css = ""
-            base_sql += ", custom_css=?"
-            params.append(css)
+        #
+        # Track B: the canonical field is `custom_style` (sanitised
+        # declaration list). We accept `custom_css` from older peers as
+        # a fallback and run it through the same sanitiser \u2014 we never
+        # trust a peer's sanitisation, even when the peer is us.
+        if "custom_style" in payload or "custom_css" in payload:
+            raw = str(payload.get("custom_style") or payload.get("custom_css") or "")[:10240]
+            sanitised = _sanitize_inline_style(raw)
+            base_sql += ", custom_style=?"
+            params.append(sanitised)
+            # We deliberately do NOT write to the local `custom_css`
+            # column from federation \u2014 raw input only ever comes from
+            # the owning user's editor on their home node.
 
         base_sql += " WHERE id=?"
         params.append(local_user["id"])

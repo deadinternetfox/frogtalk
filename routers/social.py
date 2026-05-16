@@ -206,7 +206,12 @@ async def social_profile(nickname: str, current_user: dict = Depends(get_current
             "status_msg": user.get("status_msg", ""),
             "mood": user.get("mood", ""),
             "presence": user.get("presence", "online"),
+            # Track B: `custom_css` is the raw editor input (only useful
+            # to the owner's own client). `custom_style` is the sanitised
+            # inline declaration list \u2014 the only field the renderer
+            # ever applies to the DOM.
             "custom_css": user.get("custom_css", ""),
+            "custom_style": user.get("custom_style", "") or "",
             "tags": user.get("tags", []),
             "created_at": user.get("created_at"),
             "is_admin": bool(user.get("is_admin")),

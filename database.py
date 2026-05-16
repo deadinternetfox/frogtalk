@@ -2465,14 +2465,17 @@ def _migrate():
 
         con.commit()
 
-
-# ---------------------------------------------------------------------------
-# Signal Protocol (Track A) — prekey bundle storage
-# ---------------------------------------------------------------------------
-# Thin helpers used by routers/signal.py. Kept here so the single _conn()
-# pool is reused and so the OTPK consume can run inside a BEGIN IMMEDIATE
-# transaction (SQLite's exclusive write lock) without the router needing
-# to know the connection plumbing.
+    # Track B one-shot backfill: ensure every existing user has their
+    # `custom_style` derived from the raw `custom_css`. Idempotent —
+    # only touches rows where `custom_style` is still empty. Failure
+    # here must not block startup (logging out of band; renderer just
+    # falls back to default styling for that user).
+    try:
+        n = backfill_custom_style()
+        if n:
+            print(f"[migrate] backfilled custom_style for {n} users")
+    except Exception as _e:
+        print(f"[migrate] custom_style backfill skipped: {_e!r}")
 
 def signal_publish_bundle(user_id: int, registration_id: int,
                           identity_pub: bytes,
@@ -3166,7 +3169,8 @@ def get_user_profile(nickname: str) -> Optional[Dict]:
             """SELECT id, nickname, display_name, username_changed_at,
                       avatar, banner, bio, status_msg,
                       presence, last_seen, is_admin, ecdh_pub_key,
-                      mood, custom_css, wall_enabled, wall_comments_enabled,
+                      mood, custom_css, custom_style,
+                      wall_enabled, wall_comments_enabled,
                       show_last_seen, show_read_receipts, profile_public,
                       created_at
                FROM users WHERE nickname=? COLLATE NOCASE""",
@@ -6414,24 +6418,80 @@ def update_user_mood(user_id: int, mood: str) -> bool:
 
 
 def update_user_css(user_id: int, css: str) -> bool:
-    """Update user custom CSS."""
-    # Sanitize CSS - max 10KB
+    """Update user custom CSS — writes both raw (`custom_css`, for the
+    editor round-trip) and sanitised inline-style (`custom_style`, the
+    only column the renderer reads). See Track B in
+    docs/SECURITY_REFACTOR_PLAN.md.
+    """
+    # Lazy import to avoid pulling FastAPI/Pydantic at database.py
+    # import time (database is also used by CLI tools).
+    from routers._css_inline import sanitize_inline_style
+
+    if not isinstance(css, str):
+        css = ""
     if len(css) > 10240:
         css = css[:10240]
+    sanitised = sanitize_inline_style(css)
     with _conn() as con:
         cur = con.execute(
-            "UPDATE users SET custom_css=? WHERE id=?", (css, user_id)
+            "UPDATE users SET custom_css=?, custom_style=? WHERE id=?",
+            (css, sanitised, user_id),
         )
         return cur.rowcount > 0
 
 
 def get_user_css(user_id: int) -> str:
-    """Get user custom CSS."""
+    """Get user custom CSS (raw, for the editor)."""
     with _conn() as con:
         row = con.execute(
             "SELECT custom_css FROM users WHERE id=?", (user_id,)
         ).fetchone()
     return row['custom_css'] if row else ''
+
+
+def get_user_style(user_id: int) -> str:
+    """Get sanitised inline-style declaration list (renderer-ready)."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT custom_style FROM users WHERE id=?", (user_id,)
+        ).fetchone()
+    return (row['custom_style'] if row else '') or ''
+
+
+def backfill_custom_style(*, batch: int = 500) -> int:
+    """One-shot backfill: populate `custom_style` for every user whose
+    raw `custom_css` is non-empty but `custom_style` is still empty.
+
+    Idempotent. Called from `_migrate()` on startup; safe to call again.
+    Returns the number of rows updated.
+    """
+    from routers._css_inline import sanitize_inline_style
+
+    updated = 0
+    with _conn() as con:
+        # Pull only rows that actually need work — the partial-index-like
+        # WHERE keeps this O(touched), not O(users).
+        rows = con.execute(
+            "SELECT id, custom_css FROM users "
+            "WHERE custom_css IS NOT NULL AND custom_css != '' "
+            "AND (custom_style IS NULL OR custom_style = '')"
+        ).fetchall()
+        for i in range(0, len(rows), batch):
+            chunk = rows[i:i + batch]
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                for r in chunk:
+                    s = sanitize_inline_style(r["custom_css"] or "")
+                    con.execute(
+                        "UPDATE users SET custom_style=? WHERE id=?",
+                        (s, int(r["id"])),
+                    )
+                    updated += 1
+                con.execute("COMMIT")
+            except Exception:
+                con.execute("ROLLBACK")
+                raise
+    return updated
 
 
 # Location Sharing

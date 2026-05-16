@@ -515,6 +515,48 @@ ALLOWED_PROPS: dict[str, Callable[[str], Optional[str]]] = {
 _RE_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 
 
+def _extract_legacy_rule_bodies(s: str) -> str:
+    """Legacy-input shim: if the user pasted full `selector { … }` rules,
+    extract just the declaration bodies and concatenate them into one
+    flat `;`-separated list.
+
+    The Track B grammar is declarations-only. Existing user CSS in the
+    DB was authored as scoped rules like `body { color: red }`. To make
+    the migration non-destructive we salvage the *bodies* of each
+    top-level rule and drop the selectors. Selectors themselves are
+    unsalvageable — they're exactly the surface we're closing.
+
+    If the input has no `{`, it's already declaration form; return as-is.
+    Nested braces are walked with a depth counter so a hostile
+    `{ }; <script>` outside braces is excluded.
+    """
+    if "{" not in s:
+        return s
+    out: list[str] = []
+    depth = 0
+    buf: list[str] = []
+    for ch in s:
+        if ch == "{":
+            if depth == 0:
+                buf = []  # discard selector text accumulated so far
+            else:
+                buf.append(ch)
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth <= 0:
+                depth = 0
+                out.append("".join(buf))
+                out.append(";")
+                buf = []
+            else:
+                buf.append(ch)
+        else:
+            if depth > 0:
+                buf.append(ch)
+    return "".join(out)
+
+
 def sanitize_inline_style(raw: str, *, max_output_len: int = 4096) -> str:
     """Return a canonical, safe `prop: val; ...` declaration list.
 
@@ -535,6 +577,9 @@ def sanitize_inline_style(raw: str, *, max_output_len: int = 4096) -> str:
     s = _RE_COMMENT.sub(" ", s)
     # Strip stray newlines/tabs — declaration grammar is a flat ;-list.
     s = s.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    # Salvage legacy `selector { decls; }` inputs by keeping only the
+    # bodies. Pure declaration-list inputs pass through untouched.
+    s = _extract_legacy_rule_bodies(s)
 
     out: list[str] = []
     seen_props: set[str] = set()
