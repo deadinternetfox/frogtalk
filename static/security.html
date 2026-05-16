@@ -370,9 +370,16 @@
       FrogTalk is MIT-licensed and lives on GitHub. If you can write the fix, we'd much
       rather review a PR than relitigate the bug in an issue tracker.
     </p>
+    <div class="callout">
+      <strong>Our pipeline is honest:</strong> Idea → AI slop → <em>Deslop</em> (human review) → Ship.
+      Most code starts as an AI draft; a human reviewer then tightens the security, fixes the
+      dead code, and makes sure it doesn't break anything else before it merges.
+      <a href="https://github.com/deadinternetfox/frogtalk/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Read the full process &amp; deslop checklist →</a>
+    </div>
     <ul>
       <li><strong>Repo:</strong> <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">github.com/deadinternetfox/frogtalk</a></li>
       <li><strong>Branch from <code>main</code></strong>, keep PRs small and focused, write a clear commit message.</li>
+      <li><strong>Vibe-coded PRs welcome</strong> — just label them <code>vibe-coded</code> so the deslop team knows what they're walking into. We'll review and tighten together.</li>
       <li><strong>Touched JS?</strong> Run <code>node --check static/js/&lt;file&gt;.js</code> before pushing — silent parse errors break every onclick on the page.</li>
       <li><strong>Touched Python?</strong> Run <code>python -m py_compile</code> on the changed files; the FastAPI app imports the whole tree at startup.</li>
       <li><strong>Security fixes:</strong> include a PoC in the PR description (or link to the bug-report ID you filed here) so the reviewer can verify the patch closes the hole.</li>

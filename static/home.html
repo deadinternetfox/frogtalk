@@ -1010,6 +1010,102 @@
 </head>
 <body>
 
+<!-- VIBE-CODE TRANSPARENCY BANNER -->
+<!--
+  Dismissible top banner. Honest disclosure that the app is still being
+  "deslopped" (AI-drafted code reviewed and tightened by humans). We keep
+  it lightweight: a single inline style block + ~30 lines of vanilla JS,
+  localStorage remembers the dismissal so we don't nag returning users.
+  Banner pushes the fixed <nav> down on mount and snaps it back on close.
+-->
+<style>
+  #vibe-banner {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    background: linear-gradient(90deg, #2a1f0a 0%, #1f1a2a 100%);
+    border-bottom: 1px solid #4a3a1a;
+    color: #ffe9a8;
+    font-size: .88rem;
+    line-height: 1.45;
+    padding: .7rem 3rem .7rem 1.25rem;
+    display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #vibe-banner .vb-icon { font-size: 1.1rem; flex-shrink: 0; }
+  #vibe-banner .vb-text { max-width: 880px; }
+  #vibe-banner .vb-text strong { color: #fff3c4; }
+  #vibe-banner a {
+    color: #ffd76a;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-weight: 600;
+  }
+  #vibe-banner a:hover { color: #fff3c4; }
+  #vibe-banner .vb-close {
+    position: absolute; top: 50%; right: .9rem;
+    transform: translateY(-50%);
+    background: transparent; border: none;
+    color: #ffe9a8; cursor: pointer;
+    font-size: 1.4rem; line-height: 1; padding: .3rem .55rem;
+    border-radius: 6px;
+    opacity: .75; transition: all .15s;
+  }
+  #vibe-banner .vb-close:hover { opacity: 1; background: rgba(255,255,255,.08); }
+  @media (max-width: 640px) {
+    #vibe-banner { padding: .6rem 2.6rem .6rem .9rem; font-size: .8rem; }
+    #vibe-banner .vb-close { right: .55rem; font-size: 1.25rem; }
+  }
+</style>
+<div id="vibe-banner" role="status" aria-live="polite" hidden>
+  <span class="vb-icon" aria-hidden="true">🐸</span>
+  <span class="vb-text">
+    <strong>Heads up:</strong> FrogTalk is largely <strong>vibe-coded</strong> and actively being
+    <em>deslopped</em>. Don't expect bank-grade security or privacy yet — especially in DMs.
+    Help us harden it: <a href="/security">report a bug or vulnerability</a> ·
+    <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">contribute on GitHub</a>.
+  </span>
+  <button type="button" class="vb-close" id="vibe-banner-close" aria-label="Dismiss banner">×</button>
+</div>
+<script>
+(function () {
+  // Banner is hidden by default in the markup so server-rendered HTML
+  // doesn't flash a banner the user already dismissed. We only reveal it
+  // here in JS after checking localStorage.
+  try {
+    var KEY = 'frogtalk_vibe_banner_dismissed_v1';
+    var banner = document.getElementById('vibe-banner');
+    if (!banner) return;
+    var dismissed = false;
+    try { dismissed = localStorage.getItem(KEY) === '1'; } catch (_) {}
+    if (dismissed) return;
+
+    banner.hidden = false;
+
+    // Push the fixed <nav> down by the banner height so it doesn't overlap.
+    // Re-measured on resize so wrapping text on mobile stays handled.
+    var nav = document.querySelector('body > nav');
+    function applyOffset() {
+      var h = banner.offsetHeight;
+      if (nav) nav.style.top = h + 'px';
+      document.body.style.paddingTop = h + 'px';
+    }
+    function clearOffset() {
+      if (nav) nav.style.top = '';
+      document.body.style.paddingTop = '';
+    }
+    applyOffset();
+    window.addEventListener('resize', applyOffset);
+
+    document.getElementById('vibe-banner-close').addEventListener('click', function () {
+      try { localStorage.setItem(KEY, '1'); } catch (_) {}
+      banner.style.display = 'none';
+      clearOffset();
+      window.removeEventListener('resize', applyOffset);
+    });
+  } catch (_) { /* never let the banner break the page */ }
+})();
+</script>
+
 <!-- NAV -->
 <nav>
   <a href="/" class="nav-logo">

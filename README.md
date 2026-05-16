@@ -242,11 +242,21 @@ security advisory and on the [Hall of Fame](https://frogtalk.xyz/security#hall-o
 
 ### Contributing
 
+Our pipeline is honest: **Idea → AI slop → Deslop (human review) → Ship.**
+The first draft of most code is AI-generated; humans then "deslop" it — fix
+the security holes, kill the dead code, tighten the names, and actually
+test the thing — before it merges to `main`.
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full process: the deslop
+review checklist, how to label vibe-coded PRs, how to become a deslopper,
+and how PRs flow through the queue. Quick start:
+
 1. Fork the repo and branch from `main`.
 2. If you touched JS, run `node --check static/js/<file>.js` before pushing —
    silent parse errors break every onclick on the page.
 3. If you touched Python, run `python -m py_compile <file>.py` on changed files.
-4. Open a PR with a clear description and (for security fixes) a PoC.
+4. Open a PR with the template filled in. If it's vibe-coded, say so — we'll
+   deslop it together.
 5. Add yourself to `CONTRIBUTORS.md` in the same PR.
 
 See [`/security`](https://frogtalk.xyz/security) for scope, threat model, and
