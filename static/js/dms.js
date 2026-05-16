@@ -1627,9 +1627,19 @@ function renderDMMessage (m) {
   const fwdBadge = (typeof Messages !== 'undefined' && Messages.forwardedBadgeHtml) ? Messages.forwardedBadgeHtml(m) : '';
   const isForwarded = !!(m && m.forwarded_from);
   const messageTextHtml = (!isForwarded && contentHtml) ? `<div class="msg-content">${contentHtml}</div>` : '';
+  // SECURITY: reply button stores reply context in data-* attrs and reads
+  // them back via this.dataset.* so DM plaintext NEVER ends up interpolated
+  // into a JS-string-in-HTML-attr context. The previous form
+  //   onclick="replyToDM(${m.id},'${esc(senderNick)}','${esc(safeContent)}')"
+  // was a stored-XSS sink because UI.escHtml() converts ' to &#39;, which
+  // the HTML attribute parser decodes back to ' BEFORE handing the onclick
+  // value to the JS engine. An attacker DM containing  '); fetch(...); //
+  // would escape the JS string and run arbitrary code in the recipient's
+  // session when they tapped Reply — bypassing E2EE because the payload
+  // sits in the already-decrypted plaintext. Mirrors messages.js setReplyTo.
   const actions = `
     <div class="msg-actions">
-      <button class="msg-act-btn" title="Reply" onclick="replyToDM(${m.id},'${esc(senderNick)}','${esc((safeContent||'').substring(0,80))}')">↩️</button>
+      <button class="msg-act-btn" title="Reply" data-rid="${m.id}" data-rnick="${esc(senderNick||'')}" data-rtxt="${esc((safeContent||'').substring(0,80))}" onclick="replyToDM(+this.dataset.rid,this.dataset.rnick,this.dataset.rtxt)">↩️</button>
       <button class="msg-act-btn" title="React" onclick="showDMReactMenu(${m.id}, this)">😀</button>
       <button class="msg-act-btn" title="Copy" onclick="Messages.copyMessage(${m.id})">📋</button>
       ${fwdDisabled ? '' : `<button class="msg-act-btn" title="Forward" onclick="forwardDMMessage(${m.id})">📤</button>`}
@@ -1661,9 +1671,15 @@ function renderDMMessage (m) {
 function _dmReactionHtml (reactions, msgId) {
   if (!reactions || typeof reactions === 'string') return '';
   const obj = typeof reactions === 'object' ? reactions : {};
-  const pills = Object.entries(obj).map(([emoji, count]) =>
-    count > 0 ? `<span class="reaction-pill" onclick="toggleDMReaction(${msgId},'${emoji}')">${emoji} ${count}</span>` : ''
-  ).join('');
+  // SECURITY: emoji key is server-supplied and must be treated as untrusted.
+  // Store it in a data-* attr (HTML-escape via esc) and read via
+  // this.dataset.emoji so it cannot break out of a JS-string-in-HTML-attr.
+  // Also esc() the visible text and coerce count to a number.
+  const pills = Object.entries(obj).map(([emoji, count]) => {
+    const n = Number(count) || 0;
+    if (n <= 0) return '';
+    return `<span class="reaction-pill" data-emoji="${esc(emoji)}" onclick="toggleDMReaction(${msgId},this.dataset.emoji)">${esc(emoji)} ${n}</span>`;
+  }).join('');
   if (!pills) return '';
   return `<div class="msg-reactions">${pills}</div>`;
 }
