@@ -352,6 +352,16 @@ async def toggle_reaction(request: Request, msg_id: int, body: ReactionRequest,
                           current_user: dict = Depends(get_current_user)):
     if len(body.emoji) > 10:
         return JSONResponse(status_code=400, content={"error": "Invalid emoji"})
+    # 10.5: server-side allow-list parity with /wall/*/react. Without
+    # this, a hand-rolled API client could store arbitrary strings as
+    # "reactions" — including null-byte separators or RTL override chars
+    # that would mangle the reactions bar layout for everyone in the room.
+    try:
+        from routers.wall import ALLOWED_WALL_REACTION_EMOJIS as _ALLOWED
+    except Exception:
+        _ALLOWED = None
+    if _ALLOWED is not None and body.emoji not in _ALLOWED:
+        return JSONResponse(status_code=400, content={"error": "Emoji not allowed"})
     msg = db.get_message(msg_id)
     if not msg:
         return JSONResponse(status_code=404, content={"error": "Message not found"})

@@ -126,6 +126,32 @@ def _decrypt_bridge_token(stored: Optional[str]) -> Optional[str]:
 
 DB_PATH = Path(os.getenv("DB_PATH", "data/frogtalk.db"))
 
+
+# ── Session token at-rest hardening ───────────────────────────────────
+# Session tokens used to be stored as the raw `secrets.token_urlsafe(32)`
+# string that the cookie carries. A DB dump leak therefore handed the
+# attacker every live session cookie — instant impersonation of every
+# online user, regardless of password strength.
+#
+# We now store SHA-256(token) instead (constant 64-hex-char column),
+# which makes a stolen DB useless for hijacking: the cookie value the
+# server compares against is never written to disk in recoverable form.
+# Lookups stay O(log n) via the existing UNIQUE idx_sessions_token; we
+# transparently fall back to a plaintext lookup so sessions issued
+# before this build keep working until they expire / get re-touched.
+_LEGACY_PLAINTEXT_SESSION_TOKENS = True   # flip to False after the 30-day cookie horizon
+
+def _hash_session_token(token: str) -> str:
+    """Deterministic at-rest representation of a session cookie. Keyless
+    SHA-256 is sufficient because the cookie itself is 32 bytes of
+    secrets.token_urlsafe entropy (~256 bits) — there's nothing to
+    brute-force from the hash. Using a keyed HMAC would buy nothing and
+    introduce a key-rotation failure mode."""
+    if not token:
+        return ""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 CHANNEL_DIRECTORY_ACTIVE_DAYS_KEY = "channels.directory_active_days"
 CHANNEL_AUTO_DELETE_DAYS_KEY = "channels.auto_delete_days"
 DEFAULT_CHANNEL_DIRECTORY_ACTIVE_DAYS = 30
@@ -618,6 +644,9 @@ def verify_user(nickname: str, password: str) -> Optional[Dict]:
 
 
 def get_user_by_token(token: str) -> Optional[Dict]:
+    if not token:
+        return None
+    hashed = _hash_session_token(token)
     with _conn() as con:
         row = con.execute("""
             SELECT u.id, u.nickname, u.display_name, u.username_changed_at,
@@ -635,7 +664,35 @@ def get_user_by_token(token: str) -> Optional[Dict]:
                    u.pin_require_after_autologin, u.pin_idle_timeout_sec
             FROM sessions s JOIN users u ON s.user_id = u.id
             WHERE s.token=? AND s.expires_at > datetime('now')
-        """, (token,)).fetchone()
+        """, (hashed,)).fetchone()
+        if row is None and _LEGACY_PLAINTEXT_SESSION_TOKENS:
+            # Cookie issued before the hash-at-rest migration. One last
+            # fetch by raw token, then upgrade the row to a hash so the
+            # plaintext disappears from disk on the next write.
+            row = con.execute("""
+                SELECT u.id, u.nickname, u.display_name, u.username_changed_at,
+                       u.avatar, u.bio, u.is_admin,
+                       u.presence, u.status_msg, u.profile_public,
+                       u.allow_friend_requests, u.banner, u.ecdh_pub_key,
+                       u.global_user_id, u.identity_pubkey,
+                       u.theme, u.notify_sounds, u.notify_desktop,
+                       u.notify_dms, u.notify_mentions, u.allow_dms_from,
+                       u.show_last_seen, u.show_read_receipts,
+                       u.hide_active_channels,
+                       CASE WHEN u.pin_hash IS NULL OR u.pin_hash='' THEN 0 ELSE 1 END AS has_pin,
+                       u.pin_require_on_unlock, u.pin_require_for_admin,
+                       u.pin_require_after_autologin, u.pin_idle_timeout_sec
+                FROM sessions s JOIN users u ON s.user_id = u.id
+                WHERE s.token=? AND s.expires_at > datetime('now')
+            """, (token,)).fetchone()
+            if row is not None:
+                try:
+                    con.execute("UPDATE sessions SET token=? WHERE token=?", (hashed, token))
+                    con.commit()
+                except Exception:
+                    # UNIQUE collision (someone else already migrated
+                    # this row) — harmless, fall through.
+                    pass
     return dict(row) if row else None
 
 
@@ -664,11 +721,14 @@ def create_session(user_id: int, user_agent: str = "", ip_address: str = "") -> 
     token = secrets.token_urlsafe(32)
     expires = (datetime.utcnow() + timedelta(days=30)).isoformat()
     now = datetime.utcnow().isoformat()
+    # Store only the hash; the raw token is returned to the caller (and
+    # from there into the client cookie) and is never persisted.
+    stored = _hash_session_token(token)
     with _conn() as con:
         con.execute(
             "INSERT INTO sessions (token, user_id, expires_at, user_agent, ip_address, created_at, last_active) "
             "VALUES (?,?,?,?,?,?,?)",
-            (token, user_id, expires, (user_agent or "")[:512], (ip_address or "")[:64], now, now),
+            (stored, user_id, expires, (user_agent or "")[:512], (ip_address or "")[:64], now, now),
         )
         con.commit()
     return token
@@ -677,15 +737,25 @@ def create_session(user_id: int, user_agent: str = "", ip_address: str = "") -> 
 def touch_session(token: str) -> None:
     if not token:
         return
+    hashed = _hash_session_token(token)
     try:
         with _conn() as con:
-            con.execute("UPDATE sessions SET last_active=? WHERE token=?", (datetime.utcnow().isoformat(), token))
+            cur = con.execute(
+                "UPDATE sessions SET last_active=? WHERE token=?",
+                (datetime.utcnow().isoformat(), hashed),
+            )
+            if cur.rowcount == 0 and _LEGACY_PLAINTEXT_SESSION_TOKENS:
+                con.execute(
+                    "UPDATE sessions SET token=?, last_active=? WHERE token=?",
+                    (hashed, datetime.utcnow().isoformat(), token),
+                )
             con.commit()
     except Exception:
         pass
 
 
 def list_user_sessions(user_id: int, current_token: str = "") -> list:
+    current_hashed = _hash_session_token(current_token) if current_token else ""
     with _conn() as con:
         rows = con.execute(
             "SELECT token, user_agent, ip_address, created_at, last_active, expires_at, "
@@ -700,7 +770,9 @@ def list_user_sessions(user_id: int, current_token: str = "") -> list:
         d = dict(r)
         token = d.pop("token", "") or ""
         d["id"] = token[:16]
-        d["is_current"] = bool(current_token and token == current_token)
+        d["is_current"] = bool(
+            current_token and (token == current_hashed or token == current_token)
+        )
         # Pre-v300 sessions have no UA/IP. Don't drop them entirely (the user
         # might have signed in on their phone before this build deployed) —
         # but collapse them to a single "older session" row so the dialog
@@ -719,10 +791,11 @@ def delete_other_sessions(user_id: int, current_token: str) -> int:
     Returns the number of rows removed."""
     if not current_token:
         return 0
+    hashed = _hash_session_token(current_token)
     with _conn() as con:
         cur = con.execute(
-            "DELETE FROM sessions WHERE user_id=? AND token<>?",
-            (user_id, current_token),
+            "DELETE FROM sessions WHERE user_id=? AND token<>? AND token<>?",
+            (user_id, hashed, current_token),
         )
         con.commit()
         return cur.rowcount or 0
@@ -731,12 +804,18 @@ def delete_other_sessions(user_id: int, current_token: str) -> int:
 def update_session_geo(token: str, country_code: str = "", country: str = "", city: str = "") -> None:
     if not token:
         return
+    hashed = _hash_session_token(token)
     try:
         with _conn() as con:
-            con.execute(
+            cur = con.execute(
                 "UPDATE sessions SET country_code=?, country=?, city=? WHERE token=?",
-                ((country_code or "")[:8], (country or "")[:96], (city or "")[:96], token),
+                ((country_code or "")[:8], (country or "")[:96], (city or "")[:96], hashed),
             )
+            if cur.rowcount == 0 and _LEGACY_PLAINTEXT_SESSION_TOKENS:
+                con.execute(
+                    "UPDATE sessions SET country_code=?, country=?, city=? WHERE token=?",
+                    ((country_code or "")[:8], (country or "")[:96], (city or "")[:96], token),
+                )
             con.commit()
     except Exception:
         pass
@@ -746,11 +825,12 @@ def delete_session_by_short_id(user_id: int, short_id: str, except_token: str = 
     short_id = (short_id or "").strip()
     if not short_id or len(short_id) < 8:
         return False
+    except_hashed = _hash_session_token(except_token) if except_token else ""
     with _conn() as con:
         if except_token:
             cur = con.execute(
-                "DELETE FROM sessions WHERE user_id=? AND token LIKE ? AND token<>?",
-                (user_id, short_id + "%", except_token),
+                "DELETE FROM sessions WHERE user_id=? AND token LIKE ? AND token<>? AND token<>?",
+                (user_id, short_id + "%", except_hashed, except_token),
             )
         else:
             cur = con.execute(
@@ -762,8 +842,14 @@ def delete_session_by_short_id(user_id: int, short_id: str, except_token: str = 
 
 
 def delete_session(token: str):
+    if not token:
+        return
+    hashed = _hash_session_token(token)
     with _conn() as con:
-        con.execute("DELETE FROM sessions WHERE token=?", (token,))
+        con.execute(
+            "DELETE FROM sessions WHERE token IN (?, ?)",
+            (hashed, token),
+        )
         con.commit()
 
 
@@ -1356,6 +1442,13 @@ def _migrate():
             # immediately on blur. Default 5 minutes balances usability
             # with shoulder-surf protection.
             con.execute("ALTER TABLE users ADD COLUMN pin_idle_timeout_sec INTEGER DEFAULT 300")
+        if "pin_keypad_privacy" not in cols:
+            # 10.5: when 1, the on-screen lock keypad shows only shape
+            # glyphs (●▲■◆…) and hides the digit labels entirely. The
+            # underlying digit-to-position mapping still reshuffles every
+            # render so muscle-memory and screen-record attacks fail; the
+            # privacy mode just adds a second layer for shoulder-surf.
+            con.execute("ALTER TABLE users ADD COLUMN pin_keypad_privacy INTEGER DEFAULT 0")
         # Per-user channel ordering (Discord-style drag-to-reorder). Stored as
         # a JSON array of room names; rooms not in the list fall back to the
         # default server order at the end.
@@ -2581,6 +2674,7 @@ def get_pin_status(user_id: int) -> Dict:
             """SELECT CASE WHEN pin_hash IS NULL OR pin_hash='' THEN 0 ELSE 1 END AS has_pin,
                       pin_require_on_unlock, pin_require_for_admin,
                       pin_require_after_autologin, pin_idle_timeout_sec,
+                      pin_keypad_privacy,
                       pin_locked_until, pin_failed_attempts
                  FROM users WHERE id=?""",
             (user_id,),
@@ -2712,6 +2806,7 @@ def update_pin_options(
     require_for_admin: Optional[bool] = None,
     require_after_autologin: Optional[bool] = None,
     idle_timeout_sec: Optional[int] = None,
+    keypad_privacy: Optional[bool] = None,
 ) -> bool:
     """Update PIN behaviour flags. Caller must have already verified
     the user owns a PIN; this function does not re-check (the route
@@ -2733,6 +2828,9 @@ def update_pin_options(
         t = max(0, min(86400, int(idle_timeout_sec)))
         fields.append("pin_idle_timeout_sec=?")
         values.append(t)
+    if keypad_privacy is not None:
+        fields.append("pin_keypad_privacy=?")
+        values.append(1 if keypad_privacy else 0)
     if not fields:
         return False
     values.append(user_id)

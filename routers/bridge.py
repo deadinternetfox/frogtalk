@@ -15,7 +15,16 @@ from urllib.parse import quote_plus
 import httpx
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
+from slowapi import Limiter
+
+limiter = Limiter(key_func=client_ip)
+
+# 10.5: nickname sanitizers used to scrub bridged sender_name before
+# we store / broadcast it. Strips bidirectional / zero-width Unicode
+# (commonly used to spoof "Admin" in chat) and ASCII control chars.
+_BIDI_ZW_RE = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]")
+_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 router = APIRouter(tags=["bridge"])
 
@@ -782,28 +791,52 @@ async def delete_discord_bridge(bridge_id: int, current_user: dict = Depends(get
 
 
 @router.post("/bridge/message")
-async def receive_bridge_message(body: BridgeMessageRequest):
+@limiter.limit("120/minute")
+async def receive_bridge_message(request: Request, body: BridgeMessageRequest):
     """Receive a message forwarded from a bridge bot (Telegram or Discord)."""
-    # Verify bridge token matches a known bridge
+    # Verify bridge token matches a known bridge.
+    # 9.5: scope candidates to (platform, room) FIRST so we don't iterate
+    # every bridge in the system on each call. Inside the candidate set
+    # we still constant-time compare against EVERY row to avoid leaking
+    # which row matched via early-return timing.
     platform = body.platform or "telegram"
-
-    all_bridges = db.get_telegram_bridges() + db.get_discord_bridges()
+    if platform == "telegram":
+        candidates = db.get_telegram_bridges_for_room(body.room_name)
+    elif platform == "discord":
+        candidates = db.get_discord_bridges_for_room(body.room_name)
+    else:
+        candidates = []
     matched_bridge = None
-    # Use hmac.compare_digest to avoid leaking token bytes via timing.
     supplied_token = (body.bridge_token or "").encode("utf-8")
-    for b in all_bridges:
+    for b in candidates:
         stored = (b.get("bot_token") or "").encode("utf-8")
-        if (
+        ok = (
             len(stored) == len(supplied_token)
             and hmac.compare_digest(stored, supplied_token)
-            and b.get("room_name") == body.room_name
             and bool(b.get("enabled", 1))
-        ):
+        )
+        if ok and matched_bridge is None:
             matched_bridge = b
-            break
+        # Deliberately no `break` — keep iterating so total time is
+        # constant w.r.t. which row (or no row) matched.
+
+    # Sanitize sender_name once: strip HTML, control chars, RTL/LTR
+    # overrides, and zero-width joiners. Keeps logs + UI bubbles safe
+    # even if a downstream renderer ever drops escaping. Cap at 64 chars.
+    if body.sender_name:
+        sn = body.sender_name
+        sn = _BIDI_ZW_RE.sub("", sn)
+        sn = _CTRL_RE.sub("", sn)
+        sn = sn.replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+        body.sender_name = sn.strip()[:64] or "bridge"
 
     if not matched_bridge:
         raise HTTPException(403, "Invalid bridge token")
+
+    if not body.sender_name or len(body.sender_name) < 1:
+        raise HTTPException(400, "sender_name required")
+    if body.content and len(body.content) > 10_000:
+        raise HTTPException(413, "content too long")
 
     # Scheme allow-list — reject javascript:/file:/etc. that could be
     # broadcast to clients. media_url may also be a data: URL (we decode

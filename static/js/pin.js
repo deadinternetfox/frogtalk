@@ -41,6 +41,7 @@
     pin_require_for_admin: 0,
     pin_require_after_autologin: 0,
     pin_idle_timeout_sec: 300,
+    pin_keypad_privacy: 0,
     pin_lock_remaining_sec: 0,
   };
   let _locked = false;
@@ -112,6 +113,7 @@
         pin_require_for_admin: Number(j.pin_require_for_admin || 0),
         pin_require_after_autologin: Number(j.pin_require_after_autologin || 0),
         pin_idle_timeout_sec: Number(j.pin_idle_timeout_sec || 300),
+        pin_keypad_privacy: Number(j.pin_keypad_privacy || 0),
         pin_lock_remaining_sec: Number(j.pin_lock_remaining_sec || 0),
       };
     } catch {}
@@ -129,6 +131,7 @@
       pin_require_for_admin: Number(me.pin_require_for_admin || 0),
       pin_require_after_autologin: Number(me.pin_require_after_autologin || 0),
       pin_idle_timeout_sec: Number(me.pin_idle_timeout_sec || 300),
+      pin_keypad_privacy: Number(me.pin_keypad_privacy || 0),
       pin_lock_remaining_sec: Number(me.pin_lock_remaining_sec || 0),
     };
     _renderOptionsPanel();
@@ -223,6 +226,10 @@
       }
       _pinBuffer = '';
       _renderDots();
+      // 10.5: re-shuffle the keypad after every wrong attempt so an
+      // attacker who recorded the screen for the first guess can't reuse
+      // the position-to-digit mapping for the next guess.
+      try { _renderNumpadKeys($('lock-numpad')); } catch {}
       if (j.lock_seconds && j.lock_seconds > 0) {
         _startLockoutCountdown(j.lock_seconds);
       } else {
@@ -271,6 +278,81 @@
     } catch { return false; }
   }
 
+  // 10.5: anti-shoulder-surf / anti-keylogger numeric pad. Each render
+  // (and each failed attempt — see _submitLockPin's error path)
+  // shuffles the digit-to-position mapping so muscle memory and
+  // screen-recording attacks cannot infer the PIN from tap coordinates.
+  // The "privacy keypad" toggle hides digits entirely, leaving only
+  // shape glyphs the user can memorise as a pattern. Backspace and
+  // submit stay in fixed positions so the flow stays predictable.
+  function _renderNumpadKeys (numpad) {
+    if (!numpad) return;
+    while (numpad.firstChild) numpad.removeChild(numpad.firstChild);
+    const SHAPES = ['●','▲','■','◆','★','♥','♣','♠','♦'];
+    const _shuffle = (arr) => {
+      const a = arr.slice();
+      const rnd = (max) => {
+        try {
+          const u = new Uint32Array(1);
+          (window.crypto || window.msCrypto).getRandomValues(u);
+          return u[0] % max;
+        } catch {
+          return Math.floor(Math.random() * max);
+        }
+      };
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = rnd(i + 1);
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+    const privacyKp = !!(_cfg && _cfg.pin_keypad_privacy);
+    const digits = _shuffle(['1','2','3','4','5','6','7','8','9']);
+    const cells = [];
+    for (let i = 0; i < 9; i++) cells.push({ kind: 'digit', digit: digits[i], shape: SHAPES[i] });
+    cells.push({ kind: 'back' });
+    cells.push({ kind: 'digit', digit: '0', shape: '○' });
+    cells.push({ kind: 'submit' });
+    cells.forEach(cell => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      let label = '';
+      if (cell.kind === 'back') label = '⌫';
+      else if (cell.kind === 'submit') label = '✓';
+      else if (privacyKp) {
+        label = cell.shape;
+        b.setAttribute('aria-label', 'Digit ' + cell.digit);
+      } else {
+        // Larger digit, smaller shape underneath as a memory aid.
+        const d = document.createElement('span');
+        d.style.cssText = 'font-size:18px;font-weight:600';
+        d.textContent = cell.digit;
+        const s = document.createElement('span');
+        s.style.cssText = 'display:block;font-size:10px;opacity:.45;margin-top:-2px';
+        s.textContent = cell.shape;
+        b.appendChild(d); b.appendChild(s);
+      }
+      if (label) b.textContent = label;
+      // Always store the actual digit in dataset, never trust label —
+      // ensures DOM-scraping accessibility tools and screen recordings
+      // can't recover the PIN by reading textContent alone.
+      if (cell.kind === 'digit') b.dataset.digit = cell.digit;
+      b.style.cssText = 'background:#1d1d1d;color:#e0e0e0;border:1px solid #2a2a2a;' +
+                       'border-radius:10px;padding:14px 0;font-size:18px;cursor:pointer;' +
+                       'transition:background .12s';
+      b.addEventListener('mousedown', () => { b.style.background = '#272727'; });
+      b.addEventListener('mouseup',   () => { b.style.background = '#1d1d1d'; });
+      b.addEventListener('mouseleave',() => { b.style.background = '#1d1d1d'; });
+      b.addEventListener('click', () => {
+        if (cell.kind === 'back') { _pinBuffer = _pinBuffer.slice(0, -1); _renderDots(); return; }
+        if (cell.kind === 'submit') { _submitLockPin(); return; }
+        if (_pinBuffer.length < 8) { _pinBuffer += b.dataset.digit; _renderDots(); }
+      });
+      if (cell.kind === 'submit') b.id = 'lock-submit';
+      numpad.appendChild(b);
+    });
+  }
+
   function _ensureLockScreen () {
     if ($('lock-screen')) return;
     const root = document.createElement('div');
@@ -314,25 +396,7 @@
     const numpad = document.createElement('div');
     numpad.id = 'lock-numpad';
     numpad.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px';
-    const keys = ['1','2','3','4','5','6','7','8','9','⌫','0','✓'];
-    keys.forEach(k => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.textContent = k;
-      b.style.cssText = 'background:#1d1d1d;color:#e0e0e0;border:1px solid #2a2a2a;' +
-                       'border-radius:10px;padding:14px 0;font-size:18px;cursor:pointer;' +
-                       'transition:background .12s';
-      b.addEventListener('mousedown', () => { b.style.background = '#272727'; });
-      b.addEventListener('mouseup',   () => { b.style.background = '#1d1d1d'; });
-      b.addEventListener('mouseleave',() => { b.style.background = '#1d1d1d'; });
-      b.addEventListener('click', () => {
-        if (k === '⌫') { _pinBuffer = _pinBuffer.slice(0, -1); _renderDots(); return; }
-        if (k === '✓') { _submitLockPin(); return; }
-        if (_pinBuffer.length < 8) { _pinBuffer += k; _renderDots(); }
-      });
-      if (k === '✓') b.id = 'lock-submit';
-      numpad.appendChild(b);
-    });
+    _renderNumpadKeys(numpad);
     card.appendChild(numpad);
 
     const actions = document.createElement('div');
@@ -695,6 +759,11 @@
       'When the saved session restores at startup, demand the PIN before showing chats.',
       checkbox('pin-opt-autologin', !!_cfg.pin_require_after_autologin),
     ));
+    root.appendChild(row(
+      'Privacy keypad',
+      'Hide digits on the lock screen — only shape glyphs are shown. Position still reshuffles every attempt; this adds a second layer against shoulder-surfing and screen recordings.',
+      checkbox('pin-opt-privacy-kp', !!_cfg.pin_keypad_privacy),
+    ));
   }
 
   let _commitTimer = null;
@@ -710,6 +779,7 @@
       require_for_admin:        !!($('pin-opt-admin')      || {}).checked,
       require_after_autologin:  !!($('pin-opt-autologin')  || {}).checked,
       idle_timeout_sec:         Number(($('pin-opt-idle')  || {}).value || 300),
+      keypad_privacy:           !!($('pin-opt-privacy-kp') || {}).checked,
     };
     try {
       const res = await _api('/api/auth/pin/options', 'PATCH', body);
@@ -722,6 +792,7 @@
           pin_require_for_admin:        Number(j.pin_require_for_admin || 0),
           pin_require_after_autologin:  Number(j.pin_require_after_autologin || 0),
           pin_idle_timeout_sec:         Number(j.pin_idle_timeout_sec || 300),
+          pin_keypad_privacy:           Number(j.pin_keypad_privacy || 0),
         });
         _toast('PIN options saved', 'success');
       } else {

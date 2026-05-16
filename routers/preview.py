@@ -3,12 +3,14 @@ import re
 import time
 import asyncio
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from typing import Optional
-from deps import get_current_user
+from deps import get_current_user, client_ip
+from slowapi import Limiter
 
 router = APIRouter(prefix="/preview", tags=["preview"])
+limiter = Limiter(key_func=client_ip)
 
 # Cache previews in memory with a real TTL. Without TTL the cache used to
 # fill up and never refresh; without coalescing, 24 concurrent music-tab
@@ -373,7 +375,9 @@ async def _do_fetch_og(url: str) -> dict:
 
 
 @router.get("")
+@limiter.limit("60/minute")
 async def get_link_preview(
+    request: Request,
     url: str = Query(..., min_length=10, max_length=2000),
     _: dict = Depends(get_current_user),
 ):

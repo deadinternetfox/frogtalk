@@ -913,6 +913,8 @@ class PinOptionsRequest(BaseModel):
     # Min 0 (lock immediately on blur), max 86400 (24 h). Anything
     # outside that range is clamped server-side in db.update_pin_options.
     idle_timeout_sec: int | None = Field(default=None, ge=0, le=86400)
+    # 10.5: hide digits on the lock keypad (shape-only glyphs).
+    keypad_privacy: bool | None = None
 
 
 @router.get("/pin/status")
@@ -977,6 +979,7 @@ async def pin_options(request: Request, body: PinOptionsRequest,
         body.require_for_admin,
         body.require_after_autologin,
         body.idle_timeout_sec,
+        body.keypad_privacy,
     )
     return await asyncio.to_thread(db.get_pin_status, current_user["id"])
 

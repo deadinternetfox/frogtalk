@@ -17,6 +17,7 @@ import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -40,6 +41,9 @@ class MainActivity : AppCompatActivity() {
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_BATTERY_PROMPTED = "battery_prompted"
         private const val PREF_BATTERY_PROMPTED_AT = "battery_prompted_at"
+        // 10.5: anti-screenshot. Default true so a fresh install gets
+        // the protection; the user can opt out via Settings→Privacy.
+        private const val PREF_BLOCK_SCREENSHOTS = "block_screenshots"
         // Re-nag for battery-optimization exemption every 7 days. WhatsApp-grade
         // call delivery on aggressive OEM ROMs (Xiaomi/Oppo/Samsung) collapses
         // without it; one decline shouldn't lock the user out of reliable rings.
@@ -220,6 +224,27 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Context-aware screenshot blocking: default OFF so users can
+        // freely screenshot public/community rooms (memes, share-worthy
+        // content). The web shell turns FLAG_SECURE on via
+        // CallBridge.setBlockScreenshots(true) the moment it enters a
+        // DM, a private room, or a thread that has disappearing /
+        // view-once messages active. See static/js/screenshot_guard.js.
+        try {
+            val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            // Honour a sticky user override ("always block") if it
+            // was set before this version – otherwise stay unsecured
+            // until the JS guard asks for protection.
+            if (prefs.getBoolean(PREF_BLOCK_SCREENSHOTS, false)) {
+                window.setFlags(
+                    WindowManager.LayoutParams.FLAG_SECURE,
+                    WindowManager.LayoutParams.FLAG_SECURE
+                )
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "FLAG_SECURE init failed", e)
+        }
 
         // Set system bar colours before anything else
         try {
@@ -813,6 +838,39 @@ class MainActivity : AppCompatActivity() {
                 activity.showNativeNotification(title, body)
             } catch (e: Throwable) {
                 Log.e(TAG, "showNotification failed", e)
+            }
+        }
+
+        // 10.5: let the privacy settings UI in the web app toggle the
+        // OS-level screenshot blocker. Persists across launches via
+        // SharedPreferences. Default is true (blocked).
+        @android.webkit.JavascriptInterface
+        fun setBlockScreenshots(enabled: Boolean) {
+            try {
+                activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putBoolean(PREF_BLOCK_SCREENSHOTS, enabled).apply()
+                activity.runOnUiThread {
+                    if (enabled) {
+                        activity.window.setFlags(
+                            WindowManager.LayoutParams.FLAG_SECURE,
+                            WindowManager.LayoutParams.FLAG_SECURE
+                        )
+                    } else {
+                        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                }
+            } catch (e: Throwable) {
+                Log.w(TAG, "setBlockScreenshots failed", e)
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun getBlockScreenshots(): Boolean {
+            return try {
+                activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getBoolean(PREF_BLOCK_SCREENSHOTS, false)
+            } catch (e: Throwable) {
+                true
             }
         }
 

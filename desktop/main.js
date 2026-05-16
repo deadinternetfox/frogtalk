@@ -16,6 +16,11 @@ let _creatingTray = false;
 let _isClosingWindow = false;
 let _desktopSettings = {
   closeToTrayOnX: true,
+  // 10.5: anti-screenshot. Default on for new installs (privacy-first);
+  // user can opt out via the in-app Privacy panel for support purposes.
+  // Linux X11 has no equivalent capture flag so this is effectively a
+  // no-op there; honoured on Windows + macOS.
+  blockScreenshots: true,
 };
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -30,6 +35,7 @@ function readDesktopSettings() {
     _desktopSettings = {
       ..._desktopSettings,
       closeToTrayOnX: parsed.closeToTrayOnX !== false,
+      blockScreenshots: parsed.blockScreenshots !== false,
     };
   } catch {
     // Keep defaults on first run or corrupted file.
@@ -213,6 +219,40 @@ function createWindow() {
 
   // Prevent the OS from suspending audio/WebRTC when the window is hidden.
   mainWindow.webContents.setBackgroundThrottling(false);
+
+  // Context-aware screenshot blocking. Default OFF: public/community
+  // rooms are screenshot-friendly by design. The web shell
+  // (static/js/screenshot_guard.js) calls electronAPI.setBlockScreenshots
+  // → desktop:set-block-screenshots → setContentProtection(true) only
+  // while the user is inside a DM, private room, or thread with
+  // disappearing / view-once content. We do honour a sticky user
+  // override that was set explicitly in desktop-settings.json.
+  try {
+    const enabled = !!(_desktopSettings && _desktopSettings.blockScreenshots === true);
+    mainWindow.setContentProtection(enabled);
+  } catch {}
+
+  // 10.5: spellcheck right-click suggestions. webPreferences.spellcheck
+  // is already true, but Electron does NOT show a default context menu
+  // for misspellings — the app must build one. We expose only spelling
+  // suggestions + a small "Add to dictionary" action; we deliberately
+  // do NOT include cut/copy/paste here so that this menu can't be
+  // weaponised by a malicious page to read the system clipboard.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const word = params && params.misspelledWord;
+    if (!word) return;
+    const suggestions = (params.dictionarySuggestions || []).slice(0, 6);
+    const tpl = suggestions.map(s => ({
+      label: s,
+      click: () => { try { mainWindow.webContents.replaceMisspelling(s); } catch {} },
+    }));
+    if (tpl.length) tpl.push({ type: 'separator' });
+    tpl.push({
+      label: `Add "${word}" to dictionary`,
+      click: () => { try { mainWindow.webContents.session.addWordToSpellCheckerDictionary(word); } catch {} },
+    });
+    try { Menu.buildFromTemplate(tpl).popup({ window: mainWindow }); } catch {}
+  });
 
   // Tag UA so the web shell (and the imageboard / Frog Channel widget) can
   // detect a genuine FrogTalk desktop client and hide redundant UI.
@@ -451,8 +491,19 @@ function createWindow() {
 ipcMain.handle('desktop:get-settings', () => {
   return {
     closeToTrayOnX: _desktopSettings.closeToTrayOnX !== false,
+    blockScreenshots: _desktopSettings.blockScreenshots === true,
     trayAvailable: process.platform !== 'linux' || !!process.env.DISPLAY || !!process.env.WAYLAND_DISPLAY,
   };
+});
+
+ipcMain.handle('desktop:set-block-screenshots', (_event, enabled) => {
+  const next = enabled !== false;
+  // Volatile: don't persist context-aware toggles into the on-disk
+  // settings (otherwise the very first DM the user opens would lock
+  // them into block-mode forever). _desktopSettings.blockScreenshots
+  // is only flipped through the Privacy settings panel.
+  try { mainWindow && mainWindow.setContentProtection(next); } catch {}
+  return { ok: true, blockScreenshots: next };
 });
 
 ipcMain.handle('desktop:set-close-to-tray', (_event, enabled) => {

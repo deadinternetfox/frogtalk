@@ -127,12 +127,16 @@ def _maybe_backfill_session(request: Request, token: str) -> None:
                 # accurate metadata captured at login time.
                 def _patch():
                     try:
+                        # Match either the hashed-at-rest token (current
+                        # storage format) or the legacy plaintext for any
+                        # session row issued before the hash migration.
+                        hashed = db._hash_session_token(token)
                         with db._conn() as con:
                             con.execute(
                                 "UPDATE sessions SET user_agent=COALESCE(NULLIF(user_agent,''), ?), "
                                 "ip_address=COALESCE(NULLIF(ip_address,''), ?), last_active=datetime('now') "
-                                "WHERE token=?",
-                                (ua, ip, token),
+                                "WHERE token IN (?, ?)",
+                                (ua, ip, hashed, token),
                             )
                             con.commit()
                     except Exception:

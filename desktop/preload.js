@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('desktopApp', {
   },
   getSettings: () => ipcRenderer.invoke('desktop:get-settings'),
   setCloseToTray: (enabled) => ipcRenderer.invoke('desktop:set-close-to-tray', !!enabled),
+  setBlockScreenshots: (enabled) => ipcRenderer.invoke('desktop:set-block-screenshots', !!enabled),
   getLaunchOnStartup: () => ipcRenderer.invoke('desktop:get-launch-on-startup'),
   setLaunchOnStartup: (enabled) => ipcRenderer.invoke('desktop:set-launch-on-startup', !!enabled)
 });
