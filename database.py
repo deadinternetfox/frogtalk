@@ -2029,6 +2029,12 @@ def _migrate():
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_vanity_lower "
             "ON rooms(LOWER(vanity)) WHERE vanity IS NOT NULL"
         )
+        # Track C Phase 1 — Sender Keys epoch counter. Informational only:
+        # bumped by clients whenever they rotate their room sender-key
+        # after a membership change. Server uses it for diagnostics
+        # ("did everyone rotate after this kick?"). Not enforced.
+        if "sender_key_epoch" not in room_cols:
+            con.execute("ALTER TABLE rooms ADD COLUMN sender_key_epoch INTEGER NOT NULL DEFAULT 0")
         # Forwarded-from metadata for room messages: JSON blob
         # {nick, source_label, kind:'room'|'dm', original_id?}.
         if "forwarded_from" not in msg_cols:

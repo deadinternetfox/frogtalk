@@ -201,3 +201,23 @@ async def otpk_count(
     _require_flag()
     n = await run_in_threadpool(db.signal_otpk_count, int(user["id"]))
     return {"available": int(n)}
+
+
+def _room_v2_flag_enabled() -> bool:
+    return os.getenv("FROGTALK_ROOM_ENC_V2", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+@router.get("/config")
+async def signal_config():
+    """Public capability advertisement.
+
+    Lets the client know whether DM v2 and Room v2 (Sender Keys) are
+    enabled on this node so it can decide whether to publish bundles
+    and emit v2 envelopes. Unauthenticated and cheap to call.
+    """
+    return {
+        "dm_v2_enabled":    _flag_enabled(),
+        "room_v2_enabled":  _room_v2_flag_enabled(),
+    }

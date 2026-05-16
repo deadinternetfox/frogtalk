@@ -530,5 +530,9 @@
 
   try {
     if (typeof window !== 'undefined') window.Signal = Signal;
+    // Track C — if signal_room.js loaded before us, attach it now.
+    if (typeof window !== 'undefined' && window.SignalRoom) {
+      Signal.room = window.SignalRoom;
+    }
   } catch {}
 })();
