@@ -43,6 +43,7 @@
     pin_idle_timeout_sec: 300,
     pin_keypad_privacy: 0,
     pin_lock_remaining_sec: 0,
+    is_admin: false,
   };
   let _locked = false;
   let _lastActivity = Date.now();
@@ -115,6 +116,7 @@
         pin_idle_timeout_sec: Number(j.pin_idle_timeout_sec || 300),
         pin_keypad_privacy: Number(j.pin_keypad_privacy || 0),
         pin_lock_remaining_sec: Number(j.pin_lock_remaining_sec || 0),
+        is_admin: !!j.is_admin || !!(window.State && State.user && State.user.is_admin),
       };
     } catch {}
     _renderOptionsPanel();
@@ -143,6 +145,7 @@
       pin_idle_timeout_sec: Number(me.pin_idle_timeout_sec || 300),
       pin_keypad_privacy: Number(me.pin_keypad_privacy || 0),
       pin_lock_remaining_sec: Number(me.pin_lock_remaining_sec || 0),
+      is_admin: !!me.is_admin || !!(window.State && State.user && State.user.is_admin),
     };
     _renderOptionsPanel();
     _syncQuickLockIcon();
@@ -896,9 +899,11 @@
     // actually flagged is_admin. For everyone else we deliberately
     // hide the option (and the wording) so a normal account never sees
     // hints about admin surfaces existing.
-    let _isAdminAccount = false;
+    let _isAdminAccount = !!_cfg.is_admin;
     try {
-      _isAdminAccount = !!(window.State && State.user && State.user.is_admin);
+      if (!_isAdminAccount) {
+        _isAdminAccount = !!(window.State && State.user && State.user.is_admin);
+      }
     } catch {}
     if (_isAdminAccount) {
       root.appendChild(row(

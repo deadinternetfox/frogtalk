@@ -944,12 +944,23 @@ class PinOptionsRequest(BaseModel):
 @router.get("/pin/status")
 @limiter.limit("60/minute")
 async def pin_status(request: Request, current_user: dict = Depends(get_current_user)):
-    return await asyncio.to_thread(db.get_pin_status, current_user["id"])
+    out = await asyncio.to_thread(db.get_pin_status, current_user["id"])
+    # Surface is_admin so the client-side PIN options panel can decide
+    # whether to render the "Require PIN for admin areas" row even when
+    # State.user.is_admin hasn't been hydrated yet (e.g. first paint
+    # right after login on a fresh device).
+    try:
+        out = dict(out or {})
+        out["is_admin"] = bool(current_user.get("is_admin"))
+    except Exception:
+        pass
+    return out
 
 
 @router.post("/pin/set")
 @limiter.limit("10/hour")
 async def pin_set(request: Request, body: PinSetRequest,
+                  x_session_token: str = Header(None, alias="X-Session-Token"),
                   current_user: dict = Depends(get_current_user)):
     """Set or rotate the user's PIN. Requires the account password."""
     res = await asyncio.to_thread(
@@ -957,6 +968,14 @@ async def pin_set(request: Request, body: PinSetRequest,
     )
     if not res.get("ok"):
         return JSONResponse(status_code=400, content=res)
+    # The act of setting the PIN proves possession of the account
+    # password — treat this session as freshly unlocked so the
+    # server-side pin_gate doesn't immediately 423-bounce the next
+    # request (e.g. "save settings") the user just made.
+    try:
+        pin_mark_unlocked(x_session_token or "")
+    except Exception:
+        pass
     return res
 
 
