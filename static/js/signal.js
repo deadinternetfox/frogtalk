@@ -410,6 +410,28 @@
     return { ok: true, payload };
   }
 
+  // Phase 1.5 helper: fetch peer identity public key (base64 string)
+  // so the caller can pass it as `expectedIdentityPub` (base64) to
+  // verifyCallFingerprint. Cached for ~5 min via the existing
+  // /api/signal/bundle/<peer> endpoint.
+  const _idkCache = new Map(); // peerUserId -> { b64, ts }
+  const _IDK_TTL_MS = 5 * 60 * 1000;
+  async function getPeerIdentityKey(peerUserId) {
+    const key = String(peerUserId);
+    const now = Date.now();
+    const hit = _idkCache.get(key);
+    if (hit && (now - hit.ts) < _IDK_TTL_MS) return hit.b64;
+    try {
+      const bundle = await _fetchPeerBundle(key);
+      if (!bundle || !bundle.identity_pub) return null;
+      const b64 = String(bundle.identity_pub);
+      _idkCache.set(key, { b64, ts: now });
+      return b64;
+    } catch {
+      return null;
+    }
+  }
+
   function isReady() {
     return !!(_libsignal && _store);
   }
@@ -431,6 +453,7 @@
     // Track E:
     signCallFingerprint,
     verifyCallFingerprint,
+    getPeerIdentityKey,
     // Diagnostics:
     async _stats() { return _store ? _store._stats() : null; },
     async _wipe() { if (_store) await _store._wipe(); },

@@ -111,6 +111,96 @@ try {
   });
 } catch {}
 
+/* ── Track E — DTLS fingerprint signing helpers ────────────────────────────
+ *
+ * Defends call setup against a malicious signalling server splicing its own
+ * DTLS fingerprint into the SDP and bridging the media. We sign the
+ * fingerprint with our Signal identity key (see signal.js
+ * signCallFingerprint / verifyCallFingerprint) and travel the envelope
+ * opaquely on the existing call_offer / call_answer WS frames as `fp_sig`.
+ *
+ * - On outbound offer/answer we sign {call_id, peer_user_id, fp} where
+ *   peer_user_id is the *recipient*.
+ * - On inbound we extract the remote SDP's `a=fingerprint:sha-256 ...`,
+ *   pull the caller's identity_pub out-of-band (Signal.getPeerIdentityKey),
+ *   then verify the envelope.
+ * - Missing fp_sig (legacy peer) → proceed but flag the call as UNVERIFIED.
+ * - Verify failure → toast "signalling tampering detected" and end the call.
+ */
+let _callUnverified = false;
+
+function _extractDtlsFp(sdp) {
+  try {
+    const m = String(sdp || '').match(/a=fingerprint:sha-256\s+([0-9A-Fa-f:]+)/);
+    return m ? m[1].toLowerCase() : '';
+  } catch { return ''; }
+}
+
+async function _signCallFp(callId, peerUserId, sdp) {
+  try {
+    if (!window.Signal || !Signal.isReady?.()) return '';
+    if (!callId || !peerUserId) return '';
+    const fp = _extractDtlsFp(sdp);
+    if (!fp) return '';
+    return await Signal.signCallFingerprint({
+      call_id: callId,
+      peer_user_id: peerUserId,
+      fingerprint_sha256: fp,
+    });
+  } catch (e) {
+    console.warn('[calls] _signCallFp failed', e);
+    return '';
+  }
+}
+
+// Returns:
+//   { ok: true }                              → verified, safe to apply SDP
+//   { ok: 'unverified', reason }              → no fp_sig from peer; proceed but warn
+//   { ok: false, reason }                     → tampering detected; ABORT call
+async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
+  if (!envelope) return { ok: 'unverified', reason: 'no_envelope' };
+  if (!window.Signal || !Signal.isReady?.()) {
+    return { ok: 'unverified', reason: 'signal_unavailable' };
+  }
+  const myId = (typeof State !== 'undefined' && State.user?.id) || 0;
+  if (!myId || !fromId) return { ok: 'unverified', reason: 'missing_ids' };
+  const fp = _extractDtlsFp(sdp);
+  if (!fp) return { ok: 'unverified', reason: 'no_fp_in_sdp' };
+  let expectedIdentityPub = null;
+  try { expectedIdentityPub = await Signal.getPeerIdentityKey(fromId); } catch {}
+  if (!expectedIdentityPub) {
+    return { ok: 'unverified', reason: 'no_peer_identity' };
+  }
+  try {
+    const vopts = {
+      expectedPeerUserId: Number(myId),
+      expectedFingerprint: fp,
+      expectedIdentityPub,
+    };
+    // bindCallId=false on the initial inbound offer because the caller
+    // doesn't know the server-assigned call_id at sign time.
+    if (!(opts && opts.bindCallId === false)) {
+      vopts.expectedCallId = Number(callId);
+    }
+    const res = await Signal.verifyCallFingerprint(envelope, vopts);
+    if (res && res.ok) return { ok: true };
+    return { ok: false, reason: (res && res.reason) || 'unknown' };
+  } catch (e) {
+    return { ok: false, reason: 'verify_threw' };
+  }
+}
+
+function _isVerifyFatal(reason) {
+  // Hard-fail reasons mean a real signalling tamper, not an absence of
+  // signing material. Anything else is downgraded to "unverified".
+  return reason === 'bad_signature'
+      || reason === 'identity_mismatch'
+      || reason === 'call_id_mismatch'
+      || reason === 'peer_mismatch'
+      || reason === 'fingerprint_mismatch'
+      || reason === 'stale';
+}
+
 function _isResolvedAvatar(avatar) {
   const value = String(avatar || '').trim();
   return !!value && value !== '🐸';
@@ -243,12 +333,21 @@ async function startCall (type, nick, uid) {
     const offer = await _pc.createOffer();
     await _pc.setLocalDescription(offer);
 
+    // Track E: sign DTLS fingerprint with our Signal identity. Caller
+    // doesn't know call_id yet (server assigns) so we sign with call_id=0
+    // as a sentinel — the server-side `pending_call_offers.fp_sig`
+    // passthrough preserves the envelope verbatim and the callee's
+    // verifier downgrades to "unverified" if it can't bind a call_id.
+    // (A future tweak: re-sign on call_created with the real id.)
+    const fp_sig = await _signCallFp(0, _callPeerUID || 0, offer.sdp);
+
     _sendCallSignal({
       type         : 'call_offer',
       to_id        : _callPeerUID || undefined,
       to_nickname  : _callPeerNick,
       call_type    : type,
       sdp          : offer.sdp,
+      fp_sig       : fp_sig || undefined,
     });
 
     // Auto-cancel if the callee never answers — prevents the "Calling…"
@@ -290,12 +389,14 @@ async function handleCallOffer (data) {
       await _pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
       const ans = await _pc.createAnswer();
       await _pc.setLocalDescription(ans);
+      const renegFp = await _signCallFp(data.call_id || _callId || 0, _callPeerUID || data.from_id || 0, ans.sdp);
       _sendCallSignal({
         type: 'call_answer',
         to_nickname: _callPeerNick,
         call_id: data.call_id,
         sdp: ans.sdp,
         renegotiate: true,
+        fp_sig: renegFp || undefined,
       });
     } catch (e) { console.warn('renegotiate answer failed', e); }
     return;
@@ -314,9 +415,31 @@ async function handleCallOffer (data) {
   _callState    = 'ringing';
   _callType     = data.call_type || 'voice';
   _callPeerNick = data.from_nickname;
+  _callPeerUID  = data.from_id || _callPeerUID;
   _callPeerAvatar = data.from_avatar || null;
   _callId       = data.call_id || null;
-  _pendingOffer = { sdp: data.sdp, call_id: data.call_id || null };
+  _pendingOffer = { sdp: data.sdp, call_id: data.call_id || null, from_id: data.from_id, fp_sig: data.fp_sig };
+  // Track E: verify caller's signed DTLS fingerprint envelope. The caller
+  // signs at offer time before the server has assigned a call_id, so we
+  // skip the call_id binding for the initial offer. acceptCall's outbound
+  // call_answer carries the real call_id and is verified strictly by the
+  // peer on their handleCallAnswer path.
+  try {
+    _callUnverified = false;
+    const v = await _verifyCallFp(data.fp_sig, data.call_id, data.from_id, data.sdp, { bindCallId: false });
+    if (v.ok === false && _isVerifyFatal(v.reason)) {
+      toast('Signalling tampering detected (' + v.reason + ') — call refused', 'error');
+      console.error('[calls][track-E] inbound offer rejected:', v.reason);
+      _sendCallSignal({ type: 'call_reject', to_nickname: data.from_nickname, call_id: data.call_id || undefined, reason: 'tampering' });
+      _pendingOffer = null;
+      _callState = 'idle'; _callPeerNick = null; _callPeerUID = null; _callId = null;
+      return;
+    }
+    if (v.ok !== true) {
+      _callUnverified = true;
+      console.warn('[calls][track-E] inbound offer UNVERIFIED:', v.reason);
+    }
+  } catch (e) { console.warn('[calls][track-E] verify offer threw', e); _callUnverified = true; }
   _persistIncomingCall(data);
   showIncomingCall(data.from_nickname, data.call_type, data.from_avatar || null);
   try { Notifications.startRinging(data.from_nickname); } catch {}
@@ -401,11 +524,15 @@ async function acceptCall () {
     const answer = await _pc.createAnswer();
     await _pc.setLocalDescription(answer);
 
+    const answerCallId = offer.call_id || _callId || 0;
+    const fp_sig = await _signCallFp(answerCallId, _callPeerUID || (_pendingOffer && _pendingOffer.from_id) || 0, answer.sdp);
+
     _sendCallAnswerReliable({
       type        : 'call_answer',
       to_nickname : _callPeerNick,
       call_id     : offer.call_id || _callId || undefined,
       sdp         : answer.sdp,
+      fp_sig      : fp_sig || undefined,
     });
     _armConnectingHardCap();
 
@@ -446,6 +573,25 @@ function handleCallCreated (data) {
 async function handleCallAnswer (data) {
   if (!_pc) return;
   clearTimeout(_callRingTimeout); _callRingTimeout = null;
+  // Track E: verify callee's signed DTLS fingerprint envelope against the
+  // SDP we're about to apply. Callee signs with the real call_id, so we
+  // bind it here. Fatal verify reasons → tear down before the DTLS
+  // handshake can start with a tampered fingerprint.
+  try {
+    const callIdForVerify = data.call_id || _callId || 0;
+    const fromIdForVerify = data.from_id || _callPeerUID || 0;
+    const v = await _verifyCallFp(data.fp_sig, callIdForVerify, fromIdForVerify, data.sdp);
+    if (v.ok === false && _isVerifyFatal(v.reason)) {
+      toast('Signalling tampering detected (' + v.reason + ') — call ended', 'error');
+      console.error('[calls][track-E] inbound answer rejected:', v.reason);
+      endCall();
+      return;
+    }
+    if (v.ok !== true) {
+      _callUnverified = true;
+      console.warn('[calls][track-E] inbound answer UNVERIFIED:', v.reason);
+    }
+  } catch (e) { console.warn('[calls][track-E] verify answer threw', e); _callUnverified = true; }
   try {
     await _pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
     _remoteDescApplied = true;
@@ -522,6 +668,7 @@ function _armConnectingHardCap () {
         _pc.restartIce();
         const offer = await _pc.createOffer({ iceRestart: true });
         await _pc.setLocalDescription(offer);
+        const restartFp = await _signCallFp(_callId || 0, _callPeerUID || 0, offer.sdp);
         _sendCallSignal({
           type: 'call_offer',
           to_nickname: _callPeerNick,
@@ -530,6 +677,7 @@ function _armConnectingHardCap () {
           sdp: offer.sdp,
           renegotiate: true,
           force_relay: true,
+          fp_sig: restartFp || undefined,
         });
         // Give the relay attempt another 20 s before giving up entirely.
         setTimeout(() => {
@@ -670,6 +818,7 @@ function resetCall () {
     _pendingIceQueue.length = 0;
     _outboundCallQueue.length = 0;
     _remoteDescApplied = false;
+    _callUnverified = false;
     _didRelayRetry = false;
     _autoAcceptPending = false;
     _callState = 'idle'; _callPeerNick = null; _callPeerUID = null; _callId = null;
