@@ -599,6 +599,7 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
           }
           if (window.Signal.isReady()) {
             const out = await window.Signal.decryptDM(peerId, env);
+            try { console.log('[dms.decryptDM]', 't=', env.t, 'from', peerId, 'ok=', typeof out === 'string'); } catch {}
             if (typeof out === 'string') {
               // Track C Phase 2 — SKDM-over-DM. If the DM plaintext is
               // a JSON SKDM envelope {"__skdm":1,"p":{r,c,i,d,ck,pk}},
@@ -618,6 +619,7 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
             }
           }
         } catch (e) {
+          try { console.warn('[dms.decryptDM] FAIL t=', env.t, 'from', peerId, e && e.message ? e.message : e); } catch {}
           // Cold history this device's IndexedDB can't decrypt, or
           // Signal not yet initialised. Fall through to raw.
         }
@@ -2158,17 +2160,26 @@ function handleWSDMMessage (data) {
                   (data.sender_nick && _selfNick && data.sender_nick === _selfNick);
   data._isMine = _isMine;
 
+  // ── Decrypt ONCE ──────────────────────────────────────────────────────
+  // Track A v2 envelopes mutate Signal Protocol state on decrypt: a
+  // pre-key bundle (`t:'pre'`) is consumed and the Double-Ratchet steps
+  // forward. Calling Signal.decryptDM twice on the same envelope therefore
+  // **always** fails on the second call — sidebar would decrypt, then the
+  // bubble path would get raw envelope back and render the lock
+  // placeholder. Decrypt up-front and share the plaintext with every
+  // downstream consumer (sidebar, toast, bubble).
+  const _ch0 = _dmChannels.find(c => c.id === data.channel_id);
+  const _peerId0  = data.sender_id || _ch0?.with_user_id || 0;
+  const _peerNick0 = data.sender_nick || _ch0?.nickname || '';
+  const _plainPromise = _decryptDMPreviewContent(data.content || '', _peerId0, _peerNick0);
+
   // Cheap in-place sidebar update (avoid round-tripping /api/dms on every message
   // which was adding 200-500 ms of perceived send lag).
   (async () => {
     try {
       const ch = _dmChannels.find(c => c.id === data.channel_id);
       if (ch) {
-        const previewContent = await _decryptDMPreviewContent(
-          data.content || '',
-          data.sender_id || ch.with_user_id,
-          data.sender_nick || ch.nickname,
-        );
+        const previewContent = await _plainPromise;
         ch.last_msg_raw = previewContent;
         ch.last_msg_meta = _parseDMCallLog(previewContent);
         ch.last_msg = _dmPreviewText(previewContent, data.has_media, data.media_type);
@@ -2202,12 +2213,9 @@ function handleWSDMMessage (data) {
     if (!_isMine) {
       (async () => {
         try {
-          const ch2 = _dmChannels.find(c => c.id === data.channel_id);
-          const toastContent = await _decryptDMPreviewContent(
-            data.content || '',
-            data.sender_id || ch2?.with_user_id || 0,
-            data.sender_nick || ch2?.nickname || '',
-          );
+          // Reuse the single decrypt result (see comment above) so we
+          // don't try to consume the same Track A envelope twice.
+          const toastContent = await _plainPromise;
           const preview = _dmPreviewText(toastContent, data.has_media, data.media_type);
           // Click the toast → jump straight into that DM thread.
           const onClick = () => {
@@ -2346,10 +2354,9 @@ function handleWSDMMessage (data) {
   (async () => {
     let content = data.content || '';
     if (content) {
-      const _dmChanEntry2 = _dmChannels.find(c => c.id === _activeDM?.id);
-      const _peerUid  = _activeDM?.user_id || _dmChanEntry2?.with_user_id || 0;
-      const _peerNk   = _activeDM?.nickname || '';
-      try { content = await _decryptDMPreviewContent(content, _peerUid, _peerNk); } catch {}
+      // Reuse the single decrypt result (see comment at top of handler)
+      // so we don't double-consume the Track A envelope.
+      try { content = await _plainPromise; } catch {}
     }
     appendDMMessage({ ...data, content });
     // Active chat — immediately mark as read

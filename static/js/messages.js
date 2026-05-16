@@ -2094,6 +2094,46 @@ const Messages = (() => {
     setTimeout(() => _hydrateSpecialCards(id), 120);
   }
 
+  // Track C — when a Sender-Key Distribution Message for (room, senderId)
+  // arrives AFTER one or more channel messages from that sender have
+  // already rendered, walk the per-room cache, re-decrypt any v2 sk
+  // envelopes from that sender, and silently rewrite the bubble content.
+  // Called from ws.js's `skdm` case after Signal.room.processSKDM succeeds.
+  async function retrySKDecrypt(room, senderId) {
+    if (!room || senderId == null) return;
+    if (!(window.Signal && window.Signal.room && window.Signal.room.decryptMessage)) return;
+    const cache = State.messages?.[room];
+    if (!Array.isArray(cache) || !cache.length) return;
+    const sid = +senderId;
+    for (const m of cache) {
+      if (!m || (+m.user_id) !== sid) continue;
+      const c = m.content;
+      if (typeof c !== 'string' || c.length < 9 || c[0] !== '{') continue;
+      let env;
+      try { env = JSON.parse(c); } catch { continue; }
+      if (!env || env.v !== 2 || env.t !== 'sk' || typeof env.b !== 'string') continue;
+      try {
+        const plain = await window.Signal.room.decryptMessage(room, sid, env);
+        if (typeof plain !== 'string') continue;
+        m.content = plain;
+        m._decrypted = true;
+        m._v2 = true;
+        const el = document.getElementById(`msg-${m.id}`);
+        if (el) {
+          const ce = el.querySelector('.msg-content');
+          if (ce) ce.innerHTML = _formatContent(plain);
+          // Late-hydrate any embeds (invite cards, link previews) that
+          // were skipped while the bubble was holding ciphertext.
+          const previewUrl = _extractPreviewUrl(plain);
+          if (previewUrl && !m.preview_suppressed) {
+            setTimeout(() => _loadLinkPreview(m.id, previewUrl), 80);
+          }
+          setTimeout(() => _hydrateSpecialCards(m.id), 80);
+        }
+      } catch { /* still no chain state — try again next SKDM */ }
+    }
+  }
+
   function removeMessage(id) {
     const el = document.getElementById(`msg-${id}`);
     if (!el) return;
@@ -3128,7 +3168,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

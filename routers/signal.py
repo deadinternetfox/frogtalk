@@ -274,6 +274,68 @@ async def relay_skdm(
 
 
 # ---------------------------------------------------------------------------
+# Receiver-initiated SKDM rekey request — recovery path
+# ---------------------------------------------------------------------------
+#
+# Problem: receiver gets a v2-sk room message but has no sender-key state
+# for (room, sender). Either sender's bootstrap SKDM never reached them
+# (joined after sender's fan-out) or the receiver's local sender-key
+# IndexedDB was wiped. Without a rekey path the bubble is stuck as
+# "🔒 Encrypted message" forever.
+#
+# Flow:
+#   1. receiver POSTs {room_id, sender_uid} here
+#   2. server delivers `request_skdm` WS event to sender (live only — if
+#      offline, sender re-fans on next room join via existing user_joined)
+#   3. sender's ws.js builds an SKDM for current chain and POSTs to
+#      /api/signal/skdm/{requester_uid}, which reaches the receiver
+#   4. receiver's ws.js processes the SKDM and retrySKDecrypt rewrites
+#      the stuck bubbles
+#
+# Rate-limit is intentionally tight (per requester): a malicious client
+# could otherwise force a sender to keep rebuilding/sending SKDMs.
+
+class SkdmRequestBody(BaseModel):
+    room_id:    str = Field(..., min_length=1, max_length=128)
+    sender_uid: int = Field(..., ge=1)
+
+
+@router.post("/skdm/request")
+@limiter.limit("30/minute")
+async def request_skdm(
+    request: Request,
+    body: SkdmRequestBody,
+    user: dict = Depends(get_current_user),
+):
+    """Ask `sender_uid` to (re)send us their SKDM for `room_id`.
+
+    Server is dumb relay: forwards a `request_skdm` event to the sender's
+    WS if online; silently drops otherwise (re-fan happens on user_joined).
+    Returns ``{"ok": True, "delivered": "live"|"offline"}``.
+    """
+    sender_uid = int(body.sender_uid)
+    requester_id = int(user["id"])
+    if sender_uid == requester_id:
+        raise HTTPException(status_code=400, detail="self_request")
+
+    from ws_manager import manager
+    payload = {
+        "type":          "request_skdm",
+        "from_id":       requester_id,
+        "from_nickname": str(user.get("nickname") or ""),
+        "room_id":       body.room_id.strip(),
+    }
+    delivered = "offline"
+    if manager.is_user_online(sender_uid):
+        try:
+            await manager.send_to_user(sender_uid, payload)
+            delivered = "live"
+        except Exception:
+            delivered = "offline"
+    return {"ok": True, "delivered": delivered}
+
+
+# ---------------------------------------------------------------------------
 # Linked devices — Track F Phase 1 (dark backend)
 # ---------------------------------------------------------------------------
 #

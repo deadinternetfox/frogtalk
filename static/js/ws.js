@@ -192,21 +192,75 @@ const WS = (() => {
           const roomId   = String(data.room_id || '');
           const envStr   = String(data.envelope || '');
           if (!fromId || !roomId || !envStr) break;
+          try { console.log('[ws.skdm] received', { fromId, roomId, envLen: envStr.length }); } catch {}
           if (!(window.Signal && typeof window.Signal.decryptDM === 'function')) break;
           let env;
           try { env = JSON.parse(envStr); }
           catch { break; }
           let plain;
           try { plain = await window.Signal.decryptDM(fromId, env); }
-          catch { break; }
+          catch (_e) { try { console.warn('[ws.skdm] decryptDM FAIL from', fromId, _e && _e.message); } catch {} break; }
           let inner;
           try { inner = JSON.parse(plain); }
-          catch { break; }
+          catch { try { console.warn('[ws.skdm] inner parse FAIL'); } catch {} break; }
           if (!inner || inner.__skdm !== 1 || !inner.p) break;
-          if (!(window.Signal?.room?.isAvailable?.())) break;
+          if (!(window.Signal?.room?.isAvailable?.())) { try { console.warn('[ws.skdm] Signal.room not available'); } catch {} break; }
           await window.Signal.room.processSKDM(fromId, inner.p);
+          try { console.log('[ws.skdm] processSKDM ok from', fromId, 'room', roomId); } catch {}
+          // Clear the throttle marker so we'll re-request if needed in
+          // the future (e.g. sender rotates their sender-key).
+          try {
+            if (window._skdmReqThrottle) {
+              window._skdmReqThrottle.delete(`${roomId}:${fromId}`);
+            }
+          } catch {}
+          // Track C — a channel message from `fromId` may have already
+          // rendered as ciphertext because we hadn't yet received this
+          // sender-key state. Now that the chain exists, re-decrypt any
+          // ciphertext bubbles from that sender in this room and rewrite
+          // the bubble content in-place. Best-effort: failures stay as
+          // 🔒 placeholders until the next SKDM arrives.
+          try {
+            if (typeof Messages !== 'undefined' && Messages.retrySKDecrypt) {
+              await Messages.retrySKDecrypt(roomId, fromId);
+            }
+          } catch {}
         } catch (e) {
           try { console.warn('[ws] skdm processing failed', e); } catch {}
+        }
+        break;
+      }
+
+      // Recovery rekey — another user couldn't decrypt one of our v2-sk
+      // messages because they lack our sender-key state. Build a fresh
+      // SKDM and send it to them (DM-encrypted under their identity).
+      // Throttled per requester to avoid abuse.
+      case 'request_skdm': {
+        try {
+          const fromId = Number(data.from_id) | 0;
+          const roomId = String(data.room_id || '');
+          if (!fromId || !roomId) break;
+          try { console.log('[ws.request_skdm] received from', fromId, 'room', roomId); } catch {}
+          if (!(window.Signal && window.Signal.room && window.Signal.room.isAvailable && window.Signal.room.isAvailable())) {
+            try { console.warn('[ws.request_skdm] Signal.room not available'); } catch {}
+            break;
+          }
+          // Per-requester throttle: max one fulfil per (room, requester) per 5s.
+          window._skdmFulfilThrottle = window._skdmFulfilThrottle || new Map();
+          const key = `${roomId}:${fromId}`;
+          const last = window._skdmFulfilThrottle.get(key) || 0;
+          if (Date.now() - last < 5000) { try { console.log('[ws.request_skdm] throttled'); } catch {} break; }
+          window._skdmFulfilThrottle.set(key, Date.now());
+          const skdm = await window.Signal.room.buildSKDMForCurrentChain(roomId);
+          if (!skdm) { try { console.warn('[ws.request_skdm] buildSKDM returned null'); } catch {} break; }
+          try {
+            await window.Signal.room.sendSKDMTo(fromId, skdm);
+            try { console.log('[ws.request_skdm] fulfilled to', fromId); } catch {}
+          } catch (e) {
+            try { console.warn('[ws.request_skdm] sendSKDMTo FAIL', e && e.message); } catch {}
+          }
+        } catch (e) {
+          try { console.warn('[ws] request_skdm processing failed', e); } catch {}
         }
         break;
       }
@@ -770,6 +824,7 @@ const WS = (() => {
             && (msg.user_id || msg.user_id === 0)) {
           try {
             const plain = await window.Signal.room.decryptMessage(room, msg.user_id, env);
+            try { console.log('[ws.decryptMsg] v2-sk', room, 'from', msg.user_id, 'ok=', typeof plain === 'string'); } catch {}
             if (typeof plain === 'string') {
               const out = { ...msg, content: plain, _decrypted: true, _v2: true };
               if (msg.reply_content && typeof msg.reply_content === 'string'
@@ -787,7 +842,35 @@ const WS = (() => {
               }
               return out;
             }
-          } catch {
+          } catch (_e) {
+            try { console.warn('[ws.decryptMsg] v2-sk FAIL', room, 'from', msg.user_id, _e && _e.message ? _e.message : _e); } catch {}
+            // Recovery: ask the sender to re-fan their SKDM. Throttle per
+            // (room, sender) so we send at most one request every 15s
+            // even if many ciphertext bubbles arrive in a burst.
+            try {
+              window._skdmReqThrottle = window._skdmReqThrottle || new Map();
+              const _k = `${room}:${msg.user_id}`;
+              const _last = window._skdmReqThrottle.get(_k) || 0;
+              if (Date.now() - _last >= 15000) {
+                window._skdmReqThrottle.set(_k, Date.now());
+                (async () => {
+                  try {
+                    const _r = await fetch('/api/signal/skdm/request', {
+                      method: 'POST',
+                      credentials: 'same-origin',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        ...(State.token ? { 'X-Session-Token': State.token } : {}),
+                      },
+                      body: JSON.stringify({ room_id: room, sender_uid: +msg.user_id }),
+                    });
+                    try { console.log('[ws.decryptMsg] rekey request status', _r.status, 'for', _k); } catch {}
+                  } catch (_re) {
+                    try { console.warn('[ws.decryptMsg] rekey request FAIL', _re && _re.message); } catch {}
+                  }
+                })();
+              }
+            } catch {}
             // Fall through to legacy.
           }
         }

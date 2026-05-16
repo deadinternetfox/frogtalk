@@ -76,6 +76,25 @@ def client_ip(request: Request) -> str:
 
 
 async def get_current_user(request: Request = None, x_session_token: str = Header(None, alias="X-Session-Token")):
+    # Fall back to ?token=… query and Bearer authorization so URL-only
+    # consumers (browser-fetched <img src="...?token=..."> posters,
+    # <video src="...?token=..."> media, and any third-party tool using
+    # the documented public token-in-query convention) authenticate the
+    # same way as XHR/fetch clients sending X-Session-Token. Without
+    # this, every PIN-gated route that's reachable from a raw <img>/
+    # <video> element returns 401 even with a valid session, because
+    # browsers don't forward custom headers on those subresource loads.
+    if not x_session_token and request is not None:
+        try:
+            qtok = (request.query_params.get("token") or "").strip()
+            if qtok:
+                x_session_token = qtok
+            else:
+                auth = (request.headers.get("authorization") or "").strip()
+                if auth.lower().startswith("bearer "):
+                    x_session_token = auth[7:].strip()
+        except Exception:
+            pass
     if not x_session_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     cached = _token_cache_get(x_session_token)
