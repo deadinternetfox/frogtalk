@@ -383,3 +383,176 @@ async def devices_revoke(
     )
     return {"ok": True, "changed": bool(changed)}
 
+
+# ---------------------------------------------------------------------------
+# QR-based device pairing — Track F Phase 2
+# ---------------------------------------------------------------------------
+#
+# Flow:
+#   1. Primary device: POST /devices/pairing/start → token (5 min TTL).
+#      The UI displays a QR encoding {server, token}.
+#   2. Secondary device (logged into the same account): scans QR,
+#      generates a local Curve25519 device identity, POSTs
+#      /devices/pairing/{token}/claim with its identity_pub + name.
+#   3. Primary polls GET /devices/pairing/{token} until status='claimed'.
+#      UI shows the secondary's safety-number-style fingerprint for the
+#      user to compare against the device on the other screen.
+#   4. User confirms → primary signs (device_id || identity_pub) with
+#      its primary Signal identity key and POSTs
+#      /devices/pairing/{token}/approve. Server links the device.
+#   5. Secondary polls GET /devices/pairing/{token}/status (unauth) and
+#      sees status='complete' with the assigned device_id → persists the
+#      device_id locally and finishes onboarding.
+#
+# Authorization model:
+#   * /start, /claim, /approve, GET /{token}     : require auth, must
+#     match the originating user.
+#   * /status                                    : no auth — only leaks
+#     the status enum + assigned device_id once complete. Token is the
+#     capability.
+
+
+class PairingClaimBody(BaseModel):
+    identity_pub: str = Field(..., min_length=1, max_length=128)  # base64(32)
+    device_name:  str = Field("", max_length=64)
+
+
+class PairingApproveBody(BaseModel):
+    device_id:   str = Field(..., min_length=8, max_length=64)
+    primary_sig: str = Field(..., min_length=1, max_length=128)   # base64(64)
+    device_name: Optional[str] = Field(None, max_length=64)
+
+
+def _pairing_row_to_dict(row: dict) -> dict:
+    """Serialise a pairing-lookup row for the primary device."""
+    return {
+        "status":       row["status"],
+        "device_name":  row["device_name"],
+        "device_id":    row["device_id"],
+        "created_at":   row["created_at"],
+        "expires_at":   row["expires_at"],
+        "identity_pub": _b64_encode(row["device_identity_pub"]) if row.get("device_identity_pub") else None,
+    }
+
+
+@router.post("/devices/pairing/start")
+@limiter.limit("10/minute")
+async def pairing_start(
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Primary device creates a fresh pairing token."""
+    res = await run_in_threadpool(db.signal_pairing_create, int(user["id"]))
+    return {
+        "ok":         True,
+        "token":      res["token"],
+        "expires_at": res["expires_at"],
+    }
+
+
+@router.post("/devices/pairing/{token}/claim")
+@limiter.limit("20/minute")
+async def pairing_claim(
+    request: Request,
+    token: str,
+    body: PairingClaimBody,
+    user: dict = Depends(get_current_user),
+):
+    """Secondary device claims a pairing token with its device identity."""
+    identity_pub = _b64_decode(body.identity_pub, expected_len=32, field="identity_pub")
+    try:
+        res = await run_in_threadpool(
+            db.signal_pairing_claim,
+            token=token,
+            caller_user_id=int(user["id"]),
+            device_identity_pub=identity_pub,
+            device_name=body.device_name,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        status = 404 if code == "token_not_found" else 400
+        if code in ("token_wrong_user",):
+            status = 403
+        if code in ("token_expired",):
+            status = 410
+        if code in ("token_already_claimed",):
+            status = 409
+        raise HTTPException(status_code=status, detail=code)
+    return {"ok": True, "expires_at": res["expires_at"]}
+
+
+@router.get("/devices/pairing/{token}")
+@limiter.limit("60/minute")
+async def pairing_lookup(
+    request: Request,
+    token: str,
+    user: dict = Depends(get_current_user),
+):
+    """Primary polls the token to see the secondary's claim."""
+    row = await run_in_threadpool(
+        db.signal_pairing_lookup, token=token, caller_user_id=int(user["id"]),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="token_not_found")
+    return {"ok": True, **_pairing_row_to_dict(row)}
+
+
+@router.post("/devices/pairing/{token}/approve")
+@limiter.limit("10/minute")
+async def pairing_approve(
+    request: Request,
+    token: str,
+    body: PairingApproveBody,
+    user: dict = Depends(get_current_user),
+):
+    """Primary approves the secondary's claim and links the device."""
+    primary_sig = _b64_decode(body.primary_sig, expected_len=64, field="primary_sig")
+    try:
+        res = await run_in_threadpool(
+            db.signal_pairing_approve,
+            token=token,
+            caller_user_id=int(user["id"]),
+            device_id=body.device_id,
+            primary_sig=primary_sig,
+            name_override=body.device_name,
+        )
+    except ValueError as exc:
+        code = str(exc)
+        status = 400
+        if code == "token_not_found":
+            status = 404
+        elif code == "token_wrong_user":
+            status = 403
+        elif code == "token_expired":
+            status = 410
+        elif code in ("token_not_claimed", "device_cap_reached", "token_corrupt"):
+            status = 409
+        raise HTTPException(status_code=status, detail=code)
+    dev = res["device"]
+    return {
+        "ok":        True,
+        "device_id": dev["device_id"],
+        "device": {
+            "device_id":    dev["device_id"],
+            "name":         dev["name"],
+            "created_at":   dev["created_at"],
+            "last_seen_at": dev["last_seen_at"],
+        },
+    }
+
+
+@router.get("/devices/pairing/{token}/status")
+@limiter.limit("120/minute")
+async def pairing_status(
+    request: Request,
+    token: str,
+):
+    """Unauthenticated status poll for the secondary device.
+
+    Returns only ``{status, device_id?}``. Token is the capability — no
+    other fields are leaked. Polled while the QR is on screen.
+    """
+    res = await run_in_threadpool(db.signal_pairing_status, token)
+    return {"ok": True, **res}
+
+

@@ -8893,6 +8893,100 @@ window.ConnErr = (function(){
   </div>
 </div>
 
+<!-- ═══════════════════════ LINKED DEVICES MODALS (Track F) ═══════════════════════ -->
+
+<!-- Manager: list + entry points for pairing/scanning -->
+<div class="modal-overlay hidden" id="modal-linked-devices">
+  <div class="modal" style="max-width:520px">
+    <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+      <span>📱</span><span>Linked devices</span>
+    </div>
+    <div style="font-size:12px;color:#9bbfaf;line-height:1.55;margin-bottom:12px">
+      Each device has its own encryption key. Verify the 20-digit fingerprint matches what the other device shows before approving a link.
+    </div>
+
+    <div id="linked-devices-manager-list" style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow-y:auto;margin-bottom:14px"></div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="modal-btn primary" type="button" onclick="Devices.startPairing()" style="flex:1;min-width:160px;min-height:44px">
+        ＋ Link a new device
+      </button>
+      <button class="modal-btn secondary" type="button" onclick="Devices.openScanner()" style="flex:1;min-width:160px;min-height:44px">
+        📷 Scan a code
+      </button>
+    </div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="modal-btn secondary" type="button" onclick="Devices.closeManager()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Primary side: show QR for the new device to scan, then verify + approve -->
+<div class="modal-overlay hidden" id="modal-link-device">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+      <span>＋</span><span>Link a new device</span>
+    </div>
+    <div style="font-size:12px;color:#9bbfaf;line-height:1.55;margin-bottom:14px">
+      On your other device, open FrogTalk → Settings → Security → <b>Linked devices</b> → <b>Scan a code</b>, then point its camera at this screen.
+    </div>
+
+    <div id="link-device-qr" style="display:flex;align-items:center;justify-content:center;padding:14px;background:#fff;border-radius:14px;margin:0 auto 12px;width:fit-content"></div>
+
+    <div style="text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#9bbfaf;letter-spacing:.5px;margin-bottom:6px" id="link-device-code">—</div>
+    <div style="text-align:center;font-size:11px;color:#7a8a82;margin-bottom:14px" id="link-device-expires">Code expires in 5:00</div>
+
+    <div id="link-device-status" style="font-size:12px;color:#9bbfaf;text-align:center;line-height:1.55;padding:10px 12px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:8px">Waiting for the new device to scan this code…</div>
+
+    <!-- Verify + approve step (hidden until claimed) -->
+    <div id="link-device-approve" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid #2a2a2a">
+      <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:6px">Verify the fingerprint</div>
+      <div style="font-size:12px;color:#9bbfaf;line-height:1.5;margin-bottom:8px">
+        Compare these numbers with the ones shown on the new device. They must match exactly.
+      </div>
+      <div style="font-size:11px;color:#7a8a82;margin-bottom:4px">Device name</div>
+      <div id="link-device-name" style="font-size:13px;color:#e0e0e0;font-weight:600;margin-bottom:10px">—</div>
+      <div style="font-size:11px;color:#7a8a82;margin-bottom:4px">Fingerprint</div>
+      <div id="link-device-fp" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:15px;color:#e0e0e0;letter-spacing:1px;padding:10px 12px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:8px;text-align:center;margin-bottom:12px">—</div>
+      <button class="modal-btn primary" id="link-device-approve-btn" type="button" onclick="Devices.approvePairing()" style="width:100%;min-height:44px">Approve &amp; link</button>
+    </div>
+
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="modal-btn secondary" type="button" onclick="Devices.closePairing()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Secondary side: scan QR (or paste token) -->
+<div class="modal-overlay hidden" id="modal-scan-device">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-title" style="display:flex;align-items:center;gap:8px">
+      <span>📷</span><span>Scan a linking code</span>
+    </div>
+    <div style="font-size:12px;color:#9bbfaf;line-height:1.55;margin-bottom:12px">
+      On your other (already-signed-in) device, open Settings → Security → Linked devices → Link a new device, then scan the QR it shows.
+    </div>
+
+    <div style="position:relative;width:100%;aspect-ratio:1/1;max-height:55vh;background:#000;border-radius:14px;overflow:hidden;margin-bottom:12px">
+      <video id="scan-device-video" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover;background:#000"></video>
+      <div style="position:absolute;inset:14% 14%;border:2px solid rgba(76,175,80,.85);border-radius:14px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.35)"></div>
+    </div>
+
+    <div id="scan-device-status" style="font-size:12px;color:#9bbfaf;text-align:center;line-height:1.55;margin-bottom:10px">Point the camera at the QR code on your other device.</div>
+
+    <details style="margin-bottom:10px">
+      <summary style="font-size:12px;color:#9bbfaf;cursor:pointer;padding:8px 0">Or paste the code manually</summary>
+      <input type="text" class="modal-input" id="scan-device-token-input" placeholder="Paste linking code" autocomplete="off" style="margin-top:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px">
+      <button class="modal-btn primary" type="button" onclick="Devices.submitManualToken()" style="width:100%;min-height:44px;margin-top:8px">Link with code</button>
+    </details>
+
+    <div class="modal-actions">
+      <button class="modal-btn secondary" type="button" onclick="Devices.closeScanner()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+
 <div class="modal-overlay hidden" id="modal-new-dm">
   <div class="modal">
     <div class="modal-title">Open Direct Message</div>
@@ -9429,6 +9523,20 @@ window.ConnErr = (function(){
           🔑 Generate &amp; Download Recovery Key
         </button>
         <div id="recovery-key-status" style="font-size:11px;color:#7a8a82;margin-top:8px;min-height:14px"></div>
+      </div>
+
+      <!-- Linked Devices (Track F) -->
+      <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
+        <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">📱 Linked devices</div>
+        <div style="font-size:12px;color:#888;line-height:1.55;margin-bottom:10px">
+          Devices you've enrolled to send and receive encrypted messages on your behalf.
+          Revoke anything you don't recognise.
+        </div>
+        <div id="linked-devices-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="modal-btn primary" type="button" onclick="Devices.openManager()" style="flex:1;min-width:140px;min-height:44px">Manage devices</button>
+          <button class="modal-btn secondary" type="button" onclick="Devices.refresh()" style="min-width:90px;min-height:44px">Refresh</button>
+        </div>
       </div>
     </div>
 
@@ -10438,7 +10546,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 </script>
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/signal_store.js?v=1"></script>
-<script src="/static/js/signal.js?v=5"></script>
+<script src="/static/js/signal.js?v=6"></script>
 <script src="/static/js/signal_room.js?v=3"></script>
 <script src="/static/js/state.js?v=197"></script>
 <script src="/static/js/mute.js?v=191"></script>
@@ -10464,6 +10572,10 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/pin.js?v=10"></script>
 <!-- Context-aware screenshot blocker: only engages in DMs / private rooms / disappearing threads -->
 <script src="/static/js/screenshot_guard.js?v=1"></script>
+<!-- Track F: linked devices (QR pairing) -->
+<script src="/static/vendor/qr/qrcode.min.js?v=1"></script>
+<script src="/static/vendor/qr/jsQR.js?v=1"></script>
+<script src="/static/js/devices.js?v=1"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
 </body>
 </html>

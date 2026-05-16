@@ -2532,6 +2532,39 @@ def _migrate():
             pass
 
         # ──────────────────────────────────────────────────────────────────
+        # Security refactor Track F Phase 2 — pairing tokens for QR-based
+        # secondary device enrolment. Short-lived (5 minute TTL). The
+        # primary generates a token, displays it as a QR code. The
+        # secondary device (logged into the same account) scans the QR
+        # and POSTs its locally-generated Curve25519 device identity
+        # public key under that token. The primary polls, verifies the
+        # device fingerprint with the user, signs (device_id ||
+        # identity_pub) with its primary Signal identity key, and
+        # approves — at which point the pairing row is consumed and the
+        # device is written into `user_devices`. The token is opaque
+        # 32-byte random hex; never reused; status transitions are one-
+        # way (pending → claimed → complete | expired). The server does
+        # not verify the primary signature; receivers verify on read.
+        # ──────────────────────────────────────────────────────────────────
+        con.execute("""CREATE TABLE IF NOT EXISTS signal_pairing_tokens (
+            token                TEXT    PRIMARY KEY,
+            user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            device_identity_pub  BLOB,
+            device_name          TEXT,
+            device_id            TEXT,
+            status               TEXT    NOT NULL,
+            created_at           INTEGER NOT NULL,
+            expires_at           INTEGER NOT NULL
+        )""")
+        try:
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pairing_user_status "
+                "ON signal_pairing_tokens(user_id, status)"
+            )
+        except Exception:
+            pass
+
+        # ──────────────────────────────────────────────────────────────────
         # Security refactor Track E — signed DTLS fingerprint blob carried
         # alongside the call SDP. Opaque base64 JSON; server is just a
         # passthrough. Stored on the pending offer so a cold-resumed
@@ -2883,6 +2916,233 @@ def signal_device_touch(user_id: int, device_id: str) -> None:
             (now, int(user_id), str(device_id)),
         )
         con.commit()
+
+
+# ---------------------------------------------------------------------------
+# Pairing tokens for QR-based device linking (Track F Phase 2)
+# ---------------------------------------------------------------------------
+
+_PAIRING_TTL_SECONDS = 5 * 60   # 5 minutes
+_PAIRING_TOKEN_BYTES = 32       # 256-bit unguessable token, encoded as hex
+
+# Status enum (string for SQLite clarity):
+#   "pending"  — primary created the token, secondary not yet claimed
+#   "claimed"  — secondary posted its identity_pub, awaiting primary signature
+#   "complete" — primary signed + signal_device_link succeeded
+# Expired rows are pruned lazily on lookup; an explicit sweep keeps them out
+# of the table indefinitely.
+
+
+def _pairing_prune(con) -> None:
+    """Mark expired pending/claimed rows so callers see a clean state."""
+    now = int(time.time())
+    con.execute(
+        "DELETE FROM signal_pairing_tokens "
+        "WHERE expires_at < ? AND status IN ('pending','claimed')",
+        (now,),
+    )
+
+
+def signal_pairing_create(user_id: int) -> Dict:
+    """Primary device creates a fresh pairing token.
+
+    Returns ``{token, expires_at}``. A user may have many concurrent
+    tokens (we don't deduplicate) — the UI is responsible for cancelling
+    stale flows. The TTL is short enough that abandoned tokens self-expire.
+    """
+    import secrets
+    token = secrets.token_hex(_PAIRING_TOKEN_BYTES)
+    now = int(time.time())
+    expires_at = now + _PAIRING_TTL_SECONDS
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        _pairing_prune(con)
+        con.execute(
+            "INSERT INTO signal_pairing_tokens "
+            "(token, user_id, status, created_at, expires_at) "
+            "VALUES (?,?,?,?,?)",
+            (token, int(user_id), "pending", now, expires_at),
+        )
+        con.commit()
+    return {"token": token, "expires_at": expires_at}
+
+
+def signal_pairing_claim(*, token: str, caller_user_id: int,
+                         device_identity_pub: bytes,
+                         device_name: str) -> Dict:
+    """Secondary device claims a pairing token.
+
+    Raises ValueError with a stable code for the API layer to map:
+      ``token_not_found`` ``token_expired`` ``token_wrong_user``
+      ``token_already_claimed`` ``device_identity_pub_bad_length``
+      ``device_name_too_long``
+    """
+    if not isinstance(token, str) or len(token) != _PAIRING_TOKEN_BYTES * 2:
+        raise ValueError("token_not_found")
+    if not isinstance(device_identity_pub, (bytes, bytearray)) or len(device_identity_pub) != 32:
+        raise ValueError("device_identity_pub_bad_length")
+    if device_name is None:
+        device_name = ""
+    device_name = str(device_name)[:64]
+    now = int(time.time())
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        _pairing_prune(con)
+        row = con.execute(
+            "SELECT user_id, status, expires_at FROM signal_pairing_tokens WHERE token=?",
+            (token,),
+        ).fetchone()
+        if not row:
+            con.commit()
+            raise ValueError("token_not_found")
+        if int(row["user_id"]) != int(caller_user_id):
+            con.commit()
+            raise ValueError("token_wrong_user")
+        if int(row["expires_at"]) < now:
+            con.commit()
+            raise ValueError("token_expired")
+        if row["status"] != "pending":
+            con.commit()
+            raise ValueError("token_already_claimed")
+        con.execute(
+            "UPDATE signal_pairing_tokens "
+            "SET device_identity_pub=?, device_name=?, status='claimed' "
+            "WHERE token=?",
+            (bytes(device_identity_pub), device_name, token),
+        )
+        con.commit()
+    return {"ok": True, "expires_at": int(row["expires_at"])}
+
+
+def signal_pairing_lookup(*, token: str, caller_user_id: int) -> Optional[Dict]:
+    """Primary polls the token to see whether the secondary has claimed it.
+
+    Returns ``None`` if the token does not exist, is expired, or belongs
+    to a different user (the API maps None → 404). Otherwise returns the
+    row as a dict, with `device_identity_pub` as bytes (may be None).
+    """
+    if not isinstance(token, str) or len(token) != _PAIRING_TOKEN_BYTES * 2:
+        return None
+    now = int(time.time())
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        _pairing_prune(con)
+        row = con.execute(
+            "SELECT user_id, device_identity_pub, device_name, device_id, "
+            "       status, created_at, expires_at "
+            "FROM signal_pairing_tokens WHERE token=?",
+            (token,),
+        ).fetchone()
+        con.commit()
+    if not row:
+        return None
+    if int(row["user_id"]) != int(caller_user_id):
+        return None
+    if int(row["expires_at"]) < now and row["status"] in ("pending", "claimed"):
+        return None
+    return {
+        "user_id":             int(row["user_id"]),
+        "device_identity_pub": bytes(row["device_identity_pub"]) if row["device_identity_pub"] else None,
+        "device_name":         row["device_name"] or "",
+        "device_id":           row["device_id"],
+        "status":              row["status"],
+        "created_at":          int(row["created_at"]),
+        "expires_at":          int(row["expires_at"]),
+    }
+
+
+def signal_pairing_approve(*, token: str, caller_user_id: int,
+                           device_id: str, primary_sig: bytes,
+                           name_override: Optional[str] = None) -> Dict:
+    """Primary approves a claimed pairing token.
+
+    Verifies that the token belongs to the caller, is in `claimed`
+    status, and not expired. Then calls `signal_device_link` with the
+    secondary's identity_pub stashed under the token. On success the
+    token row is marked `complete` so the secondary's status poll
+    flips to "done".
+    """
+    if not isinstance(token, str) or len(token) != _PAIRING_TOKEN_BYTES * 2:
+        raise ValueError("token_not_found")
+    if not isinstance(primary_sig, (bytes, bytearray)) or len(primary_sig) != 64:
+        raise ValueError("primary_sig_bad_length")
+    now = int(time.time())
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        _pairing_prune(con)
+        row = con.execute(
+            "SELECT user_id, device_identity_pub, device_name, status, expires_at "
+            "FROM signal_pairing_tokens WHERE token=?",
+            (token,),
+        ).fetchone()
+        if not row:
+            con.commit()
+            raise ValueError("token_not_found")
+        if int(row["user_id"]) != int(caller_user_id):
+            con.commit()
+            raise ValueError("token_wrong_user")
+        if int(row["expires_at"]) < now:
+            con.commit()
+            raise ValueError("token_expired")
+        if row["status"] != "claimed":
+            con.commit()
+            raise ValueError("token_not_claimed")
+        identity_pub = bytes(row["device_identity_pub"]) if row["device_identity_pub"] else b""
+        if len(identity_pub) != 32:
+            con.commit()
+            raise ValueError("token_corrupt")
+        # We're inside an outer transaction; signal_device_link uses its
+        # own connection + BEGIN IMMEDIATE. Commit here so we don't hold
+        # the writer lock across the helper call.
+        con.commit()
+
+    name = name_override if name_override is not None else (row["device_name"] or "")
+    # signal_device_link raises ValueError on cap / format errors — let
+    # those propagate so the API maps them to 400.
+    linked = signal_device_link(
+        user_id=int(caller_user_id),
+        device_id=str(device_id),
+        name=str(name)[:64],
+        device_identity_pub=identity_pub,
+        primary_sig=bytes(primary_sig),
+    )
+    # Flip the token to complete and remember which device_id was used so
+    # the secondary's status poll can echo it back.
+    with _conn() as con:
+        con.execute(
+            "UPDATE signal_pairing_tokens SET status='complete', device_id=? "
+            "WHERE token=? AND status='claimed'",
+            (str(device_id), token),
+        )
+        con.commit()
+    return {"ok": True, "device": linked}
+
+
+def signal_pairing_status(token: str) -> Dict:
+    """Unauthenticated status poll for the secondary device.
+
+    Returns ``{status: 'pending'|'claimed'|'complete'|'expired'|'unknown',
+    device_id?: str}``. Never reveals the identity_pub, name, or user_id
+    — the caller must hold the token to learn anything.
+    """
+    if not isinstance(token, str) or len(token) != _PAIRING_TOKEN_BYTES * 2:
+        return {"status": "unknown"}
+    now = int(time.time())
+    with _conn() as con:
+        row = con.execute(
+            "SELECT status, device_id, expires_at "
+            "FROM signal_pairing_tokens WHERE token=?",
+            (token,),
+        ).fetchone()
+    if not row:
+        return {"status": "unknown"}
+    status = row["status"]
+    if status in ("pending", "claimed") and int(row["expires_at"]) < now:
+        return {"status": "expired"}
+    out = {"status": status}
+    if status == "complete" and row["device_id"]:
+        out["device_id"] = row["device_id"]
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -328,6 +328,29 @@
 
   const CALL_FP_MAX_AGE_MS = 60 * 1000;  // 1-minute freshness window
 
+  // ── Generic XEdDSA signing with our primary identity key ────────────
+  // Track F (linked devices) uses this to sign a (device_id ||
+  // identity_pub) enrolment payload so peers can verify a secondary
+  // device was authorised by the primary identity they already trust.
+
+  async function getMyIdentityPubB64() {
+    if (!_store) throw new Error('Signal not initialised');
+    const idKey = await _store.getIdentityKeyPair();
+    return _abToB64(idKey.pubKey);
+  }
+
+  async function signWithIdentity(bytes) {
+    if (!_libsignal || !_store) throw new Error('Signal not initialised');
+    if (!bytes) throw new Error('bytes required');
+    const buf = bytes instanceof ArrayBuffer ? bytes
+      : (bytes && bytes.buffer instanceof ArrayBuffer ? bytes.buffer : null);
+    if (!buf) throw new Error('bytes must be ArrayBuffer or Uint8Array');
+    const idKey = await _store.getIdentityKeyPair();
+    const curve = (_libsignal.Curve && _libsignal.Curve.async) ? _libsignal.Curve.async : _libsignal.Curve;
+    const sig = await curve.calculateSignature(idKey.privKey, buf);
+    return _abToB64(sig);
+  }
+
   async function signCallFingerprint(payload) {
     if (!_libsignal || !_store) throw new Error('Signal not initialised');
     if (!payload || typeof payload !== 'object') throw new Error('payload required');
@@ -523,6 +546,9 @@
     getPeerIdentityKey,
     safetyNumberWith,
     peerIdentityRotated,
+    // Track F (linked devices):
+    getMyIdentityPubB64,
+    signWithIdentity,
     // Diagnostics:
     async _stats() { return _store ? _store._stats() : null; },
     async _wipe() { if (_store) await _store._wipe(); },
