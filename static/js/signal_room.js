@@ -535,9 +535,14 @@
     // Auth: same as everywhere else in the app — X-Session-Token header.
     // Some WS-triggered flows (e.g. fulfilling a request_skdm event) don't
     // have a session cookie set on the document, so cookie-auth alone
-    // 401s. State.token is always populated for an authenticated client.
+    // 401s. `State` is a top-level `const` in state.js so it is NOT on
+    // `window` — reference it by name with a typeof guard.
     let _tok = '';
-    try { _tok = (window.State && window.State.token) ? String(window.State.token) : ''; } catch {}
+    try {
+      if (typeof State !== 'undefined' && State && State.token) {
+        _tok = String(State.token);
+      }
+    } catch {}
     const _hdrs = { 'Content-Type': 'application/json' };
     if (_tok) _hdrs['X-Session-Token'] = _tok;
 
