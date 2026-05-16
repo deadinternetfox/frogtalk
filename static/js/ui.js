@@ -2145,6 +2145,36 @@ async function doAuth() {
         await _runPostRegisterRecoveryKey(password);
       } catch (e) { /* if it fails we still launch — user can try again from settings */ }
     }
+    // Privacy PIN: pull the freshly-issued session's PIN status and, if
+    // the user enabled "Use PIN as 2FA", show the lock screen BEFORE
+    // launching the app. Without this, manual login starts firing API
+    // calls that all 423 — the gate falls through (has_pin still false
+    // on the client because we haven't seen /pin/status yet) and the
+    // user lands on a blank shell with no channels / DMs. Gate is
+    // skipped for fresh registrations (no PIN yet) and silently no-ops
+    // when the user has no PIN set.
+    if (!isReg) {
+      try {
+        if (window.Pin) {
+          if (typeof Pin.refreshFromServer === 'function') {
+            await Pin.refreshFromServer();
+          }
+          if (typeof Pin.gateAutoLogin === 'function') {
+            const ok = await Pin.gateAutoLogin();
+            if (!ok) {
+              // User cancelled / failed the PIN — drop the session and
+              // bounce them back to the login form.
+              State.clear();
+              const e2 = document.getElementById('auth-error');
+              if (e2) e2.textContent = 'PIN required to continue.';
+              return;
+            }
+          }
+        }
+      } catch (e) { /* fail-open is unsafe, but a thrown gate means UI bug; surface a message */
+        console.error('[Auth] PIN gate after login failed', e);
+      }
+    }
     App.launch();
   } catch {
     errEl.textContent = 'Network error. Please try again.';

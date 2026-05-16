@@ -596,10 +596,18 @@
   // answer. Resolves once unlock completes so the caller can retry.
   function gateRequest () {
     return new Promise((resolve) => {
-      // No PIN configured on this account — nothing to do; resolve true
-      // and let the caller surface the original 423 (shouldn't happen
-      // in practice but defends against a stale `_cfg`).
-      if (!_cfg.has_pin) { resolve(true); return; }
+      // Server is the source of truth: if it sent 423 {pin_required},
+      // the account has a PIN. Trust that signal even if our local
+      // `_cfg` hasn't yet been populated (e.g. just after a manual
+      // login, before /pin/status has come back) — otherwise the gate
+      // would no-op and the caller would receive the original 423,
+      // dropping the user into a blank app shell.
+      if (!_cfg.has_pin) {
+        // Best-effort: tell pin.js this session has a PIN so the
+        // lock screen renders correctly. A subsequent refreshFromServer
+        // will overwrite this with the canonical values.
+        try { _cfg.has_pin = true; } catch {}
+      }
       _unlockResolvers.push(resolve);
       lockNow();
     });
