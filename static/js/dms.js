@@ -618,7 +618,23 @@ async function _decryptDMPreviewContent(cipher, peerId, peerNick) {
           }
           if (window.Signal.isReady()) {
             const out = await window.Signal.decryptDM(peerId, env);
-            if (typeof out === 'string') return out;
+            if (typeof out === 'string') {
+              // Track C Phase 2 — SKDM-over-DM. If the DM plaintext is
+              // a JSON SKDM envelope {"__skdm":1,"p":{r,c,i,d,ck,pk}},
+              // hand it to Signal.room and suppress the bubble.
+              try {
+                if (out.length >= 12 && out[0] === '{'
+                    && window.Signal.room && window.Signal.room.isAvailable
+                    && window.Signal.room.isAvailable()) {
+                  const inner = JSON.parse(out);
+                  if (inner && inner.__skdm === 1 && inner.p) {
+                    try { await window.Signal.room.processSKDM(peerId, inner.p); } catch {}
+                    return '';
+                  }
+                }
+              } catch { /* not an SKDM */ }
+              return out;
+            }
           }
         } catch (e) {
           // Drop into legacy paths \u2014 may be cold-history that this

@@ -3445,6 +3445,24 @@ async function loadOlderMessages() {
 
     const key = State.roomKeys[room];
     const decrypted = await Promise.all(msgs.map(async m => {
+      // Track C Phase 2 — v2 sender-key envelope path. If the cipher
+      // is a {v:2,t:'sk',b:…} envelope and Signal.room is available
+      // and we have a sender-key for (room, sender, iter), decrypt
+      // through that. Otherwise fall through to the legacy AES path.
+      try {
+        if (m.content && typeof m.content === 'string' && m.content[0] === '{'
+            && window.Signal && window.Signal.room && (m.user_id || m.user_id === 0)) {
+          const env = JSON.parse(m.content);
+          if (env && env.v === 2 && env.t === 'sk') {
+            try {
+              const plainV2 = await Signal.room.decryptMessage(room, m.user_id, env);
+              if (typeof plainV2 === 'string') {
+                return { ...m, content: plainV2, reply_content: '', _v2: true };
+              }
+            } catch {}
+          }
+        }
+      } catch {}
       if (!key) return m;
       const plain = await Crypto.decrypt(m.content, key);
       let replyPlain = m.reply_content;

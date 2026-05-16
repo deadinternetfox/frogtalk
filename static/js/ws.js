@@ -199,11 +199,26 @@ const WS = (() => {
         // Server broadcasts the new content in the SAME ciphertext form it
         // received it (so E2E stays intact). Decrypt before rendering.
         let plain = data.content;
+        let v2Decrypted = false;
         try {
-          const key = State.roomKeys[room];
-          if (key && data.content) {
-            const p = await Crypto.decrypt(data.content, key);
-            if (p !== null) plain = p;
+          // Track C Phase 2 — v2 sender-key envelope edits.
+          if (typeof data.content === 'string' && data.content[0] === '{'
+              && window.Signal && window.Signal.room
+              && (data.user_id || data.user_id === 0)) {
+            try {
+              const env = JSON.parse(data.content);
+              if (env && env.v === 2 && env.t === 'sk') {
+                const p2 = await window.Signal.room.decryptMessage(room, data.user_id, env);
+                if (typeof p2 === 'string') { plain = p2; v2Decrypted = true; }
+              }
+            } catch {}
+          }
+          if (!v2Decrypted) {
+            const key = State.roomKeys[room];
+            if (key && data.content) {
+              const p = await Crypto.decrypt(data.content, key);
+              if (p !== null) plain = p;
+            }
           }
         } catch {}
         // Keep the local cache in sync so re-renders and replies see plaintext.
@@ -634,6 +649,48 @@ const WS = (() => {
 
   async function decryptMsg(msg, room) {
     if (!msg.content) return msg;
+
+    // Track C Phase 2 — v2 Sender-Key envelope path. Wire format is a
+    // JSON object {v:2,t:'sk',b:'<base64>'}. We attempt Signal.room and
+    // fall through to the legacy AES path on failure (e.g. SKDM hasn't
+    // arrived yet, or this device's IndexedDB lacks the sender-key
+    // state). On decrypt success we mark _decrypted so callers know the
+    // bubble is plaintext.
+    const raw = msg.content;
+    if (typeof raw === 'string' && raw.length >= 9 && raw[0] === '{') {
+      try {
+        const env = JSON.parse(raw);
+        if (env && env.v === 2 && env.t === 'sk'
+            && window.Signal && window.Signal.room
+            && (msg.user_id || msg.user_id === 0)) {
+          try {
+            const plain = await window.Signal.room.decryptMessage(room, msg.user_id, env);
+            if (typeof plain === 'string') {
+              const out = { ...msg, content: plain, _decrypted: true, _v2: true };
+              if (msg.reply_content && typeof msg.reply_content === 'string'
+                  && msg.reply_content[0] === '{') {
+                try {
+                  const renv = JSON.parse(msg.reply_content);
+                  if (renv && renv.v === 2 && renv.t === 'sk') {
+                    // reply ciphertext only decryptable if we still have
+                    // chain state for that older iteration — Phase 1 is
+                    // in-order only, so we don't currently chase replies
+                    // backwards. Best-effort: leave ciphertext stripped.
+                    out.reply_content = '';
+                  }
+                } catch {}
+              }
+              return out;
+            }
+          } catch {
+            // Fall through to legacy.
+          }
+        }
+      } catch {
+        // Not v2 — fall through.
+      }
+    }
+
     const key = State.roomKeys[room];
     if (!key) return msg;
     const plain = await Crypto.decrypt(msg.content, key);

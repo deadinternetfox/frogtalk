@@ -15,6 +15,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 | B — Custom CSS | 2: wire sanitiser through writers, federation, renderer; backfill | ✅ shipped | `310e8ec` |
 | B — Custom CSS | 3: delete `_css_safety.py`, add grep CI guard | ✅ shipped | `1854ea8` |
 | C — Rooms (Sender Keys) | phase 1 ✅ dark backend | `f14cc01` | — |
+| C — Rooms (Sender Keys) | phase 2: receive path — ws.js + messages.js detect `{v:2,t:'sk'}` and route through `Signal.room.decryptMessage`; dms.js recognises SKDM-over-DM `{__skdm:1,p:{…}}` and feeds `Signal.room.processSKDM` | ✅ shipped (dark — no senders yet) | (this commit) |
 | D — Wall posts + media at rest | not started | — | — |
 | E — Voice/video integrity | 1: dark backend (fp_sig column on `pending_call_offers`, WS payload passthrough, REST cold-resume), `Signal.signCallFingerprint` / `verifyCallFingerprint` helpers | ✅ shipped (not yet wired into calls.js) | `13e4ced` |
 | E — Voice/video integrity | 2: wire calls.js to sign on offer/answer + verify on receive + Safety Numbers UI | ✅ shipped | `fb3175a` |
