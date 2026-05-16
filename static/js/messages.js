@@ -189,7 +189,7 @@ const Messages = (() => {
           // cache existed). Render a clearer indicator instead of the
           // generic lock so the user knows it's not a peer-side failure.
           if (opts && opts.isOwn) {
-            return '<em style="color:var(--text-muted,#888)" title="Sent from another device or older session — plaintext is not available on this device.">\uD83D\uDCEC Sent elsewhere</em>';
+            return '<em style="color:var(--text-muted,#888)" title="This message was sent from another device and cannot be decrypted here">\uD83D\uDD12 This message was sent from another device and cannot be decrypted</em>';
           }
           return '<em style="color:var(--text-muted,#888)">\uD83D\uDD12 Encrypted message</em>';
         }
