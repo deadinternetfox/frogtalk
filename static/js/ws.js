@@ -855,7 +855,7 @@ const WS = (() => {
                 window._skdmReqThrottle.set(_k, Date.now());
                 (async () => {
                   try {
-                    const _r = await fetch('/api/signal/skdm/request', {
+                    const _r = await fetch('/api/signal/skdm-rekey-request', {
                       method: 'POST',
                       credentials: 'same-origin',
                       headers: {

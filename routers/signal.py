@@ -300,7 +300,7 @@ class SkdmRequestBody(BaseModel):
     sender_uid: int = Field(..., ge=1)
 
 
-@router.post("/skdm/request")
+@router.post("/skdm-rekey-request")
 @limiter.limit("30/minute")
 async def request_skdm(
     request: Request,
