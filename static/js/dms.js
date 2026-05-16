@@ -1976,10 +1976,22 @@ async function sendDMMessage () {
   // sending plaintext.
   let encryptedContent = content;
   if (content && _peerUidForEnc) {
+    // Lazy-await Signal boot — a send fired before App.launch()'s
+    // fire-and-forget init resolves no longer throws "Encryption layer
+    // not ready"; we wait up to ~12s for libsignal + identity to be
+    // usable, then re-check.
     if (!window.Signal || !window.Signal.isReady || !window.Signal.isReady()) {
-      try { UI.showToast('Encryption layer not ready — please refresh.', 'error'); } catch {}
-      _dmSending = false;
-      return;
+      let ok = false;
+      try {
+        if (window.Signal && typeof Signal.ensureReady === 'function') {
+          ok = await Signal.ensureReady(State.user && State.user.id);
+        }
+      } catch {}
+      if (!ok) {
+        try { UI.showToast('Encryption layer not ready — please refresh.', 'error'); } catch {}
+        _dmSending = false;
+        return;
+      }
     }
     try {
       const env = await Signal.encryptDM(_peerUidForEnc, content);
@@ -2482,9 +2494,21 @@ async function submitDMEdit(id) {
   const _peerUidEdit = _activeDM?.user_id
     || _dmChannels.find(c => c.id === _activeDM?.id)?.with_user_id
     || 0;
-  if (!_peerUidEdit || !window.Signal || !window.Signal.isReady || !window.Signal.isReady()) {
+  if (!_peerUidEdit) {
     toast('Encryption layer not ready — please refresh.', 'error');
     return;
+  }
+  if (!window.Signal || !window.Signal.isReady || !window.Signal.isReady()) {
+    let ok = false;
+    try {
+      if (window.Signal && typeof Signal.ensureReady === 'function') {
+        ok = await Signal.ensureReady(State.user && State.user.id);
+      }
+    } catch {}
+    if (!ok) {
+      toast('Encryption layer not ready — please refresh.', 'error');
+      return;
+    }
   }
   try {
     const env = await Signal.encryptDM(_peerUidEdit, newContent);

@@ -2163,8 +2163,20 @@ const Messages = (() => {
     } else {
       if (!window.Signal || !window.Signal.room || !window.Signal.room.isAvailable
           || !window.Signal.room.isAvailable()) {
-        UI.showToast('Encryption layer not ready — please refresh.', 'error');
-        throw new Error('signal_room_unavailable');
+        // Lazy-await room crypto boot. The first send after a fresh
+        // login used to throw signal_room_unavailable because the
+        // libsignal module is dynamically imported and may still be
+        // mid-flight; ensureAvailable() awaits Signal.ensureReady().
+        let ok = false;
+        try {
+          if (window.Signal && window.Signal.room && typeof window.Signal.room.ensureAvailable === 'function') {
+            ok = await window.Signal.room.ensureAvailable();
+          }
+        } catch {}
+        if (!ok) {
+          UI.showToast('Encryption layer not ready — please refresh.', 'error');
+          throw new Error('signal_room_unavailable');
+        }
       }
       if (!await window.Signal.room.hasSelfKey(State.currentRoom)) {
         await window.Signal.room.rotateSenderKey(State.currentRoom);
@@ -3334,8 +3346,19 @@ async function sendMessage() {
     } else if (text) {
       if (!window.Signal || !window.Signal.room || !window.Signal.room.isAvailable
           || !window.Signal.room.isAvailable()) {
-        UI.showToast('Encryption layer not ready — please refresh.', 'error');
-        throw new Error('signal_room_unavailable');
+        // Lazy-await: first send after fresh login used to throw
+        // signal_room_unavailable while the libsignal ESM import was
+        // still resolving. ensureAvailable() awaits Signal.ensureReady().
+        let ok = false;
+        try {
+          if (window.Signal && window.Signal.room && typeof window.Signal.room.ensureAvailable === 'function') {
+            ok = await window.Signal.room.ensureAvailable();
+          }
+        } catch {}
+        if (!ok) {
+          UI.showToast('Encryption layer not ready — please refresh.', 'error');
+          throw new Error('signal_room_unavailable');
+        }
       }
       if (!await window.Signal.room.hasSelfKey(State.currentRoom)) {
         await window.Signal.room.rotateSenderKey(State.currentRoom);

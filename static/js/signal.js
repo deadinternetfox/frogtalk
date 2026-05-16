@@ -526,6 +526,38 @@
     return !!(_libsignal && _store);
   }
 
+  // Lazy / forgiving boot: if the caller tries to send before our
+  // fire-and-forget App.launch() bootstrap has resolved, await the
+  // in-flight init promise instead of throwing "Encryption layer not
+  // ready". Returns true when libsignal + store are usable, false on
+  // timeout / permanent failure. Safe to call concurrently — init()
+  // dedupes via _initPromise. The bundle publish is fire-and-forget so
+  // the first send isn't blocked on a network round-trip.
+  async function ensureReady(userId, opts) {
+    opts = opts || {};
+    if (isReady()) return true;
+    let uid = Number(userId) || _ourUserId || 0;
+    if (!uid) {
+      try { uid = Number(window.State && window.State.user && window.State.user.id) || 0; } catch {}
+    }
+    if (!uid) return false;
+    const timeoutMs = Number(opts.timeoutMs) || 12000;
+    try {
+      await Promise.race([
+        (async () => {
+          await init(uid);
+          // Fire-and-forget bundle publish — sends shouldn't block on
+          // POST /api/signal/bundle.
+          try { ensureMyBundleFresh().catch(() => {}); } catch {}
+        })(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('signal_init_timeout')), timeoutMs)),
+      ]);
+    } catch (e) {
+      console.warn('[Signal] ensureReady failed', e);
+    }
+    return isReady();
+  }
+
   function bundleHealthy() {
     return _bundleHealthy;
   }
@@ -535,6 +567,7 @@
   const Signal = {
     init,
     isReady,
+    ensureReady,
     bundleHealthy,
     ensureMyBundleFresh,
     encryptDM,

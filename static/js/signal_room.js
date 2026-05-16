@@ -467,6 +467,20 @@
     } catch { return false; }
   }
 
+  // Lazy boot mirror of Signal.ensureReady — sends in rooms hit
+  // isAvailable() before encryptMessage(); if libsignal hasn't finished
+  // loading from a fresh login the user used to see
+  // "signal_room_unavailable". Now we await the in-flight Signal init.
+  async function ensureAvailable(opts) {
+    if (isAvailable()) return true;
+    try {
+      if (window.Signal && typeof window.Signal.ensureReady === 'function') {
+        await window.Signal.ensureReady(null, opts || {});
+      }
+    } catch (e) { console.warn('[Signal.room] ensureAvailable failed', e); }
+    return isAvailable();
+  }
+
   // ── SKDM transport over the backend relay (Track C Phase 3) ──────────
   //
   // The recipient's identity is already established by Track A. We:
@@ -532,6 +546,7 @@
 
   const Room = {
     isAvailable,
+    ensureAvailable,
     rotateSenderKey,
     buildSKDMForCurrentChain,
     processSKDM,
