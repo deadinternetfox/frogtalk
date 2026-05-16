@@ -6657,10 +6657,13 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
 
 def get_wall_post_media(post_id: int) -> Optional[Dict]:
     """Lean fetch for the lazy media endpoint: only the fields needed for
-    privacy gating + the raw media payload. Avoids pulling content/track_*."""
+    privacy gating + the raw media payload. Avoids pulling content/track_*.
+    `enc_v` is included so callers can run the wall_post_keys audience
+    check on encrypted posts (custom audience lists are stricter than the
+    `privacy` column suggests — see wall_post_viewer_in_audience)."""
     with _conn() as con:
         row = con.execute("""
-            SELECT wp.id, wp.user_id, wp.privacy, wp.media_data, wp.media_type
+            SELECT wp.id, wp.user_id, wp.privacy, wp.media_data, wp.media_type, wp.enc_v
             FROM wall_posts wp
             WHERE wp.id=?
         """, (post_id,)).fetchone()
@@ -6730,6 +6733,7 @@ def get_wall_post_meta(post_id: int) -> Optional[Dict]:
             SELECT wp.id, wp.user_id, wp.content, wp.media_type, wp.privacy,
                    wp.share_enabled, wp.allow_comments, wp.created_at,
                    wp.edited_at, wp.track_title, wp.track_room,
+                   wp.enc_v, wp.audience,
                    COALESCE(wp.reaction_count, 0) AS reaction_count,
                    COALESCE(wp.comment_count, 0)  AS comment_count,
                    COALESCE(wp.repost_count, 0)   AS repost_count,
@@ -6740,6 +6744,38 @@ def get_wall_post_meta(post_id: int) -> Optional[Dict]:
             WHERE wp.id=?
         """, (post_id,)).fetchone()
     return dict(row) if row else None
+
+
+def wall_post_viewer_in_audience(post_id: int, viewer_id: int) -> bool:
+    """Track D — Returns True iff `viewer_id` may interact with `post_id`.
+
+    For enc_v=0 (legacy plaintext) rows we defer to the caller's existing
+    privacy/block checks and just return True here. For enc_v=2 rows the
+    viewer is in-audience iff they are the author OR they have a row in
+    `wall_post_keys`. Used by reactions/comments/reels so non-audience
+    accounts can't fan engagement on posts they can't decrypt.
+    """
+    try:
+        vid = int(viewer_id or 0)
+    except Exception:
+        return False
+    if vid <= 0:
+        return False
+    with _conn() as con:
+        row = con.execute(
+            "SELECT user_id, enc_v FROM wall_posts WHERE id=?", (int(post_id),)
+        ).fetchone()
+        if not row:
+            return False
+        if int(row["enc_v"] or 0) != 2:
+            return True
+        if int(row["user_id"]) == vid:
+            return True
+        wrap = con.execute(
+            "SELECT 1 FROM wall_post_keys WHERE post_id=? AND recipient_id=? LIMIT 1",
+            (int(post_id), vid),
+        ).fetchone()
+    return wrap is not None
 
 
 def get_user_reposts(user_id: int, viewer_id: int, limit: int = 30,
@@ -9467,9 +9503,12 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                            ORDER BY wpr5.created_at DESC LIMIT 1) AS friend_actor_emoji
                 FROM wall_posts wp
                 JOIN users u ON wp.user_id = u.id
+                LEFT JOIN wall_post_keys wpk
+                       ON wpk.post_id = wp.id AND wpk.recipient_id = ?
                 WHERE wp.media_type LIKE 'video/%'
                   AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
                   AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+                  AND (wp.enc_v = 0 OR wp.user_id = ? OR wpk.wrapped_key IS NOT NULL)
                   AND (
                       wp.user_id = ?
                       OR wp.privacy = 'public'
@@ -9516,9 +9555,11 @@ def get_reels_posts(viewer_id: int, scope: str = "all", sort: str = "hot",
                 LIMIT ? OFFSET ?
             """, (
                 viewer_id,
-                # block filters
+                # wall_post_keys join (recipient_id), block filters (×2),
+                # enc_v=2 author short-circuit, visibility rules (×6)
+                viewer_id,
                 viewer_id, viewer_id,
-                # visibility rules for viewer
+                viewer_id,
                 viewer_id,
                 viewer_id, viewer_id,
                 viewer_id, viewer_id,
@@ -9777,9 +9818,12 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
             LEFT JOIN fe     ON fe.post_id     = wp.id
             LEFT JOIN hc     ON hc.post_id     = wp.id
             LEFT JOIN friend_act ON friend_act.post_id = wp.id
+            LEFT JOIN wall_post_keys wpk
+                   ON wpk.post_id = wp.id AND wpk.recipient_id = ?
             WHERE wp.media_type LIKE 'video/%'
               AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
+              AND (wp.enc_v = 0 OR wp.user_id = ? OR wpk.wrapped_key IS NOT NULL)
               AND (
                   wp.user_id = ?
                   OR wp.privacy = 'public'
@@ -9796,10 +9840,12 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
             ORDER BY reels_score DESC, wp.created_at DESC, wp.id DESC
             LIMIT ? OFFSET ?
         """
-        # bind: i_reposted viewer, [maybe seen penalty], block (x2), visibility viewer, follower viewer, limit, offset
+        # bind: i_reposted, [seen penalty], wpk join recipient_id, block (x2),
+        #       enc_v=2 author short-circuit, visibility viewer, follower viewer,
+        #       limit, offset
         bind: List = [viewer_id]
         bind.extend(params)
-        bind.extend([viewer_id, viewer_id, viewer_id, viewer_id, limit, offset])
+        bind.extend([viewer_id, viewer_id, viewer_id, viewer_id, viewer_id, viewer_id, limit, offset])
         rows = con.execute(sql, tuple(bind)).fetchall()
 
     return [dict(r) for r in rows]

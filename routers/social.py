@@ -531,6 +531,13 @@ async def get_post_media(
                     return ("forbidden", None)
             elif privacy != "public":
                 return ("forbidden", None)
+            # enc_v=2 posts may have a stricter custom-list audience that the
+            # `privacy` column alone can't express (e.g. privacy=friends but
+            # only a subset of friends actually got a wrapped key). Gate on
+            # wall_post_keys membership for encrypted rows.
+            if int(row.get("enc_v") or 0) == 2:
+                if not db.wall_post_viewer_in_audience(post_id, viewer_id):
+                    return ("forbidden", None)
 
         media_data = row["media_data"]
         media_type = row.get("media_type") or "application/octet-stream"

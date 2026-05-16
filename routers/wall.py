@@ -637,6 +637,10 @@ async def add_post_reaction(request: Request, post_id: int, body: AddReactionReq
         return JSONResponse(status_code=404, content={"error": "Post not found"})
     if post.get("user_id") and db.is_blocked_either_way(current_user["id"], post["user_id"]):
         return JSONResponse(status_code=404, content={"error": "Post not found"})
+    # Track D — non-audience accounts must not fan engagement on a post
+    # they can't decrypt.
+    if int(post.get("enc_v") or 0) == 2 and not db.wall_post_viewer_in_audience(post_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not in audience"})
 
     added = db.add_wall_reaction(post_id, current_user["id"], body.emoji)
     reactions = db.get_post_reactions(post_id)
@@ -822,6 +826,8 @@ async def get_post_comments(post_id: int, limit: int = Query(50, le=100),
     post = db.get_wall_post_meta(post_id)
     if not post:
         return JSONResponse(status_code=404, content={"error": "Post not found"})
+    if int(post.get("enc_v") or 0) == 2 and not db.wall_post_viewer_in_audience(post_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not in audience"})
 
     comments = db.get_post_comments(post_id, limit, viewer_id=current_user["id"])
     return {"comments": comments, "allow_comments": bool(post.get("allow_comments", 1))}
@@ -843,6 +849,8 @@ async def add_post_comment(request: Request, post_id: int, body: AddCommentReque
         return JSONResponse(status_code=404, content={"error": "Post not found"})
     if post.get("user_id") and db.is_blocked_either_way(current_user["id"], post["user_id"]):
         return JSONResponse(status_code=404, content={"error": "Post not found"})
+    if int(post.get("enc_v") or 0) == 2 and not db.wall_post_viewer_in_audience(post_id, current_user["id"]):
+        return JSONResponse(status_code=403, content={"error": "Not in audience"})
 
     comment_id = db.add_wall_comment(post_id, current_user["id"], body.content.strip())
     if comment_id is None:
