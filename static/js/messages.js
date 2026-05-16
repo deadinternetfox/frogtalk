@@ -106,6 +106,37 @@ const Messages = (() => {
     }
   } catch {}
 
+  // Secondary id-keyed cache. Envelope-byte normalization should always
+  // match between PUT and GET, but server-side re-serialization (e.g.
+  // federation echo round-trip, future content-canonicalization passes)
+  // could in theory change the JSON byte order or whitespace and miss
+  // the `v2:t:b` normalized key. msg.id is server-assigned and stable
+  // across history reloads, so it makes a perfect fallback key.
+  // Keys are prefixed `id:<room>:<id>` so they coexist with envelope
+  // keys in the same Map (and the same localStorage blob) without
+  // collision.
+  function _ptCacheGetById(room, id) {
+    if (!room || !id) return undefined;
+    _rmPtLoad();
+    return _rmPtCache.get('id:' + room + ':' + id);
+  }
+  function _ptCachePutById(room, id, plain) {
+    if (!room || !id || typeof plain !== 'string') return;
+    _rmPtLoad();
+    const k = 'id:' + room + ':' + id;
+    if (_rmPtCache.has(k)) _rmPtCache.delete(k);
+    _rmPtCache.set(k, plain);
+    while (_rmPtCache.size > _RM_PT_CACHE_CAP) {
+      const k0 = _rmPtCache.keys().next().value;
+      if (k0 === undefined) break;
+      _rmPtCache.delete(k0);
+    }
+    _rmPtDirty = true;
+    if (!_rmPtSaveT) {
+      _rmPtSaveT = setTimeout(() => { _rmPtSaveT = 0; _rmPtSave(); }, 250);
+    }
+  }
+
   // Inline SVG logos for bridge origin badge (tiny, monochrome, currentColor).
   const _TG_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg>';
   const _DC_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z"/></svg>';
@@ -239,6 +270,24 @@ const Messages = (() => {
           // cache existed). Render a clearer indicator instead of the
           // generic lock so the user knows it's not a peer-side failure.
           if (opts && opts.isOwn) {
+            // One-shot diagnostic per session so we can confirm whether
+            // the placeholder is firing for a real cross-device send or
+            // because the cache lookup is genuinely missing data we
+            // should have. Logs the lookup key + map size + a small
+            // sample of stored keys.
+            try {
+              if (!window._ownPtMissLogged) {
+                window._ownPtMissLogged = true;
+                const _k = _ptCacheKey(text);
+                const _sample = [];
+                for (const _kk of _rmPtCache.keys()) {
+                  _sample.push(_kk.slice(0, 40));
+                  if (_sample.length >= 5) break;
+                }
+                console.warn('[messages._formatContent] own placeholder; cache miss',
+                  { lookup: _k.slice(0, 40), size: _rmPtCache.size, sample: _sample });
+              }
+            } catch {}
             return '<em style="color:var(--text-muted,#888)" title="This message was sent from another device and cannot be decrypted here">\uD83D\uDD12 This message was sent from another device and cannot be decrypted</em>';
           }
           return '<em style="color:var(--text-muted,#888)">\uD83D\uDD12 Encrypted message</em>';
@@ -3336,7 +3385,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, _ptCacheGet, _ptCachePut, _ptCacheFlush, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, _ptCacheGet, _ptCachePut, _ptCacheFlush, _ptCacheGetById, _ptCachePutById, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────

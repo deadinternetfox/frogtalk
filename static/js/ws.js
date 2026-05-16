@@ -288,8 +288,36 @@ const WS = (() => {
             try {
               const env = JSON.parse(data.content);
               if (env && env.v === 2 && env.t === 'sk') {
-                const p2 = await window.Signal.room.decryptMessage(room, data.user_id, env);
-                if (typeof p2 === 'string') { plain = p2; v2Decrypted = true; }
+                // Plaintext cache first: an edit echo for OUR own message
+                // can't be decrypted by libsignal (no receive chain for
+                // self) and a peer-edit replay races the chain just like
+                // a fresh msg. Either way the plaintext is already known
+                // from the send-time PUT or first-decrypt PUT.
+                try {
+                  if (typeof Messages !== 'undefined' && Messages._ptCacheGet) {
+                    const _c = Messages._ptCacheGet(data.content);
+                    if (typeof _c === 'string') { plain = _c; v2Decrypted = true; }
+                    else if (data.id && Messages._ptCacheGetById) {
+                      const _ci = Messages._ptCacheGetById(room, data.id);
+                      if (typeof _ci === 'string') { plain = _ci; v2Decrypted = true; }
+                    }
+                  }
+                } catch {}
+                if (!v2Decrypted) {
+                  const p2 = await window.Signal.room.decryptMessage(room, data.user_id, env);
+                  if (typeof p2 === 'string') {
+                    plain = p2;
+                    v2Decrypted = true;
+                    try {
+                      if (typeof Messages !== 'undefined' && Messages._ptCachePut) {
+                        Messages._ptCachePut(data.content, p2);
+                      }
+                      if (typeof Messages !== 'undefined' && Messages._ptCachePutById && data.id) {
+                        Messages._ptCachePutById(room, data.id, p2);
+                      }
+                    } catch {}
+                  }
+                }
               }
             } catch {}
           }
@@ -821,11 +849,30 @@ const WS = (() => {
           // Plaintext cache: short-circuit when we've already decrypted
           // this envelope (history reload, retransmit) OR when we sent
           // it ourselves (sender chain can't decrypt own ciphertext).
+          // Two-tier lookup: envelope-key first (works regardless of
+          // msg.id presence), then id-key fallback (survives any
+          // server-side re-serialization of the envelope JSON, e.g.
+          // federation echo round-trip).
           try {
             if (typeof Messages !== 'undefined' && Messages._ptCacheGet) {
               const _cached = Messages._ptCacheGet(raw);
               if (typeof _cached === 'string') {
+                try {
+                  if (msg.id && Messages._ptCachePutById) {
+                    Messages._ptCachePutById(room, msg.id, _cached);
+                  }
+                } catch {}
                 return { ...msg, content: _cached, _decrypted: true, _v2: true };
+              }
+              if (msg.id && Messages._ptCacheGetById) {
+                const _cachedById = Messages._ptCacheGetById(room, msg.id);
+                if (typeof _cachedById === 'string') {
+                  // Also backfill the envelope key so subsequent identical
+                  // ciphertext arrivals (different msg.id, e.g. federation
+                  // copy) hit on the primary key path.
+                  try { Messages._ptCachePut(raw, _cachedById); } catch {}
+                  return { ...msg, content: _cachedById, _decrypted: true, _v2: true };
+                }
               }
             }
           } catch {}
@@ -846,6 +893,9 @@ const WS = (() => {
                   try {
                     if (typeof Messages !== 'undefined' && Messages._ptCachePut) {
                       Messages._ptCachePut(raw, p);
+                    }
+                    if (typeof Messages !== 'undefined' && Messages._ptCachePutById && msg.id) {
+                      Messages._ptCachePutById(room, msg.id, p);
                     }
                   } catch {}
                 }
@@ -891,6 +941,12 @@ const WS = (() => {
                 const _late = Messages._ptCacheGet(raw);
                 if (typeof _late === 'string') {
                   return { ...msg, content: _late, _decrypted: true, _v2: true };
+                }
+                if (msg.id && Messages._ptCacheGetById) {
+                  const _lateById = Messages._ptCacheGetById(room, msg.id);
+                  if (typeof _lateById === 'string') {
+                    return { ...msg, content: _lateById, _decrypted: true, _v2: true };
+                  }
                 }
               }
             } catch {}
