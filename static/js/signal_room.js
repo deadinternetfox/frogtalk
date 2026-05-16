@@ -532,10 +532,19 @@
     const marker = JSON.stringify({ __skdm: 1, p: skdmPayload });
     const env = await window.Signal.encryptDM(peer, marker);
 
+    // Auth: same as everywhere else in the app — X-Session-Token header.
+    // Some WS-triggered flows (e.g. fulfilling a request_skdm event) don't
+    // have a session cookie set on the document, so cookie-auth alone
+    // 401s. State.token is always populated for an authenticated client.
+    let _tok = '';
+    try { _tok = (window.State && window.State.token) ? String(window.State.token) : ''; } catch {}
+    const _hdrs = { 'Content-Type': 'application/json' };
+    if (_tok) _hdrs['X-Session-Token'] = _tok;
+
     const resp = await fetch(`/api/signal/skdm/${peer}`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _hdrs,
       body: JSON.stringify({
         room_id: roomId,
         envelope: JSON.stringify(env),

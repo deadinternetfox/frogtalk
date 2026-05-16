@@ -847,28 +847,35 @@ const WS = (() => {
             // Recovery: ask the sender to re-fan their SKDM. Throttle per
             // (room, sender) so we send at most one request every 15s
             // even if many ciphertext bubbles arrive in a burst.
+            // Skip self — our own messages should decrypt via our own
+            // sender chain; if they can't, requesting from ourselves is
+            // pointless (server returns 400 self_request anyway).
             try {
-              window._skdmReqThrottle = window._skdmReqThrottle || new Map();
-              const _k = `${room}:${msg.user_id}`;
-              const _last = window._skdmReqThrottle.get(_k) || 0;
-              if (Date.now() - _last >= 15000) {
-                window._skdmReqThrottle.set(_k, Date.now());
-                (async () => {
-                  try {
-                    const _r = await fetch('/api/signal/skdm-rekey-request', {
-                      method: 'POST',
-                      credentials: 'same-origin',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        ...(State.token ? { 'X-Session-Token': State.token } : {}),
-                      },
-                      body: JSON.stringify({ room_id: room, sender_uid: +msg.user_id }),
-                    });
-                    try { console.log('[ws.decryptMsg] rekey request status', _r.status, 'for', _k); } catch {}
-                  } catch (_re) {
-                    try { console.warn('[ws.decryptMsg] rekey request FAIL', _re && _re.message); } catch {}
-                  }
-                })();
+              const _myId = Number(State.user && State.user.id) | 0;
+              const _peerId = Number(msg.user_id) | 0;
+              if (_peerId && _peerId !== _myId) {
+                window._skdmReqThrottle = window._skdmReqThrottle || new Map();
+                const _k = `${room}:${_peerId}`;
+                const _last = window._skdmReqThrottle.get(_k) || 0;
+                if (Date.now() - _last >= 15000) {
+                  window._skdmReqThrottle.set(_k, Date.now());
+                  (async () => {
+                    try {
+                      const _r = await fetch('/api/signal/skdm-rekey-request', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...(State.token ? { 'X-Session-Token': State.token } : {}),
+                        },
+                        body: JSON.stringify({ room_id: room, sender_uid: _peerId }),
+                      });
+                      try { console.log('[ws.decryptMsg] rekey request status', _r.status, 'for', _k); } catch {}
+                    } catch (_re) {
+                      try { console.warn('[ws.decryptMsg] rekey request FAIL', _re && _re.message); } catch {}
+                    }
+                  })();
+                }
               }
             } catch {}
             // Fall through to legacy.
