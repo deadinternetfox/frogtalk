@@ -519,16 +519,27 @@ const App = {
             }
           }
         } catch {}
-        // Takeover: server has a different key than this device. Show the
-        // active-devices dialog (geo + browser), let the user log out the
-        // other device, then auto-reset our local keypair so we're the
-        // canonical DM device.
+        // Takeover: server has a different key than this device. Only
+        // show the "another device is signed in" dialog if there is
+        // actually another active session — otherwise the mismatch is just
+        // a reinstall / cleared-data / fresh-keypair on this same device
+        // and we should silently rotate without spooking the user.
         if (serverPub && serverPub !== localPub) {
+          let otherSessionCount = 0;
           try {
-            if (typeof showActiveDevicesDialog === 'function') {
-              await showActiveDevicesDialog({ takeover: true });
+            const sr = await apiFetch('/api/auth/sessions');
+            if (sr && sr.ok) {
+              const sd = await sr.json();
+              otherSessionCount = (sd.sessions || []).filter(s => !s.is_current).length;
             }
-          } catch (e) { console.warn('active devices dialog', e); }
+          } catch {}
+          if (otherSessionCount > 0) {
+            try {
+              if (typeof showActiveDevicesDialog === 'function') {
+                await showActiveDevicesDialog({ takeover: true });
+              }
+            } catch (e) { console.warn('active devices dialog', e); }
+          }
           try {
             if (Crypto.resetIdentityKey) await Crypto.resetIdentityKey();
             localPub = await Crypto.getPublicKey();
