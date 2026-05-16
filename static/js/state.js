@@ -209,6 +209,11 @@ async function apiFetch (url, method = 'GET', body = null) {
   // Back-compat: many callers pass a fetch-style options object as the 2nd
   // arg (e.g. { method:'POST' } or { signal }). Normalize both signatures.
   const isOptsObject = method && typeof method === 'object' && !Array.isArray(method);
+  // 10.5: callers can opt out of the PIN-gate auto-retry by passing
+  // `_pinRetried:true` in the opts object. We use it internally to
+  // break the loop after one retry attempt; no caller should set it
+  // by hand.
+  const _pinRetried = !!(isOptsObject && method && method._pinRetried);
   const opts = isOptsObject
     ? { ...method, method: method.method || 'GET', headers: { ...(method.headers || {}), ...authHeaders } }
     : { method, headers: authHeaders };
@@ -230,6 +235,29 @@ async function apiFetch (url, method = 'GET', body = null) {
     const res = await fetch(url, opts);
     const _u = String(url || '');
     const _isApi = _u.startsWith('/api');
+    // ── PIN gate (server-side) ──────────────────────────────────────
+    // The server returns 423 Locked with {pin_required:true} when this
+    // session has a PIN configured and hasn't unlocked this process
+    // (or has been idle past the user's timeout). We pop the lock
+    // overlay, wait for the user to enter the PIN, then retry exactly
+    // once with the same URL/method/body. A second 423 is surfaced to
+    // the caller untouched so it doesn't loop forever.
+    if (_isApi && res.status === 423 && !_pinRetried
+        && typeof Pin !== 'undefined' && Pin.gateRequest) {
+      let bodyJson = null;
+      try { bodyJson = await res.clone().json(); } catch {}
+      if (bodyJson && bodyJson.pin_required) {
+        if (timer) { clearTimeout(timer); timer = null; }
+        try { await Pin.gateRequest(); } catch {}
+        // Rebuild the opts object so the retry gets a fresh
+        // AbortController + clean headers, and tag it so we don't
+        // recurse on a second 423.
+        const retryOpts = isOptsObject
+          ? { ...method, _pinRetried: true }
+          : { method, _pinRetried: true };
+        return apiFetch(url, retryOpts, body);
+      }
+    }
     if (_isApi) {
       const ct = String(res.headers?.get('content-type') || '').toLowerCase();
       const isJson = ct.includes('application/json') || ct.includes('+json');

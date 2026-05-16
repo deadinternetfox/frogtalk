@@ -29,7 +29,7 @@ _PUBLIC_HTML_NO_CACHE = {
     "Expires": "0",
 }
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,7 +62,7 @@ from routers import bug_reports as bug_reports_mod
 import asyncio
 from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories, cleanup_inactive_public_rooms, wal_checkpoint_truncate
 
-from deps import client_ip
+from deps import client_ip, pin_gate
 limiter = Limiter(key_func=client_ip)
 
 
@@ -807,29 +807,39 @@ async def _security_headers(request: Request, call_next):
     return response
 
 app.include_router(auth.router, prefix="/api")
-app.include_router(rooms.router, prefix="/api")
-app.include_router(messages.router, prefix="/api")
+# Sensitive routers — server-side PIN gate sits in front. When the user
+# has has_pin && pin_require_on_unlock and the session hasn't verified
+# the PIN this process (or has been idle past their timeout), every
+# request through these routers returns 423 with {pin_required: true}.
+# The client (`apiFetch`) catches that, pops the lock screen, then
+# retries after the user enters the PIN. Routers that must work pre-
+# unlock (auth itself, anonymous public/directory/preview/external_api,
+# WebSocket, server-admin which has its own admin gate) deliberately
+# stay outside.
+_PIN_GATED = [Depends(pin_gate)]
+app.include_router(rooms.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(messages.router, prefix="/api", dependencies=_PIN_GATED)
 # NOTE: friends_mod.users_router exposes /users/search. It MUST be registered
 # BEFORE users.router (which has /users/{user_id}) so "search" isn't parsed
 # as an int user_id and returned as 422.
-app.include_router(friends_mod.users_router, prefix="/api")
-app.include_router(users.router, prefix="/api")
-app.include_router(friends_mod.router, prefix="/api")
-app.include_router(dms.router, prefix="/api")
-app.include_router(push_mod.router, prefix="/api")
-app.include_router(emojis.router, prefix="/api")
+app.include_router(friends_mod.users_router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(users.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(friends_mod.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(dms.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(push_mod.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(emojis.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(preview_mod.router, prefix="/api")
-app.include_router(bots_mod.router, prefix="/api")
-app.include_router(invites_mod.router, prefix="/api")
+app.include_router(bots_mod.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(invites_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(directory_mod.router, prefix="/api")
-app.include_router(wall_mod.router, prefix="/api")
-app.include_router(location_mod.router, prefix="/api")
-app.include_router(gifs_mod.router, prefix="/api")
+app.include_router(wall_mod.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(location_mod.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(gifs_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(external_api_mod.router, prefix="/api")
-app.include_router(social_mod.router, prefix="/api")
-app.include_router(bridge_mod.router, prefix="/api")
-app.include_router(calls_mod.router, prefix="/api")
-app.include_router(admin_mod.router, prefix="/api")
+app.include_router(social_mod.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(bridge_mod.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(calls_mod.router, prefix="/api", dependencies=_PIN_GATED)
+app.include_router(admin_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(federation_mod.router, prefix="/api")
 app.include_router(server_admin_mod.router)
 app.include_router(bug_reports_mod.router, prefix="/api")

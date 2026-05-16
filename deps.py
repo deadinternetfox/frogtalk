@@ -170,3 +170,116 @@ async def get_admin_user(request: Request = None, x_session_token: str = Header(
     if not user.get("is_admin"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
+
+
+# ── Server-side PIN lock enforcement ────────────────────────────────────
+# Until this pass the PIN was a *client* lock only: an attacker holding a
+# valid session token could just bypass the overlay and call the API
+# directly. The state below promotes the PIN into a real server-side
+# gate that sits on top of the session token.
+#
+# Model:
+#   * Each session token has an in-memory entry { unlocked_at, last_active }.
+#     Process restart = everyone re-locked (intentional; defence in depth).
+#   * Login / register / federation-ticket-login / pin.verify all call
+#     pin_mark_unlocked(token) — fresh authentication grants entry to the
+#     gated endpoints because either (a) the user just typed the PIN or
+#     (b) they just typed the password, which is strictly stronger than
+#     the PIN.
+#   * Logout / pin.disable call pin_clear_for_token(token) so the next
+#     access has to re-verify.
+#   * pin_gate dep raises HTTP 423 with {pin_required: true} when the
+#     user has has_pin & pin_require_on_unlock and either was never
+#     unlocked this process or has been idle past pin_idle_timeout_sec.
+#   * On every successful gated request we bump last_active so an
+#     actively-using session doesn't get re-locked mid-action.
+#   * Token storage key is the bcrypt-friendly hashed-at-rest form
+#     (db._hash_session_token) so a memory dump never reveals raw tokens.
+import threading
+
+_pin_state_lock = threading.Lock()
+_pin_state: dict[str, dict] = {}
+_PIN_STATE_MAX = 8192
+
+
+def _pin_key(token: str) -> str:
+    raw = (token or "").strip()
+    if not raw:
+        return ""
+    try:
+        return db._hash_session_token(raw)
+    except Exception:
+        return raw
+
+
+def pin_mark_unlocked(token: str) -> None:
+    """Record a fresh unlock for `token`. Idempotent."""
+    k = _pin_key(token)
+    if not k:
+        return
+    now = time.time()
+    with _pin_state_lock:
+        _pin_state[k] = {"unlocked_at": now, "last_active": now}
+        if len(_pin_state) > _PIN_STATE_MAX:
+            # Evict stalest half — cheap O(n), bounded by _PIN_STATE_MAX.
+            stale = sorted(_pin_state.items(), key=lambda kv: kv[1].get("last_active", 0))
+            for ks, _ in stale[: _PIN_STATE_MAX // 2]:
+                _pin_state.pop(ks, None)
+
+
+def pin_clear_for_token(token: str) -> None:
+    """Drop unlock state for `token`. Called on logout and PIN disable."""
+    k = _pin_key(token)
+    if not k:
+        return
+    with _pin_state_lock:
+        _pin_state.pop(k, None)
+
+
+def _pin_session_is_locked(user: dict, token: str) -> bool:
+    """True iff the session must re-verify the PIN before serving."""
+    if not user or not token:
+        return False
+    if not int(user.get("has_pin") or 0):
+        return False
+    if not int(user.get("pin_require_on_unlock") or 0):
+        return False
+    idle_limit = int(user.get("pin_idle_timeout_sec") or 300)
+    # idle_limit == 0 means "lock immediately on blur" — server treats
+    # that as a 5 s grace so a single in-flight request doesn't trip.
+    if idle_limit <= 0:
+        idle_limit = 5
+    k = _pin_key(token)
+    now = time.time()
+    with _pin_state_lock:
+        st = _pin_state.get(k)
+        if not st:
+            return True
+        if (now - float(st.get("last_active", 0))) > idle_limit:
+            # Expired — purge so we don't keep stale entries around.
+            _pin_state.pop(k, None)
+            return True
+        # Bump activity so an active user stays unlocked.
+        st["last_active"] = now
+    return False
+
+
+async def pin_gate(
+    request: Request = None,
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+):
+    """FastAPI dependency that combines `get_current_user` with the
+    server-side PIN gate. Apply via
+        app.include_router(router, dependencies=[Depends(pin_gate)])
+    for any router serving sensitive data (messages, DMs, social, …).
+    """
+    user = await get_current_user(request, x_session_token)
+    if _pin_session_is_locked(user, x_session_token or ""):
+        # 423 Locked is the natural code here (WebDAV repurposed). The
+        # body deliberately contains no user info — only the signal the
+        # client needs to pop its PIN prompt.
+        raise HTTPException(
+            status_code=423,
+            detail={"pin_required": True, "error": "PIN required"},
+        )
+    return user
