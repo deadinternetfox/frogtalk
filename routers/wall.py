@@ -12,6 +12,7 @@ from typing import Optional
 import database as db
 from deps import get_current_user, client_ip
 from ws_manager import manager
+from routers._css_safety import sanitize_scoped_css
 
 _log = logging.getLogger(__name__)
 limiter = Limiter(key_func=client_ip)
@@ -737,29 +738,14 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
             params.append(body.mood)
         
         if body.custom_css is not None:
-            # Limit CSS size and do strict sanitization
-            css = body.custom_css[:10240]  # Max 10KB
-            # Decode CSS hex escapes (\26, \000026 etc.) and HTML entities
-            # before substring matching so attackers can't bypass with \75rl(...
-            normalized = css.lower()
-            # CSS hex escape: \ followed by 1-6 hex digits, optional whitespace
-            normalized = re.sub(r"\\([0-9a-f]{1,6})\s?", lambda m: chr(int(m.group(1), 16)) if int(m.group(1), 16) < 0x110000 else "", normalized)
-            # CSS literal escape: \X => X
-            normalized = re.sub(r"\\(.)", r"\1", normalized)
-            # HTML named/numeric entities
+            # Shared hardened sanitiser. Rejects comma-bridge selectors,
+            # @-rules, url()/@import/@font-face/expression(), encoded
+            # variants, position:fixed/sticky and </style breakouts. See
+            # routers/_css_safety.py for the full rule set.
             try:
-                import html as _html
-                normalized = _html.unescape(normalized)
-            except Exception:
-                pass
-            # Strip CSS comments
-            normalized = re.sub(r"/\*.*?\*/", "", normalized, flags=re.DOTALL)
-            # Collapse whitespace inside parens for "url ( javascript:" tricks
-            normalized = re.sub(r"\s+", "", normalized)
-            dangerous = ["javascript:", "expression(", "url(", "@import", "behavior:", "-moz-binding"]
-            for d in dangerous:
-                if d in normalized:
-                    return JSONResponse(status_code=400, content={"error": f"CSS contains forbidden: {d}"})
+                css = sanitize_scoped_css(body.custom_css)
+            except ValueError as e:
+                return JSONResponse(status_code=400, content={"error": f"Invalid CSS: {e}"})
             updates.append("custom_css=?")
             params.append(css)
         

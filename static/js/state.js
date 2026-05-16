@@ -116,6 +116,91 @@ function jsStr (s) {
   return JSON.stringify(String(s ?? '')).replace(/"/g, '&quot;');
 }
 
+// ── Css.sanitizeScopedCss ───────────────────────────────────────────────────
+// Single source of truth for "user-supplied CSS, scoped to a container".
+// Used by channel themes, profile custom CSS, social profile custom CSS,
+// and the live CSS preview pane. Every scoper used to roll its own
+// `selectors.split(',').map(s => `${scope} ${s}`)` which was exploitable:
+//
+//   1. A leading comma like `,*` produced [\"\", \"*\"]; filter(Boolean)
+//      dropped the empty, leaving a plain `${scope} *` which then matched
+//      every descendant — enough for a fullscreen overlay attack inside
+//      the scope.
+//   2. `position:fixed` in the rule body escapes the scope visually,
+//      letting an attacker overlay the whole viewport from inside any
+//      scoped element.
+//   3. `@import`, `url(`, `expression(`, `behavior:`, `javascript:` and
+//      their hex/entity-encoded variants could fetch / execute remote
+//      payloads.
+//   4. `</style>` inside the body could end the inline <style> early and
+//      drop into HTML mode (rare in practice because we use textContent,
+//      but cheap to guard).
+//
+// Returns the safe, scoped CSS string. Logs (console.warn) and drops any
+// rule that fails validation; never throws.
+const Css = (() => {
+  const DANGEROUS_TOKENS = [
+    'javascript:', 'expression(', 'url(', '@import', '@charset',
+    '@font-face', '@keyframes', '@supports', '@media',
+    'behavior:', '-moz-binding', '</style', '<script', '\\',
+    'position:fixed', 'position:sticky',
+  ];
+  const BARE_SELECTORS = new Set(['*', ':root', 'html', 'body', ':host', ':where(*)']);
+
+  function _normalize(s) {
+    let out = String(s || '').toLowerCase()
+      .replace(/\\([0-9a-f]{1,6})\s?/g, (_, h) => {
+        const cp = parseInt(h, 16);
+        return cp < 0x110000 ? String.fromCodePoint(cp) : '';
+      })
+      .replace(/\\(.)/g, '$1');
+    try { out = out.replace(/&#(\d+);?/g, (_, n) => String.fromCharCode(+n)); } catch {}
+    return out.replace(/\s+/g, '');
+  }
+
+  function _hasDangerous(s) {
+    const n = _normalize(s);
+    return DANGEROUS_TOKENS.some(t => n.includes(t));
+  }
+
+  // selectorMapper(selector) -> scoped selector or '' to drop
+  function sanitizeScopedCss(rawCss, scope, selectorMapper) {
+    if (!rawCss || !scope) return '';
+    let css = String(rawCss).slice(0, 10240).replace(/\/\*[\s\S]*?\*\//g, '');
+    if (_hasDangerous(css)) return '';
+    if ((css.match(/\{/g) || []).length !== (css.match(/\}/g) || []).length) return '';
+    const out = [];
+    for (const chunk of css.split('}')) {
+      const i = chunk.indexOf('{');
+      if (i === -1) continue;
+      const selRaw = chunk.slice(0, i).trim();
+      const body = chunk.slice(i + 1).trim();
+      if (!selRaw || !body) continue;
+      if (selRaw.startsWith('@')) continue;
+      if (/[<>(){}"'`\\;]/.test(selRaw)) continue;
+      if (_hasDangerous(body)) continue;
+      const parts = selRaw.split(',').map(s => s.trim());
+      if (parts.some(p => !p)) continue; // empty part = leading/trailing comma
+      let badPart = false;
+      const mapped = [];
+      for (const p of parts) {
+        const head = p.split(/[\s>+~]/)[0].toLowerCase();
+        if (BARE_SELECTORS.has(head)) { badPart = true; break; }
+        const m = typeof selectorMapper === 'function'
+          ? selectorMapper(p) : `${scope} ${p}`;
+        if (!m) { badPart = true; break; }
+        mapped.push(m);
+      }
+      if (badPart || !mapped.length) continue;
+      out.push(`${mapped.join(', ')} { ${body} }`);
+    }
+    return out.join('\n');
+  }
+
+  return { sanitizeScopedCss };
+})();
+try { if (typeof window !== 'undefined') window.Css = Css; } catch {}
+
 // apiFetch() — authenticated fetch using current State.token.
 // Signals ConnErr on network-level failures (TypeError) so the retry overlay
 // appears after repeated offline failures.

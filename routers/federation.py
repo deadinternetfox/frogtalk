@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import database as db
+from routers._css_safety import sanitize_scoped_css as _sanitize_scoped_css
 import crypto_fed
 
 router = APIRouter(tags=["federation"])
@@ -1689,7 +1690,17 @@ async def _handle_user_event(event: dict) -> None:
         # Only apply CSS when explicitly present in payload to avoid
         # wiping an existing style from profile updates that don't carry it.
         if "custom_css" in payload:
-            css = str(payload.get("custom_css") or "")[:10240]
+            # Federated CSS is fully untrusted — a hostile peer could ship
+            # a payload that overlays our own UI when rendered. Run the
+            # same hardened sanitiser used on first-party submissions; on
+            # any rejection, store an empty string rather than dropping
+            # the whole profile update.
+            raw_css = str(payload.get("custom_css") or "")[:10240]
+            try:
+                css = _sanitize_scoped_css(raw_css)
+            except ValueError as _e:
+                _log.warning("Federated custom_css rejected for user %s: %s", local_user["id"], _e)
+                css = ""
             base_sql += ", custom_css=?"
             params.append(css)
 

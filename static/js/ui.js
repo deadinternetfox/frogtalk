@@ -3841,27 +3841,12 @@ function clearProfileCustomCss() {
 }
 
 function scopeProfileCustomCss(css) {
-  if (!css) return '';
-  return css
-    .split('}')
-    .map(rule => rule.trim())
-    .filter(Boolean)
-    .map(rule => {
-      const braceIdx = rule.indexOf('{');
-      if (braceIdx === -1) return '';
-      const selectors = rule.slice(0, braceIdx).trim();
-      const body = rule.slice(braceIdx + 1).trim();
-      if (!selectors || !body || selectors.includes('@')) return '';
-      const scopedSelectors = selectors
-        .split(',')
-        .map(selector => selector.trim())
-        .filter(Boolean)
-        .map(selector => `#modal-user-info ${selector}`)
-        .join(', ');
-      return scopedSelectors ? `${scopedSelectors} { ${body} }` : '';
-    })
-    .filter(Boolean)
-    .join('\n');
+  // See Css.sanitizeScopedCss in state.js. Used to be a naive
+  // split(',').filter(Boolean) join — comma-bridge + position:fixed in the
+  // body let any user's profile CSS overlay the whole viewport whenever
+  // someone opened their profile modal.
+  try { return window.Css?.sanitizeScopedCss?.(css, '#modal-user-info') || ''; }
+  catch { return ''; }
 }
 
 function applyProfileCustomCss(css) {
@@ -3884,50 +3869,29 @@ function applySocialProfileCustomCss(css) {
     _socialProfileCssEl = null;
   }
   if (!css) return;
-  // Scope CSS to .social-profile container
-  const scoped = css
-    .split('}')
-    .map(rule => rule.trim())
-    .filter(Boolean)
-    .map(rule => {
-      const braceIdx = rule.indexOf('{');
-      if (braceIdx === -1) return '';
-      const selectors = rule.slice(0, braceIdx).trim();
-      const body = rule.slice(braceIdx + 1).trim();
-      if (!selectors || !body || selectors.includes('@')) return '';
-      const expandSocialSelectorAliases = (selector) => {
-        const base = String(selector || '').trim();
-        if (!base) return [];
-        const expanded = new Set([base]);
-        // Chat/profile modal and Frog Social use different class names.
-        // Keep user CSS/presets backward-compatible by aliasing selectors.
-        if (base.includes('.wall-post')) {
-          expanded.add(base.replace(/\.wall-post\b/g, '.sf-post'));
-        }
-        // NOTE: .profile-header is intentionally NOT aliased to .sp-header.
-        // Applying a background gradient to .sp-header breaks the banner/avatar
-        // overlap layout in the social profile view.
-        if (base.includes('.userinfo-nick')) {
-          expanded.add(base.replace(/\.userinfo-nick\b/g, '.sp-nick'));
-        }
-        // NOTE: .profile-avatar-large is intentionally NOT aliased to .sp-avatar.
-        // .sp-avatar uses absolute positioning; adding border/box-shadow via alias
-        // breaks layout in the social profile view.
-        return Array.from(expanded);
-      };
-      const scopedSelectors = selectors
-        .split(',')
-        .map(selector => selector.trim())
-        .filter(Boolean)
-        .reduce((acc, selector) => {
-          return acc.concat(expandSocialSelectorAliases(selector));
-        }, [])
-        .map(selector => `.social-profile ${selector}`)
-        .join(', ');
-      return scopedSelectors ? `${scopedSelectors} { ${body} }` : '';
-    })
-    .filter(Boolean)
-    .join('\n');
+  // Scope CSS to .social-profile container via the shared hardened
+  // sanitiser. Selector aliasing (.wall-post → .sf-post,
+  // .userinfo-nick → .sp-nick) is preserved via the mapper callback.
+  const expandSocialSelectorAliases = (selector) => {
+    const base = String(selector || '').trim();
+    if (!base) return [];
+    const expanded = new Set([base]);
+    if (base.includes('.wall-post')) {
+      expanded.add(base.replace(/\.wall-post\b/g, '.sf-post'));
+    }
+    if (base.includes('.userinfo-nick')) {
+      expanded.add(base.replace(/\.userinfo-nick\b/g, '.sp-nick'));
+    }
+    return Array.from(expanded);
+  };
+  let scoped = '';
+  try {
+    scoped = window.Css?.sanitizeScopedCss?.(css, '.social-profile', (p) => {
+      const variants = expandSocialSelectorAliases(p);
+      if (!variants.length) return '';
+      return variants.map(v => `.social-profile ${v}`).join(', ');
+    }) || '';
+  } catch { scoped = ''; }
   if (!scoped) return;
   const styleEl = document.createElement('style');
   styleEl.id = 'social-profile-custom-style';
@@ -4246,30 +4210,14 @@ function updateCssCharCount() {
   }
 }
 
-// Scope a chunk of user CSS to a chosen container ID. Mirrors scopeProfileCustomCss
-// but lets us point at the live preview card instead of #modal-user-info.
+// Scope a chunk of user CSS to a chosen container ID. Live-preview path
+// for the profile CSS editor. Routed through the shared hardened
+// sanitiser so the editor preview behaves exactly like the rendered
+// result (and shows nothing for malicious input).
 function scopeCssToContainer(css, containerId) {
   if (!css || !containerId) return '';
-  return css
-    .split('}')
-    .map(rule => rule.trim())
-    .filter(Boolean)
-    .map(rule => {
-      const braceIdx = rule.indexOf('{');
-      if (braceIdx === -1) return '';
-      const selectors = rule.slice(0, braceIdx).trim();
-      const body = rule.slice(braceIdx + 1).trim();
-      if (!selectors || !body || selectors.includes('@')) return '';
-      const scoped = selectors
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean)
-        .map(s => `#${containerId} ${s}`)
-        .join(', ');
-      return scoped ? `${scoped} { ${body} }` : '';
-    })
-    .filter(Boolean)
-    .join('\n');
+  try { return window.Css?.sanitizeScopedCss?.(css, `#${containerId}`) || ''; }
+  catch { return ''; }
 }
 
 let _cssPreviewStyleEl = null;

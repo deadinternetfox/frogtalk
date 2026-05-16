@@ -3496,55 +3496,10 @@ function applyChannelThemeOverride(t) {
     }
   }
   if (t.css) {
-    // Scope custom CSS to #main to prevent breakout. This used to be
-    // exploitable: a comma at the start of a selector turned
-    // `#main ,*` into a selector list matching every element, letting a
-    // channel owner blank out the UI and inject `body::after { content }`
-    // to phish/deface every visitor. We now reject every dangerous token
-    // and split selector groups so each sub-selector is individually
-    // scoped (and rejected if it looks like an escape attempt).
-    const DANGEROUS = ['javascript:','expression(','url(','@import','@charset',
-      '@font-face','behavior:','-moz-binding','</style','<script','\\'];
-    // Strip /* ... */ comments
-    let rawCss = String(t.css).slice(0, 10240).replace(/\/\*[\s\S]*?\*\//g, '');
-    const normalize = (s) => {
-      let out = s.toLowerCase()
-        .replace(/\\([0-9a-f]{1,6})\s?/g, (_, h) => {
-          const cp = parseInt(h, 16);
-          return cp < 0x110000 ? String.fromCodePoint(cp) : '';
-        })
-        .replace(/\\(.)/g, '$1');
-      try { out = out.replace(/&#(\d+);?/g, (_, n) => String.fromCharCode(+n)); } catch {}
-      return out.replace(/\s+/g, '');
-    };
-    const isBad = (s) => {
-      const n = normalize(s);
-      return DANGEROUS.some(d => n.includes(d));
-    };
-    const scopedRules = [];
-    if (!isBad(rawCss)) {
-      for (const chunk of rawCss.split('}')) {
-        const i = chunk.indexOf('{');
-        if (i === -1) continue;
-        const sel = chunk.slice(0, i).trim();
-        const body = chunk.slice(i + 1).trim();
-        if (!sel || !body) continue;
-        if (sel.startsWith('@') || /[<>(){}"'`\\;]/.test(sel)) continue;
-        if (isBad(body)) continue;
-        const parts = sel.split(',').map(s => s.trim()).filter(Boolean);
-        if (parts.length !== sel.split(',').length) continue; // empty part = comma trick
-        let ok = true;
-        const scopedParts = [];
-        for (const p of parts) {
-          const head = p.split(/[\s>+~]/)[0].toLowerCase();
-          if (['*',':root','html','body'].includes(head)) { ok = false; break; }
-          scopedParts.push(`#main ${p}`);
-        }
-        if (!ok) continue;
-        scopedRules.push(`${scopedParts.join(', ')} { ${body} }`);
-      }
-    }
-    css += scopedRules.join('\n');
+    // Channel theme custom CSS, scoped to #main. See Css.sanitizeScopedCss
+    // in state.js for the comma-bridge / hex-escape / position:fixed
+    // rejection rules.
+    try { css += (window.Css?.sanitizeScopedCss?.(t.css, '#main') || ''); } catch {}
   }
   if (css) {
     _channelThemeStyleEl = document.createElement('style');
