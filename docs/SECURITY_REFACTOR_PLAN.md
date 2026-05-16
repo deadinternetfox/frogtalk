@@ -18,7 +18,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 | D — Wall posts + media at rest | not started | — | — |
 | E — Voice/video integrity | 1: dark backend (fp_sig column on `pending_call_offers`, WS payload passthrough, REST cold-resume), `Signal.signCallFingerprint` / `verifyCallFingerprint` helpers | ✅ shipped (not yet wired into calls.js) | `13e4ced` |
 | E — Voice/video integrity | 2: wire calls.js to sign on offer/answer + verify on receive + Safety Numbers UI | ✅ shipped | `fb3175a` |
-| E — Voice/video integrity | 2b: Safety Number panel + identity-rotation toast | ✅ shipped | _pending_2b |
+| E — Voice/video integrity | 2b: Safety Number panel + identity-rotation toast | ✅ shipped | `2af34e6` |
 | F — Linked devices | not started | — | — |
 | G — Sealed Sender + metadata | not started | — | — |
 
