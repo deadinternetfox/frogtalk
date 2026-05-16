@@ -2,6 +2,7 @@
 import base64
 import logging
 import os
+import re
 import time
 import asyncio
 import ipaddress
@@ -510,7 +511,11 @@ def _fed_token_ok(token: str | None) -> bool:
     expected = os.getenv("FROGTALK_FEDERATION_TOKEN", "").strip()
     if not expected:
         return False
-    return (token or "").strip() == expected
+    # Constant-time compare to avoid leaking the federation token via
+    # timing differences on the per-request token check (high-volume
+    # inbox traffic makes timing oracles practical otherwise).
+    import hmac as _hmac
+    return _hmac.compare_digest((token or "").strip(), expected)
 
 
 async def _current_user_from_header(x_session_token: str | None) -> dict | None:
@@ -1090,6 +1095,80 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
     return accepted, rejected
 
 
+# ─── Federation payload validation ─────────────────────────────────────
+# Untrusted peers can ship anything in event payloads. Every handler
+# below pipes peer-supplied strings/blobs through these helpers before
+# we hit the DB or fan out to local clients. The goals are:
+#   * No HTML/script smuggling via media_type (data URLs in img/audio
+#     tags would otherwise let a peer render arbitrary markup as if the
+#     local user had attached it).
+#   * No giant blobs (one peer shipping a multi-MB base64 per event
+#     across a 1000-event batch is a storage-DoS vector).
+#   * Bounded text fields so a peer can't blow up the messages or
+#     federation_user_profiles tables.
+#   * Whitelist names/room names so a peer can't poison the local
+#     namespace with control characters or unicode lookalikes.
+_FED_NAME_RE = re.compile(r"^[A-Za-z0-9._\- ]{1,32}$")
+_FED_ROOM_RE = re.compile(r"^[A-Za-z0-9._\-]{1,64}$")
+_FED_MEDIA_TYPE_RE = re.compile(r"^(image|video|audio)/[A-Za-z0-9.+\-]{1,40}$")
+_FED_CONTENT_MAX = 8 * 1024              # 8 KiB room/dm body
+_FED_MEDIA_DATA_MAX = 4 * 1024 * 1024    # 4 MiB raw (≈5.3 MiB base64)
+_FED_BIO_MAX = 1024
+_FED_AVATAR_MAX = 256 * 1024
+_FED_STATUS_MAX = 128
+_FED_DISPLAY_MAX = 32
+
+
+def _fed_clip(s, n: int) -> str:
+    return str(s or "")[:n]
+
+
+def _fed_nickname(s) -> str | None:
+    """Return a safe nickname or None when input is missing/hostile."""
+    raw = str(s or "").strip()
+    return raw if _FED_NAME_RE.match(raw) else None
+
+
+def _fed_room_name(s) -> str | None:
+    raw = str(s or "").strip()
+    return raw if _FED_ROOM_RE.match(raw) else None
+
+
+def _fed_media_type(s) -> str | None:
+    """Return a whitelisted media type, '' when absent, or None when hostile.
+
+    Returning None signals the *caller* to drop the entire media payload
+    rather than silently fall back to a default that the recipient
+    browser might interpret as HTML/script.
+    """
+    raw = str(s or "").strip().lower()
+    if not raw:
+        return ""
+    # Strip any ;parameters — we only care about the base type for the
+    # whitelist check.
+    base = raw.split(";", 1)[0].strip()
+    return base if _FED_MEDIA_TYPE_RE.match(base) else None
+
+
+def _fed_media_data(blob):
+    """Cap media size. Returns blob (or None when oversized / hostile)."""
+    if blob is None or blob == "":
+        return None
+    if isinstance(blob, (bytes, bytearray, memoryview)):
+        return bytes(blob) if len(blob) <= _FED_MEDIA_DATA_MAX else None
+    s = str(blob)
+    if len(s) > _FED_MEDIA_DATA_MAX:
+        return None
+    # Refuse data: URLs that smuggle text/html (script-bearing) even if
+    # the sibling media_type field is benign. Browsers honour the inline
+    # mime of a data URL regardless of the surrounding tag.
+    if s[:5].lower() == "data:":
+        head = s[:64].lower()
+        if "text/html" in head or "application/xhtml" in head or "script" in head:
+            return None
+    return s
+
+
 # Per-peer token bucket guarding /federation/events/inbox. A misbehaving
 # (or compromised) peer cannot exceed _INBOX_RATE_MAX events per
 # _INBOX_RATE_WINDOW seconds, regardless of route-level slowapi limits
@@ -1157,12 +1236,19 @@ async def register_build_manifest(
     body: BuildManifestBody,
     x_federation_token: str | None = Header(default=None),
 ):
-    """Register official or community build hash for verification."""
-    if not (body.official and _fed_token_ok(x_federation_token)):
-        if not body.official:
-            pass  # Community builds can self-register
-        else:
-            return JSONResponse(status_code=403, content={"error": "Not authorised"})
+    """Register a build hash manifest.
+
+    Federation token is required for BOTH official and community
+    registrations. Previously community builds could self-register with
+    no auth, which let any unauthenticated remote pollute the manifest
+    table (and pass `official=False, signer=<anything>` to influence
+    later /federation/manifests/verify lookups). The federation token
+    is shared only with trusted peers, so requiring it for every
+    registration closes that gap without breaking legitimate peers
+    that already authenticate inbox traffic the same way.
+    """
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
 
     ok = db.register_build_manifest(
         platform=body.platform,
@@ -1500,7 +1586,24 @@ async def _handle_message_event(event: dict) -> None:
     """Handle incoming replicated room message event."""
     if event.get("event_type") != "message.created":
         return
-    payload = event.get("payload") or {}
+    payload = dict(event.get("payload") or {})
+    # Hostile-peer hardening: validate every untrusted field before we
+    # hand the payload to the DB layer. Invalid room/nickname -> drop
+    # silently; invalid media_type -> strip the media entirely so it
+    # can't smuggle text/html into a browser via a data URL.
+    if not _fed_room_name(payload.get("room_name")):
+        return
+    nick = _fed_nickname(payload.get("nickname")) or "remote"
+    payload["nickname"] = nick
+    payload["content"] = _fed_clip(payload.get("content"), _FED_CONTENT_MAX)
+    mt = _fed_media_type(payload.get("media_type"))
+    md = _fed_media_data(payload.get("media_data"))
+    if mt is None or md is None:
+        payload["media_type"] = None
+        payload["media_data"] = None
+    else:
+        payload["media_type"] = mt or None
+        payload["media_data"] = md
     db.save_federated_room_message(str(event.get("event_id") or ""), payload)
 
 
@@ -1508,7 +1611,7 @@ async def _handle_room_event(event: dict) -> None:
     """Handle incoming room event (create/update/delete)."""
     payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
-    room_name = str(payload.get("room_name") or "").strip()
+    room_name = _fed_room_name(payload.get("room_name"))
     if not room_name:
         return
 
@@ -1527,7 +1630,7 @@ async def _handle_room_event(event: dict) -> None:
         await _handle_room_music_event(room_name, event_type, payload)
         return
 
-    nickname = str(payload.get("nickname") or "").strip()
+    nickname = _fed_nickname(payload.get("nickname"))
     if not nickname:
         return
 
@@ -1684,14 +1787,34 @@ async def _handle_user_event(event: dict) -> None:
     if event.get("event_type") not in ("user.profile.updated", "user.created"):
         return
     gid = str(payload.get("global_user_id") or "").strip()
+    nick_in = _fed_nickname(payload.get("nickname"))
+    if not gid or not nick_in:
+        return
+    origin = str(event.get("origin_server_id") or "").strip()
+    # Cross-origin profile-takeover guard. federation_user_profiles is
+    # the foreign user directory; once a gid is claimed by a particular
+    # origin server, another peer cannot rebind it. Without this, any
+    # peer holding the shared federation token could overwrite a target
+    # user's display_name/avatar/identity_pubkey simply by knowing their
+    # gid.
+    try:
+        existing_origin = db.get_federation_profile_origin(gid)
+    except Exception:
+        existing_origin = ""
+    if existing_origin and origin and existing_origin != origin:
+        _log.warning(
+            "federation: rejecting cross-origin profile update for gid=%s (claimed=%s, incoming=%s)",
+            gid, existing_origin, origin,
+        )
+        return
     db.upsert_federation_user_profile(
         global_user_id=gid,
-        nickname=str(payload.get("nickname") or "").strip(),
-        display_name=str(payload.get("display_name") or ""),
-        avatar=str(payload.get("avatar") or ""),
-        bio=str(payload.get("bio") or ""),
-        identity_pubkey=str(payload.get("identity_pubkey") or ""),
-        origin_server_id=str(event.get("origin_server_id") or ""),
+        nickname=nick_in,
+        display_name=_fed_clip(payload.get("display_name"), _FED_DISPLAY_MAX),
+        avatar=_fed_clip(payload.get("avatar"), _FED_AVATAR_MAX),
+        bio=_fed_clip(payload.get("bio"), _FED_BIO_MAX),
+        identity_pubkey=_fed_clip(payload.get("identity_pubkey"), 4096),
+        origin_server_id=origin,
     )
 
     # Only mirror profile fields into the local `users` table when the
@@ -1733,10 +1856,10 @@ async def _handle_user_event(event: dict) -> None:
     # device sends an empty status (e.g. between a music-takeover
     # restore and the next manual edit) would otherwise propagate the
     # blank to every reflecting peer.
-    status_msg_in = str(payload.get("status_msg") or "")[:128]
-    mood_in = str(payload.get("mood") or "")[:100]
-    avatar_in = str(payload.get("avatar") or "")
-    bio_in = str(payload.get("bio") or "")
+    status_msg_in = _fed_clip(payload.get("status_msg"), _FED_STATUS_MAX)
+    mood_in = _fed_clip(payload.get("mood"), 100)
+    avatar_in = _fed_clip(payload.get("avatar"), _FED_AVATAR_MAX)
+    bio_in = _fed_clip(payload.get("bio"), _FED_BIO_MAX)
 
     with db._conn() as con:
         base_sql = """
@@ -1804,7 +1927,7 @@ async def _handle_user_event(event: dict) -> None:
 
 def _ensure_local_user_by_nickname(nickname: str) -> dict | None:
     nick = (nickname or "").strip()
-    if not nick:
+    if not _FED_NAME_RE.match(nick):
         return None
     user = db.get_user_by_nick(nick)
     if user:
@@ -1820,26 +1943,50 @@ async def _handle_dm_event(event: dict) -> None:
     if event.get("event_type") != "dm.message.created":
         return
     payload = event.get("payload") or {}
-    sender_nick = str(payload.get("sender_nickname") or "").strip()
-    peer_nick = str(payload.get("peer_nickname") or "").strip()
+    # Validate handles + sizes before we touch the local DB. A peer that
+    # ships a hostile sender/peer nick (control chars, unicode lookalikes,
+    # overly-long values) gets dropped silently — we will never
+    # auto-create an attacker-shaped stub account in the local users
+    # table as a side effect.
+    sender_nick = _fed_nickname(payload.get("sender_nickname"))
+    peer_nick = _fed_nickname(payload.get("peer_nickname"))
     if not sender_nick or not peer_nick:
         return
     sender = _ensure_local_user_by_nickname(sender_nick)
     peer = _ensure_local_user_by_nickname(peer_nick)
     if not sender or not peer:
         return
+    content = _fed_clip(payload.get("content"), _FED_CONTENT_MAX)
+    mt = _fed_media_type(payload.get("media_type"))
+    md = _fed_media_data(payload.get("media_data"))
+    if mt is None or md is None:
+        # Hostile media (HTML data URL, oversized blob, non-whitelisted
+        # type) is dropped entirely rather than passed through with a
+        # fabricated content-type.
+        media_type = None
+        media_data = None
+    else:
+        media_type = mt or None
+        media_data = md
+    media_name = _fed_clip(payload.get("media_name"), 200) or None
+    try:
+        reply_to = int(payload.get("reply_to")) if payload.get("reply_to") is not None else None
+    except Exception:
+        reply_to = None
+    media_blur = 1 if int(payload.get("media_blur") or 0) else 0
+    view_once = 1 if int(payload.get("view_once") or 0) else 0
 
     channel_id = db.get_or_create_dm(sender["id"], peer["id"])
     msg_id = db.send_dm_message(
         channel_id,
         sender["id"],
-        str(payload.get("content") or ""),
-        payload.get("media_data"),
-        payload.get("media_type"),
-        payload.get("media_name"),
-        payload.get("reply_to"),
-        media_blur=int(payload.get("media_blur") or 0),
-        view_once=int(payload.get("view_once") or 0),
+        content,
+        media_data,
+        media_type,
+        media_name,
+        reply_to,
+        media_blur=media_blur,
+        view_once=view_once,
     )
 
     dm_broadcast = {
@@ -1849,13 +1996,13 @@ async def _handle_dm_event(event: dict) -> None:
         "sender_id": sender["id"],
         "sender_nick": sender["nickname"],
         "sender_avatar": sender.get("avatar"),
-        "content": str(payload.get("content") or ""),
-        "media_type": payload.get("media_type"),
-        "media_name": payload.get("media_name"),
-        "has_media": bool(payload.get("media_data")),
-        "media_blur": int(payload.get("media_blur") or 0),
-        "view_once": int(payload.get("view_once") or 0),
-        "reply_to": payload.get("reply_to"),
+        "content": content,
+        "media_type": media_type,
+        "media_name": media_name,
+        "has_media": bool(media_data),
+        "media_blur": media_blur,
+        "view_once": view_once,
+        "reply_to": reply_to,
         "edited": False,
         "deleted": False,
         "reactions": {},

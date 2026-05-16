@@ -7975,6 +7975,31 @@ def get_or_create_federation_system_user() -> int:
     return int(row["id"]) if row else 1
 
 
+def get_federation_profile_origin(global_user_id: str) -> str:
+    """Return the origin_server_id pinned to a foreign user profile, or ''.
+
+    Used by federation inbox handlers to enforce cross-origin
+    profile-takeover protection: once a gid has been claimed by a
+    particular origin server, only events from that same origin may
+    further mutate the local mirror of that profile.
+    """
+    gid = (global_user_id or "").strip()
+    if not gid:
+        return ""
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT origin_server_id FROM federation_user_profiles WHERE global_user_id=?",
+                (gid,),
+            ).fetchone()
+            if not row:
+                return ""
+            val = row["origin_server_id"] if hasattr(row, "keys") else row[0]
+            return (val or "").strip()
+    except Exception:
+        return ""
+
+
 def upsert_federation_user_profile(
     global_user_id: str,
     nickname: str,
@@ -7989,6 +8014,23 @@ def upsert_federation_user_profile(
     if not gid or not nick:
         return False
     with _conn() as con:
+        # Cross-origin pin: once a row is owned by a particular origin
+        # server, refuse updates carrying a different origin. Without
+        # this, any peer holding the shared federation token could
+        # rebind a victim's avatar / identity_pubkey by replaying the
+        # victim's gid.
+        if origin_server_id:
+            try:
+                row = con.execute(
+                    "SELECT origin_server_id FROM federation_user_profiles WHERE global_user_id=?",
+                    (gid,),
+                ).fetchone()
+                if row:
+                    existing = (row["origin_server_id"] if hasattr(row, "keys") else row[0]) or ""
+                    if existing and existing != origin_server_id:
+                        return False
+            except Exception:
+                pass
         con.execute(
             """
             INSERT INTO federation_user_profiles
