@@ -7927,6 +7927,7 @@ window.ConnErr = (function(){
       new tab so the chat session stays intact behind it.
     -->
     <div class="server-icon" data-tip="Node Admin" data-tip-pos="right" id="node-admin-icon" onclick="try{openNodeAdmin()}catch(e){window.location.assign('/server')}" style="display:none;background:linear-gradient(135deg,#1a1208,#3a2410);color:#ffb347;font-weight:700">🛡️</div>
+    <div class="server-icon" data-tip="Lock app" data-tip-pos="right" id="quick-lock-icon" onclick="try{Pin.lockNow()}catch(e){}" style="display:none">🔒</div>
     <div class="server-icon" data-tip="Settings" data-tip-pos="right" onclick="showProfile()">⚙️</div>
     <div class="server-spacer"></div>
     <div class="server-icon" data-tip="Logout" data-tip-pos="right" onclick="doLogout()" style="background:#2a1414;color:#f85149">🚪</div>
@@ -10281,7 +10282,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <!-- cache bump: social share button + story/profile list UX fixes -->
 <script src="/static/js/social.js?v=1028"></script>
 <!-- Privacy PIN lock (auto-lock on idle, admin gate, autologin gate) -->
-<script src="/static/js/pin.js?v=2"></script>
+<script src="/static/js/pin.js?v=3"></script>
 <!-- Context-aware screenshot blocker: only engages in DMs / private rooms / disappearing threads -->
 <script src="/static/js/screenshot_guard.js?v=1"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>

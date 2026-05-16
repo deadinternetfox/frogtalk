@@ -118,7 +118,17 @@
       };
     } catch {}
     _renderOptionsPanel();
+    _syncQuickLockIcon();
     return _cfg;
+  }
+
+  // Show the sidebar quick-lock icon only when the user actually has a
+  // PIN configured. Safe to call before #quick-lock-icon exists (early
+  // boot) \u2014 it just no-ops.
+  function _syncQuickLockIcon () {
+    const el = document.getElementById('quick-lock-icon');
+    if (!el) return;
+    el.style.display = _cfg.has_pin ? '' : 'none';
   }
 
   function adoptFromMe (me) {
@@ -135,6 +145,7 @@
       pin_lock_remaining_sec: Number(me.pin_lock_remaining_sec || 0),
     };
     _renderOptionsPanel();
+    _syncQuickLockIcon();
   }
 
   // ── Idle / visibility detection ─────────────────────────────────────
@@ -278,6 +289,56 @@
     } catch { return false; }
   }
 
+  // Inject themed lock-screen CSS exactly once. Uses theme variables
+  // so the lock automatically reskins with the rest of the app when
+  // the user switches between dark / light / cyberpunk / etc.
+  function _ensureLockStyles () {
+    if (document.getElementById('pin-lock-styles')) return;
+    const css = ''
+      // pin-dot indicators (no CSS for these existed before — they were
+      // invisible). Hollow ring by default, accent-filled when typed.
+      + '.pin-dot{width:12px;height:12px;border-radius:50%;'
+      +   'border:1.5px solid color-mix(in srgb,var(--accent-color) 55%, transparent);'
+      +   'background:transparent;transition:background .12s,transform .12s,box-shadow .12s}'
+      + '.pin-dot-on{background:var(--accent-color);'
+      +   'box-shadow:0 0 8px color-mix(in srgb,var(--accent-color) 55%, transparent);'
+      +   'transform:scale(1.05)}'
+      // Numpad disabled state during lockout countdown.
+      + '#lock-numpad.pin-numpad-disabled{opacity:.45;pointer-events:none;filter:grayscale(.4)}'
+      // Sidebar quick-lock icon: matches existing .server-icon, accent tint.
+      + '#quick-lock-icon{background:color-mix(in srgb,var(--accent-color) 14%, var(--bg-color));'
+      +   'color:var(--accent-color)}'
+      + '#quick-lock-icon:hover{background:color-mix(in srgb,var(--accent-color) 28%, var(--bg-color))}';
+    const st = document.createElement('style');
+    st.id = 'pin-lock-styles';
+    st.textContent = css;
+    document.head.appendChild(st);
+  }
+
+  // Crypto-strong random integer in [0,max).
+  function _rndInt (max) {
+    try {
+      const u = new Uint32Array(1);
+      (window.crypto || window.msCrypto).getRandomValues(u);
+      return u[0] % max;
+    } catch {
+      return Math.floor(Math.random() * max);
+    }
+  }
+
+  // Each render, build a slightly different border-radius for every
+  // numpad button. Defeats naive pixel-template matching that an
+  // off-screen screen-recording attacker could use to localise the
+  // keypad in a screenshot — every key is its own organic blob now,
+  // and the blobs reshuffle every wrong attempt (see _submitLockPin).
+  // Range stays tight (10-22px) so the button still looks like a
+  // button — no usability hit.
+  function _randomBlobRadius () {
+    const r = () => (10 + _rndInt(13)); // 10..22
+    return r() + 'px ' + r() + 'px ' + r() + 'px ' + r() + 'px / '
+         + r() + 'px ' + r() + 'px ' + r() + 'px ' + r() + 'px';
+  }
+
   // 10.5: anti-shoulder-surf / anti-keylogger numeric pad. Each render
   // (and each failed attempt — see _submitLockPin's error path)
   // shuffles the digit-to-position mapping so muscle memory and
@@ -291,17 +352,8 @@
     const SHAPES = ['●','▲','■','◆','★','♥','♣','♠','♦'];
     const _shuffle = (arr) => {
       const a = arr.slice();
-      const rnd = (max) => {
-        try {
-          const u = new Uint32Array(1);
-          (window.crypto || window.msCrypto).getRandomValues(u);
-          return u[0] % max;
-        } catch {
-          return Math.floor(Math.random() * max);
-        }
-      };
       for (let i = a.length - 1; i > 0; i--) {
-        const j = rnd(i + 1);
+        const j = _rndInt(i + 1);
         [a[i], a[j]] = [a[j], a[i]];
       }
       return a;
@@ -337,12 +389,24 @@
       // ensures DOM-scraping accessibility tools and screen recordings
       // can't recover the PIN by reading textContent alone.
       if (cell.kind === 'digit') b.dataset.digit = cell.digit;
-      b.style.cssText = 'background:#1d1d1d;color:#e0e0e0;border:1px solid #2a2a2a;' +
-                       'border-radius:10px;padding:14px 0;font-size:18px;cursor:pointer;' +
-                       'transition:background .12s';
-      b.addEventListener('mousedown', () => { b.style.background = '#272727'; });
-      b.addEventListener('mouseup',   () => { b.style.background = '#1d1d1d'; });
-      b.addEventListener('mouseleave',() => { b.style.background = '#1d1d1d'; });
+      const _isAction = (cell.kind === 'back' || cell.kind === 'submit');
+      // Theme-aware backgrounds via color-mix so every theme (dark,
+      // light, cyberpunk, ocean…) picks up the right accent.
+      const _baseBg = 'color-mix(in srgb, var(--accent-color) 10%, var(--surface-color))';
+      const _hotBg  = 'color-mix(in srgb, var(--accent-color) 26%, var(--surface-color))';
+      const _borderClr = 'color-mix(in srgb, var(--accent-color) 28%, var(--border-color))';
+      const _fg = _isAction ? 'var(--accent-color)' : 'var(--text-color)';
+      b.style.cssText = 'background:' + _baseBg + ';color:' + _fg + ';' +
+                       'border:1px solid ' + _borderClr + ';' +
+                       'border-radius:' + _randomBlobRadius() + ';' +
+                       'padding:14px 0;font-size:18px;cursor:pointer;font-weight:600;' +
+                       'transition:background .12s,transform .08s,border-color .12s;' +
+                       '-webkit-tap-highlight-color:transparent';
+      b.addEventListener('mousedown', () => { b.style.background = _hotBg; b.style.transform = 'scale(.97)'; });
+      b.addEventListener('mouseup',   () => { b.style.background = _baseBg; b.style.transform = ''; });
+      b.addEventListener('mouseleave',() => { b.style.background = _baseBg; b.style.transform = ''; });
+      b.addEventListener('touchstart', () => { b.style.background = _hotBg; b.style.transform = 'scale(.97)'; }, {passive:true});
+      b.addEventListener('touchend',   () => { b.style.background = _baseBg; b.style.transform = ''; }, {passive:true});
       b.addEventListener('click', () => {
         if (cell.kind === 'back') { _pinBuffer = _pinBuffer.slice(0, -1); _renderDots(); return; }
         if (cell.kind === 'submit') { _submitLockPin(); return; }
@@ -355,32 +419,50 @@
 
   function _ensureLockScreen () {
     if ($('lock-screen')) return;
+    _ensureLockStyles();
     const root = document.createElement('div');
     root.id = 'lock-screen';
-    root.className = 'modal-overlay hidden';
+    // Note: no `.hidden` class — we toggle visibility via inline
+    // `style.display` only. `.modal-overlay.hidden{display:none}` is
+    // not !important, and our inline `display:flex` would beat it,
+    // which previously caused the lock to stay visible after a
+    // correct PIN unlock.
     // Use textContent / DOM API to build everything — no innerHTML on
     // any data path that could come from the server.
-    root.style.cssText = 'z-index:9999;background:#0b0b0b;backdrop-filter:blur(8px);' +
-                        'display:flex;align-items:center;justify-content:center;';
+    // Theme-aware backdrop: layered accent radial gradients on top of
+    // the current theme's --bg-color so cyberpunk/ocean/etc. still
+    // look right. color-mix keeps the wash subtle on any base.
+    root.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;' +
+                        'align-items:center;justify-content:center;' +
+                        'padding:max(20px,var(--safe-top)) max(16px,var(--safe-right)) max(20px,var(--safe-bottom)) max(16px,var(--safe-left));' +
+                        'box-sizing:border-box;overflow-y:auto;' +
+                        'background:' +
+                          'radial-gradient(1200px 760px at 18% -10%, color-mix(in srgb, var(--accent-color) 32%, transparent), transparent 62%),' +
+                          'radial-gradient(1000px 700px at 92% 110%, color-mix(in srgb, var(--accent-color) 24%, transparent), transparent 66%),' +
+                          'radial-gradient(700px 500px at 50% 50%, color-mix(in srgb, var(--accent-color) 8%, transparent), transparent 70%),' +
+                          'var(--bg-color);' +
+                        '-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)';
     const card = document.createElement('div');
-    card.style.cssText = 'background:#141414;border:1px solid #2a2a2a;border-radius:14px;' +
-                        'padding:32px 28px;max-width:360px;width:90%;text-align:center;' +
-                        'box-shadow:0 10px 40px rgba(0,0,0,.6)';
+    card.style.cssText = 'background:color-mix(in srgb, var(--surface-color) 92%, var(--accent-color));' +
+                        'border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));' +
+                        'border-radius:16px;' +
+                        'padding:28px 24px;max-width:360px;width:100%;text-align:center;' +
+                        'box-shadow:0 12px 48px rgba(0,0,0,.55), 0 0 0 1px color-mix(in srgb,var(--accent-color) 8%, transparent) inset';
 
     const logo = document.createElement('div');
     logo.textContent = '🐸';
-    logo.style.cssText = 'font-size:42px;margin-bottom:6px';
+    logo.style.cssText = 'font-size:42px;margin-bottom:6px;filter:drop-shadow(0 2px 8px color-mix(in srgb,var(--accent-color) 45%, transparent))';
     card.appendChild(logo);
 
     const title = document.createElement('div');
     title.textContent = 'Locked';
-    title.style.cssText = 'font-size:20px;font-weight:700;color:#e8f5e9';
+    title.style.cssText = 'font-size:20px;font-weight:700;color:var(--text-color);letter-spacing:.3px';
     card.appendChild(title);
 
     const sub = document.createElement('div');
     sub.id = 'lock-subtitle';
     sub.textContent = 'Enter your PIN to continue';
-    sub.style.cssText = 'font-size:13px;color:#8a8a8a;margin:6px 0 22px';
+    sub.style.cssText = 'font-size:13px;color:var(--text-muted);margin:6px 0 22px';
     card.appendChild(sub);
 
     const dots = document.createElement('div');
@@ -404,7 +486,7 @@
     const signOut = document.createElement('button');
     signOut.type = 'button';
     signOut.textContent = 'Sign out';
-    signOut.style.cssText = 'background:none;border:none;color:#888;cursor:pointer;text-decoration:underline';
+    signOut.style.cssText = 'background:none;border:none;color:var(--text-muted);cursor:pointer;text-decoration:underline';
     signOut.addEventListener('click', () => {
       // Only escape route. Logout clears local state + revokes session
       // server-side, so a forgotten-PIN user is forced through the
@@ -425,7 +507,14 @@
   function _hideLockScreen () {
     _locked = false;
     document.removeEventListener('keydown', _lockKeyHandler, true);
-    _hide('lock-screen');
+    const el = $('lock-screen');
+    if (el) {
+      // Hard hide: inline display beats the .hidden class, so set it
+      // explicitly. Also strip the class in case something else added
+      // it.
+      el.style.display = 'none';
+      el.classList.remove('hidden');
+    }
     _renderOptionsPanel();
   }
 
@@ -438,7 +527,8 @@
     _renderDots();
     _setText('lock-error', '');
     _setText('lock-subtitle', 'Enter your PIN to continue');
-    _show('lock-screen');
+    const el = $('lock-screen');
+    if (el) { el.classList.remove('hidden'); el.style.display = 'flex'; }
     document.addEventListener('keydown', _lockKeyHandler, true);
     // If the server reported an active lockout, surface it immediately.
     if (_cfg.pin_lock_remaining_sec > 0) {
