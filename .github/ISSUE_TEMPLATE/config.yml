@@ -4,5 +4,5 @@ contact_links:
     url: https://frogtalk.xyz/security
     about: Please use the disclosure form (or security@frogtalk.xyz) instead of a public issue. Anonymous submissions accepted.
   - name: 📖 Read the deslop process
-    url: https://github.com/deadinternetfox/frogtalk/blob/main/CONTRIBUTING.md
+    url: https://github.com/deadinternetfox/frogtalk/blob/master/CONTRIBUTING.md
     about: How we ship — Idea → AI slop → Deslop → Ship. What "deslopped" means and how to get involved.
