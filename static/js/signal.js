@@ -432,6 +432,73 @@
     }
   }
 
+  // ── Track E Phase 2 — Safety Numbers ─────────────────────────────────
+  //
+  // Returns a Signal-style 60-digit numeric safety number for in-person
+  // verification (or QR-scan). Identical on both peers iff their cached
+  // identity keys match. A change in the number = peer's identity key
+  // rotated (re-install, key wipe, OR a MITM injecting a foreign key).
+  //
+  // Algorithm: SHA-512^5 over sort(idA||idB), interpreted as 12 groups of
+  // 5 bytes → big-endian uint40 mod 100000, zero-padded to 5 digits.
+
+  function _cmpBytes(a, b) {
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+      if (a[i] !== b[i]) return a[i] - b[i];
+    }
+    return a.length - b.length;
+  }
+
+  async function safetyNumberWith(peerUserId) {
+    if (!_libsignal || !_store) return null;
+    let myPub;
+    try {
+      const idKey = await _store.getIdentityKeyPair();
+      myPub = new Uint8Array(idKey.pubKey);
+    } catch { return null; }
+    const peerB64 = await getPeerIdentityKey(peerUserId);
+    if (!peerB64) return null;
+    let peerPub;
+    try { peerPub = new Uint8Array(_b64ToAb(peerB64)); }
+    catch { return null; }
+    const [a, b] = _cmpBytes(myPub, peerPub) <= 0 ? [myPub, peerPub] : [peerPub, myPub];
+    const concat = new Uint8Array(a.length + b.length);
+    concat.set(a, 0); concat.set(b, a.length);
+    let h = concat.buffer;
+    for (let i = 0; i < 5; i++) {
+      h = await crypto.subtle.digest('SHA-512', h);
+    }
+    const bytes = new Uint8Array(h);
+    const groups = [];
+    for (let i = 0; i < 12; i++) {
+      let n = 0n;
+      for (let j = 0; j < 5; j++) {
+        n = (n << 8n) | BigInt(bytes[i * 5 + j]);
+      }
+      groups.push(String(Number(n % 100000n)).padStart(5, '0'));
+    }
+    return groups.join(' ');
+  }
+
+  // Identity-rotation watcher: returns true if the cached identity key
+  // for `peerUserId` has changed since the last call (after first call
+  // it always returns false). Used by calls.js to surface a "safety
+  // number changed" toast at call setup time.
+  const _idkSeen = new Map(); // peerUserId -> last seen b64
+  function _checkIdentityRotation(peerUserId, currentB64) {
+    if (!peerUserId || !currentB64) return false;
+    const k = String(peerUserId);
+    const prev = _idkSeen.get(k);
+    _idkSeen.set(k, currentB64);
+    return !!(prev && prev !== currentB64);
+  }
+  async function peerIdentityRotated(peerUserId) {
+    const cur = await getPeerIdentityKey(peerUserId);
+    if (!cur) return false;
+    return _checkIdentityRotation(peerUserId, cur);
+  }
+
   function isReady() {
     return !!(_libsignal && _store);
   }
@@ -454,6 +521,8 @@
     signCallFingerprint,
     verifyCallFingerprint,
     getPeerIdentityKey,
+    safetyNumberWith,
+    peerIdentityRotated,
     // Diagnostics:
     async _stats() { return _store ? _store._stats() : null; },
     async _wipe() { if (_store) await _store._wipe(); },

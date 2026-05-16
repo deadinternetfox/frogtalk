@@ -341,6 +341,8 @@ async function startCall (type, nick, uid) {
     // (A future tweak: re-sign on call_created with the real id.)
     const fp_sig = await _signCallFp(0, _callPeerUID || 0, offer.sdp);
 
+    _maybeWarnIdentityRotation(_callPeerUID);
+
     _sendCallSignal({
       type         : 'call_offer',
       to_id        : _callPeerUID || undefined,
@@ -440,6 +442,7 @@ async function handleCallOffer (data) {
       console.warn('[calls][track-E] inbound offer UNVERIFIED:', v.reason);
     }
   } catch (e) { console.warn('[calls][track-E] verify offer threw', e); _callUnverified = true; }
+  _maybeWarnIdentityRotation(_callPeerUID);
   _persistIncomingCall(data);
   showIncomingCall(data.from_nickname, data.call_type, data.from_avatar || null);
   try { Notifications.startRinging(data.from_nickname); } catch {}
@@ -1092,6 +1095,63 @@ function toggleCallSpeaker () {
   _speakerMuted = !_speakerMuted;
   rv.muted = _speakerMuted;
   document.getElementById('btn-call-speaker').textContent = _speakerMuted ? '🔈' : '🔊';
+}
+
+/* ── Track E Phase 2 — Safety Number panel ─────────────────────────────────
+ * Opens a modal with the 60-digit Signal-style numeric fingerprint of the
+ * combined identity keys. Both peers see identical digits iff no MITM /
+ * key rotation has occurred. */
+async function showCallSafetyNumber () {
+  if (typeof openModal !== 'function') return;
+  openModal('modal-call-safety');
+  const out = document.getElementById('call-safety-number');
+  const status = document.getElementById('call-safety-status');
+  if (!out) return;
+  out.textContent = '…';
+  if (status) status.textContent = '';
+  if (!window.Signal || !Signal.isReady?.()) {
+    out.textContent = '—';
+    if (status) status.textContent = 'Signal identity not available on this device.';
+    return;
+  }
+  if (!_callPeerUID) {
+    out.textContent = '—';
+    if (status) status.textContent = 'No active call peer.';
+    return;
+  }
+  try {
+    const num = await Signal.safetyNumberWith(_callPeerUID);
+    if (!num) {
+      out.textContent = '—';
+      if (status) status.textContent = 'Peer has no published Signal identity yet.';
+      return;
+    }
+    // Two-line layout: 6 groups per row.
+    const groups = num.split(' ');
+    out.innerHTML = groups.slice(0, 6).join(' ') + '<br>' + groups.slice(6).join(' ');
+    if (status) {
+      status.textContent = _callUnverified
+        ? '⚠️ This call is UNVERIFIED — peer fingerprint signature missing or unreadable.'
+        : '✅ DTLS fingerprint signature verified for this call.';
+    }
+  } catch (e) {
+    console.warn('[calls] safetyNumberWith failed', e);
+    out.textContent = '—';
+    if (status) status.textContent = 'Failed to compute safety number.';
+  }
+}
+
+// Identity-rotation toast — fires once per call setup if the peer's
+// identity key has changed since we last saw them. Hooked from
+// handleCallOffer + startCall.
+async function _maybeWarnIdentityRotation (peerUserId) {
+  try {
+    if (!peerUserId || !window.Signal || !Signal.isReady?.()) return;
+    const rotated = await Signal.peerIdentityRotated(peerUserId);
+    if (rotated) {
+      toast('Safety number changed for ' + (_callPeerNick || 'peer') + ' — verify before sharing sensitive info', 'warn');
+    }
+  } catch {}
 }
 
 /* ── Timer ─────────────────────────────────────────────────────────────────── */

@@ -9821,6 +9821,7 @@ window.ConnErr = (function(){
     <button id="btn-call-cam" onclick="toggleCallCamera()" class="call-ctl-btn" title="Camera">📷</button>
     <button id="btn-call-screen" onclick="toggleScreenShare()" class="call-ctl-btn" title="Screen Share">🖥️</button>
     <button id="btn-call-speaker" onclick="toggleCallSpeaker()" class="call-ctl-btn" title="Speaker">🔊</button>
+    <button id="btn-call-safety" onclick="showCallSafetyNumber()" class="call-ctl-btn" title="Safety Number">🔒</button>
     <button onclick="endCall()" class="call-ctl-btn call-ctl-end" title="End Call">📵</button>
   </div>
 </div>
@@ -9856,6 +9857,25 @@ window.ConnErr = (function(){
     <div class="modal-actions">
       <button class="modal-btn secondary" onclick="closeModal('modal-call-settings')">Close</button>
       <button class="modal-btn primary" onclick="applyCallSettings()">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ CALL SAFETY NUMBER MODAL ════════════════════════════════════ -->
+<div id="modal-call-safety" class="modal-overlay hidden" onclick="if(event.target===this)closeModal('modal-call-safety')">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-title">🔒 Safety Number</div>
+    <p style="font-size:13px;color:#aaa;margin:6px 0 14px">
+      Verify this number with your contact in person or over a trusted
+      channel. If both sides see the <em>same</em> 60 digits, your call
+      is end-to-end secure and no signalling server can MITM it. A
+      number that changes between calls means the peer's identity key
+      rotated (re-install — or tampering).
+    </p>
+    <div id="call-safety-number" style="font-family:'Courier New',monospace;font-size:18px;letter-spacing:2px;line-height:1.8;text-align:center;background:#0d0d0d;padding:14px;border-radius:8px;color:#e0e0e0;word-break:break-all"></div>
+    <div id="call-safety-status" style="margin-top:10px;font-size:12px;color:#888;text-align:center"></div>
+    <div class="modal-actions">
+      <button class="modal-btn secondary" onclick="closeModal('modal-call-safety')">Close</button>
     </div>
   </div>
 </div>
@@ -10371,7 +10391,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 </script>
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/signal_store.js?v=1"></script>
-<script src="/static/js/signal.js?v=2"></script>
+<script src="/static/js/signal.js?v=3"></script>
 <script src="/static/js/state.js?v=196"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=433"></script>
@@ -10385,7 +10405,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
 <script src="/static/js/dms.js?v=440"></script>
-<script src="/static/js/calls.js?v=219"></script>
+<script src="/static/js/calls.js?v=220"></script>
 <script src="/static/js/media.js?v=416"></script>
 <script src="/static/js/gifs.js?v=205"></script>
 <script src="/static/js/media-player.js?v=191"></script>
