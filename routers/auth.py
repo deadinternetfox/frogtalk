@@ -22,7 +22,7 @@ from slowapi import Limiter
 
 import database as db
 import geoip
-from deps import get_current_user, client_ip, invalidate_token_cache
+from deps import get_current_user, client_ip, invalidate_token_cache, pin_mark_unlocked, pin_clear_for_token
 from routers._media_safety import safe_reencode as _media_reencode
 from ws_manager import manager
 
@@ -59,6 +59,26 @@ def _create_session_with_meta(request: Request, user_id: int) -> str:
     except Exception:
         pass
     token = db.create_session(user_id, user_agent=ua, ip_address=ip)
+    # PIN-as-2FA: when the user has a PIN and `pin_require_after_autologin`
+    # is set, we treat the PIN as a true second factor — every login
+    # (including fresh password sign-in) must clear the PIN gate before
+    # the session can read messages. We do that by NOT marking the
+    # freshly-issued token as unlocked, so the very first /api call
+    # returns 423 and the client pops the lock screen.
+    #
+    # When the flag is off, the password is strictly stronger than the
+    # PIN (the PIN is just an idle / shoulder-surfing lock) so we let
+    # the session through to avoid double-prompting.
+    try:
+        status = db.get_pin_status(user_id) or {}
+        as_2fa = bool(int(status.get("has_pin") or 0)) and bool(int(status.get("pin_require_after_autologin") or 0))
+        if not as_2fa:
+            pin_mark_unlocked(token)
+    except Exception:
+        # Fail-safe: on any error skip the unlock — the user will be
+        # asked for their PIN. Erring toward locked is the right side
+        # for a security control.
+        pass
     if ip:
         async def _lookup_and_save():
             try:
@@ -707,6 +727,10 @@ async def logout(
     if token:
         await asyncio.to_thread(db.delete_session, token)
         invalidate_token_cache(token)
+        try:
+            pin_clear_for_token(token)
+        except Exception:
+            pass
     try:
         await asyncio.to_thread(db.delete_user_fcm_tokens, current_user["id"])
     except Exception:
@@ -939,20 +963,29 @@ async def pin_set(request: Request, body: PinSetRequest,
 @router.post("/pin/verify")
 @limiter.limit("20/minute")
 async def pin_verify(request: Request, body: PinVerifyRequest,
+                     x_session_token: str = Header(None, alias="X-Session-Token"),
                      current_user: dict = Depends(get_current_user)):
     """Verify the user's PIN. Per-user lockout after _PIN_MAX_ATTEMPTS
-    consecutive failures; per-IP slowapi limit is the secondary layer."""
+    consecutive failures; per-IP slowapi limit is the secondary layer.
+    On success we record the unlock against the calling session token
+    so the server-side pin_gate dep starts admitting requests on this
+    session."""
     res = await asyncio.to_thread(
         db.verify_user_pin, current_user["id"], body.pin
     )
     if not res.get("ok"):
         return JSONResponse(status_code=401, content=res)
+    try:
+        pin_mark_unlocked(x_session_token or "")
+    except Exception:
+        pass
     return res
 
 
 @router.delete("/pin")
 @limiter.limit("10/hour")
 async def pin_disable(request: Request, body: PinDisableRequest,
+                      x_session_token: str = Header(None, alias="X-Session-Token"),
                       current_user: dict = Depends(get_current_user)):
     """Disable PIN protection. Requires the account password."""
     res = await asyncio.to_thread(
@@ -960,6 +993,12 @@ async def pin_disable(request: Request, body: PinDisableRequest,
     )
     if not res.get("ok"):
         return JSONResponse(status_code=400, content=res)
+    # PIN is gone — the gate is a no-op now, but drop the unlock entry
+    # too so memory stays clean.
+    try:
+        pin_clear_for_token(x_session_token or "")
+    except Exception:
+        pass
     return res
 
 

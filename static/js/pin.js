@@ -176,7 +176,12 @@
   }
 
   // ── Lock screen ─────────────────────────────────────────────────────
-  let _unlockResolve = null;          // resolves when correct PIN entered
+  // Multiple callers can be parked on the lock screen at the same time
+  // (e.g. a burst of /api fetches that all came back 423 in parallel),
+  // so we keep a queue of resolvers rather than a single slot. On a
+  // successful unlock we drain the queue so every awaiting caller
+  // proceeds with one PIN entry.
+  const _unlockResolvers = [];       // resolvers fired when correct PIN entered
   let _pinBuffer = '';
   function _renderDots () {
     const wrap = $('lock-pin-dots');
@@ -232,7 +237,11 @@
         _renderDots();
         _markUnlocked();
         _hideLockScreen();
-        if (_unlockResolve) { const r = _unlockResolve; _unlockResolve = null; r(true); }
+        if (_unlockResolvers.length) {
+          // Drain — every parked caller proceeds with this single unlock.
+          const pending = _unlockResolvers.splice(0, _unlockResolvers.length);
+          for (const r of pending) { try { r(true); } catch {} }
+        }
         return;
       }
       _pinBuffer = '';
@@ -481,6 +490,22 @@
     _renderNumpadKeys(numpad);
     card.appendChild(numpad);
 
+    // Two tiny, deliberately understated hints so first-time users
+    // don't get confused by the dynamic UI:
+    //   1. Why the key positions keep changing (anti-keylogger /
+    //      anti-shoulder-surf — the per-attempt shuffle is the whole
+    //      point, not a bug).
+    //   2. The dots reflect digits typed so far, not the secret PIN
+    //      length — otherwise an observer could read "4 dots = 4-digit
+    //      PIN" off the screen.
+    // Kept on one row, low-contrast, no emoji, so it reads as a
+    // footnote rather than chrome competing with the keypad.
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:10.5px;color:color-mix(in srgb,var(--text-muted) 75%,transparent);' +
+                        'line-height:1.45;margin:-4px 0 12px;text-align:center;letter-spacing:.1px';
+    hint.textContent = 'Keypad reshuffles each attempt \u00b7 dots track typed digits, not PIN length';
+    card.appendChild(hint);
+
     const actions = document.createElement('div');
     actions.style.cssText = 'display:flex;gap:8px;justify-content:center;font-size:12px';
     const signOut = document.createElement('button');
@@ -547,7 +572,7 @@
     return new Promise((resolve) => {
       if (!_cfg.has_pin || !_cfg.pin_require_after_autologin) { resolve(true); return; }
       if (_wasUnlockedRecently(60 * 1000)) { resolve(true); return; }
-      _unlockResolve = resolve;
+      _unlockResolvers.push(resolve);
       lockNow();
     });
   }
@@ -556,7 +581,21 @@
     return new Promise((resolve) => {
       if (!_cfg.has_pin || !_cfg.pin_require_for_admin) { resolve(true); return; }
       if (_wasUnlockedRecently(_ADMIN_GRACE_MS)) { resolve(true); return; }
-      _unlockResolve = resolve;
+      _unlockResolvers.push(resolve);
+      lockNow();
+    });
+  }
+
+  // Invoked by `apiFetch` when the server returns 423 {pin_required:true}
+  // — the user's session needs a fresh PIN before sensitive routers will
+  // answer. Resolves once unlock completes so the caller can retry.
+  function gateRequest () {
+    return new Promise((resolve) => {
+      // No PIN configured on this account — nothing to do; resolve true
+      // and let the caller surface the original 423 (shouldn't happen
+      // in practice but defends against a stale `_cfg`).
+      if (!_cfg.has_pin) { resolve(true); return; }
+      _unlockResolvers.push(resolve);
       lockNow();
     });
   }
@@ -604,7 +643,7 @@
 
     const intro = document.createElement('div');
     intro.style.cssText = 'font-size:12px;color:#888;margin:-6px 0 14px';
-    intro.textContent = 'Your PIN locks the app on idle, after auto-login, and before opening admin areas. 4–8 digits, no all-same / sequential / common patterns.';
+    intro.textContent = 'Sets a 4–8 digit PIN for quick-lock and optional 2FA. Avoid all-same, sequential or common patterns.';
     modal.appendChild(intro);
 
     function field (labelText, inputId, type, attrs) {
@@ -752,10 +791,10 @@
     const status = document.createElement('div');
     status.style.cssText = 'font-size:12px;margin-top:3px;line-height:1.4';
     if (_cfg.has_pin) {
-      status.textContent = 'Active — locks the app on idle, after auto-login, and before admin areas.';
+      status.textContent = 'Active — quick-lock on idle, plus optional 2FA after sign-in.';
       status.style.color = '#7ed27e';
     } else {
-      status.textContent = 'Not set — set a PIN to enable the auto-lock options below.';
+      status.textContent = 'Not set — set a PIN to enable quick-lock and 2FA.';
       status.style.color = '#888';
     }
     headerLeft.appendChild(status);
@@ -773,8 +812,7 @@
       const callout = document.createElement('div');
       callout.style.cssText = 'background:#161616;border:1px dashed #333;border-radius:8px;' +
                              'padding:10px 12px;margin:10px 0;color:#bbb;font-size:12px';
-      callout.textContent = 'You must set a PIN before you can require it for admin areas, auto-login, or after idle. ' +
-                            'Click "Set PIN" above to start.';
+      callout.textContent = 'Set a PIN above to enable the auto-lock and 2FA options below.';
       root.appendChild(callout);
     }
 
@@ -841,14 +879,24 @@
       sel,
     ));
 
+    // Admin-area gate — only revealed to users whose account is
+    // actually flagged is_admin. For everyone else we deliberately
+    // hide the option (and the wording) so a normal account never sees
+    // hints about admin surfaces existing.
+    let _isAdminAccount = false;
+    try {
+      _isAdminAccount = !!(window.State && State.user && State.user.is_admin);
+    } catch {}
+    if (_isAdminAccount) {
+      root.appendChild(row(
+        'Require PIN for admin areas',
+        'Re-prompt before opening the Server Admin panel.',
+        checkbox('pin-opt-admin', !!_cfg.pin_require_for_admin),
+      ));
+    }
     root.appendChild(row(
-      'Require PIN for admin areas',
-      'Re-prompt before opening the Server Admin panel.',
-      checkbox('pin-opt-admin', !!_cfg.pin_require_for_admin),
-    ));
-    root.appendChild(row(
-      'Require PIN after auto-login',
-      'When the saved session restores at startup, demand the PIN before showing chats.',
+      'Use PIN as 2FA',
+      'Always re-enter the PIN after signing in on this account.',
       checkbox('pin-opt-autologin', !!_cfg.pin_require_after_autologin),
     ));
     root.appendChild(row(
@@ -866,9 +914,18 @@
   }
   async function _doCommitOptions () {
     if (!_cfg.has_pin) return;
+    // The admin row only renders for is_admin accounts (see
+    // _renderOptionsPanel). For everyone else the checkbox doesn't
+    // exist, so we must NOT default to false — that would silently
+    // clear the flag if an admin downgraded then logged in as a non-
+    // admin user on the same browser. Fall back to the current cfg.
+    const adminEl = $('pin-opt-admin');
+    const requireForAdmin = adminEl
+      ? !!adminEl.checked
+      : !!Number(_cfg.pin_require_for_admin || 0);
     const body = {
       require_on_unlock:        !!($('pin-opt-on-unlock') || {}).checked,
-      require_for_admin:        !!($('pin-opt-admin')      || {}).checked,
+      require_for_admin:        requireForAdmin,
       require_after_autologin:  !!($('pin-opt-autologin')  || {}).checked,
       idle_timeout_sec:         Number(($('pin-opt-idle')  || {}).value || 300),
       keypad_privacy:           !!($('pin-opt-privacy-kp') || {}).checked,
@@ -920,6 +977,7 @@
     openSettings,
     gateAutoLogin,
     gateAdmin,
+    gateRequest,
     lockNow,
     isLocked,
     // Exposed for callers that want to inspect after refreshFromServer().
