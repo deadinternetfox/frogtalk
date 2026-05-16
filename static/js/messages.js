@@ -2029,6 +2029,17 @@ const Messages = (() => {
             } catch {}
           }
           if (contentEl && !_skipContentRewrite) contentEl.innerHTML = _formatContent(_echoContent);
+          // Persist plaintext (cache hit or optimistic fallback) into
+          // both `msg` and the State.messages cache slot, so any future
+          // re-render from cache (channel re-open, scroll-driven
+          // re-paint) shows plaintext instead of the raw envelope. When
+          // _skipContentRewrite is true we fall back to whatever the
+          // optimistic bubble was showing.
+          let _persistedContent = _echoContent;
+          if (_skipContentRewrite && contentEl) {
+            try { _persistedContent = contentEl.textContent || msg.content || ''; } catch { _persistedContent = msg.content || ''; }
+          }
+          try { msg = { ...msg, content: _persistedContent, _decrypted: true, _v2: true }; } catch {}
           const timeEl = pendingEl.querySelector('.msg-time');
           if (timeEl) timeEl.textContent = UI.formatTime(msg.created_at);
           // Optimistic bubble had no media (temp msg always sets media_data:null);
@@ -2075,6 +2086,25 @@ const Messages = (() => {
     // reload races a WS echo, or two WS connections both deliver the same
     // server broadcast), skip creating a second identical bubble.
     if (msg.id && !msg._pending && document.getElementById(`msg-${msg.id}`)) return;
+
+    // Own-echo fresh-render fallback: if the reconcile path didn't fire
+    // (pending bubble missing for any reason) and we authored this
+    // message, the server echo is our own v2 envelope which we can
+    // never decrypt locally. Recover plaintext from the send-time
+    // cache so the bubble doesn't render as '🔒 Encrypted message'.
+    try {
+      const _ownMine = !!(msg && State.user && msg.nickname === State.user.nickname && !msg._pending);
+      const _c = msg && msg.content;
+      if (_ownMine && typeof _c === 'string' && _c.length >= 9 && _c[0] === '{') {
+        const _env = JSON.parse(_c);
+        if (_env && _env.v === 2 && _env.t === 'sk') {
+          const _cached = _ptCacheGet(_c);
+          if (typeof _cached === 'string' && _cached) {
+            msg = { ...msg, content: _cached, _decrypted: true, _v2: true };
+          }
+        }
+      }
+    } catch {}
 
     const area = document.getElementById('messages-area');
     // "At bottom" with a generous threshold so tiny composer-height shifts /
@@ -2188,6 +2218,12 @@ const Messages = (() => {
       try {
         const plain = await window.Signal.room.decryptMessage(room, sid, env);
         if (typeof plain !== 'string') continue;
+        // Cache plaintext keyed by ciphertext so the NEXT history reload
+        // (which re-runs decryptMsg per envelope) returns the cached
+        // value instead of failing with 'replay — iteration already
+        // consumed' — the SK chain advanced during this decrypt and
+        // refuses to re-consume the same iteration.
+        try { _ptCachePut(c, plain); } catch {}
         m.content = plain;
         m._decrypted = true;
         m._v2 = true;
