@@ -1603,7 +1603,18 @@ function renderDMMessage (m) {
   //      ready yet, e.g. cold-start from a notification tap) → keep raw
   //      ciphertext out of the UI but show a clear lock placeholder
   //   3. legitimately blank (media-only message) → fall through to media
-  const _rawContent = (typeof m.content === 'string') ? m.content : '';
+  const _rawContentOrig = (typeof m.content === 'string') ? m.content : '';
+  // Self-heal: if content is still a v2 envelope (e.g. sender re-opens DM
+  // after channel switch, or a re-paint pulls from cached State without
+  // re-running decryptMsg), substitute the cached plaintext we seeded at
+  // send/receive time. Avoids the bubble flipping to "Encrypted message".
+  let _rawContent = _rawContentOrig;
+  if (_rawContent && _rawContent.length >= 9 && _rawContent[0] === '{' && _looksEncryptedBlob(_rawContent)) {
+    try {
+      const _cachedPt = _dmPtCacheGet(_rawContent);
+      if (typeof _cachedPt === 'string' && _cachedPt.length) _rawContent = _cachedPt;
+    } catch {}
+  }
   const _isCipherBlob = _looksEncryptedBlob(_rawContent);
   const safeContent = (m.view_once || isViewOnceConsumed)
     ? ''

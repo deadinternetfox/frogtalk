@@ -183,6 +183,20 @@ const Messages = (() => {
         const _env = JSON.parse(text);
         if (_env && _env.v === 2 && typeof _env.b === 'string'
             && (_env.t === 'pre' || _env.t === 'msg' || _env.t === 'sk')) {
+          // Self-heal: the v2 envelope often arrives here on channel
+          // re-paint (loadHistory from cached State.messages) when an
+          // upstream decrypt path didn't substitute plaintext. If we
+          // have plaintext cached under the ciphertext, render it now
+          // — formatted as if it had been decrypted in the first place.
+          try {
+            const _cached = _ptCacheGet(text);
+            if (typeof _cached === 'string' && _cached.length) {
+              // Recurse with the plaintext so URL/markdown/etc handling
+              // still runs. Guarded against re-entrancy because the
+              // plaintext won't parse as a v2 envelope.
+              return _formatContent(_cached, opts);
+            }
+          } catch {}
           // Own historic messages we can never decrypt locally (libsignal
           // has no receive chain for our own sender-key, and no plaintext
           // cache hit — e.g. sent from another device, or before the
