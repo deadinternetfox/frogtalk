@@ -119,12 +119,20 @@ const Messages = (() => {
       try {
         const d = JSON.parse(text);
         if (d._type === 'profile_share') {
-          return `<div class="share-card" onclick="showUserInfo('${UI.escHtml(d.nickname)}',${d.user_id || 'null'})">
+          // SECURITY: d.nickname / d.user_id / d.bio come from the SENDER's
+          // own message body, NOT the server's user table — they have not
+          // been validated against NICKNAME_RE. Use jsStr() for the onclick
+          // JS-string slot (escHtml is unsafe there: ' → &#39; is decoded
+          // back to ' by the HTML attribute parser before the JS engine
+          // sees the handler). Coerce user_id to a number with the unary
+          // +; bad values become NaN → showUserInfo handles that gracefully.
+          const _sUid = Number(d.user_id) || 0;
+          return `<div class="share-card" onclick="showUserInfo(${jsStr(d.nickname)},${_sUid || 'null'})">
             <div style="flex-shrink:0">${UI.avatarEl(d.avatar || null, d.nickname, 42)}</div>
             <div class="share-card-info">
               <div class="share-card-label">FrogTalk Profile</div>
               <div class="share-card-name">@${UI.escHtml(d.nickname)}</div>
-              ${d.bio ? `<div class="share-card-bio">${UI.escHtml(d.bio.substring(0, 60))}</div>` : ''}
+              ${d.bio ? `<div class="share-card-bio">${UI.escHtml(String(d.bio).substring(0, 60))}</div>` : ''}
             </div>
           </div>`;
         }
@@ -948,9 +956,12 @@ const Messages = (() => {
       ? Object.entries(reactions)
       : [];
     if (!entries.length) return '';
+    // SECURITY: emoji is server-stored but originates from user input; treat
+    // as untrusted. Store in data-emoji (HTML-escape via escHtml) and read
+    // via this.dataset.emoji so it never enters a JS-string-in-HTML-attr.
     return `<div class="msg-reactions" id="reactions-${msgId}">
       ${entries.map(([emoji, count]) =>
-        `<span class="reaction-pill" onclick="Messages.toggleReaction(${msgId},'${UI.escHtml(emoji)}')">${emoji} ${count}</span>`
+        `<span class="reaction-pill" data-emoji="${UI.escHtml(emoji)}" onclick="Messages.toggleReaction(${msgId},this.dataset.emoji)">${UI.escHtml(emoji)} ${Number(count) || 0}</span>`
       ).join('')}
     </div>`;
   }

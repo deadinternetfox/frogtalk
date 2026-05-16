@@ -1332,6 +1332,32 @@ def _migrate():
             )
         """)
         con.execute("CREATE INDEX IF NOT EXISTS idx_dm_vo_user ON dm_view_once_views(user_id, msg_id)")
+
+        # ── Bug / security report queue ────────────────────────────────
+        # User-submitted bug & security vulnerability reports. Reporter_id
+        # may be NULL for anonymous submissions (still rate-limited by IP
+        # in the route). Severity is one of: low / medium / high / critical.
+        # Status: open / triage / in_progress / fixed / wontfix / duplicate.
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS bug_reports (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                reporter_id  INTEGER,
+                reporter_ip  TEXT,
+                title        TEXT    NOT NULL,
+                body         TEXT    NOT NULL,
+                severity     TEXT    NOT NULL DEFAULT 'medium',
+                category     TEXT    NOT NULL DEFAULT 'bug',
+                contact      TEXT,
+                status       TEXT    NOT NULL DEFAULT 'open',
+                admin_notes  TEXT,
+                created_at   TEXT    DEFAULT (datetime('now')),
+                updated_at   TEXT    DEFAULT (datetime('now')),
+                FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status, created_at DESC)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_bug_reports_severity ON bug_reports(severity, created_at DESC)")
+
         # Hot paths: latest-N by id within a channel/room and reaction lookup.
         con.execute("CREATE INDEX IF NOT EXISTS idx_dm_messages_channel_id ON dm_messages(channel_id, id DESC)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_messages_room_id ON messages(room_name, id DESC)")
@@ -7970,3 +7996,162 @@ def get_personalized_reels(viewer_id: int, scope: str = "for_you",
         rows = con.execute(sql, tuple(bind)).fetchall()
 
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Bug & security report queue
+# ---------------------------------------------------------------------------
+
+_BUG_SEVERITIES = ("low", "medium", "high", "critical")
+_BUG_STATUSES   = ("open", "triage", "in_progress", "fixed", "wontfix", "duplicate")
+_BUG_CATEGORIES = ("bug", "security", "feature", "ux", "other")
+
+
+def create_bug_report(
+    *,
+    reporter_id: Optional[int],
+    reporter_ip: str,
+    title: str,
+    body: str,
+    severity: str = "medium",
+    category: str = "bug",
+    contact: str = "",
+) -> int:
+    """Insert a bug/security report. Returns new row id."""
+    sev = severity if severity in _BUG_SEVERITIES else "medium"
+    cat = category if category in _BUG_CATEGORIES else "bug"
+    with _conn() as con:
+        cur = con.execute(
+            """INSERT INTO bug_reports
+               (reporter_id, reporter_ip, title, body, severity, category, contact)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (reporter_id, reporter_ip or "", title.strip()[:200],
+             body.strip()[:8000], sev, cat, (contact or "").strip()[:200]),
+        )
+        return int(cur.lastrowid or 0)
+
+
+def list_bug_reports(
+    *,
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list:
+    """List bug reports for the admin dashboard, newest first.
+
+    Severity is mapped to a numeric weight so 'critical' floats to the top
+    regardless of the optional status filter. Reporter nickname is joined
+    so the admin UI doesn't need a second round-trip per report.
+    """
+    where_parts: list = []
+    params: list = []
+    if status and status in _BUG_STATUSES:
+        where_parts.append("br.status = ?")
+        params.append(status)
+    if severity and severity in _BUG_SEVERITIES:
+        where_parts.append("br.severity = ?")
+        params.append(severity)
+    where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+    params.extend([int(limit), int(offset)])
+    with _conn() as con:
+        rows = con.execute(f"""
+            SELECT br.id, br.reporter_id, br.reporter_ip, br.title, br.body,
+                   br.severity, br.category, br.contact, br.status,
+                   br.admin_notes, br.created_at, br.updated_at,
+                   u.nickname AS reporter_nick,
+                   CASE br.severity
+                       WHEN 'critical' THEN 4
+                       WHEN 'high'     THEN 3
+                       WHEN 'medium'   THEN 2
+                       WHEN 'low'      THEN 1
+                       ELSE 0
+                   END AS sev_weight
+            FROM bug_reports br
+            LEFT JOIN users u ON u.id = br.reporter_id
+            {where_sql}
+            ORDER BY
+                CASE br.status WHEN 'open' THEN 0 WHEN 'triage' THEN 1
+                               WHEN 'in_progress' THEN 2 ELSE 3 END,
+                sev_weight DESC,
+                br.created_at DESC
+            LIMIT ? OFFSET ?
+        """, tuple(params)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_bug_report(report_id: int) -> Optional[Dict]:
+    with _conn() as con:
+        row = con.execute("""
+            SELECT br.*, u.nickname AS reporter_nick
+            FROM bug_reports br
+            LEFT JOIN users u ON u.id = br.reporter_id
+            WHERE br.id = ?
+        """, (int(report_id),)).fetchone()
+    return dict(row) if row else None
+
+
+def update_bug_report(
+    report_id: int,
+    *,
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    admin_notes: Optional[str] = None,
+) -> bool:
+    """Admin update. Only whitelisted fields are mutable."""
+    sets: list = []
+    params: list = []
+    if status is not None and status in _BUG_STATUSES:
+        sets.append("status = ?")
+        params.append(status)
+    if severity is not None and severity in _BUG_SEVERITIES:
+        sets.append("severity = ?")
+        params.append(severity)
+    if admin_notes is not None:
+        sets.append("admin_notes = ?")
+        params.append(str(admin_notes)[:4000])
+    if not sets:
+        return False
+    sets.append("updated_at = datetime('now')")
+    params.append(int(report_id))
+    with _conn() as con:
+        cur = con.execute(
+            f"UPDATE bug_reports SET {', '.join(sets)} WHERE id = ?",
+            tuple(params),
+        )
+        return cur.rowcount > 0
+
+
+def delete_bug_report(report_id: int) -> bool:
+    with _conn() as con:
+        cur = con.execute("DELETE FROM bug_reports WHERE id = ?", (int(report_id),))
+        return cur.rowcount > 0
+
+
+def count_recent_bug_reports_from_ip(ip: str, minutes: int = 60) -> int:
+    """Rate-limit support: how many reports has this IP filed in the last N minutes."""
+    if not ip:
+        return 0
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COUNT(*) AS c FROM bug_reports WHERE reporter_ip = ? "
+            "AND created_at >= datetime('now', ?)",
+            (ip, f"-{int(minutes)} minutes"),
+        ).fetchone()
+    return int(row["c"]) if row else 0
+
+
+def bug_report_stats() -> Dict:
+    """Counts grouped by status and severity for admin dashboard badges."""
+    out = {"by_status": {}, "by_severity": {}, "total": 0}
+    with _conn() as con:
+        for r in con.execute(
+            "SELECT status, COUNT(*) AS c FROM bug_reports GROUP BY status"
+        ).fetchall():
+            out["by_status"][r["status"]] = r["c"]
+            out["total"] += r["c"]
+        for r in con.execute(
+            "SELECT severity, COUNT(*) AS c FROM bug_reports GROUP BY severity"
+        ).fetchall():
+            out["by_severity"][r["severity"]] = r["c"]
+    return out

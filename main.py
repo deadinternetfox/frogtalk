@@ -47,6 +47,7 @@ from routers import calls as calls_mod
 from routers import admin as admin_mod
 from routers import federation as federation_mod
 from routers import server_admin as server_admin_mod
+from routers import bug_reports as bug_reports_mod
 
 import asyncio
 from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories, cleanup_inactive_public_rooms, wal_checkpoint_truncate
@@ -821,6 +822,7 @@ app.include_router(calls_mod.router, prefix="/api")
 app.include_router(admin_mod.router, prefix="/api")
 app.include_router(federation_mod.router, prefix="/api")
 app.include_router(server_admin_mod.router)
+app.include_router(bug_reports_mod.router, prefix="/api")
 app.include_router(ws.router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -2520,6 +2522,19 @@ async def docs_node_page():
 @app.get("/privacy")
 async def privacy_page():
     page = "static/privacy.html"
+    if os.path.exists(page):
+        return FileResponse(page)
+    return FileResponse("static/home.html")
+
+
+@app.get("/security")
+async def security_page():
+    """Vulnerability disclosure + community-contribution page.
+
+    FrogTalk is "vibe-coded but open source" — this page invites the
+    community to report flaws via the bug-report API and to send PRs.
+    """
+    page = "static/security.html"
     if os.path.exists(page):
         return FileResponse(page)
     return FileResponse("static/home.html")

@@ -786,6 +786,118 @@ input, select {
   50% { transform: scale(1); opacity: 1; }
   100% { transform: scale(0.78); opacity: 0.55; }
 }
+
+/* ── Bug report queue ─────────────────────────────────────────────── */
+.bug-card {
+  padding: 14px 16px;
+  border: 1px solid #254331;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(17,39,24,0.96), rgba(12,29,18,0.96));
+  display: flex; flex-direction: column; gap: 8px;
+}
+.bug-card.sev-critical { border-color: #ff4d4f; box-shadow: inset 0 0 0 1px rgba(255,77,79,.18); }
+.bug-card.sev-high     { border-color: #ffa657; }
+.bug-card.sev-medium   { border-color: #d1c84f; }
+.bug-card.sev-low      { border-color: #3d5d49; }
+.bug-card.status-fixed,
+.bug-card.status-wontfix,
+.bug-card.status-duplicate { opacity: 0.65; }
+.bug-card-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  justify-content: space-between;
+}
+.bug-title {
+  font-weight: 700;
+  font-size: 15px;
+  color: #e7ffe9;
+  flex: 1;
+  word-break: break-word;
+}
+.bug-badges { display: flex; gap: 6px; flex-wrap: wrap; }
+.bug-badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+}
+.bug-badge.sev-critical { background: rgba(255,77,79,.18); color: #ff7b7b; }
+.bug-badge.sev-high     { background: rgba(255,166,87,.18); color: #ffa657; }
+.bug-badge.sev-medium   { background: rgba(241,224,90,.16); color: #e8d859; }
+.bug-badge.sev-low      { background: rgba(125,160,135,.18); color: #b8d8c0; }
+.bug-badge.status-open        { background: rgba(74,222,128,.18); color: #6ee79c; }
+.bug-badge.status-triage      { background: rgba(116,178,255,.18); color: #74b2ff; }
+.bug-badge.status-in_progress { background: rgba(216,180,255,.18); color: #d8b4ff; }
+.bug-badge.status-fixed       { background: rgba(80,200,120,.16); color: #67dca0; }
+.bug-badge.status-wontfix     { background: rgba(160,160,160,.20); color: #b8b8b8; }
+.bug-badge.status-duplicate   { background: rgba(160,160,160,.20); color: #b8b8b8; }
+.bug-badge.cat {
+  background: rgba(255,255,255,.05);
+  color: #bcd4c1;
+}
+.bug-meta {
+  font-size: 12px;
+  color: #8ea99b;
+}
+.bug-body {
+  white-space: pre-wrap;
+  background: rgba(0,0,0,.22);
+  border: 1px solid #1f3a28;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: #d9eddb;
+  max-height: 260px;
+  overflow: auto;
+}
+.bug-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+}
+.bug-actions select, .bug-actions input[type="text"] {
+  background: #0f221a;
+  border: 1px solid #294835;
+  color: #e7ffe9;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.bug-actions .btn { padding: 6px 10px; font-size: 13px; }
+.bug-toggle {
+  background: transparent;
+  border: 1px solid #2f5640;
+  color: #bcd4c1;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bug-toggle:hover { color: #fff; border-color: #4caf50; }
+.bug-collapsed .bug-body,
+.bug-collapsed .bug-actions,
+.bug-collapsed .bug-notes { display: none; }
+.bug-notes textarea {
+  width: 100%;
+  min-height: 60px;
+  background: #0f221a;
+  border: 1px solid #294835;
+  color: #e7ffe9;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+.bug-stat-pill {
+  background: #0f221a;
+  border: 1px solid #294835;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #bcd4c1;
+}
+.bug-stat-pill b { color: #6ee79c; }
 </style>
 </head>
 <body>
@@ -1045,6 +1157,39 @@ input, select {
         </div>
         <div id="bot-mod-body" class="nodes-list"></div>
         <div id="bot-mod-msg" class="msg" style="margin-top:10px;"></div>
+      </div>
+
+      <div class="panel" style="margin-top:12px;">
+        <div class="section-title">Bug &amp; Vulnerability Reports</div>
+        <div class="sub" style="margin-bottom:12px;">
+          Reports filed via <a href="/security" target="_blank" rel="noopener">/security</a> land here.
+          Triage by severity, mark status, leave admin notes. Open reports float to the top.
+        </div>
+
+        <div id="bugs-stats" class="bugs-stats" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;"></div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <select id="bugs-filter-status" style="min-width:140px;">
+            <option value="">All statuses</option>
+            <option value="open" selected>Open</option>
+            <option value="triage">Triage</option>
+            <option value="in_progress">In progress</option>
+            <option value="fixed">Fixed</option>
+            <option value="wontfix">Won't fix</option>
+            <option value="duplicate">Duplicate</option>
+          </select>
+          <select id="bugs-filter-severity" style="min-width:140px;">
+            <option value="">All severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <button class="btn" id="bugs-refresh" type="button">Refresh</button>
+        </div>
+
+        <div id="bugs-body" class="nodes-list"></div>
+        <div id="bugs-msg" class="msg" style="margin-top:10px;"></div>
       </div>
 
       <div class="panel" style="margin-top:12px;">

@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="description" content="FrogTalk security disclosure: how to report vulnerabilities, contribute fixes via GitHub, and help us harden the platform. Vibe-coded but open source.">
+<meta name="theme-color" content="#4caf50">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="robots" content="index, follow">
+
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://frogtalk.xyz/security">
+<meta property="og:title" content="FrogTalk — Security &amp; Vulnerability Disclosure">
+<meta property="og:description" content="Vibe-coded but open source. Report a flaw, send a PR, help keep FrogTalk safe.">
+<meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+<meta property="og:site_name" content="FrogTalk">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="FrogTalk — Security &amp; Disclosure">
+<meta name="twitter:description" content="Report a vulnerability or contribute a fix. FrogTalk is community-secured open source.">
+<meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
+
+<link rel="icon" href="/static/favicon.ico" sizes="any">
+<link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="https://frogtalk.xyz/security">
+<title>Security &amp; Vulnerability Disclosure — FrogTalk</title>
+
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg2: #161b22;
+    --bg3: #21262d;
+    --border: #30363d;
+    --green: #4ade80;
+    --green-dim: #22c55e;
+    --green-dark: #16a34a;
+    --text: #e6edf3;
+    --text-muted: #7d8590;
+    --accent: #4ade80;
+    --red: #f85149;
+    --yellow: #f1e05a;
+    --orange: #ffa657;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    overflow-x: hidden;
+  }
+  a { color: var(--green); }
+  a:hover { color: var(--green-dim); }
+
+  body > nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2rem; height: 60px;
+    background: rgba(13,17,23,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo {
+    display: flex; align-items: center; gap: .6rem;
+    font-size: 1.25rem; font-weight: 700; color: var(--green);
+    text-decoration: none;
+  }
+  .nav-logo .frog { font-size: 1.5rem; }
+  .nav-links { display: flex; align-items: center; gap: 1.2rem; }
+  .nav-links a { color: var(--text); text-decoration: none; font-size: .9rem; font-weight: 500; transition: color .2s; }
+  .nav-links a:hover { color: var(--green); }
+  .btn {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .55rem 1.25rem; border-radius: 8px;
+    font-size: .9rem; font-weight: 600;
+    cursor: pointer; text-decoration: none; border: none;
+    transition: all .2s;
+  }
+  .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--green); color: var(--green); }
+  .btn-primary, .btn-primary:visited {
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+    color: #fff; font-weight: 700;
+    text-shadow: 0 1px 2px rgba(0,0,0,.2);
+    box-shadow: 0 4px 14px rgba(34,197,94,.35);
+  }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(34,197,94,.45);
+    color: #fff;
+  }
+
+  .hero {
+    position: relative;
+    padding: 8rem 1.5rem 3.5rem;
+    text-align: center;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(900px 320px at 50% -10%, rgba(74,222,128,.13), transparent 65%),
+      var(--bg);
+  }
+  .hero h1 {
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    font-weight: 800; letter-spacing: -.5px;
+    margin-bottom: .75rem;
+    background: linear-gradient(180deg, #c8ffd9 0%, #4ade80 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p { color: var(--text-muted); max-width: 720px; margin: 0 auto; font-size: 1.05rem; }
+  .badge {
+    display: inline-block; margin-top: 1.25rem; padding: .35rem .85rem;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 999px; font-size: .82rem; color: var(--text-muted);
+  }
+
+  .wrap { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+
+  section.block {
+    margin-bottom: 2.5rem;
+    padding-top: 1rem;
+    scroll-margin-top: 80px;
+  }
+  section.block h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    display: flex; align-items: center; gap: .65rem;
+  }
+  section.block h2::before {
+    content: "";
+    width: 6px; height: 22px;
+    background: var(--green);
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  section.block p { color: var(--text-muted); margin-bottom: 1rem; }
+  section.block p strong { color: var(--text); font-weight: 600; }
+  section.block ul { list-style: none; display: flex; flex-direction: column; gap: .55rem; margin: .5rem 0 1rem; }
+  section.block ul li {
+    padding: .5rem .85rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: .94rem;
+    border-left: 3px solid var(--green);
+  }
+  section.block ul li strong { color: var(--text); }
+  section.block code, .inline-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--bg3);
+    color: var(--green);
+    padding: .12rem .4rem;
+    border-radius: 5px;
+    font-size: .9em;
+  }
+
+  .callout {
+    background: linear-gradient(135deg, rgba(74,222,128,.08), rgba(74,222,128,.02));
+    border: 1px solid rgba(74,222,128,.28);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    margin: 1.25rem 0;
+    color: var(--text);
+  }
+  .callout strong { color: var(--green); }
+  .callout.warn {
+    background: linear-gradient(135deg, rgba(255,166,87,.08), rgba(255,166,87,.02));
+    border-color: rgba(255,166,87,.32);
+  }
+  .callout.warn strong { color: var(--orange); }
+
+  /* ── REPORT FORM ── */
+  .report-form {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.5rem;
+    margin-top: 1rem;
+  }
+  .report-form label {
+    display: block;
+    font-size: .85rem;
+    color: var(--text);
+    margin: .9rem 0 .35rem;
+    font-weight: 600;
+  }
+  .report-form input,
+  .report-form select,
+  .report-form textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: .65rem .8rem;
+    font-size: .95rem;
+    font-family: inherit;
+  }
+  .report-form textarea {
+    min-height: 160px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .9rem;
+  }
+  .report-form input:focus,
+  .report-form select:focus,
+  .report-form textarea:focus {
+    outline: none;
+    border-color: var(--green);
+    box-shadow: 0 0 0 3px rgba(74,222,128,.18);
+  }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 600px) { .form-row { grid-template-columns: 1fr; } }
+  .form-submit {
+    margin-top: 1.25rem;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 1rem;
+  }
+  .form-help { font-size: .82rem; color: var(--text-muted); }
+  #form-status { margin-top: 1rem; font-size: .92rem; }
+  #form-status.ok { color: var(--green); }
+  #form-status.err { color: var(--red); }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 1rem;
+    color: var(--text-muted); font-size: .87rem;
+    background: var(--bg2);
+  }
+  footer a { color: var(--text-muted); text-decoration: none; }
+  footer a:hover { color: var(--green); }
+  .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+
+  @media (max-width: 720px) {
+    body > nav { padding: 0 1rem; }
+    .nav-links a:not(.btn) { display: none; }
+    .hero { padding-top: 7rem; }
+    footer { flex-direction: column; text-align: center; gap: 1rem; }
+    .footer-links { justify-content: center; gap: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="nav-logo">
+    <span class="frog">🐸</span>
+    FrogTalk
+  </a>
+  <div class="nav-links">
+    <a href="/#features">Features</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/security">Security</a>
+    <a href="/app" class="btn btn-ghost">Log In</a>
+    <a href="/app" class="btn btn-primary">Sign Up Free</a>
+  </div>
+</nav>
+
+<section class="hero">
+  <h1>Security &amp; Vulnerability Disclosure</h1>
+  <p>FrogTalk is <strong style="color:var(--green)">vibe-coded but open source</strong>. If something looks off, broken, or exploitable — tell us. If you can write the fix, even better: send a PR. Community projects are only as safe as the community that audits them.</p>
+  <div class="badge">Community-secured · MIT-licensed · No bug bounty (yet) — full credit instead</div>
+</section>
+
+<div class="wrap">
+
+  <section class="block" id="philosophy">
+    <h2>Our honest posture</h2>
+    <p>
+      FrogTalk was built fast and shipped publicly. Some of the code is rough.
+      Some of it was written at 3am. The encryption stack (ECDH-P256 → SHA-256 → AES-GCM-256,
+      96-bit random IV per message) is standard, but the surrounding plumbing — DOM rendering,
+      session handling, media URLs, federation glue — is the kind of code that benefits from a
+      second set of eyes.
+    </p>
+    <p>
+      Instead of pretending it's flawless, we'd rather hear from you. <strong>Every issue
+      reported here goes onto an admin queue with a severity tag, gets triaged, and the fix
+      lands in the public commit log on GitHub.</strong> No NDAs, no PR theatre.
+    </p>
+    <div class="callout">
+      <strong>Threat model:</strong> we assume the server can be compromised. DM bodies are
+      end-to-end encrypted, keys never touch the server, recovery keys are 256-bit tokens
+      stored as SHA-256 hashes only. If you find a way around that — please report it loudly.
+    </div>
+  </section>
+
+  <section class="block" id="scope">
+    <h2>What counts as a vulnerability</h2>
+    <ul>
+      <li><strong>High-impact:</strong> account takeover, E2EE bypass, message tampering, server-side RCE, SQL injection, auth bypass.</li>
+      <li><strong>Medium-impact:</strong> stored or reflected XSS, CSRF on state-changing endpoints, privilege escalation, IDOR, sensitive info leaks.</li>
+      <li><strong>Lower-impact:</strong> rate-limit bypass, denial-of-service through unbounded inputs, info disclosure of non-sensitive data.</li>
+      <li><strong>Not in scope:</strong> "you can DM yourself spam from your own account", missing security headers without a working exploit, automated scanner output without a PoC, social engineering of other users.</li>
+    </ul>
+  </section>
+
+  <section class="block" id="report">
+    <h2>Report a vulnerability</h2>
+    <p>
+      Use the form below. You can submit anonymously — we don't require an account — but
+      including a contact (email, Matrix, GitHub handle, or a FrogTalk nickname) lets us
+      ask follow-up questions and credit you when it's fixed.
+    </p>
+    <p>
+      For critical issues you'd rather not put in a web form, email <strong style="color:var(--green)">security@frogtalk.xyz</strong>
+      with as much detail as you can.
+    </p>
+
+    <form class="report-form" id="bug-form" autocomplete="off">
+      <label for="bf-title">Short title <span style="color:var(--red)">*</span></label>
+      <input id="bf-title" name="title" type="text" maxlength="200" required placeholder="e.g. Stored XSS in DM mediaUrl rendering">
+
+      <div class="form-row">
+        <div>
+          <label for="bf-severity">Severity</label>
+          <select id="bf-severity" name="severity">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+            <option value="critical">Critical</option>
+          </select>
+        </div>
+        <div>
+          <label for="bf-category">Category</label>
+          <select id="bf-category" name="category">
+            <option value="security" selected>Security vulnerability</option>
+            <option value="bug">General bug</option>
+            <option value="feature">Feature request</option>
+            <option value="ux">UX / usability</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+      </div>
+
+      <label for="bf-body">Details, steps to reproduce, expected vs. actual <span style="color:var(--red)">*</span></label>
+      <textarea id="bf-body" name="body" maxlength="8000" required
+        placeholder="What did you find? How can we reproduce it? Paste payloads, request bodies, screenshots URLs — whatever helps."></textarea>
+
+      <label for="bf-contact">Contact (optional)</label>
+      <input id="bf-contact" name="contact" type="text" maxlength="200"
+        placeholder="email / GitHub handle / FrogTalk nickname — for follow-up &amp; credit">
+
+      <div class="form-submit">
+        <span class="form-help">Reports are rate-limited (5/hour per address). Be specific — a good report saves us both time.</span>
+        <button type="submit" class="btn btn-primary" id="bf-submit">Send report</button>
+      </div>
+      <div id="form-status" role="status" aria-live="polite"></div>
+    </form>
+
+    <div class="callout warn" style="margin-top:1.5rem">
+      <strong>Please don't test exploits against the live production server beyond what's needed to confirm the bug.</strong>
+      For destructive PoCs (mass-account creation, DoS), spin up a local instance — <code>docker compose up</code>
+      from the repo gets you a full stack in about a minute.
+    </div>
+  </section>
+
+  <section class="block" id="contribute">
+    <h2>Even better: send a patch</h2>
+    <p>
+      FrogTalk is MIT-licensed and lives on GitHub. If you can write the fix, we'd much
+      rather review a PR than relitigate the bug in an issue tracker.
+    </p>
+    <ul>
+      <li><strong>Repo:</strong> <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">github.com/deadinternetfox/frogtalk</a></li>
+      <li><strong>Branch from <code>main</code></strong>, keep PRs small and focused, write a clear commit message.</li>
+      <li><strong>Touched JS?</strong> Run <code>node --check static/js/&lt;file&gt;.js</code> before pushing — silent parse errors break every onclick on the page.</li>
+      <li><strong>Touched Python?</strong> Run <code>python -m py_compile</code> on the changed files; the FastAPI app imports the whole tree at startup.</li>
+      <li><strong>Security fixes:</strong> include a PoC in the PR description (or link to the bug-report ID you filed here) so the reviewer can verify the patch closes the hole.</li>
+      <li><strong>Credit:</strong> add yourself to <code>CONTRIBUTORS.md</code> in the same PR, or tell us where to credit you in the security advisory.</li>
+    </ul>
+    <div class="callout">
+      <strong>Community projects are up to all of us.</strong> Every reviewed PR, every triaged
+      report, every responsible disclosure makes the platform safer for the next person who
+      logs in. We notice, and we say thank you.
+    </div>
+  </section>
+
+  <section class="block" id="hall-of-fame">
+    <h2>Hall of fame</h2>
+    <p>Security researchers who've responsibly disclosed issues. Want to be on this list? See above.</p>
+    <ul>
+      <li><strong>You?</strong> — be the first.</li>
+    </ul>
+  </section>
+
+</div>
+
+<footer>
+  <div>© FrogTalk · <a href="/privacy">Privacy</a> · <a href="/security">Security</a> · <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">GitHub</a></div>
+  <div class="footer-links">
+    <a href="/">Home</a>
+    <a href="/app">Open app</a>
+  </div>
+</footer>
+
+<script>
+(function () {
+  const form   = document.getElementById('bug-form');
+  const btn    = document.getElementById('bf-submit');
+  const status = document.getElementById('form-status');
+
+  if (!form) return;
+
+  form.addEventListener('submit', async function (ev) {
+    ev.preventDefault();
+    status.className = '';
+    status.textContent = '';
+
+    const title    = document.getElementById('bf-title').value.trim();
+    const body     = document.getElementById('bf-body').value.trim();
+    const severity = document.getElementById('bf-severity').value;
+    const category = document.getElementById('bf-category').value;
+    const contact  = document.getElementById('bf-contact').value.trim();
+
+    if (title.length < 3 || body.length < 10) {
+      status.className = 'err';
+      status.textContent = 'Please fill in a title (3+ chars) and details (10+ chars).';
+      return;
+    }
+
+    btn.disabled = true;
+    const originalLabel = btn.textContent;
+    btn.textContent = 'Sending…';
+
+    // Reuse the user's session token if they happen to be logged in — keeps
+    // reports tied to the account so the admin queue can see "filed by X".
+    // Anonymous (no token) is fully supported by the API.
+    const headers = { 'Content-Type': 'application/json' };
+    try {
+      const tok = localStorage.getItem('session_token');
+      if (tok) headers['X-Session-Token'] = tok;
+    } catch (_) { /* ignore storage errors */ }
+
+    try {
+      const resp = await fetch('/api/bug-reports', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ title, body, severity, category, contact })
+      });
+      const data = await resp.json().catch(function () { return {}; });
+      if (resp.ok && data.ok) {
+        status.className = 'ok';
+        status.textContent = 'Thanks — report #' + data.id + ' received. We\'ll look at it.';
+        form.reset();
+      } else {
+        status.className = 'err';
+        status.textContent = (data && data.error) || ('Submit failed (HTTP ' + resp.status + ').');
+      }
+    } catch (err) {
+      status.className = 'err';
+      status.textContent = 'Network error: ' + (err && err.message ? err.message : err);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
+  });
+})();
+</script>
+
+</body>
+</html>

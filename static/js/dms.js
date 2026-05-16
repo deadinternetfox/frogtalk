@@ -1486,7 +1486,12 @@ function renderDMMessage (m) {
         onclick="Messages.openSticker(this)"
         style="display:inline-block;line-height:0;cursor:pointer"></span>`;
     } else if (mimeType.startsWith('image/') || (!mimeType && mediaUrl.startsWith('data:image'))) {
-      inner = `<img src="${mediaUrl}" class="msg-media" onclick="openLightbox('${mediaUrl}')" loading="lazy">`;
+      // SECURITY: media_data is sender-controlled (a `data:` URL is allowed
+      // by the server) and can therefore contain ' or " — escape into both
+      // the src attribute and the onclick handler. Move the URL into a
+      // data-* attribute and have openLightbox read this.dataset.url so
+      // the URL never enters a JS-string context in the HTML parser.
+      inner = `<img src="${esc(mediaUrl)}" class="msg-media" data-lburl="${esc(mediaUrl)}" onclick="openLightbox(this.dataset.lburl)" loading="lazy">`;
     } else if (mimeType.startsWith('video/') || (!mimeType && mediaUrl.startsWith('data:video'))) {
       const _vSender = esc(senderNick || '');
       const _isNote = (mimeType || '').includes('videonote=1') || /(^|\/)videonote-/.test(m.media_name || '');
@@ -1498,7 +1503,7 @@ function renderDMMessage (m) {
       // Video notes are MediaRecorder webm; keeping the data: URL in `src`
       // wedges Android WebView at HTML-parse time. Defer to data-pending-src
       // so ChatVideo can swap to a blob: URL before any load happens.
-      const _vSrcAttr = _isNote ? `data-pending-src="${mediaUrl}"` : `src="${mediaUrl}"`;
+      const _vSrcAttr = _isNote ? `data-pending-src="${esc(mediaUrl)}"` : `src="${esc(mediaUrl)}"`;
       inner = `<div class="chat-video${_noteCls}"${_noteAttr} data-sender="${_vSender}" data-time="${time}">`+
         `<div class="cv-poster"></div>`+
         `<video ${_vSrcAttr} class="msg-media clickable-media" data-sender="${_vSender}" data-time="${time}" preload="${_preload}" muted playsinline></video>`+
@@ -1507,10 +1512,10 @@ function renderDMMessage (m) {
         `<div class="cv-badge"><span class="cv-icon">${_badgeIco}</span><span class="cv-dur">${_badgeLbl}</span></div>`+
       `</div>`;
     } else if (mimeType.startsWith('audio/') || (!mimeType && mediaUrl.startsWith('data:audio'))) {
-      inner = `<audio src="${mediaUrl}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
+      inner = `<audio src="${esc(mediaUrl)}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
     } else {
       const name = mediaUrl.split('/').pop();
-      inner = `<a href="${mediaUrl}" target="_blank" style="color:#4caf50;display:block;margin-top:4px">📄 ${esc(name)}</a>`;
+      inner = `<a href="${esc(mediaUrl)}" target="_blank" rel="noopener noreferrer" style="color:#4caf50;display:block;margin-top:4px">📄 ${esc(name)}</a>`;
     }
     if (isBlurred) {
       // Wrap in a spoiler overlay that reveals on click. Replace the media's
@@ -1913,7 +1918,7 @@ async function loadDMMedia (msgId, channelId) {
       const _badgeLbl = _isNote ? 'Note' : 'Video';
       // See render-side comment: notes go through data-pending-src so the
       // WebView never tries to parse the multi-MB webm data: URL.
-      const _vSrcAttr = _isNote ? `data-pending-src="${data.media_data}"` : `src="${data.media_data}"`;
+      const _vSrcAttr = _isNote ? `data-pending-src="${esc(data.media_data)}"` : `src="${esc(data.media_data)}"`;
       html = `<div class="chat-video${_noteCls}"${_noteAttr}>`+
         `<div class="cv-poster"></div>`+
         `<video ${_vSrcAttr} class="msg-media clickable-media" preload="${_preload}" muted playsinline></video>`+
@@ -1927,13 +1932,13 @@ async function loadDMMedia (msgId, channelId) {
       // run on the freshly-rendered video.
       try { setTimeout(() => { try { ChatVideo?.scan?.(document); } catch {} }, 0); } catch {}
     } else if (mediaType.startsWith('audio')) {
-      html = `<audio src="${data.media_data}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
+      html = `<audio src="${esc(data.media_data)}" controls preload="metadata" style="width:260px;display:block;margin-top:6px"></audio>`;
     } else if (/;\s*fx=/.test(mediaType) && window.StickerFX) {
       // Deferred-load DM sticker — mount a placeholder and hydrate from
       // the parent container so the shadow-root sandbox stays in effect.
-      html = `<span class="frog-sticker-mount" data-fx-src="${data.media_data}" data-fx-mt="${mediaType.replace(/"/g,'&quot;')}" onclick="Messages.openSticker(this)" style="display:inline-block;line-height:0;cursor:pointer"></span>`;
+      html = `<span class="frog-sticker-mount" data-fx-src="${esc(data.media_data)}" data-fx-mt="${esc(mediaType)}" onclick="Messages.openSticker(this)" style="display:inline-block;line-height:0;cursor:pointer"></span>`;
     } else {
-      html = `<img src="${data.media_data}" class="msg-media" onclick="openLightbox('${data.media_data}')" loading="lazy">`;
+      html = `<img src="${esc(data.media_data)}" class="msg-media" data-lburl="${esc(data.media_data)}" onclick="openLightbox(this.dataset.lburl)" loading="lazy">`;
     }
     container.outerHTML = html;
     try {

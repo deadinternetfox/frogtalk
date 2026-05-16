@@ -1196,3 +1196,101 @@ async def server_admin_unmute(body: ModerationBody, request: Request):
     if not ok:
         return JSONResponse(status_code=404, content={"error": "User was not muted"})
     return {"ok": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Bug & vulnerability report queue (admin views)
+# ─────────────────────────────────────────────────────────────────────────
+#
+# The public POST endpoint lives in routers/bug_reports.py so that anyone —
+# including unauthenticated visitors of /security — can file a report. The
+# admin-side list/triage endpoints belong here because they need to share
+# the server-admin session + CSRF model that the rest of the dashboard uses
+# (cookie-based auth, double-submit CSRF token in X-CSRF-Token).
+
+_BUG_VALID_SEVERITY = {"low", "medium", "high", "critical"}
+_BUG_VALID_STATUS = {"open", "triage", "in_progress", "fixed", "wontfix", "duplicate"}
+
+
+class BugReportUpdateBody(BaseModel):
+    status: Optional[str] = None
+    severity: Optional[str] = None
+    admin_notes: Optional[str] = None
+
+
+@router.get("/api/server-admin/bug-reports")
+async def server_admin_list_bug_reports(
+    request: Request,
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
+    rows = db.list_bug_reports(
+        status=status, severity=severity, limit=limit, offset=offset,
+    )
+    return {"reports": rows, "stats": db.bug_report_stats()}
+
+
+@router.get("/api/server-admin/bug-reports/{report_id}")
+async def server_admin_get_bug_report(report_id: int, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+    row = db.get_bug_report(int(report_id))
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return row
+
+
+@router.patch("/api/server-admin/bug-reports/{report_id}")
+async def server_admin_update_bug_report(
+    report_id: int, body: BugReportUpdateBody, request: Request,
+):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+
+    if body.status is not None and body.status not in _BUG_VALID_STATUS:
+        return JSONResponse(status_code=400, content={"error": "Invalid status"})
+    if body.severity is not None and body.severity not in _BUG_VALID_SEVERITY:
+        return JSONResponse(status_code=400, content={"error": "Invalid severity"})
+
+    ok = db.update_bug_report(
+        int(report_id),
+        status=body.status,
+        severity=body.severity,
+        admin_notes=body.admin_notes,
+    )
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "Not found or no changes"})
+    return {"ok": True, "report": db.get_bug_report(int(report_id))}
+
+
+@router.delete("/api/server-admin/bug-reports/{report_id}")
+async def server_admin_delete_bug_report(report_id: int, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    auth = _require_auth(request)
+    if auth:
+        return auth
+    ok = db.delete_bug_report(int(report_id))
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return {"ok": True}

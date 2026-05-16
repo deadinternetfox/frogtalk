@@ -221,6 +221,39 @@ frogtalk/
 
 ---
 
+## 🐸 Vibe-coded, but open source
+
+FrogTalk is built fast and shipped publicly. Some of this code was written at 3am.
+The encryption primitives are textbook (ECDH-P256 → SHA-256 → AES-GCM-256, fresh
+96-bit IV per message), but the surrounding plumbing benefits from a second set
+of eyes. **We'd rather hear from you than pretend it's flawless.**
+
+If you think a piece of code is flawed or has a security vulnerability:
+
+- Open a report at **<https://frogtalk.xyz/security>** — anonymous submissions are accepted.
+- For critical issues you'd rather not put in a web form: email `security@frogtalk.xyz`.
+- Even better: send a PR. Branch from `main`, keep it small and focused, and include
+  a PoC for security fixes so reviewers can verify the patch closes the hole.
+
+**Community projects are up to all of us.** Every reviewed PR, every triaged
+report, every responsible disclosure makes the platform safer for the next
+person who logs in. Researchers who responsibly disclose are credited in the
+security advisory and on the [Hall of Fame](https://frogtalk.xyz/security#hall-of-fame).
+
+### Contributing
+
+1. Fork the repo and branch from `main`.
+2. If you touched JS, run `node --check static/js/<file>.js` before pushing —
+   silent parse errors break every onclick on the page.
+3. If you touched Python, run `python -m py_compile <file>.py` on changed files.
+4. Open a PR with a clear description and (for security fixes) a PoC.
+5. Add yourself to `CONTRIBUTORS.md` in the same PR.
+
+See [`/security`](https://frogtalk.xyz/security) for scope, threat model, and
+what counts as a vulnerability.
+
+---
+
 ## License
 
 MIT

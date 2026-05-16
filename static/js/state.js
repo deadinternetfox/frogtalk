@@ -86,7 +86,15 @@ function toast (text, type = 'info', ms = 3000, onClick) {
   }
 }
 
-// esc() → UI.escHtml() — HTML-escape helper
+// esc() → UI.escHtml() — HTML-escape helper. SAFE ONLY for HTML text
+// nodes and HTML attribute *values* (between the quotes). NOT safe for
+// inline-event-handler JS string contexts like
+//     onclick="foo('${esc(x)}')"
+// because the HTML parser decodes &#39; back to ' BEFORE the value is
+// handed to the JS engine, so x can break out of the JS string and
+// inject arbitrary JS. For JS-string-in-HTML-attr contexts use jsStr()
+// (defined below) which produces a properly JSON-quoted JS literal with
+// embedded " escaped as &quot; so attribute parsing stays intact.
 function esc (s) {
   if (typeof UI !== 'undefined') return UI.escHtml(String(s ?? ''));
   return String(s ?? '')
@@ -95,6 +103,17 @@ function esc (s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// jsStr() — produce a JS string literal (including the outer quotes) safe
+// to embed inside an HTML attribute. Used for inline event handlers:
+//     onclick="foo(${jsStr(x)})"
+// JSON.stringify gives us a valid JS literal that escapes " \ control
+// chars and high-bit chars; we then HTML-escape the resulting outer " to
+// &quot; so the HTML attribute parser doesn't terminate early. Drop the
+// surrounding ' ... ' you'd normally put around an esc() call.
+function jsStr (s) {
+  return JSON.stringify(String(s ?? '')).replace(/"/g, '&quot;');
 }
 
 // apiFetch() — authenticated fetch using current State.token.

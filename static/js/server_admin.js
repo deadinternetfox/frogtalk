@@ -23,6 +23,12 @@
   const easterSaveBtn = document.getElementById('easter-save-btn');
   const easterUploadBtn = document.getElementById('easter-upload-btn');
   const easterUploadInput = document.getElementById('easter-upload-input');
+  const bugsBody = document.getElementById('bugs-body');
+  const bugsStats = document.getElementById('bugs-stats');
+  const bugsMsg = document.getElementById('bugs-msg');
+  const bugsRefreshBtn = document.getElementById('bugs-refresh');
+  const bugsFilterStatus = document.getElementById('bugs-filter-status');
+  const bugsFilterSeverity = document.getElementById('bugs-filter-severity');
   const channelActiveDays = document.getElementById('channel-active-days');
   const channelAutoDeleteDays = document.getElementById('channel-auto-delete-days');
   const saveChannelRetentionBtn = document.getElementById('save-channel-retention-btn');
@@ -1088,6 +1094,177 @@
   botModSearch?.addEventListener('input', () => { if (botModLoadedOnce) renderBotModeration(); });
   botModOnlyBanned?.addEventListener('change', () => { if (botModLoadedOnce) renderBotModeration(); });
 
+  // ── Bug & vulnerability report queue ────────────────────────────────
+  // Reports filed via /security land in a DB queue. We render them as
+  // collapsible cards with severity-coloured badges and inline triage
+  // controls (status select, severity select, admin_notes textarea,
+  // delete). Open + critical float to the top thanks to the SQL sort.
+  let bugsCache = [];
+  const bugExpanded = new Set();
+
+  function _bugTimeAgo(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return iso;
+    const diff = Math.max(0, (Date.now() - t) / 1000);
+    if (diff < 60)     return `${Math.floor(diff)}s ago`;
+    if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  }
+
+  function _bugSelect(name, value, options) {
+    return `<select data-bug-field="${name}">` +
+      options.map(o => `<option value="${escHtml(o)}"${o === value ? ' selected' : ''}>${escHtml(o)}</option>`).join('') +
+      `</select>`;
+  }
+
+  function renderBugStats(stats) {
+    if (!bugsStats) return;
+    const s = stats || {};
+    const byStatus = s.by_status || {};
+    const bySev = s.by_severity || {};
+    const total = s.total || 0;
+    bugsStats.innerHTML = `
+      <span class="bug-stat-pill">Total <b>${total}</b></span>
+      <span class="bug-stat-pill">Open <b>${byStatus.open || 0}</b></span>
+      <span class="bug-stat-pill">Triage <b>${byStatus.triage || 0}</b></span>
+      <span class="bug-stat-pill">In progress <b>${byStatus.in_progress || 0}</b></span>
+      <span class="bug-stat-pill">Fixed <b>${byStatus.fixed || 0}</b></span>
+      <span class="bug-stat-pill">Critical <b>${bySev.critical || 0}</b></span>
+      <span class="bug-stat-pill">High <b>${bySev.high || 0}</b></span>
+    `;
+  }
+
+  function renderBugs() {
+    if (!bugsBody) return;
+    if (!bugsCache.length) {
+      bugsBody.innerHTML = `<div class="sub" style="padding:18px;text-align:center;">No reports match the current filters. Quiet is good.</div>`;
+      return;
+    }
+    const statuses = ['open', 'triage', 'in_progress', 'fixed', 'wontfix', 'duplicate'];
+    const sevs = ['low', 'medium', 'high', 'critical'];
+
+    const html = bugsCache.map(r => {
+      const id = Number(r.id) || 0;
+      const sev = String(r.severity || 'medium').toLowerCase();
+      const st  = String(r.status || 'open').toLowerCase();
+      const cat = String(r.category || 'bug').toLowerCase();
+      const expanded = bugExpanded.has(id);
+      const reporter = r.reporter_nick
+        ? `@${escHtml(r.reporter_nick)}`
+        : (r.reporter_ip ? `anon (${escHtml(r.reporter_ip)})` : 'anonymous');
+      const contact = r.contact ? ` · contact: ${escHtml(r.contact)}` : '';
+      return `
+        <div class="bug-card sev-${escHtml(sev)} status-${escHtml(st)} ${expanded ? '' : 'bug-collapsed'}" data-bug-id="${id}">
+          <div class="bug-card-head">
+            <div class="bug-title">#${id} · ${escHtml(r.title || '(no title)')}</div>
+            <div class="bug-badges">
+              <span class="bug-badge sev-${escHtml(sev)}">${escHtml(sev)}</span>
+              <span class="bug-badge status-${escHtml(st)}">${escHtml(st.replace('_', ' '))}</span>
+              <span class="bug-badge cat">${escHtml(cat)}</span>
+              <button class="bug-toggle" data-bug-toggle="${id}">${expanded ? 'collapse' : 'expand'}</button>
+            </div>
+          </div>
+          <div class="bug-meta">
+            ${_bugTimeAgo(r.created_at)} · by ${reporter}${contact}
+          </div>
+          <div class="bug-body">${escHtml(r.body || '')}</div>
+          <div class="bug-actions">
+            <label style="font-size:12px;color:#8ea99b;">Status</label>
+            ${_bugSelect('status', st, statuses)}
+            <label style="font-size:12px;color:#8ea99b;">Severity</label>
+            ${_bugSelect('severity', sev, sevs)}
+            <button class="btn" data-bug-save="${id}">Save</button>
+            <button class="btn danger" data-bug-delete="${id}">Delete</button>
+          </div>
+          <div class="bug-notes">
+            <label style="font-size:12px;color:#8ea99b;display:block;margin-top:6px;">Admin notes</label>
+            <textarea data-bug-field="admin_notes" placeholder="Internal triage notes (admins only)…">${escHtml(r.admin_notes || '')}</textarea>
+          </div>
+        </div>
+      `;
+    }).join('');
+    bugsBody.innerHTML = html;
+  }
+
+  async function refreshBugs() {
+    if (!bugsBody) return;
+    const params = new URLSearchParams();
+    const st = bugsFilterStatus?.value || '';
+    const sv = bugsFilterSeverity?.value || '';
+    if (st) params.set('status', st);
+    if (sv) params.set('severity', sv);
+    try {
+      const data = await api('/api/server-admin/bug-reports?' + params.toString());
+      bugsCache = Array.isArray(data.reports) ? data.reports : [];
+      renderBugStats(data.stats);
+      renderBugs();
+    } catch (e) {
+      if (bugsMsg) {
+        bugsMsg.textContent = `Failed to load bug reports: ${e.message}`;
+        bugsMsg.style.color = '#ff9f9f';
+      }
+    }
+  }
+
+  async function saveBug(id) {
+    const card = bugsBody?.querySelector(`.bug-card[data-bug-id="${id}"]`);
+    if (!card) return;
+    const status = card.querySelector('[data-bug-field="status"]')?.value;
+    const severity = card.querySelector('[data-bug-field="severity"]')?.value;
+    const admin_notes = card.querySelector('[data-bug-field="admin_notes"]')?.value || '';
+    try {
+      await api(`/api/server-admin/bug-reports/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status, severity, admin_notes }),
+      });
+      if (bugsMsg) {
+        bugsMsg.textContent = `Report #${id} updated.`;
+        bugsMsg.style.color = '#93ab9a';
+      }
+      await refreshBugs();
+    } catch (e) {
+      if (bugsMsg) {
+        bugsMsg.textContent = `Save failed: ${e.message}`;
+        bugsMsg.style.color = '#ff9f9f';
+      }
+    }
+  }
+
+  async function deleteBug(id) {
+    if (!window.confirm(`Delete report #${id}? This cannot be undone.`)) return;
+    try {
+      await api(`/api/server-admin/bug-reports/${id}`, { method: 'DELETE' });
+      bugExpanded.delete(id);
+      await refreshBugs();
+    } catch (e) {
+      if (bugsMsg) {
+        bugsMsg.textContent = `Delete failed: ${e.message}`;
+        bugsMsg.style.color = '#ff9f9f';
+      }
+    }
+  }
+
+  bugsBody?.addEventListener('click', (ev) => {
+    const t = ev.target;
+    if (!(t instanceof HTMLElement)) return;
+    const toggleId = t.getAttribute('data-bug-toggle');
+    if (toggleId) {
+      const id = Number(toggleId);
+      if (bugExpanded.has(id)) bugExpanded.delete(id); else bugExpanded.add(id);
+      renderBugs();
+      return;
+    }
+    const saveId = t.getAttribute('data-bug-save');
+    if (saveId) { saveBug(Number(saveId)); return; }
+    const delId = t.getAttribute('data-bug-delete');
+    if (delId) { deleteBug(Number(delId)); return; }
+  });
+  bugsRefreshBtn?.addEventListener('click', () => refreshBugs());
+  bugsFilterStatus?.addEventListener('change', () => refreshBugs());
+  bugsFilterSeverity?.addEventListener('change', () => refreshBugs());
+
   async function refreshDashboard() {
     const t0 = performance.now();
     const config = await api('/api/server-admin/config');
@@ -1102,6 +1279,7 @@
     renderUsers(users.users || []);
     await refreshNodes();
     await refreshBotModeration();
+    await refreshBugs();
     refreshImageboard();
     if (!easterEggLoaded) await loadEasterEgg();
     if (!easterEggLoaded) await loadEasterEgg();
