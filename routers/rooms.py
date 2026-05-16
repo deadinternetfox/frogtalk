@@ -22,6 +22,152 @@ limiter = Limiter(key_func=client_ip)
 
 ROOM_NAME_RE = re.compile(r"^[a-z0-9_\-]{1,32}$")
 
+# ─── channel_theme sanitiser ─────────────────────────────────────────────────
+# channel_theme is a JSON blob with whitelisted keys. The .css field used to
+# be passed straight to the client which applied it inside a <style> tag.
+# A malicious owner could weaponise that by starting their selector with a
+# comma — turning `#main ,*` into a selector list matching every element —
+# and inject `body::after { content: "..." }` to deface the page for every
+# visitor. This function whitelists known keys, caps sizes, and strips
+# anything in the .css field that looks like a CSS-based XSS / phishing
+# vector. Mirrors the wall.py custom_css check, but stricter (no commas in
+# selectors, no @-rules, no url()).
+_CHANNEL_THEME_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+_CHANNEL_THEME_KEYS = ("bg", "text", "accent", "bgImage", "css")
+_CSS_DANGEROUS_TOKENS = (
+    "javascript:", "expression(", "url(", "@import", "@charset",
+    "@font-face", "behavior:", "-moz-binding", "</style", "<script",
+    "\\",
+)
+
+
+def _normalize_css_for_check(s: str) -> str:
+    """Decode CSS hex escapes and HTML entities so detection can't be
+    bypassed by e.g. ``\\75 rl(`` or ``&#117;rl(``. Returns a lower-cased
+    whitespace-stripped string for *detection only*; the raw value is what
+    eventually ships if it passes."""
+    out = s.lower()
+    # CSS hex escape: \X{1,6}[ws]?
+    def _hx(m):
+        try:
+            cp = int(m.group(1), 16)
+            return chr(cp) if cp < 0x110000 else ""
+        except Exception:
+            return ""
+    out = re.sub(r"\\([0-9a-f]{1,6})\s?", _hx, out)
+    # CSS literal escape: \X -> X
+    out = re.sub(r"\\(.)", r"\1", out)
+    try:
+        import html as _html
+        out = _html.unescape(out)
+    except Exception:
+        pass
+    # Strip /* ... */ comments
+    out = re.sub(r"/\*.*?\*/", "", out, flags=re.DOTALL)
+    # Collapse all whitespace
+    out = re.sub(r"\s+", "", out)
+    return out
+
+
+def _sanitize_channel_css(raw: str) -> str:
+    """Return safe CSS, or raise ValueError if irrecoverable.
+
+    Rules: no @-rules, no url(), no javascript:, no comma-bridged selectors
+    that would escape the #main scope, no parens or quotes in selectors, no
+    angle brackets, no </style breakouts. Each rule's selector is parsed
+    and rebuilt so the client doesn't have to trust the string.
+    """
+    if not raw:
+        return ""
+    css = raw[:10_240]
+    # Strip comments first so the regex below sees the real selectors.
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    normalized_full = _normalize_css_for_check(css)
+    for tok in _CSS_DANGEROUS_TOKENS:
+        if tok in normalized_full:
+            raise ValueError(f"CSS contains forbidden token: {tok}")
+    # Rebuild rule-by-rule. Reject any chunk with @-rules / nested braces.
+    if css.count("{") != css.count("}"):
+        raise ValueError("CSS braces are unbalanced")
+    out_rules = []
+    for chunk in css.split("}"):
+        i = chunk.find("{")
+        if i == -1:
+            if chunk.strip():
+                raise ValueError("CSS contains stray text outside a rule")
+            continue
+        sel_raw = chunk[:i].strip()
+        body_raw = chunk[i + 1:].strip()
+        if not sel_raw or not body_raw:
+            continue
+        if sel_raw.startswith("@") or "{" in body_raw:
+            raise ValueError("CSS @-rules and nested rules are not allowed")
+        # Reject selectors with chars that would let the attacker break out
+        # of the scope wrapper or smuggle expressions.
+        if re.search(r"[<>(){}\"'`\\;]", sel_raw):
+            raise ValueError("CSS selector contains forbidden characters")
+        # Split the selector list and reject any empty / leading-comma
+        # part (which is what enabled the original ``,*`` escape).
+        parts = [p.strip() for p in sel_raw.split(",")]
+        if any(not p for p in parts):
+            raise ValueError("CSS selector list has empty part (leading/trailing comma?)")
+        # Reject bare universal / root / html / body selectors — they'd
+        # still hit everything once they slip past the #main prefix.
+        for p in parts:
+            head = re.split(r"[\s>+~]", p, maxsplit=1)[0].lower()
+            if head in ("*", ":root", "html", "body"):
+                raise ValueError(f"CSS selector '{p}' is too broad")
+        body_norm = _normalize_css_for_check(body_raw)
+        for tok in _CSS_DANGEROUS_TOKENS:
+            if tok in body_norm:
+                raise ValueError(f"CSS rule body contains forbidden token: {tok}")
+        out_rules.append(f"{', '.join(parts)} {{ {body_raw} }}")
+    return "\n".join(out_rules)
+
+
+def _sanitize_channel_theme(raw: Optional[str]) -> Optional[str]:
+    """Validate a channel_theme JSON blob. Returns the canonicalised JSON
+    string, or '' to clear. Raises ValueError on bad input."""
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if not raw:
+        return ""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        raise ValueError("channel_theme must be valid JSON")
+    if not isinstance(data, dict):
+        raise ValueError("channel_theme must be a JSON object")
+    clean: dict = {}
+    for k in ("bg", "text", "accent"):
+        v = data.get(k)
+        if v is None or v == "":
+            continue
+        if not isinstance(v, str) or not _CHANNEL_THEME_COLOR_RE.match(v):
+            raise ValueError(f"channel_theme.{k} must be a #hex colour")
+        clean[k] = v
+    bg_image = data.get("bgImage")
+    if bg_image:
+        if not isinstance(bg_image, str) or len(bg_image) > 2048:
+            raise ValueError("channel_theme.bgImage is invalid")
+        bg_image = bg_image.strip()
+        # Same allowlist the client enforces: http(s) URL or same-origin
+        # absolute path. No data:, no javascript:, no quotes or parens.
+        if re.search(r"[)\\\s'\"<>]", bg_image):
+            raise ValueError("channel_theme.bgImage contains forbidden characters")
+        if not (re.match(r"^https?://", bg_image, re.IGNORECASE)
+                or re.match(r"^/[A-Za-z0-9._\-/?=&%]+$", bg_image)):
+            raise ValueError("channel_theme.bgImage must be http(s) URL or absolute path")
+        clean["bgImage"] = bg_image
+    css = data.get("css")
+    if css:
+        if not isinstance(css, str):
+            raise ValueError("channel_theme.css must be a string")
+        clean["css"] = _sanitize_channel_css(css)
+    # Drop unknown keys silently — anything outside the whitelist is gone.
+    return json.dumps(clean, separators=(",", ":"))
+
 
 class CreateRoomRequest(BaseModel):
     name: str = Field(max_length=64)
@@ -271,7 +417,12 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
             icon = _normalize_room_icon(body.icon)
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
-    
+
+    try:
+        sanitized_theme = _sanitize_channel_theme(body.channel_theme)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": f"channel_theme: {e}"})
+
     ok = db.update_room_settings(
         room_name,
         name=body.name,
@@ -279,7 +430,7 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
         icon=icon,
         slowmode=body.slowmode,
         channel_type=body.channel_type,
-        channel_theme=body.channel_theme[:4096] if body.channel_theme else body.channel_theme,
+        channel_theme=sanitized_theme,
         invite_only=body.invite_only,
         who_can_invite=body.who_can_invite,
         banner=body.banner,
