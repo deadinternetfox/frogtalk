@@ -168,7 +168,22 @@ function _looksEncryptedBlob(content) {
   }
   if (/\s/.test(s)) return false;
   if (/^https?:\/\//i.test(s)) return false;
-  return /^[A-Za-z0-9+/_=-]+$/.test(s);
+  // Bare-blob branch: only the legacy "base64(iv|cipher)" form ever lands
+  // here. btoa() uses the standard alphabet, so real ciphertext contains
+  // `+`, `/`, or `=` with overwhelming probability, and the random-byte
+  // payload always mixes upper- and lower-case letters. Requiring one of
+  // those signals stops natural-language plaintext from being mistaken
+  // for cipher — e.g. a user typing "lollollollol..." 2-3 times in a row
+  // used to defeat the heuristic and render as "Older message — encrypted
+  // on a previous device" because the *decrypted* plaintext was then
+  // re-classified as cipher and discarded by the decrypt-reject guard at
+  // the message-render call site.
+  if (!/^[A-Za-z0-9+/=]+$/.test(s)) return false;
+  const hasB64Special = /[+/=]/.test(s);
+  const hasUpper = /[A-Z]/.test(s);
+  const hasLower = /[a-z]/.test(s);
+  if (!hasB64Special && !(hasUpper && hasLower)) return false;
+  return true;
 }
 
 function _dmPreviewText(content, hasMedia, mediaType) {
