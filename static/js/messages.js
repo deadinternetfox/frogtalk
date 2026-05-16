@@ -1928,7 +1928,20 @@ const Messages = (() => {
             body.querySelectorAll(':scope > .msg-share-row').forEach(r => r.remove());
           } catch {}
           const contentEl = pendingEl.querySelector('.msg-content');
-          if (contentEl) contentEl.innerHTML = _formatContent(msg.content || '');
+          // If the server echo is still a v2 sender-key envelope (the
+          // sender's own message can't be decrypted because we never
+          // store a peer state for ourselves), keep the optimistic
+          // plaintext rather than overwriting the bubble with raw JSON.
+          let _echoContent = msg.content || '';
+          if (typeof _echoContent === 'string' && _echoContent[0] === '{') {
+            try {
+              const _env = JSON.parse(_echoContent);
+              if (_env && _env.v === 2 && _env.t === 'sk' && contentEl) {
+                _echoContent = contentEl.textContent || '';
+              }
+            } catch {}
+          }
+          if (contentEl) contentEl.innerHTML = _formatContent(_echoContent);
           const timeEl = pendingEl.querySelector('.msg-time');
           if (timeEl) timeEl.textContent = UI.formatTime(msg.created_at);
           // Optimistic bubble had no media (temp msg always sets media_data:null);
