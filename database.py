@@ -1598,6 +1598,21 @@ def _migrate():
         # the feed so people can browse by vibe.
         if wp_cols and "track_mood" not in wp_cols:
             con.execute("ALTER TABLE wall_posts ADD COLUMN track_mood TEXT")
+        # ─── Track D — wall posts at rest ─────────────────────────────
+        # enc_v=0 → legacy plaintext row (content/media_data as before).
+        # enc_v=2 → ciphertext column holds AEAD-encrypted JSON payload,
+        # wrapped per-recipient via Signal sessions in wall_post_keys.
+        # audience snapshots WHO the post was visible to at publish time
+        # ('public'|'followers'|'friends'|'list:<id>'); the legacy
+        # `privacy` column stays as the server-side row-level filter so
+        # the public feed continues to work for enc_v=0 rows. New rows
+        # write both columns identically.
+        if wp_cols and "enc_v" not in wp_cols:
+            con.execute("ALTER TABLE wall_posts ADD COLUMN enc_v INTEGER NOT NULL DEFAULT 0")
+        if wp_cols and "audience" not in wp_cols:
+            con.execute("ALTER TABLE wall_posts ADD COLUMN audience TEXT")
+        if wp_cols and "ciphertext" not in wp_cols:
+            con.execute("ALTER TABLE wall_posts ADD COLUMN ciphertext BLOB")
         # Bridge message-ID mapping: remote platform msg_id ↔ FrogTalk msg_id.
         # Lets us surface Telegram/Discord replies as native FrogTalk replies
         # (when someone replies on Telegram, the remote msg_id of the parent
@@ -2120,6 +2135,24 @@ def _migrate():
             FOREIGN KEY (post_id) REFERENCES wall_posts(id) ON DELETE CASCADE,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )""")
+
+        # Track D — per-recipient wrapped payload keys for encrypted wall
+        # posts. One row per (post, recipient) authored under the post
+        # author's Signal session to the recipient. Public posts have
+        # zero rows in this table (the row-level visibility is the legacy
+        # `wall_posts.privacy='public'`). Cascades on either side ensure
+        # we never leak orphan wraps after a delete-account.
+        con.execute("""CREATE TABLE IF NOT EXISTS wall_post_keys (
+            post_id      INTEGER NOT NULL,
+            recipient_id INTEGER NOT NULL,
+            wrapped_key  BLOB    NOT NULL,
+            created_at   TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (post_id, recipient_id),
+            FOREIGN KEY (post_id)      REFERENCES wall_posts(id) ON DELETE CASCADE,
+            FOREIGN KEY (recipient_id) REFERENCES users(id)      ON DELETE CASCADE
+        )""")
+        con.execute("""CREATE INDEX IF NOT EXISTS idx_wpk_recipient
+                       ON wall_post_keys(recipient_id)""")
 
         # Polymorphic 👍/👎 votes on comments. `target_type` selects which
         # comments table the row refers to ('channel_comment' or
@@ -6352,6 +6385,184 @@ def create_wall_post(user_id: int, content: str, media_data: str = None,
         return cur.lastrowid
 
 
+# ─── Track D — encrypted wall posts ────────────────────────────────────
+# These helpers stand alongside create_wall_post/get_wall_post for posts
+# stored with enc_v=2. The author's client computes the audience set,
+# encrypts the payload (content + media descriptors) under a random
+# AES-256-GCM key, and wraps that key once per recipient using its
+# Signal session to the recipient. The server never sees the payload
+# key.
+#
+# The legacy `privacy` column is mirrored from `audience` so existing
+# row-level filters (`WHERE privacy='public'`) continue to work
+# unchanged. The plaintext `content` column is set to the empty string
+# for enc_v=2 rows (NOT NULL constraint).
+
+_WALL_AUDIENCES = {"public", "followers", "friends"}
+
+
+def _audience_to_privacy(audience: str) -> str:
+    """Map an enc_v=2 audience label onto the legacy privacy enum used
+    by row-level filters. Custom lists ('list:<id>') degrade to
+    'friends' for filter purposes — actual access is gated by the
+    presence of a `wall_post_keys` row, not by the legacy column."""
+    a = (audience or "").lower()
+    if a in _WALL_AUDIENCES:
+        return a
+    if a.startswith("list:"):
+        return "friends"
+    return "public"
+
+
+def create_wall_post_encrypted(*, user_id: int, audience: str,
+                               ciphertext: bytes,
+                               wrapped_keys,
+                               media_data: str = None,
+                               media_type: str = None,
+                               share_enabled: int = 1,
+                               allow_comments: int = 1,
+                               track_title: str = None,
+                               track_room: str = None,
+                               track_mood: str = None) -> int:
+    """Insert an encrypted (enc_v=2) wall post + its per-recipient
+    wrapped key rows in one transaction.
+
+    Args:
+        user_id:      author
+        audience:     'public' (no wraps), 'followers', 'friends', 'list:<id>'
+        ciphertext:   AEAD-encrypted payload bytes (opaque to server)
+        wrapped_keys: iterable of (recipient_id:int, wrapped_blob:bytes) tuples
+        media_type:   optional MIME hint so the lazy media endpoint can
+                      know whether to look in the encrypted blob store
+        ...           bookkeeping fields mirror create_wall_post()
+
+    Public posts may still be encrypted — pass `audience='public'` with
+    an empty wrapped_keys iterable; clients fetch the payload key from
+    a deterministic position (e.g. embedded in the row) for public
+    posts. For now we hard-require audience != 'public' for enc_v=2.
+    """
+    if not isinstance(ciphertext, (bytes, bytearray)) or len(ciphertext) == 0:
+        raise ValueError("ciphertext_required")
+    if len(ciphertext) > 4 * 1024 * 1024:  # 4 MiB hard cap — payload only
+        raise ValueError("ciphertext_too_large")
+    aud = (audience or "").strip().lower()
+    if aud == "public":
+        raise ValueError("public_must_be_plaintext")
+    if aud not in _WALL_AUDIENCES and not aud.startswith("list:"):
+        raise ValueError("audience_invalid")
+    wraps = list(wrapped_keys or [])
+    if not wraps:
+        raise ValueError("wrapped_keys_required")
+    if len(wraps) > 5000:
+        raise ValueError("audience_too_large")
+    seen = set()
+    norm = []
+    for rid, blob in wraps:
+        rid_i = int(rid)
+        if rid_i in seen:
+            continue
+        seen.add(rid_i)
+        if not isinstance(blob, (bytes, bytearray)) or len(blob) == 0:
+            raise ValueError("wrapped_key_invalid")
+        if len(blob) > 4096:
+            raise ValueError("wrapped_key_too_large")
+        norm.append((rid_i, bytes(blob)))
+
+    privacy = _audience_to_privacy(aud)
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            cur = con.execute("""
+                INSERT INTO wall_posts
+                    (user_id, content, media_data, media_type, privacy,
+                     share_enabled, allow_comments,
+                     track_title, track_room, track_mood,
+                     enc_v, audience, ciphertext)
+                VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?)
+            """, (user_id, media_data, media_type, privacy, share_enabled, allow_comments,
+                  track_title, track_room, track_mood, aud, bytes(ciphertext)))
+            post_id = cur.lastrowid
+            con.executemany(
+                "INSERT INTO wall_post_keys (post_id, recipient_id, wrapped_key) "
+                "VALUES (?, ?, ?)",
+                [(post_id, rid, blob) for rid, blob in norm],
+            )
+            con.execute("COMMIT")
+            return post_id
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
+
+def get_wall_post_wrapped_key(post_id: int, viewer_id: int) -> Optional[bytes]:
+    """Return the AEAD-wrapped payload key for `viewer_id` on
+    `post_id`, or None if the viewer is not in the post's audience.
+
+    Authors are NOT auto-included — their client keeps a local copy of
+    the payload key at publish time. This matches how Signal handles
+    sender-side history (we don't re-wrap to self)."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT wrapped_key FROM wall_post_keys "
+            "WHERE post_id=? AND recipient_id=?",
+            (int(post_id), int(viewer_id)),
+        ).fetchone()
+    if not row:
+        return None
+    return bytes(row["wrapped_key"])
+
+
+def get_wall_post_recipients(post_id: int) -> List[int]:
+    """All recipient user_ids holding a wrap for this post. Used by
+    federation fan-out + delete cascading; never exposed to clients."""
+    with _conn() as con:
+        rows = con.execute(
+            "SELECT recipient_id FROM wall_post_keys WHERE post_id=?",
+            (int(post_id),),
+        ).fetchall()
+    return [int(r["recipient_id"]) for r in rows]
+
+
+def wall_post_keys_add(post_id: int, wrapped_keys) -> int:
+    """Append additional per-recipient wrapped keys to an existing
+    encrypted post (e.g. when a 'followers' audience grows after the
+    fact and the author opts to extend access). Returns rows inserted.
+    Uses INSERT OR IGNORE so re-running the same wrap is a no-op."""
+    norm = []
+    seen = set()
+    for rid, blob in (wrapped_keys or []):
+        rid_i = int(rid)
+        if rid_i in seen:
+            continue
+        seen.add(rid_i)
+        if not isinstance(blob, (bytes, bytearray)) or len(blob) == 0 or len(blob) > 4096:
+            raise ValueError("wrapped_key_invalid")
+        norm.append((int(post_id), rid_i, bytes(blob)))
+    if not norm:
+        return 0
+    with _conn() as con:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            before = con.execute(
+                "SELECT COUNT(*) AS n FROM wall_post_keys WHERE post_id=?",
+                (int(post_id),),
+            ).fetchone()["n"]
+            con.executemany(
+                "INSERT OR IGNORE INTO wall_post_keys "
+                "(post_id, recipient_id, wrapped_key) VALUES (?, ?, ?)",
+                norm,
+            )
+            after = con.execute(
+                "SELECT COUNT(*) AS n FROM wall_post_keys WHERE post_id=?",
+                (int(post_id),),
+            ).fetchone()["n"]
+            con.execute("COMMIT")
+            return int(after - before)
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+
+
 def get_wall_posts(user_id: int, viewer_id: int = None,
                    limit: int = 20, offset: int = 0,
                    lite: bool = False) -> List[Dict]:
@@ -6361,24 +6572,26 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
     will fetch each one lazily via /api/social/posts/{id}/media). Music
     posts keep media_data because that's a URL reference, not a blob.
     A 30-post wall of images drops from megabytes of JSON to kilobytes.
+
+    Encrypted (enc_v=2) rows always include `ciphertext_b64`,
+    `audience`, and the viewer's `wrapped_key_b64` (or NULL if the
+    viewer isn't an audience member; such rows are filtered out below
+    so they never reach the client).
     """
     media_col = (
         "CASE WHEN wp.media_type LIKE 'music/%' THEN wp.media_data ELSE NULL END AS media_data"
         if lite else "wp.media_data"
     )
     with _conn() as con:
-        # Determine privacy filter
+        # Determine privacy filter (legacy enc_v=0 rows only).
         if viewer_id == user_id:
-            # Owner sees everything
             privacy_filter = "1=1"
         elif viewer_id:
-            # Check if friends
             friend = con.execute("""
                 SELECT 1 FROM friends
                 WHERE ((user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?))
                 AND status='accepted'
             """, (user_id, viewer_id, viewer_id, user_id)).fetchone()
-            # Check if viewer follows the profile owner
             follows = con.execute(
                 "SELECT 1 FROM followers WHERE follower_id=? AND following_id=?",
                 (viewer_id, user_id)
@@ -6393,10 +6606,18 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
             privacy_filter = "wp.privacy = 'public'"
 
         viewer_lookup_id = int(viewer_id or 0)
+        # Encrypted rows are visible iff (viewer == author) OR a
+        # wrapped_key row exists for the viewer. We surface that key
+        # inline so the client can decrypt without a second round-trip.
+        # The author is excluded from wall_post_keys (clients keep a
+        # local copy of the payload key at publish time).
         rows = con.execute(f"""
             SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy, wp.share_enabled,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
+                   wp.enc_v, wp.audience,
+                   wp.ciphertext AS _ciphertext,
+                   wpk.wrapped_key AS _wrapped_key,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar, u.display_name, u.is_admin AS is_admin,
                    wp.reaction_count as reaction_count,
@@ -6407,11 +6628,31 @@ def get_wall_posts(user_id: int, viewer_id: int = None,
                    ) ELSE 0 END AS i_reposted
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
-            WHERE wp.user_id=? AND {privacy_filter}
+            LEFT JOIN wall_post_keys wpk
+                   ON wpk.post_id = wp.id AND wpk.recipient_id = ?
+            WHERE wp.user_id=?
+              AND (
+                (wp.enc_v = 0 AND {privacy_filter})
+                OR (wp.enc_v = 2 AND (wp.user_id = ? OR wpk.wrapped_key IS NOT NULL))
+              )
             ORDER BY wp.created_at DESC
             LIMIT ? OFFSET ?
-        """, (viewer_lookup_id, viewer_lookup_id, user_id, limit, offset)).fetchall()
-    return [dict(r) for r in rows]
+        """, (viewer_lookup_id, viewer_lookup_id, viewer_lookup_id,
+              user_id, viewer_lookup_id, limit, offset)).fetchall()
+    out = []
+    import base64 as _b64
+    for r in rows:
+        d = dict(r)
+        ct = d.pop("_ciphertext", None)
+        wk = d.pop("_wrapped_key", None)
+        if d.get("enc_v") == 2 and ct is not None:
+            d["ciphertext_b64"] = _b64.b64encode(bytes(ct)).decode("ascii")
+            d["wrapped_key_b64"] = _b64.b64encode(bytes(wk)).decode("ascii") if wk else None
+            # The plaintext columns are meaningless for encrypted rows;
+            # zero them so the client doesn't accidentally render them.
+            d["content"] = ""
+        out.append(d)
+    return out
 
 
 def get_wall_post_media(post_id: int) -> Optional[Dict]:
@@ -6426,8 +6667,14 @@ def get_wall_post_media(post_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
-def get_wall_post(post_id: int) -> Optional[Dict]:
-    """Get a single wall post (full row including media_data)."""
+def get_wall_post(post_id: int, viewer_id: Optional[int] = None) -> Optional[Dict]:
+    """Get a single wall post (full row including media_data).
+
+    If `viewer_id` is provided and the post is encrypted (enc_v=2),
+    the response includes `ciphertext_b64` and `wrapped_key_b64` (the
+    viewer's wrap, or None if the viewer isn't in the audience). The
+    raw `ciphertext` BLOB is stripped to keep the dict JSON-safe.
+    """
     # Use the materialized `wp.repost_count` column instead of a correlated
     # subquery — counters are kept in sync by triggers (see _ensure_schema).
     with _conn() as con:
@@ -6437,7 +6684,33 @@ def get_wall_post(post_id: int) -> Optional[Dict]:
             JOIN users u ON wp.user_id = u.id
             WHERE wp.id=?
         """, (post_id,)).fetchone()
-    return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        ct = d.pop("ciphertext", None)
+        if d.get("enc_v") == 2:
+            import base64 as _b64
+            if ct is not None:
+                d["ciphertext_b64"] = _b64.b64encode(bytes(ct)).decode("ascii")
+            wk_b64 = None
+            if viewer_id is not None:
+                if int(viewer_id) == int(d.get("user_id") or 0):
+                    wk_b64 = None  # author keeps its own copy locally
+                else:
+                    wk_row = con.execute(
+                        "SELECT wrapped_key FROM wall_post_keys "
+                        "WHERE post_id=? AND recipient_id=?",
+                        (int(post_id), int(viewer_id)),
+                    ).fetchone()
+                    if wk_row:
+                        wk_b64 = _b64.b64encode(bytes(wk_row["wrapped_key"])).decode("ascii")
+            d["wrapped_key_b64"] = wk_b64
+            d["content"] = ""
+        else:
+            # legacy plaintext rows — keep `ciphertext` field out of the
+            # dict if it's somehow set (shouldn't be for enc_v=0).
+            d.pop("ciphertext", None)
+    return d
 
 
 def get_wall_post_meta(post_id: int) -> Optional[Dict]:
@@ -6507,6 +6780,9 @@ def get_user_reposts(user_id: int, viewer_id: int, limit: int = 30,
             SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy, wp.share_enabled,
                    wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
+                   wp.enc_v, wp.audience,
+                   wp.ciphertext AS _ciphertext,
+                   wpk.wrapped_key AS _wrapped_key,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar, u.display_name, u.is_admin AS is_admin,
                    wp.reaction_count as reaction_count,
@@ -6518,13 +6794,31 @@ def get_user_reposts(user_id: int, viewer_id: int, limit: int = 30,
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             JOIN wall_reposts wr ON wr.post_id = wp.id
-            WHERE wr.user_id=? AND {privacy_filter}
+            LEFT JOIN wall_post_keys wpk
+                   ON wpk.post_id = wp.id AND wpk.recipient_id = ?
+            WHERE wr.user_id=?
+              AND (
+                (wp.enc_v = 0 AND {privacy_filter})
+                OR (wp.enc_v = 2 AND (wp.user_id = ? OR wpk.wrapped_key IS NOT NULL))
+              )
               AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
             ORDER BY wr.created_at DESC
             LIMIT ? OFFSET ?
-        """, (viewer_lookup_id, viewer_lookup_id, user_id, viewer_lookup_id, viewer_lookup_id, limit, offset)).fetchall()
-    return [dict(r) for r in rows]
+        """, (viewer_lookup_id, viewer_lookup_id, viewer_lookup_id, user_id, viewer_lookup_id, viewer_lookup_id, viewer_lookup_id, limit, offset)).fetchall()
+    out = []
+    import base64 as _b64
+    for r in rows:
+        d = dict(r)
+        ct = d.pop("_ciphertext", None)
+        wk = d.pop("_wrapped_key", None)
+        if d.get("enc_v") == 2:
+            if ct is not None:
+                d["ciphertext_b64"] = _b64.b64encode(bytes(ct)).decode("ascii")
+            d["wrapped_key_b64"] = _b64.b64encode(bytes(wk)).decode("ascii") if wk else None
+            d["content"] = ""
+        out.append(d)
+    return out
 
 
 def update_wall_post(post_id: int, user_id: int, content: str = None,
@@ -7333,6 +7627,9 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
             SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy,
                    wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
+                   wp.enc_v, wp.audience,
+                   wp.ciphertext AS _ciphertext,
+                   wpk.wrapped_key AS _wrapped_key,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar, u.display_name, u.is_admin AS is_admin,
                    wp.reaction_count AS reaction_count,
@@ -7348,8 +7645,11 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
             FROM wall_posts wp
             JOIN users u ON wp.user_id = u.id
             LEFT JOIN followers f ON f.following_id = wp.user_id AND f.follower_id = ?
+            LEFT JOIN wall_post_keys wpk
+                   ON wpk.post_id = wp.id AND wpk.recipient_id = ?
             WHERE (f.follower_id IS NOT NULL OR wp.user_id = ?)
               AND wp.privacy IN ('public', 'followers', 'friends')
+              AND (wp.enc_v = 0 OR wp.user_id = ? OR wpk.wrapped_key IS NOT NULL)
               AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND wp.user_id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
               AND (? = '' OR (
@@ -7358,12 +7658,15 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
               ))
             ORDER BY wp.created_at DESC
             LIMIT ?
-        """, (user_id, user_id, user_id, user_id, user_id, mood, mood, fetch_limit)).fetchall()
+        """, (user_id, user_id, user_id, user_id, user_id, user_id, user_id, mood, mood, fetch_limit)).fetchall()
 
         repost_rows = con.execute(f"""
             SELECT wp.id, wp.user_id, wp.content, {media_col}, wp.media_type, wp.privacy,
                    wp.share_enabled, wp.allow_comments, wp.created_at, wp.edited_at,
                    wp.track_title, wp.track_room, wp.track_mood,
+                   wp.enc_v, wp.audience,
+                   wp.ciphertext AS _ciphertext,
+                   wpk.wrapped_key AS _wrapped_key,
                    (wp.media_type IS NOT NULL AND wp.media_type != '') AS has_media,
                    u.nickname, u.avatar, u.display_name, u.is_admin AS is_admin,
                    wp.reaction_count AS reaction_count,
@@ -7381,9 +7684,12 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
             JOIN users u ON u.id = wp.user_id
             JOIN users ru ON ru.id = wr.user_id
             LEFT JOIN followers rf ON rf.following_id = wr.user_id AND rf.follower_id = ?
+            LEFT JOIN wall_post_keys wpk
+                   ON wpk.post_id = wp.id AND wpk.recipient_id = ?
             WHERE (rf.follower_id IS NOT NULL OR wr.user_id = ?)
               AND wp.share_enabled = 1
               AND wp.privacy IN ('public', 'followers')
+              AND (wp.enc_v = 0 OR wp.user_id = ? OR wpk.wrapped_key IS NOT NULL)
               AND ru.id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
               AND ru.id NOT IN (SELECT blocker_id FROM user_blocks WHERE blocked_id=?)
               AND wp.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id=?)
@@ -7412,6 +7718,8 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
         """, (
             user_id,
             user_id, user_id,
+            user_id,
+            user_id,
             user_id, user_id, user_id, user_id,
             user_id,
             user_id,
@@ -7420,10 +7728,22 @@ def get_feed_posts(user_id: int, limit: int = 30, offset: int = 0,
             fetch_limit,
         )).fetchall()
 
+    import base64 as _b64
+    def _materialise(row):
+        d = dict(row)
+        ct = d.pop("_ciphertext", None)
+        wk = d.pop("_wrapped_key", None)
+        if d.get("enc_v") == 2:
+            if ct is not None:
+                d["ciphertext_b64"] = _b64.b64encode(bytes(ct)).decode("ascii")
+            d["wrapped_key_b64"] = _b64.b64encode(bytes(wk)).decode("ascii") if wk else None
+            d["content"] = ""
+        return d
+
     merged: List[Dict] = []
     best_by_post: Dict[int, Dict] = {}
     for row in list(base_rows) + list(repost_rows):
-        d = dict(row)
+        d = _materialise(row)
         pid = int(d.get("id") or 0)
         ts = str(d.get("feed_sort_at") or d.get("created_at") or "")
         existing = best_by_post.get(pid)

@@ -52,6 +52,34 @@ class CreatePostRequest(BaseModel):
     track_mood: Optional[str] = Field(default=None, max_length=32)
 
 
+# Track D — encrypted (enc_v=2) wall posts. The client encrypts the
+# payload (content + media descriptors) under a random AES-256-GCM
+# payload key, then wraps that key once per audience member using its
+# Signal session to them. Server stores opaque blobs only.
+class WrappedKeyEntry(BaseModel):
+    recipient_id: int
+    wrapped_b64: str = Field(min_length=1, max_length=8192)
+
+
+class CreateEncryptedPostRequest(BaseModel):
+    # 'followers' | 'friends' | 'list:<id>'   (public posts stay plaintext)
+    audience: str = Field(min_length=1, max_length=64)
+    ciphertext_b64: str = Field(min_length=1, max_length=8_000_000)
+    wrapped_keys: list[WrappedKeyEntry] = Field(default_factory=list, max_length=5000)
+    # Media stays plaintext for now — Track D Phase 3 will move to a
+    # content-addressed encrypted blob store. Until then encrypted
+    # posts CAN carry plaintext images/video/music (so the
+    # writer-side experience matches the public composer) and only
+    # the caption + track metadata is hidden from the server.
+    media_data: Optional[str] = Field(default=None, max_length=140_000_000)
+    media_type: Optional[str] = Field(default=None, max_length=128)
+    share_enabled: bool = True
+    allow_comments: bool = True
+    track_title: Optional[str] = Field(default=None, max_length=200)
+    track_room: Optional[str] = Field(default=None, max_length=128)
+    track_mood: Optional[str] = Field(default=None, max_length=32)
+
+
 class UpdatePostRequest(BaseModel):
     content: Optional[str] = Field(default=None, max_length=10_000)
     privacy: Optional[str] = Field(default=None, max_length=32)
@@ -204,6 +232,191 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
     }
 
 
+@router.get("/audience-recipients")
+@limiter.limit("60/minute")
+async def audience_recipients(request: Request,
+                              audience: str,
+                              current_user: dict = Depends(get_current_user)):
+    """Return the list of user_ids the client must wrap a payload key
+    to in order to publish an encrypted post for `audience`.
+
+    The server is the source of truth for the social graph so the
+    client can't fan out to people it shouldn't (and won't miss
+    people it should). The same audience check is re-applied inside
+    `POST /api/wall/posts/encrypted` so a stale list is rejected.
+    """
+    aud = (audience or "").strip().lower()
+    if aud == "public":
+        return JSONResponse(status_code=400,
+            content={"error": "Public audiences are unencrypted"})
+    if aud not in ("followers", "friends") and not aud.startswith("list:"):
+        return JSONResponse(status_code=400, content={"error": "Invalid audience"})
+
+    uid = current_user["id"]
+    if aud == "followers":
+        rows = db.get_followers_list(uid, limit=5000)
+    elif aud == "friends":
+        rows = db.get_friends(uid)
+    else:
+        # list:<id> — Phase 3 will add named friend lists. For now,
+        # the union of followers + friends (same as the create handler).
+        f1 = db.get_followers_list(uid, limit=5000)
+        f2 = db.get_friends(uid)
+        seen = set()
+        rows = []
+        for r in (f1 + f2):
+            rid = r.get("id") or r.get("user_id")
+            if rid and rid not in seen:
+                seen.add(rid)
+                rows.append({"id": rid, "nickname": r.get("nickname")})
+
+    out = []
+    for r in rows:
+        rid = r.get("id") or r.get("user_id")
+        nick = r.get("nickname")
+        if rid and nick and int(rid) != uid:
+            out.append({"user_id": int(rid), "nickname": nick})
+    return {"audience": aud, "recipients": out, "count": len(out)}
+
+
+@router.post("/posts/encrypted")
+@limiter.limit("60/hour")
+async def create_wall_post_encrypted(request: Request,
+                                     body: CreateEncryptedPostRequest,
+                                     current_user: dict = Depends(get_current_user)):
+    """Create an encrypted wall post (Track D / enc_v=2).
+
+    The client supplies opaque ciphertext + per-recipient wrapped keys.
+    The server validates the audience matches the social graph (so a
+    malicious client can't fan-out wraps to non-followers / non-friends
+    behind their back), persists the row + wraps in one transaction,
+    and emits a federation event with the same opaque bytes.
+    """
+    import base64 as _b64
+
+    aud = (body.audience or "").strip().lower()
+    if aud == "public":
+        return JSONResponse(status_code=400,
+            content={"error": "Public posts must use the plaintext endpoint."})
+    if aud not in ("followers", "friends") and not aud.startswith("list:"):
+        return JSONResponse(status_code=400, content={"error": "Invalid audience"})
+
+    # Decode + bounds-check the ciphertext.
+    try:
+        ct = _b64.b64decode(body.ciphertext_b64, validate=True)
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad ciphertext encoding"})
+    if not ct or len(ct) > 4 * 1024 * 1024:
+        return JSONResponse(status_code=400, content={"error": "Ciphertext out of bounds"})
+
+    # Pre-decode wraps + de-dup.
+    if not body.wrapped_keys:
+        return JSONResponse(status_code=400, content={"error": "No recipients"})
+    wraps_decoded = []
+    seen = set()
+    for w in body.wrapped_keys:
+        rid = int(w.recipient_id or 0)
+        if rid <= 0 or rid in seen or rid == current_user["id"]:
+            continue
+        seen.add(rid)
+        try:
+            blob = _b64.b64decode(w.wrapped_b64, validate=True)
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "Bad wrap encoding"})
+        if not blob or len(blob) > 4096:
+            return JSONResponse(status_code=400, content={"error": "Wrap out of bounds"})
+        wraps_decoded.append((rid, blob))
+    if not wraps_decoded:
+        return JSONResponse(status_code=400, content={"error": "No valid recipients"})
+
+    # Audience-graph check: every recipient must actually be in the
+    # claimed audience set. Stops a malicious client from leaking to
+    # arbitrary users by hand-crafting wraps.
+    author_id = current_user["id"]
+    if aud == "followers":
+        allowed_ids = {r["follower_id"] for r in db._conn().execute(
+            "SELECT follower_id FROM followers WHERE following_id=?", (author_id,)
+        ).fetchall()}
+    elif aud == "friends":
+        rows = db._conn().execute(
+            "SELECT user_id, friend_id FROM friends "
+            "WHERE (user_id=? OR friend_id=?) AND status='accepted'",
+            (author_id, author_id),
+        ).fetchall()
+        allowed_ids = set()
+        for r in rows:
+            allowed_ids.add(r["user_id"] if r["user_id"] != author_id else r["friend_id"])
+    else:
+        # list:<id> — Phase 3 will wire to a user_lists table. For now,
+        # accept any recipient who's also a friend OR follower of the
+        # author. Conservative default.
+        rows = db._conn().execute(
+            "SELECT follower_id AS uid FROM followers WHERE following_id=? "
+            "UNION SELECT user_id FROM friends WHERE friend_id=? AND status='accepted' "
+            "UNION SELECT friend_id FROM friends WHERE user_id=? AND status='accepted'",
+            (author_id, author_id, author_id),
+        ).fetchall()
+        allowed_ids = {int(r["uid"]) for r in rows}
+
+    bad = [rid for rid, _ in wraps_decoded if rid not in allowed_ids]
+    if bad:
+        return JSONResponse(status_code=403,
+            content={"error": "Recipient not in audience", "recipient_ids": bad[:10]})
+
+    try:
+        post_id = db.create_wall_post_encrypted(
+            user_id=author_id,
+            audience=aud,
+            ciphertext=ct,
+            wrapped_keys=wraps_decoded,
+            media_data=body.media_data,
+            media_type=body.media_type,
+            share_enabled=1 if body.share_enabled else 0,
+            allow_comments=1 if body.allow_comments else 0,
+            track_title=(body.track_title or None),
+            track_room=(body.track_room or None),
+            track_mood=(body.track_mood or None),
+        )
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+    # Federation: opaque ciphertext + only the wraps for users on each
+    # peer node (the receiving side filters down at apply-time).
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "social.post.created.encrypted",
+            "payload": {
+                "nickname": current_user["nickname"],
+                "post_id": post_id,
+                "audience": aud,
+                "ciphertext_b64": body.ciphertext_b64,
+                "wrapped_keys": [
+                    {"recipient_id": rid,
+                     "wrapped_b64": _b64.b64encode(blob).decode("ascii")}
+                    for rid, blob in wraps_decoded
+                ],
+                "media_data": body.media_data,
+                "media_type": body.media_type,
+                "share_enabled": bool(body.share_enabled),
+                "allow_comments": bool(body.allow_comments),
+                "track_title": body.track_title,
+                "track_room": body.track_room,
+                "track_mood": body.track_mood,
+            },
+        })
+    except Exception:
+        pass
+
+    return {
+        "id": post_id,
+        "enc_v": 2,
+        "audience": aud,
+        "recipients": len(wraps_decoded),
+        "created_at": "just now",
+    }
+
+
 @router.get("/posts/{post_id}")
 async def get_single_wall_post(post_id: int, current_user: dict = Depends(get_current_user)):
     """Fetch a single wall post by id (used by the Explore grid detail view).
@@ -229,6 +442,16 @@ async def get_single_wall_post(post_id: int, current_user: dict = Depends(get_cu
     )
     if not allowed:
         return JSONResponse(status_code=403, content={"error": "Not allowed to view this post"})
+    # Encrypted (enc_v=2) rows additionally need the viewer's wrapped
+    # payload key inlined. Re-fetch with viewer scope so the client gets
+    # `ciphertext_b64` + `wrapped_key_b64`.
+    if post.get("enc_v") == 2:
+        post = db.get_wall_post(post_id, viewer_id=viewer_id) or post
+        if viewer_id != author_id and not post.get("wrapped_key_b64"):
+            # Audience-mismatch: visible by legacy privacy but no wrap.
+            # Refuse rather than send unreadable data.
+            return JSONResponse(status_code=403,
+                content={"error": "Not in audience"})
     post["reactions"] = db.get_post_reactions(post_id)
     post["i_reposted"] = 1 if db.has_wall_reposted(post_id, viewer_id) else 0
     # repost_count is already populated by get_wall_post via the

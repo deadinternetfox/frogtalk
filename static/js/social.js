@@ -1060,6 +1060,11 @@ const Social = (() => {
     }
     const data = await res.json().catch(() => ({ posts: [] }));
     const posts = data.posts || [];
+    // Track D — decrypt enc_v=2 posts before caching. Profile tabs
+    // share this cache so we only decrypt once per fetch.
+    if (window.WallCrypto) {
+      try { await WallCrypto.decryptList(posts); } catch {}
+    }
     _cacheSet(_profilePostsCache, cacheKey, { ts: Date.now(), posts });
     return posts;
   }
@@ -1107,6 +1112,9 @@ const Social = (() => {
     }
     const data = await res.json().catch(() => ({ posts: [] }));
     const posts = data.posts || [];
+    if (window.WallCrypto) {
+      try { await WallCrypto.decryptList(posts); } catch {}
+    }
     _cacheSet(_profileRepostsCache, cacheKey, { ts: Date.now(), posts });
     return posts;
   }
@@ -3207,6 +3215,13 @@ const Social = (() => {
       const feedData = await feedReqPromise;
       clearQueuedSteps();
       const posts = feedData.posts || [];
+      // Track D — decrypt enc_v=2 posts in place before render. The
+      // helper is a no-op for plaintext rows and silently annotates
+      // rows that can't be decrypted (e.g. Signal session missing) so
+      // the renderer can show a placeholder.
+      if (window.WallCrypto) {
+        try { await WallCrypto.decryptList(posts); } catch {}
+      }
       _feedCache = { ts: Date.now(), posts };
       if (_currentTab !== 'feed') return;
       _updateTabLoadUi(loadUi, 62, 'Building post cards', `${posts.length} post${posts.length !== 1 ? 's' : ''} received`);
@@ -8837,6 +8852,72 @@ const Social = (() => {
         share_enabled: shareEnabled,
         allow_comments: allowCmt,
       };
+      // Track D — encrypted wall posts. If the audience is anything
+      // other than public, encrypt the caption + track metadata
+      // client-side and ship through /api/wall/posts/encrypted. Media
+      // (image/video/music URL) rides along as plaintext for now —
+      // Track D Phase 3 will move attachments to a content-addressed
+      // encrypted blob store. The composer experience matches the
+      // public path: text + attachment + privacy chip in one step.
+      const _audience = String(body.privacy || 'public').toLowerCase();
+      const _encryptable = (_audience === 'followers' || _audience === 'friends')
+        && !!(window.WallCrypto)
+        && !!(window.Signal && Signal.ready);
+      if (_encryptable) {
+        // Materialise media exactly like the plaintext branch would,
+        // so encrypted posts can still carry images/videos/music URLs.
+        let _mediaData = null;
+        let _mediaType = null;
+        try {
+          if (_newPostFile) {
+            if (postBtn) { postBtn.textContent = 'Encrypting…'; }
+            _mediaData = await UI.blobToDataURL(_newPostFile, (pct) => {
+              if (!hasAttachedMedia) return;
+              const p = Math.max(5, Math.min(55, Math.round((pct / 100) * 55)));
+              prepUiPct = Math.max(prepUiPct, p);
+              _updateStoryUploadOverlay(p, `Preparing media… ${pct}%`);
+            });
+            _mediaType = _newPostFile.type;
+          } else if (_newPostMedia && _newPostMediaType?.startsWith('image/') && _newPostOrigMedia) {
+            _mediaData = await applyFilterToImage(_newPostOrigMedia);
+            _mediaType = 'image/jpeg';
+          } else if (_newPostMedia) {
+            _mediaData = _newPostMedia;
+            _mediaType = _newPostMediaType;
+          }
+          if (postBtn) { postBtn.textContent = 'Encrypting…'; }
+          const out = await WallCrypto.publish({
+            audience: _audience,
+            content: text || '',
+            mediaData: _mediaData,
+            mediaType: _mediaType,
+            shareEnabled,
+            allowComments: allowCmt,
+          });
+          if (postBtn) { postBtn.textContent = 'Posted'; }
+          try {
+            if (State.user?.nickname) _invalidateProfilePostsCache(State.user.nickname);
+            _feedCache = null;
+            _exploreCache.clear();
+          } catch {}
+          try { closeNewPost(); } catch {}
+          try { UI.showToast('🐸 Posted (encrypted to ' + _audience + ')', 'success'); } catch {}
+          if (hasAttachedMedia) { try { _hideStoryUploadOverlay(0); } catch {} }
+          if (out && out._wrap_failed && out._wrap_failed.length) {
+            try {
+              UI.showToast('Couldn\u2019t reach: ' + out._wrap_failed.slice(0,3).join(', ')
+                + (out._wrap_failed.length > 3 ? '…' : ''), 'warn');
+            } catch {}
+          }
+          if (typeof loadFeed === 'function') { try { loadFeed(); } catch {} }
+          return;
+        } catch (e) {
+          try { UI.showToast('Encryption failed: ' + (e.message || e), 'error'); } catch {}
+          if (postBtn) { postBtn.textContent = 'Post'; postBtn.disabled = false; }
+          if (hasAttachedMedia) { try { _hideStoryUploadOverlay(0); } catch {} }
+          return;
+        }
+      }
       if (_newPostFile) {
         // Video chosen via file picker — read to base64 now. Uses
         // UI.blobToDataURL which is Safari-safe (some iOS WKWebView
