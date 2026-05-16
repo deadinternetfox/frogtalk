@@ -6764,10 +6764,12 @@ def transfer_room_ownership(room_id: int, current_owner_id: int, new_owner_id: i
                 (new_owner_id, room_id),
             )
             con.commit()
-        except Exception as exc:
+        except Exception:
             try: con.execute("ROLLBACK")
             except Exception: pass
-            return {"ok": False, "error": f"Database error: {exc}"}
+            import logging as _log_mod
+            _log_mod.getLogger(__name__).exception("Database error during ownership transfer")
+            return {"ok": False, "error": "Database error"}
     return {
         "ok": True,
         "previous_owner_id": int(current_owner_id),

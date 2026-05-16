@@ -1378,7 +1378,7 @@ function _updateVoiceBarParticipants() {
     div.style.cursor = 'pointer';
     div.style.position = 'relative';
     if (peer.avatar) {
-      div.innerHTML = `<img src="${peer.avatar}" alt="">`;
+      div.innerHTML = `<img src="${esc(peer.avatar)}" alt="">`;
     } else {
       div.textContent = peer.nickname.slice(0, 2).toUpperCase();
     }

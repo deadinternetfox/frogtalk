@@ -351,8 +351,9 @@ async def search_gifs(
             
             return {"gifs": gifs, "query": q, "provider": "tenor"}
             
-    except Exception as e:
-        return JSONResponse(status_code=502, content={"error": f"GIF search failed: {str(e)}"})
+    except Exception:
+        logging.getLogger(__name__).exception("GIF search failed")
+        return JSONResponse(status_code=502, content={"error": "GIF search failed"})
 
 
 @router.get("/gifs/trending")

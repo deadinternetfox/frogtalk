@@ -401,10 +401,10 @@ const MediaPlayer = (() => {
     const controls = document.getElementById('mp-controls');
     
     if (type === 'image') {
-      content.innerHTML = `<img src="${url}" alt="Media" onclick="event.stopPropagation()">`;
+      content.innerHTML = `<img src="${esc(url)}" alt="Media" onclick="event.stopPropagation()">`;
       controls.classList.add('hidden');
     } else if (type === 'video') {
-      content.innerHTML = `<video id="mp-video" src="${url}" onclick="MediaPlayer.togglePlay()"></video>`;
+      content.innerHTML = `<video id="mp-video" src="${esc(url)}" onclick="MediaPlayer.togglePlay()"></video>`;
       controls.classList.remove('hidden');
       setupVideoControls();
     } else if (type === 'audio') {

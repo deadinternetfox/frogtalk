@@ -243,7 +243,8 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
 
 
 @router.post("/decline/{nickname}")
-async def decline_request(nickname: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit("120/hour")
+async def decline_request(request: Request, nickname: str, current_user: dict = Depends(get_current_user)):
     profile = db.get_user_profile(nickname)
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})

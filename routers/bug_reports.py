@@ -21,9 +21,12 @@ Design notes:
     state-machine drift.
   * Body is capped at 8000 chars at the SQL helper layer.
 """
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, Request
+
+_log = logging.getLogger(__name__)
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
@@ -124,8 +127,9 @@ async def submit_bug_report(
             category=cat,
             contact=body.contact,
         )
-    except Exception as exc:  # noqa: BLE001 - last-resort surface
-        return JSONResponse(status_code=500, content={"error": f"Failed to record report: {exc}"})
+    except Exception:  # noqa: BLE001 - last-resort surface
+        _log.exception("Failed to record bug report")
+        return JSONResponse(status_code=500, content={"error": "Failed to record report"})
 
     return {"ok": True, "id": report_id, "message": "Thanks — report received."}
 
