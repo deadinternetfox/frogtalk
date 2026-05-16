@@ -1216,12 +1216,40 @@ async def delete_account(body: DeleteAccountRequest, current_user: dict = Depend
     # Prevent admin account deletion
     if current_user.get("is_admin"):
         return JSONResponse(status_code=403, content={"error": "Admin accounts cannot be deleted"})
-    
+
+    # Capture the gid BEFORE the row is destroyed so we can broadcast
+    # the deletion to federated peers. Without this peers would keep a
+    # stale federation_user_profiles row pointing at a user that no
+    # longer exists on the origin.
+    gid = ""
+    nick = current_user.get("nickname") or ""
+    try:
+        ident = db.get_user_by_id(current_user["id"]) or {}
+        gid = str(ident.get("global_user_id") or "").strip()
+    except Exception:
+        pass
+
     # Delete the account
     ok = db.delete_user_account(current_user["id"])
     if not ok:
         return JSONResponse(status_code=500, content={"error": "Failed to delete account"})
-    
+
+    # Federation fan-out: peers will purge their federation_user_profiles
+    # entry for this gid (with origin-pinning enforced by the inbox).
+    # Best-effort — a failure here must not roll back the local delete.
+    try:
+        if gid:
+            db.insert_federation_outbox_event({
+                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+                "event_type": "user.deleted",
+                "payload": {
+                    "global_user_id": gid,
+                    "nickname": nick,
+                },
+            })
+    except Exception:
+        _log.exception("federation: failed to enqueue user.deleted for gid=%s", gid)
+
     return {"ok": True, "message": "Account permanently deleted"}
 
 

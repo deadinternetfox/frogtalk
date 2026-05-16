@@ -8000,6 +8000,35 @@ def get_federation_profile_origin(global_user_id: str) -> str:
         return ""
 
 
+def delete_federation_user_profile(global_user_id: str, origin_server_id: str = "") -> bool:
+    """Remove a foreign user from the federation directory.
+
+    When ``origin_server_id`` is provided, the row is only deleted if its
+    pinned origin matches — preventing a peer from purging another
+    server's profile by replaying the gid. Returns True when a row was
+    actually removed.
+    """
+    gid = (global_user_id or "").strip()
+    if not gid:
+        return False
+    try:
+        with _conn() as con:
+            if origin_server_id:
+                cur = con.execute(
+                    "DELETE FROM federation_user_profiles WHERE global_user_id=? AND (origin_server_id='' OR origin_server_id=?)",
+                    (gid, origin_server_id),
+                )
+            else:
+                cur = con.execute(
+                    "DELETE FROM federation_user_profiles WHERE global_user_id=?",
+                    (gid,),
+                )
+            con.commit()
+            return cur.rowcount > 0
+    except Exception:
+        return False
+
+
 def upsert_federation_user_profile(
     global_user_id: str,
     nickname: str,

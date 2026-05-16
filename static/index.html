@@ -9407,6 +9407,11 @@ window.ConnErr = (function(){
         <div style="font-size:13px;color:#f44336;font-weight:600;margin-bottom:8px">Danger Zone</div>
         <div style="font-size:12px;color:#666;margin-bottom:12px">Once deleted, your account cannot be recovered. All messages will be permanently removed.</div>
         <button class="modal-btn danger" onclick="confirmDeleteAccount()" style="width:100%">🗑️ Delete My Account</button>
+        <!-- Inline confirm UI (password input + final confirm) is injected
+             here by confirmDeleteAccount(). window.prompt() is unreliable
+             in Electron renderer and iOS PWAs, which is why the old
+             prompt()-based flow silently no-op'd on desktop. -->
+        <div id="delete-account-inline"></div>
       </div>
     </div>
     <div id="profile-error" class="auth-error"></div>
@@ -10370,7 +10375,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=433"></script>
 <script src="/static/js/ws.js?v=225"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=465"></script>
+<script src="/static/js/ui.js?v=466"></script>
   <script src="/static/js/rooms.js?v=428"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
 <script src="/static/js/messages.js?v=441"></script>

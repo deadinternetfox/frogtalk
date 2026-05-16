@@ -1002,6 +1002,20 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
     # upgraded yet. Flip to 1 after one release of soak.
     require_sigs = (os.getenv("FROGTALK_FEDERATION_REQUIRE_SIGS", "0").strip().lower()
                     in ("1", "true", "yes", "on"))
+    # Events that mutate a SPECIFIC user's identity / inbox / social
+    # graph. For these we ALWAYS require a pinned server key + a valid
+    # Ed25519 signature, even when the global REQUIRE_SIGS soak flag
+    # is off. Without this, a peer that simply holds the shared
+    # federation token could forge "user.deleted" / "user.profile.updated"
+    # / "dm.message.created" for any global_user_id and have the receiving
+    # node act on it. The soak-mode allowance only stays open for less
+    # sensitive room/sticker/bot replication traffic.
+    _SENSITIVE_PREFIXES = (
+        "user.",
+        "dm.",
+        "friend.",
+        "social.",
+    )
     now = datetime.now(tz=timezone.utc)
     # Tightened from ±1h to ±5min after audit: an attacker who captures a
     # signed event has only a 5-minute window to replay it before our
@@ -1059,6 +1073,8 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
             pass
 
         # ---- Ed25519 verification (when peer pubkey pinned) ----
+        ev_type = str(ev.get("event_type") or "")
+        sensitive = ev_type.startswith(_SENSITIVE_PREFIXES)
         pubkey_pem = db.get_federation_server_pubkey(origin)
         if pubkey_pem:
             # Fingerprint pinning: refuse the event if the signer
@@ -1077,6 +1093,19 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
             if not crypto_fed.verify_event(ev, pubkey_pem):
                 rejected += 1
                 continue
+        elif sensitive:
+            # Unsigned user/dm/friend/social events are NEVER trusted,
+            # even in soak mode. A peer that only holds the shared
+            # federation token must not be able to forge identity-
+            # bearing events; the per-server Ed25519 key + an
+            # administrator-pinned fingerprint is the user-attribution
+            # anchor.
+            _log.warning(
+                "federation: dropping unsigned sensitive event type=%s origin=%s",
+                ev_type, origin,
+            )
+            rejected += 1
+            continue
         elif require_sigs:
             # No pinned key + strict mode = reject. We never trust a
             # signer pubkey supplied on the wire (TOFU is too dangerous
@@ -1782,30 +1811,41 @@ async def _handle_room_music_event(room_name: str, event_type: str, payload: dic
 
 
 async def _handle_user_event(event: dict) -> None:
-    """Handle incoming federated user profile claim/update."""
+    """Handle incoming federated user profile claim/update/delete."""
     payload = event.get("payload") or {}
-    if event.get("event_type") not in ("user.profile.updated", "user.created"):
+    event_type = event.get("event_type")
+    if event_type not in ("user.profile.updated", "user.created", "user.deleted"):
         return
     gid = str(payload.get("global_user_id") or "").strip()
-    nick_in = _fed_nickname(payload.get("nickname"))
-    if not gid or not nick_in:
+    if not gid:
         return
     origin = str(event.get("origin_server_id") or "").strip()
-    # Cross-origin profile-takeover guard. federation_user_profiles is
-    # the foreign user directory; once a gid is claimed by a particular
-    # origin server, another peer cannot rebind it. Without this, any
-    # peer holding the shared federation token could overwrite a target
-    # user's display_name/avatar/identity_pubkey simply by knowing their
-    # gid.
+    # Cross-origin pin: only the origin that first claimed a gid can
+    # mutate or delete the associated federation_user_profiles row.
     try:
         existing_origin = db.get_federation_profile_origin(gid)
     except Exception:
         existing_origin = ""
     if existing_origin and origin and existing_origin != origin:
         _log.warning(
-            "federation: rejecting cross-origin profile update for gid=%s (claimed=%s, incoming=%s)",
-            gid, existing_origin, origin,
+            "federation: rejecting cross-origin %s for gid=%s (claimed=%s, incoming=%s)",
+            event_type, gid, existing_origin, origin,
         )
+        return
+
+    if event_type == "user.deleted":
+        # Purge the foreign profile record; messages/history stay so
+        # existing conversations don't develop holes. The local users
+        # row (if any) is untouched — federation never owns local
+        # accounts.
+        try:
+            db.delete_federation_user_profile(gid, origin)
+        except Exception:
+            _log.exception("federation: failed to delete federation profile gid=%s", gid)
+        return
+
+    nick_in = _fed_nickname(payload.get("nickname"))
+    if not nick_in:
         return
     db.upsert_federation_user_profile(
         global_user_id=gid,

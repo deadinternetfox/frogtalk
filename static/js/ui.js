@@ -3837,31 +3837,92 @@ try {
 } catch {}
 
 async function confirmDeleteAccount() {
-  const confirmed = confirm('⚠️ Are you absolutely sure you want to delete your account?\n\nThis action CANNOT be undone. All your messages, friends, and data will be permanently deleted.');
-  if (!confirmed) return;
-  
-  const password = prompt('Enter your password to confirm account deletion:');
-  if (!password) return;
-  
-  try {
-    const res = await fetch('/api/auth/account', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
-      body: JSON.stringify({ password })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      UI.showToast(data.error || 'Failed to delete account', 'error');
+  // Build an inline confirm UI rather than calling window.confirm /
+  // window.prompt — both return null in Electron (renderer disables
+  // them by default) and behave inconsistently in iOS PWAs, which is
+  // why "Delete my account" appeared to do nothing for desktop users.
+  const host = document.getElementById('delete-account-inline');
+  if (!host) return;
+  if (host.dataset.open === '1') {
+    const inp = host.querySelector('input[type=password]');
+    if (inp) inp.focus();
+    return;
+  }
+  host.dataset.open = '1';
+  host.innerHTML = `
+    <div style="margin-top:12px;padding:12px;border:1px solid #f44336;border-radius:8px;background:#1a0a0a">
+      <div style="font-size:12px;color:#f44336;font-weight:600;margin-bottom:8px">
+        \u26a0\ufe0f This action cannot be undone
+      </div>
+      <div style="font-size:12px;color:#bbb;margin-bottom:10px">
+        Enter your password to permanently delete your account. All
+        messages, friends and uploads will be removed.
+      </div>
+      <input type="password" autocomplete="current-password"
+             id="delete-account-pw"
+             placeholder="Password"
+             style="width:100%;padding:8px;border-radius:6px;border:1px solid #333;background:#0d0d0d;color:#eee;margin-bottom:8px">
+      <div id="delete-account-err" style="display:none;color:#f44336;font-size:12px;margin-bottom:8px"></div>
+      <div style="display:flex;gap:8px">
+        <button class="modal-btn secondary" id="delete-account-cancel" style="flex:1">Cancel</button>
+        <button class="modal-btn danger" id="delete-account-go" style="flex:1">Delete forever</button>
+      </div>
+    </div>
+  `;
+  const pwInp = document.getElementById('delete-account-pw');
+  const errEl = document.getElementById('delete-account-err');
+  const goBtn = document.getElementById('delete-account-go');
+  const cancelBtn = document.getElementById('delete-account-cancel');
+  const closeInline = () => {
+    host.dataset.open = '0';
+    host.innerHTML = '';
+  };
+  cancelBtn?.addEventListener('click', closeInline);
+  const submit = async () => {
+    const password = (pwInp?.value || '').trim();
+    if (!password) {
+      if (errEl) {
+        errEl.textContent = 'Password required';
+        errEl.style.display = 'block';
+      }
+      pwInp?.focus();
       return;
     }
-    UI.showToast('Account deleted. Goodbye! 🐸', 'success');
-    setTimeout(() => {
-      State.clear();
-      location.reload();
-    }, 2000);
-  } catch {
-    UI.showToast('Network error', 'error');
-  }
+    goBtn.disabled = true;
+    goBtn.textContent = 'Deleting\u2026';
+    try {
+      const res = await fetch('/api/auth/account', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
+        body: JSON.stringify({ password })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (errEl) {
+          errEl.textContent = data.error || `Failed (HTTP ${res.status})`;
+          errEl.style.display = 'block';
+        }
+        goBtn.disabled = false;
+        goBtn.textContent = 'Delete forever';
+        return;
+      }
+      UI.showToast('Account deleted. Goodbye! \ud83d\udc38', 'success');
+      setTimeout(() => {
+        try { State.clear(); } catch {}
+        location.reload();
+      }, 1500);
+    } catch (e) {
+      if (errEl) {
+        errEl.textContent = 'Network error';
+        errEl.style.display = 'block';
+      }
+      goBtn.disabled = false;
+      goBtn.textContent = 'Delete forever';
+    }
+  };
+  goBtn?.addEventListener('click', submit);
+  pwInp?.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  setTimeout(() => pwInp?.focus(), 30);
 }
 
 let _profileCustomCssEl = null;
