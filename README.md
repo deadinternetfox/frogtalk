@@ -12,8 +12,9 @@
 
 # 🐸 FrogTalk
 
-**A federated, end-to-end encrypted chat platform.**
+**A censorship-free, federated, end-to-end encrypted chat platform.**
 Self-host your own node and join the swamp — or run it completely standalone.
+No company in the middle. Messages stay private. Built in the open.
 
 [![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?include_prereleases&label=release&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
 [![License](https://img.shields.io/github/license/deadinternetfox/frogtalk?color=4caf50)](LICENSE)
@@ -223,41 +224,61 @@ frogtalk/
 
 ## 🐸 Vibe-coded, but open source
 
-FrogTalk is built fast and shipped publicly. Some of this code was written at 3am.
+FrogTalk is a **censorship-free platform where messages can stay private** — and it's
+being built in the open with a process we're openly experimenting with: an AI-in-the-loop
+workflow for small, honest software teams.
+
+### Our development process
+
+```
+   ┌─────────┐    ┌─────────────┐    ┌──────────────────────┐    ┌────────┐
+   │  Idea   │ ─▶ │  AI slop    │ ─▶ │  Deslop (human pass) │ ─▶ │  Ship  │
+   └─────────┘    └─────────────┘    └──────────────────────┘    └────────┘
+```
+
+- **Idea.** Issue, sketch, "what if we…" — barrier is low on purpose.
+- **AI slop.** The first draft of most code is AI-generated. PRs are labelled `vibe-coded` so reviewers know what they're walking into.
+- **Deslop.** A human reviewer fixes the security holes, kills dead code, tightens
+  the names, rewrites lying comments, and actually exercises the change. Code is
+  not considered done until it has been deslopped.
+- **Ship.** Trunk-based: merge to `main`, deploy, watch the logs.
+
 The encryption primitives are textbook (ECDH-P256 → SHA-256 → AES-GCM-256, fresh
-96-bit IV per message), but the surrounding plumbing benefits from a second set
+96-bit IV per message). The surrounding plumbing — DOM rendering, session handling,
+media URLs, federation glue — is the kind of code that benefits from a second set
 of eyes. **We'd rather hear from you than pretend it's flawless.**
 
-If you think a piece of code is flawed or has a security vulnerability:
+### We need your help
 
-- Open a report at **<https://frogtalk.xyz/security>** — anonymous submissions are accepted.
-- For critical issues you'd rather not put in a web form: email `security@frogtalk.xyz`.
-- Even better: send a PR. Branch from `main`, keep it small and focused, and include
-  a PoC for security fixes so reviewers can verify the patch closes the hole.
+This project is run by a tiny team. Every kind of contribution matters:
 
-**Community projects are up to all of us.** Every reviewed PR, every triaged
-report, every responsible disclosure makes the platform safer for the next
-person who logs in. Researchers who responsibly disclose are credited in the
-security advisory and on the [Hall of Fame](https://frogtalk.xyz/security#hall-of-fame).
+- 🐛 **Found a bug or security issue?** Report it at **<https://frogtalk.xyz/security>**
+  — anonymous submissions accepted. For sensitive disclosures: `security@frogtalk.xyz`.
+- 🔎 **Spotted AI slop in the codebase?** Open a [slop sighting](https://github.com/deadinternetfox/frogtalk/issues/new?template=slop_sighting.md)
+  — file path, what looks wrong, why.
+- 🧹 **Want to deslop?** Pick an issue tagged `deslop-needed` and send a PR. After a
+  few solid reviews you can get write access. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- 🛠️ **New feature idea?** Half-formed is fine — file it as a [feature idea](https://github.com/deadinternetfox/frogtalk/issues/new?template=feature_idea.md).
+- 📣 **Run a node.** More nodes = more censorship-resistance. Self-host guide above.
+- 💬 **Tell people the project exists.** Community projects need a community.
+
+Researchers who responsibly disclose are credited in the security advisory and on the
+[Hall of Fame](https://frogtalk.xyz/security#hall-of-fame).
 
 ### Contributing
 
-Our pipeline is honest: **Idea → AI slop → Deslop (human review) → Ship.**
-The first draft of most code is AI-generated; humans then "deslop" it — fix
-the security holes, kill the dead code, tighten the names, and actually
-test the thing — before it merges to `main`.
-
-See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full process: the deslop
-review checklist, how to label vibe-coded PRs, how to become a deslopper,
-and how PRs flow through the queue. Quick start:
+See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full deslop process: the review
+checklist (Correctness / Security / Operational / Honesty), label conventions
+(`vibe-coded`, `deslopped`, `deslop-needed`, `slop-sighting`), and how to become a
+deslopper. Quick start:
 
 1. Fork the repo and branch from `main`.
-2. If you touched JS, run `node --check static/js/<file>.js` before pushing —
-   silent parse errors break every onclick on the page.
-3. If you touched Python, run `python -m py_compile <file>.py` on changed files.
-4. Open a PR with the template filled in. If it's vibe-coded, say so — we'll
-   deslop it together.
-5. Add yourself to `CONTRIBUTORS.md` in the same PR.
+2. If your PR is AI-drafted, label it `vibe-coded` — we'll deslop it together.
+3. Run `node --check static/js/<file>.js` for any JS you touched — silent parse
+   errors break every onclick on the page.
+4. Run `python -m py_compile <file>.py` for any Python you touched.
+5. Open a PR with the template filled in. For security fixes, include a PoC.
+6. Add yourself to `CONTRIBUTORS.md` in the same PR.
 
 See [`/security`](https://frogtalk.xyz/security) for scope, threat model, and
 what counts as a vulnerability.

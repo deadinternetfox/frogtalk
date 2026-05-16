@@ -274,24 +274,54 @@
 <div class="wrap">
 
   <section class="block" id="philosophy">
-    <h2>Our honest posture</h2>
+    <h2>What FrogTalk is, and how we build it</h2>
     <p>
-      FrogTalk was built fast and shipped publicly. Some of the code is rough.
-      Some of it was written at 3am. The encryption stack (ECDH-P256 → SHA-256 → AES-GCM-256,
-      96-bit random IV per message) is standard, but the surrounding plumbing — DOM rendering,
-      session handling, media URLs, federation glue — is the kind of code that benefits from a
-      second set of eyes.
+      FrogTalk is a <strong>censorship-free chat platform where messages can stay private</strong>.
+      No company sits in the middle; anyone can run a node; DMs are end-to-end encrypted so the
+      server can't read them even if it's seized. That's the point of the project.
     </p>
     <p>
-      Instead of pretending it's flawless, we'd rather hear from you. <strong>Every issue
-      reported here goes onto an admin queue with a severity tag, gets triaged, and the fix
-      lands in the public commit log on GitHub.</strong> No NDAs, no PR theatre.
+      We're also <strong>building it in public with a development process we're openly
+      experimenting with</strong> — the future of how small teams ship software with AI in the
+      loop. We call our flow the <em>deslop pipeline</em>:
+    </p>
+    <div class="pipeline" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;justify-content:center;margin:1.25rem 0;font-size:.95rem;">
+      <span style="padding:.45rem .85rem;border:1px solid rgba(76,175,80,.35);background:rgba(76,175,80,.08);border-radius:999px;">💡 Idea</span>
+      <span style="opacity:.6;">→</span>
+      <span style="padding:.45rem .85rem;border:1px solid rgba(255,215,106,.35);background:rgba(255,215,106,.08);border-radius:999px;">🤖 AI slop (first draft)</span>
+      <span style="opacity:.6;">→</span>
+      <span style="padding:.45rem .85rem;border:1px solid rgba(125,178,255,.35);background:rgba(125,178,255,.08);border-radius:999px;">🧹 Deslop (human review)</span>
+      <span style="opacity:.6;">→</span>
+      <span style="padding:.45rem .85rem;border:1px solid rgba(76,175,80,.45);background:rgba(76,175,80,.14);border-radius:999px;">🚀 Ship</span>
+    </div>
+    <p>
+      The first draft of most code is AI-generated. A human reviewer then <em>deslops</em> it:
+      tightens the security, kills dead code, fixes lying comments, and actually exercises the
+      change before it merges. <strong>Code is not considered done until it has been
+      deslopped.</strong> The full checklist lives in
+      <a href="https://github.com/deadinternetfox/frogtalk/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">CONTRIBUTING.md</a>.
+    </p>
+    <p>
+      We're honest about this because users deserve to know the threat model. <strong>The
+      encryption primitives are standard</strong> (ECDH-P256 → SHA-256 → AES-GCM-256, fresh
+      96-bit IV per message) <strong>but the surrounding plumbing is still being deslopped.</strong>
+      Don't expect bank-grade security or privacy yet — especially in DMs. Help us get there.
     </p>
     <div class="callout">
       <strong>Threat model:</strong> we assume the server can be compromised. DM bodies are
       end-to-end encrypted, keys never touch the server, recovery keys are 256-bit tokens
       stored as SHA-256 hashes only. If you find a way around that — please report it loudly.
     </div>
+    <p style="margin-top:1.1rem;">
+      <strong>How you can help (any of these are huge):</strong>
+    </p>
+    <ul>
+      <li>🐛 <strong>File a bug or vulnerability report</strong> via the form below — anonymous is fine.</li>
+      <li>🔎 <strong>Audit a file</strong> and open a <a href="https://github.com/deadinternetfox/frogtalk/issues/new?template=slop_sighting.md" target="_blank" rel="noopener">slop sighting</a> for code that looks AI-written and obviously wrong.</li>
+      <li>🧹 <strong>Send a deslop PR</strong> — pick an issue tagged <code>deslop-needed</code> and tighten it. Vibe-coded PRs are welcome too; just label them.</li>
+      <li>📣 <strong>Run a node</strong> and join the federation. More nodes = more censorship-resistance.</li>
+      <li>💬 <strong>Tell other people the project exists.</strong> Community projects only work with a community.</li>
+    </ul>
   </section>
 
   <section class="block" id="scope">

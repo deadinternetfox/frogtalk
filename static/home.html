@@ -1020,20 +1020,32 @@
 -->
 <style>
   #vibe-banner {
-    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
     background: linear-gradient(90deg, #2a1f0a 0%, #1f1a2a 100%);
-    border-bottom: 1px solid #4a3a1a;
+    border-top: 1px solid #4a3a1a;
+    box-shadow: 0 -6px 24px rgba(0,0,0,.35);
     color: #ffe9a8;
     font-size: .88rem;
-    line-height: 1.45;
-    padding: .7rem 3rem .7rem 1.25rem;
-    display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+    line-height: 1.5;
+    padding: .9rem 3.2rem .95rem 1.25rem;
+    display: flex; align-items: flex-start; gap: .85rem; flex-wrap: wrap;
     justify-content: center;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }
-  #vibe-banner .vb-icon { font-size: 1.1rem; flex-shrink: 0; }
-  #vibe-banner .vb-text { max-width: 880px; }
+  #vibe-banner .vb-icon { font-size: 1.25rem; flex-shrink: 0; line-height: 1.4; }
+  #vibe-banner .vb-text { max-width: 920px; }
   #vibe-banner .vb-text strong { color: #fff3c4; }
+  #vibe-banner .vb-flow {
+    display: inline-block;
+    margin: 0 .15rem;
+    padding: .05rem .45rem;
+    background: rgba(255,215,106,.08);
+    border: 1px solid rgba(255,215,106,.22);
+    border-radius: 999px;
+    font-size: .78rem;
+    color: #ffd76a;
+    white-space: nowrap;
+  }
   #vibe-banner a {
     color: #ffd76a;
     text-decoration: underline;
@@ -1042,8 +1054,7 @@
   }
   #vibe-banner a:hover { color: #fff3c4; }
   #vibe-banner .vb-close {
-    position: absolute; top: 50%; right: .9rem;
-    transform: translateY(-50%);
+    position: absolute; top: .55rem; right: .9rem;
     background: transparent; border: none;
     color: #ffe9a8; cursor: pointer;
     font-size: 1.4rem; line-height: 1; padding: .3rem .55rem;
@@ -1052,16 +1063,22 @@
   }
   #vibe-banner .vb-close:hover { opacity: 1; background: rgba(255,255,255,.08); }
   @media (max-width: 640px) {
-    #vibe-banner { padding: .6rem 2.6rem .6rem .9rem; font-size: .8rem; }
-    #vibe-banner .vb-close { right: .55rem; font-size: 1.25rem; }
+    #vibe-banner { padding: .75rem 2.6rem .8rem .9rem; font-size: .8rem; }
+    #vibe-banner .vb-close { right: .55rem; font-size: 1.25rem; top: .35rem; }
+    #vibe-banner .vb-flow { font-size: .72rem; }
   }
 </style>
 <div id="vibe-banner" role="status" aria-live="polite" hidden>
   <span class="vb-icon" aria-hidden="true">🐸</span>
   <span class="vb-text">
-    <strong>Heads up:</strong> FrogTalk is largely <strong>vibe-coded</strong> and actively being
-    <em>deslopped</em>. Don't expect bank-grade security or privacy yet — especially in DMs.
-    Help us harden it: <a href="/security">report a bug or vulnerability</a> ·
+    <strong>FrogTalk is a censorship-free platform where messages can stay private</strong> —
+    and it's being built in the open with a process we're experimenting with:
+    <span class="vb-flow">💡 idea</span>→<span class="vb-flow">🤖 AI slop</span>→<span class="vb-flow">🧹 deslop (human review)</span>→<span class="vb-flow">🚀 ship</span>.
+    The first draft of most code is AI-generated; humans then tighten the security and kill the
+    dead parts. It works, but we're early — <strong>don't expect bank-grade security or privacy yet,
+    especially in DMs.</strong> Help us harden it:
+    <a href="/security">report a bug or vulnerability</a> ·
+    <a href="https://github.com/deadinternetfox/frogtalk/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">read the deslop process</a> ·
     <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">contribute on GitHub</a>.
   </span>
   <button type="button" class="vb-close" id="vibe-banner-close" aria-label="Dismiss banner">×</button>
@@ -1070,9 +1087,12 @@
 (function () {
   // Banner is hidden by default in the markup so server-rendered HTML
   // doesn't flash a banner the user already dismissed. We only reveal it
-  // here in JS after checking localStorage.
+  // here in JS after checking localStorage. Banner now sits at the BOTTOM
+  // of the viewport so it never covers the fixed <nav> on any breakpoint.
   try {
-    var KEY = 'frogtalk_vibe_banner_dismissed_v1';
+    // Bump the version suffix so the expanded copy re-appears once for
+    // users who dismissed the previous (shorter) version.
+    var KEY = 'frogtalk_vibe_banner_dismissed_v2';
     var banner = document.getElementById('vibe-banner');
     if (!banner) return;
     var dismissed = false;
@@ -1081,17 +1101,13 @@
 
     banner.hidden = false;
 
-    // Push the fixed <nav> down by the banner height so it doesn't overlap.
-    // Re-measured on resize so wrapping text on mobile stays handled.
-    var nav = document.querySelector('body > nav');
+    // Pad the bottom of the page so the banner doesn't cover the footer
+    // or sticky CTAs. Re-measured on resize for mobile line-wrapping.
     function applyOffset() {
-      var h = banner.offsetHeight;
-      if (nav) nav.style.top = h + 'px';
-      document.body.style.paddingTop = h + 'px';
+      document.body.style.paddingBottom = banner.offsetHeight + 'px';
     }
     function clearOffset() {
-      if (nav) nav.style.top = '';
-      document.body.style.paddingTop = '';
+      document.body.style.paddingBottom = '';
     }
     applyOffset();
     window.addEventListener('resize', applyOffset);
