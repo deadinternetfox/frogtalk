@@ -186,14 +186,29 @@
     return new Uint8Array(pt);
   }
 
-  // Curve25519 XEdDSA via the vendored libsignal Curve. Async or sync.
-  function _curve() {
+  // Curve25519 XEdDSA via the vendored libsignal Curve.
+  //
+  // `window.libsignal.Curve` is a *class constructor* in this build —
+  // its methods (generateKeyPair / calculateSignature / verifySignature)
+  // live on the prototype and only become callable on an instance
+  // returned by the bundle's async factory `libsignal.default()`.
+  // We invoke it once and cache the instance.
+  let _curveInst = null;
+  async function _ensureCurve() {
+    if (_curveInst) return _curveInst;
     const L = window.libsignal;
-    if (!L || !L.Curve) throw new Error('libsignal not loaded');
-    return L.Curve.async || L.Curve;
+    if (!L) throw new Error('libsignal not loaded');
+    if (typeof L.default !== 'function') {
+      throw new Error('libsignal default() factory missing');
+    }
+    const built = await L.default();
+    if (!built || !built.Curve) throw new Error('libsignal default() returned no Curve');
+    _curveInst = built.Curve;
+    return _curveInst;
   }
   async function _generateSigningKeyPair() {
-    const kp = await _curve().generateKeyPair();
+    const C = await _ensureCurve();
+    const kp = await C.generateKeyPair();
     // {pubKey, privKey} as ArrayBuffers
     return {
       pub:  new Uint8Array(kp.pubKey),
@@ -201,12 +216,14 @@
     };
   }
   async function _sign(privBytes, data) {
-    const sig = await _curve().calculateSignature(privBytes.buffer, data.buffer || data);
+    const C = await _ensureCurve();
+    const sig = await C.calculateSignature(privBytes.buffer, data.buffer || data);
     return new Uint8Array(sig);
   }
   async function _verifySig(pubBytes, data, sigBytes) {
     try {
-      await _curve().verifySignature(pubBytes.buffer, data.buffer || data, sigBytes.buffer || sigBytes);
+      const C = await _ensureCurve();
+      await C.verifySignature(pubBytes.buffer, data.buffer || data, sigBytes.buffer || sigBytes);
       return true;
     } catch { return false; }
   }
