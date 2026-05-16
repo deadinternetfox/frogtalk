@@ -2,6 +2,67 @@
  * app.js — Boot, auth check, main app initialization
  */
 
+// ─── Mobile keyboard / visual-viewport sync ───────────────────────────────
+// When the on-screen keyboard opens in a DM or channel composer, the
+// browser's "layout viewport" doesn't change height — so anything sized
+// to 100vh stays the same and gets pushed up by the focused input, which
+// drags the top of the app off-screen and hides the channel header.
+//
+// We solve this two ways:
+//  1. The viewport <meta> uses interactive-widget=resizes-content so
+//     Android Chrome shrinks the layout viewport itself when the keyboard
+//     opens (no JS needed there).
+//  2. For iOS Safari (and older Android WebViews that ignore that hint)
+//     we mirror window.visualViewport.height into the --vvh CSS variable,
+//     which `body` and `#app` use for their height. As the keyboard
+//     comes up, --vvh shrinks → the app shell shrinks → composer stays
+//     visible above the keyboard → header stays glued to the top of the
+//     visible area instead of being scrolled off.
+//
+// We also pin window.scrollTo(0,0) so iOS can't sneak in its automatic
+// "scroll the focused input into view" behaviour that re-creates the
+// "top of app off-screen" symptom.
+(function _ftViewportSync() {
+  try {
+    const vv = window.visualViewport;
+    if (!vv) {
+      // No visualViewport API → just leave CSS fallbacks (100svh) in place.
+      return;
+    }
+    const root = document.documentElement;
+    let _raf = 0;
+    const apply = () => {
+      _raf = 0;
+      // vv.height is the height of the visible area excluding the
+      // keyboard / browser chrome. innerHeight on iOS keeps the full
+      // window height even with keyboard up, which is the bug.
+      const h = Math.max(0, Math.round(vv.height));
+      root.style.setProperty('--vvh', h + 'px');
+      // Keep the page glued to the top so the header never scrolls off.
+      // visualViewport.offsetTop > 0 means the page was scrolled up by
+      // iOS to make the focused input visible — undo that immediately.
+      if (vv.offsetTop > 0 || window.scrollY !== 0) {
+        try { window.scrollTo(0, 0); } catch {}
+      }
+    };
+    const schedule = () => {
+      if (_raf) return;
+      _raf = requestAnimationFrame(apply);
+    };
+    apply();
+    vv.addEventListener('resize', schedule);
+    vv.addEventListener('scroll', schedule);
+    // Some browsers don't fire visualViewport events on orientation
+    // change reliably; belt-and-braces.
+    window.addEventListener('orientationchange', () => setTimeout(apply, 120));
+    window.addEventListener('resize', schedule);
+    // When an input gains focus on iOS the scroll-into-view kicks in
+    // before visualViewport reports the new height. Re-run on focus.
+    document.addEventListener('focusin', () => setTimeout(apply, 60), true);
+    document.addEventListener('focusout', () => setTimeout(apply, 60), true);
+  } catch {}
+})();
+
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',

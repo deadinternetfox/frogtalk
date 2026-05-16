@@ -53,10 +53,14 @@
   // user who just typed their PIN to open Admin doesn't get re-prompted
   // immediately afterwards. Cleared on browser close.
   const _SS_UNLOCKED_AT = 'frogtalk-pin-unlocked-at';
-  // Admin re-auth grace: 5 minutes after unlock, opening admin doesn't
-  // re-prompt. Long enough for a normal admin task, short enough that a
-  // walked-away laptop doesn't stay open forever.
-  const _ADMIN_GRACE_MS = 5 * 60 * 1000;
+  // Admin re-auth uses a SEPARATE timestamp so the boot-time login PIN
+  // doesn't silently satisfy `Require PIN for admin areas`. The admin
+  // key is stamped only when the user solves the lock screen *for* an
+  // admin gate. Short grace (30 s) so a close+reopen of the admin panel
+  // within the same session doesn't re-prompt, but a walk-away or any
+  // longer pause does.
+  const _SS_ADMIN_UNLOCKED_AT = 'frogtalk-pin-admin-unlocked-at';
+  const _ADMIN_GRACE_MS = 30 * 1000;
 
   // ── Tiny helpers ────────────────────────────────────────────────────
   function $ (id) { return document.getElementById(id); }
@@ -185,6 +189,11 @@
   // successful unlock we drain the queue so every awaiting caller
   // proceeds with one PIN entry.
   const _unlockResolvers = [];       // resolvers fired when correct PIN entered
+  // Set to true while a `gateAdmin()` promise is parked on the lock
+  // screen. Consulted by `_submitLockPin()` so a successful unlock that
+  // was raised by admin entry (vs. a normal boot/idle gate) also stamps
+  // the admin-fresh timestamp. Reset after every drain.
+  let _adminGatePending = false;
   let _pinBuffer = '';
   function _renderDots () {
     const wrap = $('lock-pin-dots');
@@ -239,6 +248,15 @@
         _pinBuffer = '';
         _renderDots();
         _markUnlocked();
+        // If the lock was raised for an admin gate, stamp the admin-fresh
+        // timestamp too so the same PIN entry both unlocks the app and
+        // admits the user into the admin overlay (without granting a
+        // free pass to any later admin re-entry — that needs its own
+        // 30 s grace check below).
+        if (_adminGatePending) {
+          try { sessionStorage.setItem(_SS_ADMIN_UNLOCKED_AT, String(Date.now())); } catch {}
+        }
+        _adminGatePending = false;
         _hideLockScreen();
         if (_unlockResolvers.length) {
           // Drain — every parked caller proceeds with this single unlock.
@@ -297,6 +315,16 @@
   function _wasUnlockedRecently (graceMs) {
     try {
       const t = Number(sessionStorage.getItem(_SS_UNLOCKED_AT) || 0);
+      return t > 0 && (Date.now() - t) < graceMs;
+    } catch { return false; }
+  }
+  // Admin-area unlock helpers — separate key from `_SS_UNLOCKED_AT` so
+  // the boot-time/idle PIN unlock can't silently satisfy the
+  // `Require PIN for admin areas` toggle. Only the gateAdmin() flow
+  // stamps `_SS_ADMIN_UNLOCKED_AT` on a successful PIN entry.
+  function _wasAdminUnlockedRecently (graceMs) {
+    try {
+      const t = Number(sessionStorage.getItem(_SS_ADMIN_UNLOCKED_AT) || 0);
       return t > 0 && (Date.now() - t) < graceMs;
     } catch { return false; }
   }
@@ -588,7 +616,11 @@
   function gateAdmin () {
     return new Promise((resolve) => {
       if (!_cfg.has_pin || !_cfg.pin_require_for_admin) { resolve(true); return; }
-      if (_wasUnlockedRecently(_ADMIN_GRACE_MS)) { resolve(true); return; }
+      // Admin grace uses its OWN tracker. The boot-time unlock
+      // intentionally does not count — that's the whole point of the
+      // "Require PIN for admin areas" toggle.
+      if (_wasAdminUnlockedRecently(_ADMIN_GRACE_MS)) { resolve(true); return; }
+      _adminGatePending = true;
       _unlockResolvers.push(resolve);
       lockNow();
     });
@@ -781,6 +813,7 @@
       await refreshFromServer();
       _toast('PIN disabled', 'info');
       try { sessionStorage.removeItem(_SS_UNLOCKED_AT); } catch {}
+      try { sessionStorage.removeItem(_SS_ADMIN_UNLOCKED_AT); } catch {}
     } catch {
       _setText('pin-set-error', 'Network error — try again');
     }

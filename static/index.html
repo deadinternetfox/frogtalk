@@ -7,7 +7,7 @@
      reflows mid-edit and embedded iframes (e.g. the music player) get
      pushed behind other panels and don't always return to their original
      position when the keyboard closes. -->
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-visual">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta name="description" content="FrogTalk — Secure encrypted chat with E2E messaging, voice & video calls, group channels and stories. Open-source, privacy-first.">
 <meta name="theme-color" content="#4caf50">
@@ -1181,8 +1181,14 @@ body:is([data-theme="light"],[data-theme="midnight"],[data-theme="cyberpunk"],[d
 }
 html{height:100%;height:-webkit-fill-available}
 body{
+  /* --vvh is updated from window.visualViewport in app.js so iOS Safari
+     (and older Android WebViews that don't honour
+     interactive-widget=resizes-content) shrink the app shell instead of
+     scrolling the page — which used to push the top of the app off
+     screen when the on-screen keyboard opened in a DM/channel. Falls
+     back to 100svh on the very first paint before the JS runs. */
   min-height:100%;min-height:-webkit-fill-available;
-  max-height:100svh;overflow:hidden;
+  height:var(--vvh, 100svh);max-height:var(--vvh, 100svh);overflow:hidden;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   background:var(--bg-color);color:var(--text-color);
   padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
@@ -1294,7 +1300,7 @@ body{
 .auth-error{color:#ff8b8b;font-size:13px;text-align:center;min-height:20px;margin-bottom:8px;font-weight:500}
 
 /* ─── App Layout ────────────────────────────────────────────── */
-#app{display:flex;height:100%;height:100dvh;height:100svh;overflow:hidden;flex:1;min-height:0}
+#app{display:flex;height:var(--vvh, 100dvh);overflow:hidden;flex:1;min-height:0}
 #app.hidden{display:none}
 
 /* Server list (leftmost column – icon strip) */
@@ -10380,7 +10386,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <!-- cache bump: social share button + story/profile list UX fixes -->
 <script src="/static/js/social.js?v=1028"></script>
 <!-- Privacy PIN lock (auto-lock on idle, admin gate, autologin gate) -->
-<script src="/static/js/pin.js?v=9"></script>
+<script src="/static/js/pin.js?v=10"></script>
 <!-- Context-aware screenshot blocker: only engages in DMs / private rooms / disappearing threads -->
 <script src="/static/js/screenshot_guard.js?v=1"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>
