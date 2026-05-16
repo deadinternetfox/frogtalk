@@ -69,6 +69,12 @@ body::after {
   background: radial-gradient(circle, rgba(255, 179, 71, 0.34) 0%, rgba(255, 179, 71, 0) 70%);
 }
 .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 36px; }
+/* Match the FrogTalk green theme — default browser blue on the dark
+   admin surface is jarring and reads as broken styling. Anchors that
+   already carry a button class keep their own appearance. */
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: #7be58f; text-decoration: underline; }
+a.btn, a.btn:hover { color: inherit; text-decoration: none; }
 .header {
   display: flex;
   align-items: center;

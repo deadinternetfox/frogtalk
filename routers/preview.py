@@ -275,11 +275,30 @@ async def _do_fetch_og(url: str) -> dict:
 
     # Standard OG fetch
     try:
-        resp = await client.get(url)
-        if resp.status_code != 200:
-            return {}
-
-        html_text = resp.text[:80000]  # Limit parsing to first 80KB
+        # Stream the response so a malicious / accidentally-large server
+        # can't exhaust our memory by sending gigabytes back. We only need
+        # the first ~80 KB of HTML for OG tags, so cap at 256 KB to leave
+        # room for late-positioned <meta> tags but bail well before any
+        # real damage.
+        _OG_FETCH_CAP = 256 * 1024
+        async with client.stream("GET", url) as resp:
+            if resp.status_code != 200:
+                return {}
+            ctype = (resp.headers.get("content-type") or "").lower()
+            # Refuse non-HTML payloads — saves us pulling down e.g. a 4 GB
+            # video that happens to live under the unfurled URL.
+            if ctype and not any(t in ctype for t in ("text/html", "application/xhtml")):
+                return {}
+            buf = bytearray()
+            async for chunk in resp.aiter_bytes():
+                buf.extend(chunk)
+                if len(buf) >= _OG_FETCH_CAP:
+                    break
+            try:
+                html_text = buf.decode(resp.encoding or "utf-8", errors="replace")
+            except Exception:
+                html_text = buf.decode("utf-8", errors="replace")
+            html_text = html_text[:80000]  # Limit parsing to first 80KB
 
         # Extract OG / twitter / description tags (order-agnostic).
         og = {"type": "link"}

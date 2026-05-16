@@ -366,6 +366,17 @@ def _apply_package_archive(archive_path: str) -> dict:
         shutil.unpack_archive(archive_path, work_dir)
         entries = [e for e in Path(work_dir).iterdir()]
         src_root = entries[0] if len(entries) == 1 and entries[0].is_dir() else Path(work_dir)
+        # Defence-in-depth: a malicious update tarball could include an
+        # absolute symlink or a top-level entry that resolves outside the
+        # temp dir (zip-slip style). Refuse to rsync anything whose
+        # resolved path escapes work_dir — combined with rsync --delete,
+        # an escape would wipe arbitrary host files.
+        try:
+            work_real = Path(work_dir).resolve(strict=True)
+            src_real = Path(src_root).resolve(strict=True)
+            src_real.relative_to(work_real)
+        except Exception:
+            return {"ok": False, "error": "archive_path_escape"}
         rsync_cmd = [
             "rsync", "-a", "--delete",
             "--exclude", ".env",

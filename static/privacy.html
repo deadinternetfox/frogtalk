@@ -340,7 +340,13 @@
 
     <h3>Device & connection data</h3>
     <ul>
-      <li><strong>IP address</strong> — temporarily logged for abuse prevention (rate limiting, brute-force defence). Not retained beyond <strong>30 days</strong> in connection logs.</li>
+      <li><strong>IP address</strong> — recorded at three points and used solely for safety:
+        <ul>
+          <li><em>At registration</em> the IP that created the account is stored alongside the account row so we can identify and remove bot-farm sign-ups. This value is kept for the life of the account but is never shown to other users.</li>
+          <li><em>At login</em> the IP, an approximate user-agent string, and the timestamp are attached to the session record so you can review and revoke active sessions. Session records are deleted when the session ends or expires.</li>
+          <li><em>On every request</em> the IP is held in memory by the rate-limiter (slowapi) to enforce per-IP caps on registration, login, federation provisioning, and abuse-prone endpoints. These counters live only in process memory and are not persisted.</li>
+        </ul>
+        Connection access logs (nginx) keep the IP for at most <strong>30 days</strong>, then are rotated and discarded. We do not sell, share, or use IPs for advertising or analytics. If you connect through a VPN or Tor, only that exit address is what we ever see.</li>
       <li><strong>Device push tokens</strong> (FCM on Android, APNs on iOS) when you opt into push notifications. Used only to deliver notifications.</li>
       <li><strong>WebRTC ICE candidates</strong> are exchanged through our signalling channel during call setup, then call media flows directly between peers.</li>
     </ul>
