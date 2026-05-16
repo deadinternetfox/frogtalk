@@ -460,10 +460,16 @@
   // loaded and the WebCrypto subset we need is present.
   function isAvailable() {
     try {
+      // `window.libsignal.Curve` is a *class* constructor — the sign /
+      // verify methods live on its prototype. (You only get a usable
+      // instance by calling `libsignal.default()`, which Signal.init
+      // does once.) Probe the prototype so this stays a cheap sync
+      // capability check.
       const C = window.libsignal && window.libsignal.Curve;
-      const hasSign = !!(C && (
-        (C.async && typeof C.async.calculateSignature === 'function')
-        || typeof C.calculateSignature === 'function'
+      const proto = (C && C.prototype) || null;
+      const hasSign = !!(proto && (
+        typeof proto.calculateSignature === 'function'
+        || typeof proto.verifySignature === 'function'
       ));
       return !!(hasSign && crypto && crypto.subtle && crypto.getRandomValues);
     } catch { return false; }

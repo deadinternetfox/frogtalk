@@ -56,6 +56,12 @@
   // ── Module-load state ────────────────────────────────────────────────
 
   let _libsignal = null;
+  // The libsignal-protocol-typescript bundle exposes `Curve` as a
+  // *class* constructor; the actual sign/verify methods live on the
+  // prototype and you only get a working object by calling the
+  // bundle's async factory (`libsignal.default()`). We cache that
+  // instance here and route all sign/verify calls through it.
+  let _curve = null;
   let _store = null;
   let _initPromise = null;
   let _bundlePromise = null;
@@ -123,29 +129,47 @@
   }
 
   // ── libsignal Curve resolver ──────────────────────────────────────
-  // In some libsignal builds `Curve.async` is a thin wrapper that only
-  // exposes the keypair / DH methods and *not* calculateSignature /
-  // verifySignature — so the old `(Curve.async || Curve)` fallback
-  // resolved to a value where `.calculateSignature` was undefined.
-  // Probe per-method and prefer whichever object actually has it.
+  // `_libsignal.Curve` is a **class constructor**, not a usable
+  // object — instance methods (calculateSignature, verifySignature,
+  // calculateAgreement…) live on its prototype. To get something we
+  // can actually call we must invoke the bundle's async factory
+  // (`libsignal.default()`) which returns `{ Curve: <instance> }`.
+  // That instance also exposes `.async` (an AsyncCurve wrapper) with
+  // the same surface; some libsignal builds put the methods on one
+  // and not the other, so we probe both per-method.
   function _curveFn(name) {
-    const C = _libsignal && _libsignal.Curve;
-    if (!C) throw new Error('libsignal Curve missing');
-    if (C.async && typeof C.async[name] === 'function') return C.async[name].bind(C.async);
-    if (typeof C[name] === 'function') return C[name].bind(C);
+    if (!_curve) throw new Error('libsignal Curve not initialised');
+    if (typeof _curve[name] === 'function') return _curve[name].bind(_curve);
+    if (_curve.async && typeof _curve.async[name] === 'function') {
+      return _curve.async[name].bind(_curve.async);
+    }
     throw new Error('libsignal Curve.' + name + ' is not a function');
   }
 
   // ── Module loader ────────────────────────────────────────────────────
 
   async function _loadLibsignal() {
-    if (_libsignal) return _libsignal;
+    if (_libsignal && _curve) return _libsignal;
     // Dynamic ESM import \u2014 the bundle assigns `window.libsignal` on
     // first evaluation as a fallback, but we prefer the module export.
     const mod = await import(LIBSIGNAL_URL);
     _libsignal = mod.default || window.libsignal;
     if (!_libsignal || !_libsignal.KeyHelper) {
       throw new Error('libsignal bundle malformed');
+    }
+    // Invoke the bundle's async factory exactly once to materialise a
+    // working Curve *instance*. Without this `_libsignal.Curve.*` are
+    // all undefined (they're on the prototype). Cache the result so
+    // subsequent calls are cheap.
+    if (!_curve) {
+      if (typeof _libsignal.default !== 'function') {
+        throw new Error('libsignal default() factory missing');
+      }
+      const built = await _libsignal.default();
+      if (!built || !built.Curve) {
+        throw new Error('libsignal default() returned no Curve');
+      }
+      _curve = built.Curve;
     }
     return _libsignal;
   }
