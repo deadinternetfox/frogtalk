@@ -950,9 +950,24 @@ if ($singleThread) {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <!-- Critical: prevent FOUC white flash before style.css loads -->
-    <style>html,body{background:#0a0e0a;color:#00ff41;}</style>
+    <style>
+        html,body{background:#0a0e0a;color:#00ff41;}
+        :root{
+            --safe-top:env(safe-area-inset-top,0px);
+            --safe-right:env(safe-area-inset-right,0px);
+            --safe-bottom:env(safe-area-inset-bottom,0px);
+            --safe-left:env(safe-area-inset-left,0px);
+        }
+        body{
+            padding-top:var(--safe-top);
+            padding-right:var(--safe-right);
+            padding-bottom:var(--safe-bottom);
+            padding-left:var(--safe-left);
+            box-sizing:border-box;
+        }
+    </style>
     <?php
         // Strip emoji / pictographs from the board title for the browser tab
         // (the on-page <h2> still uses the full title with emoji). Some
@@ -2205,6 +2220,30 @@ if ($singleThread) {
             100% { transform: translateY(-10vh) rotate(360deg); opacity: 0; }
         }
         
+        /* Matrix-rain backdrop — drifting green columns behind everything */
+        .matrix-bg {
+            position: fixed; inset: 0; pointer-events: none; z-index: 0;
+            opacity: 0.55;
+            background:
+                radial-gradient(1200px 600px at 50% -10%, rgba(0,255,65,0.10), transparent 62%),
+                radial-gradient(900px 500px at 10% 110%, rgba(0,200,80,0.07), transparent 65%),
+                repeating-linear-gradient(180deg,
+                    transparent 0,
+                    transparent 18px,
+                    rgba(0,255,65,0.05) 18px,
+                    rgba(0,255,65,0.05) 19px);
+            background-size: 100% 100%, 100% 100%, 100% 220px;
+            animation: matrixDrift 24s linear infinite;
+            will-change: background-position;
+        }
+        @keyframes matrixDrift {
+            from { background-position: 0 0, 0 0, 0 0; }
+            to   { background-position: 0 0, 0 0, 0 220px; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .matrix-bg { animation: none; }
+        }
+
         /* Scanline overlay */
         .scanlines { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px); }
         
