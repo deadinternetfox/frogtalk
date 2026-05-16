@@ -4091,7 +4091,16 @@ body[data-theme="frog"] .invite-card-icon{
   /* keyboard-safe: auth & modals scroll instead of getting clipped */
   #auth-overlay{align-items:flex-start;padding:20px 16px 40px}
   .auth-box{margin-top:8px;padding:28px 20px}
-  .modal-overlay{align-items:flex-start;overflow-y:auto;padding:16px}
+  /* Modal overlay on mobile: top-anchored, scrollable, and padded
+     against the system safe-area insets so the modal's last row
+     (Save / Cancel etc.) never hides behind the Android nav bar or
+     iOS home indicator. dvh keeps the modal visually inside the
+     dynamic viewport when the URL bar shows/hides. */
+  .modal-overlay{
+    align-items:flex-start;overflow-y:auto;
+    padding:max(16px,var(--safe-top)) max(16px,var(--safe-right))
+            calc(40px + var(--safe-bottom)) max(16px,var(--safe-left));
+  }
   .modal{margin-top:0;max-height:none}
 }
 @media(max-width:400px){
@@ -10282,7 +10291,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <!-- cache bump: social share button + story/profile list UX fixes -->
 <script src="/static/js/social.js?v=1028"></script>
 <!-- Privacy PIN lock (auto-lock on idle, admin gate, autologin gate) -->
-<script src="/static/js/pin.js?v=5"></script>
+<script src="/static/js/pin.js?v=6"></script>
 <!-- Context-aware screenshot blocker: only engages in DMs / private rooms / disappearing threads -->
 <script src="/static/js/screenshot_guard.js?v=1"></script>
 <script src="/static/js/app.js?v=__APP_ASSET_VERSION__"></script>

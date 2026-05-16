@@ -367,7 +367,12 @@
       }
       return a;
     };
-    const privacyKp = !!(_cfg && _cfg.pin_keypad_privacy);
+    // Privacy keypad was a shape-only render (●▲■… instead of
+    // digits). In practice it left users with no way to know which
+    // shape was which digit — the mapping reshuffles every attempt,
+    // so a memorised "shape PIN" produces different actual digits
+    // each time. Removed from the UI; the keypad always shows digits.
+    const privacyKp = false;
     const digits = _shuffle(['1','2','3','4','5','6','7','8','9']);
     const cells = [];
     for (let i = 0; i < 9; i++) cells.push({ kind: 'digit', digit: digits[i], shape: SHAPES[i] });
@@ -899,11 +904,6 @@
       'Always re-enter the PIN after signing in on this account.',
       checkbox('pin-opt-autologin', !!_cfg.pin_require_after_autologin),
     ));
-    root.appendChild(row(
-      'Privacy keypad',
-      'Hide digits on the lock screen — only shape glyphs are shown. Position still reshuffles every attempt; this adds a second layer against shoulder-surfing and screen recordings.',
-      checkbox('pin-opt-privacy-kp', !!_cfg.pin_keypad_privacy),
-    ));
   }
 
   let _commitTimer = null;
@@ -928,7 +928,11 @@
       require_for_admin:        requireForAdmin,
       require_after_autologin:  !!($('pin-opt-autologin')  || {}).checked,
       idle_timeout_sec:         Number(($('pin-opt-idle')  || {}).value || 300),
-      keypad_privacy:           !!($('pin-opt-privacy-kp') || {}).checked,
+      // keypad_privacy is no longer surfaced in the UI (see
+      // _renderOptionsPanel). Echo the current cfg value back so a
+      // legacy account that had it on can disable it via the
+      // server API rather than getting silently re-enabled here.
+      keypad_privacy:           !!Number(_cfg.pin_keypad_privacy || 0),
     };
     try {
       const res = await _api('/api/auth/pin/options', 'PATCH', body);
