@@ -240,14 +240,23 @@ async function submitCustomEmoji() {
   }
 }
 
-// Replace :emoji_name: with custom emoji images in messages
+// Replace :emoji_name: with custom emoji images in messages.
+// Defence-in-depth: even though the server validates magic bytes on upload,
+// we re-validate the data: URL prefix here and HTML-escape the attribute
+// value so a malicious / legacy row can't break out of the src attribute
+// and inject onerror/<script>. The :name: capture is already restricted
+// by the regex character class.
 function renderCustomEmojisInText(text) {
+  const _attrEsc = (window.UI && UI.escHtml) ? UI.escHtml : (s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
+  const _safeDataUrl = /^data:image\/(png|jpe?g|gif|webp);base64,[A-Za-z0-9+/=]+$/;
   return text.replace(/:([a-z0-9_]{2,32}):/g, (match, name) => {
     const emoji = _customEmojis.find(e => e.name === name);
-    if (emoji) {
-      return `<img src="${emoji.image_data}" alt=":${name}:" title=":${name}:" class="custom-emoji-inline" style="width:20px;height:20px;vertical-align:middle">`;
-    }
-    return match;
+    if (!emoji) return match;
+    const raw = String(emoji.image_data || '');
+    if (!_safeDataUrl.test(raw)) return match;
+    const safeSrc = _attrEsc(raw);
+    const safeName = _attrEsc(name);
+    return `<img src="${safeSrc}" alt=":${safeName}:" title=":${safeName}:" class="custom-emoji-inline" style="width:20px;height:20px;vertical-align:middle">`;
   });
 }
 
