@@ -1460,7 +1460,7 @@
               <div class="demo-av">⚡</div>
               <div class="demo-msg-body">
                 <div class="demo-msg-name">VaultFrog</div>
-                <div class="demo-msg-text enc">🔒 end-to-end encrypted · ECDH + AES-256-GCM</div>
+                <div class="demo-msg-text enc">🔒 end-to-end encrypted · Signal Protocol</div>
               </div>
             </div>
           </div>
@@ -1497,8 +1497,8 @@
   <div class="features-grid">
     <div class="feature-card">
       <div class="feature-icon">🔒</div>
-      <h3>End-to-End Encrypted DMs</h3>
-      <p>Every DM is encrypted client-side with ECDH + AES-256-GCM. The server only ever sees ciphertext.</p>
+      <h3>End-to-End Encrypted DMs &amp; Rooms</h3>
+      <p>DMs are encrypted client-side with the Signal Protocol (X3DH + Double Ratchet). Rooms use Signal Sender Keys so each device holds its own sending chain. The server only ever sees ciphertext.</p>
     </div>
     <div class="feature-card">
       <div class="feature-icon">🌐</div>
@@ -1629,8 +1629,9 @@
       <h2>Built for Privacy,<br>Not Profit</h2>
       <p>Most chat apps monetize your conversations. FrogTalk is different — your messages are encrypted before they ever leave your device.</p>
       <ul class="privacy-checks">
-        <li><span class="check">✓</span> ECDH key exchange — shared secret only on your devices</li>
-        <li><span class="check">✓</span> AES-256-GCM encryption on every DM</li>
+        <li><span class="check">✓</span> Signal Protocol DMs — X3DH + Double Ratchet, forward secrecy per message</li>
+        <li><span class="check">✓</span> Sender Keys for rooms — per-device chain, signed with XEdDSA</li>
+        <li><span class="check">✓</span> Verifiable Safety Numbers in the in-app 🔒 panel</li>
         <li><span class="check">✓</span> WebRTC P2P calls — media never touches our server</li>
         <li><span class="check">✓</span> No analytics, no third-party SDKs</li>
         <li><span class="check">✓</span> Self-hosted — run your own instance</li>
@@ -1638,21 +1639,20 @@
       </ul>
     </div>
     <div class="code-block">
-<span class="cm">// Your DM encryption (client-side)</span>
-<span class="kw">const</span> shared = <span class="kw">await</span> crypto.subtle.deriveBits({
-  name: <span class="str">'ECDH'</span>,
-  public: theirPublicKey
-}, myPrivateKey, <span class="str">256</span>);
+<span class="cm">// Your DM encryption (client-side, Signal Protocol)</span>
+<span class="kw">const</span> session = <span class="kw">await</span> Signal.startSession(theirBundle);
+<span class="cm">// X3DH agreement → Double Ratchet session</span>
 
-<span class="kw">const</span> aesKey = <span class="kw">await</span> crypto.subtle.deriveKey({
-  name: <span class="str">'HKDF'</span>, hash: <span class="str">'SHA-256'</span>, ...
-}, shared, { name: <span class="str">'AES-GCM'</span>, length: <span class="str">256</span> });
+<span class="kw">const</span> envelope = <span class="kw">await</span> Signal.encryptDM(
+  peerUserId, plaintext
+);
+<span class="cm">// Every message advances the ratchet ↳ forward secrecy</span>
 
 <span class="cm">// Server receives only ciphertext 🔒</span>
-<span class="kw">const</span> encrypted = <span class="kw">await</span> crypto.subtle.encrypt(
-  { name: <span class="str">'AES-GCM'</span>, iv },
-  aesKey, plaintext
-);
+<span class="kw">await</span> fetch(<span class="str">'/api/dms/send'</span>, {
+  method: <span class="str">'POST'</span>,
+  body: JSON.stringify({ to: peerUserId, envelope })
+});
     </div>
   </div>
 </section>

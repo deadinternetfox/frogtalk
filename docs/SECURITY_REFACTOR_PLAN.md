@@ -25,7 +25,7 @@ Status: IN PROGRESS — Phase 1, 2, 3, and 4 shipped (Track A scaffold + Track B
 | F — Linked devices | not started | — | — |
 | G — Sealed Sender + metadata | not started | — | — |
 | H — Cleanup (transitional code) | not started | — | — |
-| H — Cleanup (transitional code) | doc refresh: update marketing/security copy on `static/home.html` + `static/privacy.html`, surface Signal + Sender-Keys in `README.md`, refresh `static/docs-api.html`/`static/docs-node.html` where they describe encryption; bump version refs | not started | — | — |
+| H — Cleanup (transitional code) | doc refresh: marketing/security copy on `static/home.html` + `static/privacy.html` rewritten for Signal Protocol DMs + Sender-Keys rooms + DTLS-fingerprint calls; `README.md` Encryption Model section rewritten; `docs-api.html`/`docs-node.html` had no stale crypto copy | ✅ shipped | — | — |
 
 This document is the single source of truth for the hardening tracks
 raised by an external pentester. All tracks are in scope; they are

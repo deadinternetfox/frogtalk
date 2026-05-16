@@ -307,7 +307,7 @@
     <h2>Plain-English summary</h2>
     <p>If you only read one section, read this:</p>
     <ul class="checks">
-      <li><strong>Direct messages</strong> are end-to-end encrypted with ECDH + AES-256-GCM. We can't read them, and neither can anyone with access to our servers.</li>
+      <li><strong>Direct messages</strong> are end-to-end encrypted with the Signal Protocol (X3DH + Double Ratchet). We can't read them, and neither can anyone with access to our servers.</li>
       <li><strong>Voice and video calls</strong> are peer-to-peer over WebRTC. Audio and video never touch our server.</li>
       <li>We <strong>do not run analytics</strong>, do not embed third-party trackers, and do not sell or share your data with advertisers.</li>
       <li>The only personal information required to sign up is a <strong>nickname and password</strong>. No email, no phone number.</li>
@@ -328,14 +328,14 @@
     <ul>
       <li><strong>Nickname</strong> — your display handle, chosen by you.</li>
       <li><strong>Password hash</strong> — stored salted and hashed; we never see your plaintext password.</li>
-      <li><strong>Public encryption key</strong> — needed by other users to send you encrypted DMs. Your private key never leaves your device.</li>
+      <li><strong>Public encryption keys</strong> — your Signal identity key plus a signed prekey and a pool of one-time prekeys, so other users can start an encrypted DM with you even while you're offline. Your private keys never leave your device.</li>
       <li><strong>Optional profile data</strong> — avatar, status, bio, pronouns. Whatever you fill in is shown to other users; what you leave blank is never collected.</li>
     </ul>
 
     <h3>Message metadata (server-visible)</h3>
     <ul>
       <li><strong>Sender, recipient, room ID, and timestamp</strong> for every message. The <em>contents</em> of DMs are encrypted; the routing envelope is not.</li>
-      <li><strong>Room/channel messages</strong> are stored server-side as plaintext so that history loads on new devices and servers can search content for moderation. If you need encryption inside a group, use a DM.</li>
+      <li><strong>Room and channel messages</strong> are end-to-end encrypted with Signal Sender Keys — the server stores only ciphertext. The exception is a channel with an outbound Discord/Telegram bridge enabled by an operator, which intentionally falls back to a shared room key so the bridge can forward readable text; this is clearly indicated in the channel header.</li>
     </ul>
 
     <h3>Device & connection data</h3>
@@ -373,17 +373,40 @@
 
   <section class="policy" id="encryption">
     <h2>End-to-end encryption</h2>
-    <p>Direct messages between two FrogTalk users are end-to-end encrypted in the browser/native client before transmission:</p>
+    <p>FrogTalk uses three different end-to-end cryptosystems depending on the surface, each picked for the threat model of that surface. All encryption happens in your browser, desktop client, or mobile app — the server only ever sees ciphertext.</p>
+
+    <h3 style="margin-top:18px">Direct messages — Signal Protocol</h3>
+    <p>Every DM is encrypted with the Signal Protocol (the same one used by WhatsApp and Signal):</p>
     <ul>
-      <li><strong>Key exchange:</strong> ECDH on the P-256 curve via the WebCrypto API.</li>
-      <li><strong>Key derivation:</strong> HKDF-SHA-256 from the shared secret.</li>
-      <li><strong>Symmetric cipher:</strong> AES-256-GCM with a per-message random IV.</li>
-      <li><strong>Private keys</strong> are generated on your device and never leave it. They are stored in IndexedDB / Keychain / Keystore depending on platform.</li>
+      <li><strong>Key agreement:</strong> X3DH against the recipient's published prekey bundle (identity key + signed prekey + one-time prekey).</li>
+      <li><strong>Per-message ratchet:</strong> Double Ratchet (Curve25519 DH + HKDF-SHA-256 + AES-256-GCM with HMAC). Every message advances the ratchet so a future device compromise cannot decrypt past messages.</li>
+      <li><strong>Verification:</strong> the in-app <em>Encryption info</em> modal shows a Safety Number (verifiable fingerprint of both identity keys) and a 4-emoji shortcode. A change is announced in-room with a system toast.</li>
+      <li><strong>Private keys</strong> are generated on your device and stored in IndexedDB / iOS Keychain / Android Keystore depending on platform. They never leave.</li>
     </ul>
+
+    <h3 style="margin-top:18px">Room messages — Signal Sender Keys</h3>
+    <p>Group conversations use a Sender-Keys design built on top of the same identity layer:</p>
+    <ul>
+      <li>Each device of yours holds its own sending chain (HMAC-SHA-256 chain-key ratchet → HKDF-SHA-256 → AES-256-GCM with bound additional-authenticated-data).</li>
+      <li>The chain key is signed with an XEdDSA key derived from your Curve25519 identity so other members can verify authorship even when traffic is fanned out by the server.</li>
+      <li>When you enter a room, your client distributes a <em>Sender-Key Distribution Message</em> (SKDM) to each member through their Signal DM session. The SKDM itself is ciphertext to the server.</li>
+      <li>If a member is offline, the SKDM is buffered in an opaque server spool and delivered as soon as that recipient comes back online.</li>
+      <li>When a member is banned, the remaining members automatically rotate their sender keys so the removed member cannot decrypt future messages.</li>
+    </ul>
+
+    <h3 style="margin-top:18px">Voice & video calls — DTLS-fingerprint signing</h3>
+    <p>WebRTC calls already encrypt media end-to-end with DTLS-SRTP, but a hostile signalling server could in principle swap fingerprints during call setup. FrogTalk closes that gap:</p>
+    <ul>
+      <li>Both the offer and answer SDP carry an XEdDSA signature over the DTLS fingerprint, produced by your Signal identity key.</li>
+      <li>The receiving client verifies the signature against the peer's pinned identity before answering. A mismatch surfaces in-call and the connection is refused.</li>
+      <li>Once verified, the Safety Number you see for that user in DMs also applies to the call.</li>
+    </ul>
+
     <div class="callout">
-      <strong>What this means in practice:</strong> a court order, a server breach, or a rogue admin can reveal who messaged whom and when, but cannot reveal the contents of those direct messages. We have no key to give.
+      <strong>What this means in practice:</strong> a court order, a server breach, or a rogue admin can reveal the metadata of who messaged whom and when, but cannot reveal the contents of direct messages, room messages, or call media. We have no key to give.
     </div>
-    <p>Public rooms, channels, and the social feed are <strong>not</strong> end-to-end encrypted, by design — they are public spaces. Treat anything you post in a public room the same way you'd treat a public tweet.</p>
+
+    <p>The one explicit exception is a <strong>room with an outbound Discord or Telegram bridge enabled</strong>. Because the bridge has to forward readable text to a third-party platform, those rooms fall back to a transitional AES key shared between members. This is clearly indicated in the channel header, and DMs are <strong>never</strong> bridged.</p>
   </section>
 
   <section class="policy" id="bridges">
