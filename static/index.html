@@ -4141,20 +4141,24 @@ body[data-theme="frog"] .invite-card-icon{
      Padding uses max() against env(safe-area-inset-*) so on devices
      with a notch / status bar / on-screen nav the auth box never
      hugs the very top (was visibly tucked under the clock on Galaxy
-     phones) or hides behind the bottom soft-nav. */
+     phones) or hides behind the bottom soft-nav.
+     `align-items:safe center` keeps the box centred when it fits and
+     gracefully falls back to top-anchored when it would otherwise
+     overflow the viewport (no clipping). */
   #auth-overlay{
-    align-items:flex-start;
+    align-items:safe center;
     padding:max(20px,var(--safe-top)) max(16px,var(--safe-right))
             max(40px,calc(var(--safe-bottom) + 16px)) max(16px,var(--safe-left));
   }
-  .auth-box{margin-top:8px;padding:28px 20px}
-  /* Modal overlay on mobile: top-anchored, scrollable, and padded
-     against the system safe-area insets so the modal's last row
-     (Save / Cancel etc.) never hides behind the Android nav bar or
-     iOS home indicator. dvh keeps the modal visually inside the
-     dynamic viewport when the URL bar shows/hides. */
+  .auth-box{margin-top:0;padding:28px 20px}
+  /* Modal overlay on mobile: centred when the dialog fits, scrolls
+     from the top when it doesn't, and padded against the system
+     safe-area insets so the modal's last row (Save / Cancel etc.)
+     never hides behind the Android nav bar or iOS home indicator.
+     Using `safe center` so a tall modal (long Settings tabs) still
+     starts from the top instead of clipping. */
   .modal-overlay{
-    align-items:flex-start;overflow-y:auto;
+    align-items:safe center;overflow-y:auto;
     padding:max(16px,var(--safe-top)) max(16px,var(--safe-right))
             calc(40px + var(--safe-bottom)) max(16px,var(--safe-left));
   }
