@@ -10,6 +10,7 @@ import database as db
 from deps import get_current_user
 from routers._media_safety import safe_media_type, media_response_headers
 
+public_router = APIRouter(prefix="/users", tags=["users"])
 router = APIRouter(prefix="/users", tags=["users"])
 
 
@@ -31,7 +32,7 @@ _DATA_URL_RE = re.compile(
 _DEFAULT_FROG_AVATAR = "/static/icons/icon-192.png"
 
 
-@router.get("/{user_id}/avatar.png")
+@public_router.get("/{user_id}/avatar.png")
 async def get_user_avatar_image(user_id: int):
     """Return the user's avatar bytes as a real image response.
 

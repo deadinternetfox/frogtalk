@@ -810,6 +810,7 @@ async def _security_headers(request: Request, call_next):
     return response
 
 app.include_router(auth.router, prefix="/api")
+app.include_router(users.public_router, prefix="/api")
 # Sensitive routers — server-side PIN gate sits in front. When the user
 # has has_pin && pin_require_on_unlock and the session hasn't verified
 # the PIN this process (or has been idle past their timeout), every
