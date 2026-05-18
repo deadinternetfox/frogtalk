@@ -5724,6 +5724,9 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
   const logoPip = `<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;line-height:1">${meta.logo}</span>`;
   const logoBadge = `<span style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;line-height:1">${meta.logo}</span>`;
   const safeNick = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(nickname) : String(nickname).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+  // For the in-sentence reference, strip any leading @ the user may have
+  // baked into their remote display name so the sentence reads as prose.
+  const safeNickPlain = String(safeNick).replace(/^@+/, '');
   const safePlat = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(meta.label) : meta.label;
   const sourceFallback = sourceName ? '' : 'Loading source...';
   const safeSourceName = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceName || sourceFallback || 'Source unavailable')) : String(sourceName || sourceFallback || 'Source unavailable');
@@ -5764,7 +5767,7 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
         <div class="profile-section" style="background:#1a1a1a;border-radius:12px;padding:14px;margin-bottom:12px;border-left:3px solid ${meta.color}">
           <div class="profile-section-title" style="font-size:11px;color:${meta.color};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:700">Bridged Connection</div>
           <div style="font-size:14px;color:#e0e0e0;line-height:1.55">
-            ${safeNick} is chatting from <strong style="color:${meta.color}">${safePlat}</strong> through a bridged connection &mdash; they're not a FrogTalk account.
+            ${safeNickPlain} is chatting from <strong style="color:${meta.color}">${safePlat}</strong> through a bridged connection &mdash; they're not a FrogTalk account.
             <div style="margin-top:8px;color:#aaa;font-size:13px">Their messages are mirrored here in real time, but features that need a FrogTalk account aren't available.</div>
           </div>
         </div>
