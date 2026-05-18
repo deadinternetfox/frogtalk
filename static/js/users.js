@@ -449,6 +449,30 @@ const Users = (() => {
     } catch {}
   }
 
+  // Live-drop a user from the channel member list + WS presence + State
+  // mirror so a ban/kick takes effect in the sidebar without a tab-out/in
+  // round trip. Caller (ws.js `user_banned` handler) also asks the
+  // @mention autocomplete cache to refresh so the user disappears from
+  // the dropdown candidates too.
+  function removeMember(userId, nickname) {
+    let changed = false;
+    const before = _channelMembers.length;
+    _channelMembers = _channelMembers.filter(m => !_sameUser(m.user_id, m.nickname, userId, nickname));
+    if (_channelMembers.length !== before) changed = true;
+    const beforeAll = _allUsers.length;
+    _allUsers = _allUsers.filter(u => !_sameUser(u.user_id, u.nickname, userId, nickname));
+    if (_allUsers.length !== beforeAll) changed = true;
+    try {
+      if (Array.isArray(State.onlineUsers)) {
+        const beforeOnline = State.onlineUsers.length;
+        State.onlineUsers = State.onlineUsers.filter(u => !_sameUser(u.user_id, u.nickname, userId, nickname));
+        if (State.onlineUsers.length !== beforeOnline) changed = true;
+      }
+    } catch {}
+    if (changed) _renderFiltered();
+    return changed;
+  }
+
   function getPresenceByNickname(nickname) {
     const nick = String(nickname || '').toLowerCase();
     if (!nick) return 'offline';
@@ -483,5 +507,5 @@ const Users = (() => {
     return 'online';
   }
 
-  return { updateList, updateAvatar, updateDisplayName, updatePresence, loadChannelMembers, getPresenceByNickname };
+  return { updateList, updateAvatar, updateDisplayName, updatePresence, loadChannelMembers, getPresenceByNickname, removeMember };
 })();

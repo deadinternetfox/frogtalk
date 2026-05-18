@@ -3967,6 +3967,7 @@ function handleRoomBan(data) {
     const reason = (data.reason || '').trim();
     const banner = data.banned_by || 'a moderator';
     const expires = data.expires_at;
+    const isKick = !!expires;
     let durationLabel = 'Permanent';
     if (expires) {
       try {
@@ -4030,8 +4031,8 @@ function handleRoomBan(data) {
     wrap.innerHTML = `
       <div role="alertdialog" aria-modal="true" style="background:linear-gradient(180deg,#1a0d0d 0%,#0a0505 100%);border:1px solid #7f1d1d;border-radius:14px;width:100%;max-width:480px;box-shadow:0 24px 70px rgba(220,38,38,.25);overflow:hidden;">
         <div style="padding:22px 24px 16px;border-bottom:1px solid #4d1f1f;text-align:center;">
-          <div style="font-size:42px;line-height:1;margin-bottom:8px;">🚫</div>
-          <div style="font-weight:800;color:#fca5a5;font-size:20px;letter-spacing:.3px;">You have been banned</div>
+          <div style="font-size:42px;line-height:1;margin-bottom:8px;">${isKick ? '👢' : '🚫'}</div>
+          <div style="font-weight:800;color:#fca5a5;font-size:20px;letter-spacing:.3px;">${isKick ? 'You have been kicked' : 'You have been banned'}</div>
           <div style="color:#9ca3af;font-size:14px;margin-top:6px;">from <span style="color:#fff;font-weight:700;">#${safeRoom}</span></div>
         </div>
         <div style="padding:16px 24px;display:flex;flex-direction:column;gap:12px;">

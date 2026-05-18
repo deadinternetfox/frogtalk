@@ -644,10 +644,19 @@ const WS = (() => {
         break;
       }
       case 'user_banned': {
-        // A peer was banned; show a small system notice if currently in that room
+        // A peer was banned/kicked from this room. Surface a system toast,
+        // live-remove them from the sidebar member list, and refresh the
+        // @mention candidates so they vanish from autocomplete too — no
+        // tab-out/tab-in needed.
         try {
           if (data.room && data.room === State.currentRoom && data.nickname) {
             UI.showToast(`@${data.nickname} was banned from #${data.room}`, 'info');
+          }
+          if (typeof Users !== 'undefined' && typeof Users.removeMember === 'function') {
+            Users.removeMember(data.user_id, data.nickname);
+          }
+          if (typeof window.refreshMentionUsers === 'function') {
+            window.refreshMentionUsers(true);
           }
         } catch {}
         break;
