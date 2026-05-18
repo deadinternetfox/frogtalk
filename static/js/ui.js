@@ -5764,7 +5764,7 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
         <div class="profile-section" style="background:#1a1a1a;border-radius:12px;padding:14px;margin-bottom:12px;border-left:3px solid ${meta.color}">
           <div class="profile-section-title" style="font-size:11px;color:${meta.color};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:700">Bridged Connection</div>
           <div style="font-size:14px;color:#e0e0e0;line-height:1.55">
-            <strong style="color:#fff">@${safeNick}</strong> is chatting from <strong style="color:${meta.color}">${safePlat}</strong> through a bridged connection &mdash; they're not a FrogTalk account.
+            ${safeNick} is chatting from <strong style="color:${meta.color}">${safePlat}</strong> through a bridged connection &mdash; they're not a FrogTalk account.
             <div style="margin-top:8px;color:#aaa;font-size:13px">Their messages are mirrored here in real time, but features that need a FrogTalk account aren't available.</div>
           </div>
         </div>
