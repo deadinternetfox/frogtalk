@@ -4745,17 +4745,36 @@ async function showProfile() {
   if (autoLoginEl) {
     autoLoginEl.checked = localStorage.getItem('frogtalk-auto-login') !== 'false';
     const hintEl = document.getElementById('auto-login-pin-hint');
+    const _readHasPin = () => {
+      try {
+        const c = window.Pin && Pin.config && Pin.config();
+        return !!(c && c.has_pin);
+      } catch { return false; }
+    };
     const syncHint = () => {
       if (!hintEl) return;
       // Show only when auto-login is on AND user hasn't set a PIN yet.
-      let hasPin = false;
-      try { hasPin = !!(window.Pin && Pin.config && Pin.config().has_pin); } catch {}
-      hintEl.style.display = (autoLoginEl.checked && !hasPin) ? '' : 'none';
+      hintEl.style.display = (autoLoginEl.checked && !_readHasPin()) ? '' : 'none';
     };
+    // Initial render from cached config…
     syncHint();
+    // …then refresh from server in the background so a stale _cfg
+    // (e.g. user disabled PIN in another tab / earlier in this session)
+    // doesn't keep the hint hidden after a fresh modal open.
+    try {
+      if (window.Pin && typeof Pin.refreshFromServer === 'function') {
+        Pin.refreshFromServer().then(syncHint).catch(() => {});
+      }
+    } catch {}
     autoLoginEl.onchange = () => {
       localStorage.setItem('frogtalk-auto-login', autoLoginEl.checked ? 'true' : 'false');
       syncHint();
+      // Re-check with fresh server state on user interaction too.
+      try {
+        if (window.Pin && typeof Pin.refreshFromServer === 'function') {
+          Pin.refreshFromServer().then(syncHint).catch(() => {});
+        }
+      } catch {}
     };
     const hintLink = document.getElementById('auto-login-pin-hint-link');
     if (hintLink && !hintLink._wired) {
