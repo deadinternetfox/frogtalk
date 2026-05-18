@@ -1090,11 +1090,35 @@ const Rooms = (() => {
     // Re-apply ban banner if this room had a prior `room_ban` event
     // (composer is replaced by the inline "Banned by …" banner). For
     // any other room, this call clears any stale ban banner left over.
+    //
+    // Edge case: if our WS got force-closed when the ban landed (code
+    // 4003 → auto-reconnect suppressed), a subsequent `room_unban` push
+    // from the server has nowhere to land and the local _roomBans entry
+    // outlives the actual ban. The user then re-joins via invite/link
+    // and would see a phantom red banner. Detect that case by checking
+    // whether the room is back in State.rooms (server-side /api/rooms
+    // filters out rooms the caller is currently banned from), and drop
+    // the stale entry + show the green "you're unbanned" confirmation.
+    let _staleBanCleared = false;
+    try {
+      const inRooms = !!(State.rooms || []).find(r => r.name === name);
+      if (inRooms && window._roomBans && window._roomBans[name]) {
+        delete window._roomBans[name];
+        _staleBanCleared = true;
+      }
+    } catch {}
     try {
       if (typeof window._applyRoomBanUI === 'function') {
         window._applyRoomBanUI(name);
       }
     } catch {}
+    if (_staleBanCleared) {
+      try {
+        if (typeof window._showRoomUnbannedBanner === 'function') {
+          window._showRoomUnbannedBanner(name, {});
+        }
+      } catch {}
+    }
 
     // Music channels: chat stays open but we lock the attachment bar down to
     // pictures + GIFs only so nobody can drop a voice note or a 2-minute
