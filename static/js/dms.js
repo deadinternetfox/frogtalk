@@ -2320,6 +2320,10 @@ async function sendDMMessage () {
   clearReplyToDM();
   input.value = '';
   autoResize(input);
+  // Re-snap AFTER input/reply chip layout changes settle. Mobile needs
+  // this because the soft keyboard collapse + input shrink happen after
+  // the optimistic append, pushing the new bubble below the viewport.
+  _scrollDMToBottomStable();
 }
 
 /* ── Incoming WS DM message ─────────────────────────────────────────────────── */

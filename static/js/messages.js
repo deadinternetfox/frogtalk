@@ -3145,13 +3145,18 @@ const Messages = (() => {
 function scrollToBottom(smooth) {
   const area = document.getElementById('messages-area');
   if (!area) return;
+  const snap = () => { area.scrollTop = area.scrollHeight; };
   if (smooth) {
     area.scrollTo({ top: area.scrollHeight, behavior: 'smooth' });
   } else {
-    area.scrollTop = area.scrollHeight;
+    snap();
   }
-  const snap = () => { area.scrollTop = area.scrollHeight; };
   requestAnimationFrame(() => { snap(); requestAnimationFrame(snap); });
+  // Mobile: input shrink after clear, attachment chip removal, and soft
+  // keyboard collapse all reshape the layout AFTER this call. Without
+  // these delayed re-snaps, the freshly-sent message ends up just below
+  // the visible viewport. Desktop is unaffected (already at bottom).
+  [80, 220, 500, 900].forEach(ms => setTimeout(snap, ms));
   _setJumpPipVisible(false);
 }
 
