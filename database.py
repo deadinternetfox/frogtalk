@@ -4915,7 +4915,16 @@ def can_moderate_room(room_name: str, user_id: int, is_admin: bool) -> bool:
 
 def ban_user_from_room(room_id: int, user_id: int, banned_by: int, 
                        reason: str = "", duration_minutes: Optional[int] = None) -> bool:
-    """Ban a user from a room. Duration None = permanent."""
+    """Ban a user from a room. Duration None = permanent.
+
+    Also drops the user's `room_members` row so the room disappears from
+    their channel list on the next /api/rooms refresh — without this,
+    short kicks still leave the banned room "joined" in the sidebar and
+    a banned user could trivially navigate back into it from cache. For
+    permanent bans `user_can_access_room` will refuse re-join; for
+    timed kicks the user can re-join via discovery / invite after the
+    timer expires.
+    """
     expires = None
     if duration_minutes:
         expires = (datetime.utcnow() + timedelta(minutes=duration_minutes)).isoformat()
@@ -4925,10 +4934,30 @@ def ban_user_from_room(room_id: int, user_id: int, banned_by: int,
                 INSERT OR REPLACE INTO room_bans (room_id, user_id, banned_by, reason, expires_at)
                 VALUES (?,?,?,?,?)
             """, (room_id, user_id, banned_by, reason, expires))
+            con.execute(
+                "DELETE FROM room_members WHERE room_id=? AND user_id=?",
+                (room_id, user_id),
+            )
             con.commit()
         return True
     except sqlite3.IntegrityError:
         return False
+
+
+def get_user_active_room_ban_ids(user_id: int) -> set:
+    """Return the set of room_ids the user is currently (non-expired) banned from."""
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT room_id FROM room_bans
+                WHERE user_id=? AND (expires_at IS NULL OR expires_at > datetime('now'))
+                """,
+                (user_id,),
+            ).fetchall()
+        return {int(r["room_id"] if hasattr(r, "keys") else r[0]) for r in rows}
+    except Exception:
+        return set()
 
 
 def unban_user_from_room(room_id: int, user_id: int) -> bool:
@@ -5060,6 +5089,35 @@ def is_user_globally_banned(user_id: int) -> bool:
             AND (expires_at IS NULL OR expires_at > datetime('now'))
         """, (user_id,)).fetchone()
     return row is not None
+
+
+def get_active_global_ban(user_id: int) -> Optional[Dict]:
+    """Return the user's currently-active global ban row, or None."""
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT user_id, banned_by, reason, expires_at, created_at
+            FROM global_bans WHERE user_id=?
+            AND (expires_at IS NULL OR expires_at > datetime('now'))
+            """,
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_active_room_ban(room_id: int, user_id: int) -> Optional[Dict]:
+    """Return the user's currently-active room ban row for `room_id`, or None."""
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT room_id, user_id, banned_by, reason, expires_at
+            FROM room_bans
+            WHERE room_id=? AND user_id=?
+            AND (expires_at IS NULL OR expires_at > datetime('now'))
+            """,
+            (room_id, user_id),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def global_mute_user(user_id: int, muted_by: int, reason: str = "",

@@ -250,6 +250,20 @@ async def block_user(nickname: str, current_user: dict = Depends(get_current_use
     if not profile:
         return JSONResponse(status_code=404, content={"error": "User not found"})
     db.block_user(current_user["id"], profile["id"])
+    # Federation mirror — peers apply the same block locally. Signed
+    # under the blocker's home server key; receivers reject unsigned or
+    # cross-origin events.
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "user.blocked",
+            "payload": {
+                "blocker_nickname": current_user.get("nickname"),
+                "blocked_nickname": profile.get("nickname"),
+            },
+        })
+    except Exception:
+        pass
     return {"ok": True}
 
 

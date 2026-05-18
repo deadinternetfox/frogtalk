@@ -608,6 +608,26 @@ async def login(request: Request, body: LoginRequest):
         if not boot:
             return JSONResponse(status_code=401, content={"error": "Invalid nickname or password"})
         user = boot["user"]
+    # Node-level ban check: reject the login with a polished, informative
+    # payload so the client can render a proper "banned from this node"
+    # screen instead of dropping the user onto the main app where the
+    # WS would just disconnect them. We expose reason + expires_at
+    # because the user already knows they were banned (server admin
+    # told them); leaking the existence of a ban here is fine and helps
+    # them appeal it.
+    try:
+        ban = db.get_active_global_ban(user["id"])
+    except Exception:
+        ban = None
+    if ban:
+        banner = db.get_user_by_id(ban.get("banned_by")) if ban.get("banned_by") else None
+        return JSONResponse(status_code=403, content={
+            "error": "This account has been banned from this node.",
+            "code": "node_banned",
+            "reason": (ban.get("reason") or "")[:500],
+            "expires_at": ban.get("expires_at"),
+            "banned_by": (banner or {}).get("nickname"),
+        })
     token = _create_session_with_meta(request, user["id"])
     return {
         "token": token,
@@ -652,6 +672,23 @@ async def login_with_federation_ticket(
     user = _ensure_local_user_from_ticket(payload)
     if not user:
         return JSONResponse(status_code=409, content={"error": "Could not provision account on this node"})
+
+    # Same node-ban gate as the password login path. A banned user
+    # must not be able to sidestep enforcement by hopping in via a
+    # federation ticket from a peer where they aren't banned.
+    try:
+        ban = db.get_active_global_ban(user["id"])
+    except Exception:
+        ban = None
+    if ban:
+        banner = db.get_user_by_id(ban.get("banned_by")) if ban.get("banned_by") else None
+        return JSONResponse(status_code=403, content={
+            "error": "This account has been banned from this node.",
+            "code": "node_banned",
+            "reason": (ban.get("reason") or "")[:500],
+            "expires_at": ban.get("expires_at"),
+            "banned_by": (banner or {}).get("nickname"),
+        })
 
     token = _create_session_with_meta(request, user["id"])
     return {

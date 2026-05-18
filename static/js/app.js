@@ -717,8 +717,14 @@ const App = {
         await Rooms.loadRooms();
         Rooms.switchToRoom(data.room, 'public');
       } else {
-        const err = await res.json();
-        UI.showToast(err.error || 'Failed to join', 'error');
+        const err = await res.json().catch(() => ({}));
+        // Banned-from-channel: render the dedicated ban screen so the
+        // user sees reason + duration, not a vague disconnect modal.
+        if (err && err.code === 'room_banned' && typeof window.showRoomBannedScreen === 'function') {
+          window.showRoomBannedScreen(err);
+        } else {
+          UI.showToast(err.error || 'Failed to join', 'error');
+        }
         App.openFirstAvailableRoom();
       }
     } catch (e) {

@@ -1020,6 +1020,15 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         "friend.",
         "social.",
     )
+    # Specific event types that MUST be signed even though their prefix
+    # isn't in _SENSITIVE_PREFIXES. Room moderation events grant the
+    # origin server the ability to silence a local account, so a peer
+    # that only holds the shared federation token must not be able to
+    # forge them.
+    _SENSITIVE_TYPES = {
+        "room.member.banned",
+        "room.member.unbanned",
+    }
     now = datetime.now(tz=timezone.utc)
     # Tightened from ±1h to ±5min after audit: an attacker who captures a
     # signed event has only a 5-minute window to replay it before our
@@ -1078,7 +1087,7 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
 
         # ---- Ed25519 verification (when peer pubkey pinned) ----
         ev_type = str(ev.get("event_type") or "")
-        sensitive = ev_type.startswith(_SENSITIVE_PREFIXES)
+        sensitive = ev_type.startswith(_SENSITIVE_PREFIXES) or ev_type in _SENSITIVE_TYPES
         pubkey_pem = db.get_federation_server_pubkey(origin)
         if pubkey_pem:
             # Fingerprint pinning: refuse the event if the signer
@@ -1677,6 +1686,82 @@ async def _handle_room_event(event: dict) -> None:
         with db._conn() as con:
             con.execute("DELETE FROM room_members WHERE room_id=? AND user_id=?", (room["id"], user["id"]))
             con.commit()
+    elif event_type == "room.member.banned":
+        await _apply_federated_room_ban(room, user, payload)
+    elif event_type == "room.member.unbanned":
+        await _apply_federated_room_unban(room, user, payload)
+
+
+async def _apply_federated_room_ban(room: dict, target_user: dict, payload: dict) -> None:
+    """Apply a room ban received from a federated peer.
+
+    Security: we do NOT blindly trust the peer's claim of authority.
+    The `banned_by_nickname` field is resolved to a local user (real
+    or federated mirror) and we re-check `can_moderate_room` against
+    THIS node's room state. If the actor isn't an owner/mod/admin
+    locally, the ban is dropped silently. This means a node can only
+    federate bans for rooms it (or a user it owns) actually moderates.
+    """
+    actor_nick = _fed_nickname(payload.get("banned_by_nickname"))
+    if not actor_nick:
+        return
+    actor = _ensure_local_user_by_nickname(actor_nick)
+    if not actor:
+        return
+    if not db.can_moderate_room(room["name"], actor["id"], bool(actor.get("is_admin"))):
+        _log.warning(
+            "federation: dropping room.member.banned (room=%s target=%s actor=%s not authorised locally)",
+            room.get("name"), target_user.get("nickname"), actor_nick,
+        )
+        return
+    if target_user.get("is_admin") or target_user["id"] == room.get("owner_id"):
+        return    # never allow federation to ban admins/owners
+    reason = _fed_clip(payload.get("reason"), 500)
+    duration_minutes = None
+    try:
+        dm = payload.get("duration_minutes")
+        if dm is not None:
+            duration_minutes = int(dm)
+            if duration_minutes <= 0 or duration_minutes > 525_600:  # max 1 yr
+                duration_minutes = None
+    except Exception:
+        duration_minutes = None
+    db.ban_user_from_room(room["id"], target_user["id"], actor["id"], reason, duration_minutes)
+    # Mirror the live UX: notify the banned user + the room.
+    try:
+        from ws_manager import manager
+        bans = db.get_room_bans(room["id"]) or []
+        match = next((b for b in bans if int(b.get("user_id") or 0) == int(target_user["id"])), None)
+        expires_at = match.get("expires_at") if match else None
+        await manager.send_to_user(target_user["id"], {
+            "type": "room_ban",
+            "room": room["name"],
+            "reason": reason,
+            "banned_by": actor_nick,
+            "expires_at": expires_at,
+            "duration_minutes": duration_minutes,
+        })
+        await manager.broadcast_room(room["name"], {
+            "type": "user_banned",
+            "room": room["name"],
+            "user_id": target_user["id"],
+            "nickname": target_user.get("nickname"),
+            "banned_by": actor_nick,
+        })
+    except Exception:
+        pass
+
+
+async def _apply_federated_room_unban(room: dict, target_user: dict, payload: dict) -> None:
+    actor_nick = _fed_nickname(payload.get("unbanned_by_nickname"))
+    if not actor_nick:
+        return
+    actor = _ensure_local_user_by_nickname(actor_nick)
+    if not actor:
+        return
+    if not db.can_moderate_room(room["name"], actor["id"], bool(actor.get("is_admin"))):
+        return
+    db.unban_user_from_room(room["id"], target_user["id"])
 
 
 def _set_music_anchor(room_name: str, track_id: int, started_unix: float | int | None) -> None:
@@ -1818,6 +1903,15 @@ async def _handle_user_event(event: dict) -> None:
     """Handle incoming federated user profile claim/update/delete."""
     payload = event.get("payload") or {}
     event_type = event.get("event_type")
+    # Block / unblock are personal social-graph events with no
+    # global_user_id — handle them up front. The "user." prefix
+    # already forces a signed origin (see _SENSITIVE_PREFIXES), so by
+    # the time we get here the event is signed by the blocker's home
+    # server. We still re-validate that the blocker locally maps to a
+    # known user before mutating the blocks table.
+    if event_type in ("user.blocked", "user.unblocked"):
+        await _handle_user_block_event(event_type, payload)
+        return
     if event_type not in ("user.profile.updated", "user.created", "user.deleted"):
         return
     gid = str(payload.get("global_user_id") or "").strip()
@@ -1979,6 +2073,40 @@ def _ensure_local_user_by_nickname(nickname: str) -> dict | None:
     if uid is None:
         return db.get_user_by_nick(nick)
     return db.get_user_by_id(uid)
+
+
+async def _handle_user_block_event(event_type: str, payload: dict) -> None:
+    """Apply a federated user.blocked / user.unblocked event locally.
+
+    Authority model: this event is already signature-verified (see the
+    `user.` sensitive prefix in _insert_inbox_events_sync) and pinned
+    to the blocker's home server. We only mutate when both nicknames
+    resolve to local user rows; if the blocked side isn't a real local
+    account, the block is meaningless on this node so we drop the event
+    silently rather than create a stub. The blocker side is always
+    eligible to be auto-mirrored (it's the same federation pattern as
+    other identity events).
+    """
+    blocker_nick = _fed_nickname(payload.get("blocker_nickname"))
+    blocked_nick = _fed_nickname(payload.get("blocked_nickname"))
+    if not blocker_nick or not blocked_nick:
+        return
+    blocker = _ensure_local_user_by_nickname(blocker_nick)
+    if not blocker:
+        return
+    # Don't auto-create a local mirror for the blocked side — if they
+    # don't already exist locally there's no relationship to enforce.
+    blocked = db.get_user_by_nick(blocked_nick)
+    if not blocked:
+        return
+    try:
+        if event_type == "user.blocked":
+            db.block_user(blocker["id"], blocked["id"])
+        else:
+            db.unblock_user(blocker["id"], blocked["id"])
+    except Exception:
+        _log.exception("federation: failed to apply %s blocker=%s blocked=%s",
+                       event_type, blocker_nick, blocked_nick)
 
 
 async def _handle_dm_event(event: dict) -> None:

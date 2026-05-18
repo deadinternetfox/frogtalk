@@ -607,6 +607,43 @@ async def websocket_endpoint(
                 if not ok:
                     continue
 
+                # ── Block enforcement (WS fast path) ───────────────────
+                # The HTTP send route already gates on is_blocked_either_way;
+                # the WS path was missing the same guard so a blocked user
+                # could still spam DMs over the live socket. Resolve the
+                # peer here and reject silently with a typed error frame so
+                # the sender's client can render "blocked by @peer".
+                try:
+                    with db._conn() as con:
+                        _ch = con.execute(
+                            "SELECT user_a, user_b FROM dm_channels WHERE id=?",
+                            (channel_id,),
+                        ).fetchone()
+                except Exception:
+                    _ch = None
+                if _ch:
+                    _peer_id = _ch["user_b"] if _ch["user_a"] == user["id"] else _ch["user_a"]
+                    if _peer_id and _peer_id != user["id"] \
+                            and db.is_blocked_either_way(user["id"], _peer_id):
+                        # Tell the client which direction the block goes so
+                        # the UI can show the right message. We deliberately
+                        # only expose direction inside an EXISTING DM channel
+                        # (where the parties already know each other) — the
+                        # /api/dms/open path still returns a vague 404.
+                        i_blocked = db.is_blocked(user["id"], _peer_id)
+                        peer_blocked_me = db.is_blocked(_peer_id, user["id"])
+                        peer_row = db.get_user_by_id(_peer_id) or {}
+                        await manager.send_personal(websocket, {
+                            "type": "dm_send_error",
+                            "channel_id": channel_id,
+                            "client_nonce": data.get("client_nonce"),
+                            "code": "blocked",
+                            "i_blocked": bool(i_blocked),
+                            "blocked_by_them": bool(peer_blocked_me),
+                            "peer_nickname": peer_row.get("nickname") or "",
+                        })
+                        continue
+
                 if media_data and len(media_data) > MAX_MEDIA_BYTES:
                     continue
 

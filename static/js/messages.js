@@ -1578,8 +1578,12 @@ const Messages = (() => {
     const canEdit = isOwn || State.user?.is_admin;
     const canDelete = isOwn || State.user?.is_admin || isRoomOwner || isRoomMod;
     const showAdminControls = State.user?.is_admin && !isOwn;
-    // Owner/mod can kick/ban other users (not themselves or the owner)
-    const showOwnerModControls = !isOwn && canModerateHere && !State.user?.is_admin
+    // Owner / mod / admin can kick/ban other users at the room level
+    // (admins were previously excluded, leaving node admins without an
+    // option to do a per-room ban from the message context menu — they
+    // had to use the global ban which is too heavy-handed for a single
+    // channel offence).
+    const showOwnerModControls = !isOwn && canModerateHere
       && msg.nickname !== State.currentRoomOwner;
     const adminActions = showAdminControls ? `
         <span class="msg-mod-inline">
@@ -3637,85 +3641,229 @@ function _buildMsgHtml(msg, isCont) {
 
 // ── Admin controls ───────────────────────────────────────────────────────────
 
-async function adminKick(nickname) {
-  if (!confirm(`Kick ${nickname}? This will disconnect all their sessions.`)) return;
-  try {
-    const r = await apiFetch('/api/admin/kick/' + encodeURIComponent(nickname), 'POST');
-    const data = await r.json();
-    if (r.ok) {
-      toast(data.message || 'User kicked', 'success');
-    } else {
-      toast(data.error || 'Failed to kick user', 'error');
+/* ── Polished moderation prompt modal ─────────────────────────────────
+ *
+ * Replaces window.confirm()/window.prompt() in the moderation flows.
+ * The action-sheet wrappers dispatch the underlying button click inside
+ * a setTimeout(180ms) so the close animation can play first — but that
+ * also strips user-activation, which causes prompt()/confirm() to
+ * silently return null on most browsers. The symptom was "right-click
+ * → ban → nothing happens". A real modal sidesteps activation entirely
+ * and is also far better looking on mobile (where prompt() is awful).
+ *
+ * fields: array of { key, label, type:'text'|'textarea'|'select',
+ *                    placeholder?, value?, options?:[{value,label}],
+ *                    required?, hint? }
+ * onConfirm(values) -> async fn. The dialog stays open and shows the
+ *                      "in flight" state while it runs; throw to keep
+ *                      the dialog open with no toast (caller handles).
+ */
+function showModerationModal({ title, subtitle, icon='🛡️', accent='#dc2626',
+                               confirmLabel='Confirm', confirmStyle='danger',
+                               fields=[], onConfirm }) {
+  document.getElementById('mod-action-modal')?.remove();
+  const wrap = document.createElement('div');
+  wrap.id = 'mod-action-modal';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.65);backdrop-filter:blur(4px);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  const confirmBg = confirmStyle === 'danger'
+    ? 'linear-gradient(180deg,#dc2626,#991b1b)'
+    : 'linear-gradient(180deg,#16a34a,#15803d)';
+  const confirmBorder = confirmStyle === 'danger' ? '#7f1d1d' : '#14532d';
+  const confirmShadow = confirmStyle === 'danger' ? 'rgba(220,38,38,.3)' : 'rgba(22,163,74,.3)';
+  const fieldsHtml = fields.map((f, i) => {
+    const id = `mam-f-${i}`;
+    f._id = id;
+    const labelHtml = `<label style="display:block;color:#a7d4b3;font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:600;">${UI.escHtml(f.label)}${f.hint ? ` <span style="color:#6b7280;text-transform:none;letter-spacing:0;font-weight:400;">${UI.escHtml(f.hint)}</span>` : ''}</label>`;
+    if (f.type === 'textarea') {
+      return `<div>${labelHtml}<textarea id="${id}" rows="3" maxlength="500" placeholder="${UI.escHtml(f.placeholder||'')}" style="width:100%;padding:10px 12px;background:#0a1812;border:1px solid #1f4d2e;border-radius:8px;color:#e5e7eb;font-family:inherit;font-size:14px;resize:vertical;min-height:70px;outline:none;">${UI.escHtml(f.value||'')}</textarea></div>`;
     }
-  } catch (e) {
-    toast('Failed to kick user', 'error');
+    if (f.type === 'select') {
+      const opts = (f.options||[]).map(o => `<option value="${UI.escHtml(String(o.value))}"${String(o.value)===String(f.value||'')?' selected':''}>${UI.escHtml(o.label)}</option>`).join('');
+      return `<div>${labelHtml}<select id="${id}" style="width:100%;padding:10px 12px;background:#0a1812;border:1px solid #1f4d2e;border-radius:8px;color:#e5e7eb;font-size:14px;outline:none;">${opts}</select></div>`;
+    }
+    return `<div>${labelHtml}<input id="${id}" type="text" value="${UI.escHtml(f.value||'')}" placeholder="${UI.escHtml(f.placeholder||'')}" style="width:100%;padding:10px 12px;background:#0a1812;border:1px solid #1f4d2e;border-radius:8px;color:#e5e7eb;font-size:14px;outline:none;"></div>`;
+  }).join('');
+  wrap.innerHTML = `
+    <div role="dialog" aria-modal="true" style="background:linear-gradient(180deg,#0d2818 0%,#0a1f12 100%);border:1px solid #1f4d2e;border-radius:14px;width:100%;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,.5);overflow:hidden;">
+      <div style="padding:18px 20px 14px;border-bottom:1px solid #1f4d2e;display:flex;align-items:center;gap:12px;">
+        <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,85,85,.15);display:flex;align-items:center;justify-content:center;font-size:20px;">${UI.escHtml(icon)}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;color:${accent};font-size:16px;">${UI.escHtml(title)}</div>
+          <div style="color:#9ca3af;font-size:13px;margin-top:2px;">${subtitle||''}</div>
+        </div>
+      </div>
+      <div style="padding:16px 20px;display:flex;flex-direction:column;gap:14px;">${fieldsHtml}</div>
+      <div style="padding:14px 20px 18px;display:flex;gap:10px;justify-content:flex-end;border-top:1px solid #1f4d2e;background:rgba(0,0,0,.2);">
+        <button id="mam-cancel" type="button" style="padding:9px 16px;background:transparent;border:1px solid #2d4a35;border-radius:8px;color:#9ca3af;cursor:pointer;font-weight:600;">Cancel</button>
+        <button id="mam-ok" type="button" style="padding:9px 18px;background:${confirmBg};border:1px solid ${confirmBorder};border-radius:8px;color:#fff;cursor:pointer;font-weight:700;box-shadow:0 2px 8px ${confirmShadow};">${UI.escHtml(confirmLabel)}</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const okBtn = wrap.querySelector('#mam-ok');
+  const cancelBtn = wrap.querySelector('#mam-cancel');
+  const firstField = fields.length ? wrap.querySelector(`#${fields[0]._id}`) : null;
+  setTimeout(() => { try { firstField?.focus(); } catch {} }, 50);
+  function close() { wrap.remove(); document.removeEventListener('keydown', onKey); }
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) okBtn.click();
   }
+  document.addEventListener('keydown', onKey);
+  cancelBtn.addEventListener('click', close);
+  wrap.addEventListener('click', e => { if (e.target === wrap) close(); });
+  okBtn.addEventListener('click', async () => {
+    const values = {};
+    for (const f of fields) {
+      const el = wrap.querySelector(`#${f._id}`);
+      values[f.key] = el ? el.value : '';
+      if (f.required && !String(values[f.key]).trim()) {
+        try { el?.focus(); } catch {}
+        if (typeof toast === 'function') toast(`${f.label} is required`, 'error');
+        return;
+      }
+    }
+    okBtn.disabled = true;
+    const origLabel = okBtn.textContent;
+    okBtn.textContent = 'Working…';
+    try {
+      const keep = await onConfirm(values);
+      if (!keep) close();
+      else { okBtn.disabled = false; okBtn.textContent = origLabel; }
+    } catch {
+      okBtn.disabled = false; okBtn.textContent = origLabel;
+    }
+  });
+}
+window.showModerationModal = showModerationModal;
+
+async function adminKick(nickname) {
+  showModerationModal({
+    title: `Kick @${nickname}?`,
+    subtitle: 'This disconnects every active session for this user.',
+    icon: '👢',
+    accent: '#fb923c',
+    confirmLabel: 'Kick user',
+    confirmStyle: 'danger',
+    fields: [],
+    onConfirm: async () => {
+      try {
+        const r = await apiFetch('/api/admin/kick/' + encodeURIComponent(nickname), 'POST');
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) toast(data.message || 'User kicked', 'success');
+        else { toast(data.error || 'Failed to kick user', 'error'); return false; }
+      } catch { toast('Failed to kick user', 'error'); return false; }
+    }
+  });
 }
 
 async function adminMute(nickname) {
-  const minutes = prompt(`Mute ${nickname} for how many minutes?`, '60');
-  if (!minutes) return;
-  const duration = parseInt(minutes, 10);
-  if (isNaN(duration) || duration <= 0) {
-    toast('Invalid duration', 'error');
-    return;
-  }
-  try {
-    const r = await apiFetch('/api/admin/mute/' + encodeURIComponent(nickname), 'POST', {
-      reason: 'Muted by admin',
-      duration_minutes: duration
-    });
-    const data = await r.json();
-    if (r.ok) {
-      toast(data.message || 'User muted', 'success');
-    } else {
-      toast(data.error || 'Failed to mute user', 'error');
+  showModerationModal({
+    title: `Mute @${nickname}`,
+    subtitle: 'They will be silenced server-wide for the chosen duration.',
+    icon: '🔇',
+    accent: '#fb923c',
+    confirmLabel: 'Mute user',
+    confirmStyle: 'danger',
+    fields: [
+      { key: 'reason', label: 'Reason', type: 'textarea', placeholder: 'Spam, harassment, off-topic…', hint: '(shown to the user)' },
+      { key: 'duration', label: 'Duration', type: 'select', value: '60', options: [
+        { value: '15',    label: '15 minutes' },
+        { value: '60',    label: '1 hour' },
+        { value: '360',   label: '6 hours' },
+        { value: '1440',  label: '1 day' },
+        { value: '10080', label: '1 week' },
+      ]},
+    ],
+    onConfirm: async (v) => {
+      const minutes = parseInt(v.duration, 10);
+      if (isNaN(minutes) || minutes <= 0) { toast('Invalid duration', 'error'); return true; }
+      try {
+        const r = await apiFetch('/api/admin/mute/' + encodeURIComponent(nickname), 'POST', {
+          reason: (v.reason || '').trim() || 'Muted by admin',
+          duration_minutes: minutes,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) toast(data.message || 'User muted', 'success');
+        else { toast(data.error || 'Failed to mute user', 'error'); return true; }
+      } catch { toast('Failed to mute user', 'error'); return true; }
     }
-  } catch (e) {
-    toast('Failed to mute user', 'error');
-  }
+  });
 }
 
 async function adminBan(nickname) {
-  const reason = prompt(`Ban ${nickname}? Enter reason (or leave blank):`, '');
-  if (reason === null) return;  // Cancelled
-  const durationStr = prompt('Ban duration in hours (leave empty for permanent):', '');
-  let duration_minutes = null;
-  if (durationStr && durationStr.trim()) {
-    const hours = parseInt(durationStr, 10);
-    if (!isNaN(hours) && hours > 0) {
-      duration_minutes = hours * 60;
+  showModerationModal({
+    title: `Ban @${nickname} (server-wide)`,
+    subtitle: 'They will be removed from every channel on this node.',
+    icon: '🚫',
+    accent: '#fca5a5',
+    confirmLabel: 'Ban globally',
+    confirmStyle: 'danger',
+    fields: [
+      { key: 'reason', label: 'Reason', type: 'textarea', placeholder: 'Why are they being banned?', hint: '(shown to the user)' },
+      { key: 'duration', label: 'Duration', type: 'select', value: '', options: [
+        { value: '60',    label: '1 hour' },
+        { value: '360',   label: '6 hours' },
+        { value: '1440',  label: '1 day' },
+        { value: '10080', label: '1 week' },
+        { value: '43200', label: '30 days' },
+        { value: '',      label: 'Permanent' },
+      ]},
+    ],
+    onConfirm: async (v) => {
+      const durStr = (v.duration || '').trim();
+      let duration_minutes = null;
+      if (durStr) {
+        const n = parseInt(durStr, 10);
+        if (!isNaN(n) && n > 0) duration_minutes = n;
+      }
+      try {
+        const r = await apiFetch('/api/admin/ban/' + encodeURIComponent(nickname), 'POST', {
+          reason: (v.reason || '').trim(),
+          duration_minutes,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) toast(data.message || 'User banned', 'success');
+        else { toast(data.error || 'Failed to ban user', 'error'); return true; }
+      } catch { toast('Failed to ban user', 'error'); return true; }
     }
-  }
-  try {
-    const r = await apiFetch('/api/admin/ban/' + encodeURIComponent(nickname), 'POST', {
-      reason: reason,
-      duration_minutes: duration_minutes
-    });
-    const data = await r.json();
-    if (r.ok) {
-      toast(data.message || 'User banned', 'success');
-    } else {
-      toast(data.error || 'Failed to ban user', 'error');
-    }
-  } catch (e) {
-    toast('Failed to ban user', 'error');
-  }
+  });
 }
 
-/* ── Room-level moderation (owner / mod) ─────────────────────────────── */
+/* ── Room-level moderation (owner / mod / admin) ─────────────────────── */
 async function roomKick(nickname, userId) {
   if (!State.currentRoom) return;
   if (!userId) { toast('User id unavailable', 'error'); return; }
-  if (!confirm(`Kick @${nickname} from #${State.currentRoom} for 5 minutes?`)) return;
-  try {
-    const r = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/bans`, 'POST', {
-      user_id: userId, reason: 'Kicked by moderator', duration_minutes: 5
-    });
-    const data = await r.json().catch(() => ({}));
-    if (r.ok) toast(`@${nickname} kicked for 5 min`, 'success');
-    else toast(data.error || 'Kick failed', 'error');
-  } catch { toast('Kick failed', 'error'); }
+  const room = State.currentRoom;
+  showModerationModal({
+    title: `Kick @${nickname} from #${room}`,
+    subtitle: 'A short timeout — they can re-join when it expires.',
+    icon: '👢',
+    accent: '#fb923c',
+    confirmLabel: 'Kick',
+    confirmStyle: 'danger',
+    fields: [
+      { key: 'duration', label: 'Duration', type: 'select', value: '5', options: [
+        { value: '5',   label: '5 minutes (default kick)' },
+        { value: '15',  label: '15 minutes' },
+        { value: '60',  label: '1 hour' },
+        { value: '360', label: '6 hours' },
+      ]},
+      { key: 'reason', label: 'Reason', type: 'textarea', placeholder: 'Optional', hint: '(shown to the user)' },
+    ],
+    onConfirm: async (v) => {
+      const mins = parseInt(v.duration, 10) || 5;
+      try {
+        const r = await apiFetch(`/api/rooms/${encodeURIComponent(room)}/bans`, 'POST', {
+          user_id: userId,
+          reason: (v.reason || '').trim() || 'Kicked by moderator',
+          duration_minutes: mins,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) toast(`@${nickname} kicked for ${mins} min`, 'success');
+        else { toast(data.error || 'Kick failed', 'error'); return true; }
+      } catch { toast('Kick failed', 'error'); return true; }
+    }
+  });
 }
 
 async function roomBan(nickname, userId) {
@@ -3834,20 +3982,41 @@ function handleRoomBan(data) {
       } catch {}
     }
 
-    // Close the channel: navigate away if currently inside the banned room.
+    // Close the channel: always strip from sidebar/cached state so the
+    // banned room disappears from the sidebar even if the user is browsing
+    // a different room when the ban arrives. If they ARE inside the banned
+    // room, also navigate away to the lobby ('general') so they aren't
+    // staring at messages they no longer have access to.
     try {
-      if (State.currentRoom === room) {
-        // Strip from sidebar / cached state, then switch to general
-        if (State.rooms && Array.isArray(State.rooms)) {
-          State.rooms = State.rooms.filter(r => (r?.name || r) !== room);
-        }
-        if (typeof Rooms !== 'undefined' && Rooms.renderRoomList) { try { Rooms.renderRoomList(); } catch {} }
-        if (typeof switchRoom === 'function') {
-          try { switchRoom('general'); } catch {}
-        } else if (typeof Rooms !== 'undefined' && Rooms.switchRoom) {
-          try { Rooms.switchRoom('general'); } catch {}
-        }
+      // Drop cached messages for this room so a re-join after a 5-min
+      // kick doesn't show stale state.
+      try { if (State.messages && State.messages[room]) delete State.messages[room]; } catch {}
+      // Filter sidebar cache (objects use .name, the rooms list elsewhere
+      // may store bare strings — handle both).
+      if (State.rooms && Array.isArray(State.rooms)) {
+        State.rooms = State.rooms.filter(r => (r?.name || r) !== room);
       }
+      // Re-render the sidebar with the correct function name.
+      try {
+        if (typeof Rooms !== 'undefined' && typeof Rooms.renderRooms === 'function') {
+          Rooms.renderRooms();
+        }
+      } catch {}
+      // Switch out of the banned room when it's the active view.
+      if (State.currentRoom === room) {
+        try {
+          if (typeof Rooms !== 'undefined' && typeof Rooms.switchToRoom === 'function') {
+            Rooms.switchToRoom('general', 'public');
+          }
+        } catch {}
+      }
+      // Authoritative refresh from server — the room is now excluded from
+      // /api/rooms for this user, and any private-room secret is dropped.
+      try {
+        if (typeof Rooms !== 'undefined' && typeof Rooms.loadRooms === 'function') {
+          Rooms.loadRooms();
+        }
+      } catch {}
     } catch {}
 
     // Polished modal in FrogTalk theme

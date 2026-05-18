@@ -1,6 +1,8 @@
 """User profile routes."""
 import base64
 import re
+import time
+import uuid
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, Response
 
@@ -138,16 +140,40 @@ async def block_user(user_id: int, current_user: dict = Depends(get_current_user
     ok = db.block_user(current_user["id"], user_id)
     if not ok:
         return JSONResponse(status_code=409, content={"error": "User already blocked"})
+    _emit_block_mirror("user.blocked", current_user, target)
     return {"ok": True}
 
 
 @router.delete("/{user_id}/block")
 async def unblock_user(user_id: int, current_user: dict = Depends(get_current_user)):
     """Unblock a user."""
+    target = db.get_user_by_id(user_id)
     ok = db.unblock_user(current_user["id"], user_id)
     if not ok:
         return JSONResponse(status_code=404, content={"error": "User not blocked"})
+    if target:
+        _emit_block_mirror("user.unblocked", current_user, target)
     return {"ok": True}
+
+
+def _emit_block_mirror(event_type: str, actor: dict, target: dict) -> None:
+    """Push a signed block/unblock event to the federation outbox so peer
+    nodes can mirror the same block relationship locally. Receivers will
+    refuse the event unless it is signed by the actor's origin server
+    (see federation._SENSITIVE_PREFIXES: "user."), so a hostile peer can
+    never forge a block on behalf of someone whose account lives on
+    another node."""
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": event_type,
+            "payload": {
+                "blocker_nickname": actor.get("nickname"),
+                "blocked_nickname": target.get("nickname"),
+            },
+        })
+    except Exception:
+        pass
 
 
 @router.get("/me/blocked")

@@ -2096,6 +2096,83 @@ async function loadCaptcha() {
   }
 }
 
+function _fmtBanExpiry(iso) {
+  if (!iso) return 'permanent';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return 'unknown';
+    const ms = d.getTime() - Date.now();
+    if (ms <= 0) return 'expired';
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} remaining`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 48) return `${hrs} hour${hrs === 1 ? '' : 's'} remaining`;
+    const days = Math.round(hrs / 24);
+    return `${days} day${days === 1 ? '' : 's'} remaining`;
+  } catch { return 'unknown'; }
+}
+
+function _showNodeBannedScreen(data) {
+  const existing = document.getElementById('node-banned-screen');
+  if (existing) existing.remove();
+  const reason = (data && data.reason) ? String(data.reason) : '';
+  const banner = (data && data.banned_by) ? String(data.banned_by) : '';
+  const exp = _fmtBanExpiry(data && data.expires_at);
+  const esc = (window.UI && UI.escHtml) ? UI.escHtml : (s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
+  const div = document.createElement('div');
+  div.id = 'node-banned-screen';
+  div.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(8,4,4,0.96);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(6px);';
+  div.innerHTML = `
+    <div style="max-width:480px;width:100%;background:linear-gradient(180deg,#2a0d0d,#1a0707);border:1px solid #5b1c1c;border-radius:14px;padding:28px 26px;box-shadow:0 24px 64px rgba(0,0,0,0.6);color:#fde2e2;font-family:inherit;">
+      <div style="font-size:48px;line-height:1;margin-bottom:12px;">🚫</div>
+      <h2 style="margin:0 0 10px;font-size:22px;color:#fca5a5;">Account banned from this node</h2>
+      <p style="margin:0 0 14px;color:#fecaca;line-height:1.5;">
+        Your account is currently banned from this FrogTalk node and cannot sign in here.
+        ${banner ? `Banned by <strong>@${esc(banner)}</strong>.` : ''}
+      </p>
+      ${reason ? `<div style="background:#3a1010;border:1px solid #6b1f1f;border-radius:8px;padding:10px 12px;margin-bottom:12px;"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#fca5a5;margin-bottom:4px;">Reason</div><div style="color:#fee2e2;white-space:pre-wrap;">${esc(reason)}</div></div>` : ''}
+      <div style="font-size:13px;color:#fda4af;margin-bottom:20px;">Duration: <strong>${esc(exp)}</strong></div>
+      <p style="margin:0 0 18px;color:#fecaca;font-size:13px;line-height:1.5;">
+        You can still use other federated FrogTalk nodes — your account works across the network. Contact this node's admin if you believe this is a mistake.
+      </p>
+      <button id="node-banned-dismiss" style="width:100%;background:#7f1d1d;color:#fee2e2;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer;">Back to login</button>
+    </div>`;
+  document.body.appendChild(div);
+  const btn = document.getElementById('node-banned-dismiss');
+  if (btn) btn.onclick = () => div.remove();
+}
+
+function _showRoomBannedScreen(data) {
+  const existing = document.getElementById('room-banned-screen');
+  if (existing) existing.remove();
+  const room = (data && data.room) ? String(data.room) : 'this channel';
+  const reason = (data && data.reason) ? String(data.reason) : '';
+  const banner = (data && data.banned_by) ? String(data.banned_by) : '';
+  const exp = _fmtBanExpiry(data && data.expires_at);
+  const esc = (window.UI && UI.escHtml) ? UI.escHtml : (s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
+  const div = document.createElement('div');
+  div.id = 'room-banned-screen';
+  div.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(8,4,4,0.78);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px);';
+  div.innerHTML = `
+    <div style="max-width:460px;width:100%;background:linear-gradient(180deg,#2a0d0d,#1a0707);border:1px solid #5b1c1c;border-radius:14px;padding:24px 22px;box-shadow:0 24px 64px rgba(0,0,0,0.6);color:#fde2e2;">
+      <div style="font-size:40px;line-height:1;margin-bottom:10px;">🚫</div>
+      <h3 style="margin:0 0 8px;font-size:18px;color:#fca5a5;">Banned from #${esc(room)}</h3>
+      <p style="margin:0 0 12px;color:#fecaca;line-height:1.5;font-size:14px;">
+        You can't join this channel.${banner ? ` Banned by <strong>@${esc(banner)}</strong>.` : ''}
+      </p>
+      ${reason ? `<div style="background:#3a1010;border:1px solid #6b1f1f;border-radius:8px;padding:8px 10px;margin-bottom:10px;"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#fca5a5;margin-bottom:4px;">Reason</div><div style="color:#fee2e2;white-space:pre-wrap;font-size:13px;">${esc(reason)}</div></div>` : ''}
+      <div style="font-size:12px;color:#fda4af;margin-bottom:16px;">Duration: <strong>${esc(exp)}</strong></div>
+      <button id="room-banned-dismiss" style="width:100%;background:#7f1d1d;color:#fee2e2;border:none;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;">Got it</button>
+    </div>`;
+  document.body.appendChild(div);
+  const btn = document.getElementById('room-banned-dismiss');
+  if (btn) btn.onclick = () => div.remove();
+}
+
+// Expose for app.js / Rooms.js invite-join + direct-join error handlers.
+window.showRoomBannedScreen = _showRoomBannedScreen;
+window.showNodeBannedScreen = _showNodeBannedScreen;
+
 async function doAuth() {
   const nickname = document.getElementById('auth-nickname').value.trim();
   const password = document.getElementById('auth-password').value;
@@ -2123,6 +2200,13 @@ async function doAuth() {
     });
     const data = await res.json();
     if (!res.ok) {
+      // Node-level ban: render a dedicated banned screen so the user
+      // gets reason + duration instead of a bare red error line on
+      // the login form.
+      if (!isReg && data.code === 'node_banned') {
+        _showNodeBannedScreen(data);
+        return;
+      }
       errEl.textContent = data.error || 'Auth failed';
       // If the server returned alternative usernames (signup collision),
       // surface them as clickable chips so the user can accept one.
@@ -6406,19 +6490,37 @@ function _syncMuteButtonLabel() {
 
 async function blockUserInfo() {
   if (!_userInfoTarget) return;
-  if (!confirm(`Block ${_userInfoTarget}? They won't be able to message you.`)) return;
-  try {
-    const res = await apiFetch(`/api/friends/block/${encodeURIComponent(_userInfoTarget)}`, 'POST');
-    if (res.ok) {
-      toast(`${_userInfoTarget} blocked`);
-      if (typeof refreshBlockedCache === 'function') refreshBlockedCache();
-      closeModal('modal-user-info');
-    } else {
-      const data = await res.json();
-      toast(data.error || 'Failed to block user', 'error');
-    }
-  } catch {
-    toast('Failed to block user', 'error');
+  const nick = _userInfoTarget;
+  const _modal = window.showModerationModal;
+  const run = async () => {
+    try {
+      const res = await apiFetch(`/api/friends/block/${encodeURIComponent(nick)}`, 'POST');
+      if (res.ok) {
+        toast(`@${nick} blocked`, 'success');
+        if (typeof refreshBlockedCache === 'function') refreshBlockedCache();
+        closeModal('modal-user-info');
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast(data.error || 'Failed to block user', 'error');
+        return true;
+      }
+    } catch { toast('Failed to block user', 'error'); return true; }
+  };
+  if (typeof _modal === 'function') {
+    _modal({
+      title: `Block @${nick}?`,
+      subtitle: 'They will no longer be able to message you, view your wall, or see your social posts.',
+      icon: '🚫',
+      accent: '#fca5a5',
+      confirmLabel: 'Block',
+      confirmStyle: 'danger',
+      fields: [],
+      onConfirm: run,
+    });
+  } else {
+    // Fallback if messages.js hasn't loaded yet
+    if (!confirm(`Block ${nick}?`)) return;
+    await run();
   }
 }
 
@@ -6429,33 +6531,51 @@ async function kickUserInfo() {
     toast('Cannot kick in DMs', 'error');
     return;
   }
-  if (!confirm(`Kick ${_userInfoTarget} from #${State.currentRoom}?`)) return;
-
-  // Find user ID
-  try {
-    const users = await apiFetch('/api/users').then(r => r.json()).then(d => d.users);
-    const user = users.find(u => u.nickname === _userInfoTarget);
-    if (!user) {
-      toast('User not found', 'error');
-      return;
-    }
-
-    // Ban for 1 minute (kick)
-    const res = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/bans`, 'POST', {
-      user_id: user.id,
-      reason: 'Kicked',
-      duration_minutes: 1
+  const nick = _userInfoTarget;
+  const room = State.currentRoom;
+  // Resolve user id once up-front so the modal doesn't have to.
+  let users = [];
+  try { users = await apiFetch('/api/users').then(r => r.json()).then(d => d.users || []); } catch {}
+  const user = users.find(u => u.nickname === nick);
+  if (!user) { toast('User not found', 'error'); return; }
+  const _modal = window.showModerationModal;
+  const run = async (v) => {
+    const mins = parseInt(v?.duration || '5', 10) || 5;
+    try {
+      const res = await apiFetch(`/api/rooms/${encodeURIComponent(room)}/bans`, 'POST', {
+        user_id: user.id,
+        reason: (v?.reason || '').trim() || 'Kicked by moderator',
+        duration_minutes: mins,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast(`@${nick} kicked from #${room} for ${mins} min`, 'success');
+        closeModal('modal-user-info');
+      } else { toast(data.error || 'Failed to kick user', 'error'); return true; }
+    } catch { toast('Failed to kick user', 'error'); return true; }
+  };
+  if (typeof _modal === 'function') {
+    _modal({
+      title: `Kick @${nick} from #${room}`,
+      subtitle: 'A short timeout — they can re-join when it expires.',
+      icon: '👢',
+      accent: '#fb923c',
+      confirmLabel: 'Kick',
+      confirmStyle: 'danger',
+      fields: [
+        { key: 'duration', label: 'Duration', type: 'select', value: '5', options: [
+          { value: '5',   label: '5 minutes (default kick)' },
+          { value: '15',  label: '15 minutes' },
+          { value: '60',  label: '1 hour' },
+          { value: '360', label: '6 hours' },
+        ]},
+        { key: 'reason', label: 'Reason', type: 'textarea', placeholder: 'Optional', hint: '(shown to the user)' },
+      ],
+      onConfirm: run,
     });
-
-    if (res.ok) {
-      toast(`${_userInfoTarget} kicked from #${State.currentRoom}`);
-      closeModal('modal-user-info');
-    } else {
-      const data = await res.json();
-      toast(data.error || 'Failed to kick user', 'error');
-    }
-  } catch (e) {
-    toast('Failed to kick user', 'error');
+  } else {
+    if (!confirm(`Kick ${nick} from #${room}?`)) return;
+    await run({ duration: '5', reason: '' });
   }
 }
 
@@ -6466,34 +6586,34 @@ async function banUserInfo() {
     toast('Cannot ban in DMs', 'error');
     return;
   }
-  
-  const reason = prompt(`Ban ${_userInfoTarget} from #${State.currentRoom}?\n\nEnter reason (optional):`);
-  if (reason === null) return; // Cancelled
-
-  try {
-    const users = await apiFetch('/api/users').then(r => r.json()).then(d => d.users);
-    const user = users.find(u => u.nickname === _userInfoTarget);
-    if (!user) {
-      toast('User not found', 'error');
-      return;
-    }
-
-    const res = await apiFetch(`/api/rooms/${encodeURIComponent(State.currentRoom)}/bans`, 'POST', {
-      user_id: user.id,
-      reason: reason || '',
-      duration_minutes: null // Permanent
-    });
-
-    if (res.ok) {
-      toast(`${_userInfoTarget} banned from #${State.currentRoom}`);
+  const nick = _userInfoTarget;
+  const room = State.currentRoom;
+  // Reuse the polished room-ban modal (already federation-aware).
+  if (typeof window.showRoomBanModal === 'function') {
+    // We need a user id — the modal won't fetch it for us.
+    try {
+      const users = await apiFetch('/api/users').then(r => r.json()).then(d => d.users || []);
+      const user = users.find(u => u.nickname === nick);
+      if (!user) { toast('User not found', 'error'); return; }
+      window.showRoomBanModal(nick, user.id, room);
       closeModal('modal-user-info');
-    } else {
-      const data = await res.json();
-      toast(data.error || 'Failed to ban user', 'error');
-    }
-  } catch (e) {
-    toast('Failed to ban user', 'error');
+    } catch { toast('Failed to ban user', 'error'); }
+    return;
   }
+  // Fallback to the old prompt path if messages.js is missing
+  const reason = prompt(`Ban ${nick} from #${room}?\n\nEnter reason (optional):`);
+  if (reason === null) return;
+  try {
+    const users = await apiFetch('/api/users').then(r => r.json()).then(d => d.users || []);
+    const user = users.find(u => u.nickname === nick);
+    if (!user) { toast('User not found', 'error'); return; }
+    const res = await apiFetch(`/api/rooms/${encodeURIComponent(room)}/bans`, 'POST', {
+      user_id: user.id, reason: reason || '', duration_minutes: null,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) { toast(`${nick} banned from #${room}`); closeModal('modal-user-info'); }
+    else toast(data.error || 'Failed to ban user', 'error');
+  } catch { toast('Failed to ban user', 'error'); }
 }
 
 // Check if current user can moderate current room

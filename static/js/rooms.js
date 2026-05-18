@@ -1348,7 +1348,17 @@ const Rooms = (() => {
       await loadRooms();
       const room = (State.rooms || []).find(r => r.name === name);
       switchToRoom(name, room?.type || 'public', null, room?.channel_type || 'text');
+      return;
     }
+    // Banned-from-channel: dedicated screen with reason + duration.
+    try {
+      const err = await res.json();
+      if (err && err.code === 'room_banned' && typeof window.showRoomBannedScreen === 'function') {
+        window.showRoomBannedScreen(err);
+      } else if (err && err.error && typeof UI?.showToast === 'function') {
+        UI.showToast(err.error, 'error');
+      }
+    } catch {}
   }
 
   async function leaveRoom(name) {

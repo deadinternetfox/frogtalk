@@ -239,9 +239,17 @@ async def list_rooms(current_user: dict = Depends(get_current_user)):
     rooms = db.list_rooms()
     joined_ids = db.get_user_joined_room_ids(current_user["id"])
     is_admin = bool(current_user.get("is_admin"))
+    banned_ids = db.get_user_active_room_ban_ids(current_user["id"])
     visible = []
     for r in rooms:
         r["joined"] = r["id"] in joined_ids
+        # Hide rooms the user is currently banned/kicked from so their
+        # sidebar doesn't re-add the channel on the next refresh after a
+        # `room_ban` WS event. Admins still see them (they need to
+        # moderate ban lists). The `user_can_access_room` join check
+        # remains the authoritative server-side enforcement.
+        if r["id"] in banned_ids and not is_admin:
+            continue
         # Private rooms are invite-only: hide them from listing unless the
         # requesting user is already a member or is a server admin.
         if r.get("type") == "private" and not r["joined"] and not is_admin:
@@ -798,6 +806,27 @@ async def ban_user(room_name: str, body: BanRequest,
             })
     except Exception:
         pass
+
+    # Federation mirror: tell peers to ban the same (nickname, room).
+    # Receiving nodes RE-VERIFY that `banned_by_nickname` is actually a
+    # mod/owner of their local copy of the room before applying, so a
+    # hostile peer can't escalate by claiming a fake moderator. The event
+    # is signed and rejected without a pinned Ed25519 key on the receiver
+    # (see federation._SENSITIVE_PREFIXES).
+    try:
+        db.insert_federation_outbox_event({
+            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+            "event_type": "room.member.banned",
+            "payload": {
+                "room_name": room_name,
+                "nickname": target.get("nickname"),
+                "banned_by_nickname": current_user.get("nickname"),
+                "reason": (body.reason or "")[:500],
+                "duration_minutes": body.duration_minutes,
+            },
+        })
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -815,6 +844,22 @@ async def unban_user(room_name: str, user_id: int,
     ok = db.unban_user_from_room(room["id"], user_id)
     if not ok:
         return JSONResponse(status_code=404, content={"error": "User is not banned"})
+
+    # Federation mirror: peers should drop the same ban.
+    try:
+        target = db.get_user_by_id(user_id)
+        if target:
+            db.insert_federation_outbox_event({
+                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
+                "event_type": "room.member.unbanned",
+                "payload": {
+                    "room_name": room_name,
+                    "nickname": target.get("nickname"),
+                    "unbanned_by_nickname": current_user.get("nickname"),
+                },
+            })
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -1017,8 +1062,23 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
     room = db.get_room_by_name(room_name)
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
+    # Surface room bans with a specific code so the client can render
+    # the "you are banned" UX instead of a generic permission error.
+    is_admin = bool(current_user.get("is_admin"))
+    if not is_admin:
+        ban = db.get_active_room_ban(room["id"], current_user["id"])
+        if ban:
+            banner = db.get_user_by_id(ban.get("banned_by")) if ban.get("banned_by") else None
+            return JSONResponse(status_code=403, content={
+                "error": f"You are banned from #{room_name} and cannot join.",
+                "code": "room_banned",
+                "room": room_name,
+                "reason": (ban.get("reason") or "")[:500],
+                "expires_at": ban.get("expires_at"),
+                "banned_by": (banner or {}).get("nickname"),
+            })
     if not db.user_can_access_room(
-        current_user["id"], room_name, is_admin=bool(current_user.get("is_admin"))
+        current_user["id"], room_name, is_admin=is_admin
     ):
         return JSONResponse(
             status_code=403,

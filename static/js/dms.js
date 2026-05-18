@@ -2231,7 +2231,25 @@ async function sendDMMessage () {
           },
         }
       );
-      if (!r.ok) { UI.showProgressToast('Upload failed', 100); toast('Upload failed', 'error'); return; }
+      if (!r.ok) {
+        UI.showProgressToast('Upload failed', 100);
+        // Surface blocked-state nicely instead of a generic toast.
+        try {
+          const errBody = await r.json();
+          if (r.status === 403 && errBody?.code === 'blocked') {
+            handleDMSendError({
+              channel_id: _activeDM?.id || 0,
+              code: 'blocked',
+              i_blocked: !!errBody.i_blocked,
+              blocked_by_them: !!errBody.blocked_by_them,
+              peer_nickname: errBody.peer_nickname || '',
+            });
+            return;
+          }
+          toast(errBody?.error || 'Upload failed', 'error');
+        } catch { toast('Upload failed', 'error'); }
+        return;
+      }
       UI.showProgressToast('Sent!', 100);
       clearReplyToDM();
       clearAttachment();
@@ -2519,6 +2537,55 @@ function handleWSDMMessage (data) {
     if (!document.hidden) markDMRead();
   })();
 }
+
+/* ── Server rejected a WS dm_message — currently the only reason is a
+ *    block (either direction). Remove the optimistic bubble, drop the
+ *    cached pending entry, and surface a friendly inline notice + toast
+ *    so the sender understands why their message vanished.
+ * ────────────────────────────────────────────────────────────────────── */
+function handleDMSendError (data) {
+  try {
+    const nonce = data?.client_nonce || '';
+    const area  = document.getElementById('messages-area');
+    // Drop the optimistic bubble
+    if (nonce && area) {
+      const pend = area.querySelector('.dm-pending[data-nonce="' + nonce + '"]');
+      if (pend) pend.remove();
+    }
+    // Drop the cached entry so it doesn't get re-rendered on channel switch
+    if (nonce) {
+      const pi = _dmMessages.findIndex(x => x._nonce === nonce);
+      if (pi >= 0) _dmMessages.splice(pi, 1);
+      if (_activeDM?.id) {
+        _dmHistoryCache.set(_activeDM.id, _dmMessages.map(x => ({ ...x })));
+      }
+    }
+    if (data?.code === 'blocked') {
+      const peer = data.peer_nickname ? '@' + data.peer_nickname : 'this user';
+      const txt = data.i_blocked
+        ? `You have blocked ${peer} — unblock to message them again.`
+        : `You have been blocked by ${peer}.`;
+      // Toast + persistent inline banner inside the thread
+      try { (window.toast || window.UI?.showToast)?.(txt, 'error', 5500); } catch {}
+      try {
+        if (area && (!_activeDM || _activeDM.id === data.channel_id)) {
+          // Replace any prior banner so it doesn't stack
+          area.querySelector('#dm-block-banner')?.remove();
+          const banner = document.createElement('div');
+          banner.id = 'dm-block-banner';
+          banner.style.cssText = 'margin:10px auto;padding:10px 14px;max-width:520px;background:#2a0d0d;border:1px solid #7f1d1d;border-radius:10px;color:#fca5a5;font-size:13px;text-align:center;font-weight:600;';
+          banner.textContent = '🚫 ' + txt;
+          area.appendChild(banner);
+          banner.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+      } catch {}
+    } else {
+      const err = data?.error || 'Message not delivered';
+      try { (window.toast || window.UI?.showToast)?.(err, 'error'); } catch {}
+    }
+  } catch {}
+}
+window.handleDMSendError = handleDMSendError;
 
 function appendDMMessage (m) {
   m = _normalizeDMMessage(m);

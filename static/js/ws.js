@@ -508,6 +508,21 @@ const WS = (() => {
         if (typeof handleWSDMForwarding === 'function') handleWSDMForwarding(data);
         break;
       }
+      case 'dm_send_error': {
+        // Server rejected a WS dm_message (currently: blocked either way).
+        // Hand off to dms.js which knows about optimistic bubbles + nonces.
+        try {
+          if (typeof window.handleDMSendError === 'function') window.handleDMSendError(data);
+          else if (data.code === 'blocked') {
+            const who = data.peer_nickname ? '@' + data.peer_nickname : 'this user';
+            const text = data.i_blocked
+              ? `You have blocked ${who} — unblock to message them.`
+              : `You have been blocked by ${who}.`;
+            try { (window.toast || window.UI?.showToast)?.(text, 'error'); } catch {}
+          }
+        } catch {}
+        break;
+      }
       // ── WebRTC call signaling ─────────────────────
       case 'call_offer': {
         if (typeof handleCallOffer === 'function') handleCallOffer(data);

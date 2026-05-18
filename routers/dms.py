@@ -252,7 +252,20 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
         peer_id = ch["user_b"] if ch["user_a"] == current_user["id"] else ch["user_a"]
         if peer_id and peer_id != current_user["id"] \
                 and db.is_blocked_either_way(current_user["id"], peer_id):
-            return JSONResponse(status_code=403, content={"error": "You can no longer message this user"})
+            # Surface the direction so the client can render the right
+            # message ("you blocked them" vs "they blocked you").
+            i_blocked = db.is_blocked(current_user["id"], peer_id)
+            peer_blocked_me = db.is_blocked(peer_id, current_user["id"])
+            peer_row = db.get_user_by_id(peer_id) or {}
+            return JSONResponse(status_code=403, content={
+                "error": ("You have blocked this user — unblock to message them again."
+                          if i_blocked and not peer_blocked_me
+                          else f"You have been blocked by @{peer_row.get('nickname') or 'user'}"),
+                "code": "blocked",
+                "i_blocked": bool(i_blocked),
+                "blocked_by_them": bool(peer_blocked_me),
+                "peer_nickname": peer_row.get("nickname") or "",
+            })
     # Source-side forwarding-disabled enforcement.
     fwd_meta = None
     if body.forwarded_from:

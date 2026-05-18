@@ -280,9 +280,14 @@ async def get_invite_info(code: str):
 @router.post("/{code}/join")
 async def join_via_invite(code: str, current_user: dict = Depends(get_current_user)):
     """Join a channel via invite link. Accepts either a real code or vanity."""
-    room_id = db.use_invite(code)
+    # Resolve the target room WITHOUT consuming the invite first, so that a
+    # banned user trying to use their link doesn't burn a use-count.
+    invite_row = db.get_invite(code)
     via_vanity = False
-    if not room_id:
+    target_room_id: Optional[int] = None
+    if invite_row:
+        target_room_id = invite_row.get("room_id")
+    else:
         # Try vanity. Vanity does not bypass invite_only — those channels
         # must use a real invite code.
         room = db.get_room_by_vanity(code)
@@ -293,19 +298,49 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
                 status_code=403,
                 content={"error": "This channel is invite-only. Ask the owner for a direct invite link."},
             )
-        room_id = room["id"]
+        target_room_id = room["id"]
         via_vanity = True
 
-    # Get room info
-    with db._conn() as con:
-        room = con.execute("SELECT name FROM rooms WHERE id=?", (room_id,)).fetchone()
+    if not target_room_id:
+        return JSONResponse(status_code=410, content={"error": "Invite invalid or expired"})
 
-    if not room:
+    # Pre-flight ban check. We do this BEFORE `use_invite` so a banned user
+    # doesn't consume a one-shot link and so the client gets a clear,
+    # specific error instead of a successful "join" followed by a WS
+    # `room_ban` event that triggers the disconnect/ban modal.
+    room_row = db.get_room_by_id(target_room_id) if hasattr(db, "get_room_by_id") else None
+    if not room_row:
+        with db._conn() as con:
+            room_row = con.execute(
+                "SELECT id, name FROM rooms WHERE id=?", (target_room_id,)
+            ).fetchone()
+            room_row = dict(room_row) if room_row else None
+    if not room_row:
         return JSONResponse(status_code=404, content={"error": "Channel no longer exists"})
+
+    ban = db.get_active_room_ban(target_room_id, current_user["id"])
+    if ban and not bool(current_user.get("is_admin")):
+        banner = db.get_user_by_id(ban.get("banned_by")) if ban.get("banned_by") else None
+        return JSONResponse(status_code=403, content={
+            "error": f"You are banned from #{room_row['name']} and cannot join.",
+            "code": "room_banned",
+            "room": room_row["name"],
+            "reason": (ban.get("reason") or "")[:500],
+            "expires_at": ban.get("expires_at"),
+            "banned_by": (banner or {}).get("nickname"),
+        })
+
+    # Only now consume the invite (if this was a real code, not a vanity).
+    if invite_row:
+        consumed = db.use_invite(code)
+        if not consumed:
+            return JSONResponse(status_code=410, content={"error": "Invite invalid or expired"})
+
+    room = {"name": room_row["name"]}
 
     # Actually add the user as a member (was missing — invite was accepted but
     # user was never inserted into room_members, so the sidebar never updated).
-    db.join_room(current_user["id"], room_id)
+    db.join_room(current_user["id"], target_room_id)
     try:
         db.insert_federation_outbox_event({
             "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
