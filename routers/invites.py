@@ -11,6 +11,8 @@ from urllib.parse import quote as _url_quote
 
 import database as db
 from deps import get_current_user
+from routers.rooms import request_private_room_rekey
+from ws_manager import manager
 
 router = APIRouter(prefix="/invites", tags=["invites"])
 
@@ -350,6 +352,29 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
                 "nickname": current_user["nickname"],
             },
         })
+    except Exception:
+        pass
+
+    # Broadcast member_joined to existing members so their sidebar updates
+    # without a reload, AND so private-room key rotation can be triggered.
+    try:
+        await manager.broadcast_room(room["name"], {
+            "type": "member_joined",
+            "room": room["name"],
+            "user_id": current_user["id"],
+            "nickname": current_user["nickname"],
+            "avatar": current_user.get("avatar"),
+        })
+    except Exception:
+        pass
+
+    # Private-room key handoff: the joiner has no current key. Ask the
+    # owner/a moderator to rotate so the joiner receives the new secret
+    # via the standard Signal-envelope fanout. See routers/rooms.py.
+    try:
+        full_room = db.get_room_by_name(room["name"])
+        if full_room:
+            await request_private_room_rekey(full_room, current_user)
     except Exception:
         pass
 

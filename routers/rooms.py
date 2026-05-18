@@ -22,6 +22,58 @@ limiter = Limiter(key_func=client_ip)
 
 ROOM_NAME_RE = re.compile(r"^[a-z0-9_\-]{1,32}$")
 
+
+async def request_private_room_rekey(room: dict, joiner: dict) -> None:
+    """For private rooms only: ask a current key-holder to rotate the room
+    key so the newly-joined `joiner` receives the current secret via the
+    standard Signal-envelope fanout.
+
+    Targets the room owner first; falls back to any online moderator. If
+    nobody with the key is online, the joiner won't be able to decrypt
+    until someone with the key returns and rotates manually — acceptable
+    failure mode for a private room (silence is the secure default).
+
+    Triggered on /join and on invite-accept (NOT on unban itself — the
+    unbanned user must call /join afterwards, which then fires this).
+    This is what fixes the "I unbanned them, they rejoined, but now
+    everything I type is ciphertext to them" bug: after a ban the room
+    key gets rotated; without this rekey on rejoin the unbanned user has
+    no way to acquire the post-rotation key.
+    """
+    try:
+        if (room.get("type") or "public") != "private":
+            return
+        owner_id = room.get("owner_id")
+        joiner_id = joiner.get("id")
+        joiner_nick = joiner.get("nickname") or ""
+        if not owner_id:
+            return
+        payload = {
+            "type": "room_should_rotate",
+            "room": room["name"],
+            "reason": "member_joined",
+            "target_user_id": None,        # include everyone (esp. the joiner)
+            "target_nickname": joiner_nick, # for the system-message line
+            "joiner_user_id": joiner_id,
+        }
+        delivered = 0
+        if owner_id != joiner_id and manager.is_user_online(owner_id):
+            delivered = await manager.send_to_user(owner_id, payload)
+        if not delivered:
+            try:
+                mods = db.get_room_moderators(room["id"])
+            except Exception:
+                mods = []
+            for m in mods:
+                uid = int(m.get("user_id") or 0)
+                if not uid or uid == joiner_id:
+                    continue
+                if manager.is_user_online(uid):
+                    if await manager.send_to_user(uid, payload):
+                        break
+    except Exception:
+        pass
+
 # ─── channel_theme sanitiser ─────────────────────────────────────────────────
 # channel_theme is a JSON blob with whitelisted keys. The .css field used to
 # be passed straight to the client which applied it inside a <style> tag.
@@ -1112,6 +1164,12 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
         })
     except Exception:
         pass
+    # Private-room key handoff. The freshly-joined user has no current
+    # room secret (either it's their first join or they were just
+    # unbanned after a rotation). Ask the owner/a moderator to rotate
+    # the key — the standard rotate flow then fans the new secret out
+    # to every current member, including this joiner.
+    await request_private_room_rekey(room, current_user)
     return {"ok": True}
 
 
