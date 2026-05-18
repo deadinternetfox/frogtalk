@@ -1392,6 +1392,25 @@ const Rooms = (() => {
       tab.style.pointerEvents = isPrivate ? 'none' : '';
       tab.title = isPrivate ? 'Only public channels can be listed in directory' : '';
     }
+    // Private channels don't expose a public bot surface (bots authenticate
+    // against the room owner — adding one to a private channel would leak
+    // every message via the bot's API key). Dim & disable the tab the same
+    // way as Directory so it's visibly out-of-scope here.
+    const botsTab = document.getElementById('ch-tab-bots');
+    if (botsTab) {
+      botsTab.style.opacity = isPrivate ? '0.45' : '';
+      botsTab.style.pointerEvents = isPrivate ? 'none' : '';
+      botsTab.title = isPrivate ? 'Bots are disabled in private channels' : '';
+    }
+    // Same reasoning for bridges: a Telegram/Discord mirror would publish
+    // every private message to a third-party platform, defeating the
+    // E2EE guarantee. Tab is dimmed/disabled here.
+    const bridgesTab = document.getElementById('ch-tab-bridges');
+    if (bridgesTab) {
+      bridgesTab.style.opacity = isPrivate ? '0.45' : '';
+      bridgesTab.style.pointerEvents = isPrivate ? 'none' : '';
+      bridgesTab.title = isPrivate ? 'Bridges are disabled in private channels' : '';
+    }
 
     const note = document.getElementById('ch-dir-policy-note');
     if (note) note.style.display = isPrivate ? '' : 'none';
@@ -1601,6 +1620,14 @@ const Rooms = (() => {
   function switchChannelTab(tab) {
     if (tab === 'directory' && _currentRoomData?.room?.type === 'private') {
       UI.showToast('Private channels cannot be listed in directory', 'error');
+      tab = 'perms';
+    }
+    if (tab === 'bots' && _currentRoomData?.room?.type === 'private') {
+      UI.showToast('Bots are disabled in private channels', 'error');
+      tab = 'perms';
+    }
+    if (tab === 'bridges' && _currentRoomData?.room?.type === 'private') {
+      UI.showToast('Bridges are disabled in private channels', 'error');
       tab = 'perms';
     }
     ['general', 'perms', 'directory', 'invites', 'mods', 'bans', 'theme', 'bots', 'bridges'].forEach(t => {

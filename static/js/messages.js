@@ -3967,7 +3967,14 @@ function handleRoomBan(data) {
     const reason = (data.reason || '').trim();
     const banner = data.banned_by || 'a moderator';
     const expires = data.expires_at;
-    const isKick = !!expires;
+    // Treat any of expires_at OR duration_minutes as the "this is a kick"
+    // signal. The server sends both, but if expires_at is ever lost in
+    // transit (race on get_room_bans, federation hop, …) we fall back to
+    // duration_minutes so a 5-minute kick never gets rendered as a
+    // permanent ban.
+    const durationMinutes = (typeof data.duration_minutes === 'number' && data.duration_minutes > 0)
+      ? data.duration_minutes : null;
+    const isKick = !!(expires || durationMinutes);
     let durationLabel = 'Permanent';
     if (expires) {
       try {
@@ -3981,13 +3988,22 @@ function handleRoomBan(data) {
           else durationLabel = `Until ${exp.toLocaleDateString()} ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
         }
       } catch {}
+    } else if (durationMinutes) {
+      // No expires_at on the wire — derive a label from the duration the
+      // mod selected so the user still sees "X minutes" instead of
+      // "Permanent".
+      if (durationMinutes < 60) durationLabel = `${durationMinutes} min`;
+      else if (durationMinutes < 1440) durationLabel = `${Math.round(durationMinutes/60)} h`;
+      else durationLabel = `${Math.round(durationMinutes/1440)} d`;
     }
 
-    // Close the channel: always strip from sidebar/cached state so the
-    // banned room disappears from the sidebar even if the user is browsing
-    // a different room when the ban arrives. If they ARE inside the banned
-    // room, also navigate away to the lobby ('general') so they aren't
-    // staring at messages they no longer have access to.
+    // Close the channel: strip the banned room from sidebar/cached state
+    // so it disappears from the channel list immediately. Do NOT auto-
+    // navigate the user anywhere — being silently dropped into a random
+    // room they aren't a member of (previously hard-coded 'general') is
+    // disorienting and can land them in a room with a description they
+    // didn't consent to. Instead the kick/ban modal acts as the screen
+    // until they pick another channel themselves.
     try {
       // Drop cached messages for this room so a re-join after a 5-min
       // kick doesn't show stale state.
@@ -4003,12 +4019,17 @@ function handleRoomBan(data) {
           Rooms.renderRooms();
         }
       } catch {}
-      // Switch out of the banned room when it's the active view.
+      // If the user was viewing the banned room, clear State.currentRoom
+      // so subsequent send/typing actions don't reference a room they
+      // can't access. The chat panel will repaint blank — the modal sits
+      // over it as the kick/ban screen.
       if (State.currentRoom === room) {
+        try { State.currentRoom = null; } catch {}
         try {
-          if (typeof Rooms !== 'undefined' && typeof Rooms.switchToRoom === 'function') {
-            Rooms.switchToRoom('general', 'public');
-          }
+          const msgsEl = document.getElementById('messages');
+          if (msgsEl) msgsEl.innerHTML = '';
+          const header = document.getElementById('channel-name');
+          if (header) header.textContent = '';
         } catch {}
       }
       // Authoritative refresh from server — the room is now excluded from
@@ -4052,7 +4073,7 @@ function handleRoomBan(data) {
           </div>
         </div>
         <div style="padding:14px 24px 20px;border-top:1px solid #4d1f1f;background:rgba(0,0,0,.25);text-align:center;">
-          <button id="rbn-ok" type="button" style="padding:10px 28px;background:linear-gradient(180deg,#16a34a,#15803d);border:1px solid #14532d;border-radius:8px;color:#fff;cursor:pointer;font-weight:700;box-shadow:0 2px 8px rgba(22,163,74,.3);">Return to lobby</button>
+          <button id="rbn-ok" type="button" style="padding:10px 28px;background:linear-gradient(180deg,#16a34a,#15803d);border:1px solid #14532d;border-radius:8px;color:#fff;cursor:pointer;font-weight:700;box-shadow:0 2px 8px rgba(22,163,74,.3);">Dismiss</button>
         </div>
       </div>`;
     document.body.appendChild(wrap);
