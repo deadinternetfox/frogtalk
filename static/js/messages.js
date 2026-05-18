@@ -4047,6 +4047,10 @@ function _startRoomBanTicker() {
         try { delete (window._roomBans || {})[room]; } catch {}
         if (typeof window._applyRoomBanUI === 'function') window._applyRoomBanUI(room);
         _stopRoomBanTicker();
+        // Replace the red banner with a green "ban expired" confirmation
+        // so a user staring at the screen at the moment of expiry gets a
+        // clear signal to rejoin instead of a silent restore.
+        try { window._showRoomUnbannedBanner && window._showRoomUnbannedBanner(room, { timerElapsed: true }); } catch {}
       }
     } catch {}
   }, 1000);
@@ -4063,6 +4067,15 @@ window._applyRoomBanUI = function _applyRoomBanUI(room) {
     const ta = document.getElementById('msg-input');
     const sendBtn = document.getElementById('send-btn');
     const existing = document.getElementById('room-ban-banner');
+    // Clean up a stale unban-confirmation banner left over from another
+    // room — the banner DOM lives inside the shared #input-area so it
+    // would otherwise follow the user across channels.
+    try {
+      const stale = document.getElementById('room-unban-banner');
+      if (stale && stale.dataset && stale.dataset.room && stale.dataset.room !== room) {
+        stale.remove();
+      }
+    } catch {}
     if (!info) {
       if (existing) existing.remove();
       if (inputWrap) inputWrap.style.display = '';
@@ -4230,12 +4243,86 @@ function handleRoomUnban(data) {
     if (hadBan) {
       try {
         const who = (data.unbanned_by || 'a moderator').toString();
-        toast(`Unbanned from #${room} by @${who}`, 'success');
+        // If the user is staring at the unbanned room right now, swap the
+        // red banner for a green confirmation in place. Otherwise a toast
+        // is plenty — they'll see the banner is gone the next time they
+        // switch to that channel.
+        if (State.currentRoom === room && typeof window._showRoomUnbannedBanner === 'function') {
+          window._showRoomUnbannedBanner(room, { by: who });
+        } else {
+          toast(`Unbanned from #${room} by @${who}`, 'success');
+        }
       } catch {}
     }
   } catch {}
 }
 window.handleRoomUnban = handleRoomUnban;
+
+// Green "you are now unbanned" / "your ban expired" confirmation banner.
+// Drops in above the composer (which has already been restored by
+// _applyRoomBanUI), is dismissable, and auto-fades after 20s. Tagged
+// with `data-room` so a switch to a different channel sweeps it away
+// from _applyRoomBanUI's stale-banner cleanup.
+window._roomUnbanNotices = window._roomUnbanNotices || {};
+window._showRoomUnbannedBanner = function _showRoomUnbannedBanner(room, opts) {
+  try {
+    if (!room) return;
+    if (typeof State === 'undefined' || State.currentRoom !== room) return;
+    opts = opts || {};
+    const inputArea = document.getElementById('input-area');
+    if (!inputArea) return;
+    const title = opts.timerElapsed ? 'Your ban has expired' : 'You are now unbanned';
+    const body = opts.timerElapsed
+      ? 'You may rejoin this channel.'
+      : 'You may rejoin this channel via invite link or by searching.';
+    const byLine = (!opts.timerElapsed && opts.by)
+      ? ` <span style="color:#9ca3af;">·</span> <span style="color:#9ca3af;">by</span> <strong>@${UI.escHtml(opts.by)}</strong>`
+      : '';
+    let bar = document.getElementById('room-unban-banner');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'room-unban-banner';
+      bar.style.cssText = [
+        'background:linear-gradient(180deg,#0d2a13,#071a0b)',
+        'border:1px solid #166534',
+        'border-radius:10px',
+        'margin:0 8px 8px',
+        'padding:10px 14px',
+        'color:#bbf7d0',
+        'font-size:13px',
+        'box-shadow:0 4px 14px rgba(22,101,52,.25)',
+        'position:relative',
+      ].join(';');
+      inputArea.insertBefore(bar, inputArea.firstChild);
+    }
+    bar.dataset.room = room;
+    bar.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="font-size:22px;line-height:1;flex:0 0 auto;color:#4ade80;">✓</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;color:#86efac;font-size:13px;letter-spacing:.2px;">${UI.escHtml(title)}</div>
+          <div style="margin-top:3px;color:#e5e7eb;font-size:12px;line-height:1.45;">${UI.escHtml(body)}${byLine}</div>
+        </div>
+        <button type="button" id="room-unban-banner-close" aria-label="Dismiss"
+                style="background:transparent;border:0;color:#86efac;font-size:18px;cursor:pointer;padding:0 6px;line-height:1;">×</button>
+      </div>`;
+    const dismiss = () => {
+      try { bar.remove(); } catch {}
+      try { delete window._roomUnbanNotices[room]; } catch {}
+    };
+    const btn = bar.querySelector('#room-unban-banner-close');
+    if (btn) btn.onclick = dismiss;
+    const stamp = Date.now();
+    window._roomUnbanNotices[room] = { ts: stamp };
+    setTimeout(() => {
+      // Only auto-dismiss if THIS exact notice is still the current one
+      // (a fresh ban/unban cycle in the same room shouldn't be killed by
+      // an older timer).
+      const n = window._roomUnbanNotices[room];
+      if (n && n.ts === stamp) dismiss();
+    }, 20000);
+  } catch {}
+};
 
 // Pause the chat-embedded player adjacent to the given Send-to-player
 // button so the inline iframe and the Music side-player don't double-
