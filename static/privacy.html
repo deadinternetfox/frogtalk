@@ -335,7 +335,7 @@
     <h3>Message metadata (server-visible)</h3>
     <ul>
       <li><strong>Sender, recipient, room ID, and timestamp</strong> for every message. The <em>contents</em> of DMs are encrypted; the routing envelope is not.</li>
-      <li><strong>Room and channel messages</strong> are end-to-end encrypted with Signal Sender Keys — the server stores only ciphertext. The exception is a channel with an outbound Discord/Telegram bridge enabled by an operator, which intentionally falls back to a shared room key so the bridge can forward readable text; this is clearly indicated in the channel header.</li>
+      <li><strong>Room and channel messages</strong> in private channels are end-to-end encrypted with per-room AES-256-GCM (AAD-bound to the room and key version, with automatic key rotation on ban or kick) — the server stores only ciphertext. Public channels are not E2EE: they are designed to be world-readable and stored encrypted-at-rest only. Bridges to Discord/Telegram are <strong>not available for private rooms</strong>; they only ever run on public channels, which are plaintext by design and clearly indicated in the channel header.</li>
     </ul>
 
     <h3>Device & connection data</h3>
@@ -388,9 +388,10 @@
     <p>Private channels are encrypted with a per-room AES-256-GCM key derived from a shared secret distributed to members on join:</p>
     <ul>
       <li>The shared secret is stretched with HKDF-SHA-256 into a 32-byte AES-256-GCM key bound to the channel.</li>
-      <li>Every message is sealed with a fresh 96-bit IV; the server only stores ciphertext.</li>
+      <li>Every message is sealed with a fresh 96-bit IV. Ciphertext uses a v2 wire format (<code>[0x02][iv:12][ct+tag]</code>) with AES-GCM Additional Authenticated Data set to <code>room:&lt;id&gt;:v&lt;version&gt;</code>, so a captured ciphertext cannot be replayed against another room or against an older key version. The server only stores ciphertext.</li>
       <li>The key never traverses the server in plaintext — it is delivered to new members through their already-established Signal DM session.</li>
-      <li>Public channels intentionally have <em>no</em> shared key — they are designed to be world-readable and are stored in plaintext.</li>
+      <li><strong>Key rotation:</strong> when a member is banned or kicked, or a moderator presses “Rotate room key now” in channel settings, a fresh 32-byte key is generated client-side and fanned out to every remaining member via their Signal DM session. The rotation is announced in-channel as a system message. After a rotation, removed members can no longer decrypt new messages.</li>
+      <li>Public channels intentionally have <em>no</em> shared key — they are designed to be world-readable and are stored encrypted-at-rest only.</li>
     </ul>
 
     <h3 style="margin-top:18px">Voice & video calls — DTLS-fingerprint signing</h3>
@@ -405,18 +406,18 @@
       <strong>What this means in practice:</strong> a court order, a server breach, or a rogue admin can reveal the metadata of who messaged whom and when, but cannot reveal the contents of direct messages, room messages, or call media. We have no key to give.
     </div>
 
-    <p>The one explicit exception is a <strong>room with an outbound Discord or Telegram bridge enabled</strong>. Because the bridge has to forward readable text to a third-party platform, those rooms fall back to a transitional AES key shared between members. This is clearly indicated in the channel header, and DMs are <strong>never</strong> bridged.</p>
+    <p>The one explicit exception is a <strong>public channel with an outbound Discord or Telegram bridge enabled</strong>. Because the bridge has to forward readable text to a third-party platform, those channels are plaintext by design. <strong>Bridges are blocked for private (E2EE) rooms</strong> — all four bridge-create endpoints reject private rooms with HTTP 403, so a moderator cannot accidentally leak an end-to-end encrypted channel to Discord or Telegram. DMs are <strong>never</strong> bridged.</p>
   </section>
 
   <section class="policy" id="bridges">
     <h2>Discord & Telegram bridges</h2>
-    <p>FrogTalk channels can optionally be linked to a Discord channel or Telegram chat. When a bridge is enabled by a room operator:</p>
+    <p>FrogTalk <strong>public</strong> channels can optionally be linked to a Discord channel or Telegram chat. Bridges are not available for private (E2EE) rooms — forwarding to a third-party platform would leak plaintext and defeat end-to-end encryption, so the server refuses to create them. When a bridge is enabled by a room operator on a public channel:</p>
     <ul>
       <li>Messages posted in the FrogTalk room are <strong>forwarded as plaintext</strong> to Discord / Telegram, and vice versa.</li>
       <li>Your nickname and avatar URL are sent to the bridged platform so the message renders with your identity.</li>
       <li>Messages crossing the bridge are also subject to <strong>Discord's</strong> or <strong>Telegram's</strong> own privacy policies once they leave our infrastructure.</li>
     </ul>
-    <p>Bridges are only ever activated by room operators and are clearly indicated in the channel header. DMs are <strong>never</strong> bridged.</p>
+    <p>Bridges are only ever activated by room operators on public channels, and are clearly indicated in the channel header. Private rooms and DMs are <strong>never</strong> bridged.</p>
   </section>
 
   <section class="policy" id="cookies">
