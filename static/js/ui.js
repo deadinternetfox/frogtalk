@@ -2150,24 +2150,24 @@ function _showRoomBannedScreen(data) {
   const banner = (data && data.banned_by) ? String(data.banned_by) : '';
   const hasExpiry = !!(data && data.expires_at);
   const exp = hasExpiry ? _fmtBanExpiry(data.expires_at) : '';
-  // Channel "kick" in this codebase == a time-limited room ban. So a row
-  // in room_bans with expires_at set is rendered as a Kick; permanent
-  // rows (no expires_at) are rendered as a Ban with no duration line.
-  const isKick = hasExpiry && exp !== 'expired';
-  const title = isKick ? `Kicked from #${room}` : `Banned from #${room}`;
+  // Single ban concept — a row with expires_at is a temporary ban, no
+  // expires_at means permanent. We no longer call short bans "kicks".
+  const isTemporary = hasExpiry && exp !== 'expired';
+  const title = `Banned from #${room}`;
+  const durLine = isTemporary ? exp : 'Permanent';
   const esc = (window.UI && UI.escHtml) ? UI.escHtml : (s => String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])));
   const div = document.createElement('div');
   div.id = 'room-banned-screen';
   div.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(8,4,4,0.78);display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(4px);';
   div.innerHTML = `
     <div style="max-width:460px;width:100%;background:linear-gradient(180deg,#2a0d0d,#1a0707);border:1px solid #5b1c1c;border-radius:14px;padding:24px 22px;box-shadow:0 24px 64px rgba(0,0,0,0.6);color:#fde2e2;">
-      <div style="font-size:40px;line-height:1;margin-bottom:10px;">${isKick ? '👢' : '🚫'}</div>
+      <div style="font-size:40px;line-height:1;margin-bottom:10px;">🚫</div>
       <h3 style="margin:0 0 8px;font-size:18px;color:#fca5a5;">${esc(title)}</h3>
       <p style="margin:0 0 12px;color:#fecaca;line-height:1.5;font-size:14px;">
-        ${isKick ? "You can't rejoin this channel yet." : "You can't join this channel."}${banner ? ` By <strong>@${esc(banner)}</strong>.` : ''}
+        You can't join this channel.${banner ? ` By <strong>@${esc(banner)}</strong>.` : ''}
       </p>
       ${reason ? `<div style="background:#3a1010;border:1px solid #6b1f1f;border-radius:8px;padding:8px 10px;margin-bottom:10px;"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#fca5a5;margin-bottom:4px;">Reason</div><div style="color:#fee2e2;white-space:pre-wrap;font-size:13px;">${esc(reason)}</div></div>` : ''}
-      ${isKick ? `<div style="font-size:12px;color:#fda4af;margin-bottom:16px;">${esc(exp)}</div>` : ''}
+      <div style="font-size:12px;color:#fda4af;margin-bottom:16px;"><span style="text-transform:uppercase;letter-spacing:.06em;color:#fca5a5;font-weight:600;margin-right:6px;">Duration:</span>${esc(durLine)}</div>
       <button id="room-banned-dismiss" style="width:100%;background:#7f1d1d;color:#fee2e2;border:none;border-radius:8px;padding:9px 14px;font-weight:600;cursor:pointer;">Got it</button>
     </div>`;
   document.body.appendChild(div);
