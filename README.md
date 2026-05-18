@@ -34,7 +34,7 @@ No company in the middle. Messages stay private. Built in the open.
 
 > **Your chat, your server, your keys.** No company in the middle, no plaintext on disk, no telemetry tax.
 
-- 🔐 **Real E2E** — Signal Protocol (X3DH + Double Ratchet) for DMs, Sender Keys for rooms. The server stores ciphertext and nothing else.
+- 🔐 **Real E2E** — Signal Protocol (X3DH + Double Ratchet) for DMs, per-room AES-256-GCM for private channels. The server stores ciphertext and nothing else.
 - 🌐 **Federated** — your node talks to other nodes; users, profiles, posts, rooms and DMs replicate across the swamp.
 - 🧅 **Tor-native** — flip a flag and your node lives behind a `.onion`; clearnet IP never leaks.
 - 📱 **Everywhere** — Web, Android (APK), iOS (TestFlight), Windows portable, Linux AppImage / `.deb`, and Electron desktop.
@@ -47,7 +47,7 @@ No company in the middle. Messages stay private. Built in the open.
 
 | | |
 |---|---|
-| 🔐 **E2E Encryption** | Signal Protocol for DMs (X3DH + Double Ratchet) and Sender Keys for room messages, client-side only — the server never sees plaintext |
+| 🔐 **E2E Encryption** | Signal Protocol for DMs (X3DH + Double Ratchet) and per-room AES-256-GCM for private channels, client-side only — the server never sees plaintext |
 | 🌐 **Federated** | Your node joins the global FrogTalk directory and talks to other nodes |
 | 🔁 **Cross-node Sync** | Replicates users/profile status, social follows/posts/stories, rooms, and DMs across nodes |
 | ⚡ **Real-time** | WebSocket messaging with auto-reconnect, typing indicators, reactions |
@@ -199,25 +199,27 @@ practical guarantee:
   recipient's published prekey bundle establishes a Double Ratchet session.
   Every DM advances the ratchet, so forward secrecy is per-message and a
   device compromise tomorrow can't decrypt today's traffic.
-- **Room messages — Signal Sender Keys.** Each device holds its own sending
-  chain (HMAC-SHA-256 ratchet → HKDF → AES-256-GCM with bound AAD, signed
-  with an XEdDSA key derived from libsignal's Curve25519). The chain key is
-  distributed to other members via Sender-Key Distribution Messages
-  (SKDMs) tunnelled through the recipient's Signal DM session, so the
-  server only ever moves opaque ciphertext.
+- **Room messages — per-channel AES-256-GCM.** Private channels are sealed
+  with a 256-bit AES-GCM key derived (HKDF-SHA-256) from a shared channel
+  secret distributed to new members through their already-established
+  Signal DM session. Public channels intentionally have no key — they are
+  designed to be world-readable and are stored in plaintext.
 - **Voice/video calls — DTLS fingerprint signing.** SDP offers and answers
   carry an XEdDSA signature over the call's DTLS fingerprint so a hostile
   signalling server can't silently MITM the media path. A Safety-Numbers
   panel surfaces the verified peer identity.
-- **Bridged channels.** Rooms with an outbound Discord/Telegram bridge
-  intentionally fall back to legacy AES so the bridge can forward the
-  message text; this is clearly indicated in the channel header.
+- **Wall posts — per-post AEAD wrapped to followers.** Each post is sealed
+  with a fresh AES-256-GCM key; that key is then wrapped to each follower
+  via their Signal DM session, so only the intended audience can read it.
+- **Bridged channels.** Channels with an outbound Discord/Telegram bridge
+  intentionally fall back to plaintext so the bridge can forward the
+  message text to the third-party platform; this is clearly indicated in
+  the channel header. DMs are never bridged.
 - **Private keys** are generated client-side and never leave the device.
   They live in IndexedDB (web/desktop) or the OS keystore (Android/iOS).
 
 In-app the **🔒 Encryption info** modal exposes the current safety number
-for a DM, or the room's sender-keys state (mode, local epoch, per-device
-chain state, known peers) for a channel.
+for a DM, or the channel's encryption mode for a room.
 
 ---
 
@@ -265,8 +267,7 @@ workflow for small, honest software teams.
 - **Ship.** Trunk-based: merge to `main`, deploy, watch the logs.
 
 The encryption primitives are well-studied (X3DH + Double Ratchet for DMs,
-Sender Keys with HMAC-SHA-256 + HKDF + AES-256-GCM and an XEdDSA signature
-for rooms, DTLS-fingerprint signing for calls). The surrounding plumbing — DOM rendering, session handling,
+per-room AES-256-GCM for private channels, DTLS-fingerprint signing for calls). The surrounding plumbing — DOM rendering, session handling,
 media URLs, federation glue — is the kind of code that benefits from a second set
 of eyes. **We'd rather hear from you than pretend it's flawless.**
 

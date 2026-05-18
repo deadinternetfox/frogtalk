@@ -11,236 +11,6 @@ const Messages = (() => {
   let _previewCache = {};
   let _replyTo = null; // { id, nickname, content }
 
-  // ── Room v2-sk plaintext cache ───────────────────────────────────────
-  //
-  // Sender-Key ratchets advance state on every successful decrypt; replay
-  // of the same envelope (history reload, WS retransmit, retrySKDecrypt
-  // after a late SKDM) then fails with "replay — iteration already
-  // consumed" or "skipped iteration". We also can never decrypt our own
-  // outgoing ciphertext from our SENDING chain — but we *do* know the
-  // plaintext at send time. Cache by ciphertext-envelope-JSON, persisted
-  // to localStorage so reloads pick it up.
-  const _RM_PT_CACHE_KEY = 'ft_room_pt_v1';
-  const _RM_PT_CACHE_CAP = 6000;
-  const _rmPtCache       = new Map();
-  let   _rmPtLoaded      = false;
-  let   _rmPtDirty       = false;
-  let   _rmPtSaveT       = 0;
-  function _rmPtLoad() {
-    if (_rmPtLoaded) return;
-    _rmPtLoaded = true;
-    try {
-      const raw = localStorage.getItem(_RM_PT_CACHE_KEY);
-      if (!raw) return;
-      const obj = JSON.parse(raw);
-      if (obj && typeof obj === 'object') {
-        for (const k of Object.keys(obj)) _rmPtCache.set(k, String(obj[k] || ''));
-      }
-    } catch {}
-  }
-  function _rmPtSave() {
-    if (!_rmPtDirty) return;
-    _rmPtDirty = false;
-    try {
-      const out = {};
-      let n = 0;
-      for (const [k, v] of _rmPtCache) {
-        if (++n > _RM_PT_CACHE_CAP) break;
-        out[k] = v;
-      }
-      localStorage.setItem(_RM_PT_CACHE_KEY, JSON.stringify(out));
-    } catch {}
-  }
-  // The cipher string is the v2 envelope JSON, but cache hits on history
-  // reload must survive a server JSON-roundtrip (Python json.dumps key
-  // ordering / whitespace may differ from JS JSON.stringify). Normalize
-  // by keying on the inner `b` ciphertext (base64, unique per envelope).
-  // Non-v2 inputs fall back to the raw string.
-  function _ptCacheKey(cipher) {
-    if (!cipher || typeof cipher !== 'string') return String(cipher || '');
-    if (cipher.length < 9 || cipher[0] !== '{') return cipher;
-    try {
-      const env = JSON.parse(cipher);
-      if (env && env.v === 2 && typeof env.b === 'string'
-          && (env.t === 'sk' || env.t === 'pre' || env.t === 'msg')) {
-        return 'v2:' + env.t + ':' + env.b;
-      }
-    } catch {}
-    return cipher;
-  }
-  function _ptCacheGet(cipher) {
-    _rmPtLoad();
-    const k = _ptCacheKey(cipher);
-    // Back-compat: also probe the legacy raw-string key for entries that
-    // were stored before normalization landed.
-    return _rmPtCache.get(k) ?? _rmPtCache.get(cipher);
-  }
-  // Defensive guard: a string "looks like ciphertext" if it parses as a
-  // v2 envelope {v:2,t:'sk'|'pre'|'msg',b:'…'}. We must NEVER store such
-  // a value as cached plaintext — that would poison the cache and cause
-  // _formatContent's self-heal to render ciphertext as if it were the
-  // decrypted message. Returns true when the value is ciphertext-shaped.
-  function _looksLikeCiphertext(s) {
-    if (typeof s !== 'string' || s.length < 9 || s[0] !== '{') return false;
-    try {
-      const e = JSON.parse(s);
-      return !!(e && e.v === 2 && typeof e.b === 'string'
-                && (e.t === 'sk' || e.t === 'pre' || e.t === 'msg'));
-    } catch { return false; }
-  }
-
-  function _ptCachePut(cipher, plain) {
-    // Reject ciphertext-shaped values — see _looksLikeCiphertext.
-    if (typeof plain !== 'string' || _looksLikeCiphertext(plain)) return;
-    _rmPtLoad();
-    const k = _ptCacheKey(cipher);
-    if (_rmPtCache.has(k)) _rmPtCache.delete(k);
-    _rmPtCache.set(k, String(plain));
-    while (_rmPtCache.size > _RM_PT_CACHE_CAP) {
-      const k0 = _rmPtCache.keys().next().value;
-      if (k0 === undefined) break;
-      _rmPtCache.delete(k0);
-    }
-    _rmPtDirty = true;
-    if (!_rmPtSaveT) {
-      _rmPtSaveT = setTimeout(() => { _rmPtSaveT = 0; _rmPtSave(); }, 250);
-    }
-  }
-  // Flush any pending debounced cache write synchronously. Called on
-  // pagehide/beforeunload so a send → logout → login sequence within
-  // the 250ms debounce window doesn't lose the just-cached plaintext.
-  function _ptCacheFlush() {
-    try {
-      if (_rmPtSaveT) { clearTimeout(_rmPtSaveT); _rmPtSaveT = 0; }
-      _rmPtSave();
-    } catch {}
-  }
-  try {
-    if (typeof window !== 'undefined') {
-      window.addEventListener('pagehide', _ptCacheFlush);
-      window.addEventListener('beforeunload', _ptCacheFlush);
-    }
-  } catch {}
-
-  // Secondary id-keyed cache. Envelope-byte normalization should always
-  // match between PUT and GET, but server-side re-serialization (e.g.
-  // federation echo round-trip, future content-canonicalization passes)
-  // could in theory change the JSON byte order or whitespace and miss
-  // the `v2:t:b` normalized key. msg.id is server-assigned and stable
-  // across history reloads, so it makes a perfect fallback key.
-  // Keys are prefixed `id:<room>:<id>` so they coexist with envelope
-  // keys in the same Map (and the same localStorage blob) without
-  // collision.
-  function _ptCacheGetById(room, id) {
-    if (!room || !id) return undefined;
-    _rmPtLoad();
-    return _rmPtCache.get('id:' + room + ':' + id);
-  }
-  function _ptCachePutById(room, id, plain) {
-    if (!room || !id || typeof plain !== 'string') return;
-    if (_looksLikeCiphertext(plain)) return;
-    _rmPtLoad();
-    const k = 'id:' + room + ':' + id;
-    if (_rmPtCache.has(k)) _rmPtCache.delete(k);
-    _rmPtCache.set(k, plain);
-    while (_rmPtCache.size > _RM_PT_CACHE_CAP) {
-      const k0 = _rmPtCache.keys().next().value;
-      if (k0 === undefined) break;
-      _rmPtCache.delete(k0);
-    }
-    _rmPtDirty = true;
-    if (!_rmPtSaveT) {
-      _rmPtSaveT = setTimeout(() => { _rmPtSaveT = 0; _rmPtSave(); }, 250);
-    }
-  }
-
-  // Session-scoped, in-memory plaintext map keyed by `<room>:<msg.id>`.
-  // Belt-and-braces companion to the localStorage caches above. The
-  // localStorage caches can be lost across sessions (and in theory
-  // raced/overwritten by a second tab writing its own stale snapshot),
-  // but this Map lives in the page's JS heap for the lifetime of the
-  // tab and survives every loadHistory rebuild + channel switch within
-  // the same session. ws.decryptMsg fills it on every successful
-  // decrypt OR cache hit, and _formatContent consults it before
-  // rendering the 🔒 placeholder.
-  //
-  // Persistence: also mirrored to its OWN localStorage key (separate
-  // from the LRU `_rmPtCache`), so it survives a hard page reload AND
-  // an LRU eviction that may have purged the corresponding id-keyed
-  // entry from the main cache. No size cap is enforced here — entries
-  // are tiny (just plaintext strings keyed by `<room>:<id>`) and the
-  // worst case is a few MB of LS over a year of heavy use. Sticky
-  // semantics still apply: once set for an id, we never overwrite.
-  const _MSG_PT_STICKY_KEY = 'ft_pt_sticky_v1';
-  const _msgPlainById = new Map();
-  let   _msgPtStickyLoaded = false;
-  let   _msgPtStickyDirty  = false;
-  let   _msgPtStickyT      = 0;
-  function _msgPtStickyLoad() {
-    if (_msgPtStickyLoaded) return;
-    _msgPtStickyLoaded = true;
-    try {
-      const raw = localStorage.getItem(_MSG_PT_STICKY_KEY);
-      if (!raw) return;
-      const obj = JSON.parse(raw);
-      if (obj && typeof obj === 'object') {
-        for (const k of Object.keys(obj)) {
-          const v = obj[k];
-          if (typeof v === 'string' && !_looksLikeCiphertext(v)) {
-            _msgPlainById.set(k, v);
-          }
-        }
-      }
-    } catch {}
-  }
-  function _msgPtStickySave() {
-    if (!_msgPtStickyDirty) return;
-    _msgPtStickyDirty = false;
-    try {
-      const out = {};
-      for (const [k, v] of _msgPlainById) out[k] = v;
-      localStorage.setItem(_MSG_PT_STICKY_KEY, JSON.stringify(out));
-    } catch {}
-  }
-  function _msgPtStickyFlush() {
-    try {
-      if (_msgPtStickyT) { clearTimeout(_msgPtStickyT); _msgPtStickyT = 0; }
-      _msgPtStickySave();
-    } catch {}
-  }
-  try {
-    if (typeof window !== 'undefined') {
-      window.addEventListener('pagehide', _msgPtStickyFlush);
-      window.addEventListener('beforeunload', _msgPtStickyFlush);
-    }
-  } catch {}
-  // Eager hydrate on module init so the very first _formatContent call
-  // (cached-paint pass before any WS history arrives) can self-heal.
-  _msgPtStickyLoad();
-  function _msgPtSetById(room, id, plain) {
-    if (!room || !id || typeof plain !== 'string') return;
-    // Never store ciphertext-shaped values — see _looksLikeCiphertext.
-    if (_looksLikeCiphertext(plain)) return;
-    _msgPtStickyLoad();
-    // Sticky: once we have plaintext for <room,id>, never overwrite.
-    // This Map is session-scoped and is the last line of defense for
-    // own-message self-heal across channel switches. If a later code
-    // path tries to set a different (or worse) value for the same id,
-    // we keep the first known-good plaintext.
-    const k = room + ':' + id;
-    if (_msgPlainById.has(k)) return;
-    _msgPlainById.set(k, plain);
-    _msgPtStickyDirty = true;
-    if (!_msgPtStickyT) {
-      _msgPtStickyT = setTimeout(() => { _msgPtStickyT = 0; _msgPtStickySave(); }, 250);
-    }
-  }
-  function _msgPtGetById(room, id) {
-    if (!room || !id) return undefined;
-    _msgPtStickyLoad();
-    return _msgPlainById.get(room + ':' + id);
-  }
-
   // Inline SVG logos for bridge origin badge (tiny, monochrome, currentColor).
   const _TG_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg>';
   const _DC_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z"/></svg>';
@@ -344,86 +114,6 @@ const Messages = (() => {
 
   function _formatContent(text, opts) {
     if (!text) return '';
-    // Track A/C v2 wire envelopes: when the receiver cannot decrypt (peer
-    // hasn't distributed sender-key, cold device, ratchet step lost, etc.)
-    // the upstream decrypt fall-through returns the raw {v:2,t:'sk'|'pre'|'msg',b:'…'}
-    // JSON so the renderer can show a lock placeholder rather than leaking
-    // ciphertext.  Without this guard the JSON would render verbatim.
-    if (text.length >= 9 && text[0] === '{') {
-      try {
-        const _env = JSON.parse(text);
-        if (_env && _env.v === 2 && typeof _env.b === 'string'
-            && (_env.t === 'pre' || _env.t === 'msg' || _env.t === 'sk')) {
-          // Self-heal: the v2 envelope often arrives here on channel
-          // re-paint (loadHistory from cached State.messages) when an
-          // upstream decrypt path didn't substitute plaintext. If we
-          // have plaintext cached under the ciphertext, render it now
-          // — formatted as if it had been decrypted in the first place.
-          // Three lookup tiers in priority order:
-          //   1. envelope-key localStorage cache (`v2:t:b`)
-          //   2. id-key in-memory session map (survives loadHistory)
-          //   3. id-key localStorage cache (survives reload)
-          try {
-            const _cached = _ptCacheGet(text);
-            if (typeof _cached === 'string' && _cached.length) {
-              return _formatContent(_cached, opts);
-            }
-            if (opts && opts.msgId && opts.room) {
-              const _byIdMem = _msgPtGetById(opts.room, opts.msgId);
-              if (typeof _byIdMem === 'string' && _byIdMem.length) {
-                return _formatContent(_byIdMem, opts);
-              }
-              const _byIdLs = _ptCacheGetById(opts.room, opts.msgId);
-              if (typeof _byIdLs === 'string' && _byIdLs.length) {
-                return _formatContent(_byIdLs, opts);
-              }
-            }
-          } catch {}
-          // Own historic messages we can never decrypt locally (libsignal
-          // has no receive chain for our own sender-key, and no plaintext
-          // cache hit — e.g. sent from another device, or before the
-          // cache existed). Render a clearer indicator instead of the
-          // generic lock so the user knows it's not a peer-side failure.
-          if (opts && opts.isOwn) {
-            // Diagnostic: log every own-message placeholder render with
-            // enough context to root-cause stubborn cache misses. Rate
-            // limited per msg.id so a stuck channel doesn't spam the
-            // console, but no longer one-shot — we need data across
-            // multiple messages to see whether some IDs hit and others
-            // miss within the same session.
-            try {
-              window._ownPtMissLogged = window._ownPtMissLogged || new Set();
-              const _diagKey = (opts.room || '?') + ':' + (opts.msgId || '?');
-              if (!window._ownPtMissLogged.has(_diagKey)) {
-                window._ownPtMissLogged.add(_diagKey);
-                const _k = _ptCacheKey(text);
-                const _sample = [];
-                let _idKeyCount = 0, _envKeyCount = 0;
-                for (const _kk of _rmPtCache.keys()) {
-                  if (_kk.startsWith('id:')) _idKeyCount++;
-                  else _envKeyCount++;
-                  if (_sample.length < 6) _sample.push(_kk.slice(0, 56));
-                }
-                let _lsRaw = '';
-                try { _lsRaw = (localStorage.getItem(_RM_PT_CACHE_KEY) || ''); } catch {}
-                console.warn('[messages._formatContent] own placeholder; cache miss', {
-                  msgId: opts.msgId, room: opts.room,
-                  lookup: _k.slice(0, 56),
-                  contentPrefix: String(text).slice(0, 56),
-                  mapSize: _rmPtCache.size,
-                  envKeys: _envKeyCount, idKeys: _idKeyCount,
-                  memMapSize: _msgPlainById.size,
-                  lsBytes: _lsRaw.length,
-                  sample: _sample,
-                });
-              }
-            } catch {}
-            return '<em style="color:var(--text-muted,#888)" title="This message was sent from another device and cannot be decrypted here">\uD83D\uDD12 This message was sent from another device and cannot be decrypted</em>';
-          }
-          return '<em style="color:var(--text-muted,#888)">\uD83D\uDD12 Encrypted message</em>';
-        }
-      } catch {}
-    }
     // Profile share card
     if (text.startsWith('{"_type":"profile_share"')) {
       try {
@@ -1993,25 +1683,6 @@ const Messages = (() => {
     _lastBridge = null;
     _lastBridgeSource = null;
     _lastDate = null;
-    // Snapshot the previous per-room cache by id BEFORE we clear it.
-    // A second loadHistory pass (cached-paint then WS-history re-paint)
-    // may receive msgs whose content is the raw v2 envelope because the
-    // upstream decryptMsg fell through (LS plaintext cache evicted +
-    // sender-chain self-fail). If we already had plaintext for this id
-    // in the previous render pass, prefer that — don't downgrade the
-    // bubble back to a 🔒 placeholder.
-    const _prevById = new Map();
-    try {
-      const _prev = State.messages[room];
-      if (Array.isArray(_prev)) {
-        for (const _pm of _prev) {
-          if (_pm && _pm.id && typeof _pm.content === 'string'
-              && !_looksLikeCiphertext(_pm.content)) {
-            _prevById.set(_pm.id, _pm.content);
-          }
-        }
-      }
-    } catch {}
     // Reset room cache before rebuilding so repeated loadHistory calls
     // (switching back to a room, WS re-sync, cached re-render) don't duplicate.
     State.messages[room] = [];
@@ -2051,30 +1722,6 @@ const Messages = (() => {
         _lastBridgeSource = null;
       }
       const isCont = _shouldContinue(msg);
-      // Plaintext-promotion: if this render pass got a ciphertext-shaped
-      // envelope but a previous pass (cached-paint, WS echo) already had
-      // plaintext for this id, restore it before _msgHtml runs. This
-      // prevents the visible "plaintext → 🔒 flash" on channel switch-back.
-      try {
-        if (msg && msg.id && typeof msg.content === 'string'
-            && _looksLikeCiphertext(msg.content)) {
-          const _prevPlain = _prevById.get(msg.id);
-          if (typeof _prevPlain === 'string' && _prevPlain.length) {
-            msg = { ...msg, content: _prevPlain, _decrypted: true, _v2: true };
-          }
-        }
-      } catch {}
-      // Seed the in-memory plaintext map from any msg we KNOW is
-      // plaintext (either decryptMsg succeeded, cache hit, or the
-      // promotion above). This guarantees that if a later re-render
-      // pass receives ciphertext for the same id, _formatContent's
-      // self-heal will recover the plaintext from the sticky Map.
-      try {
-        if (msg && msg.id && typeof msg.content === 'string'
-            && !_looksLikeCiphertext(msg.content)) {
-          _msgPtSetById(room, msg.id, msg.content);
-        }
-      } catch {}
       html += _msgHtml(msg, isCont);
       _lastNick = msg.nickname;
       _lastBridge = msg.bridge_platform || null;
@@ -2281,45 +1928,7 @@ const Messages = (() => {
             body.querySelectorAll(':scope > .msg-share-row').forEach(r => r.remove());
           } catch {}
           const contentEl = pendingEl.querySelector('.msg-content');
-          // If the server echo is still a v2 sender-key envelope (the
-          // sender's own message can't be decrypted because we never
-          // store a peer state for ourselves), recover the original
-          // plaintext from the send-time cache. textContent fallback is
-          // poison here: the optimistic bubble has already rendered the
-          // invite/preview placeholder span ("🐸 Loading invite…"), so
-          // reading textContent and re-formatting STRIPS the URL,
-          // destroying invite/link/share hydration. With the cache hit
-          // we get the true plaintext URL back and the placeholder is
-          // regenerated correctly.
-          let _echoContent = msg.content || '';
-          let _skipContentRewrite = false;
-          if (typeof _echoContent === 'string' && _echoContent[0] === '{') {
-            try {
-              const _env = JSON.parse(_echoContent);
-              if (_env && _env.v === 2 && _env.t === 'sk') {
-                const _cached = _ptCacheGet(_echoContent);
-                if (typeof _cached === 'string' && _cached) {
-                  _echoContent = _cached;
-                } else {
-                  // No cache hit — leave the optimistic innerHTML
-                  // intact (it already has the right placeholder).
-                  _skipContentRewrite = true;
-                }
-              }
-            } catch {}
-          }
-          if (contentEl && !_skipContentRewrite) contentEl.innerHTML = _formatContent(_echoContent);
-          // Persist plaintext (cache hit or optimistic fallback) into
-          // both `msg` and the State.messages cache slot, so any future
-          // re-render from cache (channel re-open, scroll-driven
-          // re-paint) shows plaintext instead of the raw envelope. When
-          // _skipContentRewrite is true we fall back to whatever the
-          // optimistic bubble was showing.
-          let _persistedContent = _echoContent;
-          if (_skipContentRewrite && contentEl) {
-            try { _persistedContent = contentEl.textContent || msg.content || ''; } catch { _persistedContent = msg.content || ''; }
-          }
-          try { msg = { ...msg, content: _persistedContent, _decrypted: true, _v2: true }; } catch {}
+          if (contentEl) contentEl.innerHTML = _formatContent(msg.content || '');
           const timeEl = pendingEl.querySelector('.msg-time');
           if (timeEl) timeEl.textContent = UI.formatTime(msg.created_at);
           // Optimistic bubble had no media (temp msg always sets media_data:null);
@@ -2366,25 +1975,6 @@ const Messages = (() => {
     // reload races a WS echo, or two WS connections both deliver the same
     // server broadcast), skip creating a second identical bubble.
     if (msg.id && !msg._pending && document.getElementById(`msg-${msg.id}`)) return;
-
-    // Own-echo fresh-render fallback: if the reconcile path didn't fire
-    // (pending bubble missing for any reason) and we authored this
-    // message, the server echo is our own v2 envelope which we can
-    // never decrypt locally. Recover plaintext from the send-time
-    // cache so the bubble doesn't render as '🔒 Encrypted message'.
-    try {
-      const _ownMine = !!(msg && State.user && msg.nickname === State.user.nickname && !msg._pending);
-      const _c = msg && msg.content;
-      if (_ownMine && typeof _c === 'string' && _c.length >= 9 && _c[0] === '{') {
-        const _env = JSON.parse(_c);
-        if (_env && _env.v === 2 && _env.t === 'sk') {
-          const _cached = _ptCacheGet(_c);
-          if (typeof _cached === 'string' && _cached) {
-            msg = { ...msg, content: _cached, _decrypted: true, _v2: true };
-          }
-        }
-      }
-    } catch {}
 
     const area = document.getElementById('messages-area');
     // "At bottom" with a generous threshold so tiny composer-height shifts /
@@ -2475,54 +2065,6 @@ const Messages = (() => {
     const previewUrl = _extractPreviewUrl(String(content || ''));
     if (previewUrl) setTimeout(() => _loadLinkPreview(id, previewUrl), 120);
     setTimeout(() => _hydrateSpecialCards(id), 120);
-  }
-
-  // Track C — when a Sender-Key Distribution Message for (room, senderId)
-  // arrives AFTER one or more channel messages from that sender have
-  // already rendered, walk the per-room cache, re-decrypt any v2 sk
-  // envelopes from that sender, and silently rewrite the bubble content.
-  // Called from ws.js's `skdm` case after Signal.room.processSKDM succeeds.
-  async function retrySKDecrypt(room, senderId) {
-    if (!room || senderId == null) return;
-    if (!(window.Signal && window.Signal.room && window.Signal.room.decryptMessage)) return;
-    const cache = State.messages?.[room];
-    if (!Array.isArray(cache) || !cache.length) return;
-    const sid = +senderId;
-    for (const m of cache) {
-      if (!m || (+m.user_id) !== sid) continue;
-      const c = m.content;
-      if (typeof c !== 'string' || c.length < 9 || c[0] !== '{') continue;
-      let env;
-      try { env = JSON.parse(c); } catch { continue; }
-      if (!env || env.v !== 2 || env.t !== 'sk' || typeof env.b !== 'string') continue;
-      try {
-        const plain = await window.Signal.room.decryptMessage(room, sid, env);
-        if (typeof plain !== 'string') continue;
-        // Cache plaintext keyed by ciphertext so the NEXT history reload
-        // (which re-runs decryptMsg per envelope) returns the cached
-        // value instead of failing with 'replay — iteration already
-        // consumed' — the SK chain advanced during this decrypt and
-        // refuses to re-consume the same iteration.
-        try { _ptCachePut(c, plain); } catch {}
-        try { _ptCachePutById(room, m.id, plain); } catch {}
-        try { _msgPtSetById(room, m.id, plain); } catch {}
-        m.content = plain;
-        m._decrypted = true;
-        m._v2 = true;
-        const el = document.getElementById(`msg-${m.id}`);
-        if (el) {
-          const ce = el.querySelector('.msg-content');
-          if (ce) ce.innerHTML = _formatContent(plain);
-          // Late-hydrate any embeds (invite cards, link previews) that
-          // were skipped while the bubble was holding ciphertext.
-          const previewUrl = _extractPreviewUrl(plain);
-          if (previewUrl && !m.preview_suppressed) {
-            setTimeout(() => _loadLinkPreview(m.id, previewUrl), 80);
-          }
-          setTimeout(() => _hydrateSpecialCards(m.id), 80);
-        }
-      } catch { /* still no chain state — try again next SKDM */ }
-    }
   }
 
   function removeMessage(id) {
@@ -3535,7 +3077,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, retrySKDecrypt, removeMessage, updateReactions, _ptCacheGet, _ptCachePut, _ptCacheFlush, _ptCacheGetById, _ptCachePutById, _msgPtSetById, _msgPtGetById, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
@@ -3921,24 +3463,6 @@ async function loadOlderMessages() {
 
     const key = State.roomKeys[room];
     const decrypted = await Promise.all(msgs.map(async m => {
-      // Track C Phase 2 — v2 sender-key envelope path. If the cipher
-      // is a {v:2,t:'sk',b:…} envelope and Signal.room is available
-      // and we have a sender-key for (room, sender, iter), decrypt
-      // through that. Otherwise fall through to the legacy AES path.
-      try {
-        if (m.content && typeof m.content === 'string' && m.content[0] === '{'
-            && window.Signal && window.Signal.room && (m.user_id || m.user_id === 0)) {
-          const env = JSON.parse(m.content);
-          if (env && env.v === 2 && env.t === 'sk') {
-            try {
-              const plainV2 = await Signal.room.decryptMessage(room, m.user_id, env);
-              if (typeof plainV2 === 'string') {
-                return { ...m, content: plainV2, reply_content: '', _v2: true };
-              }
-            } catch {}
-          }
-        }
-      } catch {}
       if (!key) return m;
       const plain = await Crypto.decrypt(m.content, key);
       let replyPlain = m.reply_content;

@@ -157,12 +157,12 @@ function _looksEncryptedBlob(content) {
     try {
       const obj = JSON.parse(s);
       if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-        // Track A/C v2 wire envelopes: DM Double-Ratchet ({v:2,t:'pre'|'msg',b:…})
-        // and room Sender-Key ({v:2,t:'sk',b:…}). When decrypt fails (peer
-        // hasn't shared keys yet, cold device, etc.) the raw envelope used
-        // to leak into the bubble and render as plaintext JSON. Treat it
-        // as cipher so the lock placeholder shows instead.
-        if (obj.v === 2 && typeof obj.b === 'string' && (obj.t === 'pre' || obj.t === 'msg' || obj.t === 'sk')) return true;
+        // Track A v2 DM Double-Ratchet envelope: {v:2,t:'pre'|'msg',b:…}.
+        // When decrypt fails (peer hasn't shared keys yet, cold device,
+        // etc.) the raw envelope used to leak into the bubble and render
+        // as plaintext JSON. Treat it as cipher so the lock placeholder
+        // shows instead.
+        if (obj.v === 2 && typeof obj.b === 'string' && (obj.t === 'pre' || obj.t === 'msg')) return true;
         const keys = Object.keys(obj).map(k => String(k).toLowerCase());
         const hasEncKeys = keys.includes('iv') || keys.includes('ciphertext') || keys.includes('ct') || keys.includes('tag') || keys.includes('salt');
         if (hasEncKeys) return true;
@@ -716,20 +716,6 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
             const out = await window.Signal.decryptDM(peerId, env);
             try { console.log('[dms.decryptDM]', 't=', env.t, 'from', peerId, 'ok=', typeof out === 'string'); } catch {}
             if (typeof out === 'string') {
-              // Track C Phase 2 — SKDM-over-DM. If the DM plaintext is
-              // a JSON SKDM envelope {"__skdm":1,"p":{r,c,i,d,ck,pk}},
-              // hand it to Signal.room and suppress the bubble.
-              try {
-                if (out.length >= 12 && out[0] === '{'
-                    && window.Signal.room && window.Signal.room.isAvailable
-                    && window.Signal.room.isAvailable()) {
-                  const inner = JSON.parse(out);
-                  if (inner && inner.__skdm === 1 && inner.p) {
-                    try { await window.Signal.room.processSKDM(peerId, inner.p); } catch {}
-                    return '';
-                  }
-                }
-              } catch { /* not an SKDM */ }
               // Cache plaintext so subsequent attempts on the same
               // envelope skip the ratchet (and don't fail with Bad MAC).
               _dmPtCachePut(raw, out);

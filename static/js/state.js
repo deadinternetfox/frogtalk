@@ -33,10 +33,6 @@ const State = {
   },
 
   clear() {
-    // Flush any pending plaintext-cache writes before clearing session
-    // state so a send → logout → login within the cache-save debounce
-    // window doesn't lose own-message plaintext.
-    try { if (typeof Messages !== 'undefined' && Messages._ptCacheFlush) Messages._ptCacheFlush(); } catch {}
     try { if (typeof _dmPtCacheFlush === 'function') _dmPtCacheFlush(); } catch {}
     localStorage.removeItem('fc_token');
     localStorage.removeItem('fc_user');

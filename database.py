@@ -2505,34 +2505,6 @@ def _migrate():
             pass
 
         # ──────────────────────────────────────────────────────────────────
-        # Security refactor Track C Phase 3 — SKDM (Sender-Key Distribution
-        # Message) offline spool. The payload is an opaque Track A v2
-        # Signal envelope (already DM-encrypted to the recipient). The
-        # server cannot read it. It is kept only as a hand-off buffer for
-        # recipients that are offline when the sender fans the SKDM. On
-        # WS connect the recipient drains its pending rows.
-        #
-        # Cap: an attacker spamming SKDMs cannot grow this table without
-        # bound — see `signal_skdm_enqueue`'s per-recipient cap (256 rows,
-        # oldest evicted FIFO). 30-day age cap on top of that. No PII.
-        # ──────────────────────────────────────────────────────────────────
-        con.execute("""CREATE TABLE IF NOT EXISTS signal_pending_skdms (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            recipient_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            sender_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            room_id      TEXT    NOT NULL,
-            envelope     TEXT    NOT NULL,
-            created_at   INTEGER NOT NULL
-        )""")
-        try:
-            con.execute(
-                "CREATE INDEX IF NOT EXISTS idx_skdm_recipient "
-                "ON signal_pending_skdms(recipient_id, id)"
-            )
-        except Exception:
-            pass
-
-        # ──────────────────────────────────────────────────────────────────
         # Security refactor Track F Phase 1 — linked devices (dark backend).
         # One row per (user_id, device_id). device_id is a client-generated
         # UUID. `device_identity_pub` is the per-device Curve25519 identity
@@ -2748,82 +2720,6 @@ def signal_otpk_count(user_id: int) -> int:
             (user_id,)
         ).fetchone()
     return int(row["n"]) if row else 0
-
-
-# ---------------------------------------------------------------------------
-# Sender-Key Distribution Message (SKDM) spool — Track C Phase 3
-# ---------------------------------------------------------------------------
-
-# Per-recipient cap to bound storage under SKDM spam. Picked generously
-# enough to cover a user in many rooms whose contacts all rotate at the
-# same time, but small enough that an attacker cannot grow the table to
-# DoS proportions. Oldest rows are evicted FIFO on enqueue.
-_SKDM_PER_RECIPIENT_CAP = 256
-
-# Anything older than this is dropped on drain. Bounds the table size
-# against zombie recipients that never come back online.
-_SKDM_MAX_AGE_SECS = 30 * 24 * 3600
-
-
-def signal_skdm_enqueue(recipient_id: int, sender_id: int,
-                        room_id: str, envelope: str) -> int:
-    """Persist one SKDM for offline delivery. Returns the row id.
-
-    `envelope` is the opaque Track-A v2 Signal envelope JSON (already
-    encrypted by the sender against the recipient's identity). The
-    server cannot read it.
-    """
-    import time
-    now = int(time.time())
-    with _conn() as con:
-        con.execute("BEGIN IMMEDIATE")
-        # Trim to cap BEFORE inserting so we keep the row we're about to
-        # add and only evict older entries for this recipient.
-        con.execute(
-            "DELETE FROM signal_pending_skdms WHERE recipient_id=? "
-            "AND id IN ("
-            " SELECT id FROM signal_pending_skdms WHERE recipient_id=? "
-            " ORDER BY id DESC LIMIT -1 OFFSET ?"
-            ")",
-            (recipient_id, recipient_id, _SKDM_PER_RECIPIENT_CAP - 1),
-        )
-        cur = con.execute(
-            "INSERT INTO signal_pending_skdms "
-            "(recipient_id, sender_id, room_id, envelope, created_at) "
-            "VALUES (?,?,?,?,?)",
-            (recipient_id, sender_id, str(room_id), envelope, now),
-        )
-        rid = int(cur.lastrowid or 0)
-        con.commit()
-    return rid
-
-
-def signal_skdm_drain(recipient_id: int) -> list:
-    """Pop all pending SKDMs for this recipient. Returns a list of dicts:
-        {id, sender_id, room_id, envelope, created_at}
-    Rows older than _SKDM_MAX_AGE_SECS are dropped without delivery.
-    """
-    import time
-    cutoff = int(time.time()) - _SKDM_MAX_AGE_SECS
-    with _conn() as con:
-        con.execute("BEGIN IMMEDIATE")
-        # Drop stale rows for this recipient first.
-        con.execute(
-            "DELETE FROM signal_pending_skdms WHERE recipient_id=? AND created_at < ?",
-            (recipient_id, cutoff),
-        )
-        rows = con.execute(
-            "SELECT id, sender_id, room_id, envelope, created_at "
-            "FROM signal_pending_skdms WHERE recipient_id=? ORDER BY id ASC",
-            (recipient_id,),
-        ).fetchall()
-        if rows:
-            con.execute(
-                "DELETE FROM signal_pending_skdms WHERE recipient_id=?",
-                (recipient_id,),
-            )
-        con.commit()
-    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------

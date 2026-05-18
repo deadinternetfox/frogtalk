@@ -5317,7 +5317,7 @@ function toggleEncryptionInfo() {
   }
 }
 
-// Track C — populate the Room Sender-Keys card for the current room.
+// Channel encryption status card (legacy per-room AES-256-GCM).
 async function _populateRoomEncCard() {
   const card   = document.getElementById('enc-room-card');
   const nameEl = document.getElementById('enc-room-name');
@@ -5329,52 +5329,16 @@ async function _populateRoomEncCard() {
   if (nameEl) nameEl.textContent = room ? '#' + room : '—';
   if (!room) { card.style.display = 'none'; return; }
 
-  const escape = (s) => String(s).replace(/[&<>"']/g, c => (
-    { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
-  ));
-
-  // No Signal.room module loaded → legacy AES only.
-  if (!window.Signal || !window.Signal.room || !window.Signal.room.isAvailable
-      || !window.Signal.room.isAvailable()) {
-    modeEl.innerHTML = '<span style="color:#d8b88a">🔐 Legacy AES-256-GCM (per-room shared key)</span>';
-    detail.innerHTML = '<span style="color:#7a8a82">Signal Sender Keys not yet enabled for this device. Messages still travel encrypted, just not under per-device sending keys.</span>';
-    return;
-  }
-
-  let snap = null;
-  try { snap = await window.Signal.room.describeRoom(room); } catch {}
-  if (!snap) {
-    modeEl.innerHTML = '<span style="color:#d8b88a">🔐 Legacy AES-256-GCM</span>';
-    detail.textContent = '';
-    return;
-  }
-
-  if (snap.hasSelfKey) {
-    modeEl.innerHTML = '🛡️ <strong style="color:#7fd8a5">Signal Sender Keys (v2)</strong>';
-    if (modeLine) modeLine.textContent = 'End-to-end · Signal Sender Keys';
+  const hasKey = !!(State && State.roomKeys && State.roomKeys[room]);
+  if (hasKey) {
+    modeEl.innerHTML = '🔐 <strong style="color:#7fd8a5">AES-256-GCM</strong> · per-room shared key';
+    detail.innerHTML = '<span style="color:#9ab8a8">Messages in this channel are encrypted client-side with a key derived from the channel\'s shared secret. The server stores only ciphertext.</span>';
+    if (modeLine) modeLine.textContent = 'End-to-end · per-room AES-256-GCM';
   } else {
-    modeEl.innerHTML = '<span style="color:#d8b88a">🔐 Legacy AES-256-GCM</span> '
-      + '<span style="color:#7a8a82;font-size:11px">(Sender Keys will activate once your device sends in this room)</span>';
+    modeEl.innerHTML = '<span style="color:#d8b88a">Public channel · plaintext</span>';
+    detail.innerHTML = '<span style="color:#7a8a82">This channel has no shared key, so messages are stored in plaintext on the server. Use a private channel for end-to-end encryption.</span>';
+    if (modeLine) modeLine.textContent = 'Public · no encryption';
   }
-
-  const rows = [];
-  rows.push(`<div>Local epoch · <strong>${snap.epoch | 0}</strong></div>`);
-  if (snap.self) {
-    rows.push(`<div>This device · chain ${snap.self.chain_id} · iter ${snap.self.iteration} · dev ${snap.self.device_id}</div>`);
-  } else {
-    rows.push(`<div style="color:#7a8a82">This device has not yet generated a sender key for this room.</div>`);
-  }
-  rows.push(`<div>Known senders · <strong>${snap.peerCount | 0}</strong></div>`);
-  if (snap.peers && snap.peers.length) {
-    const list = snap.peers.slice(0, 8).map(p =>
-      `<div style="color:#9ab8a8">· uid ${escape(p.uid)} · dev ${p.deviceId} · chain ${p.chain_id} · iter ${p.iteration}</div>`
-    ).join('');
-    rows.push(list);
-    if (snap.peers.length > 8) {
-      rows.push(`<div style="color:#7a8a82">…and ${snap.peers.length - 8} more</div>`);
-    }
-  }
-  detail.innerHTML = rows.join('');
 }
 
 // Track A Phase 3 — Signal v2 safety number card populator.

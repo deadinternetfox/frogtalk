@@ -384,14 +384,13 @@
       <li><strong>Private keys</strong> are generated on your device and stored in IndexedDB / iOS Keychain / Android Keystore depending on platform. They never leave.</li>
     </ul>
 
-    <h3 style="margin-top:18px">Room messages — Signal Sender Keys</h3>
-    <p>Group conversations use a Sender-Keys design built on top of the same identity layer:</p>
+    <h3 style="margin-top:18px">Room messages — per-channel AES-256-GCM</h3>
+    <p>Private channels are encrypted with a per-room AES-256-GCM key derived from a shared secret distributed to members on join:</p>
     <ul>
-      <li>Each device of yours holds its own sending chain (HMAC-SHA-256 chain-key ratchet → HKDF-SHA-256 → AES-256-GCM with bound additional-authenticated-data).</li>
-      <li>The chain key is signed with an XEdDSA key derived from your Curve25519 identity so other members can verify authorship even when traffic is fanned out by the server.</li>
-      <li>When you enter a room, your client distributes a <em>Sender-Key Distribution Message</em> (SKDM) to each member through their Signal DM session. The SKDM itself is ciphertext to the server.</li>
-      <li>If a member is offline, the SKDM is buffered in an opaque server spool and delivered as soon as that recipient comes back online.</li>
-      <li>When a member is banned, the remaining members automatically rotate their sender keys so the removed member cannot decrypt future messages.</li>
+      <li>The shared secret is stretched with HKDF-SHA-256 into a 32-byte AES-256-GCM key bound to the channel.</li>
+      <li>Every message is sealed with a fresh 96-bit IV; the server only stores ciphertext.</li>
+      <li>The key never traverses the server in plaintext — it is delivered to new members through their already-established Signal DM session.</li>
+      <li>Public channels intentionally have <em>no</em> shared key — they are designed to be world-readable and are stored in plaintext.</li>
     </ul>
 
     <h3 style="margin-top:18px">Voice & video calls — DTLS-fingerprint signing</h3>

@@ -8814,14 +8814,14 @@ window.ConnErr = (function(){
     </p>
     </div>
 
-    <!-- Room Sender-Keys card (Track C) -->
+    <!-- Channel encryption card -->
     <div id="enc-room-card" style="display:none;margin:6px 0 14px;padding:12px 14px;background:rgba(127,216,165,.04);
                 border:1px solid #2f5f48;border-radius:12px;text-align:left">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
                      border-radius:6px;background:#1a3a2a;border:1px solid #2f5f48;font-size:12px">🗝️</span>
         <div style="display:flex;flex-direction:column;line-height:1.2;flex:1;min-width:0">
-          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Room encryption</span>
+          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Channel encryption</span>
           <span id="enc-room-name" style="font-size:11px;color:#6a7a72">—</span>
         </div>
       </div>
@@ -8833,7 +8833,7 @@ window.ConnErr = (function(){
                   background:#0a0f0c;padding:10px 12px;border-radius:8px;border:1px solid #1f2a23;
                   line-height:1.6"></div>
       <div style="font-size:11px;color:#7a8a82;margin-top:9px;line-height:1.5">
-        Each member's device holds its own sending key. The server only ever sees ciphertext, and keys auto-rotate when membership changes.
+        Private channels use a per-room AES-256-GCM key derived from a shared secret. Public channels are intentionally plaintext.
       </div>
     </div>
 
@@ -10546,22 +10546,21 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 </script>
 <script src="/static/js/crypto.js?v=191"></script>
 <script src="/static/js/signal_store.js?v=1"></script>
-<script src="/static/js/signal.js?v=9"></script>
-<script src="/static/js/signal_room.js?v=11"></script>
+<script src="/static/js/signal.js?v=10"></script>
 <script src="/static/js/wall_crypto.js?v=1"></script>
-<script src="/static/js/state.js?v=199"></script>
+<script src="/static/js/state.js?v=200"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=433"></script>
-<script src="/static/js/ws.js?v=239"></script>
+<script src="/static/js/ws.js?v=240"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=470"></script>
-  <script src="/static/js/rooms.js?v=429"></script>
+<script src="/static/js/ui.js?v=471"></script>
+  <script src="/static/js/rooms.js?v=430"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
-<script src="/static/js/messages.js?v=459"></script>
+<script src="/static/js/messages.js?v=460"></script>
 <script src="/static/js/users.js?v=201"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=454"></script>
+<script src="/static/js/dms.js?v=455"></script>
 <script src="/static/js/calls.js?v=220"></script>
 <script src="/static/js/media.js?v=416"></script>
 <script src="/static/js/gifs.js?v=205"></script>

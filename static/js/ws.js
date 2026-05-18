@@ -180,86 +180,6 @@ const WS = (() => {
         }
         break;
       }
-      // Sender-Key Distribution Message (Track C Phase 3). The server
-      // relays an opaque Track-A v2 DM envelope from `from_id`. We
-      // decrypt it locally and feed the inner SKDM payload to the
-      // room sender-keys store. Failures are swallowed: the worst case
-      // is that we silently can't decrypt that sender's next message
-      // and the catch-up flow re-fans.
-      case 'skdm': {
-        try {
-          const fromId   = Number(data.from_id) | 0;
-          const roomId   = String(data.room_id || '');
-          const envStr   = String(data.envelope || '');
-          if (!fromId || !roomId || !envStr) break;
-          if (!(window.Signal && typeof window.Signal.decryptDM === 'function')) break;
-          let env;
-          try { env = JSON.parse(envStr); }
-          catch { break; }
-          let plain;
-          try { plain = await window.Signal.decryptDM(fromId, env); }
-          catch (_e) { try { console.warn('[ws.skdm] decryptDM FAIL from', fromId, _e && _e.message); } catch {} break; }
-          let inner;
-          try { inner = JSON.parse(plain); }
-          catch { try { console.warn('[ws.skdm] inner parse FAIL'); } catch {} break; }
-          if (!inner || inner.__skdm !== 1 || !inner.p) break;
-          if (!(window.Signal?.room?.isAvailable?.())) { try { console.warn('[ws.skdm] Signal.room not available'); } catch {} break; }
-          await window.Signal.room.processSKDM(fromId, inner.p);
-          // Clear the throttle marker so we'll re-request if needed in
-          // the future (e.g. sender rotates their sender-key).
-          try {
-            if (window._skdmReqThrottle) {
-              window._skdmReqThrottle.delete(`${roomId}:${fromId}`);
-            }
-          } catch {}
-          // Track C — a channel message from `fromId` may have already
-          // rendered as ciphertext because we hadn't yet received this
-          // sender-key state. Now that the chain exists, re-decrypt any
-          // ciphertext bubbles from that sender in this room and rewrite
-          // the bubble content in-place. Best-effort: failures stay as
-          // 🔒 placeholders until the next SKDM arrives.
-          try {
-            if (typeof Messages !== 'undefined' && Messages.retrySKDecrypt) {
-              await Messages.retrySKDecrypt(roomId, fromId);
-            }
-          } catch {}
-        } catch (e) {
-          try { console.warn('[ws] skdm processing failed', e); } catch {}
-        }
-        break;
-      }
-
-      // Recovery rekey — another user couldn't decrypt one of our v2-sk
-      // messages because they lack our sender-key state. Build a fresh
-      // SKDM and send it to them (DM-encrypted under their identity).
-      // Throttled per requester to avoid abuse.
-      case 'request_skdm': {
-        try {
-          const fromId = Number(data.from_id) | 0;
-          const roomId = String(data.room_id || '');
-          if (!fromId || !roomId) break;
-          if (!(window.Signal && window.Signal.room && window.Signal.room.isAvailable && window.Signal.room.isAvailable())) {
-            try { console.warn('[ws.request_skdm] Signal.room not available'); } catch {}
-            break;
-          }
-          // Per-requester throttle: max one fulfil per (room, requester) per 5s.
-          window._skdmFulfilThrottle = window._skdmFulfilThrottle || new Map();
-          const key = `${roomId}:${fromId}`;
-          const last = window._skdmFulfilThrottle.get(key) || 0;
-          if (Date.now() - last < 5000) { break; }
-          window._skdmFulfilThrottle.set(key, Date.now());
-          const skdm = await window.Signal.room.buildSKDMForCurrentChain(roomId);
-          if (!skdm) { try { console.warn('[ws.request_skdm] buildSKDM returned null'); } catch {} break; }
-          try {
-            await window.Signal.room.sendSKDMTo(fromId, skdm);
-          } catch (e) {
-            try { console.warn('[ws.request_skdm] sendSKDMTo FAIL', e && e.message); } catch {}
-          }
-        } catch (e) {
-          try { console.warn('[ws] request_skdm processing failed', e); } catch {}
-        }
-        break;
-      }
       case 'message': {
         const dm = await decryptMsg(data, room);
         Messages.appendMessage(room, dm);
@@ -279,57 +199,11 @@ const WS = (() => {
         // Server broadcasts the new content in the SAME ciphertext form it
         // received it (so E2E stays intact). Decrypt before rendering.
         let plain = data.content;
-        let v2Decrypted = false;
         try {
-          // Track C Phase 2 — v2 sender-key envelope edits.
-          if (typeof data.content === 'string' && data.content[0] === '{'
-              && window.Signal && window.Signal.room
-              && (data.user_id || data.user_id === 0)) {
-            try {
-              const env = JSON.parse(data.content);
-              if (env && env.v === 2 && env.t === 'sk') {
-                // Plaintext cache first: an edit echo for OUR own message
-                // can't be decrypted by libsignal (no receive chain for
-                // self) and a peer-edit replay races the chain just like
-                // a fresh msg. Either way the plaintext is already known
-                // from the send-time PUT or first-decrypt PUT.
-                try {
-                  if (typeof Messages !== 'undefined' && Messages._ptCacheGet) {
-                    const _c = Messages._ptCacheGet(data.content);
-                    if (typeof _c === 'string') { plain = _c; v2Decrypted = true; }
-                    else if (data.id && Messages._ptCacheGetById) {
-                      const _ci = Messages._ptCacheGetById(room, data.id);
-                      if (typeof _ci === 'string') { plain = _ci; v2Decrypted = true; }
-                    }
-                  }
-                } catch {}
-                if (!v2Decrypted) {
-                  const p2 = await window.Signal.room.decryptMessage(room, data.user_id, env);
-                  if (typeof p2 === 'string') {
-                    plain = p2;
-                    v2Decrypted = true;
-                    try {
-                      if (typeof Messages !== 'undefined' && Messages._ptCachePut) {
-                        Messages._ptCachePut(data.content, p2);
-                      }
-                      if (typeof Messages !== 'undefined' && Messages._ptCachePutById && data.id) {
-                        Messages._ptCachePutById(room, data.id, p2);
-                      }
-                      if (typeof Messages !== 'undefined' && Messages._msgPtSetById && data.id) {
-                        Messages._msgPtSetById(room, data.id, p2);
-                      }
-                    } catch {}
-                  }
-                }
-              }
-            } catch {}
-          }
-          if (!v2Decrypted) {
-            const key = State.roomKeys[room];
-            if (key && data.content) {
-              const p = await Crypto.decrypt(data.content, key);
-              if (p !== null) plain = p;
-            }
+          const key = State.roomKeys[room];
+          if (key && data.content) {
+            const p = await Crypto.decrypt(data.content, key);
+            if (p !== null) plain = p;
           }
         } catch {}
         // Keep the local cache in sync so re-renders and replies see plaintext.
@@ -418,31 +292,6 @@ const WS = (() => {
           try { Users.loadChannelMembers(data.room); } catch {}
         }
         try { window.refreshMentionUsers && window.refreshMentionUsers(); } catch {}
-
-        // Track C Phase 3: if WE have a sender-key chain for this room,
-        // ship the new member our current SKDM so they can decrypt our
-        // next message immediately. Best-effort, fire-and-forget.
-        try {
-          const newUid = Number(data.user_id) | 0;
-          const myUid  = Number(State.user?.id) | 0;
-          if (newUid && newUid !== myUid
-              && data.room === room
-              && window.Signal && window.Signal.room
-              && window.Signal.room.isAvailable
-              && window.Signal.room.isAvailable()
-              && !(State.bridgeOut && State.bridgeOut[data.room])) {
-            (async () => {
-              try {
-                if (!(await window.Signal.room.hasSelfKey(data.room))) return;
-                const skdm = await window.Signal.room.buildSKDMForCurrentChain(data.room);
-                if (!skdm) return;
-                await window.Signal.room.sendSKDMTo(newUid, skdm);
-              } catch (e) {
-                try { console.warn('[ws] member_joined SKDM fan failed', e); } catch {}
-              }
-            })();
-          }
-        } catch {}
         break;
       }
       case 'bot_added':
@@ -777,56 +626,6 @@ const WS = (() => {
             UI.showToast(`@${data.nickname} was banned from #${data.room}`, 'info');
           }
         } catch {}
-
-        // Track C Phase 3: a banned member must NOT be able to decrypt
-        // future messages even if they retained their device. Rotate
-        // our sender key for this room and re-fan to the remaining
-        // members. Best-effort; on failure we surface a console warn
-        // but keep going (the next room-enter will re-fan anyway).
-        try {
-          if (data.room
-              && window.Signal && window.Signal.room
-              && window.Signal.room.isAvailable
-              && window.Signal.room.isAvailable()
-              && !(State.bridgeOut && State.bridgeOut[data.room])) {
-            (async () => {
-              try {
-                if (!(await window.Signal.room.hasSelfKey(data.room))) return;
-                await window.Signal.room.rotateSenderKey(data.room);
-
-                // Also forget the banned user's known chain so we won't
-                // accept any future messages signed by their old key.
-                const bannedUid = Number(data.user_id) | 0;
-                if (bannedUid) {
-                  try { await window.Signal.room.forgetSender(data.room, bannedUid); } catch {}
-                }
-
-                // Re-fan the new SKDM to everyone else.
-                const myUid = Number(State.user?.id) | 0;
-                const r = await fetch(
-                  `/api/rooms/${encodeURIComponent(data.room)}/members`,
-                  { credentials: 'same-origin',
-                    headers: State.token
-                      ? { 'X-Session-Token': State.token } : {} }
-                );
-                if (!r.ok) return;
-                const j = await r.json().catch(() => ({}));
-                const peers = (j.members || [])
-                  .map(m => Number(m.user_id) | 0)
-                  .filter(uid => uid > 0 && uid !== myUid && uid !== bannedUid);
-                if (!peers.length) return;
-                const skdm = await window.Signal.room.buildSKDMForCurrentChain(data.room);
-                if (!skdm) return;
-                for (const uid of peers) {
-                  try { await window.Signal.room.sendSKDMTo(uid, skdm); }
-                  catch (e) { /* per-peer failures handled by catch-up */ }
-                }
-              } catch (e) {
-                try { console.warn('[ws] user_banned re-fan failed', e); } catch {}
-              }
-            })();
-          }
-        } catch {}
         break;
       }
       case 'pong': break;
@@ -835,50 +634,6 @@ const WS = (() => {
 
   async function decryptMsg(msg, room) {
     if (!msg.content) return msg;
-
-    // Track C (libsignal Sender Keys for rooms) was REVERTED 2026-05-20.
-    // Old v2 envelopes may still sit in channel history; try to decrypt
-    // them from the local sticky plaintext cache only. If the cache
-    // doesn't have it, leave the envelope as-is and let _formatContent
-    // render its 🔒 placeholder. No libsignal replay attempt (that's the
-    // path that produced "iteration already consumed" spam and the
-    // own-message-can't-decrypt symptom). See docs/SECURITY_REFACTOR_PLAN.md.
-    const raw = msg.content;
-    if (typeof raw === 'string' && raw.length >= 9 && raw[0] === '{') {
-      try {
-        const env = JSON.parse(raw);
-        if (env && env.v === 2 && env.t === 'sk') {
-          try {
-            if (typeof Messages !== 'undefined') {
-              if (Messages._ptCacheGet) {
-                const _cached = Messages._ptCacheGet(raw);
-                if (typeof _cached === 'string') {
-                  return { ...msg, content: _cached, _decrypted: true, _v2: true };
-                }
-              }
-              if (msg.id && Messages._ptCacheGetById) {
-                const _cachedById = Messages._ptCacheGetById(room, msg.id);
-                if (typeof _cachedById === 'string') {
-                  return { ...msg, content: _cachedById, _decrypted: true, _v2: true };
-                }
-              }
-              if (msg.id && Messages._msgPtGetById) {
-                const _sticky = Messages._msgPtGetById(room, msg.id);
-                if (typeof _sticky === 'string') {
-                  return { ...msg, content: _sticky, _decrypted: true, _v2: true };
-                }
-              }
-            }
-          } catch {}
-          // Cache miss: leave the envelope JSON in msg.content;
-          // _formatContent renders 🔒 for v2 envelopes it can't resolve.
-          return msg;
-        }
-      } catch {
-        // Not v2 — fall through to legacy AES.
-      }
-    }
-
     const key = State.roomKeys[room];
     if (!key) return msg;
     const plain = await Crypto.decrypt(msg.content, key);
