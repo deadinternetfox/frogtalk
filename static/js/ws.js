@@ -73,11 +73,23 @@ const WS = (() => {
       try { await handleServerMsg(data); } catch (err) { console.error('[WS] handleServerMsg error:', err); }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       // Only reconnect if this is still the current WS
       if (_ws !== ws) return;
       if (_pingInterval) { clearInterval(_pingInterval); _pingInterval = null; }
       if (_stableTimer) { clearTimeout(_stableTimer); _stableTimer = null; }
+      // Server-issued "do-not-reconnect" close codes. The server uses 4003
+      // when access is refused (e.g. the user was just banned from this
+      // room) — auto-reconnecting in that case loops forever and paints
+      // the disorienting "Connection lost" banner on top of the ban UI.
+      // 4001 = bad token (logout/expired), 4007 = bad origin (CSWSH),
+      // 4008 = per-IP cap. None of these are worth retrying silently.
+      const noRetry = ev && (ev.code === 4001 || ev.code === 4003 || ev.code === 4007 || ev.code === 4008);
+      if (noRetry) {
+        _room = null;
+        try { UI.setConnectionStatus && UI.setConnectionStatus('connected'); } catch {}
+        return;
+      }
       _reconnectTimer = setTimeout(() => {
         if (_room) connect(_room);
       }, _reconnectDelay);

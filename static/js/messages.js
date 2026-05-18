@@ -3989,30 +3989,67 @@ window.showRoomBanModal = showRoomBanModal;
  * banned screen).
  */
 window._roomBans = window._roomBans || {};
+window._roomBanTicker = window._roomBanTicker || null;
 
-function _fmtRoomBanDuration(expires, durationMinutes) {
-  let label = 'Permanent';
-  let resolved = false;
-  if (expires) {
+function _fmtRoomBanCountdown(expiresMs, durationMinutes) {
+  // Returns { label, isPermanent, expired }.
+  // - expiresMs: epoch ms (or null/undefined for permanent / unknown)
+  // - durationMinutes: fallback when expiresMs is missing
+  if (!expiresMs) {
+    if (typeof durationMinutes === 'number' && durationMinutes > 0) {
+      // We have a duration but no absolute timestamp — show a static label.
+      if (durationMinutes < 60) return { label: `${durationMinutes} min`, isPermanent: false, expired: false };
+      if (durationMinutes < 1440) return { label: `${Math.round(durationMinutes/60)} h`, isPermanent: false, expired: false };
+      return { label: `${Math.round(durationMinutes/1440)} d`, isPermanent: false, expired: false };
+    }
+    return { label: 'Permanent', isPermanent: true, expired: false };
+  }
+  const ms = expiresMs - Date.now();
+  if (ms <= 0) return { label: 'Expired', isPermanent: false, expired: true };
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  let label;
+  if (d > 0) label = `${d}d ${h}h ${m}m`;
+  else if (h > 0) label = `${h}h ${m}m ${s.toString().padStart(2,'0')}s`;
+  else if (m > 0) label = `${m}m ${s.toString().padStart(2,'0')}s`;
+  else label = `${s}s`;
+  return { label: `${label} left`, isPermanent: false, expired: false };
+}
+
+function _stopRoomBanTicker() {
+  if (window._roomBanTicker) {
+    try { clearInterval(window._roomBanTicker); } catch {}
+    window._roomBanTicker = null;
+  }
+}
+
+function _startRoomBanTicker() {
+  _stopRoomBanTicker();
+  window._roomBanTicker = setInterval(() => {
     try {
-      const exp = new Date(expires);
-      const now = new Date();
-      const ms = exp - now;
-      if (ms > 0) {
-        const mins = Math.round(ms / 60000);
-        if (mins < 60) label = `Until ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} (${mins} min)`;
-        else if (mins < 1440) label = `Until ${exp.toLocaleString([], {hour:'2-digit', minute:'2-digit'})} (${Math.round(mins/60)} h)`;
-        else label = `Until ${exp.toLocaleDateString()} ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
-        resolved = true;
+      const room = (typeof State !== 'undefined' ? State.currentRoom : null);
+      const info = room ? (window._roomBans || {})[room] : null;
+      const durEl = document.getElementById('room-ban-duration');
+      if (!info || !durEl) { _stopRoomBanTicker(); return; }
+      const expiresMs = info._expiresMs || null;
+      const cd = _fmtRoomBanCountdown(expiresMs, info.duration_minutes);
+      durEl.textContent = cd.label;
+      durEl.style.color = cd.isPermanent ? '#fca5a5' : (cd.expired ? '#9ca3af' : '#fbbf24');
+      if (cd.expired) {
+        // Ban just elapsed (or wasn't really live). Drop the banner so the
+        // composer comes back on the next room-switch / reconnect. The
+        // server's `room_bans` row may still have a few seconds of clock
+        // skew before the user_can_access_room check flips, so we don't
+        // touch the WS here — just stop showing a counter that's at 0.
+        try { delete (window._roomBans || {})[room]; } catch {}
+        if (typeof window._applyRoomBanUI === 'function') window._applyRoomBanUI(room);
+        _stopRoomBanTicker();
       }
     } catch {}
-  }
-  if (!resolved && typeof durationMinutes === 'number' && durationMinutes > 0) {
-    if (durationMinutes < 60) label = `${durationMinutes} min`;
-    else if (durationMinutes < 1440) label = `${Math.round(durationMinutes/60)} h`;
-    else label = `${Math.round(durationMinutes/1440)} d`;
-  }
-  return label;
+  }, 1000);
 }
 
 window._applyRoomBanUI = function _applyRoomBanUI(room) {
@@ -4031,7 +4068,16 @@ window._applyRoomBanUI = function _applyRoomBanUI(room) {
       if (inputWrap) inputWrap.style.display = '';
       if (ta) { ta.disabled = false; ta.placeholder = `Message #${room || 'channel'}`; }
       if (sendBtn) sendBtn.disabled = false;
+      _stopRoomBanTicker();
       return;
+    }
+    // Cache parsed expiry as epoch ms so the per-second ticker doesn't
+    // re-parse the ISO string 60 times a minute.
+    if (info.expires_at && typeof info._expiresMs !== 'number') {
+      try {
+        const t = new Date(info.expires_at).getTime();
+        info._expiresMs = (isNaN(t) || t <= 0) ? null : t;
+      } catch { info._expiresMs = null; }
     }
     // Hide composer + reply preview + mention popup; the banner takes their place.
     if (inputWrap) inputWrap.style.display = 'none';
@@ -4040,13 +4086,13 @@ window._applyRoomBanUI = function _applyRoomBanUI(room) {
     if (ta) ta.disabled = true;
     if (sendBtn) sendBtn.disabled = true;
 
-    const durationLabel = _fmtRoomBanDuration(info.expires_at, info.duration_minutes);
-    const isPermanent = durationLabel === 'Permanent';
+    const cd = _fmtRoomBanCountdown(info._expiresMs, info.duration_minutes);
     const safeBanner = UI.escHtml(info.banned_by || 'a moderator');
     const safeReason = info.reason
       ? UI.escHtml(info.reason)
       : '<em style="color:#9ca3af;">No reason provided.</em>';
-    const safeDuration = UI.escHtml(durationLabel);
+    const safeDuration = UI.escHtml(cd.label);
+    const durColor = cd.isPermanent ? '#fca5a5' : (cd.expired ? '#9ca3af' : '#fbbf24');
 
     if (inputArea) {
       let bar = existing;
@@ -4075,13 +4121,20 @@ window._applyRoomBanUI = function _applyRoomBanUI(room) {
             <div style="margin-top:3px;color:#e5e7eb;font-size:12px;line-height:1.45;">
               <span style="color:#9ca3af;">By</span> <strong>@${safeBanner}</strong>
               <span style="color:#9ca3af;">·</span>
-              <span style="color:${isPermanent ? '#fca5a5' : '#fbbf24'};font-weight:600;">${safeDuration}</span>
+              <span id="room-ban-duration" style="color:${durColor};font-weight:600;font-variant-numeric:tabular-nums;">${safeDuration}</span>
             </div>
             <div style="margin-top:4px;color:#d1d5db;font-size:12px;line-height:1.45;word-break:break-word;">
               <span style="color:#9ca3af;">Reason:</span> ${safeReason}
             </div>
           </div>
         </div>`;
+    }
+    // Only run the per-second ticker when there's actually something to
+    // count down — permanent bans and durationless rows stay static.
+    if (!cd.isPermanent && info._expiresMs) {
+      _startRoomBanTicker();
+    } else {
+      _stopRoomBanTicker();
     }
   } catch (e) { try { console.warn('[ban] apply UI', e); } catch {} }
 };
@@ -4118,9 +4171,15 @@ function handleRoomBan(data) {
     // One small toast so the user notices when they're not looking at the
     // composer (e.g. they were scrolling history).
     try {
-      const dur = _fmtRoomBanDuration(data.expires_at,
-        (typeof data.duration_minutes === 'number' && data.duration_minutes > 0) ? data.duration_minutes : null);
-      toast(`Banned from #${room} · ${dur}`, 'error');
+      let expiresMs = null;
+      if (data.expires_at) {
+        const t = new Date(data.expires_at).getTime();
+        if (!isNaN(t) && t > 0) expiresMs = t;
+      }
+      const dm = (typeof data.duration_minutes === 'number' && data.duration_minutes > 0)
+        ? data.duration_minutes : null;
+      const cd = _fmtRoomBanCountdown(expiresMs, dm);
+      toast(`Banned from #${room} · ${cd.label}`, 'error');
     } catch {}
 
     // Refresh sidebar from server — the room is now excluded from
