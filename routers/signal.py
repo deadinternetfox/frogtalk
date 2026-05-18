@@ -168,6 +168,26 @@ async def fetch_bundle(
     }
 
 
+@router.get("/identity/{user_id}")
+@limiter.limit("120/minute")
+async def fetch_identity(
+    request: Request,
+    user_id: int,
+    user: dict = Depends(get_current_user),
+):
+    """Return only `identity_pub` for `user_id` (does not consume OTPK).
+
+    Senders use this to detect peer-identity drift before encrypting
+    against a stale local Signal session. Cheap to call.
+    """
+    if user_id <= 0:
+        raise HTTPException(status_code=400, detail="bad_user_id")
+    ident = await run_in_threadpool(db.signal_get_identity_pub, int(user_id))
+    if ident is None:
+        raise HTTPException(status_code=404, detail="no_identity")
+    return {"user_id": int(user_id), "identity_pub": _b64_encode(ident)}
+
+
 @router.get("/otpk-count")
 @limiter.limit("30/minute")
 async def otpk_count(

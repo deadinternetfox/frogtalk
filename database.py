@@ -2716,6 +2716,22 @@ def signal_otpk_count(user_id: int) -> int:
     return int(row["n"]) if row else 0
 
 
+def signal_get_identity_pub(user_id: int) -> Optional[bytes]:
+    """Return the raw identity_pub bytes for `user_id`, or None.
+
+    Lightweight peek that does NOT consume an OTPK. Used by senders to
+    detect peer-identity drift (e.g. peer reset their keys) before
+    encrypting against a stale local session — without that check, an
+    asymmetric reset leaves the first message on a doomed ratchet.
+    """
+    with _conn() as con:
+        row = con.execute(
+            "SELECT identity_pub FROM signal_identity_keys WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+    return bytes(row["identity_pub"]) if row else None
+
+
 # ---------------------------------------------------------------------------
 # Linked devices — Track F Phase 1 (dark backend)
 # ---------------------------------------------------------------------------

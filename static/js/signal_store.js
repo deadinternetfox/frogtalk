@@ -191,6 +191,24 @@
       return !!(existing && !_abEqual(existing.pubKey, identityKey));
     }
 
+    // Internal — returns the locally-stored peer identity (ArrayBuffer)
+    // or undefined. Used by Signal.js to detect peer-identity drift
+    // before reusing an existing session.
+    async loadStoredIdentity(identifier) {
+      if (typeof identifier !== 'string') return undefined;
+      const row = await _get(STORE_IDENTITIES, identifier);
+      return row ? row.pubKey : undefined;
+    }
+
+    // Internal — drop a stored peer identity so the next saveIdentity
+    // on that identifier is treated as TOFU. Used when a drift is
+    // detected and we need to rebuild a session under the peer's new
+    // identity_pub without libsignal throwing UntrustedIdentityKeyError.
+    async removeIdentity(identifier) {
+      if (typeof identifier !== 'string') return;
+      await _del(STORE_IDENTITIES, identifier);
+    }
+
     // ── Pre-keys (one-time) ────────────────────────────────────────────
 
     async loadPreKey(keyId) {

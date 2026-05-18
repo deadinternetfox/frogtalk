@@ -299,6 +299,34 @@
     return data;
   }
 
+  // Lightweight peer identity_pub fetch — does NOT consume an OTPK.
+  // Returns base64 of the raw 32-byte identity key, or null on 404 /
+  // network error. Used to detect peer-side identity rotation before
+  // we reuse a (possibly stale) local Signal session.
+  const _peerIdentCache = new Map(); // peerUserId -> { b64, ts }
+  const _PEER_IDENT_TTL_MS = 60 * 1000; // 60s — short enough to catch a
+                                        // recent peer reset, long
+                                        // enough not to spam the API.
+  async function _fetchPeerIdentityPub(peerUserId, { noCache = false } = {}) {
+    const key = String(peerUserId);
+    const now = Date.now();
+    if (!noCache) {
+      const hit = _peerIdentCache.get(key);
+      if (hit && (now - hit.ts) < _PEER_IDENT_TTL_MS) return hit.b64;
+    }
+    const apiFetch = window.apiFetch || ((u) => fetch(u, { credentials: 'include' }));
+    try {
+      const res = await apiFetch(`/api/signal/identity/${encodeURIComponent(key)}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const b64 = data && typeof data.identity_pub === 'string' ? data.identity_pub : null;
+      if (b64) _peerIdentCache.set(key, { b64, ts: now });
+      return b64;
+    } catch {
+      return null;
+    }
+  }
+
   // ── Per-peer addressing ──────────────────────────────────────────────
 
   function _addr(peerUserId) {
@@ -306,10 +334,66 @@
     return new _libsignal.SignalProtocolAddress(String(peerUserId), OUR_DEVICE_ID);
   }
 
+  // Compare two base64-encoded byte strings without timing-sensitivity
+  // (we're comparing public keys, but defensive habit).
+  function _b64Equal(a, b) {
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    if (a.length !== b.length) return false;
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    return diff === 0;
+  }
+
   async function _ensureSessionWith(peerUserId) {
     const addr = _addr(peerUserId);
     const existing = await _store.loadSession(addr.toString());
-    if (existing) return;
+    if (existing) {
+      // Drift check: if the peer has rotated their identity since we
+      // built this session (typical cause: peer wiped their device or
+      // the server lost their data), reusing the session emits a
+      // `t:'msg'` envelope that the peer can no longer decrypt. Detect
+      // by comparing the server's current identity_pub against the one
+      // we stored when we first trusted this peer. Mismatch ⇒ blow the
+      // session away and fall through to fresh X3DH (which emits a
+      // `t:'pre'` envelope that auto-resets the peer's side).
+      try {
+        const serverB64 = await _fetchPeerIdentityPub(peerUserId);
+        if (serverB64 && typeof _store.loadStoredIdentity === 'function') {
+          const localBuf = await _store.loadStoredIdentity(addr.toString());
+          if (localBuf) {
+            // STORE_IDENTITIES holds the 33-byte DJB-prefixed form
+            // (libsignal stores whatever it was handed via
+            // saveIdentity). Strip the type byte before comparing.
+            const localStripped = _stripDjbType(localBuf);
+            const localB64 = _abToB64(localStripped);
+            if (!_b64Equal(localB64, serverB64)) {
+              console.warn('[Signal] peer ' + peerUserId + ' identity rotated; resetting local session');
+              await _store.removeSession(addr.toString());
+              // Also clear the stored peer identity so libsignal's
+              // saveIdentity treats the next X3DH as TOFU rather than
+              // throwing UntrustedIdentityKeyError.
+              try {
+                if (typeof _store.removeIdentity === 'function') {
+                  await _store.removeIdentity(addr.toString());
+                }
+              } catch {}
+              // Fall through to bundle fetch + X3DH below.
+            } else {
+              return; // Session is fresh; reuse it.
+            }
+          } else {
+            return; // No stored identity (shouldn't happen with a real
+                    // session, but don't tear down on a false alarm).
+          }
+        } else {
+          return; // No server identity (peer unpublished) or no
+                  // local-identity helper — best effort: keep the
+                  // existing session.
+        }
+      } catch {
+        return; // Network blip: keep the existing session.
+      }
+    }
     // No session yet \u2014 fetch a bundle and run X3DH.
     const bundle = await _fetchPeerBundle(peerUserId);
     // Re-attach the DJB type byte stripped at publish time so
@@ -661,6 +745,14 @@
     encryptDM,
     decryptDM,
     resetSessionWith,
+    // Eager session pre-warm (e.g. on DM open). Builds an outbound
+    // session via X3DH if none exists, OR verifies the peer's
+    // identity_pub against the local session and resets on drift —
+    // ensuring the first ciphertext we ship is always decryptable.
+    async ensureSessionWith(peerUserId) {
+      if (!_libsignal || !_store) throw new Error('Signal not initialised');
+      return _ensureSessionWith(peerUserId);
+    },
     // Track E:
     signCallFingerprint,
     verifyCallFingerprint,

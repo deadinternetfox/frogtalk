@@ -1048,6 +1048,26 @@ async function openDMChannel (id, nickname, avatar) {
       // STATE.sharedSecret for v1 DM AES-GCM) was retired. Signal
       // Protocol prekey bundles do this job now and are fetched lazily
       // by Signal.encryptDM() the first time we send to this peer.
+      //
+      // Pre-warm the Signal session on DM open: this builds an X3DH
+      // outbound session if we have none, OR resets it if the peer's
+      // identity_pub on the server has drifted from what's stored
+      // locally (peer re-installed / wiped / server lost their data).
+      // Without this, the first ciphertext we ship after a drift goes
+      // out as a `t:'msg'` against a doomed ratchet and the peer
+      // surfaces it as "🔒 Older message — encrypted on a previous
+      // device". Fire-and-forget; encryption itself stays best-effort.
+      try {
+        if (window.Signal && typeof window.Signal.ensureSessionWith === 'function') {
+          if (typeof window.Signal.isReady === 'function' && window.Signal.isReady()) {
+            window.Signal.ensureSessionWith(peerUserId).catch(() => {});
+          } else if (typeof window.Signal.ensureReady === 'function' && State?.user?.id) {
+            window.Signal.ensureReady(State.user.id, { timeoutMs: 8000 })
+              .then(() => window.Signal.ensureSessionWith(peerUserId))
+              .catch(() => {});
+          }
+        }
+      } catch {}
     } catch (e) { /* silent — encryption is best-effort */ }
   })();
 
