@@ -8863,18 +8863,23 @@ window.ConnErr = (function(){
         <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
                      border-radius:6px;background:#1a3a2a;border:1px solid #2f5f48;font-size:12px">🛡️</span>
         <div style="display:flex;flex-direction:column;line-height:1.2;flex:1;min-width:0">
-          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Signal safety number</span>
-          <span style="font-size:11px;color:#6a7a72">Compare in person · 60 digits</span>
+          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Numeric fingerprint</span>
+          <span style="font-size:11px;color:#6a7a72">Same verification as the emoji, in Signal's 60-digit format</span>
         </div>
+        <button id="enc-signal-safety-toggle" type="button" onclick="toggleEncSignalSafetyNumber()"
+          style="background:#172a1f;border:1px solid #2f5f48;color:#a8d8b8;font-size:11px;padding:4px 9px;
+                 border-radius:7px;cursor:pointer;flex-shrink:0">Show numeric fingerprint</button>
       </div>
-      <div id="enc-signal-safety-number"
-           style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;color:#d8e8de;
-                  background:#0a0f0c;padding:10px 12px;border-radius:8px;border:1px solid #1f2a23;
-                  letter-spacing:1px;line-height:1.7;text-align:center">
-        <span style="color:#666">Loading…</span>
-      </div>
-      <div style="font-size:11px;color:#7a8a82;margin-top:9px;line-height:1.5">
-        Both people should see identical 60 digits. If they don't match — or change unexpectedly — your session may have been tampered with.
+      <div id="enc-signal-safety-wrap" style="display:none">
+        <div id="enc-signal-safety-number"
+             style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;color:#d8e8de;
+                    background:#0a0f0c;padding:10px 12px;border-radius:8px;border:1px solid #1f2a23;
+                    letter-spacing:1px;line-height:1.7;text-align:center">
+          <span style="color:#666">Loading…</span>
+        </div>
+        <div style="font-size:11px;color:#7a8a82;margin-top:9px;line-height:1.5">
+          Both people should see identical 60 digits. If they don't match — or change unexpectedly — your session may have been tampered with.
+        </div>
       </div>
     </div>
 
@@ -10574,7 +10579,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=433"></script>
 <script src="/static/js/ws.js?v=247"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=478"></script>
+<script src="/static/js/ui.js?v=479"></script>
   <script src="/static/js/rooms.js?v=437"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
 <script src="/static/js/messages.js?v=474"></script>

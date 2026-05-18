@@ -5472,8 +5472,10 @@ async function _populateRoomEncCard() {
 // Track A Phase 3 — Signal v2 safety number card populator.
 async function _populateSignalSafetyCard(peer) {
   const card = document.getElementById('enc-signal-card');
+  const wrap = document.getElementById('enc-signal-safety-wrap');
   const out  = document.getElementById('enc-signal-safety-number');
-  if (!card || !out) return;
+  const toggleBtn = document.getElementById('enc-signal-safety-toggle');
+  if (!card || !wrap || !out || !toggleBtn) return;
   if (!peer || !window.Signal || !Signal.isReady?.()) { card.style.display = 'none'; return; }
   const peerUid = peer?.user_id
     || (typeof _dmChannels !== 'undefined'
@@ -5481,14 +5483,50 @@ async function _populateSignalSafetyCard(peer) {
     || 0;
   if (!peerUid) { card.style.display = 'none'; return; }
   card.style.display = '';
+  card.dataset.peerUid = String(peerUid);
+  card.dataset.loaded = '0';
+  card.dataset.loading = '0';
+  wrap.style.display = 'none';
+  out.innerHTML = '<span style="color:#666">Loading…</span>';
+  toggleBtn.textContent = 'Show numeric fingerprint';
+}
+
+async function toggleEncSignalSafetyNumber() {
+  const card = document.getElementById('enc-signal-card');
+  const wrap = document.getElementById('enc-signal-safety-wrap');
+  const out = document.getElementById('enc-signal-safety-number');
+  const toggleBtn = document.getElementById('enc-signal-safety-toggle');
+  if (!card || !wrap || !out || !toggleBtn) return;
+
+  const isOpen = wrap.style.display !== 'none';
+  if (isOpen) {
+    wrap.style.display = 'none';
+    toggleBtn.textContent = 'Show numeric fingerprint';
+    return;
+  }
+
+  wrap.style.display = '';
+  toggleBtn.textContent = 'Hide numeric fingerprint';
+  if (card.dataset.loaded === '1' || card.dataset.loading === '1') return;
+
+  const peerUid = Number(card.dataset.peerUid || 0);
+  if (!peerUid || !window.Signal || !Signal.isReady?.()) {
+    card.style.display = 'none';
+    return;
+  }
+
+  card.dataset.loading = '1';
   out.innerHTML = '<span style="color:#666">Loading…</span>';
   try {
     const num = await Signal.safetyNumberWith(peerUid);
-    if (!num) { card.style.display = 'none'; return; }
+    if (!num) throw new Error('missing safety number');
     const groups = String(num).split(' ');
     out.innerHTML = groups.slice(0, 6).join(' ') + '<br>' + groups.slice(6).join(' ');
+    card.dataset.loaded = '1';
   } catch (e) {
     card.style.display = 'none';
+  } finally {
+    card.dataset.loading = '0';
   }
 }
 
