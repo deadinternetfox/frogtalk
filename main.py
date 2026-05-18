@@ -843,7 +843,13 @@ app.include_router(location_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(gifs_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(external_api_mod.router, prefix="/api")
 app.include_router(social_mod.router, prefix="/api", dependencies=_PIN_GATED)
-app.include_router(bridge_mod.router, prefix="/api", dependencies=_PIN_GATED)
+# NOTE: bridge_mod intentionally does NOT use _PIN_GATED. Its bot-facing
+# endpoints (`/api/bridge/message`, `/api/bridge/edit`, `/api/bridge/delete`)
+# authenticate via a shared `bridge_token` in the request body — they have
+# no session cookie, so a router-level pin_gate would 401 every inbound
+# Telegram/Discord message. User-facing endpoints in this router declare
+# their own `Depends(get_current_user)` per-route.
+app.include_router(bridge_mod.router, prefix="/api")
 app.include_router(calls_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(admin_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(federation_mod.router, prefix="/api")
