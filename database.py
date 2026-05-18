@@ -1973,6 +1973,41 @@ def _migrate():
             FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
             FOREIGN KEY(muted_by) REFERENCES users(id) ON DELETE CASCADE
         )""")
+        # Per-room mutes (mod tool — silences a user in a single channel
+        # without removing them). Enforced by the message-send endpoint.
+        con.execute("""CREATE TABLE IF NOT EXISTS room_mutes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            room_id    INTEGER NOT NULL,
+            user_id    INTEGER NOT NULL,
+            muted_by   INTEGER NOT NULL,
+            reason     TEXT DEFAULT '',
+            expires_at TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(room_id, user_id),
+            FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY(muted_by) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        # Offline-delivery queue for E2EE private-room key rotations.
+        # When a moderator rotates the room secret and a recipient is
+        # offline, we stash the Signal-encrypted envelope here and drain
+        # it the next time that user opens a WS connection. Without this
+        # queue, an offline member who comes back later sees nothing but
+        # opaque ciphertext for every message sent during their absence.
+        con.execute("""CREATE TABLE IF NOT EXISTS pending_room_key_envelopes (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            recipient_id INTEGER NOT NULL,
+            room_name    TEXT NOT NULL,
+            version      INTEGER NOT NULL,
+            env          TEXT NOT NULL,
+            from_user_id INTEGER NOT NULL,
+            from_nick    TEXT NOT NULL DEFAULT '',
+            reason       TEXT NOT NULL DEFAULT 'manual',
+            created_at   TEXT DEFAULT (datetime('now')),
+            UNIQUE(recipient_id, room_name, version),
+            FOREIGN KEY(recipient_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_pending_envelopes_recipient ON pending_room_key_envelopes(recipient_id)")
         # User blocks table
         con.execute("""CREATE TABLE IF NOT EXISTS user_blocks (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -5021,7 +5056,7 @@ def user_can_access_room(user_id: int, room_name: str, *, is_admin: bool = False
 
 
 def get_room_bans(room_id: int) -> List[Dict]:
-    """Get all bans for a room."""
+    """Get all currently-active bans for a room (expired entries excluded)."""
     with _conn() as con:
         rows = con.execute("""
             SELECT b.user_id, u.nickname, b.reason, b.expires_at, b.created_at,
@@ -5030,6 +5065,9 @@ def get_room_bans(room_id: int) -> List[Dict]:
             JOIN users u ON b.user_id = u.id
             JOIN users bu ON b.banned_by = bu.id
             WHERE b.room_id = ?
+              AND (b.expires_at IS NULL
+                   OR datetime(b.expires_at) > datetime('now'))
+            ORDER BY b.created_at DESC
         """, (room_id,)).fetchall()
     return [dict(r) for r in rows]
 
@@ -5048,6 +5086,114 @@ def get_user_room_bans(user_id: int) -> List[Dict]:
               AND (b.expires_at IS NULL OR b.expires_at > datetime('now'))
             ORDER BY b.created_at DESC
         """, (user_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Per-room mute helpers (mod tool — silences a user in one channel)
+# ---------------------------------------------------------------------------
+
+def mute_user_in_room(room_id: int, user_id: int, muted_by: int,
+                      reason: str = "",
+                      duration_minutes: Optional[int] = None) -> bool:
+    """Mute a user in a room. duration_minutes=None means permanent."""
+    expires = None
+    if duration_minutes:
+        expires = (datetime.utcnow() + timedelta(minutes=duration_minutes)).isoformat()
+    try:
+        with _conn() as con:
+            con.execute("""
+                INSERT OR REPLACE INTO room_mutes
+                    (room_id, user_id, muted_by, reason, expires_at)
+                VALUES (?,?,?,?,?)
+            """, (room_id, user_id, muted_by, reason, expires))
+            con.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def unmute_user_in_room(room_id: int, user_id: int) -> bool:
+    """Remove a per-room mute. Returns True if a row was actually deleted."""
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM room_mutes WHERE room_id=? AND user_id=?",
+            (room_id, user_id),
+        )
+        con.commit()
+        return cur.rowcount > 0
+
+
+def is_user_muted_in_room(room_id: int, user_id: int) -> Optional[Dict]:
+    """Return the active mute row for (room,user), or None if not muted /
+    the mute has expired. Used by the message-send endpoint to 403 muted
+    senders before their bytes ever hit the room."""
+    with _conn() as con:
+        row = con.execute("""
+            SELECT id, reason, expires_at, muted_by, created_at
+            FROM room_mutes
+            WHERE room_id=? AND user_id=?
+              AND (expires_at IS NULL
+                   OR datetime(expires_at) > datetime('now'))
+        """, (room_id, user_id)).fetchone()
+    return dict(row) if row else None
+
+
+def get_room_mutes(room_id: int) -> List[Dict]:
+    """List currently-active mutes for a room (for settings UI)."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT m.user_id, u.nickname, m.reason, m.expires_at, m.created_at,
+                   mu.nickname AS muted_by_nick
+            FROM room_mutes m
+            JOIN users u ON m.user_id = u.id
+            JOIN users mu ON m.muted_by = mu.id
+            WHERE m.room_id = ?
+              AND (m.expires_at IS NULL
+                   OR datetime(m.expires_at) > datetime('now'))
+            ORDER BY m.created_at DESC
+        """, (room_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Offline room-key envelope queue (E2EE rotation catch-up for offline members)
+# ---------------------------------------------------------------------------
+
+def queue_pending_room_key_envelope(recipient_id: int, room_name: str,
+                                    version: int, env: str,
+                                    from_user_id: int, from_nick: str,
+                                    reason: str = "manual") -> bool:
+    """Stash a Signal-encrypted room-key envelope for later delivery."""
+    try:
+        with _conn() as con:
+            con.execute("""
+                INSERT OR REPLACE INTO pending_room_key_envelopes
+                    (recipient_id, room_name, version, env, from_user_id, from_nick, reason)
+                VALUES (?,?,?,?,?,?,?)
+            """, (recipient_id, room_name, version, env, from_user_id, from_nick, reason))
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def drain_pending_room_key_envelopes(recipient_id: int) -> List[Dict]:
+    """Pop every queued envelope for this user. Returns the rows so the
+    caller can fan them out via the WS that just opened. Atomically
+    deletes the rows after reading them; on a delivery failure the
+    caller is expected to re-queue or fall through to the next reconnect."""
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT id, room_name, version, env, from_user_id, from_nick, reason
+            FROM pending_room_key_envelopes
+            WHERE recipient_id = ?
+            ORDER BY id ASC
+        """, (recipient_id,)).fetchall()
+        if rows:
+            con.execute("DELETE FROM pending_room_key_envelopes WHERE recipient_id = ?",
+                        (recipient_id,))
+            con.commit()
     return [dict(r) for r in rows]
 
 

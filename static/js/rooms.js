@@ -1079,6 +1079,14 @@ const Rooms = (() => {
     if (_enc) {
       _enc.style.display = (key && chType !== 'voice') ? '' : 'none';
     }
+    // Re-apply mute UI for the channel we just switched to (composer
+    // disabled + "You're muted" pill). Defined in ws.js below as a
+    // window-scoped helper so room_muted events from any panel hit it.
+    try {
+      if (typeof window._applyRoomMuteUI === 'function') {
+        window._applyRoomMuteUI(name);
+      }
+    } catch {}
 
     // Music channels: chat stays open but we lock the attachment bar down to
     // pictures + GIFs only so nobody can drop a voice note or a 2-minute

@@ -87,6 +87,26 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         return JSONResponse(status_code=400, content={"error": "Empty message"})
     if content and len(content) > 10_000:
         return JSONResponse(status_code=413, content={"error": "Message too long"})
+    # Per-room mute enforcement — mods can mute a user in one channel
+    # without removing them. Block at the API boundary so a tampered
+    # client still can't deliver bytes into the room.
+    try:
+        _room = db.get_room_by_name(room_name)
+        if _room:
+            _mute = db.is_user_muted_in_room(int(_room["id"]), int(current_user["id"]))
+            if _mute:
+                _exp = _mute.get("expires_at")
+                if isinstance(_exp, str) and _exp and not _exp.endswith("Z"):
+                    _exp = _exp + "Z"
+                return JSONResponse(status_code=403, content={
+                    "error": "muted",
+                    "reason": _mute.get("reason") or "",
+                    "expires_at": _exp,
+                })
+    except Exception:
+        # Fail-open on lookup failure — we'd rather a brief mute lag than
+        # take down the entire chat surface for a transient DB error.
+        pass
     if body.media_data:
         if len(body.media_data) > MAX_MEDIA_BYTES:
             return JSONResponse(status_code=413, content={"error": "File too large (max 20MB)"})

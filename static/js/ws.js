@@ -643,6 +643,37 @@ const WS = (() => {
         try { if (typeof handleRoomBan === 'function') handleRoomBan(data); } catch {}
         break;
       }
+      case 'room_muted': {
+        // A mod muted us in this channel — toast + disable composer if
+        // we're currently looking at that room. We also persist the
+        // expiry on State so the per-room view code (rooms.js) can
+        // re-apply the disabled state when the user switches back.
+        try {
+          window._roomMutes = window._roomMutes || {};
+          window._roomMutes[data.room] = {
+            reason: data.reason || '',
+            expires_at: data.expires_at || null,
+            duration_minutes: data.duration_minutes || null,
+            muted_by: data.muted_by || '',
+          };
+          UI.showToast(`🔇 You were muted in #${data.room}${data.reason ? ': ' + data.reason : ''}`, 'warning');
+          if (State.currentRoom === data.room && typeof window._applyRoomMuteUI === 'function') {
+            window._applyRoomMuteUI(data.room);
+          }
+        } catch {}
+        break;
+      }
+      case 'room_unmuted': {
+        try {
+          window._roomMutes = window._roomMutes || {};
+          delete window._roomMutes[data.room];
+          UI.showToast(`🔊 You were unmuted in #${data.room}`, 'success');
+          if (State.currentRoom === data.room && typeof window._applyRoomMuteUI === 'function') {
+            window._applyRoomMuteUI(data.room);
+          }
+        } catch {}
+        break;
+      }
       case 'user_banned': {
         // A peer was banned/kicked from this room. Surface a system toast,
         // live-remove them from the sidebar member list, and refresh the
@@ -741,3 +772,54 @@ const WS = (() => {
 
   return { connect, disconnect, send, reconnectNow, isOpen };
 })();
+
+// ─── Per-room mute UI helper ──────────────────────────────────────────────
+// Painted by ws.js on room_muted/room_unmuted events and by rooms.js when
+// switching channels. Disables the composer and shows a bar above it
+// explaining why. window-scoped so handlers in either file can reach it
+// without a circular import.
+window._applyRoomMuteUI = function _applyRoomMuteUI(room) {
+  try {
+    const mutes = window._roomMutes || {};
+    const m = mutes[room];
+    const ta = document.getElementById('msg-input');
+    const sendBtn = document.getElementById('send-btn');
+    const existing = document.getElementById('room-mute-banner');
+    if (!m) {
+      if (existing) existing.remove();
+      if (ta) { ta.disabled = false; ta.placeholder = `Message #${room || 'channel'}`; }
+      if (sendBtn) sendBtn.disabled = false;
+      return;
+    }
+    // Resolve a friendly remaining-time label. Server sends ISO-with-Z so
+    // new Date() parses correctly across timezones (same fix as kick).
+    let when = '';
+    if (m.expires_at) {
+      try {
+        const exp = new Date(m.expires_at);
+        const mins = Math.round((exp - new Date()) / 60000);
+        if (mins > 0) {
+          if (mins < 60) when = ` · ${mins} min remaining`;
+          else if (mins < 1440) when = ` · ${Math.round(mins/60)} h remaining`;
+          else when = ` · until ${exp.toLocaleString()}`;
+        }
+      } catch {}
+    } else {
+      when = ' · permanent';
+    }
+    const inputArea = document.getElementById('input-area');
+    if (inputArea && !existing) {
+      const bar = document.createElement('div');
+      bar.id = 'room-mute-banner';
+      bar.style.cssText = 'background:linear-gradient(180deg,#3a2410,#2a1908);border:1px solid #7c4a14;border-radius:8px;margin:0 8px 6px;padding:8px 12px;color:#fbbf24;font-size:13px;display:flex;align-items:center;gap:8px;';
+      inputArea.insertBefore(bar, inputArea.firstChild);
+    }
+    const bar = document.getElementById('room-mute-banner');
+    if (bar) {
+      const reason = m.reason ? ` — ${m.reason}` : '';
+      bar.innerHTML = `🔇 <span style="flex:1">You're muted in this channel${UI.escHtml(when)}${UI.escHtml(reason)}</span>`;
+    }
+    if (ta) { ta.disabled = true; ta.placeholder = "You're muted in this channel"; }
+    if (sendBtn) sendBtn.disabled = true;
+  } catch (e) { console.warn('[mute] apply UI', e); }
+};

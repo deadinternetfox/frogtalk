@@ -239,6 +239,28 @@ async def websocket_endpoint(
     except Exception:
         logger.exception("drain_pending_call_signals failed")
 
+    # Drain queued room-key envelopes from any rotations that happened
+    # while this user was offline. Without this drain the user would see
+    # opaque ciphertext for every message encrypted under a newer key
+    # version until a mod manually re-shares the secret.
+    try:
+        pending_envs = db.drain_pending_room_key_envelopes(user["id"])
+        for row in pending_envs:
+            try:
+                await manager.send_personal(websocket, {
+                    "type": "room_key_envelope",
+                    "room": row.get("room_name"),
+                    "version": int(row.get("version") or 0),
+                    "env": row.get("env"),
+                    "from_user_id": int(row.get("from_user_id") or 0),
+                    "from_nickname": row.get("from_nick") or "",
+                    "reason": row.get("reason") or "manual",
+                })
+            except Exception:
+                pass
+    except Exception:
+        logger.exception("drain_pending_room_key_envelopes failed")
+
     # Auto-add to room_members on connect so they appear in the offline list
     # when they're not connected. Skip DM channels (prefixed with "dm-").
     if not room_name.startswith("dm-"):

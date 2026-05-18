@@ -1585,19 +1585,27 @@ const Messages = (() => {
     // channel offence).
     const showOwnerModControls = !isOwn && canModerateHere
       && msg.nickname !== State.currentRoomOwner;
-    const adminActions = showAdminControls ? `
+    // De-duplicate the inline mod icons. A node admin who is ALSO room
+    // owner/mod would otherwise see two 👢 Kick buttons + two 🚫 Ban
+    // buttons + two "⋯" menus (one room-scoped, one global). Show only
+    // the room-scoped row in that case — the kebab menu carries the
+    // global actions via scope='both' so nothing is lost.
+    const inlineScope = showOwnerModControls
+      ? (showAdminControls ? 'both' : 'room')
+      : (showAdminControls ? 'admin' : null);
+    const adminActions = inlineScope === 'admin' ? `
         <span class="msg-mod-inline">
           <button class="msg-act-btn" title="Kick" onclick="adminKick('${UI.escHtml(msg.nickname)}')" style="color:#ff9800">👢</button>
           <button class="msg-act-btn" title="Mute" onclick="adminMute('${UI.escHtml(msg.nickname)}')" style="color:#ff9800">🔇</button>
           <button class="msg-act-btn danger" title="Ban" onclick="adminBan('${UI.escHtml(msg.nickname)}')">🚫</button>
         </span>
         <button class="msg-act-btn msg-mod-more" title="Moderation" onclick="Messages.openModMenu(event,'${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'admin')">⋯</button>` : '';
-    const ownerModActions = showOwnerModControls ? `
+    const ownerModActions = (inlineScope === 'room' || inlineScope === 'both') ? `
         <span class="msg-mod-inline">
           <button class="msg-act-btn" title="Kick from channel (5 min)" onclick="roomKick('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'})" style="color:#ff9800">👢</button>
           <button class="msg-act-btn danger" title="Ban from channel" onclick="roomBan('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'})">🚫</button>
         </span>
-        <button class="msg-act-btn msg-mod-more" title="Moderation" onclick="Messages.openModMenu(event,'${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'room')">⋯</button>` : '';
+        <button class="msg-act-btn msg-mod-more" title="Moderation" onclick="Messages.openModMenu(event,'${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${inlineScope}')">⋯</button>` : '';
     const actions = `
       <div class="msg-actions">
         <button class="msg-act-btn" title="Reply" data-rid="${msg.id}" data-rnick="${UI.escHtml(msg.nickname)}" data-rtxt="${UI.escHtml((msg.content||'').substring(0,80))}" onclick="Messages.setReplyTo(+this.dataset.rid,this.dataset.rnick,this.dataset.rtxt)">↩️</button>
@@ -3059,18 +3067,24 @@ const Messages = (() => {
     document.querySelectorAll('.msg-mod-popup').forEach(el => el.remove());
     const pop = document.createElement('div');
     pop.className = 'msg-mod-popup';
-    const items = scope === 'admin'
-      ? [
-          { label: '👢 Kick (global)', color: '#ff9800', fn: () => adminKick(nickname) },
-          { label: '🔇 Mute', color: '#ff9800', fn: () => adminMute(nickname) },
-          { label: '🚫 Ban (global)', color: '#ff5555', fn: () => adminBan(nickname) },
-        ]
-      : [
-          { label: '👢 Kick from channel', color: '#ff9800', fn: () => roomKick(nickname, userId) },
-          { label: '🚫 Ban from channel', color: '#ff5555', fn: () => roomBan(nickname, userId) },
-        ];
+    const roomItems = [
+      { label: '� Mute in channel', color: '#ffb74d', fn: () => roomMute(nickname, userId) },
+      { label: '�👢 Kick from channel', color: '#ff9800', fn: () => roomKick(nickname, userId) },
+      { label: '🚫 Ban from channel', color: '#ff5555', fn: () => roomBan(nickname, userId) },
+    ];
+    const adminItems = [
+      { label: '👢 Kick (global)', color: '#ff9800', fn: () => adminKick(nickname) },
+      { label: '🔇 Mute', color: '#ff9800', fn: () => adminMute(nickname) },
+      { label: '🚫 Ban (global)', color: '#ff5555', fn: () => adminBan(nickname) },
+    ];
+    let items;
+    if (scope === 'admin') items = adminItems;
+    else if (scope === 'both') items = [...roomItems, { sep: true }, ...adminItems];
+    else items = roomItems;
     pop.innerHTML = items.map((it, i) =>
-      `<button class="msg-mod-popup-btn" data-i="${i}" style="color:${it.color}">${it.label}</button>`
+      it.sep
+        ? `<div class="msg-mod-popup-sep" data-i="${i}"></div>`
+        : `<button class="msg-mod-popup-btn" data-i="${i}" style="color:${it.color}">${it.label}</button>`
     ).join('');
     document.body.appendChild(pop);
     const rect = ev.currentTarget.getBoundingClientRect();
@@ -3080,6 +3094,9 @@ const Messages = (() => {
     let top = rect.bottom + 6;
     if (top + 120 > window.innerHeight) top = rect.top - 120;
     pop.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:${pw}px;background:#141414;border:1px solid #2a4a2a;border-radius:10px;padding:6px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:2px`;
+    pop.querySelectorAll('.msg-mod-popup-sep').forEach(s => {
+      s.style.cssText = 'height:1px;background:#2a4a2a;margin:4px 6px;';
+    });
     pop.querySelectorAll('.msg-mod-popup-btn').forEach(btn => {
       btn.style.cssText = 'background:transparent;border:0;padding:10px 12px;text-align:left;border-radius:6px;cursor:pointer;font-size:14px';
       btn.onmouseover = () => btn.style.background = '#1d2d1d';
@@ -3872,6 +3889,44 @@ async function roomBan(nickname, userId) {
   showRoomBanModal(nickname, userId, State.currentRoom);
 }
 
+async function roomMute(nickname, userId) {
+  if (!State.currentRoom) return;
+  if (!userId) { toast('User id unavailable', 'error'); return; }
+  const room = State.currentRoom;
+  showModerationModal({
+    title: `Mute @${nickname} in #${room}`,
+    subtitle: 'Block them from sending messages here. They stay in the channel and can still read.',
+    icon: '🔇',
+    accent: '#fbbf24',
+    confirmLabel: 'Mute',
+    confirmStyle: 'danger',
+    fields: [
+      { key: 'duration', label: 'Duration', type: 'select', value: '60', options: [
+        { value: '5',    label: '5 minutes' },
+        { value: '15',   label: '15 minutes' },
+        { value: '60',   label: '1 hour' },
+        { value: '360',  label: '6 hours' },
+        { value: '1440', label: '1 day' },
+        { value: '',     label: 'Permanent (until unmuted)' },
+      ]},
+      { key: 'reason', label: 'Reason', type: 'textarea', placeholder: 'Optional', hint: '(shown to the user)' },
+    ],
+    onConfirm: async (v) => {
+      const duration_minutes = v.duration ? parseInt(v.duration, 10) : null;
+      try {
+        const r = await apiFetch(`/api/rooms/${encodeURIComponent(room)}/mutes`, 'POST', {
+          user_id: userId,
+          reason: (v.reason || '').trim(),
+          duration_minutes,
+        });
+        const data = await r.json().catch(() => ({}));
+        if (r.ok) toast(`@${nickname} muted${duration_minutes ? ` for ${duration_minutes} min` : ''}`, 'success');
+        else { toast(data.error || 'Mute failed', 'error'); return true; }
+      } catch { toast('Mute failed', 'error'); return true; }
+    }
+  });
+}
+
 /* ── Polished room-ban modal (owner/mod input) ───────────────────────── */
 function showRoomBanModal(nickname, userId, room) {
   // Tear down any previous instance
@@ -3976,6 +4031,7 @@ function handleRoomBan(data) {
       ? data.duration_minutes : null;
     const isKick = !!(expires || durationMinutes);
     let durationLabel = 'Permanent';
+    let resolved = false;
     if (expires) {
       try {
         const exp = new Date(expires);
@@ -3986,12 +4042,15 @@ function handleRoomBan(data) {
           if (mins < 60) durationLabel = `Until ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} (${mins} min)`;
           else if (mins < 1440) durationLabel = `Until ${exp.toLocaleString([], {hour:'2-digit', minute:'2-digit'})} (${Math.round(mins/60)} h)`;
           else durationLabel = `Until ${exp.toLocaleDateString()} ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+          resolved = true;
         }
       } catch {}
-    } else if (durationMinutes) {
-      // No expires_at on the wire — derive a label from the duration the
-      // mod selected so the user still sees "X minutes" instead of
-      // "Permanent".
+    }
+    if (!resolved && durationMinutes) {
+      // Either no expires_at on the wire, or it parsed to a past time
+      // (server/client clock skew, naive ISO interpreted as local, …).
+      // Derive a label from the duration the mod selected so a 5-minute
+      // kick never gets rendered as "Permanent".
       if (durationMinutes < 60) durationLabel = `${durationMinutes} min`;
       else if (durationMinutes < 1440) durationLabel = `${Math.round(durationMinutes/60)} h`;
       else durationLabel = `${Math.round(durationMinutes/1440)} d`;
@@ -4027,9 +4086,25 @@ function handleRoomBan(data) {
         try { State.currentRoom = null; } catch {}
         try {
           const msgsEl = document.getElementById('messages');
-          if (msgsEl) msgsEl.innerHTML = '';
+          if (msgsEl) {
+            // Paint a friendly "open a channel" placeholder instead of an
+            // empty void behind the modal. The user will see this once they
+            // dismiss the kick modal, so they have an obvious next step
+            // rather than staring at a blank pane.
+            msgsEl.innerHTML = `
+              <div class="msg-empty-state" style="margin:auto;">
+                <div class="msg-empty-icon">💬</div>
+                <div class="msg-empty-title">No channel selected</div>
+                <div class="msg-empty-sub">Pick a channel from the sidebar to start chatting.</div>
+              </div>`;
+          }
           const header = document.getElementById('channel-name');
           if (header) header.textContent = '';
+          // Hide the composer entirely — there's no room to send to.
+          // Restored automatically when the user opens another channel
+          // (rooms.js manages input-area.style.display on switch).
+          const inputArea = document.getElementById('input-area');
+          if (inputArea) inputArea.style.display = 'none';
         } catch {}
       }
       // Authoritative refresh from server — the room is now excluded from

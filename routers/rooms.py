@@ -824,6 +824,12 @@ async def ban_user(room_name: str, body: BanRequest,
         bans = db.get_room_bans(room["id"]) or []
         match = next((b for b in bans if int(b.get("user_id") or 0) == int(body.user_id)), None)
         expires_at = match.get("expires_at") if match else None
+        # Normalize to ISO-with-Z so JavaScript `new Date(...)` parses it as
+        # UTC. Without the suffix, JS treats naive ISO strings as LOCAL time;
+        # for any user east of UTC this makes `expires - now` negative and
+        # the kick modal falls through to "Permanent" even for short kicks.
+        if isinstance(expires_at, str) and expires_at and not expires_at.endswith("Z"):
+            expires_at = expires_at + "Z"
         await manager.send_to_user(body.user_id, {
             "type": "room_ban",
             "room": room_name,
@@ -928,6 +934,87 @@ async def get_bans(room_name: str, current_user: dict = Depends(get_current_user
     return {"bans": db.get_room_bans(room["id"])}
 
 
+# ─── Per-room mutes ───────────────────────────────────────────────────────
+# A mute silences a user in one channel without removing them. Enforced
+# server-side in routers/messages.py (any send is 403'd while an active
+# mute row exists). Mirrors the ban surface — mods/owner/admin only.
+
+class MuteRequest(BaseModel):
+    user_id: int
+    reason: str = ""
+    duration_minutes: Optional[int] = None  # None = permanent until unmute
+
+
+@router.post("/{room_name}/mutes")
+async def mute_user(room_name: str, body: MuteRequest,
+                    current_user: dict = Depends(get_current_user)):
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
+    target = db.get_user_by_id(body.user_id)
+    if not target:
+        return JSONResponse(status_code=404, content={"error": "User not found"})
+    if target.get("is_admin") or target["id"] == room["owner_id"]:
+        return JSONResponse(status_code=403, content={"error": "Cannot mute this user"})
+    ok = db.mute_user_in_room(room["id"], body.user_id, current_user["id"],
+                              body.reason, body.duration_minutes)
+    if not ok:
+        return JSONResponse(status_code=500, content={"error": "Mute failed"})
+
+    try:
+        from ws_manager import manager
+        mute = db.is_user_muted_in_room(room["id"], body.user_id) or {}
+        expires_at = mute.get("expires_at")
+        if isinstance(expires_at, str) and expires_at and not expires_at.endswith("Z"):
+            expires_at = expires_at + "Z"
+        await manager.send_to_user(body.user_id, {
+            "type": "room_muted",
+            "room": room_name,
+            "reason": body.reason or "",
+            "muted_by": current_user.get("nickname") or "moderator",
+            "expires_at": expires_at,
+            "duration_minutes": body.duration_minutes,
+        })
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@router.delete("/{room_name}/mutes/{user_id}")
+async def unmute_user(room_name: str, user_id: int,
+                      current_user: dict = Depends(get_current_user)):
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
+    ok = db.unmute_user_in_room(room["id"], user_id)
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "User is not muted"})
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(user_id, {
+            "type": "room_unmuted",
+            "room": room_name,
+            "unmuted_by": current_user.get("nickname") or "moderator",
+        })
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@router.get("/{room_name}/mutes")
+async def get_mutes(room_name: str, current_user: dict = Depends(get_current_user)):
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
+    return {"mutes": db.get_room_mutes(room["id"])}
+
+
 # ─── Private-room key rotation ────────────────────────────────────────────
 # AAD-bound AES-GCM with a server-side `room_key_version` counter. Bumping
 # the version invalidates the previous room secret for anyone who doesn't
@@ -978,11 +1065,13 @@ async def rotate_room_key(room_name: str, body: RotateKeyRequest,
         return JSONResponse(status_code=500, content={"error": "Could not rotate key"})
 
     # Fan out the Signal envelopes. Each envelope was encrypted client-side
-    # so the server never learns the new secret. If a recipient is offline
-    # the WS frame is dropped — the client will catch up on next history
-    # fetch via the system message + the rotator's persisted envelope queue
-    # (future work; for now, offline members must ask for the secret).
+    # so the server never learns the new secret. Offline recipients have
+    # their envelope stashed in `pending_room_key_envelopes`; the WS
+    # connect handler drains the queue so they catch up automatically the
+    # next time they open the app — no more "Hey can you DM me the key"
+    # after a 24-hour offline window.
     delivered = 0
+    queued = 0
     for uid_str, env in (body.envelopes or {}).items():
         try:
             uid = int(uid_str)
@@ -990,17 +1079,39 @@ async def rotate_room_key(room_name: str, body: RotateKeyRequest,
             continue
         if not env or not isinstance(env, str):
             continue
+        online = False
         try:
-            await manager.send_to_user(uid, {
-                "type": "room_key_envelope",
-                "room": room_name,
-                "version": new_version,
-                "env": env,
-                "from_user_id": current_user["id"],
-                "from_nickname": current_user.get("nickname") or "",
-                "reason": reason,
-            })
-            delivered += 1
+            online = manager.is_user_online(uid)
+        except Exception:
+            online = False
+        if online:
+            try:
+                n = await manager.send_to_user(uid, {
+                    "type": "room_key_envelope",
+                    "room": room_name,
+                    "version": new_version,
+                    "env": env,
+                    "from_user_id": current_user["id"],
+                    "from_nickname": current_user.get("nickname") or "",
+                    "reason": reason,
+                })
+                if n:
+                    delivered += 1
+                    continue
+            except Exception:
+                pass
+        # Either offline or live delivery failed — persist for catch-up.
+        try:
+            if db.queue_pending_room_key_envelope(
+                recipient_id=uid,
+                room_name=room_name,
+                version=new_version,
+                env=env,
+                from_user_id=int(current_user["id"]),
+                from_nick=current_user.get("nickname") or "",
+                reason=reason,
+            ):
+                queued += 1
         except Exception:
             pass
 
