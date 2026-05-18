@@ -6530,62 +6530,8 @@ async function blockUserInfo() {
   }
 }
 
-// Moderator actions - kick removes user from room temporarily
-async function kickUserInfo() {
-  if (!_userInfoTarget) return;
-  if (!State.currentRoom || State.currentRoomType === 'dm') {
-    toast('Cannot kick in DMs', 'error');
-    return;
-  }
-  const nick = _userInfoTarget;
-  const room = State.currentRoom;
-  // Resolve user id once up-front so the modal doesn't have to.
-  let users = [];
-  try { users = await apiFetch('/api/users').then(r => r.json()).then(d => d.users || []); } catch {}
-  const user = users.find(u => u.nickname === nick);
-  if (!user) { toast('User not found', 'error'); return; }
-  const _modal = window.showModerationModal;
-  const run = async (v) => {
-    const mins = parseInt(v?.duration || '5', 10) || 5;
-    try {
-      const res = await apiFetch(`/api/rooms/${encodeURIComponent(room)}/bans`, 'POST', {
-        user_id: user.id,
-        reason: (v?.reason || '').trim() || 'Kicked by moderator',
-        duration_minutes: mins,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        toast(`@${nick} kicked from #${room} for ${mins} min`, 'success');
-        closeModal('modal-user-info');
-      } else { toast(data.error || 'Failed to kick user', 'error'); return true; }
-    } catch { toast('Failed to kick user', 'error'); return true; }
-  };
-  if (typeof _modal === 'function') {
-    _modal({
-      title: `Kick @${nick} from #${room}`,
-      subtitle: 'A short timeout — they can re-join when it expires.',
-      icon: '👢',
-      accent: '#fb923c',
-      confirmLabel: 'Kick',
-      confirmStyle: 'danger',
-      fields: [
-        { key: 'duration', label: 'Duration', type: 'select', value: '5', options: [
-          { value: '5',   label: '5 minutes (default kick)' },
-          { value: '15',  label: '15 minutes' },
-          { value: '60',  label: '1 hour' },
-          { value: '360', label: '6 hours' },
-        ]},
-        { key: 'reason', label: 'Reason', type: 'textarea', placeholder: 'Optional', hint: '(shown to the user)' },
-      ],
-      onConfirm: run,
-    });
-  } else {
-    if (!confirm(`Kick ${nick} from #${room}?`)) return;
-    await run({ duration: '5', reason: '' });
-  }
-}
-
-// Ban user from current room
+// Ban user from current room (replaces former separate kick button — use
+// the duration picker in the ban modal for short timeouts).
 async function banUserInfo() {
   if (!_userInfoTarget) return;
   if (!State.currentRoom || State.currentRoomType === 'dm') {
@@ -6643,23 +6589,20 @@ showUserInfo = async function(nickname, userId, bridgePlatform, bridgeSourceName
   _originalShowUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar);
   if (bridgePlatform) return;
   
-  // Check mod status and show kick/ban buttons
-  const kickBtn = document.getElementById('userinfo-kick-btn');
+  // Check mod status and show ban button
   const banBtn = document.getElementById('userinfo-ban-btn');
   const djBtn = document.getElementById('userinfo-dj-btn');
-  
-  if (kickBtn) kickBtn.style.display = 'none';
+
   if (banBtn) banBtn.style.display = 'none';
   if (djBtn) djBtn.style.display = 'none';
-  
+
   // Don't show for self or in DMs
   const isSelf = nickname === State.user?.nickname;
   if (isSelf || !State.currentRoom || State.currentRoomType === 'dm') return;
-  
+
   // Check if current user can moderate
   const canMod = await checkModStatus();
   if (canMod) {
-    if (kickBtn) kickBtn.style.display = '';
     if (banBtn) banBtn.style.display = '';
     // DJ button only in music channels
     const chType = State.currentChannelType;

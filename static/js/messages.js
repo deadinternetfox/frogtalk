@@ -1602,7 +1602,6 @@ const Messages = (() => {
         <button class="msg-act-btn msg-mod-more" title="Moderation" onclick="Messages.openModMenu(event,'${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'admin')">⋯</button>` : '';
     const ownerModActions = (inlineScope === 'room' || inlineScope === 'both') ? `
         <span class="msg-mod-inline">
-          <button class="msg-act-btn" title="Kick from channel (5 min)" onclick="roomKick('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'})" style="color:#ff9800">👢</button>
           <button class="msg-act-btn danger" title="Ban from channel" onclick="roomBan('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'})">🚫</button>
         </span>
         <button class="msg-act-btn msg-mod-more" title="Moderation" onclick="Messages.openModMenu(event,'${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${inlineScope}')">⋯</button>` : '';
@@ -3068,8 +3067,7 @@ const Messages = (() => {
     const pop = document.createElement('div');
     pop.className = 'msg-mod-popup';
     const roomItems = [
-      { label: '� Mute in channel', color: '#ffb74d', fn: () => roomMute(nickname, userId) },
-      { label: '�👢 Kick from channel', color: '#ff9800', fn: () => roomKick(nickname, userId) },
+      { label: '🔇 Mute in channel', color: '#ffb74d', fn: () => roomMute(nickname, userId) },
       { label: '🚫 Ban from channel', color: '#ff5555', fn: () => roomBan(nickname, userId) },
     ];
     const adminItems = [
@@ -3847,42 +3845,6 @@ async function adminBan(nickname) {
 }
 
 /* ── Room-level moderation (owner / mod / admin) ─────────────────────── */
-async function roomKick(nickname, userId) {
-  if (!State.currentRoom) return;
-  if (!userId) { toast('User id unavailable', 'error'); return; }
-  const room = State.currentRoom;
-  showModerationModal({
-    title: `Kick @${nickname} from #${room}`,
-    subtitle: 'A short timeout — they can re-join when it expires.',
-    icon: '👢',
-    accent: '#fb923c',
-    confirmLabel: 'Kick',
-    confirmStyle: 'danger',
-    fields: [
-      { key: 'duration', label: 'Duration', type: 'select', value: '5', options: [
-        { value: '5',   label: '5 minutes (default kick)' },
-        { value: '15',  label: '15 minutes' },
-        { value: '60',  label: '1 hour' },
-        { value: '360', label: '6 hours' },
-      ]},
-      { key: 'reason', label: 'Reason', type: 'textarea', placeholder: 'Optional', hint: '(shown to the user)' },
-    ],
-    onConfirm: async (v) => {
-      const mins = parseInt(v.duration, 10) || 5;
-      try {
-        const r = await apiFetch(`/api/rooms/${encodeURIComponent(room)}/bans`, 'POST', {
-          user_id: userId,
-          reason: (v.reason || '').trim() || 'Kicked by moderator',
-          duration_minutes: mins,
-        });
-        const data = await r.json().catch(() => ({}));
-        if (r.ok) toast(`@${nickname} kicked for ${mins} min`, 'success');
-        else { toast(data.error || 'Kick failed', 'error'); return true; }
-      } catch { toast('Kick failed', 'error'); return true; }
-    }
-  });
-}
-
 async function roomBan(nickname, userId) {
   if (!State.currentRoom) return;
   if (!userId) { toast('User id unavailable', 'error'); return; }
@@ -3959,6 +3921,8 @@ function showRoomBanModal(nickname, userId, room) {
         <div>
           <label style="display:block;color:#a7d4b3;font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:600;">Duration</label>
           <select id="rb-duration" style="width:100%;padding:10px 12px;background:#0a1812;border:1px solid #1f4d2e;border-radius:8px;color:#e5e7eb;font-size:14px;outline:none;">
+            <option value="5">5 minutes (timeout / kick)</option>
+            <option value="15">15 minutes</option>
             <option value="60">1 hour</option>
             <option value="360">6 hours</option>
             <option value="1440" selected>1 day</option>

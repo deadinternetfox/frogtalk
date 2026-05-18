@@ -4986,7 +4986,7 @@ def get_user_active_room_ban_ids(user_id: int) -> set:
             rows = con.execute(
                 """
                 SELECT room_id FROM room_bans
-                WHERE user_id=? AND (expires_at IS NULL OR expires_at > datetime('now'))
+                WHERE user_id=? AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
                 """,
                 (user_id,),
             ).fetchall()
@@ -5013,7 +5013,7 @@ def is_user_banned_from_room(room_name: str, user_id: int) -> bool:
             SELECT b.expires_at FROM room_bans b
             JOIN rooms r ON b.room_id = r.id
             WHERE r.name = ? AND b.user_id = ?
-            AND (b.expires_at IS NULL OR b.expires_at > datetime('now'))
+            AND (b.expires_at IS NULL OR datetime(b.expires_at) > datetime('now'))
         """, (room_name, user_id)).fetchone()
     return row is not None
 
@@ -5039,7 +5039,7 @@ def user_can_access_room(user_id: int, room_name: str, *, is_admin: bool = False
         ban = con.execute(
             """SELECT 1 FROM room_bans
                WHERE room_id=? AND user_id=?
-                 AND (expires_at IS NULL OR expires_at > datetime('now'))""",
+                 AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))""",
             (room["id"], user_id),
         ).fetchone()
         if ban:
@@ -5083,7 +5083,7 @@ def get_user_room_bans(user_id: int) -> List[Dict]:
             JOIN rooms r ON b.room_id = r.id
             LEFT JOIN users bu ON b.banned_by = bu.id
             WHERE b.user_id = ?
-              AND (b.expires_at IS NULL OR b.expires_at > datetime('now'))
+              AND (b.expires_at IS NULL OR datetime(b.expires_at) > datetime('now'))
             ORDER BY b.created_at DESC
         """, (user_id,)).fetchall()
     return [dict(r) for r in rows]
@@ -5232,7 +5232,7 @@ def is_user_globally_banned(user_id: int) -> bool:
     with _conn() as con:
         row = con.execute("""
             SELECT expires_at FROM global_bans WHERE user_id=?
-            AND (expires_at IS NULL OR expires_at > datetime('now'))
+            AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
         """, (user_id,)).fetchone()
     return row is not None
 
@@ -5244,7 +5244,7 @@ def get_active_global_ban(user_id: int) -> Optional[Dict]:
             """
             SELECT user_id, banned_by, reason, expires_at, created_at
             FROM global_bans WHERE user_id=?
-            AND (expires_at IS NULL OR expires_at > datetime('now'))
+            AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
             """,
             (user_id,),
         ).fetchone()
@@ -5259,7 +5259,7 @@ def get_active_room_ban(room_id: int, user_id: int) -> Optional[Dict]:
             SELECT room_id, user_id, banned_by, reason, expires_at
             FROM room_bans
             WHERE room_id=? AND user_id=?
-            AND (expires_at IS NULL OR expires_at > datetime('now'))
+            AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
             """,
             (room_id, user_id),
         ).fetchone()
@@ -5295,7 +5295,7 @@ def is_user_globally_muted(user_id: int) -> bool:
     with _conn() as con:
         row = con.execute("""
             SELECT expires_at FROM global_mutes WHERE user_id=?
-            AND (expires_at IS NULL OR expires_at > datetime('now'))
+            AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
         """, (user_id,)).fetchone()
     return row is not None
 
@@ -5512,7 +5512,7 @@ def search_all_messages(user_id: int, query: str, limit: int = 50) -> Dict:
               AND NOT EXISTS (
                   SELECT 1 FROM room_bans b
                   WHERE b.room_id = r.id AND b.user_id = ?
-                    AND (b.expires_at IS NULL OR b.expires_at > datetime('now'))
+                    AND (b.expires_at IS NULL OR datetime(b.expires_at) > datetime('now'))
               )
               AND (
                   COALESCE(r.invite_only, 0) = 0
