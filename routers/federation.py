@@ -1769,6 +1769,17 @@ async def _apply_federated_room_unban(room: dict, target_user: dict, payload: di
     if not db.can_moderate_room(room["name"], actor["id"], bool(actor.get("is_admin"))):
         return
     db.unban_user_from_room(room["id"], target_user["id"])
+    # Tell the unbanned user (if connected to this node) to drop the
+    # inline ban banner without a page refresh.
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(target_user["id"], {
+            "type": "room_unban",
+            "room": room["name"],
+            "unbanned_by": actor_nick,
+        })
+    except Exception:
+        pass
 
 
 def _set_music_anchor(room_name: str, track_id: int, started_unix: float | int | None) -> None:

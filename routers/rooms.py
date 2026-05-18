@@ -912,6 +912,19 @@ async def unban_user(room_name: str, user_id: int,
     if not ok:
         return JSONResponse(status_code=404, content={"error": "User is not banned"})
 
+    # Notify the unbanned user across all their connections so the
+    # inline ban banner clears immediately and the composer comes back
+    # — no refresh or relogin required.
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(user_id, {
+            "type": "room_unban",
+            "room": room_name,
+            "unbanned_by": current_user.get("nickname") or "moderator",
+        })
+    except Exception:
+        pass
+
     # Federation mirror: peers should drop the same ban.
     try:
         target = db.get_user_by_id(user_id)

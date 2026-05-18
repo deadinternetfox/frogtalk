@@ -655,6 +655,10 @@ const WS = (() => {
         try { if (typeof handleRoomBan === 'function') handleRoomBan(data); } catch {}
         break;
       }
+      case 'room_unban': {
+        try { if (typeof handleRoomUnban === 'function') handleRoomUnban(data); } catch {}
+        break;
+      }
       case 'room_muted': {
         // A mod muted us in this channel — toast + disable composer if
         // we're currently looking at that room. We also persist the

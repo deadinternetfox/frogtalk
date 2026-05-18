@@ -4198,6 +4198,45 @@ function handleRoomBan(data) {
 }
 window.handleRoomBan = handleRoomBan;
 
+// Receiver-side companion to handleRoomBan: a mod (or admin) lifted the
+// ban via DELETE /api/rooms/{room}/bans/{user_id}. The server pings us
+// over WS so the inline ban banner clears live without needing a reload
+// or relogin. We drop the cached ban metadata, stop the countdown
+// ticker if this was the only active ban, and — if the user is staring
+// at the unbanned room right now — re-paint the composer area (calling
+// `_applyRoomBanUI` with no ban entry tears the banner down and
+// re-enables the input).
+function handleRoomUnban(data) {
+  try {
+    const room = data && data.room || '';
+    if (!room) return;
+    const hadBan = !!(window._roomBans && window._roomBans[room]);
+    if (window._roomBans) delete window._roomBans[room];
+    if (State.currentRoom === room && typeof window._applyRoomBanUI === 'function') {
+      window._applyRoomBanUI(room);
+    }
+    // If no rooms still have active bans, retire the ticker.
+    try {
+      const stillBanned = window._roomBans && Object.keys(window._roomBans).length > 0;
+      if (!stillBanned && typeof _stopRoomBanTicker === 'function') _stopRoomBanTicker();
+    } catch {}
+    // Refresh the sidebar so the room reappears with the right membership
+    // state (and so any private-room key-rotation hint goes away).
+    try {
+      if (typeof Rooms !== 'undefined' && typeof Rooms.loadRooms === 'function') {
+        Rooms.loadRooms();
+      }
+    } catch {}
+    if (hadBan) {
+      try {
+        const who = (data.unbanned_by || 'a moderator').toString();
+        toast(`Unbanned from #${room} by @${who}`, 'success');
+      } catch {}
+    }
+  } catch {}
+}
+window.handleRoomUnban = handleRoomUnban;
+
 // Pause the chat-embedded player adjacent to the given Send-to-player
 // button so the inline iframe and the Music side-player don't double-
 // play out of sync. YouTube uses its iframe postMessage API
