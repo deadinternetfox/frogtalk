@@ -256,6 +256,7 @@ def init_db():
             bridge_source_name TEXT,
             bridge_source_id TEXT,
             bridge_source_parent TEXT,
+            bridge_sender_username TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 
@@ -1045,6 +1046,7 @@ def save_message(room_name: str, user_id: int, nickname: str, content: str,
                                  bridge_source_name: Optional[str] = None,
                                  bridge_source_id: Optional[str] = None,
                                  bridge_source_parent: Optional[str] = None,
+                                 bridge_sender_username: Optional[str] = None,
                  reply_to: Optional[int] = None,
                  forwarded_from: Optional[str] = None,
                  key_version: int = 0,
@@ -1054,11 +1056,13 @@ def save_message(room_name: str, user_id: int, nickname: str, content: str,
             """INSERT INTO messages (room_name, user_id, nickname, content, media_data, media_type,
                                                                          media_blur, view_once, bridge_platform, bridge_avatar,
                                                                          bridge_source_name, bridge_source_id, bridge_source_parent,
+                                                                         bridge_sender_username,
                                                                          reply_to, forwarded_from, key_version, system_kind)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (room_name, user_id, nickname, content, media_data, media_type,
                          media_blur, view_once, bridge_platform, bridge_avatar,
                          bridge_source_name, bridge_source_id, bridge_source_parent,
+                         bridge_sender_username,
                          reply_to, forwarded_from, int(key_version or 0), system_kind)
         )
         con.commit()
@@ -1173,7 +1177,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           (m.media_type IS NOT NULL AND m.media_type != '') AS has_media,
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
-                          m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
+                          m.bridge_source_id, m.bridge_source_parent, m.bridge_sender_username, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
                           COALESCE(m.key_version, 0) AS key_version,
                           m.system_kind,
@@ -1201,7 +1205,7 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           (m.media_type IS NOT NULL AND m.media_type != '') AS has_media,
                           m.media_type, m.edited, m.created_at, m.media_blur, m.view_once,
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
-                          m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
+                          m.bridge_source_id, m.bridge_source_parent, m.bridge_sender_username, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
                           COALESCE(m.key_version, 0) AS key_version,
                           m.system_kind,
@@ -1587,6 +1591,11 @@ def _migrate():
             con.execute("ALTER TABLE messages ADD COLUMN bridge_source_id TEXT")
         if "bridge_source_parent" not in msg_cols:
             con.execute("ALTER TABLE messages ADD COLUMN bridge_source_parent TEXT")
+        # Per-message remote @username for bridged senders (Discord/Telegram).
+        # Distinct from `nickname` which carries the platform display name.
+        # Used by the bridged-user profile card to surface the actual handle.
+        if "bridge_sender_username" not in msg_cols:
+            con.execute("ALTER TABLE messages ADD COLUMN bridge_sender_username TEXT")
         # Track which channel-media messages have already been promoted to the
         # user's public wall via "Make Public". Filtering on this lets the
         # Private Media tab truly move items out instead of copying them, so

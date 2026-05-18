@@ -40,6 +40,13 @@ const Messages = (() => {
     return `<span class="msg-author-handle">@${UI.escHtml(msg.nickname || '')}</span>`;
   }
 
+  // Builds the inline showUserInfo(...) call used by avatar + author click
+  // targets. Centralised so we don't drift when adding new bridge fields
+  // (e.g. the remote @username surfaced on the bridged-user profile).
+  function _userInfoOnclick(msg) {
+    return `showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}','${UI.escHtml(msg.bridge_sender_username||'')}')`;
+  }
+
   // BOT pill — small accent-tinted badge rendered immediately after the
   // author name (and after the @handle) when the message was sent via
   // the External API with a bot_ key. Server stamps `is_bot` on both
@@ -1660,10 +1667,10 @@ const Messages = (() => {
 
     if (isMutedAuthor) {
       return `<div class="msg-group is-muted-user" id="msg-${msg.id}" data-nick="${UI.escHtml(msg.nickname||'')}">
-        <div class="msg-avatar-slot"><div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div></div>
+        <div class="msg-avatar-slot"><div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="${_userInfoOnclick(msg)}">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div></div>
         <div class="msg-body">
           <div class="msg-meta">
-            <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(_authorDisplay(msg))}</span>${_authorHandleHtml(msg)}${_botPillHtml(msg)}
+            <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="${_userInfoOnclick(msg)}">${isAdmin ? '👑 ' : ''}${UI.escHtml(_authorDisplay(msg))}</span>${_authorHandleHtml(msg)}${_botPillHtml(msg)}
             ${_bridgeBadge(msg)}
             <span class="msg-time">${time}</span>
           </div>
@@ -1682,10 +1689,10 @@ const Messages = (() => {
     }
 
     return `<div class="msg-group" id="msg-${msg.id}" data-nick="${UI.escHtml(msg.nickname||'')}">
-      <div class="msg-avatar-slot"><div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div></div>
+      <div class="msg-avatar-slot"><div class="msg-avatar" data-nick="${UI.escHtml(msg.nickname||'')}" data-bridge="${UI.escHtml(msg.bridge_platform||'')}" onclick="${_userInfoOnclick(msg)}">${UI.avatarEl(msg.avatar, msg.nickname, 38)}</div></div>
       <div class="msg-body">
         <div class="msg-meta">
-          <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}')">${isAdmin ? '👑 ' : ''}${UI.escHtml(_authorDisplay(msg))}</span>${_authorHandleHtml(msg)}${_botPillHtml(msg)}
+          <span class="msg-author${isAdmin ? ' admin' : ''}" onclick="${_userInfoOnclick(msg)}">${isAdmin ? '👑 ' : ''}${UI.escHtml(_authorDisplay(msg))}</span>${_authorHandleHtml(msg)}${_botPillHtml(msg)}
           ${_bridgeBadge(msg)}
           <span class="msg-time">${time}</span>
           ${editedTag}

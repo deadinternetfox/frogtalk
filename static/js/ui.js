@@ -5702,7 +5702,7 @@ async function _resolveBridgeSourceFromConfig(platform) {
   }
 }
 
-function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourceParent, bridgeAvatar) {
+function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourceParent, bridgeAvatar, senderUsername) {
   const plat = String(platform || '').toLowerCase();
   const meta = ({
     telegram: {
@@ -5729,6 +5729,10 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
   const safeSourceName = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceName || sourceFallback || 'Source unavailable')) : String(sourceName || sourceFallback || 'Source unavailable');
   const safeSourceId = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceId || '')) : String(sourceId || '');
   const safeSourceParent = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(String(sourceParent || '')) : String(sourceParent || '');
+  // Remote @handle on the originating platform. Empty for Telegram users
+  // who never set a username; we hide the row in that case.
+  const _rawHandle = String(senderUsername || '').replace(/^@+/, '').trim();
+  const safeSenderHandle = (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(_rawHandle) : _rawHandle;
   const avatar = (typeof UI !== 'undefined' && UI.avatarEl) ? UI.avatarEl(bridgeAvatar || null, nickname, 90) : '🐸';
 
   const host = document.getElementById('modal-bridge-user-info') || (() => {
@@ -5750,6 +5754,7 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
           </div>
           <div style="flex:1;min-width:0;padding-bottom:4px">
             <div class="userinfo-nick" style="font-size:22px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 2px 4px rgba(0,0,0,0.3)">${safeNick}</div>
+            ${_rawHandle ? `<div class="userinfo-handle" style="margin-top:2px;font-size:13px;color:${meta.color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${plat === 'telegram' ? 'Telegram username' : (plat === 'discord' ? 'Discord username' : 'Remote username')}">@${safeSenderHandle}</div>` : ''}
             <div style="margin-top:4px"><span class="bridge-origin-badge" data-platform="${plat}" style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:10px;background:${pipBg};color:${meta.color};border:1px solid ${meta.color}66">${logoBadge} VIA ${safePlat.toUpperCase()}</span></div>
           </div>
         </div>
@@ -5812,14 +5817,14 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
   }
 }
 
-function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar) {
+function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar, bridgeSenderUsername) {
   // Bridge users (Telegram / Discord mirrors) have no FrogTalk account.
   // Showing the regular profile modal results in a permanently-blank
   // "Loading…" state and exposes irrelevant DM / call / friend buttons.
   // Route them to a dedicated bridged-user popup that explains the
   // origin and offers no actions that can't possibly work.
   if (bridgePlatform && typeof showBridgedUserInfo === 'function') {
-    showBridgedUserInfo(nickname, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar);
+    showBridgedUserInfo(nickname, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar, bridgeSenderUsername);
     return;
   }
   _userInfoTarget = nickname;
@@ -6661,8 +6666,8 @@ async function checkModStatus() {
 
 // Update showUserInfo to check mod status
 const _originalShowUserInfo = showUserInfo;
-showUserInfo = async function(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar) {
-  _originalShowUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar);
+showUserInfo = async function(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar, bridgeSenderUsername) {
+  _originalShowUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar, bridgeSenderUsername);
   if (bridgePlatform) return;
   
   // Check mod status and show ban button

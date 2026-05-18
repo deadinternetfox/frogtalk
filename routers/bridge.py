@@ -198,6 +198,11 @@ class BridgeMessageRequest(BaseModel):
     source_name: Optional[str] = None
     source_id: Optional[str] = None
     source_parent: Optional[str] = None
+    # Remote @handle of the sender on the originating platform (Discord
+    # username, Telegram @username). Distinct from sender_name which is
+    # the display name. Surfaced on the bridged-user profile card so
+    # viewers can see the actual handle, not just the chosen nickname.
+    sender_username: Optional[str] = None
 
 
 class BridgeMutateRequest(BaseModel):
@@ -974,6 +979,7 @@ async def receive_bridge_message(request: Request, body: BridgeMessageRequest):
         bridge_source_name=(source_name or None),
         bridge_source_id=(source_id or None),
         bridge_source_parent=(source_parent or None),
+        bridge_sender_username=((body.sender_username or "").strip()[:64] or None),
         reply_to=reply_to_ft_id,
     )
 
@@ -1005,6 +1011,7 @@ async def receive_bridge_message(request: Request, body: BridgeMessageRequest):
         "bridge_source_name": source_name,
         "bridge_source_id": source_id,
         "bridge_source_parent": source_parent,
+        "bridge_sender_username": ((body.sender_username or "").strip()[:64] or None),
         "reply_to": reply_to_ft_id,
         "reply_nickname": reply_nickname,
         "reply_content": reply_content,

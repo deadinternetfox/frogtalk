@@ -135,7 +135,8 @@ async def send_to_frogtalk(room: str, token: str, content: str,
                            reply_to_remote_id: str | None = None,
                            source_name: str | None = None,
                            source_id: str | None = None,
-                           source_parent: str | None = None):
+                           source_parent: str | None = None,
+                           sender_username: str | None = None):
     """Send a message from Discord to FrogTalk via REST."""
     async with httpx.AsyncClient(timeout=10) as client:
         payload = {
@@ -162,6 +163,8 @@ async def send_to_frogtalk(room: str, token: str, content: str,
             payload["source_id"] = str(source_id)
         if source_parent:
             payload["source_parent"] = str(source_parent)
+        if sender_username:
+            payload["sender_username"] = str(sender_username)
         r = await client.post(
             f"{FROGTALK_API}/api/bridge/message",
             json=payload
@@ -684,6 +687,9 @@ def _run_bot_in_thread(token: str):
                 return
 
             sender_name = message.author.display_name or message.author.name
+            # Actual Discord @handle (immutable username), independent of the
+            # per-guild display name. Surfaced in the bridged-user profile.
+            sender_username = getattr(message.author, "name", None) or None
             sender_avatar = None
             try:
                 if message.author.display_avatar:
@@ -805,6 +811,7 @@ def _run_bot_in_thread(token: str):
                     source_name=("#" + (getattr(message.channel, "name", "channel") or "channel")),
                     source_id=str(channel_id),
                     source_parent=(getattr(getattr(message, "guild", None), "name", "Discord server") or "Discord server"),
+                    sender_username=sender_username,
                 )
 
         # ── Mirror inbound edits ──────────────────────────────────────────

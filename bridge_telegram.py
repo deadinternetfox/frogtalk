@@ -254,7 +254,8 @@ async def send_to_frogtalk(room: str, token: str, content: str,
                            reply_to_remote_id: Optional[int] = None,
                            source_name: Optional[str] = None,
                            source_id: Optional[str] = None,
-                           source_parent: Optional[str] = None):
+                           source_parent: Optional[str] = None,
+                           sender_username: Optional[str] = None):
     """Send a message from Telegram to FrogTalk via REST."""
     payload = {
         "room_name": room, "content": content,
@@ -277,6 +278,8 @@ async def send_to_frogtalk(room: str, token: str, content: str,
         payload["source_id"] = str(source_id)
     if source_parent:
         payload["source_parent"] = str(source_parent)
+    if sender_username:
+        payload["sender_username"] = str(sender_username)
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
             f"{FROGTALK_API}/api/bridge/message", json=payload
@@ -576,6 +579,9 @@ async def process_update(update: dict):
     if sender.get("last_name"):
         sender_name += " " + sender["last_name"]
     sender_id = sender.get("id") or 0
+    # Telegram @username (may be empty if the user hasn't set one).
+    # Surfaced on the bridged-user profile card as the canonical handle.
+    sender_username = (sender.get("username") or "").strip() or None
     chat_type = str(chat.get("type") or "").strip().lower()
     chat_title = (chat.get("title") or "").strip()
     chat_username = (chat.get("username") or "").strip()
@@ -684,6 +690,7 @@ async def process_update(update: dict):
             source_name=source_name,
             source_id=str(chat_id),
             source_parent=source_parent,
+            sender_username=sender_username,
         )
 
 
