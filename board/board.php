@@ -2891,14 +2891,27 @@ if ($singleThread) {
                             //   - Clearnet peer → normal external link, new tab.
                             $_needsTorDialog = $_peerTorOnly && !$_visitorOnTor;
                             $_sameTab = $_peerTorOnly && $_visitorOnTor;
+                            // Prefer the peer's tor_onion_url when the visitor is on
+                            // Tor, OR when the peer is tor-only (regardless of where
+                            // the click lands — the dialog/text still need the right
+                            // onion). Falls back to the recorded clearnet url field
+                            // otherwise. The stored tor_onion_url is just the bare
+                            // onion host (no /board/ suffix), so normalise it here.
+                            $_peerHref = (string)($_pp['url'] ?? '');
+                            $_peerTorOnion = trim((string)($_pp['tor_onion_url'] ?? ''));
+                            if ($_peerTorOnion !== '' && ($_visitorOnTor || $_peerTorOnly)) {
+                                $_b = rtrim($_peerTorOnion, '/');
+                                if (!preg_match('#/board$#', $_b)) $_b .= '/board';
+                                $_peerHref = $_b . '/';
+                            }
                         ?>
                         <a class="fed-pill<?= $_peerTorOnly ? ' fed-pill-tor' : '' ?>"
-                           href="<?= htmlspecialchars($_pp['url']) ?>"
+                           href="<?= htmlspecialchars($_peerHref) ?>"
                            <?php if ($_needsTorDialog): ?>
                            onclick="showFedTorDialog(this); return false;"
                            data-peer-title="<?= htmlspecialchars($_pp['title']) ?>"
                            data-peer-node="<?= htmlspecialchars($_pp['node_id']) ?>"
-                           data-peer-url="<?= htmlspecialchars($_pp['url']) ?>"
+                           data-peer-url="<?= htmlspecialchars($_peerHref) ?>"
                            <?php elseif ($_sameTab): ?>
                            rel="noopener"
                            <?php else: ?>
@@ -7591,6 +7604,5 @@ if ($singleThread) {
     }
     </script>
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-    <script src="app.js?v=20260302a"></script>
 </body>
 </html>
