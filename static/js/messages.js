@@ -2611,37 +2611,12 @@ const Messages = (() => {
     if (!newContent) return;
 
     const key = State.roomKeys[State.currentRoom];
-    // Track H: edits follow the same envelope choice as send. Bridge-
-    // outbound rooms keep the transitional AES key (so the bridge can
-    // still forward); everything else MUST use Sender Keys.
-    const hasOutbound = !!(State.bridgeOut && State.bridgeOut[State.currentRoom]);
+    // Channel edits use the same legacy AES path as send (Track C reverted).
     let encrypted;
-    if (hasOutbound) {
-      encrypted = key ? await Crypto.encrypt(newContent, key) : newContent;
+    if (key && typeof Crypto !== 'undefined') {
+      encrypted = await Crypto.encrypt(newContent, key);
     } else {
-      if (!window.Signal || !window.Signal.room || !window.Signal.room.isAvailable
-          || !window.Signal.room.isAvailable()) {
-        // Lazy-await room crypto boot. The first send after a fresh
-        // login used to throw signal_room_unavailable because the
-        // libsignal module is dynamically imported and may still be
-        // mid-flight; ensureAvailable() awaits Signal.ensureReady().
-        let ok = false;
-        try {
-          if (window.Signal && window.Signal.room && typeof window.Signal.room.ensureAvailable === 'function') {
-            ok = await window.Signal.room.ensureAvailable();
-          }
-        } catch {}
-        if (!ok) {
-          UI.showToast('Encryption layer not ready — please refresh.', 'error');
-          throw new Error('signal_room_unavailable');
-        }
-      }
-      if (!await window.Signal.room.hasSelfKey(State.currentRoom)) {
-        await window.Signal.room.rotateSenderKey(State.currentRoom);
-      }
-      const env = await window.Signal.room.encryptMessage(State.currentRoom, newContent);
-      encrypted = JSON.stringify(env);
-      try { _ptCachePut(encrypted, newContent); } catch {}
+      encrypted = newContent;
     }
 
     WS.send({ type: 'edit', id, content: encrypted });
@@ -3793,43 +3768,17 @@ async function sendMessage() {
       State._bridgePrivacyNotice[State.currentRoom] = true;
       UI.showToast('Outbound bridge active: new room messages in this channel are sent without E2EE.', 'info');
     }
-    // ── Track H: Sender Keys v2 is mandatory for non-bridge rooms ────────
-    // Bridge-outbound rooms intentionally keep the transitional symmetric
-    // AES key so the bridge can forward readable text to Discord/Telegram.
-    // Everything else MUST go through Signal Sender Keys; if the chain
-    // isn't ready, we rotate before sending so the message is never
-    // silently emitted as plaintext.
+    // Channel encryption: legacy per-room AES-GCM.
+    // Track C (libsignal Sender Keys) was rolled back 2026-05-20: the protocol
+    // can't decrypt sender's own messages, can't backfill offline members,
+    // trips replay-protection on every history reload, and bridge bots have
+    // no Signal identity so bridge channels were silently broken. DMs/calls/
+    // wall stay on Signal where pairwise semantics make sense. See
+    // docs/SECURITY_REFACTOR_PLAN.md (Track C: REVERTED).
     let encrypted;
-    if (hasOutbound) {
-      encrypted = (key && text) ? await Crypto.encrypt(text, key) : text;
-    } else if (text) {
-      if (!window.Signal || !window.Signal.room || !window.Signal.room.isAvailable
-          || !window.Signal.room.isAvailable()) {
-        // Lazy-await: first send after fresh login used to throw
-        // signal_room_unavailable while the libsignal ESM import was
-        // still resolving. ensureAvailable() awaits Signal.ensureReady().
-        let ok = false;
-        try {
-          if (window.Signal && window.Signal.room && typeof window.Signal.room.ensureAvailable === 'function') {
-            ok = await window.Signal.room.ensureAvailable();
-          }
-        } catch {}
-        if (!ok) {
-          UI.showToast('Encryption layer not ready — please refresh.', 'error');
-          throw new Error('signal_room_unavailable');
-        }
-      }
-      if (!await window.Signal.room.hasSelfKey(State.currentRoom)) {
-        await window.Signal.room.rotateSenderKey(State.currentRoom);
-      }
-      const env = await window.Signal.room.encryptMessage(State.currentRoom, text);
-      encrypted = JSON.stringify(env);
-      // Seed plaintext cache so when the server echoes this message back
-      // (or we reload history) ws.decryptMsg returns the cached text
-      // instead of replaying the chain on our sending side and failing.
-      try { _ptCachePut(encrypted, text); } catch {}
+    if (key && text && typeof Crypto !== 'undefined') {
+      encrypted = await Crypto.encrypt(text, key);
     } else {
-      // Media-only send: no text body to encrypt.
       encrypted = text;
     }
     if (mediaData && key && !hasOutbound && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {

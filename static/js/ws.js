@@ -836,196 +836,46 @@ const WS = (() => {
   async function decryptMsg(msg, room) {
     if (!msg.content) return msg;
 
-    // Track C Phase 2 — v2 Sender-Key envelope path. Wire format is a
-    // JSON object {v:2,t:'sk',b:'<base64>'}. We attempt Signal.room and
-    // fall through to the legacy AES path on failure (e.g. SKDM hasn't
-    // arrived yet, or this device's IndexedDB lacks the sender-key
-    // state). On decrypt success we mark _decrypted so callers know the
-    // bubble is plaintext.
+    // Track C (libsignal Sender Keys for rooms) was REVERTED 2026-05-20.
+    // Old v2 envelopes may still sit in channel history; try to decrypt
+    // them from the local sticky plaintext cache only. If the cache
+    // doesn't have it, leave the envelope as-is and let _formatContent
+    // render its 🔒 placeholder. No libsignal replay attempt (that's the
+    // path that produced "iteration already consumed" spam and the
+    // own-message-can't-decrypt symptom). See docs/SECURITY_REFACTOR_PLAN.md.
     const raw = msg.content;
     if (typeof raw === 'string' && raw.length >= 9 && raw[0] === '{') {
       try {
         const env = JSON.parse(raw);
-        if (env && env.v === 2 && env.t === 'sk'
-            && window.Signal && window.Signal.room
-            && (msg.user_id || msg.user_id === 0)) {
-          // Plaintext cache: short-circuit when we've already decrypted
-          // this envelope (history reload, retransmit) OR when we sent
-          // it ourselves (sender chain can't decrypt own ciphertext).
-          // Two-tier lookup: envelope-key first (works regardless of
-          // msg.id presence), then id-key fallback (survives any
-          // server-side re-serialization of the envelope JSON, e.g.
-          // federation echo round-trip).
+        if (env && env.v === 2 && env.t === 'sk') {
           try {
-            if (typeof Messages !== 'undefined' && Messages._ptCacheGet) {
-              const _cached = Messages._ptCacheGet(raw);
-              if (typeof _cached === 'string') {
-                try {
-                  if (msg.id && Messages._ptCachePutById) {
-                    Messages._ptCachePutById(room, msg.id, _cached);
-                  }
-                  if (msg.id && Messages._msgPtSetById) {
-                    Messages._msgPtSetById(room, msg.id, _cached);
-                  }
-                } catch {}
-                return { ...msg, content: _cached, _decrypted: true, _v2: true };
+            if (typeof Messages !== 'undefined') {
+              if (Messages._ptCacheGet) {
+                const _cached = Messages._ptCacheGet(raw);
+                if (typeof _cached === 'string') {
+                  return { ...msg, content: _cached, _decrypted: true, _v2: true };
+                }
               }
               if (msg.id && Messages._ptCacheGetById) {
                 const _cachedById = Messages._ptCacheGetById(room, msg.id);
                 if (typeof _cachedById === 'string') {
-                  // Also backfill the envelope key so subsequent identical
-                  // ciphertext arrivals (different msg.id, e.g. federation
-                  // copy) hit on the primary key path.
-                  try { Messages._ptCachePut(raw, _cachedById); } catch {}
-                  try { if (Messages._msgPtSetById) Messages._msgPtSetById(room, msg.id, _cachedById); } catch {}
                   return { ...msg, content: _cachedById, _decrypted: true, _v2: true };
+                }
+              }
+              if (msg.id && Messages._msgPtGetById) {
+                const _sticky = Messages._msgPtGetById(room, msg.id);
+                if (typeof _sticky === 'string') {
+                  return { ...msg, content: _sticky, _decrypted: true, _v2: true };
                 }
               }
             }
           } catch {}
-          // In-flight coalesce: history reload runs `Promise.all(incoming.map(decryptMsg))`,
-          // so two copies of the same envelope (server retransmit, live
-          // WS msg + history overlap, or duplicate id) race the libsignal
-          // sender-key chain. First wins, second throws
-          // "iteration already consumed". Coalesce by envelope key so
-          // all waiters share the same plaintext result.
-          const _coalKey = 'v2sk:' + room + ':' + (msg.user_id | 0) + ':' + env.b;
-          window._v2skInflight = window._v2skInflight || new Map();
-          let _inflight = window._v2skInflight.get(_coalKey);
-          if (!_inflight) {
-            _inflight = (async () => {
-              try {
-                const p = await window.Signal.room.decryptMessage(room, msg.user_id, env);
-                if (typeof p === 'string') {
-                  try {
-                    if (typeof Messages !== 'undefined' && Messages._ptCachePut) {
-                      Messages._ptCachePut(raw, p);
-                    }
-                    if (typeof Messages !== 'undefined' && Messages._ptCachePutById && msg.id) {
-                      Messages._ptCachePutById(room, msg.id, p);
-                    }
-                    if (typeof Messages !== 'undefined' && Messages._msgPtSetById && msg.id) {
-                      Messages._msgPtSetById(room, msg.id, p);
-                    }
-                  } catch {}
-                }
-                return p;
-              } finally {
-                // Keep the entry briefly so any straggler that started
-                // after we resolved still finds the cached plaintext via
-                // _ptCacheGet on next tick; then drop to bound memory.
-                setTimeout(() => {
-                  try { window._v2skInflight && window._v2skInflight.delete(_coalKey); } catch {}
-                }, 500);
-              }
-            })();
-            window._v2skInflight.set(_coalKey, _inflight);
-          }
-          try {
-            const plain = await _inflight;
-            if (typeof plain === 'string') {
-              const out = { ...msg, content: plain, _decrypted: true, _v2: true };
-              if (msg.reply_content && typeof msg.reply_content === 'string'
-                  && msg.reply_content[0] === '{') {
-                try {
-                  const renv = JSON.parse(msg.reply_content);
-                  if (renv && renv.v === 2 && renv.t === 'sk') {
-                    // reply ciphertext only decryptable if we still have
-                    // chain state for that older iteration — Phase 1 is
-                    // in-order only, so we don't currently chase replies
-                    // backwards. Best-effort: leave ciphertext stripped.
-                    out.reply_content = '';
-                  }
-                } catch {}
-              }
-              return out;
-            }
-          } catch (_e) {
-            // Before warning/falling-through, re-check the plaintext
-            // cache. A sibling decrypt of the same envelope (different
-            // code path: retrySKDecrypt after SKDM, or a coalesce
-            // winner that landed after our await) may have populated it
-            // while we were awaiting.
-            try {
-              if (typeof Messages !== 'undefined' && Messages._ptCacheGet) {
-                const _late = Messages._ptCacheGet(raw);
-                if (typeof _late === 'string') {
-                  try {
-                    if (msg.id && Messages._ptCachePutById) Messages._ptCachePutById(room, msg.id, _late);
-                    if (msg.id && Messages._msgPtSetById) Messages._msgPtSetById(room, msg.id, _late);
-                  } catch {}
-                  return { ...msg, content: _late, _decrypted: true, _v2: true };
-                }
-                if (msg.id && Messages._ptCacheGetById) {
-                  const _lateById = Messages._ptCacheGetById(room, msg.id);
-                  if (typeof _lateById === 'string') {
-                    try {
-                      if (Messages._msgPtSetById) Messages._msgPtSetById(room, msg.id, _lateById);
-                      if (Messages._ptCachePut) Messages._ptCachePut(raw, _lateById);
-                    } catch {}
-                    return { ...msg, content: _lateById, _decrypted: true, _v2: true };
-                  }
-                }
-              }
-            } catch {}
-            // Self-fails are expected (no receive chain for our own
-            // sender-key); UI shows "🔒 This message was sent from
-            // another device and cannot be decrypted" via _formatContent.
-            // For peer fails, dedupe the warn per (room, sender) to
-            // avoid flooding the console on history reload.
-            try {
-              const _myIdL = Number(State.user && State.user.id) | 0;
-              const _peerIdL = Number(msg.user_id) | 0;
-              if (_peerIdL !== _myIdL) {
-                window._v2FailWarned = window._v2FailWarned || new Map();
-                const _wk = `${room}:${_peerIdL}`;
-                const _wlast = window._v2FailWarned.get(_wk) || 0;
-                if (Date.now() - _wlast >= 60000) {
-                  window._v2FailWarned.set(_wk, Date.now());
-                  console.warn('[ws.decryptMsg] v2-sk FAIL', room, 'from', msg.user_id, _e && _e.message ? _e.message : _e);
-                }
-              }
-            } catch {}
-            // Recovery: ask the sender to re-fan their SKDM. Throttle per
-            // (room, sender) so we send at most one request every 15s
-            // even if many ciphertext bubbles arrive in a burst.
-            // Skip self — our own messages should decrypt via our own
-            // sender chain; if they can't, requesting from ourselves is
-            // pointless (server returns 400 self_request anyway).
-            try {
-              const _myId = Number(State.user && State.user.id) | 0;
-              const _peerId = Number(msg.user_id) | 0;
-              if (_peerId && _peerId !== _myId) {
-                window._skdmReqThrottle = window._skdmReqThrottle || new Map();
-                const _k = `${room}:${_peerId}`;
-                const _last = window._skdmReqThrottle.get(_k) || 0;
-                if (Date.now() - _last >= 15000) {
-                  window._skdmReqThrottle.set(_k, Date.now());
-                  (async () => {
-                    try {
-                      const _r = await fetch('/api/signal/skdm-rekey-request', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          ...(State.token ? { 'X-Session-Token': State.token } : {}),
-                        },
-                        body: JSON.stringify({ room_id: room, sender_uid: _peerId }),
-                      });
-                      // Drop success status log — only warn on network error.
-                      void _r;
-                    } catch (_re) {
-                      try { console.warn('[ws.decryptMsg] rekey request FAIL', _re && _re.message); } catch {}
-                    }
-                  })();
-                }
-              }
-            } catch {}
-            // Fall through to legacy.
-          }
+          // Cache miss: leave the envelope JSON in msg.content;
+          // _formatContent renders 🔒 for v2 envelopes it can't resolve.
+          return msg;
         }
       } catch {
-        // Not v2 — fall through.
+        // Not v2 — fall through to legacy AES.
       }
     }
 
