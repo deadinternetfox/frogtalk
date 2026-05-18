@@ -396,6 +396,18 @@ async def get_friend_sound_file(asset_id: int, request: Request, token: Optional
     if not asset:
         return JSONResponse(status_code=404, content={"error": "Sound not found"})
     fp = Path(str(asset.get("file_path") or ""))
+    # Defence-in-depth: the DB row's file_path is written by our own
+    # upload handler so it always lives under _SOUND_ROOT — but pin it
+    # to that root anyway so a future bug or a hand-edited DB can't be
+    # used to serve `/etc/passwd` via this endpoint.
+    try:
+        sound_root_resolved = _SOUND_ROOT.resolve()
+        fp_resolved = fp.resolve()
+        if not str(fp_resolved).startswith(str(sound_root_resolved) + os.sep) \
+                and fp_resolved != sound_root_resolved:
+            return JSONResponse(status_code=404, content={"error": "Sound not found"})
+    except Exception:
+        return JSONResponse(status_code=404, content={"error": "Sound not found"})
     if not fp.exists() or not fp.is_file():
         return JSONResponse(status_code=404, content={"error": "Sound file missing"})
     media_type = _normalize_sound_content_type(asset.get("content_type") or "", fp.suffix)

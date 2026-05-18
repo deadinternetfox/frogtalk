@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -10,10 +12,29 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("../frogtalk.keystore")
-            storePassword = "frogtalk123"
-            keyAlias = "frogtalk"
-            keyPassword = "frogtalk123"
+            // Signing credentials are read from gradle.properties (in
+            // ~/.gradle/ or under android/, NEVER committed) or from
+            // environment variables (CI). If neither is present we fall
+            // back to a placeholder so :assembleDebug still works — but
+            // :assembleRelease will fail at sign time, which is the
+            // correct behaviour for a missing secret.
+            val propsFile = rootProject.file("signing.properties")
+            val props = Properties().apply {
+                if (propsFile.exists()) propsFile.inputStream().use { load(it) }
+            }
+            val storePath = props.getProperty("storeFile")
+                ?: System.getenv("FROGTALK_KEYSTORE")
+                ?: "../frogtalk.keystore"
+            storeFile = file(storePath)
+            storePassword = props.getProperty("storePassword")
+                ?: System.getenv("FROGTALK_KEYSTORE_PASSWORD")
+                ?: ""
+            keyAlias = props.getProperty("keyAlias")
+                ?: System.getenv("FROGTALK_KEY_ALIAS")
+                ?: "frogtalk"
+            keyPassword = props.getProperty("keyPassword")
+                ?: System.getenv("FROGTALK_KEY_PASSWORD")
+                ?: ""
         }
     }
 
@@ -21,8 +42,8 @@ android {
         applicationId = "xyz.frogtalk.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 228
-        versionName = "1.6.23"
+        versionCode = 229
+        versionName = "1.6.24"
     }
 
     buildTypes {
@@ -55,6 +76,15 @@ android {
 
     buildFeatures {
         viewBinding = false
+    }
+
+    // Gradle dependency locking — captures the full resolved
+    // dependency graph into lockfiles under android/app/, so a future
+    // build can't silently pick up a tampered transitive dependency.
+    // Regenerate with:
+    //   ./gradlew :app:dependencies --write-locks
+    dependencyLocking {
+        lockAllConfigurations()
     }
 }
 

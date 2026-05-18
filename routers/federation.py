@@ -483,7 +483,16 @@ def _check_update_once(auto_apply: bool = False) -> dict:
         pkg_url = str(latest.get("package_url") or "").strip()
         pkg_sha = str(latest.get("package_sha256") or "").strip().lower()
         if pkg_url and pkg_sha:
-            tmp = tempfile.mktemp(prefix="frogtalk-update-", suffix=".tar.gz")
+            # Use NamedTemporaryFile(delete=False) rather than the
+            # deprecated tempfile.mktemp(): mktemp returns a path without
+            # creating the file, leaving a TOCTOU race where a local
+            # attacker can pre-create the path as a symlink before we
+            # open it. NamedTemporaryFile opens with O_EXCL atomically.
+            _tmpf = tempfile.NamedTemporaryFile(
+                prefix="frogtalk-update-", suffix=".tar.gz", delete=False
+            )
+            tmp = _tmpf.name
+            _tmpf.close()
             try:
                 _download_update_package(pkg_url, tmp)
                 got_sha = _sha256_of_file(tmp).lower()

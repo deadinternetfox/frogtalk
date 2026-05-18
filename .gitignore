@@ -70,6 +70,7 @@ android/app/build/
 android/build/
 android/.gradle/
 android/local.properties
+android/signing.properties
 android/app/google-services.json
 *.apk
 *.aab
@@ -92,3 +93,4 @@ static/FrogTalk-*-win-x64.zip
 # tmp deploy / ship scripts and logs (not part of repo)
 .tmp_*.sh
 .tmp_*.log
+android/frogtalk.keystore

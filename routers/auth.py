@@ -3,13 +3,16 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
 import re
 import secrets
+import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import Optional
@@ -42,6 +45,57 @@ def _norm_base(url: str) -> str:
     if not raw.startswith("http://") and not raw.startswith("https://"):
         raw = f"https://{raw}"
     return raw.rstrip("/")
+
+
+def _ssrf_guard(url: str) -> None:
+    """Defence-in-depth check before federated outbound HTTP.
+
+    Federation peer URLs come from admin-controlled config, so an
+    attacker would need an already-compromised admin account to point
+    us at an internal target. Even so, refuse to dial:
+      - non http/https schemes (file://, gopher://, ftp://)
+      - hosts that resolve to loopback / link-local / RFC 1918 / ULA
+      - the .onion namespace UNLESS we're explicitly running in Tor
+        mode (federation over Tor is opt-in via FROGTALK_TOR_MODE).
+
+    Raises ValueError on rejection; callers swallow with their existing
+    try/except so a bad peer just shows up as a federation failure.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url or "")
+    except Exception as e:
+        raise ValueError(f"bad url: {e}")
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"refusing non-http scheme: {parsed.scheme}")
+    host = (parsed.hostname or "").strip().lower()
+    if not host:
+        raise ValueError("missing host")
+    # .onion is fine only when we're explicitly operating as a Tor node
+    # (the bundle of socks routing is set up elsewhere).
+    if host.endswith(".onion"):
+        if os.getenv("FROGTALK_TOR_MODE", "").strip().lower() not in ("1", "true", "yes"):
+            raise ValueError("onion host without tor mode")
+        return
+    # Resolve every A/AAAA record and reject if ANY is private/loopback.
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        raise ValueError(f"dns failure: {e}")
+    for fam, _, _, _, sockaddr in infos:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            continue
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError(f"refusing private/loopback host: {host} -> {ip_str}")
 
 
 def _create_session_with_meta(request: Request, user_id: int) -> str:
@@ -101,6 +155,7 @@ def _create_session_with_meta(request: Request, user_id: int) -> str:
 
 
 def _post_json(url: str, body: dict, headers: dict | None = None, timeout: float = 3.5):
+    _ssrf_guard(url)
     payload = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -113,12 +168,13 @@ def _post_json(url: str, body: dict, headers: dict | None = None, timeout: float
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — scheme + host validated by _ssrf_guard
         raw = resp.read().decode("utf-8", errors="replace")
     return json.loads(raw)
 
 
 def _get_json(url: str, headers: dict | None = None, timeout: float = 3.5):
+    _ssrf_guard(url)
     req = urllib.request.Request(
         url,
         headers={
@@ -128,7 +184,7 @@ def _get_json(url: str, headers: dict | None = None, timeout: float = 3.5):
         },
         method="GET",
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — scheme + host validated by _ssrf_guard
         raw = resp.read().decode("utf-8", errors="replace")
     return json.loads(raw)
 
