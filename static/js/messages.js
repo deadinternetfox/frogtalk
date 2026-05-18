@@ -2153,7 +2153,7 @@ const Messages = (() => {
     if (!newContent) return;
 
     const key = State.roomKeys[State.currentRoom];
-    // Channel edits use the same legacy AES path as send (Track C reverted).
+    // Channel edits use per-room AES-256-GCM (same path as send).
     let encrypted;
     if (key && typeof Crypto !== 'undefined') {
       encrypted = await Crypto.encrypt(newContent, key);
@@ -3310,13 +3310,7 @@ async function sendMessage() {
       State._bridgePrivacyNotice[State.currentRoom] = true;
       UI.showToast('Outbound bridge active: new room messages in this channel are sent without E2EE.', 'info');
     }
-    // Channel encryption: legacy per-room AES-GCM.
-    // Track C (libsignal Sender Keys) was rolled back 2026-05-20: the protocol
-    // can't decrypt sender's own messages, can't backfill offline members,
-    // trips replay-protection on every history reload, and bridge bots have
-    // no Signal identity so bridge channels were silently broken. DMs/calls/
-    // wall stay on Signal where pairwise semantics make sense. See
-    // docs/SECURITY_REFACTOR_PLAN.md (Track C: REVERTED).
+    // Channel encryption: per-room AES-256-GCM (see docs/SECURITY_MODEL.md).
     let encrypted;
     if (key && text && typeof Crypto !== 'undefined') {
       encrypted = await Crypto.encrypt(text, key);

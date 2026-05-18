@@ -5294,7 +5294,7 @@ function toggleEncryptionInfo() {
         if (card) card.style.display = 'none';
       });
     } else {
-      // Track C — populate the room sender-keys card.
+      // Channel: show the per-room encryption card.
       const sigCard = document.getElementById('enc-signal-card');
       if (sigCard) sigCard.style.display = 'none';
       _populateRoomEncCard().catch(() => {

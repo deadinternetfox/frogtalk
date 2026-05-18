@@ -182,21 +182,6 @@ async def otpk_count(
     return {"available": int(n)}
 
 
-@router.get("/config")
-async def signal_config():
-    """Public capability advertisement.
-
-    Track H cleanup removed the FROGTALK_DM_ENC_V2 / FROGTALK_ROOM_ENC_V2
-    flags — Signal DMs and Sender-Keys rooms are now the only supported
-    crypto path. The capability endpoint is kept (clients still poll it)
-    and unconditionally reports both features as enabled.
-    """
-    return {
-        "dm_v2_enabled":    True,
-        "room_v2_enabled":  True,
-    }
-
-
 # ---------------------------------------------------------------------------
 # Linked devices — Track F Phase 1 (dark backend)
 # ---------------------------------------------------------------------------
