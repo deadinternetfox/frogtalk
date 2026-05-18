@@ -4744,9 +4744,28 @@ async function showProfile() {
   const autoLoginEl = document.getElementById('profile-auto-login');
   if (autoLoginEl) {
     autoLoginEl.checked = localStorage.getItem('frogtalk-auto-login') !== 'false';
+    const hintEl = document.getElementById('auto-login-pin-hint');
+    const syncHint = () => {
+      if (!hintEl) return;
+      // Show only when auto-login is on AND user hasn't set a PIN yet.
+      let hasPin = false;
+      try { hasPin = !!(window.Pin && Pin.config && Pin.config().has_pin); } catch {}
+      hintEl.style.display = (autoLoginEl.checked && !hasPin) ? '' : 'none';
+    };
+    syncHint();
     autoLoginEl.onchange = () => {
       localStorage.setItem('frogtalk-auto-login', autoLoginEl.checked ? 'true' : 'false');
+      syncHint();
     };
+    const hintLink = document.getElementById('auto-login-pin-hint-link');
+    if (hintLink && !hintLink._wired) {
+      hintLink._wired = true;
+      hintLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        try { switchSettingsTab('security'); } catch {}
+        try { window.Pin && Pin.openSettings && Pin.openSettings(); } catch {}
+      });
+    }
   }
   _syncApplicationTabVisibility();
   await _loadDesktopAppSettingsIntoProfile();
