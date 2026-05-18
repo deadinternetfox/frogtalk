@@ -2104,6 +2104,21 @@ async def serve_security_txt():
     )
 
 
+# ── Android Digital Asset Links (App Links / Deep-link verification) ─────────
+# Google Play's "Domain ownership not verified" check fetches this file with
+# a strict requirement: Content-Type must be exactly application/json and the
+# fingerprint must match the cert used to sign the published APK/AAB. We
+# explicitly set the media type (no charset suffix — some verifiers reject
+# `application/json; charset=utf-8`) and serve from static/.well-known/.
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+async def serve_assetlinks_json():
+    return FileResponse(
+        "static/.well-known/assetlinks.json",
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 # ── IndexNow key (Bing / Yandex / Seznam / Naver instant indexing) ───────────
 # Generate once with `python -c "import secrets;print(secrets.token_hex(16))"`
 # and set FROGTALK_INDEXNOW_KEY in the environment. The file at

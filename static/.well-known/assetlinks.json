@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "xyz.frogtalk.app",
+      "sha256_cert_fingerprints": [
+        "69:C6:FF:C2:D3:95:BD:50:AD:AB:02:18:95:17:8A:1B:4B:6B:56:6B:7F:28:63:A7:98:5B:01:50:BD:3B:2E:BE"
+      ]
+    }
+  }
+]
