@@ -1882,6 +1882,7 @@ function toggleUsersPanel() {
 function openChatMoreMenu() {
   const header = document.getElementById('chat-header');
   const isDM = !!header && header.classList.contains('is-dm');
+  const isPrivateRoom = !isDM && String(State?.currentRoomType || '') === 'private';
   const items = [];
 
   if (isDM) {
@@ -1904,6 +1905,9 @@ function openChatMoreMenu() {
   items.push({ icon: 'ℹ️', label: 'Channel info',       onclick: () => (typeof Rooms !== 'undefined') && Rooms.showChannelAbout(room) });
   items.push({ icon: '🔍', label: 'Search messages',    onclick: () => showSearchModal() });
   items.push({ icon: '📌', label: 'Pinned messages',    onclick: () => showPinnedMessages() });
+  if (isPrivateRoom) {
+    items.push({ icon: '🔒', label: 'Encryption info',  onclick: () => toggleEncryptionInfo() });
+  }
   items.push({ icon: '🔗', label: 'Copy invite link',   onclick: () => (typeof quickShareChannel === 'function') && quickShareChannel() });
   items.push({ icon: '👥', label: 'Toggle members',     onclick: () => toggleUsersPanel() });
   showActionSheet(room ? `#${room}` : 'Channel', items);
