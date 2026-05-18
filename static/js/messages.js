@@ -3979,150 +3979,159 @@ function showRoomBanModal(nickname, userId, room) {
 }
 window.showRoomBanModal = showRoomBanModal;
 
-/* ── Banned-user receiver: Discord-style channel close + reason modal ── */
+/* ── Banned-user receiver: inline composer-replacement banner ──
+ * Keep the channel history visible (read-only) and swap the input
+ * composer for a polished red banner showing who banned them, the
+ * reason, and the duration. The banner is keyed by room name so it
+ * survives tab switches: hop to another channel → input restored,
+ * come back → banner re-appears (the WS connect check will also
+ * refuse re-join with a `room_banned` error which paints the full
+ * banned screen).
+ */
+window._roomBans = window._roomBans || {};
+
+function _fmtRoomBanDuration(expires, durationMinutes) {
+  let label = 'Permanent';
+  let resolved = false;
+  if (expires) {
+    try {
+      const exp = new Date(expires);
+      const now = new Date();
+      const ms = exp - now;
+      if (ms > 0) {
+        const mins = Math.round(ms / 60000);
+        if (mins < 60) label = `Until ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} (${mins} min)`;
+        else if (mins < 1440) label = `Until ${exp.toLocaleString([], {hour:'2-digit', minute:'2-digit'})} (${Math.round(mins/60)} h)`;
+        else label = `Until ${exp.toLocaleDateString()} ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
+        resolved = true;
+      }
+    } catch {}
+  }
+  if (!resolved && typeof durationMinutes === 'number' && durationMinutes > 0) {
+    if (durationMinutes < 60) label = `${durationMinutes} min`;
+    else if (durationMinutes < 1440) label = `${Math.round(durationMinutes/60)} h`;
+    else label = `${Math.round(durationMinutes/1440)} d`;
+  }
+  return label;
+}
+
+window._applyRoomBanUI = function _applyRoomBanUI(room) {
+  try {
+    const bans = window._roomBans || {};
+    const info = bans[room];
+    const inputArea = document.getElementById('input-area');
+    const inputWrap = inputArea ? inputArea.querySelector('.input-wrap') : null;
+    const replyBar = document.getElementById('reply-bar');
+    const mentionDd = document.getElementById('mention-dropdown');
+    const ta = document.getElementById('msg-input');
+    const sendBtn = document.getElementById('send-btn');
+    const existing = document.getElementById('room-ban-banner');
+    if (!info) {
+      if (existing) existing.remove();
+      if (inputWrap) inputWrap.style.display = '';
+      if (ta) { ta.disabled = false; ta.placeholder = `Message #${room || 'channel'}`; }
+      if (sendBtn) sendBtn.disabled = false;
+      return;
+    }
+    // Hide composer + reply preview + mention popup; the banner takes their place.
+    if (inputWrap) inputWrap.style.display = 'none';
+    if (replyBar) replyBar.style.display = 'none';
+    if (mentionDd) mentionDd.style.display = 'none';
+    if (ta) ta.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+
+    const durationLabel = _fmtRoomBanDuration(info.expires_at, info.duration_minutes);
+    const isPermanent = durationLabel === 'Permanent';
+    const safeBanner = UI.escHtml(info.banned_by || 'a moderator');
+    const safeReason = info.reason
+      ? UI.escHtml(info.reason)
+      : '<em style="color:#9ca3af;">No reason provided.</em>';
+    const safeDuration = UI.escHtml(durationLabel);
+
+    if (inputArea) {
+      let bar = existing;
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'room-ban-banner';
+        bar.style.cssText = [
+          'background:linear-gradient(180deg,#2a0d0d,#1a0707)',
+          'border:1px solid #7f1d1d',
+          'border-radius:10px',
+          'margin:0 8px 8px',
+          'padding:10px 14px',
+          'color:#fecaca',
+          'font-size:13px',
+          'box-shadow:0 4px 14px rgba(127,29,29,.25)',
+        ].join(';');
+        inputArea.insertBefore(bar, inputArea.firstChild);
+      }
+      bar.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="font-size:22px;line-height:1;flex:0 0 auto;">🚫</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:700;color:#fca5a5;font-size:13px;letter-spacing:.2px;">
+              You've been banned from this channel
+            </div>
+            <div style="margin-top:3px;color:#e5e7eb;font-size:12px;line-height:1.45;">
+              <span style="color:#9ca3af;">By</span> <strong>@${safeBanner}</strong>
+              <span style="color:#9ca3af;">·</span>
+              <span style="color:${isPermanent ? '#fca5a5' : '#fbbf24'};font-weight:600;">${safeDuration}</span>
+            </div>
+            <div style="margin-top:4px;color:#d1d5db;font-size:12px;line-height:1.45;word-break:break-word;">
+              <span style="color:#9ca3af;">Reason:</span> ${safeReason}
+            </div>
+          </div>
+        </div>`;
+    }
+  } catch (e) { try { console.warn('[ban] apply UI', e); } catch {} }
+};
+
 function handleRoomBan(data) {
   try {
     const room = data.room || '';
-    const reason = (data.reason || '').trim();
-    const banner = data.banned_by || 'a moderator';
-    const expires = data.expires_at;
-    // Treat any of expires_at OR duration_minutes as the "this is a kick"
-    // signal. The server sends both, but if expires_at is ever lost in
-    // transit (race on get_room_bans, federation hop, …) we fall back to
-    // duration_minutes so a 5-minute kick never gets rendered as a
-    // permanent ban.
-    const durationMinutes = (typeof data.duration_minutes === 'number' && data.duration_minutes > 0)
-      ? data.duration_minutes : null;
-    const isKick = !!(expires || durationMinutes);
-    let durationLabel = 'Permanent';
-    let resolved = false;
-    if (expires) {
-      try {
-        const exp = new Date(expires);
-        const now = new Date();
-        const ms = exp - now;
-        if (ms > 0) {
-          const mins = Math.round(ms / 60000);
-          if (mins < 60) durationLabel = `Until ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} (${mins} min)`;
-          else if (mins < 1440) durationLabel = `Until ${exp.toLocaleString([], {hour:'2-digit', minute:'2-digit'})} (${Math.round(mins/60)} h)`;
-          else durationLabel = `Until ${exp.toLocaleDateString()} ${exp.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}`;
-          resolved = true;
-        }
-      } catch {}
-    }
-    if (!resolved && durationMinutes) {
-      // Either no expires_at on the wire, or it parsed to a past time
-      // (server/client clock skew, naive ISO interpreted as local, …).
-      // Derive a label from the duration the mod selected so a 5-minute
-      // kick never gets rendered as "Permanent".
-      if (durationMinutes < 60) durationLabel = `${durationMinutes} min`;
-      else if (durationMinutes < 1440) durationLabel = `${Math.round(durationMinutes/60)} h`;
-      else durationLabel = `${Math.round(durationMinutes/1440)} d`;
+    if (!room) return;
+    // Persist ban metadata so the banner can be re-painted on tab/room
+    // switches (and so a refresh that lands the user on this room still
+    // shows the banner from the WS-time data we received).
+    window._roomBans[room] = {
+      reason: (data.reason || '').trim(),
+      banned_by: data.banned_by || 'a moderator',
+      expires_at: data.expires_at || null,
+      duration_minutes: (typeof data.duration_minutes === 'number' && data.duration_minutes > 0)
+        ? data.duration_minutes : null,
+    };
+
+    // Drop cached messages for this room so a re-join after a timed kick
+    // doesn't show stale state. Keep the CURRENTLY rendered messages
+    // (don't clear DOM) so the user can still read what was on screen.
+    try { if (State.messages && State.messages[room]) delete State.messages[room]; } catch {}
+
+    // Paint banner if they're viewing the banned room right now. If they
+    // are on a different room, the banner is dormant until they switch
+    // back — and the WS connect check on switch will refuse with
+    // `room_banned`, which the existing handler paints as the full
+    // banned screen (see ui.js _showRoomBannedScreen).
+    if (State.currentRoom === room && typeof window._applyRoomBanUI === 'function') {
+      window._applyRoomBanUI(room);
     }
 
-    // Close the channel: strip the banned room from sidebar/cached state
-    // so it disappears from the channel list immediately. Do NOT auto-
-    // navigate the user anywhere — being silently dropped into a random
-    // room they aren't a member of (previously hard-coded 'general') is
-    // disorienting and can land them in a room with a description they
-    // didn't consent to. Instead the kick/ban modal acts as the screen
-    // until they pick another channel themselves.
+    // One small toast so the user notices when they're not looking at the
+    // composer (e.g. they were scrolling history).
     try {
-      // Drop cached messages for this room so a re-join after a 5-min
-      // kick doesn't show stale state.
-      try { if (State.messages && State.messages[room]) delete State.messages[room]; } catch {}
-      // Filter sidebar cache (objects use .name, the rooms list elsewhere
-      // may store bare strings — handle both).
-      if (State.rooms && Array.isArray(State.rooms)) {
-        State.rooms = State.rooms.filter(r => (r?.name || r) !== room);
-      }
-      // Re-render the sidebar with the correct function name.
-      try {
-        if (typeof Rooms !== 'undefined' && typeof Rooms.renderRooms === 'function') {
-          Rooms.renderRooms();
-        }
-      } catch {}
-      // If the user was viewing the banned room, clear State.currentRoom
-      // so subsequent send/typing actions don't reference a room they
-      // can't access. The chat panel will repaint blank — the modal sits
-      // over it as the kick/ban screen.
-      if (State.currentRoom === room) {
-        try { State.currentRoom = null; } catch {}
-        try {
-          const msgsEl = document.getElementById('messages');
-          if (msgsEl) {
-            // Paint a friendly "open a channel" placeholder instead of an
-            // empty void behind the modal. The user will see this once they
-            // dismiss the kick modal, so they have an obvious next step
-            // rather than staring at a blank pane.
-            msgsEl.innerHTML = `
-              <div class="msg-empty-state" style="margin:auto;">
-                <div class="msg-empty-icon">💬</div>
-                <div class="msg-empty-title">No channel selected</div>
-                <div class="msg-empty-sub">Pick a channel from the sidebar to start chatting.</div>
-              </div>`;
-          }
-          const header = document.getElementById('channel-name');
-          if (header) header.textContent = '';
-          // Hide the composer entirely — there's no room to send to.
-          // Restored automatically when the user opens another channel
-          // (rooms.js manages input-area.style.display on switch).
-          const inputArea = document.getElementById('input-area');
-          if (inputArea) inputArea.style.display = 'none';
-        } catch {}
-      }
-      // Authoritative refresh from server — the room is now excluded from
-      // /api/rooms for this user, and any private-room secret is dropped.
-      try {
-        if (typeof Rooms !== 'undefined' && typeof Rooms.loadRooms === 'function') {
-          Rooms.loadRooms();
-        }
-      } catch {}
+      const dur = _fmtRoomBanDuration(data.expires_at,
+        (typeof data.duration_minutes === 'number' && data.duration_minutes > 0) ? data.duration_minutes : null);
+      toast(`Banned from #${room} · ${dur}`, 'error');
     } catch {}
 
-    // Polished modal in FrogTalk theme
-    document.getElementById('room-ban-notice')?.remove();
-    const wrap = document.createElement('div');
-    wrap.id = 'room-ban-notice';
-    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;';
-    const safeRoom = UI.escHtml(room);
-    const safeBanner = UI.escHtml(banner);
-    const safeReason = reason ? UI.escHtml(reason) : '<em style="color:#6b7280;">No reason provided.</em>';
-    wrap.innerHTML = `
-      <div role="alertdialog" aria-modal="true" style="background:linear-gradient(180deg,#1a0d0d 0%,#0a0505 100%);border:1px solid #7f1d1d;border-radius:14px;width:100%;max-width:480px;box-shadow:0 24px 70px rgba(220,38,38,.25);overflow:hidden;">
-        <div style="padding:22px 24px 16px;border-bottom:1px solid #4d1f1f;text-align:center;">
-          <div style="font-size:42px;line-height:1;margin-bottom:8px;">🚫</div>
-          <div style="font-weight:800;color:#fca5a5;font-size:20px;letter-spacing:.3px;">You have been banned</div>
-          <div style="color:#9ca3af;font-size:14px;margin-top:6px;">from <span style="color:#fff;font-weight:700;">#${safeRoom}</span></div>
-        </div>
-        <div style="padding:16px 24px;display:flex;flex-direction:column;gap:12px;">
-          <div>
-            <div style="color:#a7d4b3;font-size:11px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:4px;">Reason</div>
-            <div style="color:#e5e7eb;font-size:14px;line-height:1.5;background:#0a1812;border:1px solid #1f4d2e;border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-word;">${safeReason}</div>
-          </div>
-          <div style="display:flex;gap:14px;font-size:12px;">
-            <div style="flex:1;">
-              <div style="color:#a7d4b3;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:2px;">Banned by</div>
-              <div style="color:#e5e7eb;font-weight:600;">@${safeBanner}</div>
-            </div>
-            <div style="flex:1;">
-              <div style="color:#a7d4b3;text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:2px;">Duration</div>
-              <div style="color:#e5e7eb;font-weight:600;">${UI.escHtml(durationLabel)}</div>
-            </div>
-          </div>
-        </div>
-        <div style="padding:14px 24px 20px;border-top:1px solid #4d1f1f;background:rgba(0,0,0,.25);text-align:center;">
-          <button id="rbn-ok" type="button" style="padding:10px 28px;background:linear-gradient(180deg,#16a34a,#15803d);border:1px solid #14532d;border-radius:8px;color:#fff;cursor:pointer;font-weight:700;box-shadow:0 2px 8px rgba(22,163,74,.3);">Dismiss</button>
-        </div>
-      </div>`;
-    document.body.appendChild(wrap);
-    const close = () => wrap.remove();
-    wrap.querySelector('#rbn-ok').addEventListener('click', close);
-    document.addEventListener('keydown', function escClose(e) {
-      if (e.key === 'Escape' || e.key === 'Enter') {
-        close(); document.removeEventListener('keydown', escClose);
+    // Refresh sidebar from server — the room is now excluded from
+    // /api/rooms for this user and any private-room secret is dropped.
+    // We do this asynchronously and don't yank the room out from under
+    // the user; once they switch away, it's gone.
+    try {
+      if (typeof Rooms !== 'undefined' && typeof Rooms.loadRooms === 'function') {
+        Rooms.loadRooms();
       }
-    });
+    } catch {}
   } catch (e) {
     // Worst-case fallback so the user is at least told.
     try { toast(`Banned from #${data?.room || 'channel'}: ${data?.reason || ''}`, 'error'); } catch {}

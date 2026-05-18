@@ -838,6 +838,15 @@ async def ban_user(room_name: str, body: BanRequest,
             "expires_at": expires_at,
             "duration_minutes": body.duration_minutes,
         })
+        # Defence-in-depth: tear down any websocket that currently binds
+        # the banned user to this room. The per-message ban check in
+        # routers/ws.py would also catch them on next send, but proactively
+        # closing the socket prevents a stale client from racing one last
+        # message through and from receiving further room traffic.
+        try:
+            await manager.disconnect_user_from_room(body.user_id, room_name)
+        except Exception:
+            pass
         # Also broadcast a presence-style notice to the room so members see
         # the ban land (without leaking the reason).
         await manager.broadcast_room(room_name, {

@@ -1087,6 +1087,14 @@ const Rooms = (() => {
         window._applyRoomMuteUI(name);
       }
     } catch {}
+    // Re-apply ban banner if this room had a prior `room_ban` event
+    // (composer is replaced by the inline "Banned by …" banner). For
+    // any other room, this call clears any stale ban banner left over.
+    try {
+      if (typeof window._applyRoomBanUI === 'function') {
+        window._applyRoomBanUI(name);
+      }
+    } catch {}
 
     // Music channels: chat stays open but we lock the attachment bar down to
     // pictures + GIFs only so nobody can drop a voice note or a 2-minute

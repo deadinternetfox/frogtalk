@@ -1748,6 +1748,13 @@ async def _apply_federated_room_ban(room: dict, target_user: dict, payload: dict
             "nickname": target_user.get("nickname"),
             "banned_by": actor_nick,
         })
+        # Defence-in-depth: close any socket tying the banned user to
+        # this room, matching the behaviour of the local /rooms ban
+        # endpoint (per-message check in ws.py is still authoritative).
+        try:
+            await manager.disconnect_user_from_room(target_user["id"], room["name"])
+        except Exception:
+            pass
     except Exception:
         pass
 

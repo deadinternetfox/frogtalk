@@ -202,6 +202,32 @@ class ConnectionManager:
             self.disconnect(ws)
         return count
 
+    async def disconnect_user_from_room(self, user_id: int, room: str) -> int:
+        """Close only the websockets that bind `user_id` to `room`.
+
+        Used when a moderator bans a user from a specific channel: their
+        other channel sessions (including DMs) must stay connected, but
+        the socket holding the banned room must drop so they can't keep
+        sending until their own client decides to reconnect. The per-
+        message ban check in routers/ws.py is the authoritative gate;
+        this is defence-in-depth so a hostile/modded client can't sit on
+        a stale socket and spam.
+        """
+        targets = []
+        for ws in list(self._user_ws.get(user_id, [])):
+            meta = self._ws_meta.get(ws)
+            if meta and meta[0] == room:
+                targets.append(ws)
+        count = 0
+        for ws in targets:
+            try:
+                await ws.close(code=4003, reason="Banned from this channel")
+                count += 1
+            except Exception:
+                pass
+            self.disconnect(ws)
+        return count
+
     def online_count(self, room: str) -> int:
         return len(self._rooms.get(room, set()))
 

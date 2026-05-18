@@ -389,6 +389,30 @@ async def websocket_endpoint(
                     })
                     continue
 
+                # Authoritative per-message access check. The connect-time
+                # check above is necessary but NOT sufficient: a mod can
+                # ban a user mid-session, and without this check the
+                # banned user could keep sending until their WS drops on
+                # its own (could be minutes or until reload). Re-check
+                # on every send so a fresh `room_bans` row takes effect
+                # immediately. DM pseudo-rooms (`dm-*`) live outside the
+                # rooms table and are handled by the DM endpoints.
+                if not room_name.startswith("dm-"):
+                    if not db.user_can_access_room(
+                        user["id"], room_name, is_admin=bool(user.get("is_admin"))
+                    ):
+                        await manager.send_personal(websocket, {
+                            "type": "error",
+                            "text": "You can't send messages in this channel",
+                        })
+                        # Close the socket so the client falls back to the
+                        # banned-screen path on reconnect.
+                        try:
+                            await websocket.close(code=4003)
+                        except Exception:
+                            pass
+                        break
+
                 content = str(data.get("content", "")).strip()
                 media_data = data.get("media_data")
                 media_type = data.get("media_type")
