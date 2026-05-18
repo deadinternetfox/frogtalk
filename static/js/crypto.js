@@ -312,17 +312,44 @@ const Crypto = (() => {
   }
 
   /**
-   * Encrypt plaintext. Returns base64(iv + ciphertext).
+   * Encrypt plaintext. Returns base64(iv + ciphertext) for legacy callers,
+   * or base64(0x02 || iv || ciphertext) when an `aad` is supplied.
+   *
+   * The version byte lets us evolve the wire format without ambiguity:
+   *   • absent / not 0x02  → legacy, no AAD bound
+   *   • 0x02               → AAD-bound (caller-supplied additional data)
+   *
+   * AAD is NEVER transmitted with the ciphertext; sender and receiver must
+   * derive it from out-of-band context (e.g. room_id + key_version), which
+   * prevents an attacker from replaying a ciphertext under a different
+   * room/version — AES-GCM rejects the decryption.
+   *
    * @param {string} plaintext
    * @param {CryptoKey} key
+   * @param {Uint8Array|string} [aad] Additional-authenticated-data. Strings
+   *   are UTF-8 encoded. When provided, output is prefixed with 0x02.
    * @returns {Promise<string>}
    */
-  async function encrypt(plaintext, key) {
+  async function encrypt(plaintext, key, aad) {
     const enc = new TextEncoder();
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const cipherBuf = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv }, key, enc.encode(plaintext)
-    );
+    const params = { name: 'AES-GCM', iv };
+    let useV2 = false;
+    if (aad != null) {
+      const aadBytes = (typeof aad === 'string') ? enc.encode(aad) : aad;
+      if (aadBytes && aadBytes.byteLength > 0) {
+        params.additionalData = aadBytes;
+        useV2 = true;
+      }
+    }
+    const cipherBuf = await crypto.subtle.encrypt(params, key, enc.encode(plaintext));
+    if (useV2) {
+      const combined = new Uint8Array(1 + iv.byteLength + cipherBuf.byteLength);
+      combined[0] = 0x02;
+      combined.set(iv, 1);
+      combined.set(new Uint8Array(cipherBuf), 1 + iv.byteLength);
+      return _bytesToBase64(combined);
+    }
     const combined = new Uint8Array(iv.byteLength + cipherBuf.byteLength);
     combined.set(iv, 0);
     combined.set(new Uint8Array(cipherBuf), iv.byteLength);
@@ -331,13 +358,42 @@ const Crypto = (() => {
 
   /**
    * Decrypt a base64-encoded encrypted message.
+   *
+   * Detects the wire format from the leading byte:
+   *   • 0x02 → strip prefix, treat next 12 bytes as IV, bind AAD on verify
+   *   • else → legacy: first 12 bytes IV, rest ciphertext, no AAD
+   *
+   * If `aad` is supplied on a legacy (non-prefixed) ciphertext the caller
+   * is asserting they expect v2 — we still attempt the legacy decode as a
+   * fallback so a single mixed-version channel keeps rendering during the
+   * migration window.
+   *
    * @param {string} b64
    * @param {CryptoKey} key
+   * @param {Uint8Array|string} [aad]
    * @returns {Promise<string|null>}
    */
-  async function decrypt(b64, key) {
+  async function decrypt(b64, key, aad) {
+    let aadBytes = null;
+    if (aad != null) {
+      aadBytes = (typeof aad === 'string') ? new TextEncoder().encode(aad) : aad;
+    }
     try {
       const bytes = _base64ToBytes(b64);
+      // v2: leading 0x02 marker + 12-byte IV + ciphertext+tag (>= 1+12+16 = 29 bytes)
+      if (bytes.length >= 29 && bytes[0] === 0x02) {
+        const iv = bytes.slice(1, 13);
+        const data = bytes.slice(13);
+        const params = { name: 'AES-GCM', iv };
+        if (aadBytes && aadBytes.byteLength > 0) params.additionalData = aadBytes;
+        try {
+          const plainBuf = await crypto.subtle.decrypt(params, key, data);
+          return new TextDecoder().decode(plainBuf);
+        } catch {
+          // Fall through to legacy attempt in case the leading byte was a
+          // random IV that happened to equal 0x02 on an old message.
+        }
+      }
       const iv = bytes.slice(0, 12);
       const data = bytes.slice(12);
       const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
@@ -347,16 +403,16 @@ const Crypto = (() => {
     }
   }
 
-  async function encryptPayload(payload, key) {
+  async function encryptPayload(payload, key, aad) {
     if (!payload || !key) return payload;
-    return `${_payloadPrefix}${await encrypt(payload, key)}`;
+    return `${_payloadPrefix}${await encrypt(payload, key, aad)}`;
   }
 
-  async function decryptPayload(payload, key) {
+  async function decryptPayload(payload, key, aad) {
     if (!payload || typeof payload !== 'string') return payload;
     if (!payload.startsWith(_payloadPrefix)) return payload;
     if (!key) return null;
-    return decrypt(payload.slice(_payloadPrefix.length), key);
+    return decrypt(payload.slice(_payloadPrefix.length), key, aad);
   }
 
   /**

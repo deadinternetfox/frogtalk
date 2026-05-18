@@ -1516,6 +1516,37 @@ const Messages = (() => {
   }
 
   function _msgHtml(msg, isCont) {
+    // System messages (e.g. private-room key rotation) render as a centred
+    // grey pill, not a chat bubble. The payload is a JSON blob shipped as
+    // plaintext in `msg.content`; system messages bypass AES entirely.
+    if (msg.system_kind === 'room_key_rotated') {
+      let p = null;
+      try { p = JSON.parse(msg.content || '{}'); } catch { p = {}; }
+      const actor = UI.escHtml(p.actor || msg.nickname || 'a moderator');
+      const target = p.target ? UI.escHtml(p.target) : '';
+      const reason = String(p.reason || 'manual');
+      let detail;
+      if (reason === 'ban' && target) detail = `<span style="color:#888">— rotated after banning <strong>@${target}</strong></span>`;
+      else if (reason === 'kick' && target) detail = `<span style="color:#888">— rotated after kicking <strong>@${target}</strong></span>`;
+      else detail = '<span style="color:#888">— manual rotation</span>';
+      const ver = parseInt(p.version, 10) || 0;
+      const verTag = ver > 0 ? `<span style="color:#666;font-size:11px;margin-left:8px">key v${ver}</span>` : '';
+      const time = UI.formatTime(msg.created_at);
+      return `
+        <div class="msg msg-system" id="msg-${msg.id}" data-id="${msg.id}" data-system="room_key_rotated"
+             style="display:flex;justify-content:center;margin:10px 0;">
+          <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;
+                      padding:6px 14px;font-size:12px;color:#aaa;max-width:80%;text-align:center;">
+            <span style="margin-right:6px">🔄</span>
+            <strong style="color:#4caf50">@${actor}</strong>
+            rotated the room key
+            ${detail}
+            ${verTag}
+            <span style="color:#555;margin-left:8px;font-size:11px">${time}</span>
+          </div>
+        </div>
+      `;
+    }
     const isOwn = msg.nickname === State.user?.nickname;
     // Bots inherit their owner's user row, so older payloads could surface
     // is_admin=1 for a bot owned by an admin. Suppress the crown whenever the
@@ -2153,15 +2184,26 @@ const Messages = (() => {
     if (!newContent) return;
 
     const key = State.roomKeys[State.currentRoom];
-    // Channel edits use per-room AES-256-GCM (same path as send).
+    // Channel edits use per-room AES-256-GCM (same path as send) and bind
+    // AAD on private rooms so an edited ciphertext can't be replayed
+    // under a different key version.
     let encrypted;
+    let editKeyVersion = 0;
     if (key && typeof Crypto !== 'undefined') {
-      encrypted = await Crypto.encrypt(newContent, key);
+      let aad = null;
+      try {
+        const r = (State.rooms || []).find(x => x.name === State.currentRoom);
+        if (r && (r.type || 'public') === 'private' && r.id && window.Rooms && Rooms.aadForRoom) {
+          editKeyVersion = parseInt(r.room_key_version, 10) || 1;
+          aad = Rooms.aadForRoom(r.id, editKeyVersion);
+        }
+      } catch {}
+      encrypted = await Crypto.encrypt(newContent, key, aad || undefined);
     } else {
       encrypted = newContent;
     }
 
-    WS.send({ type: 'edit', id, content: encrypted });
+    WS.send({ type: 'edit', id, content: encrypted, key_version: editKeyVersion });
     // Optimistic update
     updateEdited(id, newContent, State.currentRoom);
   }
@@ -3311,14 +3353,28 @@ async function sendMessage() {
       UI.showToast('Outbound bridge active: new room messages in this channel are sent without E2EE.', 'info');
     }
     // Channel encryption: per-room AES-256-GCM (see docs/SECURITY_MODEL.md).
+    // For private rooms we bind AAD = `room:<id>:v<key_version>` so a
+    // ciphertext can't be replayed under a different room or version.
     let encrypted;
+    let keyVersion = 0;
+    let aad = null;
     if (key && text && typeof Crypto !== 'undefined') {
-      encrypted = await Crypto.encrypt(text, key);
+      try {
+        const r = (State.rooms || []).find(x => x.name === State.currentRoom);
+        if (r && (r.type || 'public') === 'private' && r.id && window.Rooms && Rooms.aadForRoom) {
+          keyVersion = parseInt(r.room_key_version, 10) || 1;
+          aad = Rooms.aadForRoom(r.id, keyVersion);
+        }
+      } catch {}
+      encrypted = await Crypto.encrypt(text, key, aad || undefined);
     } else {
       encrypted = text;
     }
     if (mediaData && key && !hasOutbound && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
       UI.showProgressToast('Encrypting…', 22);
+      // Media payloads keep the legacy (no-AAD) wire format so existing
+      // /api/messages decrypt call sites don't need to thread AAD. The
+      // sensitive surface — message text and reply quotes — is AAD-bound.
       mediaData = await Crypto.encryptPayload(mediaData, key);
       UI.showProgressToast('Encrypting…', 25);
     }
@@ -3334,6 +3390,7 @@ async function sendMessage() {
           view_once: window._pendingViewOnce ? 1 : 0,
           reply_to: Messages.getReplyToId(),
           bridge_plain: hasOutbound ? text : null,
+          key_version: keyVersion,
         },
         {
           onProgress: (loaded, total, phase) => {
@@ -3365,6 +3422,7 @@ async function sendMessage() {
         reply_to: Messages.getReplyToId(),
         client_nonce: _nonce,
         bridge_plain: hasOutbound ? text : undefined,
+        key_version: keyVersion,
       });
       _wsDispatched = true;
     }
@@ -3456,12 +3514,26 @@ async function loadOlderMessages() {
     if (!msgs.length) return;
 
     const key = State.roomKeys[room];
+    // Per-version helper: messages from before a rotation must decrypt
+    // with their original key + AAD. For private rooms we look up the
+    // matching versioned secret; legacy (key_version=0) keeps the old
+    // no-AAD path and uses the room's current key.
+    const roomMeta = (State.rooms || []).find(x => x.name === room) || null;
+    const isPrivate = roomMeta && (roomMeta.type || 'public') === 'private';
     const decrypted = await Promise.all(msgs.map(async m => {
+      if (m.system_kind) return { ...m, _system: true };
       if (!key) return m;
-      const plain = await Crypto.decrypt(m.content, key);
+      const ver = parseInt(m.key_version, 10) || 0;
+      let useKey = key;
+      let aad = null;
+      if (ver > 0 && isPrivate && roomMeta && roomMeta.id && window.Rooms) {
+        try { useKey = (await Rooms.getRoomKeyForVersion(room, ver)) || key; } catch {}
+        try { aad = Rooms.aadForRoom(roomMeta.id, ver); } catch {}
+      }
+      const plain = await Crypto.decrypt(m.content, useKey, aad || undefined);
       let replyPlain = m.reply_content;
       if (m.reply_content) {
-        const decryptedReply = await Crypto.decrypt(m.reply_content, key);
+        const decryptedReply = await Crypto.decrypt(m.reply_content, useKey, aad || undefined);
         replyPlain = decryptedReply !== null ? decryptedReply : m.reply_content;
       }
       return {
@@ -3512,6 +3584,34 @@ async function loadOlderMessages() {
 }
 
 function _buildMsgHtml(msg, isCont) {
+  // System messages reuse the centred grey-pill layout from _msgHtml.
+  if (msg && msg.system_kind === 'room_key_rotated') {
+    let p = null;
+    try { p = JSON.parse(msg.content || '{}'); } catch { p = {}; }
+    const actor = UI.escHtml(p.actor || msg.nickname || 'a moderator');
+    const target = p.target ? UI.escHtml(p.target) : '';
+    const reason = String(p.reason || 'manual');
+    let detail;
+    if (reason === 'ban' && target) detail = `<span style="color:#888">— rotated after banning <strong>@${target}</strong></span>`;
+    else if (reason === 'kick' && target) detail = `<span style="color:#888">— rotated after kicking <strong>@${target}</strong></span>`;
+    else detail = '<span style="color:#888">— manual rotation</span>';
+    const ver = parseInt(p.version, 10) || 0;
+    const verTag = ver > 0 ? `<span style="color:#666;font-size:11px;margin-left:8px">key v${ver}</span>` : '';
+    return `
+      <div class="msg msg-system" id="msg-${msg.id}" data-id="${msg.id}" data-system="room_key_rotated"
+           style="display:flex;justify-content:center;margin:10px 0;">
+        <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;
+                    padding:6px 14px;font-size:12px;color:#aaa;max-width:80%;text-align:center;">
+          <span style="margin-right:6px">🔄</span>
+          <strong style="color:#4caf50">@${actor}</strong>
+          rotated the room key
+          ${detail}
+          ${verTag}
+          <span style="color:#555;margin-left:8px;font-size:11px">${UI.formatTime(msg.created_at)}</span>
+        </div>
+      </div>
+    `;
+  }
   // Simple inline builder for older messages (avoids circular dependency)
   const time = UI.formatTime(msg.created_at);
   const content = msg.content ? UI.escHtml(msg.content).replace(/https?:\/\/[^\s]+/g, url => `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#4caf50">${url}</a>`) : '';

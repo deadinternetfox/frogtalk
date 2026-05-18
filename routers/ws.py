@@ -422,7 +422,8 @@ async def websocket_endpoint(
                 msg_id = db.save_message(
                     room_name, user["id"], user["nickname"],
                     content, media_data, media_type,
-                    media_blur, view_once
+                    media_blur, view_once,
+                    key_version=int(data.get("key_version") or 0),
                 )
                 # Store reply linkage if provided
                 reply_nickname = None
@@ -447,6 +448,7 @@ async def websocket_endpoint(
                     "display_name": user.get("display_name"),
                     "is_admin": bool(user.get("is_admin")),
                     "content": content,
+                    "key_version": int(data.get("key_version") or 0),
                     "media_data": media_data,
                     "media_type": media_type,
                     "media_blur": media_blur,
@@ -522,11 +524,17 @@ async def websocket_endpoint(
                 # Check if user is room owner
                 room_info = db.get_room_by_name(room_name)
                 is_room_owner = room_info and room_info.get("owner_id") == user["id"]
-                ok = db.edit_message(msg_id, user["id"], new_content, bool(user.get("is_admin")), is_room_owner)
+                kv = data.get("key_version")
+                ok = db.edit_message(
+                    msg_id, user["id"], new_content,
+                    bool(user.get("is_admin")), is_room_owner,
+                    key_version=(int(kv) if kv is not None else None),
+                )
                 if ok:
                     await manager.broadcast_room(room_name, {
                         "type": "edit", "id": msg_id,
                         "content": new_content, "room": room_name,
+                        "key_version": int(kv) if kv is not None else 0,
                     })
                     # For E2EE rooms the client sends the bridge-safe
                     # plaintext version of the edit alongside the

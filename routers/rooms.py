@@ -781,6 +781,21 @@ async def ban_user(room_name: str, body: BanRequest,
             "nickname": target.get("nickname"),
             "banned_by": current_user.get("nickname"),
         })
+        # Private-room key rotation: after a ban succeeds, ask the moderator's
+        # client to generate a fresh room secret and fan it out to every
+        # remaining member via Signal-encrypted envelopes. The banned user
+        # keeps their old per-version secret in localStorage (so they can
+        # still read history they were part of) but never receives the new
+        # one — every message encrypted under key_version > current is
+        # opaque to them. Public rooms skip this; they aren't E2EE.
+        if (room.get("type") or "public") == "private":
+            await manager.send_to_user(current_user["id"], {
+                "type": "room_should_rotate",
+                "room": room_name,
+                "reason": "ban",
+                "target_user_id": body.user_id,
+                "target_nickname": target.get("nickname"),
+            })
     except Exception:
         pass
     return {"ok": True}
@@ -814,6 +829,136 @@ async def get_bans(room_name: str, current_user: dict = Depends(get_current_user
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
     
     return {"bans": db.get_room_bans(room["id"])}
+
+
+# ─── Private-room key rotation ────────────────────────────────────────────
+# AAD-bound AES-GCM with a server-side `room_key_version` counter. Bumping
+# the version invalidates the previous room secret for anyone who doesn't
+# receive the new one. The new secret is generated client-side, fanned out
+# via Signal-encrypted DMs (so the server never sees plaintext), and
+# announced with a system message visible to all current members.
+#
+# Triggered: (a) manually by owner/mod via the "Rotate room key" button;
+# (b) automatically by the banning client after a successful ban (the
+# server fires a `room_should_rotate` WS event to the moderator).
+#
+# Public rooms cannot rotate — they aren't E2EE in the first place.
+
+class RotateKeyRequest(BaseModel):
+    reason: str = "manual"                    # 'manual' | 'ban' | 'kick'
+    target_user_id: Optional[int] = None      # set when reason='ban'/'kick'
+    target_nickname: Optional[str] = None
+    envelopes: dict[str, str] = Field(default_factory=dict)  # {user_id: signal_env_json}
+
+
+@router.post("/{room_name}/rotate")
+async def rotate_room_key(room_name: str, body: RotateKeyRequest,
+                          current_user: dict = Depends(get_current_user)):
+    """Rotate the room secret. Moderator-only, private rooms only.
+
+    The client has already (a) generated a fresh 32-byte secret,
+    (b) Signal-encrypted it once per remaining member, and (c) installed
+    the new secret locally. This endpoint atomically bumps the server's
+    key_version counter, routes each envelope to its recipient as a WS
+    `room_key_envelope` frame, inserts a system message into the room so
+    every member sees a "🔄 Room key rotated by Alice" notice, and
+    broadcasts that system message to currently-connected clients.
+    """
+    room = db.get_room_by_name(room_name)
+    if not room:
+        return JSONResponse(status_code=404, content={"error": "Room not found"})
+    if (room.get("type") or "public") != "private":
+        return JSONResponse(status_code=400, content={"error": "Only private rooms can rotate"})
+    if not db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin"))):
+        return JSONResponse(status_code=403, content={"error": "Not authorised"})
+
+    reason = (body.reason or "manual").lower()
+    if reason not in ("manual", "ban", "kick"):
+        reason = "manual"
+
+    new_version = db.room_increment_key_version(room_name)
+    if not new_version:
+        return JSONResponse(status_code=500, content={"error": "Could not rotate key"})
+
+    # Fan out the Signal envelopes. Each envelope was encrypted client-side
+    # so the server never learns the new secret. If a recipient is offline
+    # the WS frame is dropped — the client will catch up on next history
+    # fetch via the system message + the rotator's persisted envelope queue
+    # (future work; for now, offline members must ask for the secret).
+    delivered = 0
+    for uid_str, env in (body.envelopes or {}).items():
+        try:
+            uid = int(uid_str)
+        except (TypeError, ValueError):
+            continue
+        if not env or not isinstance(env, str):
+            continue
+        try:
+            await manager.send_to_user(uid, {
+                "type": "room_key_envelope",
+                "room": room_name,
+                "version": new_version,
+                "env": env,
+                "from_user_id": current_user["id"],
+                "from_nickname": current_user.get("nickname") or "",
+                "reason": reason,
+            })
+            delivered += 1
+        except Exception:
+            pass
+
+    # System message in the channel. nickname='System', user_id=0 so the
+    # row doesn't FK-violate (user_id=0 user does not exist, but the FK is
+    # ON DELETE CASCADE without NOT NULL enforcement on insert from app
+    # context — sqlite does not enforce FKs by default). content is a
+    # short JSON payload the client parses to render the pill.
+    payload = {
+        "kind": "room_key_rotated",
+        "actor": current_user.get("nickname") or "",
+        "actor_id": current_user["id"],
+        "target": body.target_nickname or "",
+        "target_id": int(body.target_user_id) if body.target_user_id else 0,
+        "reason": reason,
+        "version": new_version,
+    }
+    sys_content = json.dumps(payload, separators=(",", ":"))
+    try:
+        sys_msg_id = db.save_message(
+            room_name=room_name,
+            user_id=current_user["id"],
+            nickname="System",
+            content=sys_content,
+            key_version=0,
+            system_kind="room_key_rotated",
+        )
+    except Exception:
+        sys_msg_id = 0
+
+    try:
+        from datetime import datetime as _dt
+        await manager.broadcast_room(room_name, {
+            "type": "message",
+            "id": sys_msg_id,
+            "room": room_name,
+            "nickname": "System",
+            "user_id": current_user["id"],
+            "content": sys_content,
+            "system_kind": "room_key_rotated",
+            "key_version": 0,
+            "has_media": False,
+            "edited": False,
+            "reactions": {},
+            "created_at": _dt.utcnow().isoformat() + "Z",
+        })
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "version": new_version,
+        "delivered": delivered,
+        "system_message_id": sys_msg_id,
+    }
 
 
 # ─── Pinned messages ──────────────────────────────────────────────────────────

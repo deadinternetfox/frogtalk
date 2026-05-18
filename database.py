@@ -958,6 +958,7 @@ def list_rooms() -> List[Dict]:
                    r.channel_type, r.channel_theme, r.invite_only, r.who_can_invite,
                    r.is_public, r.category, r.tags, r.dj_only_queue,
                    COALESCE(r.forwarding_disabled, 0) AS forwarding_disabled,
+                   COALESCE(r.room_key_version, 1) AS room_key_version,
                    u.nickname AS owner_nickname
             FROM rooms r LEFT JOIN users u ON r.owner_id = u.id
             ORDER BY r.id
@@ -1045,21 +1046,56 @@ def save_message(room_name: str, user_id: int, nickname: str, content: str,
                                  bridge_source_id: Optional[str] = None,
                                  bridge_source_parent: Optional[str] = None,
                  reply_to: Optional[int] = None,
-                 forwarded_from: Optional[str] = None) -> int:
+                 forwarded_from: Optional[str] = None,
+                 key_version: int = 0,
+                 system_kind: Optional[str] = None) -> int:
     with _conn() as con:
         cur = con.execute(
             """INSERT INTO messages (room_name, user_id, nickname, content, media_data, media_type,
                                                                          media_blur, view_once, bridge_platform, bridge_avatar,
                                                                          bridge_source_name, bridge_source_id, bridge_source_parent,
-                                                                         reply_to, forwarded_from)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                                                         reply_to, forwarded_from, key_version, system_kind)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (room_name, user_id, nickname, content, media_data, media_type,
                          media_blur, view_once, bridge_platform, bridge_avatar,
                          bridge_source_name, bridge_source_id, bridge_source_parent,
-                         reply_to, forwarded_from)
+                         reply_to, forwarded_from, int(key_version or 0), system_kind)
         )
         con.commit()
         return cur.lastrowid
+
+
+def room_increment_key_version(room_name: str) -> int:
+    """Bump rooms.room_key_version atomically and return the new value.
+
+    Called by routers/rooms.py /rotate after verifying the actor can
+    moderate the room. The version is opaque to the server — clients
+    use it to look up the matching localStorage secret on decrypt.
+    """
+    with _conn() as con:
+        cur = con.execute(
+            "UPDATE rooms SET room_key_version = COALESCE(room_key_version,1) + 1 WHERE name=?",
+            (room_name,)
+        )
+        if not cur.rowcount:
+            con.commit()
+            return 0
+        row = con.execute(
+            "SELECT room_key_version AS v FROM rooms WHERE name=?",
+            (room_name,)
+        ).fetchone()
+        con.commit()
+        return int(row["v"]) if row else 0
+
+
+def room_get_key_version(room_name: str) -> int:
+    """Current room_key_version for `room_name` (1 if missing/unset)."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COALESCE(room_key_version,1) AS v FROM rooms WHERE name=?",
+            (room_name,)
+        ).fetchone()
+    return int(row["v"]) if row else 1
 
 
 # ─── Bridge message-ID mapping ────────────────────────────────────────────
@@ -1139,6 +1175,8 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
+                          COALESCE(m.key_version, 0) AS key_version,
+                          m.system_kind,
                          COALESCE(m.bridge_avatar, b.avatar, u.avatar) AS avatar,
                          CASE WHEN m.bridge_platform IS NOT NULL AND m.bridge_platform != ''
                              THEN NULL
@@ -1165,6 +1203,8 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
                           m.reply_to, m.bridge_platform, m.bridge_source_name,
                           m.bridge_source_id, m.bridge_source_parent, m.forwarded_from,
                           COALESCE(m.preview_suppressed, 0) AS preview_suppressed,
+                          COALESCE(m.key_version, 0) AS key_version,
+                          m.system_kind,
                          COALESCE(m.bridge_avatar, b.avatar, u.avatar) AS avatar,
                          CASE WHEN m.bridge_platform IS NOT NULL AND m.bridge_platform != ''
                              THEN NULL
@@ -1214,7 +1254,7 @@ def get_message(msg_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
-def edit_message(msg_id: int, user_id: int, new_content: str, is_admin: bool, is_room_owner: bool = False) -> bool:
+def edit_message(msg_id: int, user_id: int, new_content: str, is_admin: bool, is_room_owner: bool = False, key_version: Optional[int] = None) -> bool:
     # NOTE: room owners and moderators CANNOT edit other users' messages
     # (only the author or a global admin may). They can still delete via
     # delete_message(). `is_room_owner` is accepted for API stability but
@@ -1225,7 +1265,13 @@ def edit_message(msg_id: int, user_id: int, new_content: str, is_admin: bool, is
             return False
         if not is_admin and row["user_id"] != user_id:
             return False
-        con.execute("UPDATE messages SET content=?, edited=1 WHERE id=?", (new_content, msg_id))
+        if key_version is not None:
+            con.execute(
+                "UPDATE messages SET content=?, edited=1, key_version=? WHERE id=?",
+                (new_content, int(key_version or 0), msg_id),
+            )
+        else:
+            con.execute("UPDATE messages SET content=?, edited=1 WHERE id=?", (new_content, msg_id))
         con.commit()
     return True
 
@@ -1553,6 +1599,18 @@ def _migrate():
         # a plain hyperlink — only the embed is hidden.
         if "preview_suppressed" not in msg_cols:
             con.execute("ALTER TABLE messages ADD COLUMN preview_suppressed INTEGER DEFAULT 0")
+        # ─── Private-room AAD-bound encryption (Phase 1) + key rotation ───
+        # `key_version` tags each ciphertext with the room-key generation it
+        # was encrypted under, so old messages stay decryptable after a
+        # rotation (clients keep per-version secrets in localStorage).
+        # 0 = legacy (pre-versioning, no AAD); ≥1 = AAD-bound new format.
+        if "key_version" not in msg_cols:
+            con.execute("ALTER TABLE messages ADD COLUMN key_version INTEGER DEFAULT 0")
+        # `system_kind` marks server-generated system messages (key rotation
+        # announcements, future system events) so the client renders them as
+        # a centred pill instead of a user bubble. NULL = normal user msg.
+        if "system_kind" not in msg_cols:
+            con.execute("ALTER TABLE messages ADD COLUMN system_kind TEXT")
         # Per-bridge direction: 'both' (default), 'in' (only remote→FrogTalk),
         # or 'out' (only FrogTalk→remote). Lets an owner use a channel as a
         # one-way announcement feed in either direction.
@@ -1582,6 +1640,12 @@ def _migrate():
             con.execute("ALTER TABLE rooms ADD COLUMN slowmode INTEGER DEFAULT 0")
         if "channel_type" not in room_cols:
             con.execute("ALTER TABLE rooms ADD COLUMN channel_type TEXT DEFAULT 'text'")
+        # Private-room key generation counter. Bumped each time a moderator
+        # rotates the room secret (manual or post-ban). New ciphertext is
+        # AAD-bound to this version so clients can pick the matching
+        # localStorage secret on decrypt. Starts at 1 for every room.
+        if "room_key_version" not in room_cols:
+            con.execute("ALTER TABLE rooms ADD COLUMN room_key_version INTEGER NOT NULL DEFAULT 1")
         # Wall-post columns for shared-track metadata (title + source room).
         # Keeps media_data as the raw URL so existing share/play paths keep
         # working; the title is surfaced on cards instead of the old
@@ -4759,6 +4823,7 @@ def get_room_by_name(room_name: str) -> Optional[Dict]:
                    r.owner_id, r.room_key_hint, r.channel_type, r.channel_theme, r.created_at,
                    r.invite_only, r.who_can_invite,
                    r.is_public, r.category, r.tags, r.directory_description,
+                   COALESCE(r.room_key_version, 1) AS room_key_version,
                    (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
                    r.banner, r.about, r.dj_only_queue, r.forwarding_disabled,
                    r.vanity,

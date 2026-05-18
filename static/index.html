@@ -8322,6 +8322,18 @@ window.ConnErr = (function(){
     
     <!-- General tab -->
     <div id="ch-panel-general">
+      <!-- Encryption status badge (filled in by openChannelSettings) -->
+      <div id="ch-enc-badge" style="display:none;margin-bottom:14px;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.4"></div>
+      <!-- Manual key rotation (private rooms only) -->
+      <div id="ch-rotate-key-card" style="display:none;margin-bottom:14px;padding:12px;background:#0d0d0d;border:1px solid #222;border-radius:8px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:4px">🔄 Rotate Room Key</div>
+        <div style="font-size:12px;color:#888;margin-bottom:10px;line-height:1.5">
+          Generate a new room key and securely deliver it to every current member.
+          Anyone who has left or been removed will lose access to <strong>new</strong> messages.
+          Old messages they could already read remain readable on their device.
+        </div>
+        <button class="modal-btn secondary" id="ch-rotate-key-btn" type="button" style="width:100%">Rotate room key now</button>
+      </div>
       <label class="modal-label">Channel Type</label>
       <div class="radio-group" style="margin-bottom:12px">
         <div class="radio-option" id="ch-settings-chtype-text" onclick="selectSettingsChannelType('text')">
@@ -8613,6 +8625,12 @@ window.ConnErr = (function(){
 
     <!-- Bridges tab -->
     <div id="ch-panel-bridges" style="display:none">
+      <!-- Private rooms cannot have bridges; explain why and hide the create UI. -->
+      <div id="ch-bridges-private-warning" style="display:none;background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.3);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.5;color:#ffd54f">
+        🔒 <strong>Bridges aren't available for private (E2EE) rooms.</strong><br>
+        <span style="color:#aaa;font-size:12px">Forwarding to Discord or Telegram would leak the plaintext of every encrypted message to a third-party service, defeating end-to-end encryption. Bridges remain available for public channels.</span>
+      </div>
+      <div id="ch-bridges-public-body">
       <div style="font-size:13px;color:#888;margin-bottom:12px">
         Mirror messages to and from external chat platforms (Discord / Telegram).
       </div>
@@ -8733,6 +8751,7 @@ window.ConnErr = (function(){
       </div>
       <div style="font-size:12px;color:#aaa;margin-bottom:6px;font-weight:600">Active bridges</div>
       <div id="ch-bridges-list" style="background:#0d0d0d;border-radius:8px;padding:8px;min-height:50px"></div>
+      </div> <!-- /ch-bridges-public-body -->
     </div>
 
     <div class="modal-actions">
@@ -10544,19 +10563,19 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
   } catch(e) {}
 })();
 </script>
-<script src="/static/js/crypto.js?v=191"></script>
+<script src="/static/js/crypto.js?v=192"></script>
 <script src="/static/js/signal_store.js?v=2"></script>
 <script src="/static/js/signal.js?v=11"></script>
 <script src="/static/js/wall_crypto.js?v=1"></script>
 <script src="/static/js/state.js?v=200"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=433"></script>
-<script src="/static/js/ws.js?v=240"></script>
+<script src="/static/js/ws.js?v=241"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=471"></script>
-  <script src="/static/js/rooms.js?v=430"></script>
+  <script src="/static/js/rooms.js?v=431"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
-<script src="/static/js/messages.js?v=460"></script>
+<script src="/static/js/messages.js?v=461"></script>
 <script src="/static/js/users.js?v=201"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>

@@ -71,6 +71,10 @@ class SendMessageRequest(BaseModel):
     # forwarding_disabled=1, and (b) persists it so future renders show
     # the "↪ Forwarded from" badge.
     forwarded_from: Optional[str] = None
+    # Private-room key generation under which `content` was encrypted.
+    # 0 = legacy / unversioned. ≥1 = AAD-bound (clients pick the matching
+    # localStorage secret on decrypt).
+    key_version: int = 0
 
 
 @router.post("/{room_name}/send")
@@ -133,6 +137,7 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         content, body.media_data, body.media_type,
         body.media_blur, body.view_once,
         forwarded_from=(body.forwarded_from if fwd_meta else None),
+        key_version=int(body.key_version or 0),
     )
 
     reply_nickname = None
@@ -168,6 +173,7 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
         "forwarded_from": (body.forwarded_from if fwd_meta else None),
         "edited": False,
         "reactions": {},
+        "key_version": int(body.key_version or 0),
         "created_at": datetime.utcnow().isoformat() + "Z",
     }
     await manager.broadcast_room(room_name, broadcast_payload)

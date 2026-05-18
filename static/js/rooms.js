@@ -10,24 +10,80 @@ const Rooms = (() => {
   let _currentRoomData = null;
   const ROOM_ICON_MAX_BYTES = 2 * 1024 * 1024;
   const ROOM_SECRET_PREFIX = 'ft-room-secret-v1:';
+  // Pointer key per room → current localStorage key version. When the
+  // pointer is missing the room is treated as v1 with the legacy unsuffixed
+  // secret (auto-migrated on first read).
+  const ROOM_KEYVER_PREFIX = 'ft-room-keyver:';
   let _secretPromptResolver = null;
 
-  function _roomSecretStorageKey(name) {
-    return `${ROOM_SECRET_PREFIX}${String(name || '').toLowerCase()}`;
+  function _roomSecretStorageKey(name, version) {
+    const base = `${ROOM_SECRET_PREFIX}${String(name || '').toLowerCase()}`;
+    if (version && Number.isFinite(version) && version > 0) {
+      return `${base}:v${version}`;
+    }
+    return base;
   }
 
-  function _getStoredRoomSecret(name) {
+  function _roomKeyVersionStorageKey(name) {
+    return `${ROOM_KEYVER_PREFIX}${String(name || '').toLowerCase()}`;
+  }
+
+  function _getStoredKeyVersion(name) {
     try {
+      const raw = localStorage.getItem(_roomKeyVersionStorageKey(name));
+      const n = parseInt(raw, 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    } catch { return 0; }
+  }
+
+  function _setStoredKeyVersion(name, version) {
+    try {
+      if (version && version > 0) {
+        localStorage.setItem(_roomKeyVersionStorageKey(name), String(version));
+      }
+    } catch {}
+  }
+
+  /**
+   * Read the room secret for a specific key version, with backward-compat:
+   *   • version omitted / 0 → legacy unsuffixed slot
+   *   • version ≥ 1 → versioned slot; falls back to migrating the legacy
+   *     slot to v1 on first access so existing users keep working without
+   *     a re-key prompt.
+   */
+  function _getStoredRoomSecret(name, version) {
+    try {
+      if (version && version > 0) {
+        const v = localStorage.getItem(_roomSecretStorageKey(name, version));
+        if (v) return v;
+        // Migration: if we have a legacy secret and the caller asked for v1,
+        // promote the legacy slot in-place so subsequent fetches hit fast.
+        if (version === 1) {
+          const legacy = localStorage.getItem(_roomSecretStorageKey(name));
+          if (legacy) {
+            try { localStorage.setItem(_roomSecretStorageKey(name, 1), legacy); } catch {}
+            return legacy;
+          }
+        }
+        return '';
+      }
       return localStorage.getItem(_roomSecretStorageKey(name)) || '';
     } catch {
       return '';
     }
   }
 
-  function _storeRoomSecret(name, secret) {
+  function _storeRoomSecret(name, secret, version) {
     try {
-      if (secret) localStorage.setItem(_roomSecretStorageKey(name), secret);
-      else localStorage.removeItem(_roomSecretStorageKey(name));
+      if (secret) {
+        localStorage.setItem(_roomSecretStorageKey(name), secret);
+        if (version && version > 0) {
+          localStorage.setItem(_roomSecretStorageKey(name, version), secret);
+          _setStoredKeyVersion(name, version);
+        }
+      } else {
+        localStorage.removeItem(_roomSecretStorageKey(name));
+      }
     } catch {}
   }
 
@@ -124,7 +180,10 @@ const Rooms = (() => {
 
   async function _resolvePrivateRoomKey(name) {
     const room = (State.rooms || []).find(r => r.name === name) || null;
-    let secret = _getStoredRoomSecret(name);
+    const srvVer = Math.max(1, parseInt(room?.room_key_version, 10) || 1);
+    // Try the per-version slot first; fall back to legacy unsuffixed.
+    let secret = _getStoredRoomSecret(name, srvVer);
+    if (!secret) secret = _getStoredRoomSecret(name);
     if (!secret) {
       const entered = await _promptPrivateRoomSecret(name, room?.room_key_hint || '');
       if (!entered) return undefined;
@@ -133,9 +192,246 @@ const Rooms = (() => {
         UI.showToast('Private rooms require a shared secret', 'error');
         return undefined;
       }
-      if (entered.remember) _storeRoomSecret(name, secret);
+      if (entered.remember) _storeRoomSecret(name, secret, srvVer);
+    } else {
+      // Promote into the versioned slot if we only had a legacy copy, so
+      // future loads skip the fallback path and per-version decryption
+      // (for messages encrypted under srvVer) just works.
+      try {
+        if (!localStorage.getItem(_roomSecretStorageKey(name, srvVer))) {
+          localStorage.setItem(_roomSecretStorageKey(name, srvVer), secret);
+          _setStoredKeyVersion(name, srvVer);
+        }
+      } catch {}
     }
     return Crypto.getRoomKey(name, secret);
+  }
+
+  // ─── Key rotation (Phase 2 #3, #4) ───────────────────────────────────
+  // AAD bound to room_id + key_version so a ciphertext from one version can
+  // never be replayed under another. Public rooms aren't E2EE — caller
+  // must only invoke these for private rooms.
+  function _aadForRoom(roomId, version) {
+    if (!roomId || !version) return null;
+    return `room:${roomId}:v${version}`;
+  }
+
+  /**
+   * Return a CryptoKey for the secret stored at a specific version,
+   * or null if no secret is stored for that version. Used by the decrypt
+   * path to pick the right historical key for an old message.
+   */
+  async function _getRoomKeyForVersion(name, version) {
+    if (!name) return null;
+    const v = parseInt(version, 10) || 0;
+    let secret = '';
+    if (v > 0) secret = _getStoredRoomSecret(name, v);
+    if (!secret) secret = _getStoredRoomSecret(name);
+    if (!secret) return null;
+    try { return await Crypto.getRoomKey(name, secret); } catch { return null; }
+  }
+
+  function _b64FromBytes(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s);
+  }
+
+  /**
+   * Install a rotated room secret received via Signal-DM fanout. Idempotent:
+   * the same envelope can be delivered twice (e.g. WS reconnect race) and
+   * the second install is a no-op. We never DOWNGRADE — if we already hold
+   * a higher version, the older envelope is ignored.
+   *
+   * Triggered from ws.js on incoming `room_key_envelope`. The envelope is
+   * the raw Signal v2 envelope JSON; this helper handles the Signal decrypt
+   * before persisting.
+   */
+  async function installRotatedKey({ room, version, env, from_user_id, from_nickname }) {
+    if (!room || !version || !env) return false;
+    const v = parseInt(version, 10) || 0;
+    if (v <= 0) return false;
+    // Don't downgrade.
+    const cur = _getStoredKeyVersion(room);
+    if (cur && cur >= v && _getStoredRoomSecret(room, v)) return true;
+    if (!window.Signal || typeof Signal.decryptDM !== 'function') {
+      console.warn('[rooms] installRotatedKey: Signal not ready');
+      return false;
+    }
+    let envObj = env;
+    if (typeof env === 'string') {
+      try { envObj = JSON.parse(env); } catch { envObj = null; }
+    }
+    if (!envObj) return false;
+    let plain;
+    try {
+      plain = await Signal.decryptDM(from_user_id, envObj);
+    } catch (e) {
+      console.warn('[rooms] room_key_envelope decrypt failed', e);
+      return false;
+    }
+    if (!plain) return false;
+    let payload;
+    try { payload = JSON.parse(plain); } catch { return false; }
+    if (!payload || payload.__ft_rkey !== 1) return false;
+    // The rotator can't know the final server-assigned version when it builds
+    // the envelope, so payload.version is informational only. Trust the server
+    // version from the WS frame and just verify the room matches.
+    if (payload.room !== room) return false;
+    const secret = String(payload.secret || '');
+    if (!secret) return false;
+    try {
+      localStorage.setItem(_roomSecretStorageKey(room, v), secret);
+      localStorage.setItem(_roomSecretStorageKey(room), secret); // current pointer
+      _setStoredKeyVersion(room, v);
+    } catch {}
+    // Bump the cached room metadata so encrypts immediately use the new
+    // version without waiting for a /api/rooms refresh.
+    try {
+      const r = (State.rooms || []).find(x => x.name === room);
+      if (r) r.room_key_version = v;
+      if (State.roomKeys && State.roomKeys[room] != null) {
+        // Force re-derivation on next access.
+        State.roomKeys[room] = await Crypto.getRoomKey(room, secret);
+      }
+    } catch {}
+    try {
+      const who = from_nickname ? `@${from_nickname}` : 'a moderator';
+      UI.showToast(`🔄 Room key updated by ${who}`, 'info');
+    } catch {}
+    return true;
+  }
+
+  /**
+   * Generate a fresh room secret, fan it out via Signal DM envelopes to
+   * every current member, and bump the server's key_version. Invoked
+   * either manually (settings → "Rotate room key") or automatically by
+   * ws.js when the server sends `room_should_rotate` after a ban.
+   *
+   * For private rooms only — bridge rooms are blocked at the bridge
+   * endpoint, so private rooms by construction have no bridges.
+   */
+  async function rotateRoomKey(roomName, { reason = 'manual', targetUserId = null, targetNickname = null, silent = false } = {}) {
+    if (!roomName) return false;
+    const room = (State.rooms || []).find(r => r.name === roomName) || null;
+    if (!room) {
+      try { UI.showToast('Room not found', 'error'); } catch {}
+      return false;
+    }
+    if ((room.type || 'public') !== 'private') {
+      try { UI.showToast('Only private rooms can rotate keys', 'error'); } catch {}
+      return false;
+    }
+    if (!window.Signal || !window.Signal.isReady || !window.Signal.isReady()) {
+      try {
+        if (window.Signal && typeof Signal.ensureReady === 'function') {
+          await Signal.ensureReady(State.user && State.user.id);
+        }
+      } catch {}
+      if (!window.Signal || !Signal.isReady || !Signal.isReady()) {
+        try { UI.showToast('Encryption layer not ready — try again', 'error'); } catch {}
+        return false;
+      }
+    }
+
+    // Fetch fresh members list (don't rely on a cached sidebar).
+    let members = [];
+    try {
+      const r = await fetch(`/api/rooms/${encodeURIComponent(roomName)}/members`, { credentials: 'same-origin' });
+      if (r.ok) {
+        const d = await r.json();
+        members = Array.isArray(d.members) ? d.members : [];
+      }
+    } catch {}
+    const myId = State.user?.id;
+    // Drop self + freshly-banned user from the recipient list. The banned
+    // user is already on members until the next refresh, so filter by id.
+    const recipients = members.filter(m => {
+      const uid = parseInt(m.user_id, 10);
+      if (!uid) return false;
+      if (myId && uid === parseInt(myId, 10)) return false;
+      if (targetUserId && uid === parseInt(targetUserId, 10)) return false;
+      return true;
+    });
+
+    // Generate a fresh 32-byte secret, base64-encode for transport.
+    const raw = crypto.getRandomValues(new Uint8Array(32));
+    const secretB64 = _b64FromBytes(raw);
+
+    // Encrypt one envelope per recipient via their Signal session.
+    const envelopes = {};
+    let failedPeers = 0;
+    for (const m of recipients) {
+      const uid = parseInt(m.user_id, 10);
+      try {
+        // Make sure we have a session (handles peer-identity drift too).
+        if (typeof Signal.ensureSessionWith === 'function') {
+          try { await Signal.ensureSessionWith(uid); } catch {}
+        }
+        const env = await Signal.encryptDM(uid, JSON.stringify({
+          __ft_rkey: 1,
+          room: roomName,
+          version: 0,         // server fills in the new version on POST; client computes locally below
+          secret: secretB64,
+        }));
+        envelopes[String(uid)] = JSON.stringify(env);
+      } catch (e) {
+        failedPeers += 1;
+        console.warn('[rooms] rotate: encrypt to', uid, 'failed', e);
+      }
+    }
+
+    // POST to /rotate — server increments key_version, fans out envelopes,
+    // inserts the system message, and broadcasts to the room.
+    let resp;
+    try {
+      const r = await fetch(`/api/rooms/${encodeURIComponent(roomName)}/rotate`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason,
+          target_user_id: targetUserId || null,
+          target_nickname: targetNickname || null,
+          envelopes,
+        }),
+      });
+      if (!r.ok) {
+        try { UI.showToast('Could not rotate room key', 'error'); } catch {}
+        return false;
+      }
+      resp = await r.json();
+    } catch (e) {
+      console.error('[rooms] rotate POST failed', e);
+      try { UI.showToast('Network error rotating key', 'error'); } catch {}
+      return false;
+    }
+
+    const newVer = parseInt(resp.version, 10) || 0;
+    if (newVer <= 0) {
+      try { UI.showToast('Server rejected rotation', 'error'); } catch {}
+      return false;
+    }
+    // Persist locally under the new version.
+    try {
+      localStorage.setItem(_roomSecretStorageKey(roomName, newVer), secretB64);
+      localStorage.setItem(_roomSecretStorageKey(roomName), secretB64);
+      _setStoredKeyVersion(roomName, newVer);
+      room.room_key_version = newVer;
+      // Drop any cached derived key so the next encrypt picks up the new
+      // secret. messages.js re-derives via Rooms helpers below.
+      if (State.roomKeys) State.roomKeys[roomName] = await Crypto.getRoomKey(roomName, secretB64);
+    } catch {}
+
+    if (!silent) {
+      const delivered = parseInt(resp.delivered, 10) || 0;
+      const total = recipients.length;
+      const tail = failedPeers ? ` (${failedPeers} peer${failedPeers === 1 ? '' : 's'} unreachable)` : '';
+      try {
+        UI.showToast(`🔄 Room key rotated · sent to ${delivered}/${total} member${total === 1 ? '' : 's'}${tail}`, 'success');
+      } catch {}
+    }
+    return true;
   }
 
   function isImageIcon(icon) {
@@ -1226,6 +1522,66 @@ const Rooms = (() => {
     
     // Fetch and render bans
     fetchBans(roomName);
+
+    // ── Encryption badge + rotate button + bridge restriction ────────────
+    try {
+      const isPrivate = data.room && data.room.type === 'private';
+      const badge = document.getElementById('ch-enc-badge');
+      if (badge) {
+        if (isPrivate) {
+          const ver = parseInt(data.room.room_key_version, 10) || 1;
+          badge.style.display = 'block';
+          badge.style.background = 'rgba(76,175,80,.08)';
+          badge.style.border = '1px solid rgba(76,175,80,.3)';
+          badge.style.color = '#9bd0ad';
+          badge.innerHTML =
+            '🔒 <strong>End-to-end encrypted</strong> — AES-256-GCM per-room key with rotation. ' +
+            '<span style="color:#7a9b85;font-size:12px">Current key version: <strong>v' + ver + '</strong>. ' +
+            'The server stores ciphertext only; it cannot read your messages.</span>';
+        } else {
+          badge.style.display = 'block';
+          badge.style.background = 'rgba(255,193,7,.06)';
+          badge.style.border = '1px solid rgba(255,193,7,.25)';
+          badge.style.color = '#ffd47a';
+          badge.innerHTML =
+            '🔓 <strong>Encrypted at rest only.</strong> ' +
+            '<span style="color:#b39555;font-size:12px">Public channels are not end-to-end encrypted — the server (and any connected bridges) can read messages. For private conversations, create a Private channel.</span>';
+        }
+      }
+      const rotCard = document.getElementById('ch-rotate-key-card');
+      const rotBtn  = document.getElementById('ch-rotate-key-btn');
+      if (rotCard) rotCard.style.display = isPrivate ? 'block' : 'none';
+      if (rotBtn) {
+        rotBtn.onclick = async () => {
+          const ok = confirm(
+            'Rotate the room key now?\n\n' +
+            'A fresh AES-256-GCM key will be generated and securely sent ' +
+            'to every current member via Signal. Anyone who is no longer in ' +
+            'the room loses access to new messages.\n\n' +
+            'Old messages they already had access to remain readable on their device.'
+          );
+          if (!ok) return;
+          rotBtn.disabled = true;
+          rotBtn.textContent = 'Rotating…';
+          try {
+            await rotateRoomKey(roomName, { reason: 'manual' });
+            // Refresh the modal so the new version badge shows.
+            try { openChannelSettings(roomName); } catch {}
+          } catch (e) {
+            console.warn('[rooms] manual rotate failed', e);
+            UI.showToast('Key rotation failed: ' + (e && e.message ? e.message : 'unknown'), 'error');
+          } finally {
+            rotBtn.disabled = false;
+            rotBtn.textContent = 'Rotate room key now';
+          }
+        };
+      }
+      // Hide bridge creation UI for private rooms, show warning.
+      const bWarn = document.getElementById('ch-bridges-private-warning');
+      const bBody = document.getElementById('ch-bridges-public-body');
+      if (bWarn) bWarn.style.display = isPrivate ? 'block' : 'none';
+      if (bBody) bBody.style.display = isPrivate ? 'none' : 'block';
+    } catch (e) { console.warn('[rooms] enc/rotate UI setup failed', e); }
     
     // Default to general tab
     switchChannelTab('general');
@@ -2064,7 +2420,12 @@ const Rooms = (() => {
     renderMuteState, renderRooms, openChannelLink,
     cancelPrivateSecretPrompt, submitPrivateSecretPrompt,
     toggleSecretVisibility,
-    openTransferOwnershipModal, onTransferOwnershipInput, confirmTransferOwnership
+    openTransferOwnershipModal, onTransferOwnershipInput, confirmTransferOwnership,
+    // Phase 2 key-rotation API used by ws.js + messages.js + settings UI.
+    rotateRoomKey, installRotatedKey,
+    aadForRoom: _aadForRoom,
+    getRoomKeyForVersion: _getRoomKeyForVersion,
+    getStoredKeyVersion: _getStoredKeyVersion
   };
 })();
 

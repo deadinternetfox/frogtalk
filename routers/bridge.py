@@ -303,6 +303,11 @@ async def create_bridge_endpoint(body: CreateBridgeRequest, current_user: dict =
         raise HTTPException(404, "Room not found")
     if room["owner_id"] != current_user["id"]:
         raise HTTPException(403, "Only room owner can create bridges")
+    # Private rooms cannot be bridged: the bridge bot is a 3rd-party endpoint
+    # outside the E2EE trust boundary. Bridging would leak plaintext to the
+    # remote platform and defeat the room's encryption + key-rotation model.
+    if (room.get("type") or "public") == "private":
+        raise HTTPException(403, "Bridges are not available for private (E2EE) rooms")
     if len(body.bot_token) < 20 or ":" not in body.bot_token:
         raise HTTPException(400, "Invalid bot token format")
 
@@ -364,6 +369,8 @@ async def bridge_prepare_code(body: PrepareCodeRequest, current_user: dict = Dep
         raise HTTPException(404, "Room not found")
     if room["owner_id"] != current_user["id"]:
         raise HTTPException(403, "Only room owner can create bridges")
+    if (room.get("type") or "public") == "private":
+        raise HTTPException(403, "Bridges are not available for private (E2EE) rooms")
     if len(body.bot_token) < 20 or ":" not in body.bot_token:
         # FrogTalk bot tokens are `bot_xxxxx`; accept those too.
         if not body.bot_token.startswith("bot_"):
@@ -626,6 +633,8 @@ async def discord_bridge_prepare_code(body: PrepareDiscordCodeRequest,
         raise HTTPException(404, "Room not found")
     if room["owner_id"] != current_user["id"]:
         raise HTTPException(403, "Only room owner can create bridges")
+    if (room.get("type") or "public") == "private":
+        raise HTTPException(403, "Bridges are not available for private (E2EE) rooms")
 
     for _ in range(10):
         code = _gen_code()
@@ -757,6 +766,8 @@ async def create_discord_bridge_endpoint(body: CreateDiscordBridgeRequest, curre
         raise HTTPException(404, "Room not found")
     if room["owner_id"] != current_user["id"]:
         raise HTTPException(403, "Only room owner can create bridges")
+    if (room.get("type") or "public") == "private":
+        raise HTTPException(403, "Bridges are not available for private (E2EE) rooms")
     channel_id, guild_id = await _validate_discord_channel_access(body.discord_channel_id)
     bridge_id = db.create_discord_bridge(
         room_name=body.room_name,

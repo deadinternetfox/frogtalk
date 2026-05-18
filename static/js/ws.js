@@ -200,9 +200,18 @@ const WS = (() => {
         // received it (so E2E stays intact). Decrypt before rendering.
         let plain = data.content;
         try {
-          const key = State.roomKeys[room];
+          const ver = parseInt(data.key_version, 10) || 0;
+          let key = State.roomKeys[room];
+          let aad = null;
+          if (ver > 0 && window.Rooms && typeof Rooms.getRoomKeyForVersion === 'function') {
+            try { key = (await Rooms.getRoomKeyForVersion(room, ver)) || key; } catch {}
+            try {
+              const r = (State.rooms || []).find(x => x.name === room);
+              if (r && r.id) aad = Rooms.aadForRoom(r.id, ver);
+            } catch {}
+          }
           if (key && data.content) {
-            const p = await Crypto.decrypt(data.content, key);
+            const p = await Crypto.decrypt(data.content, key, aad || undefined);
             if (p !== null) plain = p;
           }
         } catch {}
@@ -628,20 +637,69 @@ const WS = (() => {
         } catch {}
         break;
       }
+      // ── Private-room key rotation ────────────────────────────────────
+      // Sent only to the moderator who just performed a ban — instructs
+      // their client to generate and fan out a fresh room key.
+      case 'room_should_rotate': {
+        try {
+          if (window.Rooms && typeof Rooms.rotateRoomKey === 'function') {
+            Rooms.rotateRoomKey(data.room, {
+              reason: data.reason || 'ban',
+              targetUserId: data.target_user_id || null,
+              targetNickname: data.target_nickname || null,
+            }).catch(e => console.warn('[ws] auto-rotate failed', e));
+          }
+        } catch (e) { console.warn('[ws] room_should_rotate handler', e); }
+        break;
+      }
+      // Sent to each remaining member after a successful rotation. Carries
+      // the new room secret encrypted with the recipient's Signal session.
+      case 'room_key_envelope': {
+        try {
+          if (window.Rooms && typeof Rooms.installRotatedKey === 'function') {
+            Rooms.installRotatedKey({
+              room: data.room,
+              version: data.version,
+              env: data.env,
+              from_user_id: data.from_user_id,
+              from_nickname: data.from_nickname,
+            }).catch(e => console.warn('[ws] installRotatedKey failed', e));
+          }
+        } catch (e) { console.warn('[ws] room_key_envelope handler', e); }
+        break;
+      }
       case 'pong': break;
     }
   }
 
   async function decryptMsg(msg, room) {
     if (!msg.content) return msg;
-    const key = State.roomKeys[room];
+    // System messages (e.g. key rotation notices) ship as plaintext JSON —
+    // never attempt to AES-decrypt them.
+    if (msg.system_kind) {
+      return { ...msg, _decrypted: false, _system: true };
+    }
+    // Version-aware key selection. For private rooms the message carries
+    // `key_version` (0 = legacy no-AAD wire format). Public rooms still
+    // use the single in-memory roomKeys entry.
+    const ver = parseInt(msg.key_version, 10) || 0;
+    let key = null;
+    let aad = null;
+    if (ver > 0 && window.Rooms && typeof Rooms.getRoomKeyForVersion === 'function') {
+      try { key = await Rooms.getRoomKeyForVersion(room, ver); } catch { key = null; }
+      try {
+        const r = (State.rooms || []).find(x => x.name === room);
+        if (r && r.id) aad = Rooms.aadForRoom(r.id, ver);
+      } catch {}
+    }
+    if (!key) key = State.roomKeys[room];
     if (!key) return msg;
-    const plain = await Crypto.decrypt(msg.content, key);
+    const plain = await Crypto.decrypt(msg.content, key, aad || undefined);
     const out = { ...msg, content: plain !== null ? plain : msg.content, _decrypted: plain !== null };
     // Also decrypt the quoted parent content so replies show plaintext, not ciphertext.
     if (msg.reply_content) {
       try {
-        const rp = await Crypto.decrypt(msg.reply_content, key);
+        const rp = await Crypto.decrypt(msg.reply_content, key, aad || undefined);
         if (rp !== null) out.reply_content = rp;
       } catch {}
     }
