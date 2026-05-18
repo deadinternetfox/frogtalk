@@ -34,7 +34,7 @@ No company in the middle. Messages stay private. Built in the open.
 
 > **Your chat, your server, your keys.** No company in the middle, no plaintext on disk, no telemetry tax.
 
-- 🔐 **Real E2E** — Signal Protocol (X3DH + Double Ratchet) for DMs, per-room AES-256-GCM for private channels. The server stores ciphertext and nothing else.
+- 🔐 **Real E2E** — Signal Protocol (X3DH + Double Ratchet) for DMs, per-room AES-256-GCM (AAD-bound, with key rotation on ban/kick) for private channels. The server stores ciphertext and nothing else.
 - 🌐 **Federated** — your node talks to other nodes; users, profiles, posts, rooms and DMs replicate across the swamp.
 - 🧅 **Tor-native** — flip a flag and your node lives behind a `.onion`; clearnet IP never leaks.
 - 📱 **Everywhere** — Web, Android (APK), iOS (TestFlight), Windows portable, Linux AppImage / `.deb`, and Electron desktop.
@@ -47,7 +47,7 @@ No company in the middle. Messages stay private. Built in the open.
 
 | | |
 |---|---|
-| 🔐 **E2E Encryption** | Signal Protocol for DMs (X3DH + Double Ratchet) and per-room AES-256-GCM for private channels, client-side only — the server never sees plaintext |
+| 🔐 **E2E Encryption** | Signal Protocol for DMs (X3DH + Double Ratchet) and per-room AES-256-GCM (AAD-bound v2 wire format, automatic key rotation on ban/kick) for private channels, client-side only — the server never sees plaintext |
 | 🌐 **Federated** | Your node joins the global FrogTalk directory and talks to other nodes |
 | 🔁 **Cross-node Sync** | Replicates users/profile status, social follows/posts/stories, rooms, and DMs across nodes |
 | ⚡ **Real-time** | WebSocket messaging with auto-reconnect, typing indicators, reactions |
@@ -199,11 +199,18 @@ practical guarantee:
   recipient's published prekey bundle establishes a Double Ratchet session.
   Every DM advances the ratchet, so forward secrecy is per-message and a
   device compromise tomorrow can't decrypt today's traffic.
-- **Room messages — per-channel AES-256-GCM.** Private channels are sealed
-  with a 256-bit AES-GCM key derived (HKDF-SHA-256) from a shared channel
-  secret distributed to new members through their already-established
-  Signal DM session. Public channels intentionally have no key — they are
-  designed to be world-readable and are stored in plaintext.
+- **Room messages — per-channel AES-256-GCM with AAD binding + key rotation.**
+  Private channels are sealed with a 256-bit AES-GCM key derived (HKDF-SHA-256)
+  from a shared channel secret distributed to new members through their
+  already-established Signal DM session. Ciphertext is bound to a specific
+  room id and key version via AES-GCM Additional Authenticated Data
+  (`room:<id>:v<N>`, v2 wire format `[0x02][iv:12][ct+tag]`), so a captured
+  ciphertext cannot be replayed against another room or an older key. When a
+  member is banned or kicked, or a moderator presses **Rotate room key now**,
+  a fresh key is generated client-side and fanned out to every remaining
+  member via their Signal DM session; the rotation is announced in-channel
+  as a system message. Public channels intentionally have no key — they are
+  designed to be world-readable and are stored encrypted-at-rest only.
 - **Voice/video calls — DTLS fingerprint signing.** SDP offers and answers
   carry an XEdDSA signature over the call's DTLS fingerprint so a hostile
   signalling server can't silently MITM the media path. A Safety-Numbers
@@ -214,7 +221,10 @@ practical guarantee:
 - **Bridged channels.** Channels with an outbound Discord/Telegram bridge
   intentionally fall back to plaintext so the bridge can forward the
   message text to the third-party platform; this is clearly indicated in
-  the channel header. DMs are never bridged.
+  the channel header. **Bridges are not available for private (E2EE) rooms**
+  — forwarding to Discord/Telegram would leak plaintext to a third-party
+  service and defeat end-to-end encryption, so all four bridge-create
+  endpoints reject private rooms with HTTP 403. DMs are never bridged.
 - **Private keys** are generated client-side and never leave the device.
   They live in IndexedDB (web/desktop) or the OS keystore (Android/iOS).
 

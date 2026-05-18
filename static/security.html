@@ -304,13 +304,19 @@
     <p>
       We're honest about this because users deserve to know the threat model. <strong>The
       encryption primitives are standard</strong> (ECDH-P256 → SHA-256 → AES-GCM-256, fresh
-      96-bit IV per message) <strong>but the surrounding plumbing is still being deslopped.</strong>
+      96-bit IV per message, AAD-bound ciphertext for private channels with automatic key
+      rotation on ban/kick) <strong>but the surrounding plumbing is still being deslopped.</strong>
       Don't expect bank-grade security or privacy yet — especially in DMs. Help us get there.
     </p>
     <div class="callout">
       <strong>Threat model:</strong> we assume the server can be compromised. DM bodies are
       end-to-end encrypted, keys never touch the server, recovery keys are 256-bit tokens
-      stored as SHA-256 hashes only. If you find a way around that — please report it loudly.
+      stored as SHA-256 hashes only. Private channels use per-room AES-256-GCM with AAD-bound
+      ciphertext (room id + key version) and automatic key rotation on ban/kick \u2014 a captured
+      ciphertext cannot be replayed against another room or an older key, and a banned user
+      cannot read messages sent after the rotation. Bridges to Discord/Telegram are blocked
+      for private rooms (they would leak plaintext to a third party). If you find a way around
+      any of that \u2014 please report it loudly.
     </div>
     <p style="margin-top:1.1rem;">
       <strong>How you can help (any of these are huge):</strong>
