@@ -4092,6 +4092,14 @@ window._applyRoomBanUI = function _applyRoomBanUI(room) {
         info._expiresMs = (isNaN(t) || t <= 0) ? null : t;
       } catch { info._expiresMs = null; }
     }
+    // A new ban supersedes any in-flight "you're unbanned" confirmation
+    // — yank it before painting the red banner so the user isn't told
+    // two contradictory things at once.
+    try {
+      const oldGreen = document.getElementById('room-unban-banner');
+      if (oldGreen) oldGreen.remove();
+      if (window._roomUnbanNotices) delete window._roomUnbanNotices[room];
+    } catch {}
     // Hide composer + reply preview + mention popup; the banner takes their place.
     if (inputWrap) inputWrap.style.display = 'none';
     if (replyBar) replyBar.style.display = 'none';
@@ -4271,10 +4279,14 @@ window._showRoomUnbannedBanner = function _showRoomUnbannedBanner(room, opts) {
     opts = opts || {};
     const inputArea = document.getElementById('input-area');
     if (!inputArea) return;
-    const title = opts.timerElapsed ? 'Your ban has expired' : 'You are now unbanned';
+    const title = opts.timerElapsed
+      ? 'Your ban has expired'
+      : (opts.rejoined ? 'You have been unbanned' : 'You are now unbanned');
     const body = opts.timerElapsed
       ? 'You may rejoin this channel.'
-      : 'You may rejoin this channel via invite link or by searching.';
+      : (opts.rejoined
+          ? 'Welcome back — you can send messages here again.'
+          : 'You may rejoin this channel via invite link or by searching.');
     const byLine = (!opts.timerElapsed && opts.by)
       ? ` <span style="color:#9ca3af;">·</span> <span style="color:#9ca3af;">by</span> <strong>@${UI.escHtml(opts.by)}</strong>`
       : '';

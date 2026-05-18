@@ -1115,7 +1115,7 @@ const Rooms = (() => {
     if (_staleBanCleared) {
       try {
         if (typeof window._showRoomUnbannedBanner === 'function') {
-          window._showRoomUnbannedBanner(name, {});
+          window._showRoomUnbannedBanner(name, { rejoined: true });
         }
       } catch {}
     }
