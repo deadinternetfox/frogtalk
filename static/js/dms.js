@@ -1,6 +1,8 @@
 /* ─── dms.js ──────────────────────────────────────────────────────────────── */
 'use strict';
 
+const SPOILER_EYE = '\u{1F441}\uFE0F';
+
 let _dmChannels  = [];    // [{id, with_user_id, nickname, avatar, unread, last_msg}]
 let _activeDM    = null;  // {id, nickname, avatar, user_id}
 let _dmMessages  = [];    // local cache for active DM
@@ -1633,7 +1635,7 @@ function renderDMMessage (m) {
         .replace('class="msg-media"', 'class="spoiler-img msg-media"')
         .replace(/onclick="[^"]*"/, '');
       mediaHtml = `<div class="spoiler-wrap" id="sp-dm-${m.id}" onclick="revealDMSpoiler(this, event)" data-media="${esc(mediaUrl)}">
-        <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
+        <div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>
         ${wrappedInner}
       </div>`;
     } else {
@@ -1767,7 +1769,7 @@ function renderDMMessage (m) {
     && !isViewOnceConsumed;
   const canToggleDMSpoiler = _hasVisualDmMedia;
   const spoilerBtnHtml = canToggleDMSpoiler
-    ? `<button class="msg-act-btn msg-spoiler-btn" data-blur="${m.media_blur ? 1 : 0}" title="${m.media_blur ? 'Remove spoiler' : 'Mark as spoiler'}" onclick="toggleDMSpoiler(${m.id})">${m.media_blur ? '👁️‍🗨️' : '👁️'}</button>`
+    ? `<button class="msg-act-btn msg-spoiler-btn" data-blur="${m.media_blur ? 1 : 0}" title="${m.media_blur ? 'Remove spoiler' : 'Mark as spoiler'}" onclick="toggleDMSpoiler(${m.id})">${SPOILER_EYE}</button>`
     : '';
   // SECURITY: reply button stores reply context in data-* attrs and reads
   // them back via this.dataset.* so DM plaintext NEVER ends up interpolated
@@ -1831,7 +1833,7 @@ function _updateDMSpoilerBtn(msgEl, blur) {
   try {
     const btn = msgEl.querySelector('.msg-spoiler-btn');
     if (btn) {
-      btn.textContent = blur ? '👁️‍🗨️' : '👁️';
+      btn.textContent = SPOILER_EYE;
       btn.title = blur ? 'Remove spoiler' : 'Mark as spoiler';
       btn.dataset.blur = blur ? '1' : '0';
     }
@@ -1845,7 +1847,7 @@ function _wrapDMNodeInSpoiler(msgId, node, mediaUrl) {
   wrap.id = `sp-dm-${msgId}`;
   wrap.dataset.media = mediaUrl || '';
   wrap.onclick = (e) => revealDMSpoiler(wrap, e);
-  wrap.innerHTML = '<div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>';
+  wrap.innerHTML = `<div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>`;
   if (node.classList?.contains('msg-media')) {
     node.classList.add('spoiler-img');
     node.removeAttribute('onclick');
@@ -2249,7 +2251,7 @@ async function loadDMMedia (msgId, channelId) {
         .replace('class="msg-media"', 'class="spoiler-img msg-media"')
         .replace(/onclick="[^"]*"/, '');
       html = `<div class="spoiler-wrap" id="sp-dm-${msgId}" onclick="revealDMSpoiler(this, event)" data-media="${esc(data.media_data)}">
-        <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
+        <div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>
         ${wrappedInner}
       </div>`;
     }

@@ -14,6 +14,8 @@ const Messages = (() => {
   // Inline SVG logos for bridge origin badge (tiny, monochrome, currentColor).
   const _TG_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg>';
   const _DC_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z"/></svg>';
+  // Colored eye (U+1F441 + U+FE0F) — matches composer .att-spoiler-eye / media flags.
+  const SPOILER_EYE = '\u{1F441}\uFE0F';
 
   function _bridgeBadge(msg) {
     const p = msg && msg.bridge_platform;
@@ -725,7 +727,7 @@ const Messages = (() => {
     try {
       const btn = msgEl.querySelector('.msg-spoiler-btn');
       if (btn) {
-        btn.textContent = blur ? '👁️‍🗨️' : '👁️';
+        btn.textContent = SPOILER_EYE;
         btn.title = blur ? 'Remove spoiler' : 'Mark as spoiler';
         btn.dataset.blur = blur ? '1' : '0';
       }
@@ -739,8 +741,8 @@ const Messages = (() => {
     wrap.className = 'spoiler-wrap';
     wrap.id = `sp-${msgId}`;
     wrap.addEventListener('click', (e) => revealSpoiler(msgId, e));
-    wrap.innerHTML = '<div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>'
-      + '<button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview">👁️</button>';
+    wrap.innerHTML = `<div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>`
+      + `<button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview">${SPOILER_EYE}</button>`;
     const rehide = wrap.querySelector('.spoiler-rehide');
     if (rehide) {
       rehide.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); hideSpoiler(msgId, e); });
@@ -1324,9 +1326,9 @@ const Messages = (() => {
     // Spoiler blur (images/video only)
     if (msg.media_blur && !msg.media_type?.startsWith('audio')) {
       return `<div class="spoiler-wrap" id="sp-${msg.id}" onclick="Messages.revealSpoiler(${msg.id}, event)">
-        <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
+        <div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>
         <button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview"
-          onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msg.id}, event)">👁️</button>
+          onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msg.id}, event)">${SPOILER_EYE}</button>
         ${inner.replace('class="msg-media', 'class="spoiler-img msg-media')}
       </div>`;
     }
@@ -1820,7 +1822,7 @@ const Messages = (() => {
       && !msg.view_once;
     const canToggleSpoiler = _hasVisualMedia && (isOwn || canModerateHere);
     const spoilerBtnHtml = canToggleSpoiler
-      ? `<button class="msg-act-btn msg-spoiler-btn" data-blur="${msg.media_blur ? 1 : 0}" title="${msg.media_blur ? 'Remove spoiler' : 'Mark as spoiler'}" onclick="Messages.toggleSpoiler(${msg.id})">${msg.media_blur ? '👁️‍🗨️' : '👁️'}</button>`
+      ? `<button class="msg-act-btn msg-spoiler-btn" data-blur="${msg.media_blur ? 1 : 0}" title="${msg.media_blur ? 'Remove spoiler' : 'Mark as spoiler'}" onclick="Messages.toggleSpoiler(${msg.id})">${SPOILER_EYE}</button>`
       : '';
     const showAdminControls = State.user?.is_admin && !isOwn;
     // Owner / mod / admin can kick/ban other users at the room level
@@ -2970,9 +2972,9 @@ const Messages = (() => {
       // skipping this so the image displayed uncovered on scroll-in.
       if (isBlur && !mediaType.startsWith('audio')) {
         html = `<div class="spoiler-wrap" id="sp-${msgId}" onclick="Messages.revealSpoiler(${msgId}, event)">
-          <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
+          <div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>
           <button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview"
-            onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msgId}, event)">👁️</button>
+            onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msgId}, event)">${SPOILER_EYE}</button>
           ${html.replace('class="msg-media', 'class="spoiler-img msg-media')}
         </div>`;
       }
