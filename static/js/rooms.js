@@ -2078,11 +2078,20 @@ const Rooms = (() => {
     const dirDesc = (document.getElementById('ch-dir-desc')?.value || '').slice(0, 1200);
     const dirTags = dirTagsRaw.split(',').map(t => t.trim()).filter(Boolean).slice(0, 10);
     
-    await fetch(`/api/directory/channels/${encodeURIComponent(_currentSettingsRoom)}/visibility`, {
+    const dirRoom = (_currentSettingsRoom !== name) ? name : _currentSettingsRoom;
+    await fetch(`/api/directory/channels/${encodeURIComponent(dirRoom)}/visibility`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
       body: JSON.stringify({ is_public: !!dirListed, category: dirCategory, tags: dirTags, directory_description: dirDesc })
     });
+
+    if (_currentSettingsRoom !== name) {
+      try {
+        if (window.Music && typeof Music.migrateRoomPreferences === 'function') {
+          Music.migrateRoomPreferences(_currentSettingsRoom, name);
+        }
+      } catch {}
+    }
     
     closeModal('modal-channel-settings');
     UI.showToast('Channel settings saved');

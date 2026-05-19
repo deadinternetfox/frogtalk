@@ -731,6 +731,10 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     clean_desc = _sanitize_room_text(body.description, max_len=256) if body.description is not None else None
     clean_about = _sanitize_room_text(body.about, max_len=2000, multiline=True) if body.about is not None else None
 
+    renamed_to = None
+    if body.name and body.name != room_name:
+        renamed_to = body.name
+
     ok = db.update_room_settings(
         room_name,
         name=body.name,
@@ -747,7 +751,26 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     )
     if not ok:
         return JSONResponse(status_code=409, content={"error": "Update failed (name conflict?)"})
-    return {"ok": True}
+
+    effective_name = renamed_to or room_name
+    if renamed_to:
+        _emit_federation_room_event("room.renamed", {
+            "old_name": room_name,
+            "new_name": renamed_to,
+            "room_name": renamed_to,
+        })
+    if body.channel_type is not None and _existing_room:
+        prev_ct = (_existing_room.get("channel_type") or "text")
+        if prev_ct != body.channel_type and body.channel_type == "music":
+            room_after = db.get_room_by_name(effective_name)
+            if room_after:
+                _emit_federation_room_event("room.music.settings", {
+                    "room_name": effective_name,
+                    "channel_type": "music",
+                    "dj_only": bool(room_after.get("dj_only_queue")),
+                })
+
+    return {"ok": True, "renamed_to": renamed_to} if renamed_to else {"ok": True}
 
 
 # ─── Channel theme background image upload ───────────────────────────────────
@@ -1799,6 +1822,55 @@ async def _fetch_yt_meta(video_id: str):
         return "", f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
 
+async def _fetch_oembed_meta(url: str) -> tuple[str, str]:
+    """Best-effort title + thumbnail for Spotify / SoundCloud links."""
+    try:
+        import urllib.request, urllib.parse, json as _json
+        u = (url or "").strip()
+        if not u:
+            return "", ""
+        host = (urlsplit(u).hostname or "").lower()
+        if _is_spotify_host(host):
+            oe = "https://open.spotify.com/oembed?" + urllib.parse.urlencode({"url": u})
+        elif _is_soundcloud_host(host):
+            oe = "https://soundcloud.com/oembed?" + urllib.parse.urlencode(
+                {"url": u, "format": "json"}
+            )
+        else:
+            return "", ""
+
+        req = urllib.request.Request(oe, headers={"User-Agent": "FrogTalk/1.0"})
+
+        def _blocking_fetch():
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.read().decode("utf-8")
+
+        raw = await asyncio.to_thread(_blocking_fetch)
+        data = _json.loads(raw)
+        title = str(data.get("title") or "")[:200]
+        thumb = str(data.get("thumbnail_url") or "")
+        return title, thumb
+    except Exception:
+        return "", ""
+
+
+async def _enrich_track_artwork(track: dict | None) -> None:
+    """Fill missing thumbnail/title on queue rows (in-place)."""
+    if not track or track.get("thumbnail"):
+        return
+    provider = (track.get("provider") or "").lower()
+    if provider == "youtube":
+        vid = str(track.get("video_id") or "")
+        if re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+            track["thumbnail"] = f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
+        return
+    title, thumb = await _fetch_oembed_meta(track.get("url") or "")
+    if thumb:
+        track["thumbnail"] = thumb
+    if title and len(str(track.get("title") or "")) < 4:
+        track["title"] = title
+
+
 # Track-playback start timestamps so joiners can sync to the current position.
 # In-memory only — we don't need persistence for this (on restart the queue will
 # just start from the head again, which is acceptable).
@@ -1881,6 +1953,12 @@ async def music_get_queue(room_name: str, current_user: dict = Depends(get_curre
     djs = db.dj_list(room_name)
     is_admin = bool(current_user.get("is_admin"))
     current = queue[0] if queue else None
+    # Enrich artwork for the head + next few tracks (Spotify/SC oEmbed).
+    for t in queue[:4]:
+        try:
+            await _enrich_track_artwork(t)
+        except Exception:
+            pass
     position_sec = _music_position_sec(room_name, current)
     return {
         "queue": queue,
@@ -1912,16 +1990,19 @@ async def music_add_to_queue(room_name: str, body: AddTrackRequest,
     if provider == "youtube":
         title, thumb = await _fetch_yt_meta(video_id)
     elif provider == "spotify":
-        title = body.url.rsplit("/", 1)[-1]
-        thumb = ""
+        title, thumb = await _fetch_oembed_meta(body.url.strip())
+        if not title:
+            title = body.url.rsplit("/", 1)[-1]
     elif provider == "soundcloud":
-        # Best-effort title from the slug; widget itself renders full artwork.
-        try:
-            slug = video_id.rstrip("/").rsplit("/", 1)[-1]
-            title = slug.replace("-", " ").strip()[:120] or "SoundCloud track"
-        except Exception:
-            title = "SoundCloud track"
-        thumb = ""
+        title, thumb = await _fetch_oembed_meta(body.url.strip())
+        if not title:
+            try:
+                slug = video_id.rstrip("/").rsplit("/", 1)[-1]
+                title = slug.replace("-", " ").strip()[:120] or "SoundCloud track"
+            except Exception:
+                title = "SoundCloud track"
+        if not thumb:
+            thumb = ""
 
     had_current = db.music_get_current(room_name)
     track_id = db.music_add_track(
@@ -2052,7 +2133,7 @@ async def music_skip(room_name: str,
         if expected_id is None or current is None:
             return {"ok": False, "stale": True, "skipped": None}
         played_sec = _music_position_sec(room_name, current)
-        if played_sec < 10:
+        if played_sec < 5:
             return {"ok": False, "too_early": True, "skipped": None}
     if current:
         db.music_mark_played(current["id"], room_name)

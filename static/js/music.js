@@ -79,6 +79,8 @@ const Music = (() => {
   // leaving the player stuck on the last frame). Reset on every
   // head-track change.
   let _currentDurationSec = 0;
+  let _scLastPositionSec = 0;   // SoundCloud playhead from getPosition (seconds)
+  const _artHydrateInFlight = new Set();
 
   // Live radio-sync probe state. We poll the iframe's actual play head
   // every ~4s while the panel is visible and audio is playing, and update
@@ -152,6 +154,8 @@ const Music = (() => {
         frame.contentWindow.postMessage(
           JSON.stringify({ method: 'addEventListener', value: ev }), _frameOrigin(frame));
       });
+      frame.contentWindow.postMessage(
+        JSON.stringify({ method: 'getDuration' }), _frameOrigin(frame));
     } catch {}
   }
 
@@ -214,6 +218,7 @@ const Music = (() => {
         // during iframe mount/track-change leaves the strip stuck on
         // "Paused" even after audio is happily playing again.
         _broadcastIfChanged();
+        try { _checkTrackEnded(); } catch {}
         // Belt + braces: the postMessages above are async — YT's reply
         // updates _lastPlayerState ~tens of ms later. Schedule a
         // delayed repaint so any state correction from this tick's
@@ -316,6 +321,12 @@ const Music = (() => {
     'i1.sndcdn.com',
     'i.scdn.co',
   ]);
+  function _isAllowedArtHost(hostname) {
+    const h = String(hostname || '').toLowerCase();
+    if (!h) return false;
+    if (_ARTWORK_HOSTS.has(h)) return true;
+    return h.endsWith('.sndcdn.com') || h.endsWith('.scdn.co');
+  }
   function _safeArtwork(url) {
     if (!url || typeof url !== 'string') return '';
     if (url.length > 2048) return '';
@@ -327,11 +338,63 @@ const Music = (() => {
     try {
       const u = new URL(url, location.origin);
       if (u.protocol !== 'https:' && u.protocol !== 'http:') return '';
-      if (!_ARTWORK_HOSTS.has(u.hostname)) return '';
+      if (!_isAllowedArtHost(u.hostname)) return '';
       // Force https on http CDN urls.
       if (u.protocol === 'http:') u.protocol = 'https:';
       return u.toString();
     } catch { return ''; }
+  }
+
+  function _trackArtUrl(track) {
+    if (!track) return '';
+    const fromDb = _safeArtwork(track.thumbnail || track.artwork || '');
+    if (fromDb) return fromDb;
+    const p = (track.provider || '').toLowerCase();
+    const vid = String(track.video_id || '');
+    if (p === 'youtube' && /^[A-Za-z0-9_-]{11}$/.test(vid)) {
+      return `https://img.youtube.com/vi/${vid}/hqdefault.jpg`;
+    }
+    return '';
+  }
+
+  function _cssUrl(url) {
+    return String(url || '').replace(/\\/g, '\\\\').replace(/'/g, '%27');
+  }
+
+  function _patchTrackArtInDom(thumbUrl) {
+    if (!thumbUrl) return;
+    const css = _cssUrl(thumbUrl);
+    document.querySelectorAll('.mp-art, .mp-pl-now-art, .mp-pl-art, .mmd-art').forEach((el) => {
+      el.style.backgroundImage = `url('${css}')`;
+      el.classList.remove('no-art');
+    });
+  }
+
+  async function _hydrateTrackArtwork(track) {
+    if (!track || !track.url || _trackArtUrl(track)) return;
+    const key = String(track.url);
+    if (_artHydrateInFlight.has(key)) return;
+    _artHydrateInFlight.add(key);
+    try {
+      const r = await fetch(
+        'https://noembed.com/embed?url=' + encodeURIComponent(track.url)
+      );
+      if (!r.ok) return;
+      const d = await r.json();
+      const thumb = _safeArtwork(d.thumbnail_url || '');
+      if (thumb) {
+        track.thumbnail = thumb;
+        _patchTrackArtInDom(thumb);
+      }
+      const t = String(d.title || '').trim();
+      if (t && (!track.title || /track$/i.test(track.title))) {
+        track.title = t.slice(0, 200);
+        const titleEl = document.querySelector('.mp-title, .mmd-title');
+        if (titleEl) titleEl.textContent = track.title;
+      }
+    } catch {} finally {
+      _artHydrateInFlight.delete(key);
+    }
   }
 
   // Length-cap + control-char strip for any string we hand to the system
@@ -369,8 +432,37 @@ const Music = (() => {
   const _AUTONEXT_ON_SVG  = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/><circle cx="20" cy="5" r="3" fill="#4caf50"/></svg>';
   const _AUTONEXT_OFF_SVG = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;opacity:0.55"><path d="M6 5l9 7-9 7V5zm11 0h2v14h-2V5z"/><path d="M3 21L21 3" stroke="#e74c3c" stroke-width="2" fill="none"/></svg>';
   const _AUTONEXT_LS_KEY = 'frogtalk:music:autonext';
-  function _autoNextEnabled() {
-    try { return localStorage.getItem(_AUTONEXT_LS_KEY) !== '0'; } catch { return true; }
+  const _AUTONEXT_LS_PREFIX = 'frogtalk:music:autonext:';
+  function _autoNextKey(room) {
+    const r = room || _room || '';
+    return r ? (_AUTONEXT_LS_PREFIX + r) : _AUTONEXT_LS_KEY;
+  }
+  function _autoNextEnabled(room) {
+    try {
+      const r = room || _room || '';
+      if (r) {
+        const v = localStorage.getItem(_AUTONEXT_LS_PREFIX + r);
+        if (v === '0' || v === '1') return v !== '0';
+      }
+      return localStorage.getItem(_AUTONEXT_LS_KEY) !== '0';
+    } catch { return true; }
+  }
+  const _ROOM_NAME_SAFE_RE = /^[a-z0-9_-]{1,32}$/;
+  function migrateRoomPreferences(oldRoom, newRoom) {
+    if (!oldRoom || !newRoom || oldRoom === newRoom) return;
+    if (!_ROOM_NAME_SAFE_RE.test(String(oldRoom)) || !_ROOM_NAME_SAFE_RE.test(String(newRoom))) return;
+    const prefixes = [_AUTOFILL_LS_PREFIX, _AUTONEXT_LS_PREFIX];
+    for (const prefix of prefixes) {
+      const oldK = prefix + oldRoom;
+      const newK = prefix + newRoom;
+      try {
+        const v = localStorage.getItem(oldK);
+        if (v !== null) {
+          if (localStorage.getItem(newK) === null) localStorage.setItem(newK, v);
+          localStorage.removeItem(oldK);
+        }
+      } catch {}
+    }
   }
 
   // Owner / DJ toggle: when the channel queue runs dry, automatically
@@ -468,8 +560,9 @@ const Music = (() => {
     });
   }
   function toggleAutoNext(btn) {
-    const next = !_autoNextEnabled();
-    try { localStorage.setItem(_AUTONEXT_LS_KEY, next ? '1' : '0'); } catch {}
+    const room = _room || '';
+    const next = !_autoNextEnabled(room);
+    try { localStorage.setItem(_autoNextKey(room), next ? '1' : '0'); } catch {}
     _syncAutoNextButtons();
     try { UI.showToast && UI.showToast('Auto-next ' + (next ? 'on' : 'off'), 'info', 1500); } catch {}
     // If we just turned auto-next OFF while the big-player was sitting
@@ -813,7 +906,11 @@ const Music = (() => {
   const _MAX_TRACK_POS_SEC = 4 * 3600;
 
   function _setAnchor(track, serverPosSec) {
-    if (!track) { _anchorMs = 0; _anchorTrackKey = ''; _userPaused = false; _currentDurationSec = 0; return; }
+    if (!track) {
+      _anchorMs = 0; _anchorTrackKey = ''; _userPaused = false;
+      _currentDurationSec = 0; _scLastPositionSec = 0;
+      return;
+    }
     const key = `${track.provider}:${track.video_id}`;
     let incoming = Math.max(0, parseInt(serverPosSec || 0, 10) || 0);
     // Clamp obviously-impossible server readings (see _MAX_TRACK_POS_SEC).
@@ -829,7 +926,12 @@ const Music = (() => {
     // until the freshly-mounted iframe actually reports state=1 — without
     // this, a stale "1" from the previous track makes the next iframe
     // auto-skip before it even gets a chance to start.
-    if (key !== _anchorTrackKey) { _userPaused = false; _currentDurationSec = 0; _lastPlayerState = null; }
+    if (key !== _anchorTrackKey) {
+      _userPaused = false;
+      _currentDurationSec = 0;
+      _scLastPositionSec = 0;
+      _lastPlayerState = null;
+    }
 
     // Defensive: protect a healthy local clock from a stale/just-stamped
     // server reading. The server's _music_head_started is in-memory, and
@@ -1028,6 +1130,9 @@ const Music = (() => {
             && typeof parsed.info.playerState === 'number') {
           const ps = parsed.info.playerState;
           _lastPlayerState = ps;
+          if (ps === 0) {
+            try { _maybeAutoAdvanceOnEnded(); } catch {}
+          }
           // Capture duration whenever YT volunteers it. Different YT
           // builds send it on different infoDelivery messages; keep
           // the latest non-zero reading.
@@ -1064,6 +1169,12 @@ const Music = (() => {
         if (typeof parsed.method === 'string'
             && ev.origin
             && ev.origin.indexOf('soundcloud.com') !== -1) {
+          if (parsed.method === 'getDuration' && typeof parsed.value === 'number' && parsed.value > 0) {
+            _currentDurationSec = parsed.value / 1000;
+          }
+          if (parsed.method === 'finish') {
+            try { _maybeAutoAdvanceOnEnded(); } catch {}
+          }
           let scPaused = null;
           if (parsed.method === 'play') scPaused = false;
           else if (parsed.method === 'pause' || parsed.method === 'finish') scPaused = true;
@@ -1107,10 +1218,16 @@ const Music = (() => {
         } else if (parsed.method === 'getPosition'
                    && typeof parsed.value === 'number') {
           actualSec = parsed.value / 1000;
+          _scLastPositionSec = actualSec;
         }
         if (actualSec == null) return;
         _syncProbePending = false;
         if (playerState != null) _lastPlayerState = playerState;
+        const curSc = _state && _state.queue && _state.queue[0];
+        if (curSc && (curSc.provider || '') === 'soundcloud'
+            && _currentDurationSec > 0 && actualSec >= _currentDurationSec - 1.5) {
+          try { _maybeAutoAdvanceOnEnded(); } catch {}
+        }
         // If we have a timestamp for when the player generated this reading,
         // compare against the *expected position at that moment* — not
         // expected-now — so message latency doesn't get billed as drift.
@@ -1226,7 +1343,7 @@ const Music = (() => {
     for (const d of delays) {
       const t = setTimeout(() => {
         if (!_syncProbeTimer) return;  // probe was stopped meanwhile
-        if (document.hidden || _paused) return;
+        if (_paused) return;
         _runSyncProbe();
       }, d);
       _syncFastProbeTimers.push(t);
@@ -1256,40 +1373,35 @@ const Music = (() => {
     _syncProbeTimer = setInterval(_runSyncProbe, SYNC_PROBE_INTERVAL_MS);
   }
 
+  function _checkTrackEnded() {
+    const cur = _state && _state.queue && _state.queue[0];
+    if (!cur || _paused) return;
+    const prov = (cur.provider || '').toLowerCase();
+    if (prov === 'youtube' && _currentDurationSec > 0 && _anchorMs > 0
+        && _lastPlayerState === 1) {
+      const expected = _expectedPosSec();
+      if (expected >= _currentDurationSec + 2) {
+        try { _maybeAutoAdvanceOnEnded(); } catch {}
+      }
+      return;
+    }
+    if (prov === 'soundcloud' && _currentDurationSec > 0
+        && _scLastPositionSec >= _currentDurationSec - 1.5) {
+      try { _maybeAutoAdvanceOnEnded(); } catch {}
+    }
+  }
+
   function _runSyncProbe() {
     try {
-      if (document.hidden) return;       // tab hidden — pay nothing
       if (_paused) { _stopSyncProbe(); return; }
       const cur = _state && _state.queue && _state.queue[0];
       if (!cur) { _stopSyncProbe(); return; }
 
-      // Duration-overshoot fallback for auto-next. The YT iframe is
-      // supposed to fire onStateChange=0 (ended) when a track finishes,
-      // but on mobile and after lock-screen wake it sometimes never
-      // delivers that message — the track just stops, or YT autoplays
-      // the same track over from the beginning. Without this, the user
-      // sits on a dead mini-player despite auto-next being on. So once
-      // our local anchor says we're meaningfully past the known
-      // duration, force the auto-advance path. Dedupe inside
-      // _maybeAutoAdvanceOnEnded prevents this from double-firing.
-      //
-      // BUT only when YT has confirmed the iframe is actually playing
-      // (state=1). On mobile, autoplay is blocked for fresh iframes
-      // until the user taps play. While the user is still tapping, our
-      // local _anchorMs keeps ticking and would race past the known
-      // duration even though no audio ever played — yanking the queue
-      // forward and skipping every track autonomously. The ended-event
-      // dedupe doesn't save us because the *id* changes each skip, so
-      // the loop runs unbounded. Gate on _lastPlayerState===1 so the
-      // overshoot fallback only kicks in for tracks that actually
-      // started playing at some point.
-      if (_currentDurationSec > 0 && _anchorMs > 0 && _lastPlayerState === 1) {
-        const expected = _expectedPosSec();
-        if (expected >= _currentDurationSec + 2) {
-          try { _maybeAutoAdvanceOnEnded(); } catch {}
-          return;
-        }
-      }
+      // End-of-track checks run even when the tab is hidden / FrogSocial
+      // is open — otherwise auto-next never fires in the background.
+      _checkTrackEnded();
+
+      if (document.hidden) return;
 
       const frame = document.querySelector('#mp-player-wrap iframe.mp-frame');
       if (!frame || !frame.contentWindow) return;
@@ -1320,6 +1432,9 @@ const Music = (() => {
         } catch { _syncProbePending = false; }
       } else if (cur.provider === 'soundcloud') {
         try {
+          _bindSoundCloudWidget(frame);
+          frame.contentWindow.postMessage(
+            JSON.stringify({ method: 'getDuration' }), _frameOrigin(frame));
           frame.contentWindow.postMessage(
             JSON.stringify({ method: 'getPosition' }), _frameOrigin(frame));
         } catch { _syncProbePending = false; }
@@ -1714,7 +1829,7 @@ const Music = (() => {
       <div class="mp-now">
         <a class="mp-art" href="${_curUrlEsc}" target="_blank" rel="noopener noreferrer"
            title="Open on ${esc(cur.provider || 'source')}"
-           style="background-image:url('${esc(cur.thumbnail || '')}')"></a>
+           style="background-image:url('${_cssUrl(_trackArtUrl(cur))}')"></a>
         <div class="mp-info">
           <a class="mp-title" href="${_curUrlEsc}" target="_blank" rel="noopener noreferrer"
              title="Open this track on ${esc(cur.provider || 'source')} ↗">${esc(cur.title || cur.url)}</a>
@@ -1772,7 +1887,7 @@ const Music = (() => {
         ${nextTrack ? `
         <div class="mp-upnext-row">
           <span class="mp-upnext-label">Up next</span>
-          <div class="mp-upnext-art" style="background-image:url('${esc(nextTrack.thumbnail || '')}')"></div>
+          <div class="mp-upnext-art" style="background-image:url('${_cssUrl(_trackArtUrl(nextTrack))}')"></div>
           <div class="mp-upnext-title" title="${esc(nextTrack.title || nextTrack.url)}">${esc(nextTrack.title || nextTrack.url)}</div>
           <span class="mp-upnext-sub">${esc(nextTrack.submitter_nick || '')}</span>
         </div>` : `
@@ -1828,6 +1943,18 @@ const Music = (() => {
     // If the playlist modal is open, refresh it so it always reflects
     // the live queue (skips, removes, new submissions, etc.).
     if (document.getElementById('mp-playlist-modal')) _renderPlaylistModal();
+    if (cur && !_trackArtUrl(cur)) {
+      try { _hydrateTrackArtwork(cur); } catch {}
+    }
+    for (const t of upcoming.slice(0, 3)) {
+      if (t && !_trackArtUrl(t)) {
+        try { _hydrateTrackArtwork(t); } catch {}
+      }
+    }
+    try {
+      const scFrame = document.querySelector('#mp-player-wrap iframe.mp-frame');
+      if (cur && cur.provider === 'soundcloud') _bindSoundCloudWidget(scFrame);
+    } catch {}
   }
 
   async function mount(roomName, channelType) {
@@ -2031,8 +2158,9 @@ const Music = (() => {
     const titleEsc = esc(cur.title || cur.url || 'Now playing');
     const roomEsc = esc(_room || '');
     const sharerEsc = esc(cur.sharer || '');
-    const art = cur.thumbnail ? `style="background-image:url('${esc(cur.thumbnail)}')"` : '';
-    const noArt = cur.thumbnail ? '' : 'no-art';
+    const artUrl = _trackArtUrl(cur);
+    const art = artUrl ? `style="background-image:url('${_cssUrl(artUrl)}')"` : '';
+    const noArt = artUrl ? '' : 'no-art';
     const canPause = _providerSupportsPause(cur.provider);
     // Skip is allowed in solo mode (advances via Social.getNextMusicTrack /
     // discover fallback) and in room mode for users with can_control. For
@@ -2541,7 +2669,7 @@ const Music = (() => {
     const items = upcoming.map((t, i) => `
       <div class="mp-pl-item" data-tid="${t.id}">
         <span class="mp-pl-idx">${i + 1}</span>
-        <div class="mp-pl-art" style="background-image:url('${esc(t.thumbnail || '')}')"></div>
+        <div class="mp-pl-art" style="background-image:url('${_cssUrl(_trackArtUrl(t))}')"></div>
         <div class="mp-pl-info">
           <div class="mp-pl-title" title="${esc(t.title || t.url)}">${esc(t.title || t.url)}</div>
           <div class="mp-pl-sub">${esc(t.submitter_nick || '?')} · ${esc(t.provider || '')}</div>
@@ -2554,7 +2682,7 @@ const Music = (() => {
     const nowHtml = cur ? `
       <div class="mp-pl-now">
         <span class="mp-pl-now-pulse"></span>
-        <div class="mp-pl-now-art" style="background-image:url('${esc(cur.thumbnail || '')}')"></div>
+        <div class="mp-pl-now-art" style="background-image:url('${_cssUrl(_trackArtUrl(cur))}')"></div>
         <div class="mp-pl-info">
           <div class="mp-pl-now-label">Now playing</div>
           <div class="mp-pl-title" title="${esc(cur.title || cur.url)}">${esc(cur.title || cur.url)}</div>
@@ -2651,7 +2779,17 @@ const Music = (() => {
       },
       body: JSON.stringify(body),
     });
-    if (res.ok) { _state = await _fetchState(_room); _render(); }
+    let data = {};
+    try { data = await res.json(); } catch { data = {}; }
+    if (res.ok) {
+      if (data.too_early && isAuto) {
+        setTimeout(() => skip(expectedTrackId, { auto: true }), 2500);
+        return;
+      }
+      if (data.stale) return;
+      _state = await _fetchState(_room);
+      _render();
+    }
   }
 
   // Loop the current track from 0 in the YT/SC iframe. Used in solo
@@ -2686,7 +2824,8 @@ const Music = (() => {
     const q = (_state && _state.queue) || [];
     const cur = q[0];
     if (!cur) return;
-    if ((cur.provider || '') !== 'youtube') return;
+    const prov = (cur.provider || '').toLowerCase();
+    if (prov !== 'youtube' && prov !== 'soundcloud') return;
 
     // Auto-next OFF behavior:
     //   - solo mode (mini-dock / topbar / sidebar): loop the same
@@ -2964,6 +3103,7 @@ const Music = (() => {
            resyncNow, shareToWall, playSolo, updateCurrentMeta,
            pauseForExternalPlayback, restoreChannelPlayerIfNeeded,
            toggleAutoNext,
+           migrateRoomPreferences,
            toggleAutoFill,
            _syncAutoNextButtons,
            _syncPlayPauseButtons,

@@ -1,6 +1,7 @@
 """SQLite database layer for FrogChat."""
 import os
 import json
+import re
 import secrets
 import sqlite3
 import threading
@@ -4946,12 +4947,88 @@ def get_room_by_name(room_name: str) -> Optional[Dict]:
 get_room = get_room_by_name
 
 
+_ROOM_NAME_SAFE_RE = re.compile(r"^[a-z0-9_\-]{1,32}$")
+_RENAME_ROOM_TABLES = (
+    "messages",
+    "pinned_messages",
+    "room_djs",
+    "music_queue",
+    "telegram_bridges",
+    "discord_bridges",
+    "pending_room_key_envelopes",
+)
+
+
+def _rename_room_name_references(con: sqlite3.Connection, old_name: str, new_name: str) -> None:
+    """Re-key every table that stores ``room_name`` as text when a channel is renamed."""
+    old_name = str(old_name or "").strip()
+    new_name = str(new_name or "").strip()
+    if not _ROOM_NAME_SAFE_RE.match(old_name) or not _ROOM_NAME_SAFE_RE.match(new_name):
+        raise ValueError("invalid room name")
+    if old_name == new_name:
+        return
+    for table in _RENAME_ROOM_TABLES:
+        con.execute(f"UPDATE {table} SET room_name=? WHERE room_name=?", (new_name, old_name))
+    old_anchor_key = _music_anchor_config_key(old_name)
+    new_anchor_key = _music_anchor_config_key(new_name)
+    row = con.execute("SELECT value FROM config WHERE key=?", (old_anchor_key,)).fetchone()
+    if row and row["value"]:
+        con.execute(
+            "INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)",
+            (new_anchor_key, row["value"]),
+        )
+        con.execute("DELETE FROM config WHERE key=?", (old_anchor_key,))
+
+
+def cascade_room_rename(old_name: str, new_name: str) -> bool:
+    """Rename an existing room and re-key all ``room_name`` FKs. Names must match ``_ROOM_NAME_SAFE_RE``."""
+    old_name = str(old_name or "").strip()
+    new_name = str(new_name or "").strip()
+    if not _ROOM_NAME_SAFE_RE.match(old_name) or not _ROOM_NAME_SAFE_RE.match(new_name):
+        return False
+    if old_name == new_name:
+        return True
+    try:
+        with _conn() as con:
+            if not con.execute("SELECT 1 FROM rooms WHERE name=?", (old_name,)).fetchone():
+                return False
+            if con.execute("SELECT 1 FROM rooms WHERE name=?", (new_name,)).fetchone():
+                return False
+            _rename_room_name_references(con, old_name, new_name)
+            con.execute("UPDATE rooms SET name=? WHERE name=?", (new_name, old_name))
+            con.commit()
+        return True
+    except (sqlite3.IntegrityError, ValueError):
+        return False
+
+
 def update_room_settings(room_name: str, **kwargs) -> bool:
     """Update room settings. Accepts: name, description, icon, slowmode, channel_type, channel_theme, invite_only, who_can_invite, is_public, category, tags, directory_description."""
     valid_cols = {'name', 'description', 'icon', 'slowmode', 'channel_type', 'channel_theme', 'invite_only', 'who_can_invite', 'is_public', 'category', 'tags', 'directory_description', 'banner', 'about', 'forwarding_disabled'}
     updates = {k: v for k, v in kwargs.items() if k in valid_cols and v is not None}
     if not updates:
         return False
+    new_name = updates.get("name")
+    if isinstance(new_name, str):
+        new_name = new_name.strip()
+    else:
+        new_name = None
+    renaming = bool(new_name and new_name != room_name)
+    if renaming:
+        try:
+            with _conn() as con:
+                if not con.execute("SELECT 1 FROM rooms WHERE name=?", (room_name,)).fetchone():
+                    return False
+                if con.execute("SELECT 1 FROM rooms WHERE name=?", (new_name,)).fetchone():
+                    return False
+                _rename_room_name_references(con, room_name, new_name)
+                set_clause = ", ".join(f"{k}=?" for k in updates)
+                values = list(updates.values()) + [room_name]
+                con.execute(f"UPDATE rooms SET {set_clause} WHERE name=?", values)
+                con.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
     set_clause = ", ".join(f"{k}=?" for k in updates)
     values = list(updates.values()) + [room_name]
     try:

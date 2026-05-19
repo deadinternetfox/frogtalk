@@ -1662,9 +1662,43 @@ async def _handle_room_event(event: dict) -> None:
     """Handle incoming room event (create/update/delete)."""
     payload = event.get("payload") or {}
     event_type = str(event.get("event_type") or "")
+
+    if event_type == "room.renamed":
+        old_name = _fed_room_name(payload.get("old_name"))
+        new_name = _fed_room_name(payload.get("new_name"))
+        if not old_name or not new_name or old_name == new_name:
+            return
+        old_name = old_name.lower()
+        new_name = new_name.lower()
+        if not db.get_room_by_name(old_name):
+            return
+        db.cascade_room_rename(old_name, new_name)
+        return
+
+    if event_type == "room.music.settings":
+        room_name = _fed_room_name(payload.get("room_name"))
+        if not room_name:
+            return
+        room_name = room_name.lower()
+        room = db.get_room_by_name(room_name)
+        if not room:
+            return
+        ct = str(payload.get("channel_type") or "").strip().lower()
+        if ct in ("text", "music", "voice"):
+            db.update_room_settings(room_name, channel_type=ct)
+        if "dj_only" in payload:
+            db.room_set_dj_only(room_name, 1 if payload.get("dj_only") else 0)
+            await _broadcast_music_ws(room_name, {
+                "type": "music_dj_only_changed",
+                "room": room_name,
+                "dj_only": bool(payload.get("dj_only")),
+            })
+        return
+
     room_name = _fed_room_name(payload.get("room_name"))
     if not room_name:
         return
+    room_name = room_name.lower()
 
     room = db.get_room_by_name(room_name)
     if not room:
