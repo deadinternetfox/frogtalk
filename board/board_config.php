@@ -97,10 +97,50 @@ function saveBans(array $bans): void {
     file_put_contents(DATA_DIR . '/bans.json', json_encode($bans, JSON_PRETTY_PRINT), LOCK_EX);
 }
 
+/**
+ * Real client IP — mirrors deps.client_ip() so bans/rate-limits
+ * aren't keyed on the proxy/tunnel address when CF or XFF is present.
+ */
+function getClientIP(): string {
+    $cf = trim($_SERVER['HTTP_CF_CONNECTING_IP'] ?? '');
+    if ($cf !== '' && filter_var($cf, FILTER_VALIDATE_IP)) {
+        return $cf;
+    }
+    $xff = trim($_SERVER['HTTP_X_FORWARDED_FOR'] ?? '');
+    if ($xff !== '') {
+        $first = trim(explode(',', $xff)[0]);
+        if ($first !== '' && filter_var($first, FILTER_VALIDATE_IP)) {
+            return $first;
+        }
+    }
+    $remote = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    return filter_var($remote, FILTER_VALIDATE_IP) ? $remote : '127.0.0.1';
+}
+
+/** Normalize ban form input: raw IP → md5, or existing 32-char hash. */
+function normalizeBanIPHash(string $input): ?string {
+    $input = trim($input);
+    if ($input === '') {
+        return null;
+    }
+    if (filter_var($input, FILTER_VALIDATE_IP)) {
+        return md5($input);
+    }
+    if (preg_match('/^[a-f0-9]{32}$/i', $input)) {
+        return strtolower($input);
+    }
+    return null;
+}
+
 function isIPBanned(string $ipHash): array|false {
+    // Logged-in board admins must never be locked out by an IP ban they
+    // (or a shared proxy hash) triggered while moderating.
+    if (isAdminLoggedIn()) {
+        return false;
+    }
     $bans = loadBans();
     foreach ($bans as $ban) {
-        if ($ban['ip_hash'] === $ipHash) {
+        if (($ban['ip_hash'] ?? '') === $ipHash) {
             if ($ban['expires'] === 0 || $ban['expires'] > time()) {
                 return $ban;
             }
@@ -154,7 +194,7 @@ function generatePostId(): string {
 }
 
 function getAnonId(string $threadId = ''): string {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    $ip = getClientIP();
     $salt = date('Y-m-d') . $threadId;
     return substr(hash('sha256', $ip . $salt), 0, 12);
 }
@@ -162,7 +202,7 @@ function getAnonId(string $threadId = ''): string {
 // Stable chat-only anon ID — unique per browser, not just per IP
 // Uses a persistent cookie so two users on the same IP (VPN, CGNAT, shared wifi) get different IDs
 function getChatAnonId(): string {
-    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    $ip = getClientIP();
     $uid = $_COOKIE['swamp_uid'] ?? '';
     // If no cookie yet, generate one and set it (will apply on next request)
     if (empty($uid) || strlen($uid) < 16) {
@@ -184,7 +224,7 @@ function getChatAnonId(): string {
 }
 
 function getIPHash(): string {
-    return md5($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1');
+    return md5(getClientIP());
 }
 
 // Per-session visitor ID for likes — unique per browser, not per IP.

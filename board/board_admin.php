@@ -314,8 +314,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
         case 'ban_user':
             $ipInput = trim($_POST['ip_hash'] ?? '');
-            // Accept plain IP addresses — hash them server-side exactly like getIPHash()
-            $ipHash = filter_var($ipInput, FILTER_VALIDATE_IP) ? md5($ipInput) : $ipInput;
+            $ipHash = normalizeBanIPHash($ipInput);
+            if ($ipHash === null) {
+                $error = 'Invalid ban target — use a poster IP hash from a thread or a plain IP address.';
+                break;
+            }
+            if ($ipHash === getIPHash()) {
+                $error = 'Cannot ban your own IP — that would lock you out of the board. '
+                    . 'If every post shows the same hash, fix proxy IP forwarding (CF-Connecting-IP / X-Forwarded-For) first.';
+                logModAction('ban_blocked', "Self-ban prevented for hash {$ipHash}");
+                break;
+            }
             $reason = trim($_POST['reason'] ?? 'Violation of board rules');
             $duration = (int)($_POST['duration'] ?? 0); // hours, 0 = permanent
             $expires = $duration > 0 ? time() + ($duration * 3600) : 0;
