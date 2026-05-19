@@ -2822,7 +2822,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
    the waveform + REC timer never brush up against the textarea below. */
 #attachment-preview:has(#rec-canvas),
 #attachment-preview:has(#video-preview){padding:14px 16px 16px;min-height:76px}
-.att-preview-item{display:inline-flex;flex-direction:column;align-items:flex-start;max-width:200px;gap:4px}
+.att-preview-item{position:relative;display:inline-flex;flex-direction:column;align-items:flex-start;max-width:200px;gap:4px}
 .att-preview-item img,.att-preview-item video{max-width:200px;max-height:140px;border-radius:8px;display:block;object-fit:cover}
 .att-preview-icon{font-size:28px;padding:6px 2px}
 /* Multi-attachment composer preview: lay items side-by-side with a small
@@ -2872,27 +2872,32 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #attachment-thumb[data-count="4"] .att-viewonce-fire,
 #attachment-thumb[data-count="5"] .att-spoiler-eye,
 #attachment-thumb[data-count="5"] .att-viewonce-fire{
-  width:22px;height:22px;font-size:11px;padding:0;top:4px
+  width:22px;height:22px;font-size:11px;padding:0
 }
 #attachment-thumb[data-count="3"] .att-spoiler-eye,
 #attachment-thumb[data-count="4"] .att-spoiler-eye,
-#attachment-thumb[data-count="5"] .att-spoiler-eye{right:4px}
+#attachment-thumb[data-count="5"] .att-spoiler-eye{bottom:4px;right:4px}
 #attachment-thumb[data-count="3"] .att-viewonce-fire,
 #attachment-thumb[data-count="4"] .att-viewonce-fire,
-#attachment-thumb[data-count="5"] .att-viewonce-fire{left:4px}
+#attachment-thumb[data-count="5"] .att-viewonce-fire{top:4px;left:4px}
+#attachment-thumb.is-multi .att-preview-remove,
+#attachment-thumb[data-count="2"] .att-preview-remove,
 #attachment-thumb[data-count="3"] .att-preview-remove,
 #attachment-thumb[data-count="4"] .att-preview-remove,
 #attachment-thumb[data-count="5"] .att-preview-remove{
-  padding:2px 6px;font-size:10px;top:3px;right:3px
+  width:22px;height:22px;font-size:11px;top:4px;right:4px;padding:0
 }
 
 .att-preview-remove{
-  position:absolute;top:6px;right:6px;
-  background:rgba(0,0,0,.55);color:#fff;border:none;
-  border-radius:999px;padding:4px 8px;cursor:pointer;
-  font-size:12px;line-height:1;z-index:3
+  position:absolute;top:4px;right:4px;
+  width:26px;height:26px;
+  background:rgba(0,0,0,.62);color:#fff;border:1px solid rgba(255,255,255,.18);
+  border-radius:50%;padding:0;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:13px;line-height:1;z-index:4;
+  box-shadow:0 2px 6px rgba(0,0,0,.45)
 }
-.att-preview-remove:hover{background:rgba(0,0,0,.8)}
+.att-preview-remove:hover{background:rgba(0,0,0,.85)}
 /* Voice-note variant of the composer attachment preview: wider so the
    chat-style audio-msg bubble (play button + waveform + duration) fits
    without wrapping, and uses the same green gradient as messages. */
@@ -2907,7 +2912,7 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 /* Attachment preview v2 — eye overlay acts as the spoiler toggle */
 .att-media-wrap{position:relative;display:inline-block;max-width:200px}
 .att-spoiler-eye{
-  position:absolute;top:6px;right:6px;
+  position:absolute;bottom:6px;right:6px;top:auto;
   width:30px;height:30px;border-radius:50%;
   background:rgba(0,0,0,.62);color:#fff;border:1px solid rgba(255,255,255,.18);
   display:inline-flex;align-items:center;justify-content:center;

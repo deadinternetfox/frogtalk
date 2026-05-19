@@ -622,9 +622,15 @@ function _renderPendingAttachmentList () {
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'att-preview-remove';
-    removeBtn.title = 'Remove attachment';
+    removeBtn.title = 'Remove this attachment';
+    removeBtn.setAttribute('aria-label', 'Remove this attachment');
     removeBtn.textContent = '✕';
-    removeBtn.addEventListener('click', () => _removePendingAttachment(index));
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      _removePendingAttachment(index);
+    });
+    mediaWrap.appendChild(removeBtn);
 
     const sub = document.createElement('div');
     sub.className = 'att-preview-sub';
@@ -632,7 +638,6 @@ function _renderPendingAttachmentList () {
     sub.innerHTML = _fmtAttachSub(item.name, item.sizeBytes);
 
     wrapper.appendChild(mediaWrap);
-    wrapper.appendChild(removeBtn);
     wrapper.appendChild(sub);
     thumb.appendChild(wrapper);
   });
@@ -752,7 +757,7 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
                : /audio/.test(type || '') ? '🎵'
                : /zip|rar|7z/.test(type || '') ? '🗜️'
                : '📄';
-    mediaHtml = `<div class="att-preview-icon">${icon}</div>`;
+    mediaHtml = `<div class="att-media-wrap"><div class="att-preview-icon">${icon}</div></div>`;
   }
 
   thumb.innerHTML = `
@@ -760,6 +765,22 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
       ${mediaHtml}
       <div class="att-preview-sub" title="${safeName}">${sub}</div>
     </div>`;
+
+  const singleWrap = thumb.querySelector('.att-media-wrap');
+  if (singleWrap && !singleWrap.querySelector('.att-preview-remove')) {
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'att-preview-remove';
+    rm.title = 'Remove this attachment';
+    rm.setAttribute('aria-label', 'Remove this attachment');
+    rm.textContent = '✕';
+    rm.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      _removePendingAttachment(0);
+    });
+    singleWrap.appendChild(rm);
+  }
 
   // Fire button is always visible on images/videos (no DM-only restriction)
   // Hide the flag bar entirely — both buttons are now overlays on the image
