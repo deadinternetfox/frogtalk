@@ -640,7 +640,7 @@ async def register(
         except Exception:
             _log.exception("register: peer fanout failed")
     token = _create_session_with_meta(request, user_id)
-    return {"token": token, "nickname": body.nickname, "user_id": user_id, "is_admin": False}
+    return _auth_session_response(user_id, token)
 
 
 @router.post("/login")
@@ -685,15 +685,23 @@ async def login(request: Request, body: LoginRequest):
             "banned_by": (banner or {}).get("nickname"),
         })
     token = _create_session_with_meta(request, user["id"])
+    return _auth_session_response(user["id"], token)
+
+
+def _auth_session_response(user_id: int, token: str) -> dict:
+    """Login/ticket payload — always include server-stored presence + status."""
+    ident = db.get_user_by_id(user_id) or {}
     return {
         "token": token,
-        "nickname": user["nickname"],
-        "display_name": user.get("display_name"),
-        "username_change_remaining_seconds": int(db.username_change_remaining_seconds(user["id"])),
-        "user_id": user["id"],
-        "is_admin": bool(user["is_admin"]),
-        "avatar": user["avatar"],
-        "bio": user["bio"],
+        "nickname": ident.get("nickname") or "",
+        "display_name": ident.get("display_name"),
+        "username_change_remaining_seconds": int(db.username_change_remaining_seconds(user_id)),
+        "user_id": user_id,
+        "is_admin": bool(ident.get("is_admin")),
+        "avatar": ident.get("avatar"),
+        "bio": ident.get("bio") or "",
+        "presence": ident.get("presence") or "online",
+        "status_msg": ident.get("status_msg") or "",
     }
 
 
@@ -747,16 +755,7 @@ async def login_with_federation_ticket(
         })
 
     token = _create_session_with_meta(request, user["id"])
-    return {
-        "token": token,
-        "nickname": user["nickname"],
-        "display_name": user.get("display_name"),
-        "username_change_remaining_seconds": int(db.username_change_remaining_seconds(user["id"])),
-        "user_id": user["id"],
-        "is_admin": bool(user.get("is_admin")),
-        "avatar": user.get("avatar"),
-        "bio": user.get("bio"),
-    }
+    return _auth_session_response(user["id"], token)
 
 
 class FederationProvisionRequest(BaseModel):

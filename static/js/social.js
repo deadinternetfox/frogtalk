@@ -812,18 +812,19 @@ const Social = (() => {
         .querySelectorAll('#social-overlay .sf-link-embed')
         .forEach(w => { try { w.remove(); } catch {} });
     } catch {}
-    // Tear down the music player + mini dock too. The "now playing"
-    // strip (#social-nowplaying) is inside #social-overlay so it
-    // already disappears, but the persistent #music-mini-dock in the
-    // sidebar would keep the previous track visible/playing after
-    // leaving FrogSocial. Music.close() handles both surfaces.
+    // Music: remount the in-channel player when applicable, otherwise keep
+    // solo playback in the sidebar mini dock (do NOT Music.close() — that
+    // was stopping the track instead of transferring it).
     try {
       if (window.Music) {
-        // After solo playback _room is null but State.currentRoom may still
-        // be a music channel — remount the big player instead of close().
         const restored = typeof Music.restoreChannelPlayerIfNeeded === 'function'
           && Music.restoreChannelPlayerIfNeeded();
-        if (!restored && typeof Music.close === 'function') Music.close();
+        if (!restored && typeof Music.detachSoloToMiniDock === 'function'
+            && Music.detachSoloToMiniDock()) {
+          /* solo → mini dock */
+        } else if (!restored && typeof Music.close === 'function') {
+          Music.close();
+        }
       }
     } catch {}
     // Tear down all the long-lived observers / sockets so closing the

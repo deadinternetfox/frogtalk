@@ -166,6 +166,8 @@ const App = {
         avatar: data.avatar,
         bio: data.bio,
         is_admin: data.is_admin,
+        presence: data.presence || 'online',
+        status_msg: ('status_msg' in data) ? (data.status_msg ?? '') : '',
       };
       State.save();
       return true;
@@ -372,6 +374,12 @@ const App = {
     const savedThemeRaw = State.user?.theme || localStorage.getItem('frogtalk-theme') || 'frog';
     const savedTheme = (String(savedThemeRaw || '').toLowerCase() === 'dark') ? 'frog' : savedThemeRaw;
     if (typeof applyTheme === 'function') applyTheme(savedTheme);
+
+    // Rehydrate profile fields (status_msg, presence) from this node — not
+    // only the fc_user cache which can be stale after SW/cache bumps.
+    try {
+      if (UI.refreshSelfProfileFromServer) await UI.refreshSelfProfileFromServer({ force: true });
+    } catch {}
 
     // Populate self panel
     const u = State.user;

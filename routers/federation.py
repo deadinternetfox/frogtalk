@@ -2212,15 +2212,19 @@ async def _handle_user_event(event: dict) -> None:
     # id channel anyway.
     try:
         from ws_manager import manager
-        await manager.broadcast_all({
+        broadcast = {
             "type": "profile_update",
             "user_id": local_user["id"],
             "nickname": str(payload.get("nickname") or "").strip(),
             "display_name": display_name_raw or None,
-            "avatar": avatar_in,
+            "avatar": avatar_in or None,
             "presence": (presence or str(payload.get("presence") or "").strip().lower() or "online"),
-            "status_msg": status_msg_in,
-        })
+        }
+        # Never fan-out an empty status — peers use COALESCE on ingest, but
+        # the live WS patch used to wipe UI state on other devices.
+        if status_msg_in:
+            broadcast["status_msg"] = status_msg_in
+        await manager.broadcast_all(broadcast)
     except Exception:
         pass
 

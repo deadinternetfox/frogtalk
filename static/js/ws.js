@@ -72,6 +72,7 @@ const WS = (() => {
       // socket reaches OPEN, and without a flush hook those candidates are
       // silently dropped.
       try { window.dispatchEvent(new CustomEvent('ws:open', { detail: { room } })); } catch {}
+      try { UI.refreshSelfProfileFromServer && UI.refreshSelfProfileFromServer(); } catch {}
     };
 
     ws.onmessage = async (e) => {
@@ -424,14 +425,22 @@ const WS = (() => {
         }
         // Sync presence/status changes into member list rows immediately.
         if (data.presence !== undefined || data.status_msg !== undefined) {
-          if (sameUser(State.user)) {
-            if (data.presence !== undefined) State.user.presence = data.presence || 'online';
-            if (data.status_msg !== undefined) State.user.status_msg = data.status_msg || '';
+          const isSelf = sameUser(State.user);
+          const allowedPresence = new Set(['online', 'away', 'dnd', 'invisible']);
+          const nextPresence = (typeof data.presence === 'string' && allowedPresence.has(data.presence))
+            ? data.presence
+            : undefined;
+          const statusPatch = (data.status_msg !== undefined && (data.status_msg || isSelf))
+            ? String(data.status_msg || '').slice(0, 128)
+            : undefined;
+          if (isSelf) {
+            if (nextPresence !== undefined) State.user.presence = nextPresence;
+            if (statusPatch !== undefined) State.user.status_msg = statusPatch;
             try { State.save(); } catch {}
             try { UI.renderSelfStatus && UI.renderSelfStatus(); } catch {}
           }
           if (typeof Users !== 'undefined' && Users.updatePresence) {
-            Users.updatePresence(data.user_id, data.nickname, data.presence, data.status_msg);
+            Users.updatePresence(data.user_id, data.nickname, nextPresence, statusPatch);
           }
         }
         // Sync display_name change to member list caches
@@ -463,7 +472,10 @@ const WS = (() => {
                 if (data.avatar !== undefined) { f.avatar = data.avatar; fChanged = true; }
                 if (data.display_name !== undefined) { f.display_name = data.display_name || null; fChanged = true; }
                 if (data.presence !== undefined) { f.presence = data.presence || 'online'; fChanged = true; }
-                if (data.status_msg !== undefined) { f.status_msg = data.status_msg || ''; fChanged = true; }
+                if (data.status_msg !== undefined && data.status_msg) {
+                  f.status_msg = data.status_msg;
+                  fChanged = true;
+                }
               }
             }
             if (fChanged) {

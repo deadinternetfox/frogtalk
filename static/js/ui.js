@@ -206,18 +206,45 @@ const UI = (() => {
     if (inputEl && document.activeElement !== inputEl) inputEl.value = msg;
   }
 
-  async function _refreshSelfStatusFromApi() {
-    try {
-      const res = await fetch('/api/auth/me', { headers: { 'X-Session-Token': State.token } });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data || !State.user) return;
-      if (typeof data.presence === 'string') State.user.presence = data.presence;
-      if (typeof data.status_msg === 'string') State.user.status_msg = data.status_msg;
-      if (typeof State.save === 'function') State.save();
-      renderSelfStatus();
-      renderSelfQuickStatus();
-    } catch {}
+  let _profileRefreshInflight = null;
+  let _profileRefreshLastAt = 0;
+  const _PROFILE_REFRESH_MIN_MS = 20000;
+
+  async function refreshSelfProfileFromServer(opts) {
+    if (!State.token) return;
+    const force = !!(opts && opts.force);
+    const now = Date.now();
+    if (!force && (now - _profileRefreshLastAt) < _PROFILE_REFRESH_MIN_MS) return;
+    if (_profileRefreshInflight) return _profileRefreshInflight;
+    _profileRefreshInflight = (async () => {
+      try {
+        const res = await fetch('/api/auth/me', { headers: { 'X-Session-Token': State.token } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !State.user) return;
+        const allowedPresence = new Set(['online', 'away', 'dnd', 'invisible']);
+        if (typeof data.presence === 'string' && allowedPresence.has(data.presence)) {
+          State.user.presence = data.presence;
+        }
+        if ('status_msg' in data) {
+          State.user.status_msg = String(data.status_msg ?? '').slice(0, 128);
+        }
+        if (data.display_name !== undefined) State.user.display_name = data.display_name || null;
+        if (data.avatar !== undefined) State.user.avatar = data.avatar;
+        if (typeof State.save === 'function') State.save();
+        _profileRefreshLastAt = Date.now();
+        renderSelfStatus();
+        renderSelfQuickStatus();
+        try { setSelfNameAndHandle(); } catch {}
+      } catch {} finally {
+        _profileRefreshInflight = null;
+      }
+    })();
+    return _profileRefreshInflight;
+  }
+
+  async function _refreshSelfStatusFromApi(force) {
+    return refreshSelfProfileFromServer({ force: !!force });
   }
 
   const _AUTO_AWAY_IDLE_MS = 15 * 60 * 1000;
@@ -335,7 +362,7 @@ const UI = (() => {
     const tick = document.getElementById('self-quick-save');
     if (!wrap || !input) return;
     const wantOpen = (typeof open === 'boolean') ? open : !wrap.classList.contains('is-open');
-    if (wantOpen) await _refreshSelfStatusFromApi();
+    if (wantOpen) await _refreshSelfStatusFromApi(true);
     wrap.classList.toggle('is-open', wantOpen);
     if (tick) tick.classList.toggle('is-active', wantOpen);
     if (wantOpen) {
@@ -362,7 +389,7 @@ const UI = (() => {
     try { ev?.stopPropagation?.(); } catch {}
     if (!State?.user) return;
     // Open instantly using local state; refresh in background to avoid UI lag.
-    _refreshSelfStatusFromApi();
+    refreshSelfProfileFromServer({ force: true });
 
     // Always destroy + recreate so stale DOM / old styles never show
     const old = document.getElementById('status-picker-popover');
@@ -813,7 +840,8 @@ const UI = (() => {
     if (disp) {
       try { bindLongPress(disp, _openNowPlayingTrack); } catch {}
     }
-    // Initial sync in case music was already playing when the page loaded.
+    // Load presence/status from the node DB before now-playing logic runs
+    // (hard refresh / cache bump must not rely on stale fc_user alone).
     setTimeout(() => { try { _syncNowPlayingStatus(); } catch {} }, 600);
 
     // Auto-away wiring: mark users as away after idle, restore on activity.
@@ -1226,7 +1254,7 @@ const UI = (() => {
     });
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, updateTypingBar, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled, setSelfNameAndHandle };
+  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, refreshSelfProfileFromServer, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, updateTypingBar, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled, setSelfNameAndHandle };
 })();
 
 // ─── ChatVideo: themed inline video player for chat ──────────────────────────
@@ -2242,7 +2270,17 @@ async function doAuth() {
       return;
     }
     State.token = data.token;
-    State.user = { id: data.user_id, nickname: data.nickname, display_name: data.display_name || null, username_change_remaining_seconds: Number(data.username_change_remaining_seconds || 0), avatar: data.avatar, bio: data.bio, is_admin: data.is_admin };
+    State.user = {
+      id: data.user_id,
+      nickname: data.nickname,
+      display_name: data.display_name || null,
+      username_change_remaining_seconds: Number(data.username_change_remaining_seconds || 0),
+      avatar: data.avatar,
+      bio: data.bio,
+      is_admin: data.is_admin,
+      presence: data.presence || 'online',
+      status_msg: ('status_msg' in data) ? (data.status_msg ?? '') : '',
+    };
     State.save();
     // Brand-new accounts: force the user through the recovery-key
     // download flow before we launch the app. We don't store email, so

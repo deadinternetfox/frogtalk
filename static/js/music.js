@@ -2387,6 +2387,32 @@ const Music = (() => {
     _anchorTrackKey = '';
   }
 
+  /** Keep solo playback alive in the sidebar mini dock when FrogSocial closes. */
+  function detachSoloToMiniDock() {
+    if (!_soloMode || !_state || !(_state.queue || []).length) return false;
+    const cur = _state.queue[0];
+    if (!cur) return false;
+    const panel = $('music-panel');
+    if (!panel) return false;
+
+    const useSoloEmbed = (cur.provider === 'spotify' || cur.provider === 'soundcloud');
+    panel.classList.remove('active');
+    panel.classList.remove('collapsed');
+    panel.classList.toggle('solo-embed', useSoloEmbed);
+    panel.classList.toggle('mini', !useSoloEmbed);
+    panel.style.display = 'flex';
+
+    document.body.setAttribute('data-music', '1');
+    document.body.setAttribute('data-music-mini', '1');
+
+    try { _renderDock(cur); } catch {}
+    try { _syncPlayPauseButtons(); } catch {}
+    try { _startUiSync(); } catch {}
+    try { _startSyncProbeIfNeeded(); } catch {}
+    try { _lastEmitHash = ''; _emitState(); } catch {}
+    return true;
+  }
+
   function close() {
     _stopSyncProbe();
     _stopUiSync();
@@ -3109,7 +3135,7 @@ const Music = (() => {
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo, updateCurrentMeta,
-           pauseForExternalPlayback, restoreChannelPlayerIfNeeded,
+           pauseForExternalPlayback, restoreChannelPlayerIfNeeded, detachSoloToMiniDock,
            toggleAutoNext,
            migrateRoomPreferences,
            toggleAutoFill,
