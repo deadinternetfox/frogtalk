@@ -39,7 +39,7 @@ const Notifications = (() => {
       await new Promise(res => window.addEventListener('load', res, { once: true }));
     }
     try {
-      _swReg = await navigator.serviceWorker.register('/sw.js?v=263', { scope: '/' });
+      _swReg = await navigator.serviceWorker.register('/sw.js?v=264', { scope: '/' });
       // Note: incoming-call accept/decline is handled exclusively by the
       // in-page #incoming-call popup (driven by WS call_offer). The SW
       // notification has no action buttons and posts no ft-call-action.
