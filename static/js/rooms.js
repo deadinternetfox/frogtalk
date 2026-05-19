@@ -1539,19 +1539,135 @@ const Rooms = (() => {
     } catch {}
   }
 
-  async function leaveRoom(name) {
-    if (!confirm(`Leave #${name}?`)) return;
+  let _pendingLeaveRoom = null;
+
+  function closeLeaveOwnerWarning() {
+    _pendingLeaveRoom = null;
+    try { closeModal('modal-leave-owner-warning'); } catch {}
+  }
+
+  async function openLeaveOwnerWarning(roomName) {
+    _pendingLeaveRoom = roomName;
+    const label = '#' + roomName;
+    const label1 = document.getElementById('leave-owner-room-label');
+    const label2 = document.getElementById('leave-owner-room-label-2');
+    if (label1) label1.textContent = label;
+    if (label2) label2.textContent = label;
+    const modsHint = document.getElementById('leave-owner-mods-hint');
+    const deleteWarn = document.getElementById('leave-owner-delete-warn');
+    const confirmBtn = document.getElementById('leave-owner-confirm-btn');
+    if (modsHint) modsHint.textContent = 'Checking moderators…';
+    if (deleteWarn) deleteWarn.style.display = 'none';
+    if (confirmBtn) {
+      confirmBtn.textContent = 'Leave channel';
+      confirmBtn.disabled = false;
+    }
+    try { openModal('modal-leave-owner-warning'); } catch {}
+
+    try {
+      const res = await fetch(`/api/rooms/${encodeURIComponent(roomName)}`, {
+        headers: { 'X-Session-Token': State.token }
+      });
+      const data = await res.json().catch(() => ({}));
+      const mods = Array.isArray(data.moderators) ? data.moderators : [];
+      const modCount = mods.length;
+      if (!res.ok) {
+        if (modsHint) modsHint.textContent = 'Could not load moderator list — leaving may delete the channel if none exist.';
+        return;
+      }
+      if (modCount > 0) {
+        if (modsHint) {
+          modsHint.innerHTML = `You have <b>${modCount}</b> moderator${modCount === 1 ? '' : 's'}. `
+            + 'Ownership will automatically pass to whoever has been a moderator the longest.';
+        }
+        if (deleteWarn) deleteWarn.style.display = 'none';
+        if (confirmBtn) confirmBtn.textContent = 'Leave channel';
+      } else {
+        if (modsHint) {
+          modsHint.textContent = 'This channel has no moderators who can inherit ownership.';
+        }
+        if (deleteWarn) deleteWarn.style.display = 'block';
+        if (confirmBtn) confirmBtn.textContent = 'Leave and delete channel';
+      }
+    } catch {
+      if (modsHint) modsHint.textContent = 'Could not load moderator list — leaving may delete the channel if none exist.';
+    }
+  }
+
+  async function leaveOwnerOpenTransferSettings() {
+    const room = _pendingLeaveRoom;
+    if (!room) return;
+    closeLeaveOwnerWarning();
+    await openChannelSettings(room);
+    switchChannelTab('mods');
+    setTimeout(() => {
+      try {
+        const dz = document.getElementById('ch-owner-danger');
+        if (dz) dz.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch {}
+      openTransferOwnershipModal();
+    }, 120);
+  }
+
+  async function confirmLeaveOwnerChannel() {
+    const room = _pendingLeaveRoom;
+    if (!room) return;
+    const deleteWarn = document.getElementById('leave-owner-delete-warn');
+    const willDelete = deleteWarn && deleteWarn.style.display !== 'none';
+    if (willDelete) {
+      const ok = await UI.confirm({
+        title: 'Delete channel forever?',
+        message: `#${room} has no moderators. Leaving will permanently delete the channel and all messages. This cannot be undone.`,
+        confirmLabel: 'Delete and leave',
+        cancelLabel: 'Cancel',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    closeLeaveOwnerWarning();
+    await _executeLeaveRoom(room);
+  }
+
+  async function _executeLeaveRoom(name) {
     const res = await fetch(`/api/rooms/${encodeURIComponent(name)}/leave`, {
       method: 'POST', headers: { 'X-Session-Token': State.token }
     });
-    if (res.ok) {
-      await loadRooms();
-      if (State.currentRoom === name) {
-        // Find first joined room to switch to
-        const fallback = State.rooms.find(r => r.joined && r.name !== name);
-        switchToRoom(fallback ? fallback.name : 'general', 'public');
-      }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      try { UI.showToast(data.error || 'Could not leave channel', 'error'); } catch {}
+      return;
     }
+    if (data.owner_action === 'deleted') {
+      try { UI.showToast(`#${name} was deleted — no moderators were available to take ownership`, 'warning'); } catch {}
+    } else if (data.owner_action === 'transferred') {
+      try { UI.showToast(`Ownership of #${name} was transferred before you left`, 'success'); } catch {}
+    } else {
+      try { UI.showToast(`Left #${name}`, 'success'); } catch {}
+    }
+    await loadRooms();
+    if (State.currentRoom === name) {
+      const fallback = State.rooms.find(r => r.joined && r.name !== name);
+      switchToRoom(fallback ? fallback.name : 'general', 'public');
+    }
+  }
+
+  async function leaveRoom(name) {
+    const room = (State.rooms || []).find(r => r && r.name === name);
+    const myNick = State.user && State.user.nickname;
+    const isOwner = !!(room && myNick && room.owner_nickname === myNick);
+    if (isOwner) {
+      await openLeaveOwnerWarning(name);
+      return;
+    }
+    const ok = await UI.confirm({
+      title: 'Leave channel?',
+      message: `Leave #${name}? You can rejoin later if the channel is public or you get a new invite.`,
+      confirmLabel: 'Leave',
+      cancelLabel: 'Stay',
+      danger: true,
+    });
+    if (!ok) return;
+    await _executeLeaveRoom(name);
   }
 
   // ─── Channel Settings ────────────────────────────────────────────────────────
@@ -2736,7 +2852,7 @@ const Rooms = (() => {
 
   return { 
     loadRooms, switchToRoom, openDM, showCreateRoom, createRoom, deleteRoom,
-    joinRoom, leaveRoom,
+    joinRoom, leaveRoom, closeLeaveOwnerWarning, leaveOwnerOpenTransferSettings, confirmLeaveOwnerChannel,
     openChannelSettings, addModerator, removeModerator, unbanUser, saveChannelSettings, deleteChannelFromSettings,
     switchChannelTab,
     selectRoomType, selectChannelType, selectSettingsChannelType,
@@ -2800,6 +2916,9 @@ function showChannelAbout() { Rooms.showChannelAbout(); }
 function openTransferOwnershipModal() { Rooms.openTransferOwnershipModal(); }
 function onTransferOwnershipInput() { Rooms.onTransferOwnershipInput(); }
 function confirmTransferOwnership() { Rooms.confirmTransferOwnership(); }
+function closeLeaveOwnerWarning() { Rooms.closeLeaveOwnerWarning(); }
+function leaveOwnerOpenTransferSettings() { Rooms.leaveOwnerOpenTransferSettings(); }
+function confirmLeaveOwnerChannel() { Rooms.confirmLeaveOwnerChannel(); }
 
 function toggleNewRoomDirectoryFields() {
   const cb = document.getElementById('new-room-list-directory');

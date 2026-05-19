@@ -3598,6 +3598,52 @@ input[type=file]::-webkit-file-upload-button{
 .modal-btn.secondary:hover{background:#2a2a2a}
 .modal-btn.danger{background:#3a1a1a;color:#ff5555}
 .modal-btn.danger:hover{background:#4a2020;box-shadow:0 6px 18px rgba(255,85,85,.25)}
+/* Owner leave warning — theme-aware danger dialog */
+.leave-owner-modal{
+  max-width:min(460px,94vw);
+  background:linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-color,#4caf50) 10%, var(--surface-color,#1a1a1a)) 0%,
+    color-mix(in srgb, var(--accent-color,#4caf50) 4%,  var(--surface-color,#141414)) 100%);
+  border:1px solid color-mix(in srgb, #ff6b6b 35%, var(--border-color,#2a2a2a));
+  box-shadow:0 14px 48px rgba(0,0,0,.55),0 0 0 1px color-mix(in srgb, #ff6b6b 12%, transparent) inset;
+}
+.leave-owner-modal .modal-title{color:var(--text-color,#f0f0f0)}
+.leave-owner-modal .leave-owner-lead{
+  font-size:13.5px;line-height:1.55;color:color-mix(in srgb, var(--text-color,#e0e0e0) 92%, transparent);
+  margin-bottom:12px
+}
+.leave-owner-callout{
+  border-radius:10px;padding:12px 14px;margin-bottom:12px;
+  background:color-mix(in srgb, var(--accent-color,#4caf50) 8%, var(--surface-color,#121212));
+  border:1px solid color-mix(in srgb, var(--accent-color,#4caf50) 22%, var(--border-color,#2a2a2a));
+  font-size:12.5px;line-height:1.5;color:color-mix(in srgb, var(--text-color,#d6d6d6) 90%, transparent)
+}
+.leave-owner-callout b{color:var(--text-color,#f0f0f0)}
+.leave-owner-delete-banner{
+  display:none;border-radius:10px;padding:11px 13px;margin-bottom:12px;
+  background:linear-gradient(180deg,#2a1212 0%,#1a0a0a 100%);
+  border:1px solid #5a2828;color:#ffb8b8;font-size:12.5px;line-height:1.5
+}
+.leave-owner-delete-banner strong{color:#ff8a8a}
+.leave-owner-actions{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.leave-owner-actions .modal-btn{width:100%;justify-content:center}
+.leave-owner-transfer-btn{
+  background:color-mix(in srgb, var(--accent-color,#4caf50) 18%, var(--surface-color,#1e1e1e));
+  color:var(--text-color,#e8e8e8);
+  border:1px solid color-mix(in srgb, var(--accent-color,#4caf50) 40%, var(--border-color,#333))
+}
+.leave-owner-transfer-btn:hover{
+  background:color-mix(in srgb, var(--accent-color,#4caf50) 28%, var(--surface-color,#252525));
+  box-shadow:0 6px 18px color-mix(in srgb, var(--accent-color,#4caf50) 25%, transparent)
+}
+#leave-owner-confirm-btn{
+  background:linear-gradient(180deg,#c62828 0%,#8e0000 100%);
+  color:#fff;border:1px solid #b71c1c;font-weight:700
+}
+#leave-owner-confirm-btn:hover{
+  background:linear-gradient(180deg,#d32f2f 0%,#a31515 100%);
+  box-shadow:0 6px 20px rgba(198,40,40,.45)
+}
 
 /* ── Ripple effect (Discord-style press feedback) ──────────────────────── */
 .modal-btn::after,.icon-btn::after{
@@ -8965,6 +9011,40 @@ window.ConnErr = (function(){
   </div>
 </div>
 
+<!-- Owner leave warning — channel deleted if no moderators to inherit ownership -->
+<div class="modal-overlay hidden" id="modal-leave-owner-warning"
+     onclick="if(event.target===this)closeLeaveOwnerWarning()">
+  <div class="modal leave-owner-modal" role="dialog" aria-modal="true" aria-labelledby="leave-owner-title">
+    <div class="modal-title" id="leave-owner-title" style="display:flex;align-items:center;gap:8px">
+      <span aria-hidden="true" style="font-size:18px">⚠️</span>
+      <span>Leaving <b id="leave-owner-room-label" style="color:var(--accent-color,#7ee08a)">#channel</b></span>
+    </div>
+    <p class="leave-owner-lead">
+      Every channel must have an <b>owner</b>. You are the owner of this channel — if you leave without transferring ownership, FrogTalk will try to pass ownership to your longest-serving <b>moderator</b>.
+    </p>
+    <div class="leave-owner-callout" id="leave-owner-mods-hint">
+      Checking moderators…
+    </div>
+    <div class="leave-owner-delete-banner" id="leave-owner-delete-warn">
+      <strong>Permanent deletion:</strong> This channel has <b>no moderators</b>. If you leave now, <b id="leave-owner-room-label-2">#channel</b> and all of its messages will be <b>deleted forever</b>. This cannot be undone.
+    </div>
+    <p style="font-size:12px;color:color-mix(in srgb, var(--text-color,#aaa) 85%, transparent);line-height:1.45;margin:0 0 14px">
+      To keep the channel alive, transfer ownership first (Settings → Moderators → Danger zone).
+    </p>
+    <div class="leave-owner-actions">
+      <button type="button" class="modal-btn leave-owner-transfer-btn" id="leave-owner-transfer-btn"
+              onclick="leaveOwnerOpenTransferSettings()">
+        Transfer ownership in settings…
+      </button>
+      <button type="button" class="modal-btn danger" id="leave-owner-confirm-btn"
+              onclick="confirmLeaveOwnerChannel()">
+        Leave channel
+      </button>
+      <button type="button" class="modal-btn secondary" onclick="closeLeaveOwnerWarning()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- New DM modal -->
 <!-- Encryption verification modal (Telegram-style emoji match) -->
 <div class="modal-overlay hidden" id="modal-encrypt-verify">
@@ -10757,7 +10837,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/ws.js?v=252"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=489"></script>
-  <script src="/static/js/rooms.js?v=450"></script>
+  <script src="/static/js/rooms.js?v=451"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>
 <script src="/static/js/text_format.js?v=2"></script>
 <script src="/static/js/messages.js?v=486"></script>
