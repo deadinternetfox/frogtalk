@@ -753,13 +753,35 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
         return JSONResponse(status_code=409, content={"error": "Update failed (name conflict?)"})
 
     effective_name = renamed_to or room_name
+    actor_nick = (current_user.get("nickname") or "").strip()
     if renamed_to:
         _emit_federation_room_event("room.renamed", {
             "old_name": room_name,
             "new_name": renamed_to,
             "room_name": renamed_to,
-            "renamed_by_nickname": (current_user.get("nickname") or "").strip(),
+            "renamed_by_nickname": actor_nick,
         })
+
+    fed_settings = {"room_name": effective_name, "updated_by_nickname": actor_nick}
+    fed_any = False
+    if body.icon is not None:
+        fed_settings["icon"] = icon if icon is not None else ""
+        fed_any = True
+    if body.description is not None:
+        fed_settings["description"] = clean_desc if clean_desc is not None else ""
+        fed_any = True
+    if body.about is not None:
+        fed_settings["about"] = clean_about if clean_about is not None else ""
+        fed_any = True
+    if body.channel_type is not None:
+        fed_settings["channel_type"] = body.channel_type
+        fed_any = True
+    if body.slowmode is not None:
+        fed_settings["slowmode"] = body.slowmode
+        fed_any = True
+    if fed_any:
+        _emit_federation_room_event("room.settings.updated", fed_settings)
+
     if body.channel_type is not None and _existing_room:
         prev_ct = (_existing_room.get("channel_type") or "text")
         if prev_ct != body.channel_type and body.channel_type == "music":
@@ -769,7 +791,17 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
                     "room_name": effective_name,
                     "channel_type": "music",
                     "dj_only": bool(room_after.get("dj_only_queue")),
+                    "updated_by_nickname": actor_nick,
                 })
+
+    if fed_any or renamed_to:
+        try:
+            await manager.broadcast_room(effective_name, {
+                "type": "room_settings_updated",
+                "room": effective_name,
+            })
+        except Exception:
+            pass
 
     return {"ok": True, "renamed_to": renamed_to} if renamed_to else {"ok": True}
 
@@ -1802,6 +1834,36 @@ def _parse_track_url(url: str):
     return None, None, None
 
 
+_ARTWORK_HOST_EXACT = frozenset({
+    "i.ytimg.com", "img.youtube.com", "i1.sndcdn.com", "i.scdn.co", "mosaic.scdn.co",
+})
+_ARTWORK_HOST_SUFFIXES = (".sndcdn.com", ".scdn.co", ".spotifycdn.com", ".ytimg.com")
+
+
+def _sanitize_artwork_url(url: str) -> str:
+    """Return a normalized https artwork URL or '' when the host is not allowlisted."""
+    raw = str(url or "").strip()
+    if not raw or len(raw) > 2048:
+        return ""
+    try:
+        parts = urlsplit(raw)
+        if parts.scheme not in ("http", "https"):
+            return ""
+        host = (parts.hostname or "").lower()
+        if not host or "@" in raw:
+            return ""
+        allowed = host in _ARTWORK_HOST_EXACT or any(
+            host.endswith(suffix) for suffix in _ARTWORK_HOST_SUFFIXES
+        )
+        if not allowed:
+            return ""
+        path = parts.path or "/"
+        qs = f"?{parts.query}" if parts.query else ""
+        return f"https://{host}{path}{qs}"
+    except Exception:
+        return ""
+
+
 async def _fetch_yt_meta(video_id: str):
     """Fetch title + thumbnail via YouTube oEmbed (no API key)."""
     try:
@@ -1849,17 +1911,21 @@ async def _fetch_oembed_meta(url: str) -> tuple[str, str]:
         raw = await asyncio.to_thread(_blocking_fetch)
         data = _json.loads(raw)
         title = str(data.get("title") or "")[:200]
-        thumb = str(data.get("thumbnail_url") or "")
+        thumb = _sanitize_artwork_url(str(data.get("thumbnail_url") or ""))
         return title, thumb
     except Exception:
         return "", ""
 
 
 async def _enrich_track_artwork(track: dict | None) -> None:
-    """Fill missing thumbnail/title on queue rows (in-place)."""
-    if not track or track.get("thumbnail"):
+    """Fill missing or stale thumbnail/title on queue rows (in-place)."""
+    if not track:
         return
     provider = (track.get("provider") or "").lower()
+    existing = _sanitize_artwork_url(str(track.get("thumbnail") or ""))
+    if existing:
+        track["thumbnail"] = existing
+        return
     if provider == "youtube":
         vid = str(track.get("video_id") or "")
         if re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
@@ -1945,6 +2011,33 @@ def _music_position_sec(room_name: str, current_track: dict | None) -> int:
     return max(0, elapsed)
 
 
+@router.get("/{room_name}/track-art")
+async def music_track_art(
+    room_name: str,
+    url: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Resolve allowlisted artwork for a supported track URL (Spotify / SC / YT)."""
+    if not db.user_can_access_room(
+        current_user["id"], room_name,
+        is_admin=bool(current_user.get("is_admin")),
+    ):
+        return JSONResponse(status_code=403, content={"error": "Not a member of this room"})
+    clean_url = (url or "").strip()
+    if not clean_url or len(clean_url) > 2048:
+        return JSONResponse(status_code=400, content={"error": "Invalid url"})
+    provider, video_id, _embed = _parse_track_url(clean_url)
+    if not provider:
+        return JSONResponse(status_code=400, content={"error": "Unsupported track url"})
+    title, thumb = "", ""
+    if provider == "youtube":
+        title, thumb = await _fetch_yt_meta(video_id)
+        thumb = _sanitize_artwork_url(thumb)
+    else:
+        title, thumb = await _fetch_oembed_meta(clean_url)
+    return {"thumbnail": thumb, "title": (title or "")[:200]}
+
+
 @router.get("/{room_name}/queue")
 async def music_get_queue(room_name: str, current_user: dict = Depends(get_current_user)):
     room = db.get_room_by_name(room_name)
@@ -1954,8 +2047,8 @@ async def music_get_queue(room_name: str, current_user: dict = Depends(get_curre
     djs = db.dj_list(room_name)
     is_admin = bool(current_user.get("is_admin"))
     current = queue[0] if queue else None
-    # Enrich artwork for the head + next few tracks (Spotify/SC oEmbed).
-    for t in queue[:4]:
+    # Enrich artwork (Spotify / SoundCloud oEmbed) for visible queue rows.
+    for t in queue[:12]:
         try:
             await _enrich_track_artwork(t)
         except Exception:
@@ -2014,7 +2107,7 @@ async def music_add_to_queue(room_name: str, body: AddTrackRequest,
         video_id=video_id,
         url=body.url.strip(),
         title=title,
-        thumbnail=thumb,
+        thumbnail=_sanitize_artwork_url(thumb),
     )
     track = {
         "id": track_id, "room_name": room_name,
@@ -2190,6 +2283,7 @@ async def music_toggle_dj_only(room_name: str, body: ToggleDJOnlyRequest,
     _emit_federation_room_event("room.music.dj_only.changed", {
         "room_name": room_name,
         "dj_only": bool(body.dj_only),
+        "updated_by_nickname": (current_user.get("nickname") or "").strip(),
     })
     try:
         from ws_manager import manager

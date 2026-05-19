@@ -1658,6 +1658,82 @@ async def _handle_message_event(event: dict) -> None:
     db.save_federated_room_message(str(event.get("event_id") or ""), payload)
 
 
+def _fed_room_moderator(room_name: str, actor_nick: str | None) -> dict | None:
+    """Return the local user row when a federated actor may moderate ``room_name``."""
+    nick = _fed_nickname(actor_nick)
+    if not nick:
+        return None
+    user = _ensure_local_user_by_nickname(nick)
+    if not user:
+        return None
+    if not db.can_moderate_room(room_name, user["id"], bool(user.get("is_admin"))):
+        return None
+    return user
+
+
+async def _broadcast_room_settings_ws(room_name: str) -> None:
+    try:
+        from ws_manager import manager
+        await manager.broadcast_room(room_name, {
+            "type": "room_settings_updated",
+            "room": room_name,
+        })
+    except Exception:
+        pass
+
+
+async def _apply_federated_room_settings(room_name: str, payload: dict) -> None:
+    """Apply channel metadata from a trusted federated peer (icon, desc, type)."""
+    # Name changes are only accepted via room.renamed (with FK cascade).
+    if payload.get("old_name") or payload.get("new_name") or payload.get("name"):
+        _log.warning(
+            "federation: dropping room.settings.updated with name fields room=%s",
+            room_name,
+        )
+        return
+    if not _fed_room_moderator(room_name, payload.get("updated_by_nickname")):
+        _log.warning(
+            "federation: dropping room.settings.updated (unauthorised) room=%s",
+            room_name,
+        )
+        return
+    if not db.get_room_by_name(room_name):
+        return
+    from routers import rooms as rooms_router
+
+    kwargs: dict = {}
+    if "icon" in payload:
+        try:
+            kwargs["icon"] = rooms_router._normalize_room_icon(payload.get("icon"))
+        except ValueError:
+            _log.warning("federation: dropping room.settings.updated icon (invalid) room=%s", room_name)
+            return
+    if "description" in payload:
+        kwargs["description"] = rooms_router._sanitize_room_text(
+            payload.get("description"), max_len=256,
+        )
+    if "about" in payload:
+        kwargs["about"] = rooms_router._sanitize_room_text(
+            payload.get("about"), max_len=2000, multiline=True,
+        )
+    if "channel_type" in payload:
+        ct = str(payload.get("channel_type") or "").strip().lower()
+        if ct in ("text", "music", "voice"):
+            kwargs["channel_type"] = ct
+    if "slowmode" in payload:
+        try:
+            sm = int(payload.get("slowmode"))
+            if 0 <= sm <= 3600:
+                kwargs["slowmode"] = sm
+        except (TypeError, ValueError):
+            pass
+    if not kwargs:
+        return
+    if not db.update_room_settings(room_name, **kwargs):
+        return
+    await _broadcast_room_settings_ws(room_name)
+
+
 async def _handle_room_event(event: dict) -> None:
     """Handle incoming room event (create/update/delete)."""
     payload = event.get("payload") or {}
@@ -1672,23 +1748,21 @@ async def _handle_room_event(event: dict) -> None:
         new_name = new_name.lower()
         if not db.get_room_by_name(old_name):
             return
-        actor_nick = _fed_nickname(payload.get("renamed_by_nickname"))
-        if not actor_nick:
+        if not _fed_room_moderator(old_name, payload.get("renamed_by_nickname")):
             _log.warning(
-                "federation: dropping room.renamed (missing renamed_by_nickname) %s -> %s",
+                "federation: dropping room.renamed (unauthorised) %s -> %s",
                 old_name, new_name,
             )
             return
-        actor = _ensure_local_user_by_nickname(actor_nick)
-        if not actor or not db.can_moderate_room(
-            old_name, actor["id"], bool(actor.get("is_admin"))
-        ):
-            _log.warning(
-                "federation: dropping room.renamed (actor %s not authorised on %s)",
-                actor_nick, old_name,
-            )
-            return
         db.cascade_room_rename(old_name, new_name)
+        await _broadcast_room_settings_ws(new_name)
+        return
+
+    if event_type == "room.settings.updated":
+        room_name = _fed_room_name(payload.get("room_name"))
+        if not room_name:
+            return
+        await _apply_federated_room_settings(room_name.lower(), payload)
         return
 
     if event_type == "room.music.settings":
@@ -1696,6 +1770,12 @@ async def _handle_room_event(event: dict) -> None:
         if not room_name:
             return
         room_name = room_name.lower()
+        if not _fed_room_moderator(room_name, payload.get("updated_by_nickname")):
+            _log.warning(
+                "federation: dropping room.music.settings (unauthorised) room=%s",
+                room_name,
+            )
+            return
         room = db.get_room_by_name(room_name)
         if not room:
             return
@@ -1967,6 +2047,12 @@ async def _handle_room_music_event(room_name: str, event_type: str, payload: dic
         return
 
     if event_type == "room.music.dj_only.changed":
+        if not _fed_room_moderator(room_name, payload.get("updated_by_nickname")):
+            _log.warning(
+                "federation: dropping room.music.dj_only.changed (unauthorised) room=%s",
+                room_name,
+            )
+            return
         db.room_set_dj_only(room_name, 1 if payload.get("dj_only") else 0)
         await _broadcast_music_ws(room_name, {
             "type": "music_dj_only_changed",

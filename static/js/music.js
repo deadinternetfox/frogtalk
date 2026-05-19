@@ -325,7 +325,8 @@ const Music = (() => {
     const h = String(hostname || '').toLowerCase();
     if (!h) return false;
     if (_ARTWORK_HOSTS.has(h)) return true;
-    return h.endsWith('.sndcdn.com') || h.endsWith('.scdn.co');
+    return h.endsWith('.sndcdn.com') || h.endsWith('.scdn.co') || h.endsWith('.spotifycdn.com')
+      || h.endsWith('.ytimg.com');
   }
   function _safeArtwork(url) {
     if (!url || typeof url !== 'string') return '';
@@ -376,12 +377,15 @@ const Music = (() => {
     if (_artHydrateInFlight.has(key)) return;
     _artHydrateInFlight.add(key);
     try {
+      const room = _room || '';
+      if (!room) return;
       const r = await fetch(
-        'https://noembed.com/embed?url=' + encodeURIComponent(track.url)
+        `/api/rooms/${encodeURIComponent(room)}/track-art?url=${encodeURIComponent(track.url)}`,
+        { headers: { 'X-Session-Token': State.token } }
       );
       if (!r.ok) return;
       const d = await r.json();
-      const thumb = _safeArtwork(d.thumbnail_url || '');
+      const thumb = _safeArtwork(d.thumbnail || '');
       if (thumb) {
         track.thumbnail = thumb;
         _patchTrackArtInDom(thumb);
@@ -1827,7 +1831,8 @@ const Music = (() => {
     const _curSubmitterEsc = cur ? esc(cur.submitter_nick || '') : '';
     const nowRow = cur ? `
       <div class="mp-now">
-        <a class="mp-art" href="${_curUrlEsc}" target="_blank" rel="noopener noreferrer"
+        <a class="mp-art${_trackArtUrl(cur) ? '' : ' no-art'}" href="${_curUrlEsc}" target="_blank" rel="noopener noreferrer"
+           data-provider="${esc(cur.provider || '')}"
            title="Open on ${esc(cur.provider || 'source')}"
            style="background-image:url('${_cssUrl(_trackArtUrl(cur))}')"></a>
         <div class="mp-info">
@@ -1911,6 +1916,9 @@ const Music = (() => {
       _renderSyncBadge();
       _startSyncProbeIfNeeded();
       if (document.getElementById('mp-playlist-modal')) _renderPlaylistModal();
+      if (cur && !_trackArtUrl(cur)) {
+        try { _hydrateTrackArtwork(cur); } catch {}
+      }
       return;
     }
 

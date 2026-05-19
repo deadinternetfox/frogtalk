@@ -687,6 +687,10 @@ const WS = (() => {
         try { window.Music?.handleWsEvent?.(data); } catch {}
         break;
       }
+      case 'room_settings_updated': {
+        try { window.Rooms?.onRoomSettingsUpdated?.(data.room); } catch {}
+        break;
+      }
       // ── Room ban / kick (Discord-style channel close) ────
       case 'room_ban': {
         try { if (typeof handleRoomBan === 'function') handleRoomBan(data); } catch {}

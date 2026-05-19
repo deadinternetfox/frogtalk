@@ -6451,7 +6451,7 @@ def get_public_channels(category: str = None, search: str = None,
         if search:
             query += " AND (r.name LIKE ? OR r.description LIKE ? OR r.tags LIKE ?)"
             params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
-        query += " ORDER BY r.member_count DESC LIMIT ? OFFSET ?"
+        query += " ORDER BY member_count DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         rows = con.execute(query, params).fetchall()
     return [dict(r) for r in rows]

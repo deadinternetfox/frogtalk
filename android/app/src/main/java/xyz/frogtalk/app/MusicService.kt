@@ -51,7 +51,10 @@ class MusicService : Service() {
 
         // Mirror static/js/music.js _ARTWORK_HOSTS — defense in depth.
         private val ARTWORK_HOSTS = setOf(
-            "i.ytimg.com", "img.youtube.com", "i1.sndcdn.com", "i.scdn.co"
+            "i.ytimg.com", "img.youtube.com", "i1.sndcdn.com", "i.scdn.co", "mosaic.scdn.co"
+        )
+        private val ARTWORK_HOST_SUFFIXES = listOf(
+            ".sndcdn.com", ".scdn.co", ".spotifycdn.com", ".ytimg.com"
         )
         private const val MAX_TEXT = 200
     }
@@ -297,7 +300,10 @@ class MusicService : Service() {
     private fun isAllowedArtHost(url: String): Boolean {
         return try {
             val u = URL(url)
-            (u.protocol == "https" || u.protocol == "http") && ARTWORK_HOSTS.contains(u.host)
+            if (u.protocol != "https" && u.protocol != "http") return false
+            val host = u.host?.lowercase() ?: return false
+            if (ARTWORK_HOSTS.contains(host)) return true
+            return ARTWORK_HOST_SUFFIXES.any { host.endsWith(it) }
         } catch (_: Throwable) { false }
     }
 

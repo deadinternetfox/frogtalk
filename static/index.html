@@ -1703,7 +1703,16 @@ body[data-music-mini="1"] #music-mini-dock{display:flex}
 body[data-music-collapsed] #messages-area{flex:1 1 auto}
 .mp-now{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .mp-art{width:72px;height:72px;border-radius:6px;background:#2a1a3a center/cover no-repeat;flex-shrink:0;
-  box-shadow:0 2px 10px rgba(200,130,255,0.25);display:block;cursor:pointer;text-decoration:none}
+  box-shadow:0 2px 10px rgba(200,130,255,0.25);display:block;cursor:pointer;text-decoration:none;position:relative}
+.mp-art.no-art::before{content:'';position:absolute;inset:0;border-radius:inherit;
+  background:linear-gradient(145deg,#1a3d2e 0%,#0d2818 55%,#1db954 100%);opacity:0.95}
+.mp-art.no-art[data-provider="spotify"]::after,
+.mp-art.no-art[data-provider="soundcloud"]::after,
+.mp-art.no-art[data-provider="youtube"]::after{
+  content:'';position:absolute;inset:0;margin:auto;width:28px;height:28px;background:center/contain no-repeat;z-index:1}
+.mp-art.no-art[data-provider="spotify"]::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff'%3E%3Cpath d='M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.6 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z'/%3E%3C/svg%3E")}
+.mp-art.no-art[data-provider="soundcloud"]::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23f50'%3E%3Cpath d='M12 2.4c-2.4 0-4.6.9-6.3 2.4-.3.3-.3.7 0 1 .3.3.7.3 1 0 1.4-1.2 3.2-1.9 5.1-1.9s3.7.7 5.1 1.9c.3.3.7.3 1 0 .3-.3.3-.7 0-1-1.7-1.5-3.9-2.4-6.3-2.4zm0 4.8c-1.8 0-3.4.7-4.7 1.9-.3.3-.3.7 0 1 .3.3.7.3 1 0 1-.9 2.3-1.4 3.7-1.4s2.7.5 3.7 1.4c.3.3.7.3 1 0 .3-.3.3-.7 0-1-1.3-1.2-2.9-1.9-4.7-1.9z'/%3E%3C/svg%3E")}
+.mp-art.no-art[data-provider="youtube"]::after{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff'%3E%3Cpath d='M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.4.6A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.6 9.4.6 9.4.6s7.5 0 9.4-.6a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8zM9.8 15.5V8.5l6.2 3.5-6.2 3.5z'/%3E%3C/svg%3E")}
 .mp-art:hover{box-shadow:0 2px 14px rgba(200,130,255,0.45)}
 .mp-info{flex:1 1 160px;min-width:0}
 .mp-title{font-size:14px;font-weight:700;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;text-decoration:none;cursor:pointer}
@@ -10739,7 +10748,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/ws.js?v=248"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=487"></script>
-  <script src="/static/js/rooms.js?v=443"></script>
+  <script src="/static/js/rooms.js?v=447"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>
 <script src="/static/js/text_format.js?v=2"></script>
 <script src="/static/js/messages.js?v=482"></script>
@@ -10752,7 +10761,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/media.js?v=419"></script>
 <script src="/static/js/gifs.js?v=205"></script>
 <script src="/static/js/media-player.js?v=191"></script>
-<script src="/static/js/music.js?v=422"></script>
+<script src="/static/js/music.js?v=423"></script>
 <!-- cache bump: social share button + story/profile list UX fixes -->
 <script src="/static/js/social.js?v=1032"></script>
 <!-- Privacy PIN lock (auto-lock on idle, admin gate, autologin gate) -->

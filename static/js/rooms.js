@@ -2,6 +2,39 @@
  * rooms.js — Channel & DM management
  */
 
+// Shared by Rooms + directory/profile helpers defined outside the IIFE.
+function isSafeCssImageUrl(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return false;
+  if (/^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(s)) return true;
+  if (/^https?:\/\//i.test(s)) {
+    if (s.length > 2048) return false;
+    if (/[)\\\s'"<>]/.test(s)) return false;
+    return true;
+  }
+  if (s.startsWith('/')) {
+    if (s.length > 2048) return false;
+    return /^\/[A-Za-z0-9._\-/?=&%]+$/.test(s);
+  }
+  return false;
+}
+
+function isImageIcon(icon) {
+  if (!icon || typeof icon !== 'string') return false;
+  return isSafeCssImageUrl(icon);
+}
+
+function defaultIconForType(type, channelType = 'text') {
+  if (channelType === 'voice') return '🔊';
+  return type === 'private' ? '🔒' : '#';
+}
+
+function _cssUrl(raw) {
+  const s = String(raw || '').trim();
+  if (!isSafeCssImageUrl(s)) return '';
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 const Rooms = (() => {
   let _selectedRoomType = 'public';
   let _selectedChannelType = 'text';  // text or voice
@@ -434,32 +467,6 @@ const Rooms = (() => {
     return true;
   }
 
-  function isImageIcon(icon) {
-    if (!icon || typeof icon !== 'string') return false;
-    return isSafeCssImageUrl(icon);
-  }
-
-  function isSafeCssImageUrl(raw) {
-    const s = String(raw || '').trim();
-    if (!s) return false;
-    if (/^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(s)) return true;
-    if (/^https?:\/\//i.test(s)) {
-      if (s.length > 2048) return false;
-      if (/[)\\\s'"<>]/.test(s)) return false;
-      return true;
-    }
-    if (s.startsWith('/')) {
-      if (s.length > 2048) return false;
-      return /^\/[A-Za-z0-9._\-/?=&%]+$/.test(s);
-    }
-    return false;
-  }
-
-  function defaultIconForType(type, channelType = 'text') {
-    if (channelType === 'voice') return '🔊';
-    return type === 'private' ? '🔒' : '#';
-  }
-
   function roomIconHtml(icon, type, className = 'ch-icon', channelType = 'text') {
     const safeIcon = (icon || '').trim();
     if (isImageIcon(safeIcon)) {
@@ -468,6 +475,33 @@ const Rooms = (() => {
     const renderedIcon = safeIcon || defaultIconForType(type, channelType);
     const fallbackHashClass = (!safeIcon && renderedIcon === '#') ? ' is-fallback-hash' : '';
     return `<span class="${className}${fallbackHashClass}">${UI.escHtml(renderedIcon)}</span>`;
+  }
+
+  /** Keep chat header (icon + description) in sync with sidebar / saved settings. */
+  function syncActiveRoomHeader(roomName, patch = {}) {
+    if (!roomName || State.currentRoomType === 'dm') return;
+    if (State.currentRoom !== roomName) return;
+    const roomData = (State.rooms || []).find(r => r.name === roomName) || {};
+    const type = patch.type || roomData.type || State.currentRoomType || 'public';
+    const chType = patch.channelType
+      || ((roomData.channel_type === 'voice') ? 'music' : (roomData.channel_type || 'text'));
+    const icon = Object.prototype.hasOwnProperty.call(patch, 'icon')
+      ? patch.icon
+      : (roomData.icon || null);
+    const desc = Object.prototype.hasOwnProperty.call(patch, 'description')
+      ? patch.description
+      : (roomData.description || '');
+    setRoomHeader(roomName, type, icon, null, chType);
+    const descEl = document.getElementById('ch-desc');
+    if (descEl) descEl.textContent = desc;
+  }
+
+  function previewSettingsRoomHeader() {
+    if (!_currentSettingsRoom || State.currentRoom !== _currentSettingsRoom) return;
+    if (State.currentRoomType === 'dm') return;
+    const icon = (document.getElementById('ch-settings-icon-input')?.value || '').trim();
+    const desc = (document.getElementById('ch-settings-desc')?.value || '').trim();
+    syncActiveRoomHeader(_currentSettingsRoom, { icon, description: desc });
   }
 
   function setRoomHeader(name, type, roomIcon = null, dmPeer = null, channelType = 'text') {
@@ -571,7 +605,13 @@ const Rooms = (() => {
     const finish = (dataUrl) => {
       const iconInput = document.getElementById('ch-settings-icon-input');
       iconInput.value = dataUrl;
-      setRoomIconPreview('ch-settings-icon', dataUrl, _currentRoomData?.room?.type || 'public');
+      setRoomIconPreview('ch-settings-icon', dataUrl, _currentRoomData?.room?.type || 'public', _settingsChannelType);
+      previewSettingsRoomHeader();
+      const row = (State.rooms || []).find(r => r.name === _currentSettingsRoom);
+      if (row) {
+        row.icon = dataUrl;
+        try { renderRooms(); } catch {}
+      }
     };
     if (typeof ImageCropper !== 'undefined') {
       ImageCropper.open({ file, aspect: 1, maxSize: 256, circle: false, onCrop: finish });
@@ -676,6 +716,14 @@ const Rooms = (() => {
         hint.style.color = '#888';
       }
     } catch {}
+  }
+
+  async function onRoomSettingsUpdated(roomName) {
+    if (!roomName) return;
+    try { await loadRooms(); } catch {}
+    if (State.currentRoom === roomName) {
+      try { syncActiveRoomHeader(roomName); } catch {}
+    }
   }
 
   async function loadRooms() {
@@ -1597,7 +1645,17 @@ const Rooms = (() => {
           if (typeof openLightbox === 'function') openLightbox(value);
         }) : null;
       }
+      previewSettingsRoomHeader();
+      const row = (State.rooms || []).find(r => r.name === _currentSettingsRoom);
+      if (row) {
+        row.icon = value;
+        try { renderRooms(); } catch {}
+      }
     };
+    const descInput = document.getElementById('ch-settings-desc');
+    if (descInput) {
+      descInput.oninput = () => previewSettingsRoomHeader();
+    }
 
     const settingsPreview = document.getElementById('ch-settings-icon');
     if (settingsPreview) {
@@ -2141,6 +2199,8 @@ const Rooms = (() => {
     // If we renamed the room or we're in it, update
     if (State.currentRoom === _currentSettingsRoom && _currentSettingsRoom !== name) {
       switchToRoom(name, _currentRoomData.room.type, null, _settingsChannelType);
+    } else if (State.currentRoom === name) {
+      syncActiveRoomHeader(name, { icon, description: desc, channelType: _settingsChannelType });
     }
     } catch (err) {
       UI.showToast('Failed to save settings', 'error');
@@ -2601,6 +2661,8 @@ const Rooms = (() => {
     getRoomKeyForVersion: _getRoomKeyForVersion,
     getStoredKeyVersion: _getStoredKeyVersion,
     migrateRoomChannelState,
+    syncActiveRoomHeader,
+    onRoomSettingsUpdated,
   };
 })();
 
@@ -3219,9 +3281,14 @@ function _jsStr(s) {
 function _renderRichText(md) {
   let html = _escapeHtml(md || '');
   // Links first so later replacements don't break URL detection.
-  html = html.replace(/https?:\/\/[^\s<]+/g, url =>
-    `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:#4caf50">${url}</a>`
-  );
+  html = html.replace(/https?:\/\/[^\s<]+/g, url => {
+    const u = String(url).trim();
+    if (!/^https?:\/\//i.test(u) || u.length > 2048 || /[<>"'\\\s]/.test(u)) {
+      return _escapeHtml(u);
+    }
+    const safe = _escapeHtml(u);
+    return `<a href="${safe}" target="_blank" rel="noopener noreferrer" style="color:#4caf50">${safe}</a>`;
+  });
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
   html = html.replace(/`(.+?)`/g, '<code style="background:#1a1a1a;padding:1px 4px;border-radius:4px">$1</code>');
@@ -3388,7 +3455,7 @@ function renderDirectoryCard(ch, compact) {
       </div>
       <div class="dir-card-desc">${esc(plainDesc.substring(0, 200))}${plainDesc.length > 200 ? '…' : ''}</div>
       ${tags.length ? `<div class="dir-card-tags">${tags.slice(0, 5).map(t => `<span class="dir-tag">${esc(t)}</span>`).join('')}</div>` : ''}
-      ${ch.owner_name ? `<div class="dir-card-owner">by ${ch.owner_avatar ? `<img src="${esc(ch.owner_avatar)}" style="width:14px;height:14px;border-radius:50%;vertical-align:middle;margin-right:2px">` : ''}${esc(ch.owner_name)}</div>` : ''}
+      ${ch.owner_name ? `<div class="dir-card-owner">by ${isSafeCssImageUrl(ch.owner_avatar) ? `<img src="${esc(ch.owner_avatar)}" style="width:14px;height:14px;border-radius:50%;vertical-align:middle;margin-right:2px">` : ''}${esc(ch.owner_name)}</div>` : ''}
     </div>
     <div class="dir-card-join">
       ${alreadyJoined
@@ -3436,6 +3503,7 @@ async function searchDirectory() {
     el.style.opacity = '';
   } catch (e) {
     el.style.opacity = '';
+    try { console.error('[directory] searchDirectory failed:', e); } catch {}
     el.innerHTML = '<div style="color:#f44336;padding:20px">Error loading directory</div>';
   }
 }
@@ -3585,7 +3653,7 @@ async function viewChannelProfile(channelName) {
 
     overlay.innerHTML = `
       <div class="modal ch-prof-modal">
-        ${safeBanner ? `<div class="ch-prof-banner" style="background-image:url('${UI.escHtml(safeBanner)}')"></div>` : ''}
+        ${safeBanner ? `<div class="ch-prof-banner" style="background-image:url('${_cssUrl(safeBanner)}')"></div>` : ''}
         <div class="ch-prof-body">
         <div class="ch-prof-head${ch.banner?' has-banner':''}">
           <div class="ch-prof-head-left">
@@ -3610,8 +3678,8 @@ async function viewChannelProfile(channelName) {
 
         ${ch.owner_name ? `<div class="ch-prof-owner">
           <span>Created by</span>
-          ${ch.owner_avatar ? `<img src="${UI.escHtml(ch.owner_avatar)}" class="ch-prof-owner-avatar">` : ''}
-          <span class="ch-prof-owner-name" onclick="showUserInfo('${UI.escHtml(ch.owner_name)}')">${UI.escHtml(ch.owner_name)}</span>
+          ${isSafeCssImageUrl(ch.owner_avatar) ? `<img src="${UI.escHtml(ch.owner_avatar)}" class="ch-prof-owner-avatar">` : ''}
+          <span class="ch-prof-owner-name" onclick="showUserInfo(${_jsStr(ch.owner_name)})">${UI.escHtml(ch.owner_name)}</span>
         </div>` : ''}
 
         <div class="ch-prof-actions">
