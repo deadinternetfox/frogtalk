@@ -27,7 +27,14 @@ const WS = (() => {
     }
   }
 
+  function resetHistoryCache(room) {
+    if (!room) return;
+    _historyInFlight.delete(room);
+    _historyLastApplied.delete(room);
+  }
+
   function connect(room) {
+    resetHistoryCache(room);
     if (_ws && _room === room) {
       if (_ws.readyState === WebSocket.CONNECTING || _ws.readyState === WebSocket.OPEN) {
         return;
@@ -153,6 +160,21 @@ const WS = (() => {
         _historyInFlight.set(room, histSig);
         try {
           const cached = (State.messages && State.messages[room]) ? State.messages[room] : [];
+          // After a channel rename the server may briefly return an empty history
+          // window while rows are being re-keyed; never wipe a populated cache.
+          if (!incoming.length && cached.length) {
+            _historyLastApplied.set(room, histSig);
+            Users.updateList(data.online || []);
+            try {
+              if (State.currentRoom === room) {
+                const area = document.getElementById('messages-area');
+                if (area && (area.querySelector('#ch-loading-state') || !area.children.length)) {
+                  Messages.loadHistory(room, cached.slice());
+                }
+              }
+            } catch {}
+            break;
+          }
           // If server resent the same history window, skip expensive decrypt +
           // full DOM rebuild. Presence still updates below.
           if (cached.length && incoming.length) {
@@ -801,7 +823,7 @@ const WS = (() => {
     if (_room) connect(_room);
   }
 
-  return { connect, disconnect, send, reconnectNow, isOpen };
+  return { connect, disconnect, send, reconnectNow, isOpen, resetHistoryCache };
 })();
 
 // ─── Per-room mute UI helper ──────────────────────────────────────────────

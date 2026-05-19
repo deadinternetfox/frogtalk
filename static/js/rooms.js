@@ -936,6 +936,39 @@ const Rooms = (() => {
     }
   }
 
+  const _ROOM_NAME_SAFE_RE = /^[a-z0-9_-]{1,32}$/;
+
+  function migrateRoomChannelState(oldRoom, newRoom) {
+    if (!oldRoom || !newRoom || oldRoom === newRoom) return;
+    if (!_ROOM_NAME_SAFE_RE.test(String(oldRoom)) || !_ROOM_NAME_SAFE_RE.test(String(newRoom))) return;
+    const S = State;
+    if (S.messages && Array.isArray(S.messages[oldRoom])) {
+      if (!Array.isArray(S.messages[newRoom]) || !S.messages[newRoom].length) {
+        S.messages[newRoom] = S.messages[oldRoom];
+      }
+      delete S.messages[oldRoom];
+    }
+    if (S.roomKeys && Object.prototype.hasOwnProperty.call(S.roomKeys, oldRoom)) {
+      if (S.roomKeys[newRoom] == null) S.roomKeys[newRoom] = S.roomKeys[oldRoom];
+      delete S.roomKeys[oldRoom];
+    }
+    if (S.bridgeOut && Object.prototype.hasOwnProperty.call(S.bridgeOut, oldRoom)) {
+      S.bridgeOut[newRoom] = S.bridgeOut[oldRoom];
+      delete S.bridgeOut[oldRoom];
+    }
+    try { WS?.resetHistoryCache?.(oldRoom); WS?.resetHistoryCache?.(newRoom); } catch {}
+    try {
+      const last = localStorage.getItem('fc_last_room');
+      if (last) {
+        const parsed = JSON.parse(last);
+        if (parsed && parsed.name === oldRoom) {
+          parsed.name = newRoom;
+          localStorage.setItem('fc_last_room', JSON.stringify(parsed));
+        }
+      }
+    } catch {}
+  }
+
   async function switchToRoom(name, type = 'public', dmPeer = null, channelType = 'text') {    closeMobileSidebar();
     const _roomDataEarly = State.rooms.find(r => r.name === name);
     const _chTypeEarly = (_roomDataEarly?.channel_type === 'voice') ? 'music' : (_roomDataEarly?.channel_type || channelType || 'text');
@@ -2086,6 +2119,7 @@ const Rooms = (() => {
     });
 
     if (_currentSettingsRoom !== name) {
+      try { migrateRoomChannelState(_currentSettingsRoom, name); } catch {}
       try {
         if (window.Music && typeof Music.migrateRoomPreferences === 'function') {
           Music.migrateRoomPreferences(_currentSettingsRoom, name);
@@ -2561,7 +2595,8 @@ const Rooms = (() => {
     rotateRoomKey, installRotatedKey,
     aadForRoom: _aadForRoom,
     getRoomKeyForVersion: _getRoomKeyForVersion,
-    getStoredKeyVersion: _getStoredKeyVersion
+    getStoredKeyVersion: _getStoredKeyVersion,
+    migrateRoomChannelState,
   };
 })();
 

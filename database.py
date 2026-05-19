@@ -1175,6 +1175,11 @@ def get_messages(room_name: str, limit: int = 100, before_id: Optional[int] = No
     # per-message correlated subquery joined into a GROUP BY. Also avoid
     # SELECT-ing m.media_data (potentially MB of base64 per row); the API
     # surfaces a has_media flag and clients lazy-load via /messages/<id>/media.
+    if before_id is None and get_config(_rename_hint_key(room_name)):
+        try:
+            repair_messages_after_rename(room_name)
+        except Exception:
+            pass
     with _conn() as con:
         if before_id:
             rows = con.execute(
@@ -4959,6 +4964,45 @@ _RENAME_ROOM_TABLES = (
 )
 
 
+def _rename_hint_key(room_name: str) -> str:
+    return f"room.rename_hint.{str(room_name or '').strip().lower()}"
+
+
+def remember_room_rename(old_name: str, new_name: str) -> None:
+    """Record ``old_name`` so a later repair can reattach orphaned rows if needed."""
+    old_name = str(old_name or "").strip()
+    new_name = str(new_name or "").strip()
+    if not _ROOM_NAME_SAFE_RE.match(old_name) or not _ROOM_NAME_SAFE_RE.match(new_name):
+        return
+    if old_name == new_name:
+        return
+    set_config(_rename_hint_key(new_name), old_name)
+
+
+def repair_messages_after_rename(room_name: str) -> int:
+    """Re-key messages (and related rows) still stored under a pre-rename name."""
+    room_name = str(room_name or "").strip()
+    if not _ROOM_NAME_SAFE_RE.match(room_name):
+        return 0
+    old_name = get_config(_rename_hint_key(room_name))
+    if not old_name or old_name == room_name:
+        return 0
+    if not _ROOM_NAME_SAFE_RE.match(old_name):
+        return 0
+    try:
+        with _conn() as con:
+            if not con.execute("SELECT 1 FROM rooms WHERE name=?", (room_name,)).fetchone():
+                return 0
+            _rename_room_name_references(con, old_name, room_name)
+            con.commit()
+        with _conn() as con:
+            con.execute("DELETE FROM config WHERE key=?", (_rename_hint_key(room_name),))
+            con.commit()
+        return 1
+    except (sqlite3.IntegrityError, ValueError):
+        return 0
+
+
 def _rename_room_name_references(con: sqlite3.Connection, old_name: str, new_name: str) -> None:
     """Re-key every table that stores ``room_name`` as text when a channel is renamed."""
     old_name = str(old_name or "").strip()
@@ -4994,6 +5038,7 @@ def cascade_room_rename(old_name: str, new_name: str) -> bool:
                 return False
             if con.execute("SELECT 1 FROM rooms WHERE name=?", (new_name,)).fetchone():
                 return False
+            remember_room_rename(old_name, new_name)
             _rename_room_name_references(con, old_name, new_name)
             con.execute("UPDATE rooms SET name=? WHERE name=?", (new_name, old_name))
             con.commit()
@@ -5021,6 +5066,7 @@ def update_room_settings(room_name: str, **kwargs) -> bool:
                     return False
                 if con.execute("SELECT 1 FROM rooms WHERE name=?", (new_name,)).fetchone():
                     return False
+                remember_room_rename(room_name, new_name)
                 _rename_room_name_references(con, room_name, new_name)
                 set_clause = ", ".join(f"{k}=?" for k in updates)
                 values = list(updates.values()) + [room_name]
