@@ -656,7 +656,9 @@ class UpdateRoomRequest(BaseModel):
 @router.get("/{room_name}")
 async def get_room(room_name: str, current_user: dict = Depends(get_current_user)):
     """Get room details including settings and moderators."""
-    room = db.get_room_by_name(room_name)
+    requested = (room_name or "").strip().lower()
+    resolved = db.resolve_room_name(requested) or requested
+    room = db.get_room_by_name(resolved)
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
     
@@ -666,11 +668,14 @@ async def get_room(room_name: str, current_user: dict = Depends(get_current_user
     # Check if current user can edit
     can_edit = db.can_moderate_room(room_name, current_user["id"], bool(current_user.get("is_admin")))
     
-    return {
+    out = {
         "room": room,
         "moderators": mods,
-        "can_edit": can_edit
+        "can_edit": can_edit,
     }
+    if resolved != requested:
+        out["resolved_from"] = requested
+    return out
 
 
 @router.patch("/{room_name}")
@@ -784,22 +789,36 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
 
     if body.channel_type is not None and _existing_room:
         prev_ct = (_existing_room.get("channel_type") or "text")
-        if prev_ct != body.channel_type and body.channel_type == "music":
+        if prev_ct != body.channel_type:
             room_after = db.get_room_by_name(effective_name)
             if room_after:
                 _emit_federation_room_event("room.music.settings", {
                     "room_name": effective_name,
-                    "channel_type": "music",
+                    "channel_type": body.channel_type,
                     "dj_only": bool(room_after.get("dj_only_queue")),
                     "updated_by_nickname": actor_nick,
                 })
 
     if fed_any or renamed_to:
         try:
-            await manager.broadcast_room(effective_name, {
+            room_row = db.get_room_by_name(effective_name) or {}
+            ws_evt = {
                 "type": "room_settings_updated",
                 "room": effective_name,
-            })
+                "channel_type": room_row.get("channel_type") or "text",
+            }
+            if renamed_to:
+                ws_evt["renamed_from"] = room_name
+                await manager.broadcast_all({
+                    "type": "room_renamed",
+                    "old_name": room_name,
+                    "new_name": renamed_to,
+                })
+                try:
+                    await manager.broadcast_room(room_name, ws_evt)
+                except Exception:
+                    pass
+            await manager.broadcast_room(effective_name, ws_evt)
         except Exception:
             pass
 

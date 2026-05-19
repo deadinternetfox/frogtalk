@@ -849,13 +849,17 @@ async def media_to_wall(msg_id: int, current_user: dict = Depends(get_current_us
         return JSONResponse(status_code=403, content={"error": "Not your media"})
     if not msg.get("media_data"):
         return JSONResponse(status_code=400, content={"error": "No media on this message"})
-    # Create a wall post with the same media
+    room_raw = str(msg.get("room_name") or "").strip().lower()
+    from routers.rooms import ROOM_NAME_RE
+    track_room = room_raw if ROOM_NAME_RE.match(room_raw) else None
+    caption_room = track_room or room_raw[:32] if room_raw else "channel"
     post_id = db.create_wall_post(
         user_id=current_user["id"],
-        content=f"📸 From #{msg['room_name']}",
+        content=f"📸 From #{caption_room}",
         media_data=msg["media_data"],
         media_type=msg.get("media_type"),
         privacy="public",
+        track_room=track_room,
     )
     # Flag the source message so it no longer appears in Private Media.
     try:

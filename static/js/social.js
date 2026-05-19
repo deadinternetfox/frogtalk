@@ -81,6 +81,64 @@ const Social = (() => {
   // Encoding them as &quot; leaves valid HTML that decodes back to "foo"
   // before the JS engine parses the handler.
   const jsStr = s => JSON.stringify(String(s || '')).replace(/"/g, '&quot;');
+  const _ROOM_NAME_RE = /^[a-z0-9_-]{1,32}$/;
+
+  function _isValidRoomName(name) {
+    return _ROOM_NAME_RE.test(String(name || '').trim().toLowerCase());
+  }
+
+  /** Clickable #channel pill — room name is validated before use in handlers. */
+  function _roomMentionHtml(roomName) {
+    const room = String(roomName || '').trim().toLowerCase();
+    if (!_isValidRoomName(room)) return '';
+    const safe = esc(room);
+    return `<button type="button" class="room-mention sf-room-mention" data-room="${safe}" title="Open #${safe}">#${safe}</button>`;
+  }
+
+  function _extractPostRoomName(p) {
+    const tr = String(p?.track_room || '').trim().toLowerCase();
+    if (_isValidRoomName(tr)) return tr;
+    const content = String(p?.content || '');
+    const m = /(?:📸\s*)?From\s+#([a-z0-9_-]{1,32})\b/i.exec(content)
+      || /🎵\s*(?:Now playing|Sharing)(?:\s+in\s+#([a-z0-9_-]{1,32}))?/i.exec(content);
+    if (m && m[1] && _isValidRoomName(m[1])) return m[1];
+    return '';
+  }
+
+  function _patchPostsRoomName(posts, oldName, newName) {
+    if (!Array.isArray(posts) || !oldName || !newName) return;
+    const o = String(oldName).trim().toLowerCase();
+    const n = String(newName).trim().toLowerCase();
+    if (!o || o === n || !_isValidRoomName(n)) return;
+    const re = new RegExp(`#${o.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+    for (const p of posts) {
+      if (!p) continue;
+      if (String(p.track_room || '').toLowerCase() === o) p.track_room = n;
+      if (p.content) p.content = p.content.replace(re, `#${n}`);
+    }
+  }
+
+  function onRoomRenamed(oldName, newName) {
+    const o = String(oldName || '').trim().toLowerCase();
+    const n = String(newName || '').trim().toLowerCase();
+    if (!o || !n || o === n || !_isValidRoomName(n)) return;
+    try {
+      if (_feedCache?.posts) _patchPostsRoomName(_feedCache.posts, o, n);
+      _exploreCache.forEach(v => { if (v?.posts) _patchPostsRoomName(v.posts, o, n); });
+      _musicCache.forEach(v => { if (v?.posts) _patchPostsRoomName(v.posts, o, n); });
+      _profilePostsCache.forEach(v => { if (v?.posts) _patchPostsRoomName(v.posts, o, n); });
+      _profileRepostsCache.forEach(v => { if (v?.posts) _patchPostsRoomName(v.posts, o, n); });
+    } catch {}
+    try {
+      document.querySelectorAll(`.room-mention[data-room="${CSS.escape(o)}"]`).forEach(el => {
+        const wrap = document.createElement('span');
+        wrap.innerHTML = _roomMentionHtml(n);
+        const btn = wrap.firstElementChild;
+        if (btn) el.replaceWith(btn);
+      });
+    } catch {}
+  }
+
   function _jsonErrorResponse(status, error, extra = {}) {
     return new Response(JSON.stringify({ error, ...extra }), {
       status: Number(status) || 500,
@@ -3924,7 +3982,7 @@ const Social = (() => {
               }
               <button type="button" class="social-media-del-btn" title="Delete" aria-label="Delete private media" onclick="event.stopPropagation();Social.promptDeletePrivateMedia(${item.id})">✕</button>
               <div class="social-media-info">
-                <span>#${esc(item.room_name)}</span>
+                ${_roomMentionHtml(item.room_name) || `<span>#${esc(item.room_name)}</span>`}
                 <span>${timeAgo(item.created_at)}</span>
               </div>
             </div>
@@ -5912,7 +5970,7 @@ const Social = (() => {
                 : `<img src="/api/messages/media/${item.id}?thumb=1" alt="" loading="lazy" onerror="this.closest('.social-media-item')?.remove()">`
               }
               <div class="social-media-info">
-                <span>#${esc(item.room_name)}</span>
+                ${_roomMentionHtml(item.room_name) || `<span>#${esc(item.room_name)}</span>`}
                 <span>${timeAgo(item.created_at)}</span>
               </div>
             </div>
@@ -6067,8 +6125,11 @@ const Social = (() => {
     // #channel refs → clickable pill that jumps to the channel (same flow
     // as in-channel #mentions: closes Social, auto-joins if public, shows
     // a "deleted" toast if the channel is gone).
-    html = html.replace(/(^|[\s(\[>])#([a-zA-Z0-9][a-zA-Z0-9_-]{1,31})\b/g,
-      (m, pre, name) => `${pre}<span class="room-mention sf-room-mention" data-room="${esc(name)}" onclick="event.stopPropagation();if(window.Rooms&&Rooms.openChannelLink){Rooms.openChannelLink('${esc(name).replace(/'/g,"\\'")}')}">#${esc(name)}</span>`);
+    html = html.replace(/(^|[\s(\[>])#([a-z0-9][a-z0-9_-]{0,31})\b/gi,
+      (m, pre, name) => {
+        const pill = _roomMentionHtml(name);
+        return pill ? `${pre}${pill}` : m;
+      });
     // Restore URL placeholders as themed link (green accent, no default blue).
     html = html.replace(/\x00URL(\d+)\x00/g, (_m, i) => {
       const url = urlSlots[+i];
@@ -6289,7 +6350,7 @@ const Social = (() => {
                onclick="event.stopPropagation();">${esc(title)}</a>
           </div>
           <div class="sfmc-sub">
-            ${roomHint ? `<span class="room-mention sfmc-room" data-room="${esc(roomHint)}" onclick="event.stopPropagation();if(window.Rooms&&Rooms.openChannelLink){Rooms.openChannelLink('${esc(roomHint).replace(/'/g,"\\'")}')}">#${esc(roomHint)}</span> · ` : ''}
+            ${roomHint ? `${_roomMentionHtml(roomHint)} · ` : ''}
             <a href="${esc(fullUrl)}" target="_blank" rel="noopener noreferrer" class="sfmc-link">Open on ${esc(label)} ↗</a>
           </div>
           ${(() => {
@@ -7540,6 +7601,17 @@ const Social = (() => {
     const postPrivacy = String(p.privacy || 'public').toLowerCase();
     const shareEnabled = Number(p.share_enabled ?? 1) === 1;
     const canAudienceShare = (postPrivacy === 'public' || postPrivacy === 'followers');
+    const sourceRoom = (!isMusicPost && p.media_data && p.media_type)
+      ? _extractPostRoomName(p)
+      : '';
+    if (sourceRoom && postText) {
+      postText = postText
+        .replace(new RegExp(`^📸\\s*From\\s+#${sourceRoom.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'im'), '')
+        .trim();
+    }
+    const sourceRoomHtml = sourceRoom
+      ? `<div class="sf-post-source-room">${_roomMentionHtml(sourceRoom)}</div>`
+      : '';
 
     // Inline link embed — when the post is text-only and the body contains
     // a YouTube or Spotify URL, render an embed underneath the text so the
@@ -7624,6 +7696,7 @@ const Social = (() => {
           onclick="event.stopPropagation();Social.openPostMenu(this)">⋯</button>
       </div>
       ${postText ? `<div class="sf-post-text ${isMusicPost ? 'is-music-caption' : ''}">${_formatPostContent(postText)}</div>` : ''}
+      ${sourceRoomHtml}
       ${linkEmbedHtml}
       ${mediaHtml}
       <div class="sf-post-actions">
@@ -9893,6 +9966,7 @@ const Social = (() => {
       } catch {}
     },
     viewChannelProfile(name) { if (typeof viewChannelProfile === 'function') viewChannelProfile(name); },
+    onRoomRenamed,
   };
 })();
 

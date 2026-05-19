@@ -16,8 +16,18 @@ from ws_manager import manager
 # `_css_safety.sanitize_scoped_css` (selector-aware <style> sanitiser)
 # is no longer used: we never emit a <style> block from user data.
 from routers._css_inline import sanitize_inline_style
+from routers.rooms import ROOM_NAME_RE
 
 _log = logging.getLogger(__name__)
+
+
+def _sanitize_track_room(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    s = str(raw).strip().lower()
+    if not s or not ROOM_NAME_RE.match(s):
+        return None
+    return s
 limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/wall", tags=["wall"])
 
@@ -192,6 +202,7 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
     if body.privacy not in ("public", "followers", "friends", "private"):
         return JSONResponse(status_code=400, content={"error": "Invalid privacy setting"})
     
+    track_room = _sanitize_track_room(body.track_room)
     post_id = db.create_wall_post(
         current_user["id"],
         body.content.strip(),
@@ -201,7 +212,7 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
         1 if body.share_enabled else 0,
         1 if body.allow_comments else 0,
         (body.track_title or None),
-        (body.track_room or None),
+        track_room,
         (body.track_mood or None),
     )
 
@@ -218,7 +229,7 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
                 "share_enabled": bool(body.share_enabled),
                 "allow_comments": bool(body.allow_comments),
                 "track_title": body.track_title,
-                "track_room": body.track_room,
+                "track_room": track_room,
                 "track_mood": body.track_mood,
             },
         })
@@ -365,6 +376,7 @@ async def create_wall_post_encrypted(request: Request,
         return JSONResponse(status_code=403,
             content={"error": "Recipient not in audience", "recipient_ids": bad[:10]})
 
+    enc_track_room = _sanitize_track_room(body.track_room)
     try:
         post_id = db.create_wall_post_encrypted(
             user_id=author_id,
@@ -376,7 +388,7 @@ async def create_wall_post_encrypted(request: Request,
             share_enabled=1 if body.share_enabled else 0,
             allow_comments=1 if body.allow_comments else 0,
             track_title=(body.track_title or None),
-            track_room=(body.track_room or None),
+            track_room=enc_track_room,
             track_mood=(body.track_mood or None),
         )
     except ValueError as e:
@@ -403,7 +415,7 @@ async def create_wall_post_encrypted(request: Request,
                 "share_enabled": bool(body.share_enabled),
                 "allow_comments": bool(body.allow_comments),
                 "track_title": body.track_title,
-                "track_room": body.track_room,
+                "track_room": enc_track_room,
                 "track_mood": body.track_mood,
             },
         })

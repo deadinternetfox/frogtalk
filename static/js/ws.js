@@ -704,7 +704,16 @@ const WS = (() => {
         break;
       }
       case 'room_settings_updated': {
-        try { window.Rooms?.onRoomSettingsUpdated?.(data.room); } catch {}
+        try { window.Rooms?.onRoomSettingsUpdated?.(data.room, data); } catch {}
+        if (data.renamed_from && data.room) {
+          try { window.Social?.onRoomRenamed?.(data.renamed_from, data.room); } catch {}
+        }
+        break;
+      }
+      case 'room_renamed': {
+        if (data.old_name && data.new_name) {
+          try { window.Social?.onRoomRenamed?.(data.old_name, data.new_name); } catch {}
+        }
         break;
       }
       // ── Room ban / kick (Discord-style channel close) ────

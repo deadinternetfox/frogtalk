@@ -36,6 +36,8 @@ function _cssUrl(raw) {
 }
 
 const Rooms = (() => {
+  const _ROOM_NAME_RE = /^[a-z0-9_-]{1,32}$/;
+  let _roomMentionClickBound = false;
   let _selectedRoomType = 'public';
   let _selectedChannelType = 'text';  // text or voice
   let _settingsChannelType = 'text';
@@ -477,6 +479,49 @@ const Rooms = (() => {
     return `<span class="${className}${fallbackHashClass}">${UI.escHtml(renderedIcon)}</span>`;
   }
 
+  function normalizeChannelType(ct) {
+    return (ct === 'voice') ? 'music' : (ct || 'text');
+  }
+
+  function channelTypeForRoom(roomName) {
+    const row = (State.rooms || []).find(r => r.name === roomName);
+    return normalizeChannelType(row?.channel_type);
+  }
+
+  /** Apply text↔music UI without reloading message history (settings / WS sync). */
+  function applyChannelTypeUi(roomName, channelType, opts = {}) {
+    if (!roomName || State.currentRoom !== roomName || State.currentRoomType === 'dm') return false;
+    const chType = normalizeChannelType(channelType);
+    const prev = normalizeChannelType(State.currentChannelType);
+    State.currentChannelType = chType;
+    const row = (State.rooms || []).find(r => r.name === roomName);
+    if (row) row.channel_type = chType;
+
+    const roomType = State.currentRoomType || 'public';
+    syncActiveRoomHeader(roomName, { channelType: chType });
+
+    const voiceJoinBtn = document.getElementById('voice-join-btn');
+    if (voiceJoinBtn) {
+      const showVoice = !window._voiceRoom && chType !== 'music' && roomType !== 'dm';
+      voiceJoinBtn.style.display = showVoice ? '' : 'none';
+    }
+    const msgBar = document.getElementById('input-area');
+    if (msgBar) msgBar.style.display = chType === 'voice' ? 'none' : '';
+
+    const isMusic = chType === 'music';
+    const voiceRecBtn = document.getElementById('voice-rec-btn');
+    const videoRecBtn = document.getElementById('video-rec-btn');
+    const fileInput = document.getElementById('file-input');
+    if (voiceRecBtn) voiceRecBtn.style.display = isMusic ? 'none' : '';
+    if (videoRecBtn) videoRecBtn.style.display = isMusic ? 'none' : '';
+    if (fileInput) fileInput.accept = isMusic ? 'image/*,image/gif' : 'image/*,video/mp4,video/webm,audio/*';
+    document.body.classList.toggle('in-music-channel', isMusic);
+
+    try { Music?.mount?.(roomName, chType); } catch {}
+    if (opts.refreshSidebar) try { renderRooms(); } catch {}
+    return prev !== chType;
+  }
+
   /** Keep chat header (icon + description) in sync with sidebar / saved settings. */
   function syncActiveRoomHeader(roomName, patch = {}) {
     if (!roomName || State.currentRoomType === 'dm') return;
@@ -718,11 +763,21 @@ const Rooms = (() => {
     } catch {}
   }
 
-  async function onRoomSettingsUpdated(roomName) {
+  async function onRoomSettingsUpdated(roomName, evt) {
     if (!roomName) return;
+    const prevCh = (State.currentRoom === roomName)
+      ? normalizeChannelType(State.currentChannelType)
+      : null;
     try { await loadRooms(); } catch {}
-    if (State.currentRoom === roomName) {
-      try { syncActiveRoomHeader(roomName); } catch {}
+    if (State.currentRoom !== roomName) return;
+    const newCh = evt?.channel_type != null
+      ? normalizeChannelType(evt.channel_type)
+      : channelTypeForRoom(roomName);
+    if (prevCh !== null && prevCh !== newCh) {
+      try { applyChannelTypeUi(roomName, newCh); } catch {}
+    } else {
+      try { syncActiveRoomHeader(roomName, { channelType: newCh }); } catch {}
+      try { Music?.mount?.(roomName, newCh); } catch {}
     }
   }
 
@@ -1025,9 +1080,14 @@ const Rooms = (() => {
     const _roomDataEarly = State.rooms.find(r => r.name === name);
     const _chTypeEarly = (_roomDataEarly?.channel_type === 'voice') ? 'music' : (_roomDataEarly?.channel_type || channelType || 'text');
     if (State.currentRoom === name && State.currentRoomType === type) {
-      // Re-clicking the current channel must still refresh the music panel
-      // (e.g. user played a FrogSocial track while staying on this channel).
-      try { Music?.mount?.(name, _chTypeEarly); } catch {}
+      const chNow = normalizeChannelType(_chTypeEarly);
+      if (normalizeChannelType(State.currentChannelType) !== chNow) {
+        try { applyChannelTypeUi(name, chNow); } catch {}
+      } else {
+        // Re-clicking the current channel must still refresh the music panel
+        // (e.g. user played a FrogSocial track while staying on this channel).
+        try { Music?.mount?.(name, chNow); } catch {}
+      }
       return;
     }
     try {
@@ -1068,7 +1128,6 @@ const Rooms = (() => {
     State.roomKeys[name] = key;
     State.currentRoom = name;
     State.currentRoomType = type;
-    State.currentChannelType = channelType;
     State.dmPeer = dmPeer;
     try {
       if (typeof UI !== 'undefined' && UI.updateTypingBar) UI.updateTypingBar();
@@ -1149,7 +1208,8 @@ const Rooms = (() => {
         }
       }).catch(() => {});
     }
-    const chType = (roomData?.channel_type === 'voice') ? 'music' : (roomData?.channel_type || channelType || 'text');
+    const chType = normalizeChannelType(roomData?.channel_type || channelType || 'text');
+    State.currentChannelType = chType;
     setRoomHeader(name, type, roomData?.icon || null, dmPeer, chType);
     document.getElementById('ch-desc').textContent = type === 'dm'
       ? `Direct message with ${dmPeer}`
@@ -1168,22 +1228,7 @@ const Rooms = (() => {
     const encryptBtn = document.getElementById('encrypt-btn');
     if (encryptBtn) encryptBtn.style.display = type === 'dm' ? '' : 'none';
 
-    // Show voice join button for voice channels or as general room voice
-    const voiceJoinBtn = document.getElementById('voice-join-btn');
-    if (voiceJoinBtn) {
-      // Always visible outside active voice sessions — useful from any context.
-      // Music channels don't use the voice bar (they use the YouTube/Spotify
-      // player instead), so hide it there to avoid user confusion.
-      const isMusicCh = chType === 'music';
-      const showVoice = !window._voiceRoom && !isMusicCh && type !== 'dm';
-      voiceJoinBtn.style.display = showVoice ? '' : 'none';
-    }
-    
-    // For voice channels, auto-hide the message input (voice channels don't have text chat in this model)
-    const msgBar = document.getElementById('input-area');
-    if (msgBar) {
-      msgBar.style.display = chType === 'voice' ? 'none' : '';
-    }
+    applyChannelTypeUi(name, chType);
     if (_enc) {
       _enc.style.display = (key && chType !== 'voice') ? '' : 'none';
     }
@@ -1227,21 +1272,6 @@ const Rooms = (() => {
         }
       } catch {}
     }
-
-    // Music channels: chat stays open but we lock the attachment bar down to
-    // pictures + GIFs only so nobody can drop a voice note or a 2-minute
-    // vlog in the middle of a DJ set. Also hide record buttons entirely.
-    const isMusic = (chType === 'music');
-    const voiceRecBtn = document.getElementById('voice-rec-btn');
-    const videoRecBtn = document.getElementById('video-rec-btn');
-    const fileInput   = document.getElementById('file-input');
-    if (voiceRecBtn) voiceRecBtn.style.display = isMusic ? 'none' : '';
-    if (videoRecBtn) videoRecBtn.style.display = isMusic ? 'none' : '';
-    if (fileInput)   fileInput.accept = isMusic ? 'image/*,image/gif' : 'image/*,video/mp4,video/webm,audio/*';
-    document.body.classList.toggle('in-music-channel', isMusic);
-
-    // Show/hide the music channel panel
-    try { Music?.mount?.(name, chType); } catch {}
 
     // Highlight active
     document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
@@ -1530,6 +1560,13 @@ const Rooms = (() => {
     _settingsChannelType = type;
     document.getElementById('ch-settings-chtype-text').classList.toggle('selected', type === 'text');
     document.getElementById('ch-settings-chtype-music').classList.toggle('selected', type === 'music');
+    const iconVal = (document.getElementById('ch-settings-icon-input')?.value || '').trim();
+    const roomType = _currentRoomData?.room?.type || 'public';
+    setRoomIconPreview('ch-settings-icon', iconVal, roomType, type);
+    const titleIcon = document.getElementById('ch-settings-title-icon');
+    if (titleIcon) {
+      titleIcon.textContent = isImageIcon(iconVal) ? '🖼️' : (iconVal || defaultIconForType(roomType, type));
+    }
   }
 
   function _applyDirectoryPolicyForRoomType(roomType) {
@@ -2180,6 +2217,10 @@ const Rooms = (() => {
       body: JSON.stringify({ is_public: !!dirListed, category: dirCategory, tags: dirTags, directory_description: dirDesc })
     });
 
+    const oldSettingsRoom = _currentSettingsRoom;
+    const oldChType = normalizeChannelType(_currentRoomData?.room?.channel_type);
+    const newChType = normalizeChannelType(_settingsChannelType);
+
     if (_currentSettingsRoom !== name) {
       try { migrateRoomChannelState(_currentSettingsRoom, name); } catch {}
       try {
@@ -2188,7 +2229,8 @@ const Rooms = (() => {
         }
       } catch {}
     }
-    
+    _currentSettingsRoom = name;
+
     closeModal('modal-channel-settings');
     UI.showToast('Channel settings saved');
     restoreBtn();
@@ -2197,10 +2239,13 @@ const Rooms = (() => {
     await loadRooms();
 
     // If we renamed the room or we're in it, update
-    if (State.currentRoom === _currentSettingsRoom && _currentSettingsRoom !== name) {
-      switchToRoom(name, _currentRoomData.room.type, null, _settingsChannelType);
+    if (State.currentRoom === oldSettingsRoom && oldSettingsRoom !== name) {
+      switchToRoom(name, _currentRoomData.room.type, null, newChType);
     } else if (State.currentRoom === name) {
-      syncActiveRoomHeader(name, { icon, description: desc, channelType: _settingsChannelType });
+      if (oldChType !== newChType) {
+        try { applyChannelTypeUi(name, newChType); } catch {}
+      }
+      syncActiveRoomHeader(name, { icon, description: desc, channelType: newChType });
     }
     } catch (err) {
       UI.showToast('Failed to save settings', 'error');
@@ -2593,28 +2638,48 @@ const Rooms = (() => {
     try { renderRooms(); } catch {}
   }
 
-  // Jump to a channel from a #room-mention inside a message.  Verifies the
-  // channel still exists (deleted channels return 404), otherwise shows a
-  // friendly toast.  The pill briefly flashes to give tactile feedback.
+  function _normalizeRoomLinkName(name) {
+    const n = String(name || '').trim().toLowerCase();
+    return _ROOM_NAME_RE.test(n) ? n : '';
+  }
+
+  /** One delegated listener for all #channel pills (Social, chat, etc.). */
+  function _bindRoomMentionClicks() {
+    if (_roomMentionClickBound) return;
+    _roomMentionClickBound = true;
+    document.addEventListener('click', (e) => {
+      const pill = e.target.closest('.room-mention[data-room]');
+      if (!pill || pill.classList.contains('dead')) return;
+      const room = _normalizeRoomLinkName(pill.dataset.room);
+      if (!room) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openChannelLink(room);
+    });
+  }
+
+  // Jump to a channel from a #room-mention (Frog Social, chat, etc.).
+  // Closes Social, auto-joins public channels, resolves renames server-side.
   async function openChannelLink(name) {
-    if (!name) return;
-    const raw = String(name).trim();
-    // Visual feedback on the clicked pill (event.target isn't always the
-    // pill — look it up by data-room).
+    const raw = _normalizeRoomLinkName(name);
+    if (!raw) return;
+
     const pill = document.querySelector(`.room-mention[data-room="${CSS.escape(raw)}"]`);
     if (pill) {
       pill.classList.add('loading');
       setTimeout(() => { try { pill.classList.remove('loading'); } catch {} }, 1200);
     }
-    // Close Frog Social if it's open so the channel takes over the view.
+
+    // Leave Frog Social / post detail so the channel view is visible.
     try { if (window.Social && typeof Social.close === 'function') Social.close(); } catch {}
-    // Fast path: it's already joined — just switch.
+    try { if (typeof closePostDetail === 'function') closePostDetail(); } catch {}
+
     const cached = (State.rooms || []).find(r => r.name === raw);
     if (cached && cached.joined) {
-      switchToRoom(raw, 'public', null, cached.channel_type || 'text');
+      switchToRoom(raw, cached.type || 'public', null, cached.channel_type || 'text');
       return;
     }
-    // Verify server-side so a deleted channel doesn't leave the user hanging.
+
     try {
       const res = await apiFetch(`/api/rooms/${encodeURIComponent(raw)}`);
       if (res.status === 404) {
@@ -2628,18 +2693,46 @@ const Rooms = (() => {
       }
       const data = await res.json();
       const room = data.room || {};
-      // Auto-join public channels so the link "just works".
-      if (!room.is_private && !(cached && cached.joined)) {
-        try {
-          await apiFetch(`/api/rooms/${encodeURIComponent(raw)}/join`, 'POST');
-        } catch {}
+      const target = _normalizeRoomLinkName(room.name) || raw;
+      const roomType = room.type || 'public';
+      if (pill && target !== raw) {
+        pill.dataset.room = target;
+        pill.textContent = `#${target}`;
       }
+
+      const alreadyJoined = (State.rooms || []).some(r => r.name === target && r.joined);
+      if (roomType === 'private' && !alreadyJoined) {
+        UI.showToast(`#${target} is private — you need an invite to join`, 'warning');
+        return;
+      }
+      if (!alreadyJoined) {
+        const jr = await apiFetch(`/api/rooms/${encodeURIComponent(target)}/join`, 'POST');
+        if (!jr.ok) {
+          const err = await jr.json().catch(() => ({}));
+          UI.showToast(err.error || `Couldn't join #${target}`, 'error');
+          if (jr.status === 404 && pill) pill.classList.add('dead');
+          return;
+        }
+      }
+
       try { await loadRooms(); } catch {}
-      switchToRoom(raw, 'public', null, room.channel_type || 'text');
+      const fresh = (State.rooms || []).find(r => r.name === target);
+      switchToRoom(
+        target,
+        fresh?.type || roomType,
+        null,
+        fresh?.channel_type || room.channel_type || 'text',
+      );
     } catch {
       UI.showToast('Network error', 'error');
+    } finally {
+      if (pill) {
+        try { pill.classList.remove('loading'); } catch {}
+      }
     }
   }
+
+  _bindRoomMentionClicks();
 
   return { 
     loadRooms, switchToRoom, openDM, showCreateRoom, createRoom, deleteRoom,

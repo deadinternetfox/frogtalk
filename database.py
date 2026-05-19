@@ -4996,6 +4996,10 @@ def _rename_hint_key(room_name: str) -> str:
     return f"room.rename_hint.{str(room_name or '').strip().lower()}"
 
 
+def _rename_forward_key(room_name: str) -> str:
+    return f"room.rename.forward.{str(room_name or '').strip().lower()}"
+
+
 def remember_room_rename(old_name: str, new_name: str) -> None:
     """Record ``old_name`` so a later repair can reattach orphaned rows if needed."""
     old_name = str(old_name or "").strip()
@@ -5005,6 +5009,22 @@ def remember_room_rename(old_name: str, new_name: str) -> None:
     if old_name == new_name:
         return
     set_config(_rename_hint_key(new_name), old_name)
+    set_config(_rename_forward_key(old_name), new_name)
+
+
+def resolve_room_name(name: str) -> Optional[str]:
+    """Return the current room name, following a single rename forward hint if needed."""
+    n = str(name or "").strip().lower()
+    if not _ROOM_NAME_SAFE_RE.match(n):
+        return None
+    if get_room_by_name(n):
+        return n
+    fwd = get_config(_rename_forward_key(n))
+    if isinstance(fwd, str):
+        fwd = fwd.strip().lower()
+        if fwd and fwd != n and _ROOM_NAME_SAFE_RE.match(fwd) and get_room_by_name(fwd):
+            return fwd
+    return None
 
 
 def repair_messages_after_rename(room_name: str) -> int:
@@ -5041,6 +5061,10 @@ def _rename_room_name_references(con: sqlite3.Connection, old_name: str, new_nam
         return
     for table in _RENAME_ROOM_TABLES:
         con.execute(f"UPDATE {table} SET room_name=? WHERE room_name=?", (new_name, old_name))
+    con.execute(
+        "UPDATE wall_posts SET track_room=? WHERE track_room=?",
+        (new_name, old_name),
+    )
     old_anchor_key = _music_anchor_config_key(old_name)
     new_anchor_key = _music_anchor_config_key(new_name)
     row = con.execute("SELECT value FROM config WHERE key=?", (old_anchor_key,)).fetchone()

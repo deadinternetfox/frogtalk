@@ -3907,7 +3907,8 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 /* Clickable #channel reference inside a message body */
 .room-mention{
   color:#8ab4ff;font-weight:600;background:rgba(100,150,255,.1);
-  border-radius:4px;padding:0 4px;cursor:pointer;
+  border:0;border-radius:4px;padding:0 4px;cursor:pointer;
+  font:inherit;line-height:inherit;
   transition:background .15s,color .15s,transform .1s
 }
 .room-mention:hover{background:rgba(100,150,255,.22);color:#b1caff}
@@ -7279,7 +7280,8 @@ body[data-social-nowplaying="1"] .reel-mute-btn{top:78px}
 .sfmc-title a{color:inherit;text-decoration:none;cursor:pointer}
 .sfmc-title a:hover{color:#fff;text-decoration:underline}
 .sfmc-sub{font-size:12px;color:#888}
-.sfmc-sub .sfmc-room{color:#a88fe0;font-weight:600}
+.sfmc-sub .sfmc-room{color:#a88fe0;font-weight:600;cursor:pointer}
+.sf-post-source-room{padding:0 14px 6px;font-size:12px}
 .sfmc-sub .sfmc-link{color:#4caf50;text-decoration:none}
 .sfmc-sub .sfmc-link:hover{text-decoration:underline}
 .sfmc-status{
@@ -10745,13 +10747,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/state.js?v=203"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=435"></script>
-<script src="/static/js/ws.js?v=250"></script>
+<script src="/static/js/ws.js?v=252"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=489"></script>
-  <script src="/static/js/rooms.js?v=447"></script>
+  <script src="/static/js/rooms.js?v=450"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>
 <script src="/static/js/text_format.js?v=2"></script>
-<script src="/static/js/messages.js?v=484"></script>
+<script src="/static/js/messages.js?v=485"></script>
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
@@ -10763,7 +10765,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=424"></script>
 <!-- cache bump: social share button + story/profile list UX fixes -->
-<script src="/static/js/social.js?v=1033"></script>
+<script src="/static/js/social.js?v=1035"></script>
 <!-- Privacy PIN lock (auto-lock on idle, admin gate, autologin gate) -->
 <script src="/static/js/pin.js?v=11"></script>
 <!-- Context-aware screenshot blocker: only engages in DMs / private rooms / disappearing threads -->

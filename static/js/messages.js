@@ -175,7 +175,11 @@ const Messages = (() => {
     // Rejects things that look like CSS colors (#abc, #a1b2c3) or trailing
     // hashes inside URLs by requiring a word-boundary before the hash.
     escaped = escaped.replace(/(^|[\s(\[>])#([a-zA-Z0-9][a-zA-Z0-9_-]{1,31})\b/g,
-      (m, pre, name) => `${pre}<span class="room-mention" data-room="${UI.escHtml(name)}" onclick="Rooms.openChannelLink('${UI.escHtml(name).replace(/'/g,"\\'")}')">#${UI.escHtml(name)}</span>`);
+      (m, pre, name) => {
+        const room = String(name || '').trim().toLowerCase();
+        if (!/^[a-z0-9_-]{1,32}$/.test(room)) return m;
+        return `${pre}<button type="button" class="room-mention" data-room="${UI.escHtml(room)}" title="Open #${UI.escHtml(room)}">#${UI.escHtml(room)}</button>`;
+      });
 
     // Restore URL placeholders, running the invite-card / social-card /
     // generic-link transforms on the original URL strings.

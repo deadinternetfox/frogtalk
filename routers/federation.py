@@ -1674,9 +1674,11 @@ def _fed_room_moderator(room_name: str, actor_nick: str | None) -> dict | None:
 async def _broadcast_room_settings_ws(room_name: str) -> None:
     try:
         from ws_manager import manager
+        room_row = db.get_room_by_name(room_name) or {}
         await manager.broadcast_room(room_name, {
             "type": "room_settings_updated",
             "room": room_name,
+            "channel_type": room_row.get("channel_type") or "text",
         })
     except Exception:
         pass
@@ -1755,6 +1757,15 @@ async def _handle_room_event(event: dict) -> None:
             )
             return
         db.cascade_room_rename(old_name, new_name)
+        try:
+            from ws_manager import manager
+            await manager.broadcast_all({
+                "type": "room_renamed",
+                "old_name": old_name,
+                "new_name": new_name,
+            })
+        except Exception:
+            pass
         await _broadcast_room_settings_ws(new_name)
         return
 
@@ -1780,8 +1791,12 @@ async def _handle_room_event(event: dict) -> None:
         if not room:
             return
         ct = str(payload.get("channel_type") or "").strip().lower()
+        type_changed = False
         if ct in ("text", "music", "voice"):
-            db.update_room_settings(room_name, channel_type=ct)
+            if db.update_room_settings(room_name, channel_type=ct):
+                type_changed = True
+        if type_changed:
+            await _broadcast_room_settings_ws(room_name)
         if "dj_only" in payload:
             db.room_set_dj_only(room_name, 1 if payload.get("dj_only") else 0)
             await _broadcast_music_ws(room_name, {
@@ -2517,6 +2532,7 @@ async def _handle_social_event(event: dict) -> None:
         if not author:
             return
         # Use existing DB helper so post appears in feed/explore as normal.
+        from routers.wall import _sanitize_track_room
         db.create_wall_post(
             author["id"],
             str(payload.get("content") or ""),
@@ -2525,7 +2541,7 @@ async def _handle_social_event(event: dict) -> None:
             str(payload.get("privacy") or "public"),
             1 if bool(payload.get("allow_comments", True)) else 0,
             payload.get("track_title") or None,
-            payload.get("track_room") or None,
+            _sanitize_track_room(payload.get("track_room")),
             payload.get("track_mood") or None,
         )
         return
