@@ -37,6 +37,8 @@ DEFAULT_FILES=(
   "static/js/state.js:static/js/state.js"
   "static/js/rooms.js:static/js/rooms.js"
   "static/js/ui.js:static/js/ui.js"
+  "static/js/text_format.js:static/js/text_format.js"
+  "static/js/format_toolbar.js:static/js/format_toolbar.js"
 )
 
 if [[ $# -gt 0 ]]; then

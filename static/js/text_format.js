@@ -12,10 +12,13 @@ const TextFormat = (() => {
     code: { open: 'code', cls: 'fmt-code' },
   };
   const OPEN_RE = /^\[(b|i|u|s|code)\]/i;
+  const HAS_FMT_RE = /\[(?:\/)?(?:b|i|u|s|code)\]/i;
+  const MAX_LEN = 10000;
   const MAX_DEPTH = 12;
 
   function _findClose(str, from, tag) {
     const close = `[/${tag}]`;
+    const closeLower = close.toLowerCase();
     let depth = 1;
     let i = from;
     while (i < str.length) {
@@ -26,7 +29,7 @@ const TextFormat = (() => {
         i += nestedOpen[0].length;
         continue;
       }
-      if (rest.toLowerCase().startsWith(close)) {
+      if (rest.toLowerCase().startsWith(closeLower)) {
         depth -= 1;
         if (depth === 0) return i;
         i += close.length;
@@ -57,7 +60,7 @@ const TextFormat = (() => {
         }
         const inner = applyTags(escaped.slice(innerStart, innerEnd), depth + 1);
         out += `<${spec.open} class="${spec.cls}">${inner}</${spec.open}>`;
-        i = innerEnd + (`[/${tag}]`).length;
+        i = innerEnd + closeLen(tag);
         continue;
       }
       const next = escaped.indexOf('[', i);
@@ -71,10 +74,17 @@ const TextFormat = (() => {
     return out;
   }
 
+  function closeLen(tag) {
+    return (`[/${tag}]`).length;
+  }
+
   /** Format already-escaped HTML text with bracket tags. */
   function formatEscaped(escaped) {
     if (!escaped) return '';
-    return applyTags(String(escaped), 0);
+    const s = String(escaped);
+    if (s.length > MAX_LEN) return s;
+    if (!s.includes('[') || !HAS_FMT_RE.test(s)) return s;
+    return applyTags(s, 0);
   }
 
   /** Escape + format raw user text for display. */
@@ -84,7 +94,13 @@ const TextFormat = (() => {
     return formatEscaped(esc(raw));
   }
 
-  return { formatEscaped, formatRaw, TAGS };
+  /** True when text may contain supported formatting tags. */
+  function hasFormatting(raw) {
+    if (!raw) return false;
+    return HAS_FMT_RE.test(String(raw));
+  }
+
+  return { formatEscaped, formatRaw, hasFormatting, TAGS };
 })();
 
 try { if (typeof window !== 'undefined') window.TextFormat = TextFormat; } catch {}

@@ -1,5 +1,5 @@
 /* FrogTalk Service Worker — caching + web push */
-const CACHE_NAME = 'frogtalk-v630';
+const CACHE_NAME = 'frogtalk-v631';
 const STATIC_ASSETS = [
   '/app',
   '/static/js/app.js',
@@ -9,6 +9,8 @@ const STATIC_ASSETS = [
   '/static/js/crypto.js',
   '/static/js/rooms.js',
   '/static/js/messages.js',
+  '/static/js/text_format.js',
+  '/static/js/format_toolbar.js',
   '/static/js/users.js',
   '/static/js/emoji.js',
   '/static/js/friends.js',
