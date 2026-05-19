@@ -740,7 +740,7 @@ const Messages = (() => {
     wrap.id = `sp-${msgId}`;
     wrap.addEventListener('click', (e) => revealSpoiler(msgId, e));
     wrap.innerHTML = '<div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>'
-      + '<button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview">🙈</button>';
+      + '<button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview">👁️</button>';
     const rehide = wrap.querySelector('.spoiler-rehide');
     if (rehide) {
       rehide.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); hideSpoiler(msgId, e); });
@@ -1326,7 +1326,7 @@ const Messages = (() => {
       return `<div class="spoiler-wrap" id="sp-${msg.id}" onclick="Messages.revealSpoiler(${msg.id}, event)">
         <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
         <button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview"
-          onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msg.id}, event)">🙈</button>
+          onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msg.id}, event)">👁️</button>
         ${inner.replace('class="msg-media', 'class="spoiler-img msg-media')}
       </div>`;
     }
@@ -2972,7 +2972,7 @@ const Messages = (() => {
         html = `<div class="spoiler-wrap" id="sp-${msgId}" onclick="Messages.revealSpoiler(${msgId}, event)">
           <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
           <button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview"
-            onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msgId}, event)">🙈</button>
+            onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msgId}, event)">👁️</button>
           ${html.replace('class="msg-media', 'class="spoiler-img msg-media')}
         </div>`;
       }
