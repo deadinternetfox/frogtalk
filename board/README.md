@@ -1,12 +1,6 @@
-<<<<<<< HEAD
-# Imageboard Standalone
-
-This is a standalone copy of the imageboard stack extracted from the main project.
-=======
 # Frog Channel board
 
 Anonymous imageboard (“Frog Channel”) for [FrogTalk](https://frogtalk.xyz): threads, replies, greentext, media uploads, live board chat, moderation, and optional federation between nodes.
->>>>>>> 262e4f5 (docs(board): document standalone vs FrogTalk-integrated deployment.)
 
 ## Standalone or part of FrogTalk?
 
