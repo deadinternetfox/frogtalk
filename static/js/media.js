@@ -474,10 +474,182 @@ function showRecordingUI (stream) {
 
 /* ── File attachment handling ─────────────────────────────────────────────── */
 function handleFileSelect (input) {
-  const file = input.files?.[0];
-  if (!file) return;
-  addPendingAttachmentFile(file);
+  if (!input?.files?.length) return;
+  const isDM = typeof isDMView === 'function' && isDMView();
+  if (!isDM || input.files.length === 1) {
+    const file = input.files[0];
+    if (!file) return;
+    addPendingAttachmentFile(file);
+    input.value = '';
+    return;
+  }
+
+  for (const file of input.files) {
+    if (!file) continue;
+    addPendingAttachmentFile(file);
+  }
   input.value = '';
+}
+
+function getPendingAttachments () {
+  if (Array.isArray(window._pendingAttachments) && window._pendingAttachments.length) {
+    return window._pendingAttachments.slice();
+  }
+  if (window._pendingAttachment) {
+    return [window._pendingAttachment];
+  }
+  if (State && State.pendingAttachment) {
+    return [State.pendingAttachment];
+  }
+  return [];
+}
+
+function _syncPendingAttachmentState () {
+  if (Array.isArray(window._pendingAttachments) && window._pendingAttachments.length) {
+    window._pendingAttachment = window._pendingAttachments[0];
+    State.pendingAttachment = window._pendingAttachments.length === 1 ? window._pendingAttachments[0] : null;
+  } else {
+    window._pendingAttachment = null;
+    State.pendingAttachment = null;
+  }
+}
+
+function _renderPendingAttachmentList () {
+  const thumb = document.getElementById('attachment-thumb');
+  const prev  = document.getElementById('attachment-preview');
+  if (!thumb || !prev) return;
+  const attachments = getPendingAttachments();
+  if (!attachments.length) {
+    thumb.innerHTML = '';
+    prev.style.display = 'none';
+    return;
+  }
+
+  prev.style.display = 'flex';
+  thumb.innerHTML = '';
+  const isDM = typeof isDMView === 'function' && isDMView();
+  const multi = attachments.length > 1;
+
+  attachments.forEach((item, index) => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'att-preview-item';
+    wrapper.style.position = 'relative';
+
+    const mediaWrap = document.createElement('div');
+    mediaWrap.className = 'att-media-wrap';
+    mediaWrap.style.position = 'relative';
+
+    if (item.type && item.type.startsWith('image/')) {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(item.blob);
+      img.alt = '';
+      mediaWrap.appendChild(img);
+    } else if (item.type && item.type.startsWith('video/')) {
+      const vid = document.createElement('video');
+      vid.src = URL.createObjectURL(item.blob);
+      vid.muted = true;
+      vid.playsInline = true;
+      vid.preload = 'metadata';
+      vid.style.maxWidth = '200px';
+      vid.style.maxHeight = '140px';
+      vid.style.borderRadius = '8px';
+      mediaWrap.appendChild(vid);
+    } else {
+      const icon = document.createElement('div');
+      icon.className = 'att-preview-icon';
+      icon.textContent = /pdf/.test(item.type || '') ? '📕'
+                       : /audio/.test(item.type || '') ? '🎵'
+                       : /zip|rar|7z/.test(item.type || '') ? '🗜️'
+                       : '📄';
+      mediaWrap.appendChild(icon);
+    }
+
+    if (!multi && item.type && (item.type.startsWith('image/') || item.type.startsWith('video/'))) {
+      const eye = document.createElement('button');
+      eye.type = 'button';
+      eye.className = 'att-spoiler-eye';
+      eye.title = 'Toggle spoiler (blur until tapped)';
+      eye.setAttribute('aria-pressed', 'false');
+      eye.textContent = '👁️';
+      eye.style.position = 'absolute';
+      eye.style.top = '8px';
+      eye.style.right = '8px';
+      eye.style.background = 'rgba(0,0,0,.45)';
+      eye.style.color = '#fff';
+      eye.style.border = 'none';
+      eye.style.borderRadius = '999px';
+      eye.style.padding = '6px';
+      eye.style.cursor = 'pointer';
+      eye.addEventListener('click', () => toggleMediaFlag('blur'));
+      mediaWrap.appendChild(eye);
+      if (isDM) {
+        const fire = document.createElement('button');
+        fire.type = 'button';
+        fire.className = 'att-viewonce-fire';
+        fire.title = 'View once — disappears after viewing';
+        fire.setAttribute('aria-pressed', 'false');
+        fire.textContent = '🔥';
+        fire.style.position = 'absolute';
+        fire.style.top = '8px';
+        fire.style.left = '8px';
+        fire.style.background = 'rgba(0,0,0,.45)';
+        fire.style.color = '#fff';
+        fire.style.border = 'none';
+        fire.style.borderRadius = '999px';
+        fire.style.padding = '6px';
+        fire.style.cursor = 'pointer';
+        fire.addEventListener('click', () => toggleMediaFlag('view_once'));
+        mediaWrap.appendChild(fire);
+      }
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'att-preview-remove';
+    removeBtn.title = 'Remove attachment';
+    removeBtn.textContent = '✕';
+    removeBtn.style.position = 'absolute';
+    removeBtn.style.top = '6px';
+    removeBtn.style.right = '6px';
+    removeBtn.style.background = 'rgba(0,0,0,.55)';
+    removeBtn.style.color = '#fff';
+    removeBtn.style.border = 'none';
+    removeBtn.style.borderRadius = '999px';
+    removeBtn.style.padding = '4px 8px';
+    removeBtn.style.cursor = 'pointer';
+    removeBtn.addEventListener('click', () => _removePendingAttachment(index));
+
+    const sub = document.createElement('div');
+    sub.className = 'att-preview-sub';
+    sub.title = item.name || '';
+    sub.innerHTML = _fmtAttachSub(item.name, item.sizeBytes);
+
+    wrapper.appendChild(mediaWrap);
+    wrapper.appendChild(removeBtn);
+    wrapper.appendChild(sub);
+    thumb.appendChild(wrapper);
+  });
+
+  const flagBtns = document.getElementById('media-flag-btns');
+  if (flagBtns) {
+    flagBtns.style.display = multi ? '' : 'none';
+  }
+}
+
+function _removePendingAttachment (index) {
+  if (!Array.isArray(window._pendingAttachments)) return;
+  if (index < 0 || index >= window._pendingAttachments.length) return;
+  window._pendingAttachments.splice(index, 1);
+  _syncPendingAttachmentState();
+  if (window._pendingAttachments.length) {
+    if (window._pendingAttachments.length === 1) {
+      _renderAttachmentPreview(window._pendingAttachments[0]);
+    } else {
+      _renderPendingAttachmentList();
+    }
+  } else {
+    clearAttachment();
+  }
 }
 
 /* Reusable helper for any source (file picker, paste, camera). */
@@ -497,13 +669,39 @@ function addPendingAttachmentFile (file, opts = {}) {
     return false;
   }
 
-  window._pendingAttachment = { blob: file, name, type: mime };
-  _renderAttachmentPreview({
-    blob: file,
-    name,
-    type: mime,
-    sizeBytes: file.size,
-  });
+  const isDM = typeof isDMView === 'function' && isDMView();
+  if (!isDM) {
+    window._pendingAttachment = { blob: file, name, type: mime };
+    State.pendingAttachment = window._pendingAttachment;
+    _renderAttachmentPreview({
+      blob: file,
+      name,
+      type: mime,
+      sizeBytes: file.size,
+    });
+    return true;
+  }
+
+  if (!Array.isArray(window._pendingAttachments)) {
+    window._pendingAttachments = [];
+  }
+  if (window._pendingAttachments.length >= 5) {
+    toast('You can attach up to 5 files', 'info');
+    return false;
+  }
+
+  window._pendingAttachments.push({ blob: file, name, type: mime, sizeBytes: file.size });
+  _syncPendingAttachmentState();
+  if (window._pendingAttachments.length === 1) {
+    _renderAttachmentPreview({
+      blob: file,
+      name,
+      type: mime,
+      sizeBytes: file.size,
+    });
+  } else {
+    _renderPendingAttachmentList();
+  }
   return true;
 }
 
@@ -612,6 +810,8 @@ function clearAttachment () {
     }
   }
   window._pendingAttachment = null;
+  window._pendingAttachments = [];
+  State.pendingAttachment = null;
   document.getElementById('attachment-thumb').innerHTML = '';
   document.getElementById('attachment-preview').style.display = 'none';
   // Reset media flag toggles
@@ -628,39 +828,39 @@ function clearAttachment () {
 function toggleMediaFlag(flag) {
   if (flag === 'blur') {
     window._pendingMediaBlur = !window._pendingMediaBlur;
-    // Legacy hidden button kept for compatibility
     document.getElementById('spoiler-toggle-btn')?.classList.toggle('active', !!window._pendingMediaBlur);
-    // Eye overlay on the image itself
-    const eye = document.querySelector('#attachment-thumb .att-spoiler-eye');
-    if (eye) {
+    const eyes = document.querySelectorAll('#attachment-thumb .att-spoiler-eye');
+    eyes.forEach(eye => {
       eye.classList.toggle('active', !!window._pendingMediaBlur);
       eye.setAttribute('aria-pressed', window._pendingMediaBlur ? 'true' : 'false');
-    }
-    // Blur the preview image so the sender sees what recipients will see
-    const item = document.getElementById('att-preview-item');
-    if (item) item.classList.toggle('is-spoiler', !!window._pendingMediaBlur);
+    });
+    document.querySelectorAll('#attachment-thumb .att-preview-item').forEach(item => {
+      item.classList.toggle('is-spoiler', !!window._pendingMediaBlur);
+    });
 
     if (window._pendingMediaBlur) {
       window._pendingViewOnce = false;
-      const fire = document.querySelector('#attachment-thumb .att-viewonce-fire');
-      if (fire) { fire.classList.remove('active'); fire.setAttribute('aria-pressed', 'false'); }
+      const fires = document.querySelectorAll('#attachment-thumb .att-viewonce-fire');
+      fires.forEach(fire => { fire.classList.remove('active'); fire.setAttribute('aria-pressed', 'false'); });
     }
   } else {
     window._pendingViewOnce = !window._pendingViewOnce;
-    // Fire overlay button on the image
-    const fire = document.querySelector('#attachment-thumb .att-viewonce-fire');
-    if (fire) {
+    const fires = document.querySelectorAll('#attachment-thumb .att-viewonce-fire');
+    fires.forEach(fire => {
       fire.classList.toggle('active', !!window._pendingViewOnce);
       fire.setAttribute('aria-pressed', window._pendingViewOnce ? 'true' : 'false');
-    }
+    });
     document.getElementById('viewonce-toggle-btn')?.classList.toggle('active', !!window._pendingViewOnce);
     if (window._pendingViewOnce) {
       window._pendingMediaBlur = false;
       document.getElementById('spoiler-toggle-btn')?.classList.remove('active');
-      const eye = document.querySelector('#attachment-thumb .att-spoiler-eye');
-      if (eye) { eye.classList.remove('active'); eye.setAttribute('aria-pressed', 'false'); }
-      const item = document.getElementById('att-preview-item');
-      if (item) item.classList.remove('is-spoiler');
+      document.querySelectorAll('#attachment-thumb .att-spoiler-eye').forEach(eye => {
+        eye.classList.remove('active');
+        eye.setAttribute('aria-pressed', 'false');
+      });
+      document.querySelectorAll('#attachment-thumb .att-preview-item').forEach(item => {
+        item.classList.remove('is-spoiler');
+      });
     }
   }
 }

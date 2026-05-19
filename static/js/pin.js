@@ -312,6 +312,21 @@
   function _markUnlocked () {
     try { sessionStorage.setItem(_SS_UNLOCKED_AT, String(Date.now())); } catch {}
   }
+
+  function reset () {
+    try {
+      sessionStorage.removeItem(_SS_UNLOCKED_AT);
+      sessionStorage.removeItem(_SS_ADMIN_UNLOCKED_AT);
+    } catch {}
+    _locked = false;
+    _adminGatePending = false;
+    _pinBuffer = '';
+    _unlockResolvers.splice(0, _unlockResolvers.length).forEach(r => {
+      try { r(false); } catch {}
+    });
+    _hideLockScreen();
+  }
+
   function _wasUnlockedRecently (graceMs) {
     try {
       const t = Number(sessionStorage.getItem(_SS_UNLOCKED_AT) || 0);
@@ -1030,6 +1045,7 @@
     gateAdmin,
     gateRequest,
     lockNow,
+    reset,
     isLocked,
     // Exposed for callers that want to inspect after refreshFromServer().
     config: () => Object.freeze({ ..._cfg }),

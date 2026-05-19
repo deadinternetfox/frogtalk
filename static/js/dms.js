@@ -2099,6 +2099,67 @@ function _observeDMLazyMedia(root) {
   });
 }
 
+async function _sendDMFileMessage (fileData, payload) {
+  let mediaData = fileData.dataUrl || fileData.data || null;
+  if (!mediaData && fileData.blob) {
+    UI.showProgressToast('Preparing media…', 0);
+    try {
+      mediaData = await UI.blobToDataURL(fileData.blob, (pct) => {
+        UI.showProgressToast('Preparing media…', Math.max(1, Math.round(pct * 0.20)));
+      });
+    } catch (err) {
+      UI.showProgressToast('Failed to prepare media', 100);
+      throw err;
+    }
+    UI.showProgressToast('Preparing media…', 20);
+  }
+  if (mediaData && STATE.sharedSecret && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
+    UI.showProgressToast('Encrypting…', 22);
+    mediaData = await Crypto.encryptPayload(mediaData, STATE.sharedSecret);
+    UI.showProgressToast('Encrypting…', 25);
+  }
+  UI.showProgressToast('Uploading…', 25);
+  const r = await UI.uploadJSONWithProgress(
+    `/api/dms/${_activeDM.id}/messages`,
+    {
+      ...payload,
+      media_data: mediaData,
+      media_type: fileData.type || '',
+      media_name: fileData.name || 'file',
+      media_blur: window._pendingMediaBlur ? 1 : 0,
+      view_once: window._pendingViewOnce ? 1 : 0,
+    },
+    {
+      onProgress: (loaded, total, phase) => {
+        if (phase === 'uploaded') {
+          UI.showProgressToast('Sending…', 97);
+          return;
+        }
+        if (!total) return;
+        const frac = Math.max(0, Math.min(1, loaded / total));
+        const pct = 25 + Math.round(frac * 70);
+        UI.showProgressToast('Uploading…', Math.min(95, pct));
+      },
+    }
+  );
+  if (!r.ok) {
+    UI.showProgressToast('Upload failed', 100);
+    const errBody = await r.json().catch(() => ({}));
+    if (r.status === 403 && errBody?.code === 'blocked') {
+      handleDMSendError({
+        channel_id: _activeDM?.id || 0,
+        code: 'blocked',
+        i_blocked: !!errBody.i_blocked,
+        blocked_by_them: !!errBody.blocked_by_them,
+        peer_nickname: errBody.peer_nickname || '',
+      });
+      return null;
+    }
+    throw new Error(errBody?.error || 'Upload failed');
+  }
+  return r.json();
+}
+
 /* ── Send DM ─────────────────────────────────────────────────────────────────── */
 let _dmSending = false;
 async function sendDMMessage () {
@@ -2168,95 +2229,31 @@ async function sendDMMessage () {
     }
   }
 
-  const payload = {
-    content    : encryptedContent || content,
-    reply_to   : _dmReplyTo?.id || null,
-    client_mime: fileData?.type || null,
-  };
+  const pendingAttachments = (typeof getPendingAttachments === 'function')
+    ? getPendingAttachments()
+    : (window._pendingAttachment ? [window._pendingAttachment] : State.pendingAttachment ? [State.pendingAttachment] : []);
 
-  if (fileData) {
+  if (pendingAttachments.length) {
     _dmSending = true;
     const sendBtn = document.getElementById('send-btn');
     if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '⏳'; }
-    // Convert blob to base64 data URL and send as JSON (API only accepts JSON body).
-    // Progress phases (matches the channel-message uploader so the toast
-    // climbs honestly with bytes-on-the-wire instead of pausing at 70%):
-    //   0–20%  Preparing media   (blob → base64)
-    //  20–25%  Encrypting        (E2EE DMs only)
-    //  25–95%  Uploading         (real XHR upload progress)
-    //  95–99%  Server processing
-    //    100%  Sent
     try {
-      let mediaData = fileData.dataUrl || fileData.data || null;
-      if (!mediaData && fileData.blob) {
-        UI.showProgressToast('Preparing media…', 0);
-        try {
-          mediaData = await UI.blobToDataURL(fileData.blob, (pct) => {
-            UI.showProgressToast('Preparing media…', Math.max(1, Math.round(pct * 0.20)));
-          });
-        } catch (err) {
-          UI.showProgressToast('Failed to prepare media', 100);
-          toast('Could not read attachment: ' + (err?.message || 'unknown error'), 'error');
-          return;
-        }
-        UI.showProgressToast('Preparing media…', 20);
-      }
-      if (mediaData && STATE.sharedSecret && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
-        UI.showProgressToast('Encrypting…', 22);
-        mediaData = await Crypto.encryptPayload(mediaData, STATE.sharedSecret);
-        UI.showProgressToast('Encrypting…', 25);
-      }
-      UI.showProgressToast('Uploading…', 25);
-      const r = await UI.uploadJSONWithProgress(
-        `/api/dms/${_activeDM.id}/messages`,
-        {
-          content: encryptedContent || content || '',
-          media_data: mediaData,
-          media_type: fileData.type || '',
-          media_name: fileData.name || 'file',
-          media_blur: window._pendingMediaBlur ? 1 : 0,
-          view_once: window._pendingViewOnce ? 1 : 0,
-          reply_to: _dmReplyTo?.id || null,
-        },
-        {
-          onProgress: (loaded, total, phase) => {
-            if (phase === 'uploaded') {
-              UI.showProgressToast('Sending…', 97);
-              return;
-            }
-            if (!total) return;
-            const frac = Math.max(0, Math.min(1, loaded / total));
-            const pct = 25 + Math.round(frac * 70);
-            UI.showProgressToast('Uploading…', Math.min(95, pct));
-          },
-        }
-      );
-      if (!r.ok) {
-        UI.showProgressToast('Upload failed', 100);
-        // Surface blocked-state nicely instead of a generic toast.
-        try {
-          const errBody = await r.json();
-          if (r.status === 403 && errBody?.code === 'blocked') {
-            handleDMSendError({
-              channel_id: _activeDM?.id || 0,
-              code: 'blocked',
-              i_blocked: !!errBody.i_blocked,
-              blocked_by_them: !!errBody.blocked_by_them,
-              peer_nickname: errBody.peer_nickname || '',
-            });
-            return;
-          }
-          toast(errBody?.error || 'Upload failed', 'error');
-        } catch { toast('Upload failed', 'error'); }
-        return;
+      for (let i = 0; i < pendingAttachments.length; i++) {
+        const fileItem = pendingAttachments[i];
+        const filePayload = {
+          content: i === 0 ? (encryptedContent || content || '') : '',
+          reply_to: i === 0 ? _dmReplyTo?.id || null : null,
+          client_mime: fileItem?.type || null,
+        };
+        const msg = await _sendDMFileMessage(fileItem, filePayload);
+        if (msg === null) return;
+        appendDMMessage(msg);
       }
       UI.showProgressToast('Sent!', 100);
       clearReplyToDM();
       clearAttachment();
       input.value = '';
       autoResize(input);
-      const msg = await r.json();
-      appendDMMessage(msg);
     } catch (e) {
       console.error('DM file send error', e);
       UI.showProgressToast('Upload failed', 100);
@@ -2269,7 +2266,6 @@ async function sendDMMessage () {
   }
 
   // Send over WebSocket for speed. Include a client_nonce so we can reconcile
-  // the server's echo back to our optimistic bubble.
   const _nonce = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   wsSend({ type: 'dm_message', channel_id: _activeDM.id, content: encryptedContent || content,
            reply_to: _dmReplyTo?.id || null, client_nonce: _nonce });

@@ -34,6 +34,7 @@ const State = {
 
   clear() {
     try { if (typeof _dmPtCacheFlush === 'function') _dmPtCacheFlush(); } catch {}
+    try { if (window.Pin && typeof Pin.reset === 'function') Pin.reset(); } catch {}
     localStorage.removeItem('fc_token');
     localStorage.removeItem('fc_user');
     localStorage.removeItem('fc_last_room');
