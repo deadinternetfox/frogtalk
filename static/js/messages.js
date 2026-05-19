@@ -17,6 +17,14 @@ const Messages = (() => {
   // Colored eye (U+1F441 + U+FE0F) — matches composer .att-spoiler-eye / media flags.
   const SPOILER_EYE = '\u{1F441}\uFE0F';
 
+  function _spoilerOverlayHtml () {
+    return `<div class="spoiler-overlay" aria-hidden="true">`
+      + `<span class="spoiler-overlay-pill">`
+      + `<span class="spoiler-overlay-ic">${SPOILER_EYE}</span>`
+      + `<span class="spoiler-overlay-txt">Tap to reveal spoiler</span>`
+      + `</span></div>`;
+  }
+
   function _bridgeBadge(msg) {
     const p = msg && msg.bridge_platform;
     if (!p) return '';
@@ -741,7 +749,7 @@ const Messages = (() => {
     wrap.className = 'spoiler-wrap';
     wrap.id = `sp-${msgId}`;
     wrap.addEventListener('click', (e) => revealSpoiler(msgId, e));
-    wrap.innerHTML = `<div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>`
+    wrap.innerHTML = _spoilerOverlayHtml()
       + `<button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview">${SPOILER_EYE}</button>`;
     const rehide = wrap.querySelector('.spoiler-rehide');
     if (rehide) {
@@ -1326,7 +1334,7 @@ const Messages = (() => {
     // Spoiler blur (images/video only)
     if (msg.media_blur && !msg.media_type?.startsWith('audio')) {
       return `<div class="spoiler-wrap" id="sp-${msg.id}" onclick="Messages.revealSpoiler(${msg.id}, event)">
-        <div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>
+        ${_spoilerOverlayHtml()}
         <button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview"
           onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msg.id}, event)">${SPOILER_EYE}</button>
         ${inner.replace('class="msg-media', 'class="spoiler-img msg-media')}
@@ -2972,7 +2980,7 @@ const Messages = (() => {
       // skipping this so the image displayed uncovered on scroll-in.
       if (isBlur && !mediaType.startsWith('audio')) {
         html = `<div class="spoiler-wrap" id="sp-${msgId}" onclick="Messages.revealSpoiler(${msgId}, event)">
-          <div class="spoiler-overlay">${SPOILER_EYE} Spoiler — Click to Reveal</div>
+          ${_spoilerOverlayHtml()}
           <button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview"
             onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msgId}, event)">${SPOILER_EYE}</button>
           ${html.replace('class="msg-media', 'class="spoiler-img msg-media')}
