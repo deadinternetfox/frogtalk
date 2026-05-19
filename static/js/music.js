@@ -232,6 +232,77 @@ const Music = (() => {
   }
   const $ = (id) => document.getElementById(id);
   const esc = (s) => UI.escHtml(String(s || ''));
+  function _isYoutubeHost(host) {
+    const h = String(host || '').toLowerCase();
+    if (!h) return false;
+    if (h === 'youtu.be' || h.endsWith('.youtu.be')) return true;
+    return h === 'youtube.com' || h.endsWith('.youtube.com');
+  }
+  function _isSoundcloudHost(host) {
+    const h = String(host || '').toLowerCase();
+    return h === 'soundcloud.com' || h.endsWith('.soundcloud.com');
+  }
+  function _isSpotifyHost(host) {
+    const h = String(host || '').toLowerCase();
+    return h === 'spotify.com' || h.endsWith('.spotify.com');
+  }
+
+  function _parseSpotifyPath(path) {
+    const m = String(path || '').match(
+      /(?:^|\/)(?:intl-[a-z]{2}(?:-[a-z]{2})?\/)?(?:embed\/)?(track|episode|playlist|album|show)\/([A-Za-z0-9]+)/i
+    );
+    if (!m) return null;
+    return { kind: m[1].toLowerCase(), id: m[2] };
+  }
+
+  function _normalizeMusicInputUrl(raw) {
+    const input = String(raw || '').trim();
+    if (!input || input.length > 4096) return '';
+    const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(input);
+    const withScheme = hasScheme ? input : `https://${input.replace(/^\/+/, '')}`;
+    try {
+      const u = new URL(withScheme);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+      if (!u.hostname) return '';
+      if (u.username || u.password) return '';
+      u.hash = '';
+      return u.toString();
+    } catch {
+      return '';
+    }
+  }
+
+  function _parseSupportedTrackUrl(raw) {
+    const normalized = _normalizeMusicInputUrl(raw);
+    if (!normalized) return null;
+    try {
+      const u = new URL(normalized);
+      const host = (u.hostname || '').toLowerCase();
+      const path = u.pathname || '';
+      if (_isYoutubeHost(host)) {
+        let vid = '';
+        if (host.endsWith('youtu.be')) {
+          vid = (path.replace(/^\/+/, '').split('/') || [''])[0];
+        } else if (path.startsWith('/watch')) {
+          vid = u.searchParams.get('v') || '';
+        } else {
+          const m = path.match(/^\/(?:shorts|embed|v)\/([A-Za-z0-9_-]{11})/);
+          vid = m ? m[1] : '';
+        }
+        if (/^[A-Za-z0-9_-]{11}$/.test(vid)) return { provider: 'youtube', videoId: vid, url: normalized };
+        return null;
+      }
+      if (_isSpotifyHost(host)) {
+        const sp = _parseSpotifyPath(path);
+        if (!sp) return null;
+        return { provider: 'spotify', videoId: `${sp.kind}/${sp.id}`, url: normalized };
+      }
+      if (_isSoundcloudHost(host)) {
+        return { provider: 'soundcloud', videoId: normalized, url: normalized };
+      }
+    } catch {}
+    return null;
+  }
 
   // Strict allowlist for artwork URLs. Anything outside the known
   // CDN hosts (or a small set of inline data: types) is rejected so
@@ -686,6 +757,18 @@ const Music = (() => {
     const btn = document.querySelector('.mmd-play, .mp-mini-playpause');
     if (btn) { togglePause(btn); return true; }
     return false;
+  }
+
+  // External surfaces (FrogSocial reels/cards, chat inline media, etc.) call
+  // this before starting their own playback. If we're currently following a
+  // room's big player, pause it so users don't get overlapping audio streams.
+  function pauseForExternalPlayback(/* reason */) {
+    try {
+      if (!isMediaChannelContext()) return false;
+      const cur = getCurrent();
+      if (!cur || !cur.active || cur.paused) return false;
+      return !!togglePauseGlobal();
+    } catch { return false; }
   }
 
   // Notification-tray play action for YouTube. The Android side already
@@ -2217,25 +2300,14 @@ const Music = (() => {
     }
     const url = String(opts.url || '').trim();
     if (!url) return false;
-    // Derive provider + video_id (same matcher social.js uses).
-    let provider = (opts.provider || '').toLowerCase();
-    let videoId = '';
-    try {
-      const ytFull = url.match(/[?&]v=([A-Za-z0-9_-]{6,})/);
-      const ytShort = url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
-      const ytId = (ytFull && ytFull[1]) || (ytShort && ytShort[1]);
-      if (ytId && (!provider || provider === 'youtube')) {
-        provider = 'youtube'; videoId = ytId;
-      } else {
-        const sp = url.match(/open\.spotify\.com\/(track|playlist|album|episode)\/([A-Za-z0-9]+)/);
-        if (sp) { provider = 'spotify'; videoId = `${sp[1]}/${sp[2]}`; }
-        else if (url.includes('soundcloud.com')) { provider = 'soundcloud'; videoId = url; }
-      }
-    } catch {}
-    if (!provider || !videoId) {
+    const parsed = _parseSupportedTrackUrl(url);
+    if (!parsed) {
       try { UI.showToast('Unsupported music link', 'error'); } catch {}
       return false;
     }
+    const provider = parsed.provider;
+    const videoId = parsed.videoId;
+    const safeUrl = parsed.url;
     // Auto-thumbnail for YouTube when caller didn't supply one.
     let thumb = opts.thumbnail || '';
     if (!thumb && provider === 'youtube') {
@@ -2244,7 +2316,7 @@ const Music = (() => {
     const track = {
       provider,
       video_id: videoId,
-      url,
+      url: safeUrl,
       title: opts.title || 'Music',
       thumbnail: thumb,
       sharer: String(opts.sharer || '').trim(),
@@ -2847,6 +2919,7 @@ const Music = (() => {
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo, updateCurrentMeta,
+           pauseForExternalPlayback,
            toggleAutoNext,
            toggleAutoFill,
            _syncAutoNextButtons,

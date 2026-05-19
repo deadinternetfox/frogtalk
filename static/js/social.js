@@ -103,6 +103,13 @@ const Social = (() => {
   // Real 4xx (401/403/404 etc.) propagate immediately so callers can render
   // the correct UI ("User not found", "Forbidden") instead of looping.
   const _TRANSIENT_STATUSES = new Set([0, 408, 425, 429, 500, 502, 503, 504]);
+  function _pauseRoomMusicForExternalPlayback() {
+    try {
+      const M = window.Music;
+      if (!M || typeof M.pauseForExternalPlayback !== 'function') return;
+      M.pauseForExternalPlayback('social');
+    } catch {}
+  }
   const _attemptApi = async (path, method, body, timeoutMs = _socialApiTimeoutMs) => {
     try {
       return await Promise.race([
@@ -468,6 +475,7 @@ const Social = (() => {
           play.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
+            _pauseRoomMusicForExternalPlayback();
             setBuffering(true);
             try { video.removeAttribute('controls'); } catch {}
             try { video.controls = false; } catch {}
@@ -490,6 +498,7 @@ const Social = (() => {
             e.preventDefault();
             e.stopPropagation();
             if (video.paused) {
+              _pauseRoomMusicForExternalPlayback();
               setBuffering(true);
               _ftVideoBind(video);
               video.play().catch(() => setBuffering(false));
@@ -809,7 +818,12 @@ const Social = (() => {
     // sidebar would keep the previous track visible/playing after
     // leaving FrogSocial. Music.close() handles both surfaces.
     try {
-      if (window.Music && typeof Music.close === 'function') Music.close();
+      if (window.Music && typeof Music.close === 'function') {
+        const inMediaRoom = !!(typeof Music.isMediaChannelContext === 'function' && Music.isMediaChannelContext());
+        // Don't tear down the room player when leaving Social if we're still
+        // in a media channel context — users should be able to resync later.
+        if (!inMediaRoom) Music.close();
+      }
     } catch {}
     // Tear down all the long-lived observers / sockets so closing the
     // social overlay actually frees memory + connection slots.
@@ -6592,6 +6606,7 @@ const Social = (() => {
       window.open(theUrl, '_blank', 'noopener,noreferrer');
       return;
     }
+    _pauseRoomMusicForExternalPlayback();
     try {
       const cur = typeof M.getCurrent === 'function' ? M.getCurrent() : null;
       if (cur && cur.active && cur.url === theUrl) {

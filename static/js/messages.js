@@ -2678,7 +2678,8 @@ const Messages = (() => {
       } catch (e) {
         // Last-resort fallback so a bad fx blob can never blank the bubble.
         const img = document.createElement('img');
-        img.src = src;
+        const safeSrc = StickerFX.safeImageSrc ? StickerFX.safeImageSrc(src) : src;
+        if (safeSrc) img.src = safeSrc;
         img.style.cssText = 'max-width:160px;max-height:160px;object-fit:contain';
         node.appendChild(img);
         node.setAttribute('data-fx-rendered', '1');
@@ -2688,14 +2689,16 @@ const Messages = (() => {
 
   function openSticker(el) {
     const src = el.getAttribute('data-fx-src');
-    if (!src) return;
+    const safeSrc = (window.StickerFX && StickerFX.safeImageSrc)
+      ? StickerFX.safeImageSrc(src) : src;
+    if (!safeSrc) return;
     const sender = el.getAttribute('data-fx-sender') || 'Unknown';
     const time   = el.getAttribute('data-fx-time') || '';
     // Reuse the existing media viewer with a plain image — the effects
     // animation continues in the chat bubble; the fullscreen view shows
     // the un-effected source which is what the user uploaded.
     const fake = document.createElement('img');
-    fake.src = src;
+    fake.src = safeSrc;
     if (window.MediaPlayer && MediaPlayer.open) {
       MediaPlayer.open(fake, sender, time, []);
     }

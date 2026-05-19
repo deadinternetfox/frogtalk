@@ -7,6 +7,7 @@ import re
 import time
 import uuid
 import unicodedata
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 from pathlib import Path
 from fastapi import APIRouter, Request, Depends, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse
@@ -1662,6 +1663,57 @@ _SOUNDCLOUD_RE = re.compile(
     re.IGNORECASE,
 )
 
+def _is_youtube_host(host: str) -> bool:
+    h = (host or "").lower()
+    if not h:
+        return False
+    if h == "youtu.be" or h.endswith(".youtu.be"):
+        return True
+    return h == "youtube.com" or h.endswith(".youtube.com")
+
+
+def _is_soundcloud_host(host: str) -> bool:
+    h = (host or "").lower()
+    return h == "soundcloud.com" or h.endswith(".soundcloud.com")
+
+
+def _is_spotify_host(host: str) -> bool:
+    h = (host or "").lower()
+    return h == "spotify.com" or h.endswith(".spotify.com")
+
+
+def _parse_spotify_path(path: str):
+    """Extract (kind, id) from open.spotify.com paths (intl/, embed/, etc.)."""
+    m = re.search(
+        r"(?:^|/)(?:intl-[a-z]{2}(?:-[a-z]{2})?/)?(?:embed/)?"
+        r"(track|episode|playlist|album|show)/([A-Za-z0-9]+)",
+        path or "",
+        re.IGNORECASE,
+    )
+    if not m:
+        return None, None
+    return m.group(1).lower(), m.group(2)
+
+
+def _normalize_music_url(raw: str) -> str | None:
+    """Strict URL normalization for music-player inputs."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    if not re.match(r"^[a-zA-Z][a-zA-Z0-9+\-.]*://", s):
+        s = "https://" + s.lstrip("/")
+    try:
+        p = urlsplit(s)
+    except Exception:
+        return None
+    if p.scheme not in ("http", "https"):
+        return None
+    if not p.hostname:
+        return None
+    if p.username or p.password:
+        return None
+    return urlunsplit((p.scheme, p.netloc, p.path, p.query, ""))
+
 
 def _can_queue(room: dict, user_id: int, is_admin: bool) -> bool:
     """Whether the user can submit tracks to this music room."""
@@ -1684,29 +1736,45 @@ def _can_control(room_name: str, user_id: int, is_admin: bool) -> bool:
 
 def _parse_track_url(url: str):
     """Return (provider, video_id, embed_url) or (None, None, None)."""
-    url = (url or "").strip()
+    url = _normalize_music_url(url or "")
     if not url:
         return None, None, None
-    m = _YT_RE.search(url)
-    if m:
-        vid = m.group(1)
-        return "youtube", vid, f"https://www.youtube.com/embed/{vid}?autoplay=1"
-    m = _SPOTIFY_RE.search(url)
-    if m:
-        kind, vid = m.group(1), m.group(2)
+    try:
+        p = urlsplit(url)
+        host = (p.hostname or "").lower()
+        path = p.path or ""
+        q = parse_qs(p.query or "")
+    except Exception:
+        return None, None, None
+
+    if _is_youtube_host(host):
+        vid = ""
+        if host.endswith("youtu.be"):
+            vid = (path.strip("/").split("/") or [""])[0]
+        elif path.startswith("/watch"):
+            vid = (q.get("v") or [""])[0]
+        else:
+            m = re.search(r"/(?:shorts|embed|v)/([A-Za-z0-9_-]{11})", path)
+            vid = m.group(1) if m else ""
+        if re.fullmatch(r"[A-Za-z0-9_-]{11}", vid or ""):
+            return "youtube", vid, f"https://www.youtube.com/embed/{vid}?autoplay=1"
+        return None, None, None
+
+    if _is_spotify_host(host):
+        kind, vid = _parse_spotify_path(path)
+        if not kind or not vid:
+            return None, None, None
         return "spotify", f"{kind}/{vid}", f"https://open.spotify.com/embed/{kind}/{vid}"
-    m = _SOUNDCLOUD_RE.search(url)
-    if m:
-        # Normalize to canonical URL; the SoundCloud widget resolves slug-based
-        # and on.soundcloud.com short links server-side when given the full URL.
-        full = url if url.lower().startswith("http") else f"https://{url.lstrip('/')}"
+
+    if _is_soundcloud_host(host):
         import urllib.parse as _up
         embed = (
             "https://w.soundcloud.com/player/?url="
-            + _up.quote(full, safe="")
+            + _up.quote(url, safe="")
             + "&auto_play=true&show_artwork=true&visual=false&hide_related=true"
         )
-        return "soundcloud", full, embed
+        return "soundcloud", url, embed
+
     return None, None, None
 
 

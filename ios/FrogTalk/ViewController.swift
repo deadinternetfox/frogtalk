@@ -229,6 +229,10 @@ final class ViewController: UIViewController {
         return comps.string ?? configuredAppEntryUrl()
     }
 
+    private func isAppPath(_ path: String) -> Bool {
+        return path == "/app" || path.hasPrefix("/app/")
+    }
+
     /// Open a Universal-Link URL in the embedded webview if it belongs to us.
     func loadRequestedURL(_ url: URL) {
         guard isFrogTalkURL(url) else {
@@ -253,7 +257,8 @@ final class ViewController: UIViewController {
         guard let configured = normalizeServerBaseUrl(getServerBaseUrl()),
               let appHost = URL(string: configured)?.host?.lowercased(),
               !appHost.isEmpty else { return false }
-        return host == appHost || host.hasSuffix(".\(appHost)")
+        guard host == appHost || host.hasSuffix(".\(appHost)") else { return false }
+        return isAppPath(url.path)
     }
 }
 
@@ -267,7 +272,7 @@ extension ViewController: WKNavigationDelegate {
             decisionHandler(.allow); return
         }
 
-        // Allow navigation inside frogtalk.xyz; route everything else to Safari.
+        // Keep only /app routes in the embedded webview; open other pages externally.
         if isFrogTalkURL(url) || url.scheme == "about" || url.scheme == "data" {
             decisionHandler(.allow); return
         }

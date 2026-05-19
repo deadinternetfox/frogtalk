@@ -157,6 +157,12 @@ class MainActivity : AppCompatActivity() {
         return h == appHost || h.endsWith(".$appHost")
     }
 
+    private fun isAppPath(path: String?): Boolean {
+        val p = path?.trim().orEmpty()
+        if (p.isBlank()) return false
+        return p == "/app" || p.startsWith("/app/")
+    }
+
     private fun ensureServerConfigured(onReady: () -> Unit) {
         if (normalizeServerBaseUrl(getServerBaseUrl()) != null) {
             onReady()
@@ -219,12 +225,15 @@ class MainActivity : AppCompatActivity() {
     private fun shouldOpenExternally(uri: Uri): Boolean {
         val scheme = (uri.scheme ?: "").lowercase()
         if (scheme.isBlank()) return false
+        if (scheme == "about" || scheme == "data") return false
         if (scheme != "http" && scheme != "https") return true
 
         val host = (uri.host ?: "").lowercase()
-        if (host.isBlank()) return false
+        if (host.isBlank()) return true
 
-        return !isAppHost(host)
+        // Keep only /app routes in the in-app WebView.
+        if (!isAppHost(host)) return true
+        return !isAppPath(uri.path)
     }
 
     private fun openExternalUri(uri: Uri): Boolean {
@@ -250,6 +259,7 @@ class MainActivity : AppCompatActivity() {
             val uri = Uri.parse(raw)
             if (shouldOpenExternally(uri)) {
                 openExternalUri(uri)
+                true
             } else {
                 webView?.loadUrl(uri.toString())
                 true
@@ -515,6 +525,7 @@ class MainActivity : AppCompatActivity() {
                 val uri = request.url
                 return if (shouldOpenExternally(uri)) {
                     openExternalUri(uri)
+                    true
                 } else {
                     false
                 }
@@ -671,8 +682,10 @@ class MainActivity : AppCompatActivity() {
 
         // Deep-link handling
         intent?.data?.let { uri ->
-            if (isAppHost(uri.host ?: "")) {
+            if (isAppHost(uri.host ?: "") && isAppPath(uri.path)) {
                 wv.loadUrl(uri.toString())
+            } else if (shouldOpenExternally(uri)) {
+                openExternalUri(uri)
             }
         }
     }

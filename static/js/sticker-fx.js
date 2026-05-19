@@ -44,6 +44,45 @@
     'float', 'glow', 'rainbow', 'flip', 'swing',
   ]);
   const HEX_CHARS = '0123456789abcdef';
+  const FX_B64_MAX_LEN = 1500;
+  const FX_ALT_MAX_LEN = 120;
+  const FX_SIZE_MIN = 16;
+  const FX_SIZE_MAX = 512;
+  const FX_DATA_URL_RE = /^data:image\/(png|jpe?g|gif|webp|apng|avif);base64,[A-Za-z0-9+/=]+$/;
+
+  function _stripControlChars(s) {
+    return String(s || '').replace(/[\x00-\x1f\x7f]+/g, ' ').trim();
+  }
+
+  /** Safe `src` for <img> — blocks javascript:/data:text/html and other schemes. */
+  function _safeImageSrc(raw) {
+    if (typeof raw !== 'string') return '';
+    const s = raw.trim();
+    if (!s || s.length > 600000) return '';
+    const head = s.slice(0, 32).toLowerCase();
+    if (head.startsWith('javascript:') || head.startsWith('vbscript:')
+        || head.startsWith('data:text') || head.startsWith('blob:')) {
+      return '';
+    }
+    if (FX_DATA_URL_RE.test(s)) return s;
+    try {
+      const u = new URL(s, window.location.origin);
+      if (u.protocol === 'https:' || u.protocol === 'http:') return u.href;
+    } catch {}
+    return '';
+  }
+
+  function _safeSize(raw) {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(FX_SIZE_MIN, Math.min(FX_SIZE_MAX, Math.round(n)));
+  }
+
+  function _safeAlt(raw) {
+    const t = _stripControlChars(raw);
+    if (!t) return '';
+    return t.length > FX_ALT_MAX_LEN ? t.slice(0, FX_ALT_MAX_LEN) : t;
+  }
 
   function _clamp(v, lo, hi, def) {
     const n = Number(v);
@@ -75,8 +114,8 @@
       out.shadow[k] = _clamp(raw.shadow && raw.shadow[k], lo, hi, d);
     }
     out.shadow.color = _hex(raw.shadow && raw.shadow.color, '#000000');
-    out.animation = (typeof raw.animation === 'string' && ANIMATIONS.has(raw.animation))
-      ? raw.animation : 'none';
+    const animRaw = (typeof raw.animation === 'string') ? raw.animation.trim() : '';
+    out.animation = ANIMATIONS.has(animRaw) ? animRaw : 'none';
     out.animation_duration = _clamp(raw.animation_duration, 0.3, 10, 2);
     out.background = _hex(raw.background, '');
     out.border_radius = _clamp(raw.border_radius, 0, 50, 0);
@@ -229,9 +268,10 @@
   function decodeFromMediaType(mediaType) {
     if (typeof mediaType !== 'string') return null;
     const m = mediaType.match(/;\s*fx=([A-Za-z0-9_-]+)/);
-    if (!m) return null;
+    if (!m || m[1].length > FX_B64_MAX_LEN) return null;
     try {
       const parsed = JSON.parse(_b64urlDecode(m[1]));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
       return normalize(parsed);
     } catch {
       return null;
@@ -256,6 +296,10 @@
       onClick,
     } = opts || {};
 
+    const safeSrc = _safeImageSrc(src);
+    const safeAlt = _safeAlt(alt);
+    const safeSize = _safeSize(size);
+
     const host = document.createElement('span');
     host.className = 'frog-sticker';
     // The host itself is the sandbox boundary. `contain: layout paint
@@ -268,9 +312,9 @@
       'isolation:isolate;' +
       'line-height:0;' +
       'vertical-align:middle;' +
-      (size ? `width:${size}px;height:${size}px;` : 'max-width:160px;max-height:160px;')
+      (safeSize ? `width:${safeSize}px;height:${safeSize}px;` : 'max-width:160px;max-height:160px;')
     );
-    if (alt) host.setAttribute('aria-label', alt);
+    if (safeAlt) host.setAttribute('aria-label', safeAlt);
     if (onClick) {
       host.style.cursor = 'pointer';
       host.addEventListener('click', onClick);
@@ -317,11 +361,11 @@
       const wrap = document.createElement('div');
       wrap.className = 'wrap';
       const img = document.createElement('img');
-      img.setAttribute('alt', alt || '');
+      img.setAttribute('alt', safeAlt);
       img.setAttribute('draggable', 'false');
       img.setAttribute('decoding', 'async');
       img.setAttribute('loading', 'lazy');
-      img.src = src || '';
+      if (safeSrc) img.src = safeSrc;
       wrap.appendChild(img);
       root.appendChild(style);
       root.appendChild(wrap);
@@ -330,9 +374,9 @@
       // back to a plain <img>. No animation in that case, but the page
       // still renders cleanly.
       const img = document.createElement('img');
-      img.src = src || '';
+      if (safeSrc) img.src = safeSrc;
       img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain';
-      if (alt) img.alt = alt;
+      if (safeAlt) img.alt = safeAlt;
       host.appendChild(img);
     }
     return host;
@@ -368,6 +412,7 @@
     stripFx,
     buildHost,
     renderInto,
+    safeImageSrc: _safeImageSrc,
     defaults,
     ANIMATIONS: Array.from(ANIMATIONS),
     FILTER_RANGES,

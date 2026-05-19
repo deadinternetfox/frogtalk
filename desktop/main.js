@@ -508,9 +508,32 @@ async function createWindow() {
     return { action: 'allow' };
   });
 
-  // Same backstop for in-window navigations to .onion (e.g. an <a> click
-  // that somehow slipped past the renderer's capture-phase preventDefault).
+  // Backstop for in-window navigations: keep only /app inside this window.
   mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isAppNavigationUrl(url)) {
+      event.preventDefault();
+      try {
+        const u = new URL(url);
+        if (u.hostname.toLowerCase().endsWith('.onion')) {
+          dialog.showMessageBox(mainWindow, {
+            type: 'info',
+            buttons: ['Copy address', 'OK'],
+            defaultId: 0,
+            title: 'Tor required',
+            message: 'This link is a Tor hidden service (.onion).',
+            detail: `${url}\n\nOpen Tor Browser, paste the address, and try again.`,
+            noLink: true,
+          }).then((res) => {
+            if (res && res.response === 0) {
+              try { require('electron').clipboard.writeText(url); } catch {}
+            }
+          }).catch(() => {});
+          return;
+        }
+      } catch {}
+      shell.openExternal(url);
+      return;
+    }
     try {
       const u = new URL(url);
       if (u.hostname.toLowerCase().endsWith('.onion')) {

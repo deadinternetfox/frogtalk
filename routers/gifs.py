@@ -104,6 +104,8 @@ def validate_sticker_effects(raw: Any) -> Optional[Dict[str, Any]]:
     shadow["color"] = _safe_hex(sh_in.get("color"), "#000000")
 
     anim_name = raw.get("animation")
+    if isinstance(anim_name, str):
+        anim_name = anim_name.strip()
     if not isinstance(anim_name, str) or anim_name not in _STICKER_FX_ANIMATIONS:
         anim_name = "none"
     anim_duration = _clamp(raw.get("animation_duration"), 0.3, 10.0, 2.0)
