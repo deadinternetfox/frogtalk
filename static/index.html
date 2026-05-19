@@ -2811,10 +2811,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   background:linear-gradient(180deg,#12231d,#0f1d18);
   border-top:1px solid #29473d;
   padding:10px 16px 12px;display:none;
-  align-items:center;gap:10px;flex-wrap:wrap;
+  align-items:flex-start;gap:10px;flex-wrap:nowrap;
   position:relative;z-index:2;
   margin-bottom:4px
 }
+#attachment-thumb{flex:1 1 auto;min-width:0}
 #attachment-preview img,#attachment-preview video{
   max-width:200px;max-height:150px;border-radius:8px
 }
@@ -2874,30 +2875,48 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #attachment-thumb[data-count="5"] .att-viewonce-fire{
   width:22px;height:22px;font-size:11px;padding:0
 }
-#attachment-thumb[data-count="3"] .att-spoiler-eye,
-#attachment-thumb[data-count="4"] .att-spoiler-eye,
-#attachment-thumb[data-count="5"] .att-spoiler-eye{bottom:4px;right:4px}
 #attachment-thumb[data-count="3"] .att-viewonce-fire,
 #attachment-thumb[data-count="4"] .att-viewonce-fire,
 #attachment-thumb[data-count="5"] .att-viewonce-fire{top:4px;left:4px}
-#attachment-thumb.is-multi .att-preview-remove,
-#attachment-thumb[data-count="2"] .att-preview-remove,
-#attachment-thumb[data-count="3"] .att-preview-remove,
-#attachment-thumb[data-count="4"] .att-preview-remove,
-#attachment-thumb[data-count="5"] .att-preview-remove{
-  width:22px;height:22px;font-size:11px;top:4px;right:4px;padding:0
+#attachment-thumb.is-multi .att-preview-controls .att-spoiler-eye,
+#attachment-thumb.is-multi .att-preview-controls .att-preview-remove,
+#attachment-thumb[data-count="2"] .att-preview-controls .att-spoiler-eye,
+#attachment-thumb[data-count="2"] .att-preview-controls .att-preview-remove,
+#attachment-thumb[data-count="3"] .att-preview-controls .att-spoiler-eye,
+#attachment-thumb[data-count="3"] .att-preview-controls .att-preview-remove,
+#attachment-thumb[data-count="4"] .att-preview-controls .att-spoiler-eye,
+#attachment-thumb[data-count="4"] .att-preview-controls .att-preview-remove,
+#attachment-thumb[data-count="5"] .att-preview-controls .att-spoiler-eye,
+#attachment-thumb[data-count="5"] .att-preview-controls .att-preview-remove{
+  width:22px;height:22px;font-size:11px
 }
 
+.att-preview-controls{
+  position:absolute;bottom:6px;right:6px;z-index:4;
+  display:flex;flex-direction:column;align-items:center;gap:4px
+}
+.att-preview-controls .att-spoiler-eye,
+.att-preview-controls .att-preview-remove{
+  position:static;top:auto;bottom:auto;left:auto;right:auto;
+  width:26px;height:26px;margin:0
+}
 .att-preview-remove{
-  position:absolute;top:4px;right:4px;
-  width:26px;height:26px;
   background:rgba(0,0,0,.62);color:#fff;border:1px solid rgba(255,255,255,.18);
   border-radius:50%;padding:0;cursor:pointer;
   display:inline-flex;align-items:center;justify-content:center;
-  font-size:13px;line-height:1;z-index:4;
+  font-size:13px;line-height:1;
   box-shadow:0 2px 6px rgba(0,0,0,.45)
 }
 .att-preview-remove:hover{background:rgba(0,0,0,.85)}
+.att-preview-clear-all{
+  flex:0 0 auto;align-self:center;margin-left:4px;
+  background:transparent;border:none;padding:4px 8px;
+  font-size:11px;font-weight:500;line-height:1.3;color:#6f9a88;
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;
+  white-space:nowrap
+}
+.att-preview-clear-all:hover{color:#a8cfc0}
+.att-preview-clear-all[hidden]{display:none}
 /* Voice-note variant of the composer attachment preview: wider so the
    chat-style audio-msg bubble (play button + waveform + duration) fits
    without wrapping, and uses the same green gradient as messages. */
@@ -2995,7 +3014,6 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
   display:block;font-size:11px;color:#85a89a;margin-top:4px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;line-height:1.25
 }
-.preview-close{background:none;border:none;color:#ff5555;cursor:pointer;font-size:16px;margin-left:8px}
 #msg-input{
   flex:1;background:none;border:none;outline:none;color:#e0e0e0;
   font-size:15px;resize:none;max-height:160px;line-height:1.4;min-height:32px;
@@ -8313,7 +8331,7 @@ window.ConnErr = (function(){
         <button class="media-flag-btn" id="spoiler-toggle-btn" onclick="toggleMediaFlag('blur')" title="Mark as Spoiler" style="display:none">👁️ Spoiler</button>
         <button class="media-flag-btn" id="viewonce-toggle-btn" onclick="toggleMediaFlag('view_once')" title="View Once — disappears after opening" style="display:none">🔥 View Once</button>
       </div>
-      <button class="preview-close" onclick="clearAttachment()">✕</button>
+      <button type="button" class="att-preview-clear-all" id="att-preview-clear-all" onclick="clearAttachment()" hidden>Remove all</button>
     </div>
 
     <div class="encrypt-indicator" id="encrypt-indicator" style="display:none">
@@ -10847,9 +10865,9 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=463"></script>
+<script src="/static/js/dms.js?v=464"></script>
 <script src="/static/js/calls.js?v=220"></script>
-<script src="/static/js/media.js?v=421"></script>
+<script src="/static/js/media.js?v=422"></script>
 <script src="/static/js/gifs.js?v=205"></script>
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=424"></script>

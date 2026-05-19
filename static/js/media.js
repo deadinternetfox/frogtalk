@@ -537,6 +537,67 @@ function _syncPendingAttachmentState () {
   }
 }
 
+function _updatePreviewClearAll () {
+  const btn = document.getElementById('att-preview-clear-all');
+  if (!btn) return;
+  btn.hidden = getPendingAttachments().length < 2;
+}
+
+/** Bottom-right stack: spoiler eye on top, remove ✕ underneath. */
+function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
+  if (!mediaWrap || !item) return;
+  mediaWrap.querySelector('.att-preview-controls')?.remove();
+
+  const isVisual = !!(item.type && (item.type.startsWith('image/') || item.type.startsWith('video/')));
+  const controls = document.createElement('div');
+  controls.className = 'att-preview-controls';
+
+  if (isVisual) {
+    const eye = document.createElement('button');
+    eye.type = 'button';
+    eye.className = 'att-spoiler-eye' + (item.blur ? ' active' : '');
+    eye.title = 'Toggle spoiler (blur until tapped)';
+    eye.setAttribute('aria-pressed', item.blur ? 'true' : 'false');
+    eye.textContent = '👁️';
+    eye.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      toggleMediaFlag('blur', index);
+    });
+    controls.appendChild(eye);
+  }
+
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'att-preview-remove';
+  removeBtn.title = 'Remove this attachment';
+  removeBtn.setAttribute('aria-label', 'Remove this attachment');
+  removeBtn.textContent = '✕';
+  removeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    _removePendingAttachment(index);
+  });
+  controls.appendChild(removeBtn);
+  mediaWrap.appendChild(controls);
+
+  if (isVisual && isDM) {
+    mediaWrap.querySelector('.att-viewonce-fire')?.remove();
+    const fire = document.createElement('button');
+    fire.type = 'button';
+    fire.className = 'att-viewonce-fire' + (item.viewOnce ? ' active' : '');
+    fire.title = 'View once — disappears after viewing';
+    fire.setAttribute('aria-pressed', item.viewOnce ? 'true' : 'false');
+    fire.textContent = '🔥';
+    fire.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      toggleMediaFlag('view_once', index);
+    });
+    mediaWrap.appendChild(fire);
+  }
+}
+
 function _renderPendingAttachmentList () {
   const thumb = document.getElementById('attachment-thumb');
   const prev  = document.getElementById('attachment-preview');
@@ -588,49 +649,7 @@ function _renderPendingAttachmentList () {
       mediaWrap.appendChild(icon);
     }
 
-    // Per-item spoiler + (DM-only) view-once buttons. Each carries its
-    // own state on the attachment object so toggling one thumbnail
-    // doesn't affect the others — fixes the "blur disappears for
-    // multi" report.
-    if (item.type && (item.type.startsWith('image/') || item.type.startsWith('video/'))) {
-      const eye = document.createElement('button');
-      eye.type = 'button';
-      eye.className = 'att-spoiler-eye' + (item.blur ? ' active' : '');
-      eye.title = 'Toggle spoiler (blur until tapped)';
-      eye.setAttribute('aria-pressed', item.blur ? 'true' : 'false');
-      eye.textContent = '👁️';
-      eye.addEventListener('click', (e) => {
-        e.stopPropagation();
-        toggleMediaFlag('blur', index);
-      });
-      mediaWrap.appendChild(eye);
-      if (isDM) {
-        const fire = document.createElement('button');
-        fire.type = 'button';
-        fire.className = 'att-viewonce-fire' + (item.viewOnce ? ' active' : '');
-        fire.title = 'View once — disappears after viewing';
-        fire.setAttribute('aria-pressed', item.viewOnce ? 'true' : 'false');
-        fire.textContent = '🔥';
-        fire.addEventListener('click', (e) => {
-          e.stopPropagation();
-          toggleMediaFlag('view_once', index);
-        });
-        mediaWrap.appendChild(fire);
-      }
-    }
-
-    const removeBtn = document.createElement('button');
-    removeBtn.type = 'button';
-    removeBtn.className = 'att-preview-remove';
-    removeBtn.title = 'Remove this attachment';
-    removeBtn.setAttribute('aria-label', 'Remove this attachment');
-    removeBtn.textContent = '✕';
-    removeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      _removePendingAttachment(index);
-    });
-    mediaWrap.appendChild(removeBtn);
+    _mountAttPreviewControls(mediaWrap, item, index, isDM);
 
     const sub = document.createElement('div');
     sub.className = 'att-preview-sub';
@@ -648,6 +667,7 @@ function _renderPendingAttachmentList () {
   const flagBtns = document.getElementById('media-flag-btns');
   if (flagBtns) flagBtns.style.display = 'none';
   _bindAttPreviewRevealDelegation();
+  _updatePreviewClearAll();
 }
 
 function _removePendingAttachment (index) {
@@ -731,27 +751,13 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
   const safeName = esc(name || '');
 
   const _inDM = typeof isDMView === 'function' && isDMView();
-  const _voBtn = _inDM
-    ? `<button type="button" class="att-viewonce-fire" title="View once — disappears after viewing"
-                onclick="toggleMediaFlag('view_once')" aria-pressed="false">🔥</button>`
-    : '';
   let mediaHtml = '';
   if (isImg) {
     const url = URL.createObjectURL(blob);
-    mediaHtml = `<div class="att-media-wrap">
-        <img src="${url}" alt="">
-        <button type="button" class="att-spoiler-eye" title="Toggle spoiler (blur until tapped)"
-                onclick="event.stopPropagation();event.preventDefault();toggleMediaFlag('blur')" aria-pressed="false">👁️</button>
-        ${_voBtn}
-      </div>`;
+    mediaHtml = `<div class="att-media-wrap"><img src="${url}" alt=""></div>`;
   } else if (isVid) {
     const url = URL.createObjectURL(blob);
-    mediaHtml = `<div class="att-media-wrap">
-        <video src="${url}" muted playsinline preload="metadata"></video>
-        <button type="button" class="att-spoiler-eye" title="Toggle spoiler (blur until tapped)"
-                onclick="event.stopPropagation();event.preventDefault();toggleMediaFlag('blur')" aria-pressed="false">👁️</button>
-        ${_voBtn}
-      </div>`;
+    mediaHtml = `<div class="att-media-wrap"><video src="${url}" muted playsinline preload="metadata"></video></div>`;
   } else {
     const icon = /pdf/.test(type || '') ? '📕'
                : /audio/.test(type || '') ? '🎵'
@@ -767,19 +773,13 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
     </div>`;
 
   const singleWrap = thumb.querySelector('.att-media-wrap');
-  if (singleWrap && !singleWrap.querySelector('.att-preview-remove')) {
-    const rm = document.createElement('button');
-    rm.type = 'button';
-    rm.className = 'att-preview-remove';
-    rm.title = 'Remove this attachment';
-    rm.setAttribute('aria-label', 'Remove this attachment');
-    rm.textContent = '✕';
-    rm.addEventListener('click', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      _removePendingAttachment(0);
-    });
-    singleWrap.appendChild(rm);
+  if (singleWrap) {
+    const att = window._pendingAttachments?.[0] || {
+      type,
+      blur: !!window._pendingMediaBlur,
+      viewOnce: !!window._pendingViewOnce,
+    };
+    _mountAttPreviewControls(singleWrap, att, 0, _inDM);
   }
 
   // Fire button is always visible on images/videos (no DM-only restriction)
@@ -794,6 +794,7 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
   const eye = thumb.querySelector('.att-spoiler-eye');
   if (eye) { eye.classList.remove('active'); eye.setAttribute('aria-pressed', 'false'); }
   _bindAttPreviewRevealDelegation();
+  _updatePreviewClearAll();
 }
 
 function _fmtAttachSub (name, bytes) {
@@ -841,6 +842,7 @@ function clearAttachment () {
   State.pendingAttachment = null;
   document.getElementById('attachment-thumb').innerHTML = '';
   document.getElementById('attachment-preview').style.display = 'none';
+  _updatePreviewClearAll();
   // Reset media flag toggles
   const flagBtns = document.getElementById('media-flag-btns');
   if (flagBtns) flagBtns.style.display = 'none';
