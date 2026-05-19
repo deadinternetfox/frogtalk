@@ -1,9 +1,8 @@
+# Disabled auto-runs to avoid GitHub Actions / GHCR / LFS billing.
+# Re-enable push/tags triggers when billing is restored, or run manually.
 name: Publish container image to GHCR
 
 on:
-  push:
-    branches: [master]
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
