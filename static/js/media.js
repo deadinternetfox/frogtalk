@@ -543,7 +543,7 @@ function _updatePreviewClearAll () {
   btn.hidden = getPendingAttachments().length < 2;
 }
 
-/** Bottom-right stack: spoiler eye on top, remove ✕ underneath. */
+/** Top-right stack: spoiler eye, then remove ✕ — same chip style as view-once fire. */
 function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
   if (!mediaWrap || !item) return;
   mediaWrap.querySelector('.att-preview-controls')?.remove();
@@ -555,7 +555,7 @@ function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
   if (isVisual) {
     const eye = document.createElement('button');
     eye.type = 'button';
-    eye.className = 'att-spoiler-eye' + (item.blur ? ' active' : '');
+    eye.className = 'att-preview-chip att-spoiler-eye' + (item.blur ? ' active' : '');
     eye.title = 'Toggle spoiler (blur until tapped)';
     eye.setAttribute('aria-pressed', item.blur ? 'true' : 'false');
     eye.textContent = '👁️';
@@ -569,7 +569,7 @@ function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
 
   const removeBtn = document.createElement('button');
   removeBtn.type = 'button';
-  removeBtn.className = 'att-preview-remove';
+  removeBtn.className = 'att-preview-chip att-preview-remove';
   removeBtn.title = 'Remove this attachment';
   removeBtn.setAttribute('aria-label', 'Remove this attachment');
   removeBtn.textContent = '✕';
@@ -585,7 +585,7 @@ function _mountAttPreviewControls (mediaWrap, item, index, isDM) {
     mediaWrap.querySelector('.att-viewonce-fire')?.remove();
     const fire = document.createElement('button');
     fire.type = 'button';
-    fire.className = 'att-viewonce-fire' + (item.viewOnce ? ' active' : '');
+    fire.className = 'att-preview-chip att-viewonce-fire' + (item.viewOnce ? ' active' : '');
     fire.title = 'View once — disappears after viewing';
     fire.setAttribute('aria-pressed', item.viewOnce ? 'true' : 'false');
     fire.textContent = '🔥';
