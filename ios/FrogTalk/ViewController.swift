@@ -16,6 +16,7 @@ final class ViewController: UIViewController {
 
     // ── Configuration ────────────────────────────────────────────────────────
     private static let serverBaseUrlKey = "server_base_url"
+    private static let officialServerInput = "frogtalk.xyz"
     private let APP_URL  = "https://frogtalk.xyz/app"
     private let WEB_CACHE_REV = "20260519-ios-shell-v1"
 
@@ -174,15 +175,27 @@ final class ViewController: UIViewController {
         }
         let alert = UIAlertController(
             title: "Connect to your FrogTalk node",
-            message: "Enter the URL of your FrogTalk server. You can use your own node or any trusted community server — the official node is optional.",
+            message: "Most people use the official FrogTalk node at frogtalk.xyz — it is pre-filled below. Edit or replace it to use your own self-hosted server or any trusted community node.",
             preferredStyle: .alert
         )
         alert.addTextField { tf in
-            tf.placeholder = "https://your-frogtalk-node.example"
+            tf.text = Self.officialServerInput
+            tf.placeholder = Self.officialServerInput
             tf.keyboardType = .URL
             tf.autocapitalizationType = .none
             tf.autocorrectionType = .no
         }
+        alert.addAction(UIAlertAction(title: "Use official", style: .default) { [weak self] _ in
+            guard let self else { return }
+            alert.textFields?.first?.text = Self.officialServerInput
+            guard let normalized = self.normalizeServerBaseUrl(Self.officialServerInput) else {
+                self.showError(message: "Invalid server URL")
+                self.ensureServerConfigured(onReady: onReady)
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: Self.serverBaseUrlKey)
+            onReady()
+        })
         alert.addAction(UIAlertAction(title: "Connect", style: .default) { [weak self] _ in
             guard let self else { return }
             let raw = alert.textFields?.first?.text

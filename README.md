@@ -19,7 +19,7 @@ No company in the middle. Messages stay private. Built in the open.
 [![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?include_prereleases&label=release&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
 [![License](https://img.shields.io/github/license/deadinternetfox/frogtalk?color=4caf50)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-frogtalk-4caf50?logo=docker&logoColor=white)](https://github.com/deadinternetfox/frogtalk/pkgs/container/frogtalk)
-[![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
+[![Stars](https://img.shields.io/github/stars/deadinternetfox/frogtalk?label=stars&style=flat&color=4caf50)](https://github.com/deadinternetfox/frogtalk/stargazers)
 
 [🌐 frogtalk.xyz](https://frogtalk.xyz) ·
 [📥 Downloads](https://github.com/deadinternetfox/frogtalk/releases/latest) ·

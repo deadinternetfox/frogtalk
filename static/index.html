@@ -9617,7 +9617,10 @@ window.ConnErr = (function(){
       </label>
 
       <label class="modal-label">Custom Server URL</label>
-      <input id="network-custom-url" class="modal-input" placeholder="https://your-frogtalk-server.example">
+      <input id="network-custom-url" class="modal-input" placeholder="frogtalk.xyz" value="frogtalk.xyz">
+      <div style="font-size:11px;color:#7a8a82;margin-top:6px;line-height:1.45">
+        Official node: <strong style="color:#9ec59e">frogtalk.xyz</strong> — edit the field above for your own server.
+      </div>
 
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
         <button class="modal-btn secondary" type="button" onclick="refreshNetworkServers()" style="flex:1;min-width:160px">Probe Servers</button>
@@ -9631,8 +9634,9 @@ window.ConnErr = (function(){
       </div>
 
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        <button class="modal-btn primary" type="button" onclick="saveNetworkSettings()" style="flex:1;min-width:180px">Save Network Preferences</button>
-        <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:180px">Connect To Selected Server</button>
+        <button class="modal-btn primary" type="button" onclick="saveNetworkSettings()" style="flex:1;min-width:160px">Save Network Preferences</button>
+        <button class="modal-btn secondary" type="button" onclick="useOfficialNetworkUrl()" style="flex:1;min-width:140px">Use official</button>
+        <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:160px">Connect To Selected Server</button>
       </div>
     </div>
     <!-- Application Tab (desktop-only) -->
@@ -10735,7 +10739,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=434"></script>
 <script src="/static/js/ws.js?v=247"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=486"></script>
+<script src="/static/js/ui.js?v=487"></script>
   <script src="/static/js/rooms.js?v=439"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
 <script src="/static/js/text_format.js?v=2"></script>

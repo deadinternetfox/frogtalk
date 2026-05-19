@@ -39,6 +39,8 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "FrogTalk"
         private const val APP_URL = "https://frogtalk.xyz/app"
+        /** Pre-filled in the first-run dialog; user can edit or clear before connecting. */
+        private const val OFFICIAL_SERVER_INPUT = "frogtalk.xyz"
         private const val WEB_CACHE_REV = "20260424-music-background-v1"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
@@ -163,30 +165,40 @@ class MainActivity : AppCompatActivity() {
         showServerSetupDialog(onReady)
     }
 
+    private fun persistServerFromInput(input: EditText, onReady: () -> Unit): Boolean {
+        val normalized = normalizeServerBaseUrl(input.text?.toString())
+        if (normalized == null) {
+            showErrorScreen("Invalid server URL.\nTap Retry to enter a valid address.")
+            return false
+        }
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
+        onReady()
+        return true
+    }
+
     private fun showServerSetupDialog(onReady: () -> Unit) {
         val input = EditText(this).apply {
-            hint = "https://your-frogtalk-node.example"
+            setText(OFFICIAL_SERVER_INPUT)
+            setSelection(text?.length ?: 0)
             setSingleLine(true)
             setPadding(48, 32, 48, 32)
+            hint = OFFICIAL_SERVER_INPUT
         }
         AlertDialog.Builder(this)
             .setTitle("Connect to your FrogTalk node")
             .setMessage(
-                "Enter the URL of your FrogTalk server. " +
-                    "You can use your own node or any trusted community server — " +
-                    "the official node is optional."
+                "Most people use the official FrogTalk node at frogtalk.xyz — it is pre-filled below. " +
+                    "Edit or replace it to use your own self-hosted server or any trusted community node."
             )
             .setView(input)
             .setCancelable(false)
+            .setNegativeButton("Use official") { _, _ ->
+                input.setText(OFFICIAL_SERVER_INPUT)
+                persistServerFromInput(input, onReady)
+            }
             .setPositiveButton("Connect") { _, _ ->
-                val normalized = normalizeServerBaseUrl(input.text?.toString())
-                if (normalized == null) {
-                    showErrorScreen("Invalid server URL.\nTap Retry to enter a valid address.")
-                    return@setPositiveButton
-                }
-                getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                    .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
-                onReady()
+                persistServerFromInput(input, onReady)
             }
             .show()
     }

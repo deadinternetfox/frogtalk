@@ -39,6 +39,11 @@ DEFAULT_FILES=(
   "static/js/ui.js:static/js/ui.js"
   "static/js/text_format.js:static/js/text_format.js"
   "static/js/format_toolbar.js:static/js/format_toolbar.js"
+  "static/frogtalk-v231.apk:static/frogtalk-v231.apk"
+  "static/FrogTalk-1.5.3.AppImage:static/FrogTalk-1.5.3.AppImage"
+  "static/frogtalk_1.5.3_amd64.deb:static/frogtalk_1.5.3_amd64.deb"
+  "static/FrogTalk-1.5.3-win-x64-portable.exe:static/FrogTalk-1.5.3-win-x64-portable.exe"
+  "static/FrogTalk-1.5.3-win-x64.zip:static/FrogTalk-1.5.3-win-x64.zip"
 )
 
 if [[ $# -gt 0 ]]; then

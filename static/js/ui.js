@@ -2470,7 +2470,10 @@ function ensureNetworkPaneContent() {
     </label>
 
     <label class="modal-label">Custom Server URL</label>
-    <input id="network-custom-url" class="modal-input" placeholder="https://your-frogtalk-server.example">
+    <input id="network-custom-url" class="modal-input" placeholder="frogtalk.xyz" value="frogtalk.xyz">
+    <div style="font-size:11px;color:#7a8a82;margin-top:6px;line-height:1.45">
+      Official node: <strong style="color:#9ec59e">frogtalk.xyz</strong> — edit the field above for your own server.
+    </div>
 
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
       <button class="modal-btn secondary" type="button" onclick="refreshNetworkServers()" style="flex:1;min-width:160px">Probe Servers</button>
@@ -2484,8 +2487,9 @@ function ensureNetworkPaneContent() {
     </div>
 
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-      <button class="modal-btn primary" type="button" onclick="saveNetworkSettings()" style="flex:1;min-width:180px">Save Network Routing</button>
-      <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:180px">Connect To Selected Server</button>
+      <button class="modal-btn primary" type="button" onclick="saveNetworkSettings()" style="flex:1;min-width:160px">Save Network Routing</button>
+      <button class="modal-btn secondary" type="button" onclick="useOfficialNetworkUrl()" style="flex:1;min-width:140px">Use official</button>
+      <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:160px">Connect To Selected Server</button>
     </div>
     <div style="margin-top:6px;font-size:11px;color:#687d74">This saves only Network tab options. The modal "Save" button still saves your account/profile settings.</div>
   `;
@@ -2994,6 +2998,19 @@ async function runAutoNetworkSelect() {
   }
 }
 
+const OFFICIAL_NETWORK_INPUT = 'frogtalk.xyz';
+
+function useOfficialNetworkUrl() {
+  const customEl = document.getElementById('network-custom-url');
+  const modeEl = document.getElementById('network-mode');
+  if (customEl) customEl.value = OFFICIAL_NETWORK_INPUT;
+  if (modeEl) modeEl.value = 'custom';
+  localStorage.setItem('ft_network_mode', 'custom');
+  localStorage.setItem('ft_network_custom_url', OFFICIAL_NETWORK_INPUT);
+  _syncNativeServerUrl(OFFICIAL_NETWORK_INPUT);
+  UI.showToast('Using official FrogTalk node (frogtalk.xyz)', 'success');
+}
+
 function _syncNativeServerUrl(url) {
   const base = _normalizeNetworkUrl(url || '');
   if (!base) return;
@@ -3107,7 +3124,7 @@ async function loadNetworkSettings() {
   if (!modeEl || !onionEl || !customEl) return;
   modeEl.value = localStorage.getItem('ft_network_mode') || 'auto';
   onionEl.checked = localStorage.getItem('ft_network_prefer_onion') === '1';
-  customEl.value = localStorage.getItem('ft_network_custom_url') || '';
+  customEl.value = localStorage.getItem('ft_network_custom_url') || OFFICIAL_NETWORK_INPUT;
   if (!onionEl.dataset.bound) {
     onionEl.addEventListener('change', () => {
       saveNetworkSettings(true);

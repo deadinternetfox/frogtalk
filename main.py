@@ -31,7 +31,7 @@ _PUBLIC_HTML_NO_CACHE = {
 
 from fastapi import FastAPI, Request, Depends
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -2357,16 +2357,16 @@ async def download_android():
     import glob
     import re
 
-    candidates = glob.glob("static/frogtalk-v*.apk")
+    candidates = glob.glob("static/frogtalk-v*.apk") + glob.glob("static/FrogTalk-v*.apk")
 
     def _apk_version(path: str) -> int:
         name = os.path.basename(path)
         m = re.search(r"frogtalk-v(\d+)\.apk$", name, flags=re.IGNORECASE)
         return int(m.group(1)) if m else -1
 
-    path = max(candidates, key=_apk_version) if candidates else "static/frogtalk.apk"
+    path = max(candidates, key=lambda p: (_apk_version(p), os.path.getmtime(p))) if candidates else ""
     if not os.path.exists(path):
-        return FileResponse("static/index.html")
+        return JSONResponse(status_code=404, content={"error": "Android APK not available"})
     size = os.path.getsize(path)
     # APKs are already zip-compressed; running them through GZipMiddleware
     # wastes CPU AND switches the response to chunked transfer, which
@@ -2478,14 +2478,30 @@ async def apple_app_site_association():
 async def download_linux():
     """Always serves the latest Linux AppImage."""
     import glob
-    candidates = sorted(glob.glob("static/FrogTalk-*.AppImage"))
-    path = candidates[-1] if candidates else ""
+    import re
+    candidates = glob.glob("static/FrogTalk-*.AppImage")
+
+    def _appimage_version(path: str):
+        name = os.path.basename(path)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)\.AppImage$", name, flags=re.IGNORECASE)
+        if not m:
+            return (-1, -1, -1, os.path.getmtime(path))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
+
+    path = max(candidates, key=_appimage_version) if candidates else ""
     if not path or not os.path.exists(path):
-        return FileResponse("static/index.html")
+        return JSONResponse(status_code=404, content={"error": "Linux AppImage not available"})
+    size = os.path.getsize(path)
     return FileResponse(
         path,
         media_type="application/octet-stream",
         filename=os.path.basename(path),
+        headers={
+            "Content-Encoding": "identity",
+            "Content-Length": str(size),
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=300, no-transform",
+        },
     )
 
 
@@ -2493,14 +2509,33 @@ async def download_linux():
 async def download_deb():
     """Always serves the latest Debian/Ubuntu .deb package."""
     import glob
-    candidates = sorted(glob.glob("static/frogtalk_*_amd64.deb"))
-    path = candidates[-1] if candidates else ""
+    import re
+    candidates = (
+        glob.glob("static/frogtalk_*_amd64.deb")
+        + glob.glob("static/FrogTalk_*_amd64.deb")
+    )
+
+    def _deb_version(path: str):
+        name = os.path.basename(path)
+        m = re.search(r"frogtalk_(\d+)\.(\d+)\.(\d+)_amd64\.deb$", name, flags=re.IGNORECASE)
+        if not m:
+            return (-1, -1, -1, os.path.getmtime(path))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
+
+    path = max(candidates, key=_deb_version) if candidates else ""
     if not path or not os.path.exists(path):
-        return FileResponse("static/index.html")
+        return JSONResponse(status_code=404, content={"error": "Debian package not available"})
+    size = os.path.getsize(path)
     return FileResponse(
         path,
         media_type="application/vnd.debian.binary-package",
         filename=os.path.basename(path),
+        headers={
+            "Content-Encoding": "identity",
+            "Content-Length": str(size),
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=300, no-transform",
+        },
     )
 
 
@@ -2508,33 +2543,52 @@ async def download_deb():
 async def download_windows():
     """Serves the latest Windows portable .exe (preferred), falling back to .zip."""
     import glob
+    import re
     # Prefer portable .exe (single-file, just run it). Fall back to zip / installer.
-    candidates = sorted(
+    candidates = (
         glob.glob("static/FrogTalk-*-win-x64-portable.exe")
         + glob.glob("static/FrogTalk-*-portable.exe")
         + glob.glob("static/FrogTalk-*-Setup.exe")
         + glob.glob("static/FrogTalk-*-win-x64.zip")
         + glob.glob("static/FrogTalk-*-win.zip")
     )
-    # Sort so portable.exe wins even if zip has higher-looking version: re-prioritize
-    portable = [p for p in candidates if "portable" in p.lower()]
-    setups = [p for p in candidates if p.endswith(".exe") and "portable" not in p.lower()]
-    zips = [p for p in candidates if p.endswith(".zip")]
-    ordered = (sorted(portable) + sorted(setups) + sorted(zips))
-    path = ordered[-1] if portable else (ordered[0] if ordered else "")
+
+    def _win_ver(path: str):
+        name = os.path.basename(path)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)-", name, flags=re.IGNORECASE)
+        if not m:
+            return (-1, -1, -1, os.path.getmtime(path))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
+
+    portable = [p for p in candidates if p.lower().endswith(".exe") and "portable" in p.lower()]
+    setups = [p for p in candidates if p.lower().endswith(".exe") and "portable" not in p.lower()]
+    zips = [p for p in candidates if p.lower().endswith(".zip")]
     if portable:
-        path = sorted(portable)[-1]
+        path = max(portable, key=_win_ver)
+    elif setups:
+        path = max(setups, key=_win_ver)
+    elif zips:
+        path = max(zips, key=_win_ver)
+    else:
+        path = ""
     if not path or not os.path.exists(path):
-        return FileResponse("static/index.html")
+        return JSONResponse(status_code=404, content={"error": "Windows package not available"})
     media = (
         "application/zip"
-        if path.endswith(".zip")
+        if path.lower().endswith(".zip")
         else "application/vnd.microsoft.portable-executable"
     )
+    size = os.path.getsize(path)
     return FileResponse(
         path,
         media_type=media,
         filename=os.path.basename(path),
+        headers={
+            "Content-Encoding": "identity",
+            "Content-Length": str(size),
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=300, no-transform",
+        },
     )
 
 
@@ -2542,17 +2596,33 @@ async def download_windows():
 async def download_windows_zip():
     """Serves the latest Windows .zip build (extract & run)."""
     import glob
-    candidates = sorted(
+    import re
+    candidates = (
         glob.glob("static/FrogTalk-*-win-x64.zip")
         + glob.glob("static/FrogTalk-*-win.zip")
     )
-    path = candidates[-1] if candidates else ""
+
+    def _zip_ver(path: str):
+        name = os.path.basename(path)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)-", name, flags=re.IGNORECASE)
+        if not m:
+            return (-1, -1, -1, os.path.getmtime(path))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
+
+    path = max(candidates, key=_zip_ver) if candidates else ""
     if not path or not os.path.exists(path):
-        return FileResponse("static/index.html")
+        return JSONResponse(status_code=404, content={"error": "Windows ZIP package not available"})
+    size = os.path.getsize(path)
     return FileResponse(
         path,
         media_type="application/zip",
         filename=os.path.basename(path),
+        headers={
+            "Content-Encoding": "identity",
+            "Content-Length": str(size),
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=300, no-transform",
+        },
     )
 
 

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const APP_URL_FALLBACK = 'https://frogtalk.xyz/app';
+const OFFICIAL_SERVER_INPUT = 'frogtalk.xyz';
 const WEB_PARTITION = 'persist:frogtalk-web';
 const AUTH_SNAPSHOT_PATH = path.join(app.getPath('userData'), 'auth-snapshot.json');
 const DESKTOP_SETTINGS_PATH = path.join(app.getPath('userData'), 'desktop-settings.json');
@@ -71,7 +72,7 @@ function ensureServerUrlConfigured(parentWin) {
     };
     const win = new BrowserWindow({
       width: 520,
-      height: 280,
+      height: 340,
       modal: !!parentWin,
       parent: parentWin || undefined,
       title: 'FrogTalk Server',
@@ -98,16 +99,20 @@ function ensureServerUrlConfigured(parentWin) {
 <html><head><meta charset="UTF-8"><title>FrogTalk Server</title></head>
 <body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:20px;background:#0d1117;color:#e6edf3;margin:0">
 <h2 style="margin-top:0">Connect to your FrogTalk node</h2>
-<p style="color:#8b949e;margin-top:0">Use your self-hosted node or any trusted server — the official node is optional.</p>
-<input id="url" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #30363d;background:#161b22;color:#e6edf3" placeholder="https://your-node.example">
-<button id="go" style="margin-top:12px;padding:10px 18px;background:#238636;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600">Connect</button>
+<p style="color:#8b949e;margin-top:0;line-height:1.45">Most people use the official FrogTalk node at <strong style="color:#e6edf3">frogtalk.xyz</strong> — it is pre-filled below. Edit or replace it to use your own self-hosted server or any trusted community node.</p>
+<input id="url" value="${OFFICIAL_SERVER_INPUT}" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #30363d;background:#161b22;color:#e6edf3" placeholder="frogtalk.xyz">
+<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+<button id="official" type="button" style="flex:1;min-width:140px;padding:10px 14px;background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:8px;cursor:pointer;font-weight:600">Use official</button>
+<button id="go" type="button" style="flex:1;min-width:140px;padding:10px 14px;background:#238636;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600">Connect</button>
+</div>
 <script>
-document.getElementById('go').onclick=function(){
-  require('electron').ipcRenderer.send('desktop:server-url-submit', document.getElementById('url').value);
+function submitUrl(){ require('electron').ipcRenderer.send('desktop:server-url-submit', document.getElementById('url').value); }
+document.getElementById('go').onclick=submitUrl;
+document.getElementById('official').onclick=function(){
+  var el=document.getElementById('url'); el.value='${OFFICIAL_SERVER_INPUT}'; el.focus(); submitUrl();
 };
-document.getElementById('url').addEventListener('keydown',function(e){
-  if(e.key==='Enter') document.getElementById('go').click();
-});
+document.getElementById('url').addEventListener('keydown',function(e){ if(e.key==='Enter') submitUrl(); });
+document.getElementById('url').focus(); document.getElementById('url').select();
 </script></body></html>`)}`);
     win.show();
   });
