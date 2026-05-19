@@ -70,5 +70,8 @@
       "icon.png",
       "../static"
     ]
+  },
+  "dependencies": {
+    "@fallow-cli/beacon": "^0.4.3"
   }
 }

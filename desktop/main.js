@@ -2,6 +2,25 @@ const { app, BrowserWindow, Menu, Tray, Notification, shell, ipcMain, dialog } =
 const fs = require('fs');
 const path = require('path');
 
+/** Optional Fallow runtime beacon (Node 20+). Set BEACON_API_KEY in the environment. */
+function startFallowBeacon() {
+  const apiKey = process.env.BEACON_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const { createNodeBeacon } = require('@fallow-cli/beacon');
+    const beacon = createNodeBeacon({
+      apiKey,
+      projectId: process.env.FALLOW_PROJECT_ID || 'deadinternetfox/frogtalk',
+      commitSha: process.env.GIT_SHA || process.env.FALLOW_COMMIT_SHA || undefined,
+    });
+    beacon.start();
+    return beacon;
+  } catch (err) {
+    console.warn('[fallow] beacon failed to start:', err && err.message ? err.message : err);
+    return null;
+  }
+}
+
 const APP_URL_FALLBACK = 'https://frogtalk.xyz/app';
 const OFFICIAL_SERVER_INPUT = 'frogtalk.xyz';
 const WEB_PARTITION = 'persist:frogtalk-web';
@@ -781,6 +800,7 @@ function createTray() {
 
 app.whenReady().then(async () => {
   app.isQuitting = false;
+  startFallowBeacon();
   readDesktopSettings();
   await createWindow();
 });

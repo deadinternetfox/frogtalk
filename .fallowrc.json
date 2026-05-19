@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "static/index.html",
+    "static/server_admin.html",
+    "desktop/main.js",
+    "desktop/preload.js",
+    "static/sw.js",
+    "static/vendor/qr/jsQR.js",
+    "static/vendor/qr/qrcode.min.js"
+  ],
+  "ignorePatterns": [
+    "static/vendor/**",
+    "**/*.min.js"
+  ],
+  "ignoreDependencies": ["electron", "electron-builder"],
+  "production": true,
+  "rules": {
+    "unused-files": "warn",
+    "unused-exports": "warn",
+    "unresolved-imports": "warn"
+  },
+  "duplicates": {
+    "minLines": 8,
+    "minTokens": 40
+  }
+}
