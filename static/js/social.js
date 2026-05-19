@@ -818,11 +818,12 @@ const Social = (() => {
     // sidebar would keep the previous track visible/playing after
     // leaving FrogSocial. Music.close() handles both surfaces.
     try {
-      if (window.Music && typeof Music.close === 'function') {
-        const inMediaRoom = !!(typeof Music.isMediaChannelContext === 'function' && Music.isMediaChannelContext());
-        // Don't tear down the room player when leaving Social if we're still
-        // in a media channel context — users should be able to resync later.
-        if (!inMediaRoom) Music.close();
+      if (window.Music) {
+        // After solo playback _room is null but State.currentRoom may still
+        // be a music channel — remount the big player instead of close().
+        const restored = typeof Music.restoreChannelPlayerIfNeeded === 'function'
+          && Music.restoreChannelPlayerIfNeeded();
+        if (!restored && typeof Music.close === 'function') Music.close();
       }
     } catch {}
     // Tear down all the long-lived observers / sockets so closing the

@@ -937,7 +937,14 @@ const Rooms = (() => {
   }
 
   async function switchToRoom(name, type = 'public', dmPeer = null, channelType = 'text') {    closeMobileSidebar();
-    if (State.currentRoom === name && State.currentRoomType === type) return;
+    const _roomDataEarly = State.rooms.find(r => r.name === name);
+    const _chTypeEarly = (_roomDataEarly?.channel_type === 'voice') ? 'music' : (_roomDataEarly?.channel_type || channelType || 'text');
+    if (State.currentRoom === name && State.currentRoomType === type) {
+      // Re-clicking the current channel must still refresh the music panel
+      // (e.g. user played a FrogSocial track while staying on this channel).
+      try { Music?.mount?.(name, _chTypeEarly); } catch {}
+      return;
+    }
     try {
       const typingBar = document.getElementById('typing-bar');
       if (typingBar) typingBar.textContent = '';

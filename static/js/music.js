@@ -42,6 +42,7 @@ const Music = (() => {
   let _room = null;       // active music room name
   let _state = null;      // { queue, djs, dj_only, can_submit, can_control, is_dj }
   let _soloMode = false;  // true when playing a track via Music.playSolo (no room)
+  let _roomBeforeSolo = null; // music channel to restore after FrogSocial solo playback
   let _paused = false;    // mirrors current play/pause state (best-effort; iframe APIs don't always notify)
   // Sticky flag: set ONLY when the user explicitly pauses via togglePause
   // (dock / mini bar / drawer button). Cleared on user-initiated play and
@@ -1885,6 +1886,10 @@ const Music = (() => {
       delete panel.dataset.mountedRoom;
       return;
     }
+    // Leaving solo / side-player: show the in-channel big player again.
+    const fromSoloUi = panel.classList.contains('mini') || panel.classList.contains('solo-embed');
+    _soloMode = false;
+    _roomBeforeSolo = null;
     _room = roomName;
     panel.classList.remove('mini');
     panel.classList.remove('solo-embed');
@@ -1906,8 +1911,10 @@ const Music = (() => {
       panel.innerHTML = `<div class="mp-empty">Switching to #${esc(roomName)}…</div>`;
       _anchorMs = 0;
       _anchorTrackKey = '';
-    } else if (!wrap) {
+    } else if (!wrap || fromSoloUi) {
       panel.innerHTML = `<div class="mp-empty">Loading queue…</div>`;
+      _anchorMs = 0;
+      _anchorTrackKey = '';
     }
     panel.dataset.mountedRoom = roomName;
     _state = await _fetchState(roomName);
@@ -2216,7 +2223,7 @@ const Music = (() => {
       return;
     }
     if (_room && typeof Rooms !== 'undefined' && Rooms.switchToRoom) {
-      Rooms.switchToRoom(_room, 'music');
+      Rooms.switchToRoom(_room, 'public', null, 'music');
       // No auto-resync. The iframe was kept alive while the user was on
       // another channel; it's still where they left it. If they want
       // to catch back up to the room they can hit Resync explicitly.
@@ -2225,6 +2232,23 @@ const Music = (() => {
       try { _lastEmitHash = ''; _emitState(); } catch {}
       try { _probeIframeStateSoon(); } catch {}
     }
+  }
+
+  // Detach from the in-channel player for FrogSocial solo playback without
+  // hiding the panel (playSolo immediately re-mounts mini/solo-embed).
+  function _softDetachForSolo() {
+    _stopSyncProbe();
+    _stopUiSync();
+    const panel = $('music-panel');
+    if (panel) {
+      panel.classList.remove('active');
+      panel.classList.remove('collapsed');
+      delete panel.dataset.mountedRoom;
+    }
+    document.body.removeAttribute('data-music-mini');
+    _clearDock();
+    _anchorMs = 0;
+    _anchorTrackKey = '';
   }
 
   function close() {
@@ -2247,6 +2271,7 @@ const Music = (() => {
     _room = null;
     _state = null;
     _soloMode = false;
+    _roomBeforeSolo = null;
     _paused = false;
     _muted = false;
     // Reset every sticky pause flag so the NEXT render (channel mount
@@ -2288,13 +2313,11 @@ const Music = (() => {
     _userIntentAt = 0;
     _lastPlayerState = null;
     if (_room && !_soloMode) {
-      // Tear down the channel-mode UI/state without leaving the room
-      // server-side: close() resets _room/_state/_paused locally so the
-      // fresh solo render below starts from a clean slate. The channel
-      // continues for other users; this client just stopped following.
-      try { close(); } catch {}
-      // close() resets _userPaused; re-clear here so the order of the
-      // ifs above doesn't matter to a future reader.
+      // Remember which channel to restore when the user returns from Social.
+      // Soft-detach only — do NOT close() (that hides the panel and breaks
+      // remount when switchToRoom early-returns on the same channel).
+      _roomBeforeSolo = _room;
+      try { _softDetachForSolo(); } catch {}
       _userPaused = false;
       _userIntentPaused = null;
     }
@@ -2861,6 +2884,26 @@ const Music = (() => {
   //     the affordance entirely (no point offering a button that 403s).
   //   • Anywhere else (text channels, DMs, FrogSocial) → fall back to
   //     the side / solo player as before.
+  function _channelTypeForRoom(roomName) {
+    try {
+      const rd = (State.rooms || []).find(r => r.name === roomName);
+      const ct = rd?.channel_type;
+      if (ct === 'voice') return 'music';
+      return ct || 'text';
+    } catch { return 'text'; }
+  }
+
+  function restoreChannelPlayerIfNeeded() {
+    try {
+      const room = String(State?.currentRoom || '');
+      if (!room) return false;
+      const chType = _channelTypeForRoom(room);
+      if (chType !== 'music') return false;
+      void mount(room, chType);
+      return true;
+    } catch { return false; }
+  }
+
   function isMediaChannelContext() {
     // Authoritative signal: Music has mounted into a room (mount() only
     // sets _room when channelType resolves to 'music' / 'voice'), and
@@ -2919,7 +2962,7 @@ const Music = (() => {
            grantDJ, revokeDJ, isDJ, handleWsEvent, expand, close, togglePause,
            togglePauseGlobal, resumeFromNotification, setNativeMuted, getCurrent,
            resyncNow, shareToWall, playSolo, updateCurrentMeta,
-           pauseForExternalPlayback,
+           pauseForExternalPlayback, restoreChannelPlayerIfNeeded,
            toggleAutoNext,
            toggleAutoFill,
            _syncAutoNextButtons,
