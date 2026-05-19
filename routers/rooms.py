@@ -6,6 +6,7 @@ import os
 import re
 import time
 import uuid
+import unicodedata
 from pathlib import Path
 from fastapi import APIRouter, Request, Depends, UploadFile, File
 from fastapi.responses import JSONResponse, FileResponse
@@ -21,6 +22,11 @@ router = APIRouter(prefix="/rooms", tags=["rooms"])
 limiter = Limiter(key_func=client_ip)
 
 ROOM_NAME_RE = re.compile(r"^[a-z0-9_\-]{1,32}$")
+_ROOM_SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9._\-/?=&%]+$")
+_ROOM_SAFE_HTTP_RE = re.compile(r"^https?://", re.IGNORECASE)
+_ROOM_STYLE_UNSAFE_CHARS_RE = re.compile(r"[)\\\s'\"<>]")
+_ROOM_BIDI_INVIS_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+_ROOM_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 async def request_private_room_rekey(room: dict, joiner: dict) -> None:
@@ -424,15 +430,76 @@ def _normalize_room_icon(icon: Optional[str]) -> Optional[str]:
             raise ValueError("Room image is too large")
         return icon
 
-    if icon.startswith("https://") or icon.startswith("http://"):
+    if _ROOM_SAFE_HTTP_RE.match(icon):
         if len(icon) > 2048:
             raise ValueError("Room image URL is too long")
+        if _ROOM_STYLE_UNSAFE_CHARS_RE.search(icon):
+            raise ValueError("Room image URL contains forbidden characters")
+        return icon
+
+    if icon.startswith("/"):
+        if len(icon) > 2048:
+            raise ValueError("Room image path is too long")
+        if not _ROOM_SAFE_PATH_RE.match(icon):
+            raise ValueError("Room image path is invalid")
         return icon
 
     # Backward compatibility: allow short emoji/text icon values.
     if len(icon) > 8:
         raise ValueError("Emoji icon must be 8 characters or fewer")
+    # Reject plain alnum/punctuation placeholders like "_" or "abc".
+    if re.fullmatch(r"[A-Za-z0-9_-]+", icon):
+        raise ValueError("Emoji icon must include an emoji or symbol")
     return icon
+
+
+def _normalize_room_banner(banner: Optional[str]) -> Optional[str]:
+    """Validate and normalize room banner source (URL, path, or data image)."""
+    if banner is None:
+        return None
+    banner = banner.strip()
+    if banner == "":
+        return ""
+    if banner.startswith("data:image/"):
+        allowed_prefixes = (
+            "data:image/png;base64,",
+            "data:image/jpeg;base64,",
+            "data:image/webp;base64,",
+            "data:image/gif;base64,",
+        )
+        if not any(banner.startswith(p) for p in allowed_prefixes):
+            raise ValueError("Banner image must be PNG, JPEG, WEBP, or GIF")
+        if len(banner) > 6_000_000:
+            raise ValueError("Banner image is too large")
+        return banner
+    if _ROOM_SAFE_HTTP_RE.match(banner):
+        if len(banner) > 2048:
+            raise ValueError("Banner image URL is too long")
+        if _ROOM_STYLE_UNSAFE_CHARS_RE.search(banner):
+            raise ValueError("Banner image URL contains forbidden characters")
+        return banner
+    if banner.startswith("/"):
+        if len(banner) > 2048:
+            raise ValueError("Banner image path is too long")
+        if not _ROOM_SAFE_PATH_RE.match(banner):
+            raise ValueError("Banner image path is invalid")
+        return banner
+    raise ValueError("Banner must be a data image, http(s) URL, or absolute path")
+
+
+def _sanitize_room_text(value: Optional[str], *, max_len: int, multiline: bool = False) -> str:
+    """Strip control/invisible chars and enforce a bounded canonical text form."""
+    raw = str(value or "")
+    raw = unicodedata.normalize("NFC", raw)
+    raw = _ROOM_BIDI_INVIS_RE.sub("", raw)
+    raw = _ROOM_CTRL_RE.sub("", raw)
+    if multiline:
+        raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+        raw = re.sub(r"\n{3,}", "\n\n", raw)
+        clean = raw.strip()
+    else:
+        clean = re.sub(r"\s+", " ", raw).strip()
+    return clean[:max_len]
 
 
 @router.get("")
@@ -530,9 +597,10 @@ async def create_room(request: Request, body: CreateRoomRequest,
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
+    clean_desc = _sanitize_room_text(body.description, max_len=256)
     room_id = db.create_room(
         name=body.name,
-        description=body.description[:256],
+        description=clean_desc,
         room_type=body.type,
         owner_id=current_user["id"],
         room_key_hint=body.room_key_hint,
@@ -641,6 +709,12 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
             icon = _normalize_room_icon(body.icon)
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
+    banner: Optional[str] = None
+    if body.banner is not None:
+        try:
+            banner = _normalize_room_banner(body.banner)
+        except ValueError as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
 
     # Look up the current room so the theme sanitizer can apply the
     # private-channel CSS/bgImage gate. If the row vanished mid-request
@@ -653,18 +727,21 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": f"channel_theme: {e}"})
 
+    clean_desc = _sanitize_room_text(body.description, max_len=256) if body.description is not None else None
+    clean_about = _sanitize_room_text(body.about, max_len=2000, multiline=True) if body.about is not None else None
+
     ok = db.update_room_settings(
         room_name,
         name=body.name,
-        description=body.description[:256] if body.description else None,
+        description=clean_desc,
         icon=icon,
         slowmode=body.slowmode,
         channel_type=body.channel_type,
         channel_theme=sanitized_theme,
         invite_only=body.invite_only,
         who_can_invite=body.who_can_invite,
-        banner=body.banner,
-        about=body.about[:4000] if body.about is not None else None,
+        banner=banner,
+        about=clean_about,
         forwarding_disabled=body.forwarding_disabled,
     )
     if not ok:

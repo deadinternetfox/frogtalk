@@ -8,6 +8,7 @@ import json
 
 import database as db
 from deps import get_current_user, client_ip
+from routers.rooms import _sanitize_room_text
 
 limiter = Limiter(key_func=client_ip)
 router = APIRouter(prefix="/directory", tags=["directory"])
@@ -67,6 +68,24 @@ class UpdateChannelVisibilityRequest(BaseModel):
     tags: List[str] = []
 
 
+def _sanitize_directory_tags(tags: List[str]) -> List[str]:
+    clean: List[str] = []
+    seen = set()
+    for t in tags or []:
+        v = _sanitize_room_text(str(t or ""), max_len=24, multiline=False).lower()
+        if not v:
+            continue
+        if not all(ch.isalnum() or ch in {"-", "_"} for ch in v):
+            continue
+        if v in seen:
+            continue
+        seen.add(v)
+        clean.append(v)
+        if len(clean) >= 10:
+            break
+    return clean
+
+
 @router.patch("/channels/{room_name}/visibility")
 async def update_channel_visibility(
     room_name: str,
@@ -91,8 +110,9 @@ async def update_channel_visibility(
     if body.category and body.category not in CHANNEL_CATEGORIES:
         return JSONResponse(status_code=400, content={"error": f"Invalid category. Choose from: {', '.join(CHANNEL_CATEGORIES)}"})
     
-    tags_json = json.dumps(body.tags[:10])  # max 10 tags
-    dir_desc = body.directory_description[:2000] if body.directory_description else ""
+    clean_tags = _sanitize_directory_tags(body.tags)
+    tags_json = json.dumps(clean_tags)
+    dir_desc = _sanitize_room_text(body.directory_description, max_len=1200, multiline=True)
     
     if db.set_room_public(room_name, 1 if body.is_public else 0, body.category, dir_desc, tags_json):
         return {"ok": True, "is_public": body.is_public, "category": body.category}
@@ -301,8 +321,9 @@ async def update_channel_listing(
         )
     if body.category and body.category not in CHANNEL_CATEGORIES:
         return JSONResponse(status_code=400, content={"error": f"Invalid category"})
-    tags_json = json.dumps(body.tags[:10])
-    dir_desc = body.directory_description[:2000] if body.directory_description else ""
+    clean_tags = _sanitize_directory_tags(body.tags)
+    tags_json = json.dumps(clean_tags)
+    dir_desc = _sanitize_room_text(body.directory_description, max_len=1200, multiline=True)
     is_public = 1 if room.get("is_public") else 0
     if db.set_room_public(room_name, is_public, body.category, dir_desc, tags_json):
         return {"ok": True}

@@ -436,7 +436,23 @@ const Rooms = (() => {
 
   function isImageIcon(icon) {
     if (!icon || typeof icon !== 'string') return false;
-    return icon.startsWith('data:image/') || /^https?:\/\//i.test(icon);
+    return isSafeCssImageUrl(icon);
+  }
+
+  function isSafeCssImageUrl(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return false;
+    if (/^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(s)) return true;
+    if (/^https?:\/\//i.test(s)) {
+      if (s.length > 2048) return false;
+      if (/[)\\\s'"<>]/.test(s)) return false;
+      return true;
+    }
+    if (s.startsWith('/')) {
+      if (s.length > 2048) return false;
+      return /^\/[A-Za-z0-9._\-/?=&%]+$/.test(s);
+    }
+    return false;
   }
 
   function defaultIconForType(type, channelType = 'text') {
@@ -1344,7 +1360,7 @@ const Rooms = (() => {
     const listInDir = document.getElementById('new-room-list-directory')?.checked;
     if (_selectedRoomType === 'public' && listInDir) {
       const cat = document.getElementById('new-room-category')?.value || '';
-      const dirDesc = document.getElementById('new-room-dir-desc')?.value?.trim() || '';
+      const dirDesc = (document.getElementById('new-room-dir-desc')?.value || '').slice(0, 1200).trim();
       const tagsRaw = document.getElementById('new-room-tags')?.value?.trim() || '';
       const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean).slice(0, 10) : [];
       try {
@@ -1502,8 +1518,8 @@ const Rooms = (() => {
     const _bannerPreview = document.getElementById('ch-settings-banner-preview');
     if (_bannerHidden) _bannerHidden.value = _banner;
     if (_bannerPreview) {
-      if (_banner) {
-        _bannerPreview.style.backgroundImage = `url(${_banner})`;
+      if (_banner && isSafeCssImageUrl(_banner)) {
+        _bannerPreview.style.backgroundImage = `url('${_banner}')`;
         _bannerPreview.style.backgroundSize = 'cover';
         _bannerPreview.style.backgroundPosition = 'center';
         _bannerPreview.textContent = '';
@@ -1978,7 +1994,7 @@ const Rooms = (() => {
     const desc = document.getElementById('ch-settings-desc').value.trim();
     const slowmode = parseInt(document.getElementById('ch-settings-slowmode').value) || 0;
     const banner = document.getElementById('ch-settings-banner')?.value || '';
-    const about = document.getElementById('ch-settings-about')?.value.slice(0, 4000) || '';
+    const about = document.getElementById('ch-settings-about')?.value.slice(0, 2000) || '';
     
     if (!name) {
       UI.showToast('Channel name is required', 'error');
@@ -2052,7 +2068,7 @@ const Rooms = (() => {
     const dirListed = (_currentRoomData?.room?.type === 'private') ? false : !!document.getElementById('ch-dir-listed')?.checked;
     const dirCategory = document.getElementById('ch-dir-category')?.value || '';
     const dirTagsRaw = document.getElementById('ch-dir-tags')?.value || '';
-    const dirDesc = document.getElementById('ch-dir-desc')?.value || '';
+    const dirDesc = (document.getElementById('ch-dir-desc')?.value || '').slice(0, 1200);
     const dirTags = dirTagsRaw.split(',').map(t => t.trim()).filter(Boolean).slice(0, 10);
     
     await fetch(`/api/directory/channels/${encodeURIComponent(_currentSettingsRoom)}/visibility`, {
@@ -3288,7 +3304,7 @@ function renderDirectoryCard(ch, compact) {
   let tags = [];
   try { tags = typeof ch.tags === 'string' ? JSON.parse(ch.tags) : (ch.tags || []); } catch {}
   const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
-  const iconHtml = ch.icon && ch.icon.startsWith('data:image')
+  const iconHtml = isImageIcon(ch.icon || '')
     ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
     : esc(ch.icon || '💬');
   // "Joined" vs "Join" state — check our local rooms list.
@@ -3452,9 +3468,9 @@ function directoryAutoSearch() {
         if (items.length && sugEl) {
           const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
           sugEl.innerHTML = items.map(s => {
-            const iconHtml = s.icon && s.icon.startsWith('data:image')
+            const iconHtml = isImageIcon(s.icon || '')
               ? `<img src="${UI.escHtml(s.icon)}" style="width:20px;height:20px;border-radius:50%;object-fit:cover">`
-              : (s.icon || '💬');
+              : UI.escHtml(s.icon || '💬');
             return `<div class="dir-suggestion-item" onmousedown="directorySelectSuggestion(${_jsStr(s.name)})">
               <span>${iconHtml}</span>
               <span style="flex:1">${UI.escHtml(s.name)}</span>
@@ -3492,9 +3508,10 @@ async function viewChannelProfile(channelName) {
     let tags = [];
     try { tags = Array.isArray(ch.tags) ? ch.tags : JSON.parse(ch.tags || '[]'); } catch {}
     const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
-    const iconHtml = ch.icon && ch.icon.startsWith('data:image')
+    const iconHtml = isImageIcon(ch.icon || '')
       ? `<img src="${UI.escHtml(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
       : UI.escHtml(ch.icon || '💬');
+    const safeBanner = isSafeCssImageUrl(ch.banner || '') ? String(ch.banner).trim() : '';
     const desc = ch.directory_description || ch.description || '';
     const aboutText = ch.about || desc;
     const showListingHint = !!ch.is_owner && !!ch.about && !!desc && ch.about.trim() !== desc.trim();
@@ -3513,7 +3530,7 @@ async function viewChannelProfile(channelName) {
 
     overlay.innerHTML = `
       <div class="modal ch-prof-modal">
-        ${ch.banner ? `<div class="ch-prof-banner" style="background-image:url(${UI.escHtml(ch.banner)})"></div>` : ''}
+        ${safeBanner ? `<div class="ch-prof-banner" style="background-image:url('${UI.escHtml(safeBanner)}')"></div>` : ''}
         <div class="ch-prof-body">
         <div class="ch-prof-head${ch.banner?' has-banner':''}">
           <div class="ch-prof-head-left">
