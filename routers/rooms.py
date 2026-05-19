@@ -758,6 +758,7 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
             "old_name": room_name,
             "new_name": renamed_to,
             "room_name": renamed_to,
+            "renamed_by_nickname": (current_user.get("nickname") or "").strip(),
         })
     if body.channel_type is not None and _existing_room:
         prev_ct = (_existing_room.get("channel_type") or "text")

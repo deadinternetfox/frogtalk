@@ -5060,6 +5060,9 @@ def update_room_settings(room_name: str, **kwargs) -> bool:
         new_name = None
     renaming = bool(new_name and new_name != room_name)
     if renaming:
+        room_name = str(room_name or "").strip()
+        if not _ROOM_NAME_SAFE_RE.match(room_name):
+            return False
         try:
             with _conn() as con:
                 if not con.execute("SELECT 1 FROM rooms WHERE name=?", (room_name,)).fetchone():
@@ -5073,7 +5076,7 @@ def update_room_settings(room_name: str, **kwargs) -> bool:
                 con.execute(f"UPDATE rooms SET {set_clause} WHERE name=?", values)
                 con.commit()
             return True
-        except sqlite3.IntegrityError:
+        except (sqlite3.IntegrityError, ValueError):
             return False
     set_clause = ", ".join(f"{k}=?" for k in updates)
     values = list(updates.values()) + [room_name]

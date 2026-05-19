@@ -947,6 +947,10 @@ const Rooms = (() => {
         S.messages[newRoom] = S.messages[oldRoom];
       }
       delete S.messages[oldRoom];
+      if (State.currentRoom === newRoom || State.currentRoom === oldRoom) {
+        const head = S.messages[newRoom] && S.messages[newRoom][0];
+        State.oldestMsgId = head && head.id ? head.id : null;
+      }
     }
     if (S.roomKeys && Object.prototype.hasOwnProperty.call(S.roomKeys, oldRoom)) {
       if (S.roomKeys[newRoom] == null) S.roomKeys[newRoom] = S.roomKeys[oldRoom];

@@ -1672,6 +1672,22 @@ async def _handle_room_event(event: dict) -> None:
         new_name = new_name.lower()
         if not db.get_room_by_name(old_name):
             return
+        actor_nick = _fed_nickname(payload.get("renamed_by_nickname"))
+        if not actor_nick:
+            _log.warning(
+                "federation: dropping room.renamed (missing renamed_by_nickname) %s -> %s",
+                old_name, new_name,
+            )
+            return
+        actor = _ensure_local_user_by_nickname(actor_nick)
+        if not actor or not db.can_moderate_room(
+            old_name, actor["id"], bool(actor.get("is_admin"))
+        ):
+            _log.warning(
+                "federation: dropping room.renamed (actor %s not authorised on %s)",
+                actor_nick, old_name,
+            )
+            return
         db.cascade_room_rename(old_name, new_name)
         return
 
