@@ -227,6 +227,73 @@
   #form-status.ok { color: var(--green); }
   #form-status.err { color: var(--red); }
 
+  /* ── HALL OF FAME ── */
+  .hof-list { list-style: none; display: flex; flex-direction: column; gap: 1rem; margin: .75rem 0 0; padding: 0; }
+  .hof-entry {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.15rem;
+    border-left: 3px solid var(--green);
+  }
+  .hof-head {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .5rem;
+    margin-bottom: .55rem;
+  }
+  .hof-name {
+    font-size: 1.02rem; font-weight: 700; color: var(--text);
+  }
+  .hof-name a { color: var(--green); text-decoration: none; }
+  .hof-name a:hover { text-decoration: underline; }
+  .hof-meta { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; }
+  .hof-badge {
+    font-size: .72rem; font-weight: 600; letter-spacing: .03em;
+    padding: .2rem .55rem; border-radius: 999px;
+    background: rgba(74,222,128,.12); border: 1px solid rgba(74,222,128,.28);
+    color: #86efac; text-transform: uppercase;
+  }
+  .hof-date { font-size: .78rem; color: var(--text-muted); }
+  .hof-summary {
+    color: var(--text-muted); font-size: .94rem; line-height: 1.55;
+    margin: 0 0 .65rem;
+  }
+  .hof-summary strong { color: var(--text); font-weight: 600; }
+  .hof-toggle {
+    background: none; border: none; padding: 0;
+    color: var(--green); font-size: .86rem; font-weight: 600;
+    cursor: pointer; text-decoration: underline; text-underline-offset: 2px;
+    font-family: inherit;
+  }
+  .hof-toggle:hover { color: var(--green-dim); }
+  .hof-details {
+    display: none;
+    margin-top: .85rem; padding-top: .85rem;
+    border-top: 1px dashed var(--border);
+    color: var(--text-muted); font-size: .9rem; line-height: 1.58;
+  }
+  .hof-details.is-open { display: block; }
+  .hof-details ul {
+    list-style: none; margin: .55rem 0 0; padding: 0;
+    display: flex; flex-direction: column; gap: .45rem;
+  }
+  .hof-details ul li {
+    padding: .45rem .7rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    border-left: 2px solid rgba(74,222,128,.45);
+    font-size: .88rem;
+  }
+  .hof-details ul li strong { color: var(--text); }
+  .hof-outcome {
+    margin-top: .75rem; padding: .65rem .8rem;
+    background: rgba(74,222,128,.06);
+    border: 1px solid rgba(74,222,128,.22);
+    border-radius: 8px; font-size: .86rem; color: #b8e6c8;
+  }
+  .hof-outcome strong { color: var(--green); }
+
   /* ── FOOTER ── */
   footer {
     border-top: 1px solid var(--border);
@@ -240,12 +307,95 @@
   footer a:hover { color: var(--green); }
   .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
 
-  @media (max-width: 720px) {
-    body > nav { padding: 0 1rem; }
-    .nav-links a:not(.btn) { display: none; }
-    .hero { padding-top: 7rem; }
+  @media (max-width: 768px) {
+    body > nav { padding: 0 .75rem; gap: .4rem; }
+    body > nav .nav-logo { font-size: 1.05rem; gap: .35rem; flex-shrink: 0; }
+    body > nav .nav-logo .frog { font-size: 1.25rem; }
+    body > nav .nav-links a:not(.btn):not(.nav-mobile-keep) { display: none; }
+    body > nav .nav-links {
+      gap: .3rem;
+      flex-wrap: nowrap;
+      min-width: 0;
+    }
+    body > nav .nav-mobile-keep {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      box-sizing: border-box;
+      width: 56px;
+      height: 30px;
+      padding: 0 .25rem;
+      border: 1px solid #2f3b48;
+      border-radius: 999px;
+      font-size: .62rem !important;
+      font-weight: 600;
+      line-height: 1.05;
+      letter-spacing: .01em;
+      color: #b6c3cf !important;
+      background: rgba(15,23,42,.35);
+      white-space: normal;
+      word-break: keep-all;
+      hyphens: none;
+    }
+    body > nav .nav-mobile-keep:hover { border-color: rgba(74,222,128,.6); color: #86efac !important; }
+    body > nav .nav-links .btn {
+      padding: 0 .65rem;
+      height: 30px;
+      font-size: .72rem;
+      line-height: 30px;
+      flex-shrink: 0;
+    }
+    body > nav .nav-links .btn-primary {
+      color: #fff !important;
+      white-space: normal;
+      text-align: center;
+      line-height: 1.05;
+      padding: 0 .55rem;
+      font-size: .65rem;
+      width: 64px;
+    }
+    body > nav .nav-links .btn-ghost { display: none; }
+    .hero { padding-top: 5rem; }
     footer { flex-direction: column; text-align: center; gap: 1rem; }
     .footer-links { justify-content: center; gap: 1rem; }
+  }
+  @media (max-width: 400px) {
+    body > nav { padding: 0 .55rem; height: 54px; gap: .3rem; }
+    body > nav .nav-logo { font-size: .95rem; gap: .3rem; }
+    body > nav .nav-logo .frog { font-size: 1.15rem; }
+    body > nav .nav-links { gap: .25rem; }
+    body > nav .nav-mobile-keep {
+      width: 50px;
+      height: 28px;
+      font-size: .58rem !important;
+      padding: 0 .2rem;
+    }
+    body > nav .nav-links .btn-primary {
+      padding: 0 .4rem;
+      height: 28px;
+      line-height: 1.05;
+      font-size: .6rem;
+      width: 56px;
+      color: #fff !important;
+    }
+  }
+  @media (max-width: 320px) {
+    body > nav { padding: 0 .4rem; height: 50px; gap: .25rem; }
+    body > nav .nav-logo { font-size: .85rem; }
+    body > nav .nav-logo .frog { font-size: 1rem; }
+    body > nav .nav-mobile-keep {
+      width: 44px;
+      height: 26px;
+      font-size: .54rem !important;
+    }
+    body > nav .nav-links .btn-primary {
+      padding: 0 .35rem;
+      height: 26px;
+      font-size: .55rem;
+      width: 50px;
+      color: #fff !important;
+    }
   }
 </style>
 </head>
@@ -258,8 +408,12 @@
   </a>
   <div class="nav-links">
     <a href="/#features">Features</a>
+    <a href="/#how">How it works</a>
     <a href="/privacy">Privacy</a>
     <a href="/security">Security</a>
+    <a href="/#open-source" class="nav-mobile-keep">Open Source</a>
+    <a href="/docs/api" class="nav-mobile-keep">API</a>
+    <a href="/docs/node" class="nav-mobile-keep">Run Node</a>
     <a href="/app" class="btn btn-ghost">Log In</a>
     <a href="/app" class="btn btn-primary">Sign Up Free</a>
   </div>
@@ -431,8 +585,47 @@
   <section class="block" id="hall-of-fame">
     <h2>Hall of fame</h2>
     <p>Security researchers who've responsibly disclosed issues. Want to be on this list? See above.</p>
-    <ul>
-      <li><strong>You?</strong> — be the first.</li>
+    <ul class="hof-list">
+      <li class="hof-entry">
+        <div class="hof-head">
+          <div class="hof-name"><a href="/u/frogtalk_is_insecure">@frogtalk_is_insecure</a></div>
+          <div class="hof-meta">
+            <span class="hof-badge">Channel CSS audit</span>
+            <span class="hof-date">May 2026</span>
+          </div>
+        </div>
+        <p class="hof-summary">
+          Audited public-channel custom CSS and theme handling. Found that a channel owner could
+          <strong>fingerprint every visitor's IP</strong> by loading a background image from their
+          own server — effectively turning the chat theme into ad-tracking pixels — plus several
+          CSS-sandbox bypasses that let styles reach outside the channel scope.
+        </p>
+        <button type="button" class="hof-toggle" aria-expanded="false" data-hof-toggle="frogtalk-is-insecure">
+          Show what they found
+        </button>
+        <div class="hof-details" id="hof-frogtalk-is-insecure" aria-hidden="true">
+          <p>In their own words, the core issue was blunt: <em>"I can add my own adtracking to the
+          chat — I can see anyone's IP now whenever they open this chat, just from loading the
+          page."</em> A hostile channel theme could point <code>background-image</code> at an
+          attacker-controlled URL; every member who opened the channel would hit that server and
+          leak their IP — no message send required.</p>
+          <p>They also flagged the CSS sanitizer as incomplete:</p>
+          <ul>
+            <li><strong><code>:root</code> not blocked</strong> — document-level selectors could escape the <code>#main</code> scope.</li>
+            <li><strong><code>[data-theme]</code> not blocked</strong> — platform theme attributes were reachable from channel CSS.</li>
+            <li><strong>Namespaces wide open</strong> — <code>@namespace</code> and related rules were not rejected.</li>
+            <li><strong>Pseudo-elements unfiltered</strong> — modern selectors like <code>::column</code> (and similar) were not on the deny list.</li>
+            <li><strong>Unicode whitespace mismatch</strong> — the sanitizer's space detection did not match browser behaviour, likely allowing a <code>#main</code> jailbreak via thousands of Unicode space-like characters.</li>
+            <li><strong>JSON API whitespace bugs</strong> — message requests with newlines or special characters were mishandled by the API layer.</li>
+          </ul>
+          <div class="hof-outcome">
+            <strong>Outcome:</strong> CSS sanitizer tightened (<code>:root</code>, <code>[data-theme]</code>,
+            forbidden pseudos, Unicode normalisation), external background images proxied through FrogTalk,
+            custom CSS disabled entirely for private channels, message content whitespace preserved,
+            and channel-theme UI warnings added. Fixed and deployed.
+          </div>
+        </div>
+      </li>
     </ul>
   </section>
 
@@ -506,6 +699,20 @@
       btn.disabled = false;
       btn.textContent = originalLabel;
     }
+  });
+})();
+
+(function () {
+  document.querySelectorAll('[data-hof-toggle]').forEach(function (btn) {
+    var targetId = 'hof-' + btn.getAttribute('data-hof-toggle');
+    var panel = document.getElementById(targetId);
+    if (!panel) return;
+    btn.addEventListener('click', function () {
+      var open = panel.classList.toggle('is-open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+      btn.textContent = open ? 'Hide details' : 'Show what they found';
+    });
   });
 })();
 </script>

@@ -1720,6 +1720,9 @@ function renderDMMessage (m) {
     if (typeof renderCustomEmojisInText === 'function') {
       contentHtml = renderCustomEmojisInText(contentHtml);
     }
+    if (typeof TextFormat !== 'undefined' && TextFormat.formatEscaped) {
+      contentHtml = TextFormat.formatEscaped(contentHtml);
+    }
   }
   if (!contentHtml && !mediaHtml) {
     if (_isCipherBlob || m._decryptPending) {

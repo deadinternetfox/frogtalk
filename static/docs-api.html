@@ -285,6 +285,9 @@ POST   /api/rooms
 DELETE /api/rooms/{room_name}
 GET    /api/rooms/{room_name}
 PATCH  /api/rooms/{room_name}
+POST   /api/rooms/{room_name}/theme-bg
+GET    /api/rooms/{room_name}/theme-bg
+DELETE /api/rooms/{room_name}/theme-bg
 POST   /api/rooms/{room_name}/moderators
 DELETE /api/rooms/{room_name}/moderators/{user_id}
 POST   /api/rooms/{room_name}/bans
@@ -341,6 +344,8 @@ POST   /api/emojis
 DELETE /api/emojis/{emoji_id}
 
 GET    /api/preview
+
+GET    /api/proxy/image
 
 GET    /api/push/vapid-key
 POST   /api/push/subscribe
@@ -463,6 +468,8 @@ GET    /api/developer/bots/public</code></pre>
             <li>Copy the <code>bot_…</code> token shown in the dialog — it's only displayed once.</li>
             <li>Click <strong>Edit</strong> on the bot row to set its avatar, description, and whether
             it appears in the public directory (botfather-style).</li>
+            <li>Install the bot into at least one channel via <strong>Settings → Developer → Bots → Add to channel</strong>.
+            Bots cannot post until installed — uninstalled bots receive <code>403 Bot is not a member of this channel</code>.</li>
           </ol>
 
           <h3 id="bot-step-auth">2. Authenticate</h3>
@@ -517,6 +524,9 @@ while True:
 
           <h3 id="bot-step-etiquette">Etiquette &amp; limits</h3>
           <ul>
+            <li><strong>Channel membership:</strong> a bot must be installed in a channel before it can
+            read or post there. Use <code>GET /api/external/me/channels</code> to discover where the bot
+            is installed.</li>
             <li><strong>Rate limit:</strong> <code>POST /channels/{name}/messages</code> is capped at
             30 req/min per bot key. Stay well under it.</li>
             <li><strong>No mention spam:</strong> only reply when the bot is explicitly addressed
@@ -585,11 +595,11 @@ while True:
     for m in r.json().get("messages", []):
         if m["id"] in seen: continue
         seen.add(m["id"])
-        if "@mybot" in (m.get("text") or "").lower():
+        if "@mybot" in (m.get("content") or "").lower():
             requests.post(
                 f"{BASE}/channels/{CHANNEL}/messages",
                 headers=HEADERS,
-                json={"text": f"hi @{m['nickname']} 👋", "reply_to": m["id"]},
+                json={"content": f"hi @{m['nickname']} 👋", "reply_to": m["id"]},
                 timeout=10,
             )
     time.sleep(5)</code></pre>
@@ -607,10 +617,10 @@ async function tick() {
   for (const m of messages) {
     if (seen.has(m.id)) continue;
     seen.add(m.id);
-    if ((m.text || "").toLowerCase().includes("@mybot")) {
+    if ((m.content || "").toLowerCase().includes("@mybot")) {
       await fetch(`${BASE}/channels/${CHANNEL}/messages`, {
         method: "POST", headers,
-        body: JSON.stringify({ text: `hi @${m.nickname} 👋`, reply_to: m.id }),
+        body: JSON.stringify({ content: `hi @${m.nickname} 👋`, reply_to: m.id }),
       });
     }
   }
@@ -625,7 +635,10 @@ setInterval(tick, 5000);</code></pre>
         <article class="panel" id="external">
           <h2>External Token API (for Devs and Bots)</h2>
           <div class="muted"><span class="tag">PREFIX</span> /api/external</div>
-          <p class="muted">Auth: <code>X-API-Key: frog_xxx</code> or <code>Authorization: Bearer frog_xxx</code>. Key comes from <code>/api/developer/keys</code>.</p>
+          <p class="muted">Auth: <code>X-API-Key: frog_…</code> or <code>bot_…</code>, or
+          <code>Authorization: Bearer &lt;key&gt;</code>. User keys (<code>frog_…</code>) come from
+          <code>/api/developer/keys</code>; bot keys (<code>bot_…</code>) come from
+          <code>/api/developer/bots</code>.</p>
 <pre><code>GET    /api/external/docs
 GET    /api/external/health
 GET    /api/external/me
@@ -731,7 +744,6 @@ POST   /api/server-admin/control/unmute</code></pre>
 <pre><code>GET    /api/ping
 GET    /invite/{code}          (landing)
 WebSocket: /ws/{room_name}?token=SESSION_TOKEN</code></pre>
-          <p class="muted ok">This page now mirrors the current routed API surface in this repository.</p>
         </article>
       </section>
     </div>

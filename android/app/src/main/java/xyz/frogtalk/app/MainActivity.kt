@@ -19,6 +19,7 @@ import android.view.ViewGroup
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.*
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.content.BroadcastReceiver
@@ -27,6 +28,7 @@ import android.content.IntentFilter
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -39,6 +41,7 @@ class MainActivity : AppCompatActivity() {
         private const val APP_URL = "https://frogtalk.xyz/app"
         private const val WEB_CACHE_REV = "20260424-music-background-v1"
         private const val PREFS = "frogtalk_prefs"
+        private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_BATTERY_PROMPTED = "battery_prompted"
         private const val PREF_BATTERY_PROMPTED_AT = "battery_prompted_at"
         // 10.5: anti-screenshot. Default true so a fresh install gets
@@ -97,10 +100,109 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var webView: WebView? = null
+    private var webViewInitialized = false
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermissionRequest: PermissionRequest? = null
     private var musicPlaybackActive: Boolean = false
     private var pendingBatteryPromptAfterNotifications: Boolean = false
+
+    private fun normalizeServerBaseUrl(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        var u = raw.trim()
+        if (!u.startsWith("http://", ignoreCase = true) &&
+            !u.startsWith("https://", ignoreCase = true)
+        ) {
+            u = "https://$u"
+        }
+        return try {
+            val parsed = Uri.parse(u)
+            val host = parsed.host?.trim()?.lowercase().orEmpty()
+            if (host.isBlank()) return null
+            val scheme = (parsed.scheme ?: "https").lowercase()
+            if (scheme != "http" && scheme != "https") return null
+            val port = parsed.port
+            val base = if (port != -1 && port != 80 && port != 443) {
+                "$scheme://$host:$port"
+            } else {
+                "$scheme://$host"
+            }
+            base.trimEnd('/')
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun getServerBaseUrl(): String {
+        return try {
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(PREF_SERVER_BASE_URL, "")?.trim().orEmpty()
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    private fun getConfiguredAppEntryUrl(): String {
+        val base = getServerBaseUrl()
+        require(base.isNotBlank()) { "Server URL not configured" }
+        return "$base/app"
+    }
+
+    private fun isAppHost(host: String): Boolean {
+        val configured = normalizeServerBaseUrl(getServerBaseUrl()) ?: return false
+        val appHost = (Uri.parse(configured).host ?: "").lowercase()
+        val h = host.lowercase()
+        if (appHost.isBlank() || h.isBlank()) return false
+        return h == appHost || h.endsWith(".$appHost")
+    }
+
+    private fun ensureServerConfigured(onReady: () -> Unit) {
+        if (normalizeServerBaseUrl(getServerBaseUrl()) != null) {
+            onReady()
+            return
+        }
+        showServerSetupDialog(onReady)
+    }
+
+    private fun showServerSetupDialog(onReady: () -> Unit) {
+        val input = EditText(this).apply {
+            hint = "https://your-frogtalk-node.example"
+            setSingleLine(true)
+            setPadding(48, 32, 48, 32)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Connect to your FrogTalk node")
+            .setMessage(
+                "Enter the URL of your FrogTalk server. " +
+                    "You can use your own node or any trusted community server — " +
+                    "the official node is optional."
+            )
+            .setView(input)
+            .setCancelable(false)
+            .setPositiveButton("Connect") { _, _ ->
+                val normalized = normalizeServerBaseUrl(input.text?.toString())
+                if (normalized == null) {
+                    showErrorScreen("Invalid server URL.\nTap Retry to enter a valid address.")
+                    return@setPositiveButton
+                }
+                getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
+                onReady()
+            }
+            .show()
+    }
+
+    fun setServerBaseUrlFromJs(url: String) {
+        val normalized = normalizeServerBaseUrl(url) ?: return
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
+        runOnUiThread {
+            try {
+                webView?.loadUrl(buildAppUrl(getConfiguredAppEntryUrl()))
+            } catch (e: Throwable) {
+                Log.e(TAG, "setServerBaseUrlFromJs reload failed", e)
+            }
+        }
+    }
 
     private fun shouldOpenExternally(uri: Uri): Boolean {
         val scheme = (uri.scheme ?: "").lowercase()
@@ -110,10 +212,7 @@ class MainActivity : AppCompatActivity() {
         val host = (uri.host ?: "").lowercase()
         if (host.isBlank()) return false
 
-        val appHost = (Uri.parse(APP_URL).host ?: "").lowercase()
-        if (appHost.isBlank()) return false
-
-        return !(host == appHost || host.endsWith(".$appHost"))
+        return !isAppHost(host)
     }
 
     private fun openExternalUri(uri: Uri): Boolean {
@@ -263,13 +362,17 @@ class MainActivity : AppCompatActivity() {
         // Always set the layout — even if WebView fails, the user sees something
         setContentView(R.layout.activity_main)
 
-        // Try to initialise the WebView
-        try {
-            initWebView(savedInstanceState)
-            registerCallReceiver()
-        } catch (t: Throwable) {
-            Log.e(TAG, "WebView init failed", t)
-            showErrorScreen("WebView could not start:\n${t.message}")
+        // Prompt for a server URL on first launch, then initialise WebView.
+        ensureServerConfigured {
+            if (webViewInitialized) return@ensureServerConfigured
+            try {
+                initWebView(savedInstanceState)
+                registerCallReceiver()
+                webViewInitialized = true
+            } catch (t: Throwable) {
+                Log.e(TAG, "WebView init failed", t)
+                showErrorScreen("WebView could not start:\n${t.message}")
+            }
         }
 
         // Back navigation
@@ -534,7 +637,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Load URL with a lightweight cache-revision query for predictable refresh.
-        val rawUrl = savedInstanceState?.getString("url") ?: APP_URL
+        val rawUrl = savedInstanceState?.getString("url") ?: getConfiguredAppEntryUrl()
         val withRev = buildAppUrl(rawUrl)
         wv.loadUrl(withRev)
 
@@ -556,7 +659,7 @@ class MainActivity : AppCompatActivity() {
 
         // Deep-link handling
         intent?.data?.let { uri ->
-            if (uri.host == "frogtalk.xyz") {
+            if (isAppHost(uri.host ?: "")) {
                 wv.loadUrl(uri.toString())
             }
         }
@@ -679,11 +782,28 @@ class MainActivity : AppCompatActivity() {
             findViewById<View>(R.id.btn_retry)?.setOnClickListener {
                 errorScreen?.visibility = View.GONE
                 findViewById<View>(R.id.loading_screen)?.visibility = View.VISIBLE
+                if (normalizeServerBaseUrl(getServerBaseUrl()) == null) {
+                    ensureServerConfigured {
+                        try {
+                            if (webView != null) {
+                                webView?.reload()
+                            } else {
+                                initWebView(null)
+                                webViewInitialized = true
+                            }
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "Retry failed", t)
+                            showErrorScreen("Retry failed:\n${t.message}")
+                        }
+                    }
+                    return@setOnClickListener
+                }
                 try {
                     if (webView != null) {
                         webView?.reload()
                     } else {
                         initWebView(null)
+                        webViewInitialized = true
                     }
                 } catch (t: Throwable) {
                     Log.e(TAG, "Retry failed", t)
@@ -693,7 +813,12 @@ class MainActivity : AppCompatActivity() {
 
             findViewById<View>(R.id.btn_open_browser)?.setOnClickListener {
                 try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(APP_URL)))
+                    val openUrl = try {
+                        getConfiguredAppEntryUrl()
+                    } catch (_: Throwable) {
+                        APP_URL
+                    }
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(openUrl)))
                 } catch (_: Throwable) {
                     // No browser available
                 }
@@ -872,6 +997,16 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Throwable) {
                 true
             }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun getServerBaseUrl(): String {
+            return activity.getServerBaseUrl()
+        }
+
+        @android.webkit.JavascriptInterface
+        fun setServerBaseUrl(url: String) {
+            activity.setServerBaseUrlFromJs(url)
         }
 
         @android.webkit.JavascriptInterface

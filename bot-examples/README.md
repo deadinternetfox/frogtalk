@@ -31,6 +31,9 @@ RunPod, a Cloud Function, a Raspberry Pi, …).
 3. Copy the `bot_…` token that appears — it is shown **once**.
 4. Click **Edit** on the bot row to set its avatar, description, and
    whether it appears in the public bot directory (botfather-style).
+5. **Add the bot to a channel** — Settings → Developer → Bots →
+   **Add to channel**. Bots cannot post until installed; uninstalled
+   bots get `403 Bot is not a member of this channel`.
 
 ### 2. Authenticate every call
 

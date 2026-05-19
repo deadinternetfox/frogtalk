@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('desktopApp', {
     ipcRenderer.send('show-notification', { title, body });
   },
   getSettings: () => ipcRenderer.invoke('desktop:get-settings'),
+  getServerBaseUrl: () => ipcRenderer.invoke('desktop:get-server-base-url'),
+  setServerBaseUrl: (url) => ipcRenderer.invoke('desktop:set-server-base-url', url || ''),
   setCloseToTray: (enabled) => ipcRenderer.invoke('desktop:set-close-to-tray', !!enabled),
   setBlockScreenshots: (enabled) => ipcRenderer.invoke('desktop:set-block-screenshots', !!enabled),
   getLaunchOnStartup: () => ipcRenderer.invoke('desktop:get-launch-on-startup'),

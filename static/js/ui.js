@@ -2994,6 +2994,18 @@ async function runAutoNetworkSelect() {
   }
 }
 
+function _syncNativeServerUrl(url) {
+  const base = _normalizeNetworkUrl(url || '');
+  if (!base) return;
+  try {
+    if (window.Android && typeof window.Android.setServerBaseUrl === 'function') {
+      window.Android.setServerBaseUrl(base);
+    } else if (window.desktopApp && typeof window.desktopApp.setServerBaseUrl === 'function') {
+      window.desktopApp.setServerBaseUrl(base);
+    }
+  } catch {}
+}
+
 function saveNetworkSettings(silent = false) {
   const mode = document.getElementById('network-mode')?.value || 'auto';
   const preferOnion = document.getElementById('network-prefer-onion')?.checked ? '1' : '0';
@@ -3005,6 +3017,7 @@ function saveNetworkSettings(silent = false) {
   if (selectedAddr) {
     localStorage.setItem('ft_network_selected', selectedAddr);
   }
+  if (mode === 'custom' && customUrl) _syncNativeServerUrl(customUrl);
   if (!silent) UI.showToast('Network preferences saved', 'success');
 }
 
@@ -3028,6 +3041,7 @@ async function connectToSelectedServer() {
     return;
   }
   saveNetworkSettings(true);
+  _syncNativeServerUrl(target);
 
   if (_isOnionNetworkUrl(target)) {
     const confirmed = await _showTorModeDialog({

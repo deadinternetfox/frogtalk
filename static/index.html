@@ -2977,6 +2977,26 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #msg-input:focus,
 #msg-input:focus-visible{outline:none !important;box-shadow:none !important;border-color:transparent !important}
 #msg-input::placeholder{color:#444}
+.format-toolbar{
+  position:fixed;z-index:1200;display:flex;gap:2px;padding:4px 6px;
+  background:#1a1f24;border:1px solid #30363d;border-radius:10px;
+  box-shadow:0 8px 24px rgba(0,0,0,.45);pointer-events:auto
+}
+.format-toolbar-btn{
+  min-width:32px;height:28px;padding:0 8px;border:none;border-radius:6px;
+  background:transparent;color:#c9d1d9;font-size:13px;font-weight:700;cursor:pointer
+}
+.format-toolbar-btn:hover{background:#30363d;color:#fff}
+.format-toolbar-btn[data-fmt="code"]{font-family:ui-monospace,monospace;font-size:11px}
+.msg-content .fmt-b,.msg-content strong.fmt-b{font-weight:700}
+.msg-content .fmt-i,.msg-content em.fmt-i{font-style:italic}
+.msg-content .fmt-u,.msg-content u.fmt-u{text-decoration:underline}
+.msg-content .fmt-s,.msg-content s.fmt-s{text-decoration:line-through;color:#aaa}
+.msg-content .fmt-code,.msg-content code.fmt-code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:.92em;background:#1c2128;border:1px solid #30363d;border-radius:4px;
+  padding:1px 5px;color:#e6edf3
+}
 .send-btn{
   position:relative;overflow:hidden;
   background:linear-gradient(155deg,#9ef6c2 0%,#61d989 26%,#3aa95a 58%,#2a8647 100%);
@@ -10708,10 +10728,12 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=434"></script>
 <script src="/static/js/ws.js?v=247"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=485"></script>
+<script src="/static/js/ui.js?v=486"></script>
   <script src="/static/js/rooms.js?v=439"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
-<script src="/static/js/messages.js?v=479"></script>
+<script src="/static/js/text_format.js?v=1"></script>
+<script src="/static/js/messages.js?v=480"></script>
+<script src="/static/js/format_toolbar.js?v=1"></script>
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>

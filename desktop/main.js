@@ -2,7 +2,7 @@ const { app, BrowserWindow, Menu, Tray, Notification, shell, ipcMain, dialog } =
 const fs = require('fs');
 const path = require('path');
 
-const APP_URL = 'https://frogtalk.xyz/app';
+const APP_URL_FALLBACK = 'https://frogtalk.xyz/app';
 const WEB_PARTITION = 'persist:frogtalk-web';
 const AUTH_SNAPSHOT_PATH = path.join(app.getPath('userData'), 'auth-snapshot.json');
 const DESKTOP_SETTINGS_PATH = path.join(app.getPath('userData'), 'desktop-settings.json');
@@ -21,7 +21,97 @@ let _desktopSettings = {
   // Linux X11 has no equivalent capture flag so this is effectively a
   // no-op there; honoured on Windows + macOS.
   blockScreenshots: true,
+  serverBaseUrl: '',
 };
+
+function normalizeServerBaseUrl(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  let u = raw.trim();
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+  try {
+    const parsed = new URL(u);
+    if (!parsed.hostname) return '';
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+    return `${parsed.protocol}//${parsed.host}`.replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function getAppUrl() {
+  const base = normalizeServerBaseUrl(_desktopSettings.serverBaseUrl || '');
+  return base ? `${base}/app` : '';
+}
+
+function isAppNavigationUrl(url) {
+  if (!url || url.startsWith('data:') || url.startsWith('about:')) return true;
+  const appUrl = getAppUrl();
+  if (!appUrl) return false;
+  try {
+    const u = new URL(url);
+    const a = new URL(appUrl);
+    return u.origin === a.origin && (u.pathname === '/app' || u.pathname.startsWith('/app/'));
+  } catch {
+    return false;
+  }
+}
+
+function ensureServerUrlConfigured(parentWin) {
+  readDesktopSettings();
+  if (normalizeServerBaseUrl(_desktopSettings.serverBaseUrl)) {
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      resolve(!!ok);
+    };
+    const win = new BrowserWindow({
+      width: 520,
+      height: 280,
+      modal: !!parentWin,
+      parent: parentWin || undefined,
+      title: 'FrogTalk Server',
+      autoHideMenuBar: true,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    });
+    const submitHandler = (_event, url) => {
+      const base = normalizeServerBaseUrl(url);
+      if (!base) return;
+      _desktopSettings.serverBaseUrl = base;
+      writeDesktopSettings();
+      try { win.close(); } catch {}
+      finish(true);
+    };
+    ipcMain.once('desktop:server-url-submit', submitHandler);
+    win.on('closed', () => {
+      ipcMain.removeListener('desktop:server-url-submit', submitHandler);
+      finish(!!normalizeServerBaseUrl(_desktopSettings.serverBaseUrl));
+    });
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>FrogTalk Server</title></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;padding:20px;background:#0d1117;color:#e6edf3;margin:0">
+<h2 style="margin-top:0">Connect to your FrogTalk node</h2>
+<p style="color:#8b949e;margin-top:0">Use your self-hosted node or any trusted server — the official node is optional.</p>
+<input id="url" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #30363d;background:#161b22;color:#e6edf3" placeholder="https://your-node.example">
+<button id="go" style="margin-top:12px;padding:10px 18px;background:#238636;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600">Connect</button>
+<script>
+document.getElementById('go').onclick=function(){
+  require('electron').ipcRenderer.send('desktop:server-url-submit', document.getElementById('url').value);
+};
+document.getElementById('url').addEventListener('keydown',function(e){
+  if(e.key==='Enter') document.getElementById('go').click();
+});
+</script></body></html>`)}`);
+    win.show();
+  });
+}
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -36,6 +126,7 @@ function readDesktopSettings() {
       ..._desktopSettings,
       closeToTrayOnX: parsed.closeToTrayOnX !== false,
       blockScreenshots: parsed.blockScreenshots !== false,
+      serverBaseUrl: normalizeServerBaseUrl(parsed.serverBaseUrl || ''),
     };
   } catch {
     // Keep defaults on first run or corrupted file.
@@ -191,7 +282,8 @@ ipcMain.on('show-notification', (event, { title, body }) => {
   }
 });
 
-function createWindow() {
+async function createWindow() {
+  readDesktopSettings();
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -361,14 +453,23 @@ function createWindow() {
     </body>
     </html>
   `)}`);
-  
+
+  const configured = await ensureServerUrlConfigured(mainWindow);
+  if (!configured) {
+    app.isQuitting = true;
+    try { mainWindow.close(); } catch {}
+    app.quit();
+    return;
+  }
+
   setTimeout(() => {
-    mainWindow.loadURL(APP_URL);
+    const target = getAppUrl() || APP_URL_FALLBACK;
+    mainWindow.loadURL(target);
   }, 500);
 
   // Open external links in system browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(APP_URL)) {
+    if (!isAppNavigationUrl(url)) {
       // Backstop for the .onion Tor splash: the renderer-side intercept
       // in static/js/server_admin.js calls preventDefault on the click,
       // but if for any reason it didn't run (stale cache, CSP weirdness,
@@ -492,8 +593,27 @@ ipcMain.handle('desktop:get-settings', () => {
   return {
     closeToTrayOnX: _desktopSettings.closeToTrayOnX !== false,
     blockScreenshots: _desktopSettings.blockScreenshots === true,
+    serverBaseUrl: normalizeServerBaseUrl(_desktopSettings.serverBaseUrl || ''),
     trayAvailable: process.platform !== 'linux' || !!process.env.DISPLAY || !!process.env.WAYLAND_DISPLAY,
   };
+});
+
+ipcMain.handle('desktop:get-server-base-url', () => {
+  readDesktopSettings();
+  return normalizeServerBaseUrl(_desktopSettings.serverBaseUrl || '');
+});
+
+ipcMain.handle('desktop:set-server-base-url', (_event, url) => {
+  const base = normalizeServerBaseUrl(url || '');
+  if (!base) return { ok: false };
+  _desktopSettings.serverBaseUrl = base;
+  writeDesktopSettings();
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadURL(`${base}/app`);
+    }
+  } catch {}
+  return { ok: true, serverBaseUrl: base };
 });
 
 ipcMain.handle('desktop:set-block-screenshots', (_event, enabled) => {
@@ -631,18 +751,18 @@ function createTray() {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.isQuitting = false;
   readDesktopSettings();
-  createWindow();
+  await createWindow();
 });
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('activate', () => {
-  if (!mainWindow) createWindow();
+app.on('activate', async () => {
+  if (!mainWindow) await createWindow();
   else {
     mainWindow.show();
     destroyTray();

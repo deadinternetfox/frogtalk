@@ -141,13 +141,14 @@
 
     <section class="step">
       <h2>1) Deploy FrogTalk Service</h2>
-      <p class="hint">Clone project, create virtualenv, install requirements, run as systemd service.</p>
-      <pre><code>git clone https://github.com/your-org/frogtalk-standalone.git /opt/frogtalk
+      <p class="hint">Clone the official repo, create a virtualenv, install requirements, and copy the env template.</p>
+      <pre><code>git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env</code></pre>
+cp deploy/env.example .env
+$EDITOR .env   # set ADMIN_PASSWORD, PORT, ALLOWED_ORIGINS, PUBLIC_URL</code></pre>
     </section>
 
     <section class="step">
@@ -162,10 +163,11 @@ FROGTALK_UPDATE_FEED_URL=https://frogtalk.xyz/api/network/updates/latest
 FROGTALK_UPDATE_CHECK_INTERVAL_SEC=300
 FROGTALK_AUTO_UPDATE_ENABLED=1
 
-# Optional service install dir / service name overrides
-FROGTALK_INSTALL_DIR=/opt/frogtalk
-FROGTALK_SERVICE_NAME=frogtalk</code></pre>
-      <p class="hint">Use same federation token only for trusted nodes under your control.</p>
+# Public URL clients and federation peers should use (clearnet nodes)
+PUBLIC_URL=https://your-node.example
+# Optional alias — same role as PUBLIC_URL when set
+# FROGTALK_BASE_URL=https://your-node.example</code></pre>
+      <p class="hint">Use the same federation token only for trusted nodes under your control.</p>
     </section>
 
     <section class="step">
@@ -184,7 +186,9 @@ FROGTALK_BASE_URL=
 
     <section class="step">
       <h2>3) Start Service</h2>
-      <pre><code>sudo systemctl daemon-reload
+      <pre><code>sudo cp deploy/frogtalk.service /etc/systemd/system/frogtalk.service
+# edit WorkingDirectory and User in the unit file if needed
+sudo systemctl daemon-reload
 sudo systemctl enable frogtalk
 sudo systemctl restart frogtalk
 sudo systemctl status frogtalk --no-pager</code></pre>

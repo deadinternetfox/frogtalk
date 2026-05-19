@@ -15,9 +15,9 @@ import PhotosUI
 final class ViewController: UIViewController {
 
     // ── Configuration ────────────────────────────────────────────────────────
+    private static let serverBaseUrlKey = "server_base_url"
     private let APP_URL  = "https://frogtalk.xyz/app"
-    private let WEB_HOST = "frogtalk.xyz"
-    private let WEB_CACHE_REV = "20260428-ios-shell-v1"
+    private let WEB_CACHE_REV = "20260519-ios-shell-v1"
 
     // ── State ────────────────────────────────────────────────────────────────
     static weak var shared: ViewController?
@@ -35,7 +35,9 @@ final class ViewController: UIViewController {
 
         installWebView()
         installLoadingScreen()
-        loadInitialURL()
+        ensureServerConfigured { [weak self] in
+            self?.loadInitialURL()
+        }
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -131,6 +133,70 @@ final class ViewController: UIViewController {
     }
 
     // ── URL handling ─────────────────────────────────────────────────────────
+    func getServerBaseUrl() -> String {
+        UserDefaults.standard.string(forKey: Self.serverBaseUrlKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private func normalizeServerBaseUrl(_ raw: String?) -> String? {
+        guard var u = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !u.isEmpty else { return nil }
+        if !u.lowercased().hasPrefix("http://") && !u.lowercased().hasPrefix("https://") {
+            u = "https://\(u)"
+        }
+        guard let comps = URLComponents(string: u),
+              let host = comps.host?.lowercased(), !host.isEmpty else { return nil }
+        let scheme = (comps.scheme ?? "https").lowercased()
+        guard scheme == "http" || scheme == "https" else { return nil }
+        if let port = comps.port, port != 80 && port != 443 {
+            return "\(scheme)://\(host):\(port)"
+        }
+        return "\(scheme)://\(host)"
+    }
+
+    func setServerBaseUrlFromJs(_ url: String) {
+        guard let normalized = normalizeServerBaseUrl(url) else { return }
+        UserDefaults.standard.set(normalized, forKey: Self.serverBaseUrlKey)
+        if let loadUrl = URL(string: buildAppURL()) {
+            webView.load(URLRequest(url: loadUrl))
+        }
+    }
+
+    private func configuredAppEntryUrl() -> String {
+        guard let base = normalizeServerBaseUrl(getServerBaseUrl()) else {
+            return APP_URL
+        }
+        return "\(base)/app"
+    }
+
+    private func ensureServerConfigured(onReady: @escaping () -> Void) {
+        if normalizeServerBaseUrl(getServerBaseUrl()) != nil {
+            onReady()
+            return
+        }
+        let alert = UIAlertController(
+            title: "Connect to your FrogTalk node",
+            message: "Enter the URL of your FrogTalk server. You can use your own node or any trusted community server — the official node is optional.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { tf in
+            tf.placeholder = "https://your-frogtalk-node.example"
+            tf.keyboardType = .URL
+            tf.autocapitalizationType = .none
+            tf.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: "Connect", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let raw = alert.textFields?.first?.text
+            guard let normalized = self.normalizeServerBaseUrl(raw) else {
+                self.showError(message: "Invalid server URL")
+                self.ensureServerConfigured(onReady: onReady)
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: Self.serverBaseUrlKey)
+            onReady()
+        })
+        present(alert, animated: true)
+    }
+
     private func loadInitialURL() {
         let url: URL = {
             if let dl = pendingDeepLink, isFrogTalkURL(dl) { return dl }
@@ -140,14 +206,14 @@ final class ViewController: UIViewController {
     }
 
     private func buildAppURL(extraQuery: [String: String] = [:]) -> String {
-        var comps = URLComponents(string: APP_URL)!
+        var comps = URLComponents(string: configuredAppEntryUrl())!
         var items = [
             URLQueryItem(name: "mobile", value: "ios"),
             URLQueryItem(name: "rev", value: WEB_CACHE_REV),
         ]
         for (k, v) in extraQuery { items.append(URLQueryItem(name: k, value: v)) }
         comps.queryItems = items
-        return comps.string ?? APP_URL
+        return comps.string ?? configuredAppEntryUrl()
     }
 
     /// Open a Universal-Link URL in the embedded webview if it belongs to us.
@@ -171,7 +237,10 @@ final class ViewController: UIViewController {
 
     private func isFrogTalkURL(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased() else { return false }
-        return host == WEB_HOST || host.hasSuffix(".\(WEB_HOST)")
+        guard let configured = normalizeServerBaseUrl(getServerBaseUrl()),
+              let appHost = URL(string: configured)?.host?.lowercased(),
+              !appHost.isEmpty else { return false }
+        return host == appHost || host.hasSuffix(".\(appHost)")
     }
 }
 
@@ -235,7 +304,8 @@ extension ViewController: WKUIDelegate {
                  initiatedByFrame frame: WKFrameInfo,
                  type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-        guard origin.host.lowercased().hasSuffix(WEB_HOST) else {
+        guard let appHost = URL(string: configuredAppEntryUrl())?.host?.lowercased(),
+              origin.host.lowercased() == appHost || origin.host.lowercased().hasSuffix(".\(appHost)") else {
             decisionHandler(.deny); return
         }
         decisionHandler(.grant)

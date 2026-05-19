@@ -209,6 +209,11 @@ const Messages = (() => {
     if (typeof renderCustomEmojisInText === 'function') {
       escaped = renderCustomEmojisInText(escaped);
     }
+    // Discord-style [b]/[i]/[u]/[s]/[code] tags — applied last so
+    // mentions/URLs inside formatted spans stay intact.
+    if (typeof TextFormat !== 'undefined' && TextFormat.formatEscaped) {
+      escaped = TextFormat.formatEscaped(escaped);
+    }
     return escaped;
   }
 

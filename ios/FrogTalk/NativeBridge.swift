@@ -51,7 +51,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             registerFcmToken: function (sessionToken) { send('registerFcmToken', {sessionToken: sessionToken}); },
             vibrate: function (ms) { send('vibrate', {ms: ms}); },
             playNotificationTone: function () { send('playNotificationTone'); },
-            setTorch: function (on) { send('setTorch', {on: !!on}); },
+            setBlockScreenshots: function (on) { send('setBlockScreenshots', {on: !!on}); },
+            getServerBaseUrl: function () { return ''; },
+            setServerBaseUrl: function (url) { send('setServerBaseUrl', {url: url}); },
             isInForeground: function () { return true; }
           };
           window.Android = ios;
@@ -122,6 +124,10 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case "setTorch":
             let on = (args["on"] as? Bool) ?? false
             setTorch(on: on)
+
+        case "setServerBaseUrl":
+            let url = args["url"] as? String ?? ""
+            viewController?.setServerBaseUrlFromJs(url)
 
         default:
             NSLog("[FrogTalk] Unknown bridge fn: %@", fn)

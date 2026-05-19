@@ -246,12 +246,95 @@
   footer a:hover { color: var(--green); }
   .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
 
-  @media (max-width: 720px) {
-    body > nav { padding: 0 1rem; }
-    .nav-links a:not(.btn) { display: none; }
-    .privacy-hero { padding-top: 7rem; }
+  @media (max-width: 768px) {
+    body > nav { padding: 0 .75rem; gap: .4rem; }
+    body > nav .nav-logo { font-size: 1.05rem; gap: .35rem; flex-shrink: 0; }
+    body > nav .nav-logo .frog { font-size: 1.25rem; }
+    body > nav .nav-links a:not(.btn):not(.nav-mobile-keep) { display: none; }
+    body > nav .nav-links {
+      gap: .3rem;
+      flex-wrap: nowrap;
+      min-width: 0;
+    }
+    body > nav .nav-mobile-keep {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      box-sizing: border-box;
+      width: 56px;
+      height: 30px;
+      padding: 0 .25rem;
+      border: 1px solid #2f3b48;
+      border-radius: 999px;
+      font-size: .62rem !important;
+      font-weight: 600;
+      line-height: 1.05;
+      letter-spacing: .01em;
+      color: #b6c3cf !important;
+      background: rgba(15,23,42,.35);
+      white-space: normal;
+      word-break: keep-all;
+      hyphens: none;
+    }
+    body > nav .nav-mobile-keep:hover { border-color: rgba(74,222,128,.6); color: #86efac !important; }
+    body > nav .nav-links .btn {
+      padding: 0 .65rem;
+      height: 30px;
+      font-size: .72rem;
+      line-height: 30px;
+      flex-shrink: 0;
+    }
+    body > nav .nav-links .btn-primary {
+      color: #fff !important;
+      white-space: normal;
+      text-align: center;
+      line-height: 1.05;
+      padding: 0 .55rem;
+      font-size: .65rem;
+      width: 64px;
+    }
+    body > nav .nav-links .btn-ghost { display: none; }
+    .privacy-hero { padding-top: 5rem; }
     footer { flex-direction: column; text-align: center; gap: 1rem; }
     .footer-links { justify-content: center; gap: 1rem; }
+  }
+  @media (max-width: 400px) {
+    body > nav { padding: 0 .55rem; height: 54px; gap: .3rem; }
+    body > nav .nav-logo { font-size: .95rem; gap: .3rem; }
+    body > nav .nav-logo .frog { font-size: 1.15rem; }
+    body > nav .nav-links { gap: .25rem; }
+    body > nav .nav-mobile-keep {
+      width: 50px;
+      height: 28px;
+      font-size: .58rem !important;
+      padding: 0 .2rem;
+    }
+    body > nav .nav-links .btn-primary {
+      padding: 0 .4rem;
+      height: 28px;
+      line-height: 1.05;
+      font-size: .6rem;
+      width: 56px;
+      color: #fff !important;
+    }
+  }
+  @media (max-width: 320px) {
+    body > nav { padding: 0 .4rem; height: 50px; gap: .25rem; }
+    body > nav .nav-logo { font-size: .85rem; }
+    body > nav .nav-logo .frog { font-size: 1rem; }
+    body > nav .nav-mobile-keep {
+      width: 44px;
+      height: 26px;
+      font-size: .54rem !important;
+    }
+    body > nav .nav-links .btn-primary {
+      padding: 0 .35rem;
+      height: 26px;
+      font-size: .55rem;
+      width: 50px;
+      color: #fff !important;
+    }
   }
 </style>
 </head>
@@ -267,7 +350,10 @@
     <a href="/#features">Features</a>
     <a href="/#how">How it works</a>
     <a href="/privacy">Privacy</a>
-    <a href="/docs/api">API</a>
+    <a href="/security">Security</a>
+    <a href="/#open-source" class="nav-mobile-keep">Open Source</a>
+    <a href="/docs/api" class="nav-mobile-keep">API</a>
+    <a href="/docs/node" class="nav-mobile-keep">Run Node</a>
     <a href="/app" class="btn btn-ghost">Log In</a>
     <a href="/app" class="btn btn-primary">Sign Up Free</a>
   </div>
