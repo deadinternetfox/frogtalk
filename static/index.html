@@ -7603,16 +7603,15 @@ html{ scroll-behavior:smooth }
 /* Theme-aware toasts (used by toast() + UI.showToast) */
 #toast-stack{
   position:fixed;
-  bottom:24px;
-  left:50%;
-  transform:translateX(-50%);
+  top:calc(var(--safe-top, 0px) + 12px);
+  right:16px;
   display:flex;
-  flex-direction:column-reverse;
+  flex-direction:column;
   gap:8px;
   z-index:9999;
   pointer-events:none;
-  max-width:92vw;
-  align-items:center;
+  max-width:min(92vw, 420px);
+  align-items:flex-end;
 }
 .toast,
 .ft-toast{
