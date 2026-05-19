@@ -738,12 +738,12 @@ const Messages = (() => {
     const wrap = document.createElement('div');
     wrap.className = 'spoiler-wrap';
     wrap.id = `sp-${msgId}`;
-    wrap.onclick = () => revealSpoiler(msgId);
+    wrap.addEventListener('click', (e) => revealSpoiler(msgId, e));
     wrap.innerHTML = '<div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>'
-      + '<button type="button" class="spoiler-rehide" title="Hide spoiler" aria-label="Hide spoiler">👁️‍🗨️</button>';
+      + '<button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview">🙈</button>';
     const rehide = wrap.querySelector('.spoiler-rehide');
     if (rehide) {
-      rehide.onclick = (e) => { e.stopPropagation(); hideSpoiler(msgId); };
+      rehide.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); hideSpoiler(msgId, e); });
     }
     if (node.classList?.contains('msg-media')) {
       node.classList.add('spoiler-img');
@@ -823,7 +823,7 @@ const Messages = (() => {
 
     if (blur && spoilerWrap) {
       spoilerWrap.classList.remove('revealed');
-      spoilerWrap.onclick = () => revealSpoiler(msgId);
+      spoilerWrap.onclick = (e) => revealSpoiler(msgId, e);
       _updateSpoilerBtn(msgEl, blur);
       return;
     }
@@ -1323,10 +1323,10 @@ const Messages = (() => {
 
     // Spoiler blur (images/video only)
     if (msg.media_blur && !msg.media_type?.startsWith('audio')) {
-      return `<div class="spoiler-wrap" id="sp-${msg.id}" onclick="Messages.revealSpoiler(${msg.id})">
+      return `<div class="spoiler-wrap" id="sp-${msg.id}" onclick="Messages.revealSpoiler(${msg.id}, event)">
         <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
-        <button type="button" class="spoiler-rehide" title="Hide spoiler" aria-label="Hide spoiler"
-          onclick="event.stopPropagation();Messages.hideSpoiler(${msg.id})">👁️‍🗨️</button>
+        <button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview"
+          onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msg.id}, event)">🙈</button>
         ${inner.replace('class="msg-media', 'class="spoiler-img msg-media')}
       </div>`;
     }
@@ -2829,21 +2829,22 @@ const Messages = (() => {
     }
   }
 
-  function revealSpoiler(id) {
+  function revealSpoiler(id, ev) {
+    try {
+      if (ev?.target?.closest?.('.spoiler-rehide, .msg-spoiler-btn')) return;
+      ev?.stopPropagation?.();
+      ev?.preventDefault?.();
+    } catch {}
     const el = document.getElementById(`sp-${id}`);
-    if (!el) return;
+    if (!el || el.classList.contains('revealed')) return;
     el.classList.add('revealed');
-    // Don't null onclick — we want no action on the wrap once revealed;
-    // the re-hide button handles its own event via stopPropagation.
-    el.onclick = null;
   }
 
-  function hideSpoiler(id) {
+  function hideSpoiler(id, ev) {
+    try { ev?.stopPropagation?.(); ev?.preventDefault?.(); } catch {}
     const el = document.getElementById(`sp-${id}`);
     if (!el) return;
     el.classList.remove('revealed');
-    // Re-arm the reveal click so it behaves exactly like it did the first time.
-    el.onclick = () => revealSpoiler(id);
   }
 
   async function revealViewOnce(id) {
@@ -2968,10 +2969,10 @@ const Messages = (() => {
       // direct-broadcast render path wraps it, but lazy-loaded history was
       // skipping this so the image displayed uncovered on scroll-in.
       if (isBlur && !mediaType.startsWith('audio')) {
-        html = `<div class="spoiler-wrap" id="sp-${msgId}" onclick="Messages.revealSpoiler(${msgId})">
+        html = `<div class="spoiler-wrap" id="sp-${msgId}" onclick="Messages.revealSpoiler(${msgId}, event)">
           <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
-          <button type="button" class="spoiler-rehide" title="Hide spoiler" aria-label="Hide spoiler"
-            onclick="event.stopPropagation();Messages.hideSpoiler(${msgId})">👁️‍🗨️</button>
+          <button type="button" class="spoiler-rehide" title="Hide preview (still a spoiler)" aria-label="Hide preview"
+            onclick="event.stopPropagation();event.preventDefault();Messages.hideSpoiler(${msgId}, event)">🙈</button>
           ${html.replace('class="msg-media', 'class="spoiler-img msg-media')}
         </div>`;
       }

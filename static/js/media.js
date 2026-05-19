@@ -497,6 +497,29 @@ function getPendingAttachments () {
   return [];
 }
 
+let _attPreviewRevealBound = false;
+
+/** Tap blurred preview media to peek — does not change the spoiler send flag. */
+function _bindAttPreviewRevealDelegation () {
+  if (_attPreviewRevealBound) return;
+  const thumb = document.getElementById('attachment-thumb');
+  if (!thumb) return;
+  _attPreviewRevealBound = true;
+  thumb.addEventListener('click', (e) => {
+    if (e.target.closest('.att-spoiler-eye, .att-viewonce-fire, .att-preview-remove')) return;
+    const wrapper = e.target.closest('.att-preview-item.is-spoiler');
+    if (!wrapper) return;
+    const wrappers = thumb.querySelectorAll('.att-preview-item');
+    const index = Array.from(wrappers).indexOf(wrapper);
+    const attachments = getPendingAttachments();
+    const item = attachments[index];
+    if (!item || !item.blur) return;
+    e.preventDefault();
+    e.stopPropagation();
+    wrapper.classList.toggle('is-preview-revealed');
+  });
+}
+
 function _syncPendingAttachmentState () {
   if (Array.isArray(window._pendingAttachments) && window._pendingAttachments.length) {
     window._pendingAttachment = window._pendingAttachments[0];
@@ -619,6 +642,7 @@ function _renderPendingAttachmentList () {
   // hide it; the in-thumb eye/fire are the only controls users need.
   const flagBtns = document.getElementById('media-flag-btns');
   if (flagBtns) flagBtns.style.display = 'none';
+  _bindAttPreviewRevealDelegation();
 }
 
 function _removePendingAttachment (index) {
@@ -712,7 +736,7 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
     mediaHtml = `<div class="att-media-wrap">
         <img src="${url}" alt="">
         <button type="button" class="att-spoiler-eye" title="Toggle spoiler (blur until tapped)"
-                onclick="toggleMediaFlag('blur')" aria-pressed="false">👁️</button>
+                onclick="event.stopPropagation();event.preventDefault();toggleMediaFlag('blur')" aria-pressed="false">👁️</button>
         ${_voBtn}
       </div>`;
   } else if (isVid) {
@@ -720,7 +744,7 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
     mediaHtml = `<div class="att-media-wrap">
         <video src="${url}" muted playsinline preload="metadata"></video>
         <button type="button" class="att-spoiler-eye" title="Toggle spoiler (blur until tapped)"
-                onclick="toggleMediaFlag('blur')" aria-pressed="false">👁️</button>
+                onclick="event.stopPropagation();event.preventDefault();toggleMediaFlag('blur')" aria-pressed="false">👁️</button>
         ${_voBtn}
       </div>`;
   } else {
@@ -748,6 +772,7 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
   if (item) item.classList.remove('is-spoiler');
   const eye = thumb.querySelector('.att-spoiler-eye');
   if (eye) { eye.classList.remove('active'); eye.setAttribute('aria-pressed', 'false'); }
+  _bindAttPreviewRevealDelegation();
 }
 
 function _fmtAttachSub (name, bytes) {
@@ -844,6 +869,7 @@ function toggleMediaFlag (flag, index) {
     const cur = window._pendingAttachments[i];
     if (!cur) return;
     wrapper.classList.toggle('is-spoiler', !!cur.blur);
+    if (!cur.blur) wrapper.classList.remove('is-preview-revealed');
     const eye = wrapper.querySelector('.att-spoiler-eye');
     if (eye) {
       eye.classList.toggle('active', !!cur.blur);

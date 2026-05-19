@@ -22,6 +22,25 @@ _PUBLIC_HTML_NO_CACHE = {
     "Expires": "0",
 }
 
+# Inline auth probe for public HTML landings (invite /i/, /invite/). The SPA
+# stores the session in localStorage.fc_token — older landings wrongly checked
+# `token` only, so logged-in users still saw "Create a new account".
+_LANDING_SESSION_HEAD = """<script>
+(function(){
+  function ftSessionToken(){
+    try{
+      return localStorage.getItem('fc_token')
+        || localStorage.getItem('token')
+        || localStorage.getItem('ft_token')
+        || '';
+    }catch(e){return '';}
+  }
+  window.ftSessionToken=ftSessionToken;
+  window.ftIsLoggedIn=function(){return !!ftSessionToken();};
+  if(window.ftIsLoggedIn()){document.documentElement.classList.add('ft-logged-in');}
+})();
+</script>"""
+
 
 def generate_invite_code() -> str:
     """Generate a short readable invite code."""
@@ -503,6 +522,7 @@ a:hover{background:linear-gradient(180deg,#6cd870 0%,#56bd5a 55%,#479e4d 100%)}
 
     html = f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
+{_LANDING_SESSION_HEAD}
 <title>Join #{room_name_safe} on FrogTalk</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="description" content="{og_desc_safe}">
@@ -609,6 +629,7 @@ h1{{
 }}
 .note{{color:#7e9b8c;font-size:12px;margin:14px 0 0}}
 .note b{{color:#bfe0ce;font-weight:600}}
+html.ft-logged-in #btn-secondary{{display:none!important}}
 </style>
 </head><body>
 <div class="card">
@@ -621,21 +642,20 @@ h1{{
 <p id="note" class="note">You'll join <b>#{room_name_safe}</b> after signing in.</p>
 </div>
 <script>
-// Upgrade the CTAs based on whether the visitor is already signed in.
-// We only check localStorage for a session token — no network call — so this
-// stays a static landing page for crawlers / preview bots.
+// Upgrade CTAs when already signed in (fc_token in localStorage).
 (function() {{
-  var tok = null;
-  try {{ tok = localStorage.getItem('token') || localStorage.getItem('ft_token'); }} catch (e) {{}}
+  var loggedIn = (typeof window.ftIsLoggedIn === 'function') && window.ftIsLoggedIn();
   var primary = document.getElementById('btn-primary');
   var secondary = document.getElementById('btn-secondary');
   var note = document.getElementById('note');
-  if (tok) {{
-    // Already signed in — one clear action: open the app with the invite applied.
-    if (primary) primary.textContent = 'Open in FrogTalk';
+  if (loggedIn) {{
+    document.documentElement.classList.add('ft-logged-in');
+    if (primary) {{
+      primary.textContent = 'Open in FrogTalk';
+      primary.href = '/app?invite={code}';
+    }}
     if (secondary) secondary.style.display = 'none';
     if (note) note.textContent = "You're signed in — tap Open to join #{room_name_safe}.";
-    // Best-effort auto-redirect after a beat (gives users time to read the card).
     setTimeout(function() {{ window.location.href = '/app?invite={code}'; }}, 600);
   }}
 }})();
