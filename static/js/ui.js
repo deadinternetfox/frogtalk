@@ -919,17 +919,25 @@ const UI = (() => {
   }
 
   let _progressToastTimer = null;
+  let _progressToastRemoveTimer = null;
   function showProgressToast(label, percent) {
     let el = document.getElementById('progress-toast');
     if (!el) {
       el = document.createElement('div');
       el.id = 'progress-toast';
+      // `pointer-events:none` is intentional and load-bearing: the toast
+      // is a passive notification, and it floats `bottom:70px` directly
+      // over the composer textarea. Without this rule the (invisible
+      // after fade-out) element silently swallows taps on the input
+      // for ~1.5s after every media send, which manifests as "input is
+      // frozen / doesn't register click".
       el.style.cssText = `
         position:fixed;bottom:70px;left:50%;transform:translateX(-50%);
         background:linear-gradient(180deg,#153028,#112720);
         border:1px solid #305d4d;border-radius:12px;
         padding:12px 20px;z-index:1000;box-shadow:0 4px 24px rgba(0,0,0,.6);
         min-width:220px;transition:opacity .3s;
+        pointer-events:none;
       `;
       el.innerHTML = `
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -942,13 +950,24 @@ const UI = (() => {
       `;
       document.body.appendChild(el);
     }
+    // A new toast event cancels any pending removal so the element
+    // isn't ripped out from under an in-flight follow-up batch upload.
+    clearTimeout(_progressToastRemoveTimer);
     el.style.opacity = '1';
     document.getElementById('progress-toast-label').textContent = label;
     document.getElementById('progress-toast-pct').textContent = percent + '%';
     document.getElementById('progress-toast-bar').style.width = percent + '%';
     clearTimeout(_progressToastTimer);
     if (percent >= 100) {
-      _progressToastTimer = setTimeout(() => { el.style.opacity = '0'; }, 1500);
+      _progressToastTimer = setTimeout(() => {
+        el.style.opacity = '0';
+        // Drop the node entirely once the fade completes so nothing —
+        // not even an invisible, pointer-events-none element — lingers
+        // in the DOM. Belt and braces against future regressions.
+        _progressToastRemoveTimer = setTimeout(() => {
+          try { el.remove(); } catch {}
+        }, 350);
+      }, 1500);
     }
   }
 

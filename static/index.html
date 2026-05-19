@@ -8682,11 +8682,11 @@ window.ConnErr = (function(){
            submit stale field values. -->
       <div id="ch-theme-advanced-fields">
         <div id="ch-theme-public-warning" style="display:none;background:rgba(33,150,243,.08);border:1px solid rgba(33,150,243,.3);border-radius:8px;padding:12px;margin-top:14px;margin-bottom:6px;font-size:13px;line-height:1.5;color:#90caf9">
-          <details style="margin:0">
+          <details id="ch-theme-css-help" style="margin:0">
             <summary style="cursor:pointer;list-style:none;outline:none;font-size:13.5px">
               ℹ️ <strong>Custom CSS is sandboxed.</strong>
               Some selectors and properties are stripped on save —
-              <span style="text-decoration:underline;text-underline-offset:2px">show what's blocked</span>
+              <span class="ch-theme-css-help-toggle" style="text-decoration:underline;text-underline-offset:2px">show what's blocked</span>
             </summary>
             <div style="margin-top:10px;font-size:12.5px;color:#b0c8e0">
               Rules outside the chat area, or that try to reach the rest of the
@@ -8707,10 +8707,21 @@ window.ConnErr = (function(){
               classes, IDs), and class-stacking like <code>.a.b.c</code>. Anything with parens
               (<code>:not()</code>, <code>:nth-child()</code>, <code>calc()</code> in selectors) is
               dropped — keep selectors simple.
-              Preview before saving — rejected rules show up as a toast.
             </div>
           </details>
         </div>
+        <script>
+          // Toggle the inline "show/hide what's blocked" affordance on the
+          // <details> summary so it mirrors the open/closed state.
+          (function () {
+            var d = document.getElementById('ch-theme-css-help');
+            if (!d) return;
+            d.addEventListener('toggle', function () {
+              var lbl = d.querySelector('.ch-theme-css-help-toggle');
+              if (lbl) lbl.textContent = d.open ? "hide what's blocked" : "show what's blocked";
+            });
+          })();
+        </script>
         <label class="modal-label">Background Image URL (optional)</label>
         <div style="display:flex;gap:8px;align-items:stretch">
           <input class="modal-input" id="ch-theme-bg-image" placeholder="https://... or upload below" maxlength="512" style="flex:1;min-width:0">
@@ -10697,7 +10708,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/notifications.js?v=434"></script>
 <script src="/static/js/ws.js?v=247"></script>
 <script src="/static/js/cropper.js?v=191"></script>
-<script src="/static/js/ui.js?v=484"></script>
+<script src="/static/js/ui.js?v=485"></script>
   <script src="/static/js/rooms.js?v=439"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
 <script src="/static/js/messages.js?v=479"></script>
