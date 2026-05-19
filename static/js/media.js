@@ -475,15 +475,8 @@ function showRecordingUI (stream) {
 /* ── File attachment handling ─────────────────────────────────────────────── */
 function handleFileSelect (input) {
   if (!input?.files?.length) return;
-  const isDM = typeof isDMView === 'function' && isDMView();
-  if (!isDM || input.files.length === 1) {
-    const file = input.files[0];
-    if (!file) return;
-    addPendingAttachmentFile(file);
-    input.value = '';
-    return;
-  }
-
+  // Channels and DMs both support multi-pick now — loop every selected file
+  // and let `addPendingAttachmentFile` enforce the 5-file cap with a toast.
   for (const file of input.files) {
     if (!file) continue;
     addPendingAttachmentFile(file);
@@ -529,15 +522,17 @@ function _renderPendingAttachmentList () {
   thumb.innerHTML = '';
   const isDM = typeof isDMView === 'function' && isDMView();
   const multi = attachments.length > 1;
+  // Layout/sizing for the multi case live in `#attachment-thumb.is-multi`
+  // styles in index.html — toggling the class keeps DOM clean and lets
+  // designers tweak spacing without re-deploying JS.
+  thumb.classList.toggle('is-multi', multi);
 
   attachments.forEach((item, index) => {
     const wrapper = document.createElement('div');
     wrapper.className = 'att-preview-item';
-    wrapper.style.position = 'relative';
 
     const mediaWrap = document.createElement('div');
     mediaWrap.className = 'att-media-wrap';
-    mediaWrap.style.position = 'relative';
 
     if (item.type && item.type.startsWith('image/')) {
       const img = document.createElement('img');
@@ -550,9 +545,6 @@ function _renderPendingAttachmentList () {
       vid.muted = true;
       vid.playsInline = true;
       vid.preload = 'metadata';
-      vid.style.maxWidth = '200px';
-      vid.style.maxHeight = '140px';
-      vid.style.borderRadius = '8px';
       mediaWrap.appendChild(vid);
     } else {
       const icon = document.createElement('div');
@@ -608,15 +600,6 @@ function _renderPendingAttachmentList () {
     removeBtn.className = 'att-preview-remove';
     removeBtn.title = 'Remove attachment';
     removeBtn.textContent = '✕';
-    removeBtn.style.position = 'absolute';
-    removeBtn.style.top = '6px';
-    removeBtn.style.right = '6px';
-    removeBtn.style.background = 'rgba(0,0,0,.55)';
-    removeBtn.style.color = '#fff';
-    removeBtn.style.border = 'none';
-    removeBtn.style.borderRadius = '999px';
-    removeBtn.style.padding = '4px 8px';
-    removeBtn.style.cursor = 'pointer';
     removeBtn.addEventListener('click', () => _removePendingAttachment(index));
 
     const sub = document.createElement('div');
@@ -670,18 +653,6 @@ function addPendingAttachmentFile (file, opts = {}) {
   }
 
   const isDM = typeof isDMView === 'function' && isDMView();
-  if (!isDM) {
-    window._pendingAttachment = { blob: file, name, type: mime };
-    State.pendingAttachment = window._pendingAttachment;
-    _renderAttachmentPreview({
-      blob: file,
-      name,
-      type: mime,
-      sizeBytes: file.size,
-    });
-    return true;
-  }
-
   if (!Array.isArray(window._pendingAttachments)) {
     window._pendingAttachments = [];
   }
@@ -714,6 +685,9 @@ function _renderAttachmentPreview ({ blob, name, type, sizeBytes }) {
   const prev  = document.getElementById('attachment-preview');
   if (!thumb || !prev) return;
   prev.style.display = 'flex';
+  // Single-item preview uses the legacy 200×150 sizing — make sure any
+  // leftover multi-mode class from a previous render is dropped.
+  thumb.classList.remove('is-multi');
 
   const isImg = type && type.startsWith('image/');
   const isVid = type && type.startsWith('video/');

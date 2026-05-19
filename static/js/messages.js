@@ -3246,6 +3246,68 @@ function handlePasteAttachment(e) {
   }
 }
 
+// Upload a single attachment for the current channel. Mirrors the DM helper
+// `_sendDMFileMessage` so multi-attachment sends loop one helper call per
+// file. The caller is responsible for text encryption (done once per batch)
+// and for stamping `content` / `reply_to` / `bridge_plain` only on the first
+// item — see `sendMessage` below.
+async function _sendChannelFileMessage (fileItem, payload, opts = {}) {
+  const { key, room } = opts;
+  const hasOutbound = !!opts.hasOutbound;
+  let mediaData = fileItem.dataUrl || fileItem.data || null;
+  let mediaType = fileItem.type || null;
+  if (!mediaData && fileItem.blob) {
+    UI.showProgressToast('Preparing media…', 0);
+    try {
+      mediaData = await UI.blobToDataURL(fileItem.blob, (pct) => {
+        UI.showProgressToast('Preparing media…', Math.max(1, Math.round(pct * 0.20)));
+      });
+    } catch (err) {
+      UI.showProgressToast('Failed to prepare media', 100);
+      throw new Error('Could not read attachment: ' + (err && err.message ? err.message : 'unknown error'));
+    }
+    mediaType = fileItem.type;
+    UI.showProgressToast('Preparing media…', 20);
+  }
+  if (mediaData && key && !hasOutbound && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
+    UI.showProgressToast('Encrypting…', 22);
+    mediaData = await Crypto.encryptPayload(mediaData, key);
+    UI.showProgressToast('Encrypting…', 25);
+  }
+  const body = {
+    content: payload.content || '',
+    media_data: mediaData,
+    media_type: mediaType,
+    media_blur: window._pendingMediaBlur ? 1 : 0,
+    view_once: window._pendingViewOnce ? 1 : 0,
+    reply_to: payload.reply_to || null,
+    bridge_plain: payload.bridge_plain || null,
+    key_version: payload.key_version || 0,
+  };
+  UI.showProgressToast('Uploading…', 25);
+  const res = await UI.uploadJSONWithProgress(
+    `/api/messages/${encodeURIComponent(room)}/send`,
+    body,
+    {
+      onProgress: (loaded, total, phase) => {
+        if (phase === 'uploaded') {
+          UI.showProgressToast('Sending…', 97);
+          return;
+        }
+        if (!total) return;
+        const frac = Math.max(0, Math.min(1, loaded / total));
+        const pct = 25 + Math.round(frac * 70);
+        UI.showProgressToast('Uploading…', Math.min(95, pct));
+      },
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Upload failed');
+  }
+  return res;
+}
+
 async function sendMessage() {
   // Delegate to DM handler when in DM view
   if (typeof isDMView === 'function' && isDMView()) {
@@ -3265,9 +3327,16 @@ async function sendMessage() {
   if (Messages._isSending) return;
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
-  const attachment = State.pendingAttachment || window._pendingAttachment;
+  const pendingAttachments = (typeof getPendingAttachments === 'function')
+    ? getPendingAttachments()
+    : (State.pendingAttachment
+        ? [State.pendingAttachment]
+        : window._pendingAttachment ? [window._pendingAttachment] : []);
+  // Keep `attachment` around for the optimistic-bubble logic below; the
+  // upload path itself iterates the full `pendingAttachments` array.
+  const attachment = pendingAttachments[0] || null;
 
-  if (!text && !attachment) return;
+  if (!text && !pendingAttachments.length) return;
 
   Messages._isSending = true;
   const btn = document.getElementById('send-btn');
@@ -3328,29 +3397,18 @@ async function sendMessage() {
   try {
     const key = State.roomKeys[State.currentRoom];
 
-    // Convert blob attachment to base64 dataUrl if needed.
-    // Progress phases for the upload toast (so users see honest motion
-    // instead of the old "stick at 70% then jump to 100%" pattern):
+    // Multi-attachment sends loop one POST per file. Per-attachment progress
+    // toasts are stamped with "(i/N) " so users see how far the batch has
+    // gone. The blob → base64 → optional E2EE pipeline lives in
+    // `_sendChannelFileMessage`; the parent only owns text encryption and
+    // bridge detection (done once for the batch below).
+    //
+    // Progress phases for the per-file upload toast:
     //   0–20%  Preparing media (blob → base64)
     //  20–25%  Encrypting payload (E2EE rooms only)
     //  25–95%  Uploading (real XHR upload-progress bytes)
     //  95–99%  Server processing
     //    100%  Sent
-    let mediaData = attachment?.dataUrl || attachment?.data || null;
-    let mediaType = attachment?.type || null;
-    if (!mediaData && attachment?.blob) {
-      UI.showProgressToast('Preparing media…', 0);
-      try {
-        mediaData = await UI.blobToDataURL(attachment.blob, (pct) => {
-          UI.showProgressToast('Preparing media…', Math.max(1, Math.round(pct * 0.20)));
-        });
-      } catch (err) {
-        UI.showProgressToast('Failed to prepare media', 100);
-        throw new Error('Could not read attachment: ' + (err && err.message ? err.message : 'unknown error'));
-      }
-      mediaType = attachment.type;
-      UI.showProgressToast('Preparing media…', 20);
-    }
 
     // Use REST API for media (reliable) or WS for text-only (fast)
     // When this room has an active outbound bridge, attach the plaintext
@@ -3401,46 +3459,28 @@ async function sendMessage() {
     } else {
       encrypted = text;
     }
-    if (mediaData && key && !hasOutbound && typeof Crypto !== 'undefined' && Crypto.encryptPayload) {
-      UI.showProgressToast('Encrypting…', 22);
-      // Media payloads keep the legacy (no-AAD) wire format so existing
-      // /api/messages decrypt call sites don't need to thread AAD. The
-      // sensitive surface — message text and reply quotes — is AAD-bound.
-      mediaData = await Crypto.encryptPayload(mediaData, key);
-      UI.showProgressToast('Encrypting…', 25);
-    }
-    if (mediaData) {
-      UI.showProgressToast('Uploading…', 25);
-      const res = await UI.uploadJSONWithProgress(
-        `/api/messages/${encodeURIComponent(State.currentRoom)}/send`,
-        {
-          content: encrypted,
-          media_data: mediaData,
-          media_type: mediaType,
-          media_blur: window._pendingMediaBlur ? 1 : 0,
-          view_once: window._pendingViewOnce ? 1 : 0,
-          reply_to: Messages.getReplyToId(),
-          bridge_plain: hasOutbound ? text : null,
+    if (pendingAttachments.length) {
+      const total = pendingAttachments.length;
+      for (let i = 0; i < total; i++) {
+        const fileItem = pendingAttachments[i];
+        // First file carries the caption / reply context / outbound-bridge
+        // plaintext — subsequent files in the batch are sent with empty
+        // content so the server stores them as separate messages without
+        // re-broadcasting the same caption N times.
+        const itemPayload = {
+          content: i === 0 ? encrypted : '',
+          reply_to: i === 0 ? Messages.getReplyToId() : null,
+          bridge_plain: i === 0 && hasOutbound ? text : null,
           key_version: keyVersion,
-        },
-        {
-          onProgress: (loaded, total, phase) => {
-            if (phase === 'uploaded') {
-              UI.showProgressToast('Sending…', 97);
-              return;
-            }
-            if (!total) return;
-            // Map real upload bytes onto 25 → 95 so the bar climbs smoothly
-            // with the network instead of pausing at 70%.
-            const frac = Math.max(0, Math.min(1, loaded / total));
-            const pct = 25 + Math.round(frac * 70);
-            UI.showProgressToast('Uploading…', Math.min(95, pct));
-          },
+        };
+        if (total > 1) {
+          UI.showProgressToast(`(${i + 1}/${total}) Uploading…`, 25);
         }
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || 'Upload failed');
+        await _sendChannelFileMessage(fileItem, itemPayload, {
+          key,
+          room: State.currentRoom,
+          hasOutbound,
+        });
       }
       UI.showProgressToast('Sent!', 100);
     } else {

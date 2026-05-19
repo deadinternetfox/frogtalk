@@ -2804,8 +2804,30 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #attachment-preview:has(#rec-canvas),
 #attachment-preview:has(#video-preview){padding:14px 16px 16px;min-height:76px}
 .att-preview-item{display:inline-flex;flex-direction:column;align-items:flex-start;max-width:200px;gap:4px}
-.att-preview-item img,.att-preview-item video{max-width:200px;max-height:140px;border-radius:8px;display:block}
+.att-preview-item img,.att-preview-item video{max-width:200px;max-height:140px;border-radius:8px;display:block;object-fit:cover}
 .att-preview-icon{font-size:28px;padding:6px 2px}
+/* Multi-attachment composer preview: lay items side-by-side with a small
+   gap, wrap to a second row past 5 items, and compact each thumbnail so
+   2–5 files fit without stretching full-width. Single attachment keeps
+   the original 200×150 sizing handled by the rules above. */
+#attachment-thumb.is-multi{
+  display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;width:100%
+}
+#attachment-thumb.is-multi .att-preview-item{
+  flex:0 0 auto;min-width:0;max-width:180px
+}
+#attachment-thumb.is-multi .att-media-wrap{max-width:180px;max-height:140px}
+#attachment-thumb.is-multi .att-preview-item img,
+#attachment-thumb.is-multi .att-preview-item video{
+  max-width:180px;max-height:140px;border-radius:6px
+}
+.att-preview-remove{
+  position:absolute;top:6px;right:6px;
+  background:rgba(0,0,0,.55);color:#fff;border:none;
+  border-radius:999px;padding:4px 8px;cursor:pointer;
+  font-size:12px;line-height:1;z-index:3
+}
+.att-preview-remove:hover{background:rgba(0,0,0,.8)}
 /* Voice-note variant of the composer attachment preview: wider so the
    chat-style audio-msg bubble (play button + waveform + duration) fits
    without wrapping, and uses the same green gradient as messages. */
@@ -8162,7 +8184,7 @@ window.ConnErr = (function(){
           <button class="send-btn" id="send-btn" onclick="sendMessage()" data-tip="Send">➤</button>
         </div>
       </div>
-      <input type="file" id="file-input" style="display:none" accept="image/*,video/mp4,video/webm,audio/*"
+      <input type="file" id="file-input" multiple style="display:none" accept="image/*,video/mp4,video/webm,audio/*"
              onchange="handleFileSelect(this)">
     </div>
   </div>
@@ -10582,13 +10604,13 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/ui.js?v=484"></script>
   <script src="/static/js/rooms.js?v=437"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
-<script src="/static/js/messages.js?v=476"></script>
+<script src="/static/js/messages.js?v=477"></script>
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
 <script src="/static/js/dms.js?v=460"></script>
 <script src="/static/js/calls.js?v=220"></script>
-<script src="/static/js/media.js?v=417"></script>
+<script src="/static/js/media.js?v=418"></script>
 <script src="/static/js/gifs.js?v=205"></script>
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=417"></script>
