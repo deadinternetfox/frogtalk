@@ -93,4 +93,5 @@ static/FrogTalk-*-win-x64.zip
 # tmp deploy / ship scripts and logs (not part of repo)
 .tmp_*.sh
 .tmp_*.log
+scripts/deploy_nodes.sh
 android/frogtalk.keystore
