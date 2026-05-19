@@ -501,9 +501,16 @@ function _syncPendingAttachmentState () {
   if (Array.isArray(window._pendingAttachments) && window._pendingAttachments.length) {
     window._pendingAttachment = window._pendingAttachments[0];
     State.pendingAttachment = window._pendingAttachments.length === 1 ? window._pendingAttachments[0] : null;
+    // Mirror item[0]'s per-item flags back to the legacy globals so
+    // legacy code paths (camera capture / voice / etc.) keep working
+    // with the single-attachment workflow.
+    window._pendingMediaBlur = !!window._pendingAttachments[0].blur;
+    window._pendingViewOnce  = !!window._pendingAttachments[0].viewOnce;
   } else {
     window._pendingAttachment = null;
     State.pendingAttachment = null;
+    window._pendingMediaBlur = false;
+    window._pendingViewOnce = false;
   }
 }
 
@@ -523,13 +530,15 @@ function _renderPendingAttachmentList () {
   const isDM = typeof isDMView === 'function' && isDMView();
   const multi = attachments.length > 1;
   // Layout/sizing for the multi case live in `#attachment-thumb.is-multi`
-  // styles in index.html — toggling the class keeps DOM clean and lets
-  // designers tweak spacing without re-deploying JS.
+  // styles in index.html. `data-count` drives the per-N scale rules so
+  // 5 thumbnails always fit on one row inside the composer.
   thumb.classList.toggle('is-multi', multi);
+  thumb.setAttribute('data-count', String(attachments.length));
 
   attachments.forEach((item, index) => {
     const wrapper = document.createElement('div');
     wrapper.className = 'att-preview-item';
+    if (item.blur) wrapper.classList.add('is-spoiler');
 
     const mediaWrap = document.createElement('div');
     mediaWrap.className = 'att-media-wrap';
@@ -556,41 +565,33 @@ function _renderPendingAttachmentList () {
       mediaWrap.appendChild(icon);
     }
 
-    if (!multi && item.type && (item.type.startsWith('image/') || item.type.startsWith('video/'))) {
+    // Per-item spoiler + (DM-only) view-once buttons. Each carries its
+    // own state on the attachment object so toggling one thumbnail
+    // doesn't affect the others — fixes the "blur disappears for
+    // multi" report.
+    if (item.type && (item.type.startsWith('image/') || item.type.startsWith('video/'))) {
       const eye = document.createElement('button');
       eye.type = 'button';
-      eye.className = 'att-spoiler-eye';
+      eye.className = 'att-spoiler-eye' + (item.blur ? ' active' : '');
       eye.title = 'Toggle spoiler (blur until tapped)';
-      eye.setAttribute('aria-pressed', 'false');
+      eye.setAttribute('aria-pressed', item.blur ? 'true' : 'false');
       eye.textContent = '👁️';
-      eye.style.position = 'absolute';
-      eye.style.top = '8px';
-      eye.style.right = '8px';
-      eye.style.background = 'rgba(0,0,0,.45)';
-      eye.style.color = '#fff';
-      eye.style.border = 'none';
-      eye.style.borderRadius = '999px';
-      eye.style.padding = '6px';
-      eye.style.cursor = 'pointer';
-      eye.addEventListener('click', () => toggleMediaFlag('blur'));
+      eye.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleMediaFlag('blur', index);
+      });
       mediaWrap.appendChild(eye);
       if (isDM) {
         const fire = document.createElement('button');
         fire.type = 'button';
-        fire.className = 'att-viewonce-fire';
+        fire.className = 'att-viewonce-fire' + (item.viewOnce ? ' active' : '');
         fire.title = 'View once — disappears after viewing';
-        fire.setAttribute('aria-pressed', 'false');
+        fire.setAttribute('aria-pressed', item.viewOnce ? 'true' : 'false');
         fire.textContent = '🔥';
-        fire.style.position = 'absolute';
-        fire.style.top = '8px';
-        fire.style.left = '8px';
-        fire.style.background = 'rgba(0,0,0,.45)';
-        fire.style.color = '#fff';
-        fire.style.border = 'none';
-        fire.style.borderRadius = '999px';
-        fire.style.padding = '6px';
-        fire.style.cursor = 'pointer';
-        fire.addEventListener('click', () => toggleMediaFlag('view_once'));
+        fire.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleMediaFlag('view_once', index);
+        });
         mediaWrap.appendChild(fire);
       }
     }
@@ -613,10 +614,11 @@ function _renderPendingAttachmentList () {
     thumb.appendChild(wrapper);
   });
 
+  // The bottom flag-bar (legacy single-attachment buttons) is hidden
+  // for multi — per-item controls own the state. For single, we still
+  // hide it; the in-thumb eye/fire are the only controls users need.
   const flagBtns = document.getElementById('media-flag-btns');
-  if (flagBtns) {
-    flagBtns.style.display = multi ? '' : 'none';
-  }
+  if (flagBtns) flagBtns.style.display = 'none';
 }
 
 function _removePendingAttachment (index) {
@@ -661,7 +663,12 @@ function addPendingAttachmentFile (file, opts = {}) {
     return false;
   }
 
-  window._pendingAttachments.push({ blob: file, name, type: mime, sizeBytes: file.size });
+  // Seed per-item flags so each attachment carries its own spoiler /
+  // view-once state independently of any other items in the batch.
+  window._pendingAttachments.push({
+    blob: file, name, type: mime, sizeBytes: file.size,
+    blur: !!window._pendingMediaBlur, viewOnce: !!window._pendingViewOnce,
+  });
   _syncPendingAttachmentState();
   if (window._pendingAttachments.length === 1) {
     _renderAttachmentPreview({
@@ -799,44 +806,61 @@ function clearAttachment () {
   if (typeof clearReplyToDM === 'function') clearReplyToDM();
 }
 
-function toggleMediaFlag(flag) {
-  if (flag === 'blur') {
-    window._pendingMediaBlur = !window._pendingMediaBlur;
-    document.getElementById('spoiler-toggle-btn')?.classList.toggle('active', !!window._pendingMediaBlur);
-    const eyes = document.querySelectorAll('#attachment-thumb .att-spoiler-eye');
-    eyes.forEach(eye => {
-      eye.classList.toggle('active', !!window._pendingMediaBlur);
-      eye.setAttribute('aria-pressed', window._pendingMediaBlur ? 'true' : 'false');
-    });
-    document.querySelectorAll('#attachment-thumb .att-preview-item').forEach(item => {
-      item.classList.toggle('is-spoiler', !!window._pendingMediaBlur);
-    });
-
-    if (window._pendingMediaBlur) {
-      window._pendingViewOnce = false;
-      const fires = document.querySelectorAll('#attachment-thumb .att-viewonce-fire');
-      fires.forEach(fire => { fire.classList.remove('active'); fire.setAttribute('aria-pressed', 'false'); });
-    }
-  } else {
-    window._pendingViewOnce = !window._pendingViewOnce;
-    const fires = document.querySelectorAll('#attachment-thumb .att-viewonce-fire');
-    fires.forEach(fire => {
-      fire.classList.toggle('active', !!window._pendingViewOnce);
-      fire.setAttribute('aria-pressed', window._pendingViewOnce ? 'true' : 'false');
-    });
-    document.getElementById('viewonce-toggle-btn')?.classList.toggle('active', !!window._pendingViewOnce);
-    if (window._pendingViewOnce) {
-      window._pendingMediaBlur = false;
-      document.getElementById('spoiler-toggle-btn')?.classList.remove('active');
-      document.querySelectorAll('#attachment-thumb .att-spoiler-eye').forEach(eye => {
-        eye.classList.remove('active');
-        eye.setAttribute('aria-pressed', 'false');
-      });
-      document.querySelectorAll('#attachment-thumb .att-preview-item').forEach(item => {
-        item.classList.remove('is-spoiler');
-      });
-    }
+/* Toggle a media flag (`blur` or `view_once`) on a specific attachment.
+   When called without an index (the legacy global-bar buttons) the flag
+   is applied to the first pending attachment, which preserves the
+   single-attachment workflow. When called with an index (per-item eye
+   or fire buttons in the multi-attach preview) only that one item is
+   mutated. Blur and view-once are mutually exclusive within a single
+   item — turning one on turns the other off on the same item. */
+function toggleMediaFlag (flag, index) {
+  if (!Array.isArray(window._pendingAttachments) || !window._pendingAttachments.length) {
+    return;
   }
+  const idx = (typeof index === 'number' && index >= 0
+               && index < window._pendingAttachments.length)
+               ? index : 0;
+  const item = window._pendingAttachments[idx];
+  if (!item) return;
+
+  if (flag === 'blur') {
+    item.blur = !item.blur;
+    if (item.blur) item.viewOnce = false;
+  } else {
+    item.viewOnce = !item.viewOnce;
+    if (item.viewOnce) item.blur = false;
+  }
+
+  // Mirror item[0] flags back to the legacy globals so any code path
+  // that still reads `window._pendingMediaBlur` (camera capture, voice
+  // notes, etc.) sees the same state for the single-attachment case.
+  _syncPendingAttachmentState();
+
+  // Repaint the per-item button states + spoiler overlay without
+  // rebuilding the whole DOM (avoids reloading blob URLs and losing
+  // <video> playback position).
+  const wrappers = document.querySelectorAll('#attachment-thumb .att-preview-item');
+  wrappers.forEach((wrapper, i) => {
+    const cur = window._pendingAttachments[i];
+    if (!cur) return;
+    wrapper.classList.toggle('is-spoiler', !!cur.blur);
+    const eye = wrapper.querySelector('.att-spoiler-eye');
+    if (eye) {
+      eye.classList.toggle('active', !!cur.blur);
+      eye.setAttribute('aria-pressed', cur.blur ? 'true' : 'false');
+    }
+    const fire = wrapper.querySelector('.att-viewonce-fire');
+    if (fire) {
+      fire.classList.toggle('active', !!cur.viewOnce);
+      fire.setAttribute('aria-pressed', cur.viewOnce ? 'true' : 'false');
+    }
+  });
+
+  // Legacy global flag-bar buttons (visible only for single attachment).
+  const sb = document.getElementById('spoiler-toggle-btn');
+  const vb = document.getElementById('viewonce-toggle-btn');
+  if (sb) sb.classList.toggle('active', !!window._pendingMediaBlur);
+  if (vb) vb.classList.toggle('active', !!window._pendingViewOnce);
 }
 
 /* ── Helpers ─────────────────────────────────────────────────────────────────── */

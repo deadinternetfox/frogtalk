@@ -160,13 +160,16 @@ const Css = (() => {
   const BARE_TAG_HEADS = new Set(['*', 'html', 'body']);
   const ROOT_PSEUDOS = [':root', ':host', ':scope', ':target'];
   const BROADENING_PSEUDO_RE = /:(defined|is|where|has|not|matches|any)\b/;
+  // Pseudo-elements that paint outside the matched element or pierce
+  // shadow boundaries. `::before` / `::after` / `::marker` /
+  // `::placeholder` / `::selection` are intentionally allowed — they
+  // stay inside the element's own subtree and break common themes if
+  // we deny them.
   const FORBIDDEN_PSEUDOS = [
     '::column', '::scroll-marker', '::scroll-marker-group',
     '::scroll-button', '::view-transition', '::view-transition-group',
     '::view-transition-image-pair', '::view-transition-old',
     '::view-transition-new', '::part', '::slotted', '::backdrop',
-    '::cue', '::cue-region', '::file-selector-button',
-    '::marker', '::placeholder', '::selection',
     '::-webkit-scrollbar', '::-webkit-resizer',
   ];
   // NBSP, ogham, en/em/etc., narrow no-break, math, ideographic,
@@ -230,27 +233,34 @@ const Css = (() => {
     return null;
   }
 
-  // selectorMapper(selector) -> scoped selector or '' to drop
-  function sanitizeScopedCss(rawCss, scope, selectorMapper) {
-    if (!rawCss || !scope) return '';
+  // Internal: returns `{ css, rejections }` so callers can surface a
+  // human-readable list of dropped selectors / rules in the UI. The
+  // public `sanitizeScopedCss` just returns the css string for
+  // backward-compat with everything that already calls it.
+  function _sanitizeWithReport(rawCss, scope, selectorMapper) {
+    const rej = [];
+    if (!rawCss || !scope) return { css: '', rejections: rej };
     let css = String(rawCss).slice(0, 10240).replace(/\/\*[\s\S]*?\*\//g, '');
     if (_hasDangerous(css)) {
+      rej.push({ kind: 'stylesheet', reason: 'contains a dangerous token (e.g. url(, javascript:, @import, expression)' });
       try { console.warn('[Css] dropped stylesheet — contains dangerous token'); } catch {}
-      return '';
+      return { css: '', rejections: rej };
     }
     const normFull = _normalize(css);
-    // Belt-and-braces: reject root pseudos / [data-theme] *anywhere* in
-    // the stylesheet (covers `:is(:root)` and similar nested forms that
-    // per-selector parsing might miss).
     if (ROOT_PSEUDOS.some(rp => normFull.includes(rp))) {
+      rej.push({ kind: 'stylesheet', reason: 'targets :root / :host / :scope / :target (document-level reach)' });
       try { console.warn('[Css] dropped stylesheet — contains root pseudo'); } catch {}
-      return '';
+      return { css: '', rejections: rej };
     }
     if (/\[data-(theme|mode)/.test(normFull)) {
+      rej.push({ kind: 'stylesheet', reason: 'targets the platform [data-theme]/[data-mode] attribute' });
       try { console.warn('[Css] dropped stylesheet — targets platform theme attribute'); } catch {}
-      return '';
+      return { css: '', rejections: rej };
     }
-    if ((css.match(/\{/g) || []).length !== (css.match(/\}/g) || []).length) return '';
+    if ((css.match(/\{/g) || []).length !== (css.match(/\}/g) || []).length) {
+      rej.push({ kind: 'stylesheet', reason: 'unbalanced braces' });
+      return { css: '', rejections: rej };
+    }
     const out = [];
     for (const chunk of css.split('}')) {
       const i = chunk.indexOf('{');
@@ -259,34 +269,60 @@ const Css = (() => {
       const body = chunk.slice(i + 1).trim();
       if (!selRaw || !body) continue;
       if (selRaw.startsWith('@')) {
+        rej.push({ kind: 'rule', selector: selRaw.slice(0, 80), reason: '@-rules are not allowed' });
         try { console.warn('[Css] dropped @-rule (not allowed):', selRaw.slice(0, 60)); } catch {}
         continue;
       }
-      if (/[<>(){}"'`\\;]/.test(selRaw)) continue;
-      if (_hasDangerous(body)) continue;
+      if (/[<>(){}"'`\\;]/.test(selRaw)) {
+        rej.push({ kind: 'rule', selector: selRaw.slice(0, 80), reason: 'selector contains forbidden characters (<>(){}"\'`\\;)' });
+        continue;
+      }
+      if (_hasDangerous(body)) {
+        rej.push({ kind: 'rule', selector: selRaw.slice(0, 80), reason: 'rule body contains a dangerous token' });
+        continue;
+      }
       const selNorm = _normalizeSelector(selRaw);
       const parts = selNorm.split(',').map(s => s.trim());
-      if (parts.some(p => !p)) continue; // empty part = leading/trailing comma
-      let badPart = false;
+      if (parts.some(p => !p)) {
+        rej.push({ kind: 'rule', selector: selRaw.slice(0, 80), reason: 'empty entry in selector list (leading/trailing comma?)' });
+        continue;
+      }
+      let badPart = null;
       const mapped = [];
       for (const p of parts) {
         const reason = _selectorPartRejected(p);
         if (reason) {
+          badPart = { selector: p, reason };
           try { console.warn(`[Css] dropped selector "${p}":`, reason); } catch {}
-          badPart = true; break;
+          break;
         }
         const m = typeof selectorMapper === 'function'
           ? selectorMapper(p) : `${scope} ${p}`;
-        if (!m) { badPart = true; break; }
+        if (!m) { badPart = { selector: p, reason: 'mapper rejected' }; break; }
         mapped.push(m);
       }
-      if (badPart || !mapped.length) continue;
+      if (badPart) {
+        rej.push({ kind: 'selector', selector: badPart.selector, reason: badPart.reason });
+        continue;
+      }
+      if (!mapped.length) continue;
       out.push(`${mapped.join(', ')} { ${body} }`);
     }
-    return out.join('\n');
+    return { css: out.join('\n'), rejections: rej };
   }
 
-  return { sanitizeScopedCss };
+  function sanitizeScopedCss(rawCss, scope, selectorMapper) {
+    return _sanitizeWithReport(rawCss, scope, selectorMapper).css;
+  }
+
+  // Public: same parameters as `sanitizeScopedCss` but returns
+  // `{ css, rejections: [{kind, selector?, reason}] }` so the UI can
+  // toast "some CSS was stripped because …" with the exact reason.
+  function sanitizeScopedCssWithReport(rawCss, scope, selectorMapper) {
+    return _sanitizeWithReport(rawCss, scope, selectorMapper);
+  }
+
+  return { sanitizeScopedCss, sanitizeScopedCssWithReport };
 })();
 try { if (typeof window !== 'undefined') window.Css = Css; } catch {}
 

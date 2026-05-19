@@ -110,14 +110,21 @@ _CSS_DANGEROUS_TOKENS = (
 # pierce shadow trees. Modern column / scroll / part / slotted / view-
 # transition / backdrop pseudos all let an attacker style elements they
 # never matched directly — reject them anywhere in the first compound.
+#
+# Intentionally NOT forbidden: `::before`, `::after`, `::first-line`,
+# `::first-letter`, `::marker`, `::placeholder`, `::selection`,
+# `::file-selector-button`, `::cue`/`::cue-region`. These either stay
+# inside the element's own subtree (`::before` etc.) or are scoped to
+# input UI / native form controls and have no documented escape path.
+# Blocking them would break legitimate channel themes for no security
+# benefit.
 _CSS_FORBIDDEN_PSEUDOS = (
     "::column", "::scroll-marker", "::scroll-marker-group",
     "::scroll-button", "::view-transition", "::view-transition-group",
     "::view-transition-image-pair", "::view-transition-old",
     "::view-transition-new", "::part", "::slotted", "::backdrop",
-    "::cue", "::cue-region", "::file-selector-button",
-    "::marker", "::placeholder", "::selection",
-    # `::-webkit-scrollbar*` etc. can paint over the page chrome.
+    # `::-webkit-scrollbar*` can paint over the page chrome and isn't
+    # something a channel theme should ever need.
     "::-webkit-scrollbar", "::-webkit-resizer",
 )
 

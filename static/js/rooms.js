@@ -2034,7 +2034,16 @@ const Rooms = (() => {
     
     if (!res.ok) {
       const data = await res.json();
-      UI.showToast(data.error || 'Failed to save settings', 'error');
+      let msg = data.error || 'Failed to save settings';
+      // The server returns `channel_theme: ...` for CSS / bgImage
+      // sanitiser rejections. Replace with a friendlier prefix that
+      // makes it clear WHY the save failed.
+      if (typeof msg === 'string' && msg.startsWith('channel_theme:')) {
+        const detail = msg.slice('channel_theme:'.length).trim();
+        msg = `Channel theme was rejected — ${detail}. Open the console for help.`;
+        try { console.warn('[channel-theme] save rejected:', detail); } catch {}
+      }
+      UI.showToast(msg, 'error');
       restoreBtn();
       return;
     }
@@ -3914,6 +3923,29 @@ function previewChannelTheme() {
   const bgImage = document.getElementById('ch-theme-bg-image').value.trim();
   const css = document.getElementById('ch-theme-css').value.trim();
   applyChannelThemeOverride({ bg, text, accent, bgImage, css });
+
+  // Dry-run the custom CSS through the same client-side sanitizer the
+  // production renderer uses so owners learn IMMEDIATELY (during
+  // preview) that a rule was stripped, instead of waiting for a 400
+  // from the server on save. Surfaces a friendly toast with the
+  // reason(s).
+  if (css && window.Css && typeof Css.sanitizeScopedCssWithReport === 'function') {
+    try {
+      const { rejections } = Css.sanitizeScopedCssWithReport(css, '#main');
+      if (rejections && rejections.length) {
+        const first = rejections[0];
+        const more = rejections.length > 1 ? ` (+${rejections.length - 1} more)` : '';
+        const detail = first.selector
+          ? `'${first.selector}': ${first.reason}`
+          : first.reason;
+        UI.showToast(
+          `Some CSS was stripped — ${detail}${more}. Open the console for the full list.`,
+          'warn'
+        );
+        return;
+      }
+    } catch {}
+  }
   UI.showToast('Preview applied — save channel settings to keep');
 }
 

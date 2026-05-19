@@ -3285,8 +3285,11 @@ async function _sendChannelFileMessage (fileItem, payload, opts = {}) {
     content: payload.content || '',
     media_data: mediaData,
     media_type: mediaType,
-    media_blur: window._pendingMediaBlur ? 1 : 0,
-    view_once: window._pendingViewOnce ? 1 : 0,
+    // Per-item flags (live on the attachment object itself) — fall back
+    // to the global pending state for legacy single-attachment paths
+    // (camera capture, voice notes, etc.) that don't set per-item flags.
+    media_blur: (fileItem.blur != null ? fileItem.blur : window._pendingMediaBlur) ? 1 : 0,
+    view_once: (fileItem.viewOnce != null ? fileItem.viewOnce : window._pendingViewOnce) ? 1 : 0,
     reply_to: payload.reply_to || null,
     bridge_plain: payload.bridge_plain || null,
     key_version: payload.key_version || 0,

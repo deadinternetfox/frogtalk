@@ -2811,20 +2811,66 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .att-preview-item img,.att-preview-item video{max-width:200px;max-height:140px;border-radius:8px;display:block;object-fit:cover}
 .att-preview-icon{font-size:28px;padding:6px 2px}
 /* Multi-attachment composer preview: lay items side-by-side with a small
-   gap, wrap to a second row past 5 items, and compact each thumbnail so
-   2–5 files fit without stretching full-width. Single attachment keeps
-   the original 200×150 sizing handled by the rules above. */
+   gap. Sizes scale down as more attachments are added so all 5 fit on
+   one row inside the composer — single attachment keeps the original
+   200×150 sizing handled by the rules above. */
 #attachment-thumb.is-multi{
-  display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;width:100%
+  display:flex;flex-wrap:nowrap;gap:8px;align-items:flex-start;width:100%;
+  overflow-x:auto
 }
 #attachment-thumb.is-multi .att-preview-item{
-  flex:0 0 auto;min-width:0;max-width:180px
+  flex:1 1 0;min-width:0;max-width:180px;display:flex;flex-direction:column
 }
-#attachment-thumb.is-multi .att-media-wrap{max-width:180px;max-height:140px}
+#attachment-thumb.is-multi .att-media-wrap{
+  position:relative;width:100%;max-width:100%;display:block
+}
 #attachment-thumb.is-multi .att-preview-item img,
 #attachment-thumb.is-multi .att-preview-item video{
-  max-width:180px;max-height:140px;border-radius:6px
+  width:100%;max-width:100%;height:auto;max-height:140px;
+  border-radius:6px;object-fit:cover;display:block
 }
+/* Per-count scaling: shrinks the per-item ceiling as N grows so 3, 4,
+   and 5 attachments all sit comfortably on one composer row. Smaller
+   items keep the same gap (8 px) and round-radius so the row reads as
+   a coherent strip. The fire/eye overlay buttons also shrink alongside. */
+#attachment-thumb[data-count="2"].is-multi .att-preview-item{max-width:170px}
+#attachment-thumb[data-count="2"].is-multi .att-preview-item img,
+#attachment-thumb[data-count="2"].is-multi .att-preview-item video{max-height:140px}
+
+#attachment-thumb[data-count="3"].is-multi .att-preview-item{max-width:140px}
+#attachment-thumb[data-count="3"].is-multi .att-preview-item img,
+#attachment-thumb[data-count="3"].is-multi .att-preview-item video{max-height:120px}
+
+#attachment-thumb[data-count="4"].is-multi .att-preview-item{max-width:115px}
+#attachment-thumb[data-count="4"].is-multi .att-preview-item img,
+#attachment-thumb[data-count="4"].is-multi .att-preview-item video{max-height:100px}
+
+#attachment-thumb[data-count="5"].is-multi .att-preview-item{max-width:95px}
+#attachment-thumb[data-count="5"].is-multi .att-preview-item img,
+#attachment-thumb[data-count="5"].is-multi .att-preview-item video{max-height:85px}
+
+/* Shrink the per-item overlay buttons in tighter layouts so they don't
+   cover most of the thumbnail. */
+#attachment-thumb[data-count="3"] .att-spoiler-eye,
+#attachment-thumb[data-count="3"] .att-viewonce-fire,
+#attachment-thumb[data-count="4"] .att-spoiler-eye,
+#attachment-thumb[data-count="4"] .att-viewonce-fire,
+#attachment-thumb[data-count="5"] .att-spoiler-eye,
+#attachment-thumb[data-count="5"] .att-viewonce-fire{
+  width:22px;height:22px;font-size:11px;padding:0;top:4px
+}
+#attachment-thumb[data-count="3"] .att-spoiler-eye,
+#attachment-thumb[data-count="4"] .att-spoiler-eye,
+#attachment-thumb[data-count="5"] .att-spoiler-eye{right:4px}
+#attachment-thumb[data-count="3"] .att-viewonce-fire,
+#attachment-thumb[data-count="4"] .att-viewonce-fire,
+#attachment-thumb[data-count="5"] .att-viewonce-fire{left:4px}
+#attachment-thumb[data-count="3"] .att-preview-remove,
+#attachment-thumb[data-count="4"] .att-preview-remove,
+#attachment-thumb[data-count="5"] .att-preview-remove{
+  padding:2px 6px;font-size:10px;top:3px;right:3px
+}
+
 .att-preview-remove{
   position:absolute;top:6px;right:6px;
   background:rgba(0,0,0,.55);color:#fff;border:none;
@@ -10622,21 +10668,21 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/signal_store.js?v=2"></script>
 <script src="/static/js/signal.js?v=11"></script>
 <script src="/static/js/wall_crypto.js?v=1"></script>
-<script src="/static/js/state.js?v=202"></script>
+<script src="/static/js/state.js?v=203"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=434"></script>
 <script src="/static/js/ws.js?v=247"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=484"></script>
-  <script src="/static/js/rooms.js?v=438"></script>
+  <script src="/static/js/rooms.js?v=439"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
-<script src="/static/js/messages.js?v=478"></script>
+<script src="/static/js/messages.js?v=479"></script>
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
-<script src="/static/js/dms.js?v=460"></script>
+<script src="/static/js/dms.js?v=461"></script>
 <script src="/static/js/calls.js?v=220"></script>
-<script src="/static/js/media.js?v=418"></script>
+<script src="/static/js/media.js?v=419"></script>
 <script src="/static/js/gifs.js?v=205"></script>
 <script src="/static/js/media-player.js?v=191"></script>
 <script src="/static/js/music.js?v=417"></script>

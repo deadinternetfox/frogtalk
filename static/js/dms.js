@@ -2126,8 +2126,10 @@ async function _sendDMFileMessage (fileData, payload) {
       media_data: mediaData,
       media_type: fileData.type || '',
       media_name: fileData.name || 'file',
-      media_blur: window._pendingMediaBlur ? 1 : 0,
-      view_once: window._pendingViewOnce ? 1 : 0,
+      // Per-item flags fall back to the legacy globals for code paths
+      // that still set window._pending* directly (camera, voice notes).
+      media_blur: (fileData.blur != null ? fileData.blur : window._pendingMediaBlur) ? 1 : 0,
+      view_once: (fileData.viewOnce != null ? fileData.viewOnce : window._pendingViewOnce) ? 1 : 0,
     },
     {
       onProgress: (loaded, total, phase) => {
