@@ -3731,12 +3731,6 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) .radio-optio
     0 4px 14px rgba(76,175,80,.22) !important;
 }
 
-/* Private channels are invite-only by definition — hide the redundant
-   "Invite Only" toggle in the Create Channel modal whenever the user
-   has the Private visibility option selected. CSS-only fallback so this
-   works even if rooms.js is cached from an older build. */
-#modal-create-room:has(#type-private.selected) #new-room-invite-only-card{display:none !important}
-
 /* ─── Profile modal ─────────────────────────────────────────── */
 .profile-avatar-wrap{text-align:center;margin-bottom:16px}
 .profile-avatar-large{
@@ -8388,15 +8382,6 @@ window.ConnErr = (function(){
       <input class="modal-input" id="new-room-secret-hint" placeholder="Shown to invited members when they join">
       <div style="font-size:11px;color:#888;margin-top:8px">Everyone in this private channel must use the same shared secret.</div>
     </div>
-    <div class="modal-card" id="new-room-invite-only-card" style="padding:10px 12px">
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-        <input type="checkbox" id="new-room-invite-only" style="width:16px;height:16px;accent-color:var(--accent-color,#4caf50);cursor:pointer">
-        <div>
-          <div style="font-weight:600;font-size:13px">Invite Only</div>
-          <div style="font-size:11px;color:#888">Require an invite link to join</div>
-        </div>
-      </label>
-    </div>
     <div id="new-room-directory-section" class="modal-card">
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px">
         <input type="checkbox" id="new-room-list-directory" style="width:16px;height:16px;accent-color:#4caf50;cursor:pointer" onchange="toggleNewRoomDirectoryFields()">
@@ -8553,16 +8538,6 @@ window.ConnErr = (function(){
         Control who can access and manage this channel.
       </div>
       
-      <label class="modal-label">Channel Access</label>
-      <div class="modal-card" id="ch-invite-only-card" style="margin-bottom:16px">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-          <input type="checkbox" id="ch-invite-only" style="width:18px;height:18px;accent-color:var(--accent-color,#4caf50);cursor:pointer">
-          <div>
-            <div style="font-weight:600;font-size:14px">Invite Only</div>
-            <div style="font-size:12px;color:#888">When enabled, users can only join through invite links (does not control directory visibility)</div>
-          </div>
-        </label>
-      </div>
       <div id="ch-invite-only-private-note" class="modal-card" style="display:none;margin-bottom:16px;background:rgba(76,175,80,.06);border-color:rgba(76,175,80,.25)">
         <div style="font-size:12px;color:#9bd0ad;line-height:1.5">
           🔒 Private channels are <strong>invite-only by default</strong> — only members with an invite link or the shared secret can join.
@@ -8597,7 +8572,6 @@ window.ConnErr = (function(){
       <div id="ch-dir-policy-note" style="display:none;font-size:12px;color:#ffb36b;background:#2a1e12;border:1px solid #5b3f20;border-radius:8px;padding:8px 10px;margin-bottom:12px">
         Private channels cannot be listed in directory. Change the channel type to public first.
       </div>
-      
       <div class="modal-card" style="margin-bottom:16px">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
           <input type="checkbox" id="ch-dir-listed" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer">
@@ -10837,7 +10811,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/ws.js?v=252"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=489"></script>
-  <script src="/static/js/rooms.js?v=451"></script>
+  <script src="/static/js/rooms.js?v=452"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>
 <script src="/static/js/text_format.js?v=2"></script>
 <script src="/static/js/messages.js?v=486"></script>
