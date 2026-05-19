@@ -426,7 +426,9 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) .modal-input
     0 4px 14px rgba(76,175,80,.22) !important;
 }
 body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) textarea.modal-input{resize:vertical;min-height:64px;line-height:1.45}
-/* Sub-panels inside modals (Shared secret group, Invite Only card, etc.) */
+/* Sub-panels inside modals (shared secret group, directory listing, etc.) */
+/* Legacy invite-only row removed from create-channel — hide if an old /app is cached */
+#new-room-invite-only-card{display:none !important}
 .modal-card{
   background:
     linear-gradient(180deg,
