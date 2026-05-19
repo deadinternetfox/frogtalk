@@ -154,9 +154,11 @@ async def get_user_wall(
 @limiter.limit("60/hour")
 async def create_wall_post(request: Request, body: CreatePostRequest, current_user: dict = Depends(get_current_user)):
     """Create a new wall post."""
-    if not body.content.strip() and not body.media_data:
+    # `.strip()` only for the empty-check — store original whitespace so
+    # multi-paragraph posts keep their formatting.
+    if not (body.content or "").strip() and not body.media_data:
         return JSONResponse(status_code=400, content={"error": "Post content or media required"})
-    
+
     if len(body.content) > MAX_POST_CONTENT:
         return JSONResponse(status_code=400, content={"error": f"Post too long (max {MAX_POST_CONTENT} chars)"})
     
@@ -837,7 +839,9 @@ async def get_post_comments(post_id: int, limit: int = Query(50, le=100),
 @limiter.limit("120/hour")
 async def add_post_comment(request: Request, post_id: int, body: AddCommentRequest, current_user: dict = Depends(get_current_user)):
     """Add a comment to a post."""
-    if not body.content or len(body.content.strip()) == 0:
+    # `.strip()` only for the empty-check; the original content is stored
+    # so newlines / leading whitespace are not silently dropped.
+    if not body.content or not body.content.strip():
         return JSONResponse(status_code=400, content={"error": "Comment cannot be empty"})
 
     if len(body.content) > 1000:
@@ -852,7 +856,7 @@ async def add_post_comment(request: Request, post_id: int, body: AddCommentReque
     if int(post.get("enc_v") or 0) == 2 and not db.wall_post_viewer_in_audience(post_id, current_user["id"]):
         return JSONResponse(status_code=403, content={"error": "Not in audience"})
 
-    comment_id = db.add_wall_comment(post_id, current_user["id"], body.content.strip())
+    comment_id = db.add_wall_comment(post_id, current_user["id"], body.content)
     if comment_id is None:
         return JSONResponse(status_code=403, content={"error": "Comments disabled on this post"})
 

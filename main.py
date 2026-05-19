@@ -58,6 +58,7 @@ from routers import admin as admin_mod
 from routers import federation as federation_mod
 from routers import server_admin as server_admin_mod
 from routers import bug_reports as bug_reports_mod
+from routers import proxy as proxy_mod
 # Track A — Signal Protocol prekey bundle endpoints (X3DH + Double
 # Ratchet identity / signed-prekey / OTPK pool).
 from routers import signal as signal_mod
@@ -843,6 +844,10 @@ app.include_router(wall_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(location_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(gifs_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(external_api_mod.router, prefix="/api")
+# Image proxy for channel-theme backgrounds — gates the request through
+# `get_current_user` and an SSRF allowlist so external URLs can't be
+# used to dox viewers via direct browser fetches.
+app.include_router(proxy_mod.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(social_mod.router, prefix="/api", dependencies=_PIN_GATED)
 # NOTE: bridge_mod intentionally does NOT use _PIN_GATED. Its bot-facing
 # endpoints (`/api/bridge/message`, `/api/bridge/edit`, `/api/bridge/delete`)

@@ -2183,7 +2183,14 @@ const Messages = (() => {
     if (!el) return;
     const contentEl = el.querySelector('.msg-content');
     if (!contentEl) return;
-    const current = contentEl.textContent;
+    // Read from the in-memory message object instead of the rendered
+    // `.textContent`. The DOM path collapses runs of whitespace and
+    // drops newlines, which corrupted multi-line edits before this
+    // fix. DM edits already do this; this brings channels into parity.
+    const cached = (State.messages[State.currentRoom] || []).find(m => m && +m.id === +id);
+    const current = (cached && typeof cached.content === 'string')
+      ? cached.content
+      : contentEl.textContent;
     contentEl.dataset.originalText = current;
     contentEl.innerHTML = `
       <textarea id="edit-input-${id}" style="width:100%;background:#1a1a1a;border:1px solid #4caf50;border-radius:6px;color:#e0e0e0;padding:6px;font-size:14px;resize:none;outline:none" rows="2">${UI.escHtml(current)}</textarea>

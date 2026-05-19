@@ -142,37 +142,71 @@ function jsStr (s) {
 // rule that fails validation; never throws.
 const Css = (() => {
   const DANGEROUS_TOKENS = [
-    'javascript:', 'expression(', 'url(', '@import', '@charset',
-    '@font-face', '@keyframes', '@supports', '@media',
-    'behavior:', '-moz-binding', '</style', '<script', '\\',
+    // Code execution
+    'javascript:', 'expression(', 'behavior:', '-moz-binding',
+    // External resource fetchers
+    'url(', '@import', '@charset', '@font-face',
+    // Global / document-level at-rules. @namespace was the report; the
+    // others let an owner re-skin the whole page through future browser
+    // features like @layer / @scope / @container so we reject them too.
+    '@namespace', '@layer', '@scope', '@container', '@property',
+    '@page', '@document', '@viewport', '@keyframes',
+    '@supports', '@media',
+    // HTML breakouts
+    '</style', '<script', '\\',
+    // Visual escapes from the #main scope
     'position:fixed', 'position:sticky',
   ];
   const BARE_TAG_HEADS = new Set(['*', 'html', 'body']);
-  const ROOT_PSEUDO_PREFIXES = [':root', ':host', ':scope', ':target'];
-  // :defined / :is / :where / :has / :not / :matches / :any can broaden
-  // a match to elements the attacker doesn't otherwise have grounds to
-  // touch — reject them anywhere in the first compound selector.
+  const ROOT_PSEUDOS = [':root', ':host', ':scope', ':target'];
   const BROADENING_PSEUDO_RE = /:(defined|is|where|has|not|matches|any)\b/;
-
-  function _isBroadSelectorPart(p) {
-    const first = (p || '').split(/[\s>+~]/)[0].toLowerCase();
-    if (!first) return true;
-    if (BROADENING_PSEUDO_RE.test(first)) return true;
-    if (ROOT_PSEUDO_PREFIXES.some(pref => first.startsWith(pref))) return true;
-    const m = first.match(/^([*a-z][a-z0-9-]*)/);
-    const headTag = m ? m[1] : '';
-    return BARE_TAG_HEADS.has(headTag);
-  }
+  const FORBIDDEN_PSEUDOS = [
+    '::column', '::scroll-marker', '::scroll-marker-group',
+    '::scroll-button', '::view-transition', '::view-transition-group',
+    '::view-transition-image-pair', '::view-transition-old',
+    '::view-transition-new', '::part', '::slotted', '::backdrop',
+    '::cue', '::cue-region', '::file-selector-button',
+    '::marker', '::placeholder', '::selection',
+    '::-webkit-scrollbar', '::-webkit-resizer',
+  ];
+  // NBSP, ogham, en/em/etc., narrow no-break, math, ideographic,
+  // mongolian vowel separator, zero-width family, BOM. Browsers treat
+  // these as selector whitespace; we must too or `:root\u00a0,*` slips
+  // past the comma-bridge check.
+  const UNI_WS = '\\s\\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000\\u180e\\u200b\\u200c\\u200d\\ufeff';
+  const UNI_COMMA_RE = /[\u002c\uff0c\ufe50\u060c\u05c3\u1808]/g;
 
   function _normalize(s) {
-    let out = String(s || '').toLowerCase()
-      .replace(/\\([0-9a-f]{1,6})\s?/g, (_, h) => {
+    let out = String(s || '');
+    try { out = out.normalize('NFC'); } catch {}
+    out = out.toLowerCase()
+      .replace(/\\([0-9a-f]{1,6})\s?/gi, (_, h) => {
         const cp = parseInt(h, 16);
         return cp < 0x110000 ? String.fromCodePoint(cp) : '';
       })
       .replace(/\\(.)/g, '$1');
     try { out = out.replace(/&#(\d+);?/g, (_, n) => String.fromCharCode(+n)); } catch {}
-    return out.replace(/\s+/g, '');
+    try { out = out.replace(/&#x([0-9a-f]+);?/gi, (_, h) => String.fromCharCode(parseInt(h, 16))); } catch {}
+    return out.replace(new RegExp(`[${UNI_WS}]+`, 'g'), '');
+  }
+
+  // Keep ASCII spaces so selector structure (combinators, comma list,
+  // leading compound) stays inspectable while still normalising hex
+  // escapes / entities / Unicode whitespace.
+  function _normalizeSelector(s) {
+    let out = String(s || '');
+    try { out = out.normalize('NFC'); } catch {}
+    out = out
+      .replace(/\\([0-9a-f]{1,6})\s?/gi, (_, h) => {
+        const cp = parseInt(h, 16);
+        return cp < 0x110000 ? String.fromCodePoint(cp) : '';
+      })
+      .replace(/\\(.)/g, '$1');
+    try { out = out.replace(/&#(\d+);?/g, (_, n) => String.fromCharCode(+n)); } catch {}
+    try { out = out.replace(/&#x([0-9a-f]+);?/gi, (_, h) => String.fromCharCode(parseInt(h, 16))); } catch {}
+    out = out.replace(UNI_COMMA_RE, ',');
+    out = out.replace(new RegExp(`[${UNI_WS}]+`, 'g'), ' ').trim().toLowerCase();
+    return out;
   }
 
   function _hasDangerous(s) {
@@ -180,11 +214,42 @@ const Css = (() => {
     return DANGEROUS_TOKENS.some(t => n.includes(t));
   }
 
+  function _selectorPartRejected(p) {
+    const first = p.split(new RegExp(`[${UNI_WS}>+~]`))[0];
+    if (!first) return 'empty leading compound';
+    if (BROADENING_PSEUDO_RE.test(first)) return 'broadening pseudo';
+    if (ROOT_PSEUDOS.some(rp => first.includes(rp))) return 'root pseudo';
+    if (/\[data-(theme|mode)\b/.test(first)) return 'platform-theme attribute';
+    if (first.startsWith('[')) return 'naked attribute selector';
+    for (const fp of FORBIDDEN_PSEUDOS) {
+      if (p.includes(fp)) return `forbidden pseudo ${fp}`;
+    }
+    const m = first.match(/^([*a-z][a-z0-9-]*)/);
+    const headTag = m ? m[1] : '';
+    if (BARE_TAG_HEADS.has(headTag)) return 'bare tag head';
+    return null;
+  }
+
   // selectorMapper(selector) -> scoped selector or '' to drop
   function sanitizeScopedCss(rawCss, scope, selectorMapper) {
     if (!rawCss || !scope) return '';
     let css = String(rawCss).slice(0, 10240).replace(/\/\*[\s\S]*?\*\//g, '');
-    if (_hasDangerous(css)) return '';
+    if (_hasDangerous(css)) {
+      try { console.warn('[Css] dropped stylesheet — contains dangerous token'); } catch {}
+      return '';
+    }
+    const normFull = _normalize(css);
+    // Belt-and-braces: reject root pseudos / [data-theme] *anywhere* in
+    // the stylesheet (covers `:is(:root)` and similar nested forms that
+    // per-selector parsing might miss).
+    if (ROOT_PSEUDOS.some(rp => normFull.includes(rp))) {
+      try { console.warn('[Css] dropped stylesheet — contains root pseudo'); } catch {}
+      return '';
+    }
+    if (/\[data-(theme|mode)/.test(normFull)) {
+      try { console.warn('[Css] dropped stylesheet — targets platform theme attribute'); } catch {}
+      return '';
+    }
     if ((css.match(/\{/g) || []).length !== (css.match(/\}/g) || []).length) return '';
     const out = [];
     for (const chunk of css.split('}')) {
@@ -193,15 +258,23 @@ const Css = (() => {
       const selRaw = chunk.slice(0, i).trim();
       const body = chunk.slice(i + 1).trim();
       if (!selRaw || !body) continue;
-      if (selRaw.startsWith('@')) continue;
+      if (selRaw.startsWith('@')) {
+        try { console.warn('[Css] dropped @-rule (not allowed):', selRaw.slice(0, 60)); } catch {}
+        continue;
+      }
       if (/[<>(){}"'`\\;]/.test(selRaw)) continue;
       if (_hasDangerous(body)) continue;
-      const parts = selRaw.split(',').map(s => s.trim());
+      const selNorm = _normalizeSelector(selRaw);
+      const parts = selNorm.split(',').map(s => s.trim());
       if (parts.some(p => !p)) continue; // empty part = leading/trailing comma
       let badPart = false;
       const mapped = [];
       for (const p of parts) {
-        if (_isBroadSelectorPart(p)) { badPart = true; break; }
+        const reason = _selectorPartRejected(p);
+        if (reason) {
+          try { console.warn(`[Css] dropped selector "${p}":`, reason); } catch {}
+          badPart = true; break;
+        }
         const m = typeof selectorMapper === 'function'
           ? selectorMapper(p) : `${scope} ${p}`;
         if (!m) { badPart = true; break; }

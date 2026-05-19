@@ -87,10 +87,52 @@ async def request_private_room_rekey(room: dict, joiner: dict) -> None:
 _CHANNEL_THEME_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
 _CHANNEL_THEME_KEYS = ("bg", "text", "accent", "bgImage", "css")
 _CSS_DANGEROUS_TOKENS = (
-    "javascript:", "expression(", "url(", "@import", "@charset",
-    "@font-face", "behavior:", "-moz-binding", "</style", "<script",
+    # Code/script execution vectors
+    "javascript:", "expression(", "behavior:", "-moz-binding",
+    # External resource fetchers (IP leak / SSRF / mixed-content)
+    "url(", "@import", "@charset", "@font-face",
+    # Document-root / global takeover via at-rules. @namespace was the
+    # specific report — the JS-side `continue`-on-@ branch silently dropped
+    # these instead of rejecting, so an owner could prepend
+    # `@namespace url(http://attacker);` and have the server accept the
+    # stylesheet body even though it parses funny.
+    "@namespace", "@layer", "@scope", "@container", "@property",
+    "@page", "@document", "@viewport",
+    # HTML breakouts
+    "</style", "<script",
+    # `\` enables the entire CSS-escape-bypass family; normalizer below
+    # decodes legitimate escapes for detection, but any rule that still
+    # contains a raw backslash after normalization is suspect.
     "\\",
 )
+
+# Pseudo-elements that can paint outside the scoping rule's element or
+# pierce shadow trees. Modern column / scroll / part / slotted / view-
+# transition / backdrop pseudos all let an attacker style elements they
+# never matched directly — reject them anywhere in the first compound.
+_CSS_FORBIDDEN_PSEUDOS = (
+    "::column", "::scroll-marker", "::scroll-marker-group",
+    "::scroll-button", "::view-transition", "::view-transition-group",
+    "::view-transition-image-pair", "::view-transition-old",
+    "::view-transition-new", "::part", "::slotted", "::backdrop",
+    "::cue", "::cue-region", "::file-selector-button",
+    "::marker", "::placeholder", "::selection",
+    # `::-webkit-scrollbar*` etc. can paint over the page chrome.
+    "::-webkit-scrollbar", "::-webkit-resizer",
+)
+
+# Catches NBSP (U+00A0), Ogham space mark (U+1680), the en/em/etc. space
+# family (U+2000–U+200A), narrow no-break space (U+202F), medium math
+# space (U+205F), ideographic space (U+3000). Browsers treat all of these
+# as selector whitespace; Python's default `\s` already covers most but
+# we list them explicitly so the regex behaviour doesn't depend on the
+# host stdlib build.
+_UNICODE_WS_CLASS = r"\s\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u180e\u200b\u200c\u200d\ufeff"
+# Unicode comma variants that browsers DO treat as selector list separators
+# in some engines (fullwidth, small, Arabic, Hebrew, Mongolian). Treat all
+# of them as a comma for the bypass-detection split.
+_UNICODE_COMMAS = (",", "\uff0c", "\ufe50", "\u060c", "\u05c3", "\u1808")
+_UNICODE_COMMA_RE = re.compile("|".join(re.escape(c) for c in _UNICODE_COMMAS))
 
 
 def _normalize_css_for_check(s: str) -> str:
@@ -98,7 +140,11 @@ def _normalize_css_for_check(s: str) -> str:
     bypassed by e.g. ``\\75 rl(`` or ``&#117;rl(``. Returns a lower-cased
     whitespace-stripped string for *detection only*; the raw value is what
     eventually ships if it passes."""
-    out = s.lower()
+    import unicodedata
+    # NFC-normalize first so canonical-equivalent codepoints
+    # (eg. ﬁ → fi, KELVIN SIGN → K) collapse to ASCII forms before token
+    # comparison.
+    out = unicodedata.normalize("NFC", s).lower()
     # CSS hex escape: \X{1,6}[ws]?
     def _hx(m):
         try:
@@ -116,18 +162,48 @@ def _normalize_css_for_check(s: str) -> str:
         pass
     # Strip /* ... */ comments
     out = re.sub(r"/\*.*?\*/", "", out, flags=re.DOTALL)
-    # Collapse all whitespace
-    out = re.sub(r"\s+", "", out)
+    # Collapse all whitespace including the Unicode family above
+    out = re.sub(f"[{_UNICODE_WS_CLASS}]+", "", out)
+    return out
+
+
+def _normalize_selector(s: str) -> str:
+    """Like `_normalize_css_for_check` but preserves ASCII spaces so the
+    selector structure (descendant combinators, comma-separated list,
+    leading compound) stays inspectable. Returns lower-cased, NFC,
+    hex-/entity-decoded text with all Unicode whitespace folded to a
+    single ASCII space and Unicode commas folded to ASCII commas."""
+    import unicodedata
+    out = unicodedata.normalize("NFC", s)
+    def _hx(m):
+        try:
+            cp = int(m.group(1), 16)
+            return chr(cp) if cp < 0x110000 else ""
+        except Exception:
+            return ""
+    out = re.sub(r"\\([0-9a-f]{1,6})\s?", _hx, out, flags=re.IGNORECASE)
+    out = re.sub(r"\\(.)", r"\1", out)
+    try:
+        import html as _html
+        out = _html.unescape(out)
+    except Exception:
+        pass
+    out = _UNICODE_COMMA_RE.sub(",", out)
+    out = re.sub(f"[{_UNICODE_WS_CLASS}]+", " ", out).strip().lower()
     return out
 
 
 def _sanitize_channel_css(raw: str) -> str:
     """Return safe CSS, or raise ValueError if irrecoverable.
 
-    Rules: no @-rules, no url(), no javascript:, no comma-bridged selectors
-    that would escape the #main scope, no parens or quotes in selectors, no
-    angle brackets, no </style breakouts. Each rule's selector is parsed
-    and rebuilt so the client doesn't have to trust the string.
+    Rules: no @-rules, no url(), no javascript:, no comma-bridged
+    selectors that would escape the #main scope, no parens or quotes in
+    selectors, no angle brackets, no </style breakouts, no `:root` /
+    `[data-theme]` reach into globals, no future column / part / slotted
+    pseudo-elements that paint outside the matched element. Each rule's
+    selector is parsed and rebuilt against a normalized form so an
+    attacker can't bypass with hex escapes, HTML entities, NBSP,
+    fullwidth commas, etc.
     """
     if not raw:
         return ""
@@ -138,6 +214,20 @@ def _sanitize_channel_css(raw: str) -> str:
     for tok in _CSS_DANGEROUS_TOKENS:
         if tok in normalized_full:
             raise ValueError(f"CSS contains forbidden token: {tok}")
+    # Reject `:root`, `:host`, `:scope`, `:target` anywhere in the
+    # stylesheet — even buried inside a `:is()` / `:where()` argument or
+    # an attribute-selector value. Selector-level checks below catch the
+    # common cases, but this is a belt-and-braces stylesheet-wide check.
+    for tok in (":root", ":host", ":scope", ":target"):
+        if tok in normalized_full:
+            raise ValueError(f"CSS contains root-level pseudo: {tok}")
+    # Reject `[data-theme...]` anywhere in the stylesheet — owners must
+    # not be able to retheme the whole app via the platform's theme
+    # variable hook.
+    if re.search(r"\[data-theme", normalized_full):
+        raise ValueError("CSS targets the [data-theme] attribute")
+    if re.search(r"\[data-mode", normalized_full):
+        raise ValueError("CSS targets the [data-mode] attribute")
     # Rebuild rule-by-rule. Reject any chunk with @-rules / nested braces.
     if css.count("{") != css.count("}"):
         raise ValueError("CSS braces are unbalanced")
@@ -158,26 +248,54 @@ def _sanitize_channel_css(raw: str) -> str:
         # of the scope wrapper or smuggle expressions.
         if re.search(r"[<>(){}\"'`\\;]", sel_raw):
             raise ValueError("CSS selector contains forbidden characters")
-        # Split the selector list and reject any empty / leading-comma
-        # part (which is what enabled the original ``,*`` escape).
-        parts = [p.strip() for p in sel_raw.split(",")]
+        # Normalize the selector text against Unicode whitespace / commas /
+        # hex escapes / HTML entities before structural checks. The browser
+        # parses `:root\u00a0,*` as `:root , *`; without normalization our
+        # ASCII split would treat the whole thing as one part and miss the
+        # comma-bridge bypass.
+        sel_norm = _normalize_selector(sel_raw)
+        parts = [p.strip() for p in sel_norm.split(",")]
         if any(not p for p in parts):
             raise ValueError("CSS selector list has empty part (leading/trailing comma?)")
-        # Reject bare universal / root / html / body selectors — they'd
-        # still hit everything once they slip past the #main prefix.
-        # We strip pseudo-classes/elements first so ``body:defined`` and
-        # ``*:defined`` don't sneak past the equality check (the original
-        # bypass used by the pentester to render the room blank).
         for p in parts:
-            first = re.split(r"[\s>+~]", p, maxsplit=1)[0].lower()
+            # Split on the *full* whitespace + combinator class so NBSP /
+            # EN-SPACE bypasses are treated like ASCII space.
+            first = re.split(
+                f"[{_UNICODE_WS_CLASS}>+~]",
+                p, maxsplit=1,
+            )[0]
             # Reject broadening pseudo-classes anywhere in the first
             # compound selector — these can match arbitrary elements
             # regardless of the tag prefix.
             if re.search(r":(defined|is|where|has|not|matches|any)\b", first):
                 raise ValueError(f"CSS selector '{p}' uses a broadening pseudo-class")
-            # Reject root-level pseudo-classes outright (no tag prefix).
-            if first.startswith((":root", ":host", ":scope", ":target")):
+            # Reject root-level pseudo-classes outright. Anywhere in the
+            # first compound, not just startswith — `body:root` is also
+            # an unwanted hook.
+            if any(rp in first for rp in (":root", ":host", ":scope", ":target")):
                 raise ValueError(f"CSS selector '{p}' targets the document root")
+            # Reject forbidden pseudo-elements (column / part / slotted /
+            # scroll-marker / view-transition / etc.) anywhere in the
+            # whole compound.
+            for fp in _CSS_FORBIDDEN_PSEUDOS:
+                if fp in p:
+                    raise ValueError(
+                        f"CSS selector '{p}' uses forbidden pseudo-element {fp}"
+                    )
+            # Reject attribute selectors that re-target the platform's
+            # theming hooks.
+            if re.search(r"\[data-(theme|mode)\b", first):
+                raise ValueError(
+                    f"CSS selector '{p}' targets a platform theming attribute"
+                )
+            # Reject naked `[attr]` selectors with no preceding tag /
+            # id / class — too broad and the most common bypass shape
+            # ([class] matches everything).
+            if first.startswith("["):
+                raise ValueError(
+                    f"CSS selector '{p}' starts with an attribute selector — "
+                    f"add a tag/id/class prefix"
+                )
             # Extract just the leading element/universal token, ignoring
             # any trailing pseudo-class / class / id / attribute selector.
             m = re.match(r"^([*a-z][a-z0-9-]*)", first)
@@ -192,9 +310,15 @@ def _sanitize_channel_css(raw: str) -> str:
     return "\n".join(out_rules)
 
 
-def _sanitize_channel_theme(raw: Optional[str]) -> Optional[str]:
+def _sanitize_channel_theme(raw: Optional[str], room_type: str = "public") -> Optional[str]:
     """Validate a channel_theme JSON blob. Returns the canonicalised JSON
-    string, or '' to clear. Raises ValueError on bad input."""
+    string, or '' to clear. Raises ValueError on bad input.
+
+    ``room_type`` gates the optional fields: private rooms are not
+    allowed to set ``css`` or ``bgImage`` because a single owner could
+    use either to harvest every invited member's IP / browser
+    fingerprint via tracker URLs or `data-theme` retheming. Color
+    fields (``bg``, ``text``, ``accent``) are always allowed."""
     if raw is None:
         return None
     raw = raw.strip()
@@ -206,6 +330,7 @@ def _sanitize_channel_theme(raw: Optional[str]) -> Optional[str]:
         raise ValueError("channel_theme must be valid JSON")
     if not isinstance(data, dict):
         raise ValueError("channel_theme must be a JSON object")
+    is_private = (room_type or "public").lower() == "private"
     clean: dict = {}
     for k in ("bg", "text", "accent"):
         v = data.get(k)
@@ -215,6 +340,10 @@ def _sanitize_channel_theme(raw: Optional[str]) -> Optional[str]:
             raise ValueError(f"channel_theme.{k} must be a #hex colour")
         clean[k] = v
     bg_image = data.get("bgImage")
+    if bg_image and is_private:
+        raise ValueError(
+            "Background images are disabled in private channels for member privacy"
+        )
     if bg_image:
         if not isinstance(bg_image, str) or len(bg_image) > 2048:
             raise ValueError("channel_theme.bgImage is invalid")
@@ -226,8 +355,21 @@ def _sanitize_channel_theme(raw: Optional[str]) -> Optional[str]:
         if not (re.match(r"^https?://", bg_image, re.IGNORECASE)
                 or re.match(r"^/[A-Za-z0-9._\-/?=&%]+$", bg_image)):
             raise ValueError("channel_theme.bgImage must be http(s) URL or absolute path")
+        # External URLs are rewritten to flow through `/api/proxy/image`
+        # so the viewer's browser never talks directly to the URL the
+        # owner provided — closing the IP-leak / ad-tracker vector
+        # reported by the pentester. Same-origin paths (uploads via
+        # `/api/rooms/{name}/theme-bg` or other server-served assets)
+        # pass through unchanged.
+        if re.match(r"^https?://", bg_image, re.IGNORECASE):
+            from urllib.parse import quote_plus
+            bg_image = f"/api/proxy/image?u={quote_plus(bg_image)}"
         clean["bgImage"] = bg_image
     css = data.get("css")
+    if css and is_private:
+        raise ValueError(
+            "Custom CSS is disabled in private channels for member privacy"
+        )
     if css:
         if not isinstance(css, str):
             raise ValueError("channel_theme.css must be a string")
@@ -493,8 +635,14 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
 
+    # Look up the current room so the theme sanitizer can apply the
+    # private-channel CSS/bgImage gate. If the row vanished mid-request
+    # we fall back to public (existing 404 returned later by
+    # update_room_settings).
+    _existing_room = db.get_room_by_name(room_name)
+    _room_type = (_existing_room or {}).get("type") or "public"
     try:
-        sanitized_theme = _sanitize_channel_theme(body.channel_theme)
+        sanitized_theme = _sanitize_channel_theme(body.channel_theme, room_type=_room_type)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": f"channel_theme: {e}"})
 
@@ -564,6 +712,14 @@ async def upload_channel_theme_bg(request: Request, room_name: str,
     room = db.get_room_by_name(room_name)
     if not room:
         return JSONResponse(status_code=404, content={"error": "Room not found"})
+    # Private channels can't host a custom background — the owner could
+    # use the URL as an IP tracker on a small group of invited members.
+    # Color theming still works through the regular PATCH path.
+    if (room.get("type") or "public").lower() == "private":
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Background images are disabled in private channels"},
+        )
 
     raw = await media.read()
     if not raw:

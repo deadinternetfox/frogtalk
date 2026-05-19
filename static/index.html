@@ -2458,7 +2458,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 .msg-tick-pending{color:#666;opacity:.6}
 .msg-tick-read{color:#4fc3f7}
 .msg-tick-seen{color:#4fc3f7} /* legacy alias */
-.msg-content{font-size:15px;line-height:1.48;word-break:break-word;color:#d0d0d0}
+/* `pre-wrap` preserves the newlines / leading whitespace that the
+   server now stores verbatim (it used to `.strip()` and chop them).
+   `overflow-wrap:anywhere` keeps long URLs / unbroken strings from
+   pushing the bubble outside the message column. */
+.msg-content{font-size:15px;line-height:1.48;word-break:break-word;color:#d0d0d0;white-space:pre-wrap;overflow-wrap:anywhere}
 .msg-pending{opacity:.62}
 .msg-pending .msg-actions,
 .msg-pending .msg-more-trigger{display:none !important}
@@ -8616,19 +8620,41 @@ window.ConnErr = (function(){
       <input class="modal-input" type="color" id="ch-theme-text" value="#e0e0e0" style="height:40px;padding:4px;cursor:pointer">
       <label class="modal-label">Accent Color</label>
       <input class="modal-input" type="color" id="ch-theme-accent" value="#4caf50" style="height:40px;padding:4px;cursor:pointer">
-      <label class="modal-label">Background Image URL (optional)</label>
-      <div style="display:flex;gap:8px;align-items:stretch">
-        <input class="modal-input" id="ch-theme-bg-image" placeholder="https://... or upload below" maxlength="512" style="flex:1;min-width:0">
-        <button class="modal-btn secondary" type="button" style="flex:0 0 auto;padding:0 12px" onclick="document.getElementById('ch-theme-bg-image-file').click()">Upload</button>
-        <button class="modal-btn secondary" type="button" style="flex:0 0 auto;padding:0 12px" onclick="clearChannelThemeBgImage()" title="Remove background image">✕</button>
+
+      <!-- Privacy notice (shown only when the current channel is private).
+           Background images + custom CSS are server-rejected on private
+           channels because a single owner could use either as a per-member
+           IP tracker against a small invited audience. -->
+      <div id="ch-theme-private-notice" style="display:none;background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.3);border-radius:8px;padding:12px;margin-top:14px;font-size:13px;line-height:1.5;color:#ffd54f">
+        🔒 <strong>Custom CSS and background images are disabled in private channels.</strong>
+        Both features can be used to fingerprint or track invited members. The color
+        pickers above still work for theming.
       </div>
-      <input type="file" id="ch-theme-bg-image-file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="handleChannelThemeBgUpload(this)">
-      <div class="room-icon-hint" id="ch-theme-bg-image-hint" style="margin-top:4px">JPEG, PNG, or WEBP. Up to 8 MB. Auto-resized to 2560 px.</div>
-      <label class="modal-label">Custom CSS (optional, max 4KB)</label>
-      <textarea class="modal-input" id="ch-theme-css" rows="4" style="font-family:monospace;font-size:12px;resize:vertical" placeholder="#messages-area { ... }" maxlength="4096"></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button class="modal-btn secondary" onclick="resetChannelTheme()" style="flex:1">Reset to Default</button>
-        <button class="modal-btn primary" onclick="previewChannelTheme()" style="flex:1">Preview</button>
+
+      <!-- Public-channel warning + advanced fields. We hide the entire
+           wrapper for private channels so owners can't accidentally
+           submit stale field values. -->
+      <div id="ch-theme-advanced-fields">
+        <div id="ch-theme-public-warning" style="display:none;background:rgba(33,150,243,.08);border:1px solid rgba(33,150,243,.3);border-radius:8px;padding:12px;margin-top:14px;margin-bottom:6px;font-size:13px;line-height:1.5;color:#90caf9">
+          ℹ️ <strong>Public channel.</strong> Custom CSS can change the look of this page
+          for every visitor — keep it tasteful. External background images are
+          proxied through FrogTalk so viewers' IP addresses are not exposed to the
+          image host.
+        </div>
+        <label class="modal-label">Background Image URL (optional)</label>
+        <div style="display:flex;gap:8px;align-items:stretch">
+          <input class="modal-input" id="ch-theme-bg-image" placeholder="https://... or upload below" maxlength="512" style="flex:1;min-width:0">
+          <button class="modal-btn secondary" type="button" style="flex:0 0 auto;padding:0 12px" onclick="document.getElementById('ch-theme-bg-image-file').click()">Upload</button>
+          <button class="modal-btn secondary" type="button" style="flex:0 0 auto;padding:0 12px" onclick="clearChannelThemeBgImage()" title="Remove background image">✕</button>
+        </div>
+        <input type="file" id="ch-theme-bg-image-file" accept="image/jpeg,image/png,image/webp" style="display:none" onchange="handleChannelThemeBgUpload(this)">
+        <div class="room-icon-hint" id="ch-theme-bg-image-hint" style="margin-top:4px">JPEG, PNG, or WEBP. Up to 8 MB. Auto-resized to 2560 px.</div>
+        <label class="modal-label">Custom CSS (optional, max 4KB)</label>
+        <textarea class="modal-input" id="ch-theme-css" rows="4" style="font-family:monospace;font-size:12px;resize:vertical" placeholder="#messages-area { ... }" maxlength="4096"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="modal-btn secondary" onclick="resetChannelTheme()" style="flex:1">Reset to Default</button>
+          <button class="modal-btn primary" onclick="previewChannelTheme()" style="flex:1">Preview</button>
+        </div>
       </div>
     </div>
 
@@ -10596,15 +10622,15 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/signal_store.js?v=2"></script>
 <script src="/static/js/signal.js?v=11"></script>
 <script src="/static/js/wall_crypto.js?v=1"></script>
-<script src="/static/js/state.js?v=201"></script>
+<script src="/static/js/state.js?v=202"></script>
 <script src="/static/js/mute.js?v=191"></script>
 <script src="/static/js/notifications.js?v=434"></script>
 <script src="/static/js/ws.js?v=247"></script>
 <script src="/static/js/cropper.js?v=191"></script>
 <script src="/static/js/ui.js?v=484"></script>
-  <script src="/static/js/rooms.js?v=437"></script>
+  <script src="/static/js/rooms.js?v=438"></script>
 <script src="/static/js/sticker-fx.js?v=1"></script>
-<script src="/static/js/messages.js?v=477"></script>
+<script src="/static/js/messages.js?v=478"></script>
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>

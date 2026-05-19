@@ -436,9 +436,12 @@ async def mark_dm_viewed(channel_id: int, msg_id: int,
 @router.put("/{channel_id}/messages/{msg_id}")
 async def edit_message(channel_id: int, msg_id: int, body: EditDMBody,
                        current_user: dict = Depends(get_current_user)):
-    if not body.content.strip():
+    # `.strip()` only for the empty-check — store the original content
+    # so a Signal-envelope ciphertext (or any newline-bearing plaintext)
+    # round-trips without the outer whitespace being chopped.
+    if not (body.content or "").strip():
         return JSONResponse(status_code=400, content={"error": "Empty content"})
-    ok = db.edit_dm_message(msg_id, current_user["id"], body.content.strip())
+    ok = db.edit_dm_message(msg_id, current_user["id"], body.content)
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot edit this message"})
     return {"ok": True}

@@ -82,8 +82,12 @@ class SendMessageRequest(BaseModel):
 async def send_message(request: Request, room_name: str, body: SendMessageRequest,
                        current_user: dict = Depends(get_current_user)):
     """Send a message to a room via REST (reliable for media uploads)."""
-    content = body.content.strip()
-    if not content and not body.media_data:
+    # Preserve internal whitespace (newlines, tabs, leading indent for
+    # code-block style messages). `.strip()` is only used for the empty
+    # check so an "all whitespace" body still 400s, but a message that
+    # legitimately starts with `\n` keeps its formatting intact.
+    content = body.content or ""
+    if not content.strip() and not body.media_data:
         return JSONResponse(status_code=400, content={"error": "Empty message"})
     if content and len(content) > 10_000:
         return JSONResponse(status_code=413, content={"error": "Message too long"})
@@ -286,7 +290,10 @@ async def get_history(
 @router.patch("/{msg_id}")
 async def edit_message(msg_id: int, body: EditRequest,
                        current_user: dict = Depends(get_current_user)):
-    if not body.content.strip():
+    # `.strip()` only for the empty-check — store the original bytes
+    # so newlines / leading whitespace in edited messages round-trip
+    # cleanly through the API.
+    if not (body.content or "").strip():
         return JSONResponse(status_code=400, content={"error": "Message cannot be empty"})
     if len(body.content) > 10000:
         return JSONResponse(status_code=413, content={"error": "Message too long"})

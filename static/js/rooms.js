@@ -1650,6 +1650,16 @@ const Rooms = (() => {
       const bBody = document.getElementById('ch-bridges-public-body');
       if (bWarn) bWarn.style.display = isPrivate ? 'block' : 'none';
       if (bBody) bBody.style.display = isPrivate ? 'none' : 'block';
+      // Theme tab: private channels hide bgImage + custom CSS entirely
+      // (server also rejects them). Public channels show a warning that
+      // CSS is allowed but background images are proxied. Color fields
+      // (bg / text / accent) are always visible above this wrapper.
+      const tAdv = document.getElementById('ch-theme-advanced-fields');
+      const tPrivNotice = document.getElementById('ch-theme-private-notice');
+      const tPubWarn = document.getElementById('ch-theme-public-warning');
+      if (tAdv) tAdv.style.display = isPrivate ? 'none' : '';
+      if (tPrivNotice) tPrivNotice.style.display = isPrivate ? 'block' : 'none';
+      if (tPubWarn) tPubWarn.style.display = isPrivate ? 'none' : 'block';
     } catch (e) { console.warn('[rooms] enc/rotate UI setup failed', e); }
     
     // Default to general tab
@@ -2004,13 +2014,21 @@ const Rooms = (() => {
           : (document.getElementById('ch-invite-only')?.checked ? 1 : 0),
         who_can_invite: document.getElementById('ch-who-can-invite')?.value || 'everyone',
         forwarding_disabled: document.getElementById('ch-forwarding-disabled')?.checked ? 1 : 0,
-        channel_theme: JSON.stringify({
-          bg: document.getElementById('ch-theme-bg').value,
-          text: document.getElementById('ch-theme-text').value,
-          accent: document.getElementById('ch-theme-accent').value,
-          bgImage: document.getElementById('ch-theme-bg-image').value.trim(),
-          css: document.getElementById('ch-theme-css').value.trim().slice(0, 4096)
-        })
+        channel_theme: JSON.stringify((() => {
+          // Private channels are server-rejected if `bgImage` or `css`
+          // is non-empty (per `_sanitize_channel_theme`) — strip them
+          // here so a stale value left in a hidden input can't cause a
+          // 400 on save. Color fields ship for both privacy tiers.
+          const isPriv = (_currentRoomData?.room?.type === 'private');
+          const payload = {
+            bg: document.getElementById('ch-theme-bg').value,
+            text: document.getElementById('ch-theme-text').value,
+            accent: document.getElementById('ch-theme-accent').value,
+            bgImage: isPriv ? '' : (document.getElementById('ch-theme-bg-image').value.trim()),
+            css: isPriv ? '' : (document.getElementById('ch-theme-css').value.trim().slice(0, 4096)),
+          };
+          return payload;
+        })())
       })
     });
     

@@ -366,7 +366,20 @@ async def websocket_endpoint(
                 continue
             try:
                 data = json.loads(raw)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as _je:
+                # Previously this silently dropped malformed frames,
+                # which made the client look like it was sending into
+                # the void when a JSON serializer messed up an escape.
+                # Surface a short error frame so the client (or a
+                # logging proxy) can see what happened.
+                try:
+                    await manager.send_personal(websocket, {
+                        "type": "error",
+                        "error": "invalid_json",
+                        "detail": str(_je)[:200],
+                    })
+                except Exception:
+                    pass
                 continue
 
             try:
@@ -413,12 +426,15 @@ async def websocket_endpoint(
                             pass
                         break
 
-                content = str(data.get("content", "")).strip()
+                # Preserve internal whitespace so multi-line messages
+                # and pasted code-blocks aren't corrupted; only the
+                # empty-check uses `.strip()`.
+                content = str(data.get("content", ""))
                 media_data = data.get("media_data")
                 media_type = data.get("media_type")
                 reply_to = data.get("reply_to")
 
-                if not content and not media_data:
+                if not content.strip() and not media_data:
                     continue
                 if content and len(content) > MAX_MSG_LEN:
                     await manager.send_personal(websocket, {"type": "error", "text": "Message too long"})
@@ -564,8 +580,9 @@ async def websocket_endpoint(
             # ── Edit message ──────────────────────────────────────────
             elif msg_type == "edit":
                 msg_id = int(data.get("id", 0))
-                new_content = str(data.get("content", "")).strip()
-                if not new_content or len(new_content) > MAX_MSG_LEN:
+                # Keep internal whitespace; only the empty-check trims.
+                new_content = str(data.get("content", ""))
+                if not new_content.strip() or len(new_content) > MAX_MSG_LEN:
                     continue
                 # Check if user is room owner
                 room_info = db.get_room_by_name(room_name)
@@ -639,13 +656,15 @@ async def websocket_endpoint(
             # ── DM message (real-time relay) ──────────────────────────
             elif msg_type == "dm_message":
                 channel_id = int(data.get("channel_id", 0))
-                content = str(data.get("content", "")).strip()
+                # Preserve original bytes so Signal envelopes and
+                # multi-line plaintext both round-trip cleanly.
+                content = str(data.get("content", ""))
                 media_data = data.get("media_data")
                 media_type_dm = data.get("media_type")
                 media_name = data.get("media_name")
                 reply_to_dm = data.get("reply_to")
 
-                if not content and not media_data:
+                if not content.strip() and not media_data:
                     continue
 
                 # Verify membership
