@@ -28,7 +28,7 @@ SSH_OPTS=(-o StrictHostKeyChecking=no
 # Remote paths are relative to REMOTE_BASE.
 DEFAULT_FILES=(
   "static/index.html:static/index.html"
-  "static/sw.js:sw.js"
+  "static/sw.js:static/sw.js"
   "static/js/media.js:static/js/media.js"
   "static/js/messages.js:static/js/messages.js"
   "static/js/notifications.js:static/js/notifications.js"
