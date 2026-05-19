@@ -208,32 +208,43 @@ const WS = (() => {
         break;
       }
       case 'edit': {
-        // Server broadcasts the new content in the SAME ciphertext form it
-        // received it (so E2E stays intact). Decrypt before rendering.
+        const hasContent = Object.prototype.hasOwnProperty.call(data, 'content');
+        const hasMediaBlur = Object.prototype.hasOwnProperty.call(data, 'media_blur');
+        // Server broadcasts content in the same ciphertext form it received.
+        // Decrypt before rendering when content was part of this edit payload.
         let plain = data.content;
-        try {
-          const ver = parseInt(data.key_version, 10) || 0;
-          let key = State.roomKeys[room];
-          let aad = null;
-          if (ver > 0 && window.Rooms && typeof Rooms.getRoomKeyForVersion === 'function') {
-            try { key = (await Rooms.getRoomKeyForVersion(room, ver)) || key; } catch {}
-            try {
-              const r = (State.rooms || []).find(x => x.name === room);
-              if (r && r.id) aad = Rooms.aadForRoom(r.id, ver);
-            } catch {}
-          }
-          if (key && data.content) {
-            const p = await Crypto.decrypt(data.content, key, aad || undefined);
-            if (p !== null) plain = p;
-          }
-        } catch {}
-        // Keep the local cache in sync so re-renders and replies see plaintext.
+        if (hasContent) {
+          try {
+            const ver = parseInt(data.key_version, 10) || 0;
+            let key = State.roomKeys[room];
+            let aad = null;
+            if (ver > 0 && window.Rooms && typeof Rooms.getRoomKeyForVersion === 'function') {
+              try { key = (await Rooms.getRoomKeyForVersion(room, ver)) || key; } catch {}
+              try {
+                const r = (State.rooms || []).find(x => x.name === room);
+                if (r && r.id) aad = Rooms.aadForRoom(r.id, ver);
+              } catch {}
+            }
+            if (key && data.content) {
+              const p = await Crypto.decrypt(data.content, key, aad || undefined);
+              if (p !== null) plain = p;
+            }
+          } catch {}
+        }
+        // Keep the local cache in sync so re-renders and replies see updates.
         try {
           const cache = State.messages?.[room] || [];
           const m = cache.find(x => x.id === data.id);
-          if (m) { m.content = plain; m.edited = 1; }
+          if (m) {
+            if (hasContent) m.content = plain;
+            if (hasMediaBlur) m.media_blur = data.media_blur ? 1 : 0;
+            m.edited = 1;
+          }
         } catch {}
-        Messages.updateEdited(data.id, plain, room);
+        Messages.updateEdited(data.id, hasContent ? plain : null, room, {
+          hasContent,
+          media_blur: hasMediaBlur ? (data.media_blur ? 1 : 0) : undefined,
+        });
         break;
       }
       case 'delete': {
@@ -242,6 +253,10 @@ const WS = (() => {
       }
       case 'preview_suppress': {
         try { Messages.applyPreviewSuppress?.(data.id); } catch {}
+        break;
+      }
+      case 'media_blur': {
+        try { Messages.applyMediaBlur?.(data.id, !!data.blur, data.room); } catch {}
         break;
       }
       case 'dm_preview_suppress': {

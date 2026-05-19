@@ -1262,24 +1262,60 @@ def get_message(msg_id: int) -> Optional[Dict]:
     return dict(row) if row else None
 
 
-def edit_message(msg_id: int, user_id: int, new_content: str, is_admin: bool, is_room_owner: bool = False, key_version: Optional[int] = None) -> bool:
-    # NOTE: room owners and moderators CANNOT edit other users' messages
-    # (only the author or a global admin may). They can still delete via
-    # delete_message(). `is_room_owner` is accepted for API stability but
-    # intentionally ignored here.
+def edit_message(
+    msg_id: int,
+    user_id: int,
+    new_content: Optional[str],
+    is_admin: bool,
+    is_room_owner: bool = False,
+    key_version: Optional[int] = None,
+    media_blur: Optional[int] = None,
+    can_moderate_media: bool = False,
+) -> bool:
+    # Text edits remain author/admin only. Media spoiler edits are allowed for
+    # channel moderators/owners/admins so they can quickly hide sensitive media.
     with _conn() as con:
-        row = con.execute("SELECT user_id FROM messages WHERE id=?", (msg_id,)).fetchone()
+        row = con.execute(
+            "SELECT user_id, media_type FROM messages WHERE id=?",
+            (msg_id,),
+        ).fetchone()
         if not row:
             return False
-        if not is_admin and row["user_id"] != user_id:
+        is_author = int(row["user_id"]) == int(user_id)
+        # Text edits are author-only. Moderation actions for others are
+        # delete/hide media blur, not content mutation.
+        can_edit_text = is_author
+        can_edit_media = can_edit_text or bool(is_room_owner) or bool(can_moderate_media) or bool(is_admin)
+
+        updates = []
+        params = []
+
+        if new_content is not None:
+            if not can_edit_text:
+                return False
+            updates.append("content=?")
+            params.append(new_content)
+            if key_version is not None:
+                updates.append("key_version=?")
+                params.append(int(key_version or 0))
+            updates.append("edited=1")
+
+        if media_blur is not None:
+            if not can_edit_media:
+                return False
+            media_type = str(row["media_type"] or "")
+            # Blur spoilers only make sense for visual media.
+            if media_type.startswith("audio"):
+                media_blur = 0
+            updates.append("media_blur=?")
+            params.append(1 if int(media_blur or 0) else 0)
+            updates.append("edited=1")
+
+        if not updates:
             return False
-        if key_version is not None:
-            con.execute(
-                "UPDATE messages SET content=?, edited=1, key_version=? WHERE id=?",
-                (new_content, int(key_version or 0), msg_id),
-            )
-        else:
-            con.execute("UPDATE messages SET content=?, edited=1 WHERE id=?", (new_content, msg_id))
+
+        params.append(msg_id)
+        con.execute(f"UPDATE messages SET {', '.join(updates)} WHERE id=?", tuple(params))
         con.commit()
     return True
 
@@ -1292,6 +1328,31 @@ def delete_message(msg_id: int, user_id: int, is_admin: bool, is_room_owner: boo
         if not is_admin and not is_room_owner and row["user_id"] != user_id:
             return False
         con.execute("DELETE FROM messages WHERE id=?", (msg_id,))
+        con.commit()
+    return True
+
+
+def set_message_media_blur(msg_id: int, blur: int, user_id: int,
+                           is_admin: bool = False, is_room_owner: bool = False) -> bool:
+    """Toggle the spoiler/blur flag on a room message's media.
+
+    Permitted callers: the original author, a global admin, or anyone with
+    moderator/owner rights in the room (signalled by `is_room_owner`, which
+    the router resolves via `can_moderate_room`). Returns False if the
+    message does not exist or the caller lacks permission.
+    """
+    with _conn() as con:
+        row = con.execute(
+            "SELECT user_id FROM messages WHERE id=?", (msg_id,)
+        ).fetchone()
+        if not row:
+            return False
+        if not (is_admin or is_room_owner or row["user_id"] == user_id):
+            return False
+        con.execute(
+            "UPDATE messages SET media_blur=? WHERE id=?",
+            (1 if blur else 0, msg_id),
+        )
         con.commit()
     return True
 

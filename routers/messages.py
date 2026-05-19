@@ -47,7 +47,8 @@ def _is_allowed_media_payload(payload: Optional[str]) -> bool:
 
 
 class EditRequest(BaseModel):
-    content: str
+    content: Optional[str] = None
+    media_blur: Optional[int] = None
 
 
 class ReactionRequest(BaseModel):
@@ -290,34 +291,61 @@ async def get_history(
 @router.patch("/{msg_id}")
 async def edit_message(msg_id: int, body: EditRequest,
                        current_user: dict = Depends(get_current_user)):
-    # `.strip()` only for the empty-check — store the original bytes
-    # so newlines / leading whitespace in edited messages round-trip
-    # cleanly through the API.
-    if not (body.content or "").strip():
-        return JSONResponse(status_code=400, content={"error": "Message cannot be empty"})
-    if len(body.content) > 10000:
-        return JSONResponse(status_code=413, content={"error": "Message too long"})
-    ok = db.edit_message(msg_id, current_user["id"], body.content, bool(current_user.get("is_admin")))
+    # Supports text edits + media spoiler blur toggles.
+    if body.content is None and body.media_blur is None:
+        return JSONResponse(status_code=400, content={"error": "No changes provided"})
+
+    if body.content is not None:
+        # `.strip()` only for the empty-check — store the original bytes
+        # so newlines / leading whitespace in edited messages round-trip
+        # cleanly through the API.
+        if not (body.content or "").strip():
+            return JSONResponse(status_code=400, content={"error": "Message cannot be empty"})
+        if len(body.content) > 10000:
+            return JSONResponse(status_code=413, content={"error": "Message too long"})
+
+    msg = db.get_message(msg_id) if hasattr(db, "get_message") else None
+    room_name = (msg or {}).get("room_name")
+    can_moderate_media = False
+    if room_name:
+        try:
+            can_moderate_media = db.can_moderate_room(
+                room_name, current_user["id"], bool(current_user.get("is_admin"))
+            )
+        except Exception:
+            can_moderate_media = False
+
+    ok = db.edit_message(
+        msg_id,
+        current_user["id"],
+        body.content,
+        bool(current_user.get("is_admin")),
+        is_room_owner=False,
+        key_version=None,
+        media_blur=(int(body.media_blur) if body.media_blur is not None else None),
+        can_moderate_media=can_moderate_media,
+    )
     if not ok:
         return JSONResponse(status_code=403, content={"error": "Cannot edit this message"})
     # Broadcast the edit + mirror it onto every linked bridge so the
     # change shows up everywhere it was originally posted.
     try:
-        msg = db.get_message(msg_id) if hasattr(db, "get_message") else None
-        room_name = (msg or {}).get("room_name")
         if room_name:
-            await manager.broadcast_room(room_name, {
-                "type": "edit", "id": msg_id,
-                "content": body.content, "room": room_name,
-            })
-            try:
-                import bridge_outbound
-                bridge_outbound.forward_user_edit(
-                    room_name, msg_id, body.content,
-                    nickname=current_user.get("nickname"),
-                )
-            except Exception:
-                pass
+            payload = {"type": "edit", "id": msg_id, "room": room_name}
+            if body.content is not None:
+                payload["content"] = body.content
+            if body.media_blur is not None:
+                payload["media_blur"] = 1 if int(body.media_blur) else 0
+            await manager.broadcast_room(room_name, payload)
+            if body.content is not None:
+                try:
+                    import bridge_outbound
+                    bridge_outbound.forward_user_edit(
+                        room_name, msg_id, body.content,
+                        nickname=current_user.get("nickname"),
+                    )
+                except Exception:
+                    pass
     except Exception:
         pass
     return {"ok": True}
@@ -353,6 +381,47 @@ async def delete_message(msg_id: int, current_user: dict = Depends(get_current_u
         except Exception:
             pass
     return {"ok": True}
+
+
+class SpoilerRequest(BaseModel):
+    blur: int = 1
+
+
+@router.post("/{msg_id}/spoiler")
+async def toggle_message_spoiler(msg_id: int, body: SpoilerRequest,
+                                 current_user: dict = Depends(get_current_user)):
+    """Apply or clear the blur/spoiler flag on a message's media.
+
+    Allowed for the original author, node admins, and channel owners /
+    moderators of the room the message lives in. We resolve the room from
+    the message itself rather than trusting client input.
+    """
+    is_room_owner = False
+    room_name = None
+    try:
+        msg = db.get_message(msg_id) if hasattr(db, "get_message") else None
+        if msg and msg.get("room_name"):
+            room_name = msg["room_name"]
+            is_room_owner = db.can_moderate_room(
+                room_name, current_user["id"], bool(current_user.get("is_admin"))
+            )
+    except Exception:
+        is_room_owner = False
+    ok = db.set_message_media_blur(
+        msg_id, int(body.blur or 0), current_user["id"],
+        bool(current_user.get("is_admin")), is_room_owner,
+    )
+    if not ok:
+        return JSONResponse(status_code=403, content={"error": "Cannot edit this message"})
+    if room_name:
+        try:
+            await manager.broadcast_room(room_name, {
+                "type": "media_blur", "id": msg_id,
+                "blur": 1 if body.blur else 0, "room": room_name,
+            })
+        except Exception:
+            pass
+    return {"ok": True, "blur": 1 if body.blur else 0}
 
 
 @router.post("/{msg_id}/preview-suppress")

@@ -692,6 +692,103 @@ const Messages = (() => {
     applyPreviewSuppress(msgId);
   }
 
+  // ── Spoiler / blur toggle (author + room owner / mod + node admin) ───
+  // Posts to the new /messages/<id>/spoiler endpoint; server broadcasts
+  // a `media_blur` WS event back so every connected client re-renders the
+  // media bubble (blurred ↔ visible).
+  async function toggleSpoiler(msgId) {
+    let cur = 0;
+    try {
+      const arr = State.messages?.[State.currentRoom] || [];
+      const m = arr.find(x => x && +x.id === +msgId);
+      if (m) cur = m.media_blur ? 1 : 0;
+    } catch {}
+    const next = cur ? 0 : 1;
+    try {
+      const res = await apiFetch(`/api/messages/${msgId}/spoiler`, 'POST', { blur: next });
+      if (!res.ok) {
+        try { UI.toast(`Could not toggle spoiler (${res.status})`); } catch {}
+        return;
+      }
+    } catch {
+      try { UI.toast('Network error toggling spoiler'); } catch {}
+      return;
+    }
+    applyMediaBlur(msgId, !!next, State.currentRoom);
+  }
+
+  // Apply a blur-state change broadcast to every client (including ours).
+  // Updates the in-memory cache so navigating away and back still reflects
+  // the new state, then surgically replaces the media element in place so
+  // we don't blow away unrelated DOM (reactions, link previews, etc.).
+  function applyMediaBlur(msgId, blur, room) {
+    try {
+      Object.values(State.messages || {}).forEach(arr => {
+        if (!Array.isArray(arr)) return;
+        const m = arr.find(x => x && +x.id === +msgId);
+        if (m) m.media_blur = blur ? 1 : 0;
+      });
+    } catch {}
+    const msgEl = document.getElementById(`msg-${msgId}`);
+    if (!msgEl) return;
+    // Look up the freshly-updated cache entry so _buildMediaHtml renders
+    // with the new flag. Fall back to a minimal stub if we somehow don't
+    // have the message cached (shouldn't happen, but keeps the UI alive).
+    let cached = null;
+    try {
+      for (const arr of Object.values(State.messages || {})) {
+        if (!Array.isArray(arr)) continue;
+        const m = arr.find(x => x && +x.id === +msgId);
+        if (m) { cached = m; break; }
+      }
+    } catch {}
+    if (!cached) return;
+    const selectors = [
+      `#sp-${msgId}`,           // existing spoiler-wrap (was blurred)
+      `#vo-${msgId}`,           // view-once wrap (we keep it as-is below)
+      `#media-lazy-${msgId}`,   // history lazy stub
+      `#audio-${msgId}`,        // audio bubble
+      '.spoiler-wrap',
+      '.chat-video',
+      '.msg-media',
+      '.frog-sticker-mount',
+    ];
+    let mediaEl = null;
+    for (const sel of selectors) {
+      mediaEl = msgEl.querySelector(sel);
+      if (mediaEl) break;
+    }
+    const newHtml = _buildMediaHtml(cached);
+    if (mediaEl) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = newHtml;
+      const replacement = tmp.firstElementChild;
+      if (replacement) {
+        mediaEl.replaceWith(replacement);
+      } else {
+        mediaEl.remove();
+      }
+    } else {
+      // No existing media node (e.g. caption-only render path) — append
+      // the rebuilt node next to the message content as a best-effort.
+      const body = msgEl.querySelector('.msg-content') || msgEl;
+      const tmp = document.createElement('div');
+      tmp.innerHTML = newHtml;
+      const replacement = tmp.firstElementChild;
+      if (replacement) body.insertAdjacentElement('afterend', replacement);
+    }
+    // Repaint the inline action-button icon so it reflects the new state
+    // without re-rendering the whole message.
+    try {
+      const btn = msgEl.querySelector('.msg-spoiler-btn');
+      if (btn) {
+        btn.textContent = blur ? '👁️‍🗨️' : '👁️';
+        btn.title = blur ? 'Remove spoiler' : 'Mark as spoiler';
+        btn.dataset.blur = blur ? '1' : '0';
+      }
+    } catch {}
+  }
+
   function applyPreviewSuppress(msgId) {
     // Update cached state across all rooms so a re-render (e.g. switching
     // back to the room) doesn't resurrect the embed.
@@ -1584,11 +1681,22 @@ const Messages = (() => {
     const isRoomMod = Array.isArray(State.currentRoomMods) && State.currentRoomMods.includes(State.user?.nickname);
     const canModerateHere = (isRoomOwner || isRoomMod || State.user?.is_admin) && State.currentRoomType !== 'dm';
     const canPin = canModerateHere;
-    // Edit: only the author can edit their own message. Global admins may edit
-    // for moderation. Room owners / mods CANNOT edit other users' messages —
-    // they can only delete.
-    const canEdit = isOwn || State.user?.is_admin;
+    // Edit: author-only. Moderation for others is delete + spoiler blur.
+    const canEdit = isOwn;
     const canDelete = isOwn || State.user?.is_admin || isRoomOwner || isRoomMod;
+    // Spoiler toggle: node admins + channel owners/mods may flip blur.
+    // We hide the button for audio
+    // (no blur UI) and for view-once payloads (the reveal flow handles
+    // its own scrim) and only show it on messages that actually carry
+    // image/video media.
+    const _mediaTypeStr = String(msg.media_type || '');
+    const _hasVisualMedia = !!(msg.media_data || msg.has_media || msg.media_blur)
+      && !_mediaTypeStr.startsWith('audio')
+      && !msg.view_once;
+    const canToggleSpoiler = _hasVisualMedia && canModerateHere;
+    const spoilerBtnHtml = canToggleSpoiler
+      ? `<button class="msg-act-btn msg-spoiler-btn" data-blur="${msg.media_blur ? 1 : 0}" title="${msg.media_blur ? 'Remove spoiler' : 'Mark as spoiler'}" onclick="Messages.toggleSpoiler(${msg.id})">${msg.media_blur ? '👁️‍🗨️' : '👁️'}</button>`
+      : '';
     const showAdminControls = State.user?.is_admin && !isOwn;
     // Owner / mod / admin can kick/ban other users at the room level
     // (admins were previously excluded, leaving node admins without an
@@ -1625,6 +1733,7 @@ const Messages = (() => {
         ${State.currentRoomForwardingDisabled ? '' : `<button class="msg-act-btn" title="Forward" onclick="Messages.forwardMessage(${msg.id})">📤</button>`}
         ${canPin ? `<button class="msg-act-btn" title="Pin" onclick="pinMessage(${msg.id})">📌</button>` : ''}
         ${canEdit ? `<button class="msg-act-btn" title="Edit" onclick="Messages.startEdit(${msg.id})">✏️</button>` : ''}
+        ${spoilerBtnHtml}
         ${canDelete ? `<button class="msg-act-btn danger" title="Delete" onclick="Messages.deleteMsg(${msg.id})">🗑️</button>` : ''}
         ${ownerModActions}
         ${adminActions}
@@ -3157,7 +3266,7 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
