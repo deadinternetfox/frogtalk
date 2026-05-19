@@ -285,6 +285,10 @@ const WS = (() => {
         try { window.applyDMPreviewSuppress?.(data.id); } catch {}
         break;
       }
+      case 'dm_media_blur': {
+        try { window.applyDMMediaBlur?.(data.id, !!data.blur, data.channel_id); } catch {}
+        break;
+      }
       case 'reaction': {
         Messages.updateReactions(data.id, data.reactions);
         break;

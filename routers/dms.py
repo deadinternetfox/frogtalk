@@ -61,6 +61,10 @@ class EditDMBody(BaseModel):
     content: str
 
 
+class DMSpoilerRequest(BaseModel):
+    blur: int = 1
+
+
 @router.post("/open/{nickname}")
 @limiter.limit("60/hour")
 async def open_dm(request: Request, nickname: str, current_user: dict = Depends(get_current_user)):
@@ -464,6 +468,34 @@ async def react(channel_id: int, msg_id: int, body: dict,
         return JSONResponse(status_code=400, content={"error": "No emoji"})
     counts = db.toggle_dm_reaction(msg_id, current_user["id"], emoji)
     return {"reactions": counts}
+
+
+@router.post("/{channel_id}/messages/{msg_id}/spoiler")
+async def toggle_dm_spoiler(channel_id: int, msg_id: int, body: DMSpoilerRequest,
+                            current_user: dict = Depends(get_current_user)):
+    """Apply or clear blur/spoiler on DM visual media. Channel participants only."""
+    cid = db.set_dm_message_media_blur(msg_id, int(body.blur or 0), current_user["id"])
+    if cid is None or int(cid) != int(channel_id):
+        return JSONResponse(status_code=403, content={"error": "Cannot edit this message"})
+    blur_val = 1 if body.blur else 0
+    try:
+        with db._conn() as con:
+            ch = con.execute(
+                "SELECT user_a, user_b FROM dm_channels WHERE id=?", (cid,)
+            ).fetchone()
+        if ch:
+            payload = {
+                "type": "dm_media_blur",
+                "id": msg_id,
+                "channel_id": cid,
+                "blur": blur_val,
+            }
+            for uid in (ch["user_a"], ch["user_b"]):
+                if uid:
+                    await manager.send_to_user(uid, payload)
+    except Exception:
+        pass
+    return {"ok": True, "blur": blur_val}
 
 
 @router.post("/{channel_id}/messages/{msg_id}/preview-suppress")

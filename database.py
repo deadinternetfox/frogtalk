@@ -4406,6 +4406,34 @@ def edit_dm_message(msg_id: int, user_id: int, new_content: str) -> bool:
     return True
 
 
+def set_dm_message_media_blur(msg_id: int, blur: int, user_id: int) -> Optional[int]:
+    """Toggle spoiler/blur on a DM message. Returns channel_id on success.
+
+    Any participant in the DM channel may blur/unblur visual media (not audio).
+    """
+    with _conn() as con:
+        row = con.execute(
+            "SELECT dm.channel_id, dm.media_type, dc.user_a, dc.user_b "
+            "FROM dm_messages dm "
+            "JOIN dm_channels dc ON dm.channel_id = dc.id "
+            "WHERE dm.id=? AND dm.deleted=0",
+            (msg_id,),
+        ).fetchone()
+        if not row:
+            return None
+        if user_id not in (row["user_a"], row["user_b"]):
+            return None
+        media_type = str(row["media_type"] or "")
+        if media_type.startswith("audio"):
+            blur = 0
+        con.execute(
+            "UPDATE dm_messages SET media_blur=? WHERE id=?",
+            (1 if blur else 0, msg_id),
+        )
+        con.commit()
+        return int(row["channel_id"])
+
+
 def delete_dm_message(msg_id: int, user_id: int) -> bool:
     with _conn() as con:
         row = con.execute(

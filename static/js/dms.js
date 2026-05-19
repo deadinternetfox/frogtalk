@@ -1642,7 +1642,8 @@ function renderDMMessage (m) {
   } else if (m.has_media) {
     // Auto-loading stub (IntersectionObserver kicks in via _observeDMLazyMedia).
     const icon = mimeType?.startsWith('video') ? '🎬' : mimeType?.startsWith('audio') ? '🎵' : '🖼️';
-    mediaHtml = `<div class="media-lazy auto" id="dm-media-lazy-${m.id}" data-msg-id="${m.id}" data-channel-id="${m.channel_id || _activeDM?.id || ''}" data-media-type="${esc(mimeType)}">
+    const blurAttr = isBlurred ? ' data-blur="1"' : '';
+    mediaHtml = `<div class="media-lazy auto" id="dm-media-lazy-${m.id}" data-msg-id="${m.id}" data-channel-id="${m.channel_id || _activeDM?.id || ''}" data-media-type="${esc(mimeType)}"${blurAttr}>
       <div class="media-lazy-placeholder media-lazy-auto" onclick="loadDMMedia(${m.id}, ${m.channel_id || _activeDM?.id || 0})">
         <span class="media-lazy-icon" style="font-size:20px">${icon}</span>
         <span class="media-lazy-spinner" aria-hidden="true"></span>
@@ -1760,6 +1761,14 @@ function renderDMMessage (m) {
   const fwdBadge = (typeof Messages !== 'undefined' && Messages.forwardedBadgeHtml) ? Messages.forwardedBadgeHtml(m) : '';
   const isForwarded = !!(m && m.forwarded_from);
   const messageTextHtml = (!isForwarded && contentHtml) ? `<div class="msg-content">${contentHtml}</div>` : '';
+  const _hasVisualDmMedia = !!(mediaUrl || m.has_media || m.media_blur)
+    && !mimeType.startsWith('audio/')
+    && !m.view_once
+    && !isViewOnceConsumed;
+  const canToggleDMSpoiler = _hasVisualDmMedia;
+  const spoilerBtnHtml = canToggleDMSpoiler
+    ? `<button class="msg-act-btn msg-spoiler-btn" data-blur="${m.media_blur ? 1 : 0}" title="${m.media_blur ? 'Remove spoiler' : 'Mark as spoiler'}" onclick="toggleDMSpoiler(${m.id})">${m.media_blur ? '👁️‍🗨️' : '👁️'}</button>`
+    : '';
   // SECURITY: reply button stores reply context in data-* attrs and reads
   // them back via this.dataset.* so DM plaintext NEVER ends up interpolated
   // into a JS-string-in-HTML-attr context. The previous form
@@ -1776,6 +1785,7 @@ function renderDMMessage (m) {
       <button class="msg-act-btn" title="React" onclick="showDMReactMenu(${m.id}, this)">😀</button>
       <button class="msg-act-btn" title="Copy" onclick="Messages.copyMessage(${m.id})">📋</button>
       ${fwdDisabled ? '' : `<button class="msg-act-btn" title="Forward" onclick="forwardDMMessage(${m.id})">📤</button>`}
+      ${spoilerBtnHtml}
       ${mine ? `<button class="msg-act-btn" title="Edit" onclick="editDMMsg(${m.id})">✏️</button>` : ''}
       <button class="msg-act-btn danger" title="Delete" onclick="deleteDMMsg(${m.id})">🗑️</button>
     </div>
@@ -1816,6 +1826,170 @@ function _dmReactionHtml (reactions, msgId) {
   if (!pills) return '';
   return `<div class="msg-reactions">${pills}</div>`;
 }
+
+function _updateDMSpoilerBtn(msgEl, blur) {
+  try {
+    const btn = msgEl.querySelector('.msg-spoiler-btn');
+    if (btn) {
+      btn.textContent = blur ? '👁️‍🗨️' : '👁️';
+      btn.title = blur ? 'Remove spoiler' : 'Mark as spoiler';
+      btn.dataset.blur = blur ? '1' : '0';
+    }
+  } catch {}
+}
+
+function _wrapDMNodeInSpoiler(msgId, node, mediaUrl) {
+  if (!node || node.closest(`#sp-dm-${msgId}`)) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'spoiler-wrap';
+  wrap.id = `sp-dm-${msgId}`;
+  wrap.dataset.media = mediaUrl || '';
+  wrap.onclick = (e) => revealDMSpoiler(wrap, e);
+  wrap.innerHTML = '<div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>';
+  if (node.classList?.contains('msg-media')) {
+    node.classList.add('spoiler-img');
+    node.removeAttribute('onclick');
+  }
+  const parent = node.parentNode;
+  if (!parent) return;
+  parent.insertBefore(wrap, node);
+  wrap.appendChild(node);
+}
+
+function _unwrapDMSpoiler(msgId) {
+  const wrap = document.getElementById(`sp-dm-${msgId}`);
+  if (!wrap) return;
+  const url = wrap.dataset.media || '';
+  const inner = wrap.querySelector('.chat-video, .frog-sticker-mount, .msg-media, img.clickable-media, video.msg-media');
+  if (!inner) {
+    wrap.remove();
+    return;
+  }
+  inner.classList.remove('spoiler-img');
+  wrap.replaceWith(inner);
+  const img = inner.matches?.('img.msg-media') ? inner : inner.querySelector?.('img.msg-media');
+  if (img && url) {
+    img.setAttribute('data-lburl', url);
+    img.onclick = () => { try { openLightbox(url); } catch {} };
+  }
+  try {
+    if (inner.classList?.contains('chat-video') && window.ChatVideo?.scan) {
+      ChatVideo.scan(document);
+    }
+  } catch {}
+}
+
+function _findDMSpoilerWrapTarget(msgEl, msgId) {
+  if (msgEl.querySelector(`#vo-dm-${msgId}`)) return null;
+  if (msgEl.querySelector(`#sp-dm-${msgId}`)) return null;
+  const chatVideo = msgEl.querySelector('.chat-video');
+  if (chatVideo) return chatVideo;
+  const sticker = msgEl.querySelector('.frog-sticker-mount');
+  if (sticker) return sticker;
+  const img = msgEl.querySelector('img.msg-media, img.clickable-media');
+  if (img) return img;
+  const video = msgEl.querySelector('video.msg-media');
+  if (video && !video.closest('.chat-video')) return video;
+  return null;
+}
+
+function applyDMMediaBlur(msgId, blur, channelId) {
+  _dmMessages.forEach(m => {
+    if (m && +m.id === +msgId) m.media_blur = blur ? 1 : 0;
+  });
+  if (!_activeDM || +_activeDM.id !== +channelId) return;
+  const msgEl = document.getElementById(`msg-${msgId}`);
+  if (!msgEl) return;
+  const cached = _dmMessages.find(x => x && +x.id === +msgId);
+  const mediaUrl = cached?.media_url || cached?.media_data || '';
+
+  const spoilerWrap = document.getElementById(`sp-dm-${msgId}`);
+  const lazyEl = document.getElementById(`dm-media-lazy-${msgId}`);
+
+  if (!blur && spoilerWrap) {
+    _unwrapDMSpoiler(msgId);
+    _updateDMSpoilerBtn(msgEl, blur);
+    return;
+  }
+
+  if (blur && spoilerWrap) {
+    spoilerWrap.classList.remove('revealed');
+    spoilerWrap.onclick = (e) => revealDMSpoiler(spoilerWrap, e);
+    _updateDMSpoilerBtn(msgEl, blur);
+    return;
+  }
+
+  if (blur) {
+    const target = _findDMSpoilerWrapTarget(msgEl, msgId);
+    if (target) {
+      _wrapDMNodeInSpoiler(msgId, target, mediaUrl);
+      _updateDMSpoilerBtn(msgEl, blur);
+      try { Messages?.hydrateStickers?.(msgEl); } catch {}
+      return;
+    }
+    if (lazyEl) {
+      lazyEl.setAttribute('data-blur', '1');
+      loadDMMedia(msgId, channelId);
+      _updateDMSpoilerBtn(msgEl, blur);
+      return;
+    }
+  }
+
+  if (!blur && lazyEl) {
+    lazyEl.setAttribute('data-blur', '0');
+    _updateDMSpoilerBtn(msgEl, blur);
+    return;
+  }
+
+  if (cached && !cached.media_url && !cached.media_data && cached.has_media) {
+    if (blur) {
+      if (!lazyEl) {
+        const icon = (cached.media_type || '').startsWith('video') ? '🎬' : '🖼️';
+        const stub = document.createElement('div');
+        stub.className = 'media-lazy auto';
+        stub.id = `dm-media-lazy-${msgId}`;
+        stub.dataset.msgId = String(msgId);
+        stub.dataset.channelId = String(channelId);
+        stub.dataset.blur = '1';
+        stub.innerHTML = `<div class="media-lazy-placeholder media-lazy-auto" onclick="loadDMMedia(${msgId}, ${channelId})">
+          <span class="media-lazy-icon" style="font-size:20px">${icon}</span>
+          <span class="media-lazy-spinner" aria-hidden="true"></span>
+          <span style="font-size:12px;color:#85a89a">Loading media…</span>
+        </div>`;
+        const anchor = msgEl.querySelector('.msg-content') || msgEl.querySelector('.msg-body') || msgEl;
+        anchor.appendChild(stub);
+        _observeDMLazyMedia(msgEl);
+      } else {
+        lazyEl.setAttribute('data-blur', '1');
+      }
+      loadDMMedia(msgId, channelId);
+    }
+    _updateDMSpoilerBtn(msgEl, blur);
+    return;
+  }
+
+  _updateDMSpoilerBtn(msgEl, blur);
+}
+window.applyDMMediaBlur = applyDMMediaBlur;
+
+async function toggleDMSpoiler(msgId) {
+  if (!_activeDM) return;
+  const m = _dmMessages.find(x => x && +x.id === +msgId);
+  if (!m) return;
+  const next = m.media_blur ? 0 : 1;
+  try {
+    const res = await apiFetch(`/api/dms/${_activeDM.id}/messages/${msgId}/spoiler`, 'POST', { blur: next });
+    if (!res.ok) {
+      toast(`Could not toggle spoiler (${res.status})`, 'error');
+      return;
+    }
+  } catch {
+    toast('Network error toggling spoiler', 'error');
+    return;
+  }
+  applyDMMediaBlur(msgId, !!next, _activeDM.id);
+}
+window.toggleDMSpoiler = toggleDMSpoiler;
 
 /* Reveal a DM spoiler on click — unblurs and restores the image click-to-open. */
 function revealDMSpoiler (wrap, ev) {
@@ -2026,6 +2200,8 @@ window.handleWSDMForwarding = handleWSDMForwarding;
 async function loadDMMedia (msgId, channelId) {
   const container = document.getElementById(`dm-media-lazy-${msgId}`);
   if (!container) return;
+  const cached = _dmMessages.find(x => x && +x.id === +msgId);
+  const isBlur = !!(cached && cached.media_blur) || container.getAttribute('data-blur') === '1';
   container.innerHTML = '<div style="padding:12px;color:#85a89a;font-size:13px">Loading…</div>';
   try {
     const res = await apiFetch(`/api/dms/${channelId}/messages/${msgId}/media`);
@@ -2068,10 +2244,24 @@ async function loadDMMedia (msgId, channelId) {
     } else {
       html = `<img src="${esc(data.media_data)}" class="msg-media" data-lburl="${esc(data.media_data)}" onclick="openLightbox(this.dataset.lburl)" loading="lazy">`;
     }
+    if (isBlur && !mediaType.startsWith('audio')) {
+      const wrappedInner = html
+        .replace('class="msg-media"', 'class="spoiler-img msg-media"')
+        .replace(/onclick="[^"]*"/, '');
+      html = `<div class="spoiler-wrap" id="sp-dm-${msgId}" onclick="revealDMSpoiler(this, event)" data-media="${esc(data.media_data)}">
+        <div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>
+        ${wrappedInner}
+      </div>`;
+    }
     container.outerHTML = html;
+    if (cached && data.media_data) {
+      cached.media_url = data.media_data;
+      cached.media_data = data.media_data;
+    }
     try {
       if (window.Messages && Messages.hydrateStickers) Messages.hydrateStickers(document);
     } catch {}
+    try { setTimeout(() => { try { ChatVideo?.scan?.(document); } catch {} }, 0); } catch {}
   } catch {
     container.innerHTML = '<div style="padding:12px;color:#d9a89f;font-size:13px">Failed to load media</div>';
   }

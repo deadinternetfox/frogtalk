@@ -717,6 +717,70 @@ const Messages = (() => {
     applyMediaBlur(msgId, !!next, State.currentRoom);
   }
 
+  function _updateSpoilerBtn(msgEl, blur) {
+    try {
+      const btn = msgEl.querySelector('.msg-spoiler-btn');
+      if (btn) {
+        btn.textContent = blur ? '👁️‍🗨️' : '👁️';
+        btn.title = blur ? 'Remove spoiler' : 'Mark as spoiler';
+        btn.dataset.blur = blur ? '1' : '0';
+      }
+    } catch {}
+  }
+
+  /** Wrap already-rendered media without rebuilding from cache (history often has no media_data). */
+  function _wrapDomNodeInSpoiler(msgId, node) {
+    if (!node || node.closest(`#sp-${msgId}`)) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'spoiler-wrap';
+    wrap.id = `sp-${msgId}`;
+    wrap.onclick = () => revealSpoiler(msgId);
+    wrap.innerHTML = '<div class="spoiler-overlay">👁️ Spoiler — Click to Reveal</div>'
+      + '<button type="button" class="spoiler-rehide" title="Hide spoiler" aria-label="Hide spoiler">👁️‍🗨️</button>';
+    const rehide = wrap.querySelector('.spoiler-rehide');
+    if (rehide) {
+      rehide.onclick = (e) => { e.stopPropagation(); hideSpoiler(msgId); };
+    }
+    if (node.classList?.contains('msg-media')) {
+      node.classList.add('spoiler-img');
+    }
+    const parent = node.parentNode;
+    if (!parent) return;
+    parent.insertBefore(wrap, node);
+    wrap.appendChild(node);
+  }
+
+  function _unwrapDomSpoiler(msgId) {
+    const wrap = document.getElementById(`sp-${msgId}`);
+    if (!wrap) return;
+    const inner = wrap.querySelector('.chat-video, .frog-sticker-mount, .msg-media, img.clickable-media, video.msg-media');
+    if (!inner) {
+      wrap.remove();
+      return;
+    }
+    inner.classList.remove('spoiler-img');
+    wrap.replaceWith(inner);
+    try {
+      if (inner.classList?.contains('chat-video') && window.ChatVideo?.upgrade) {
+        ChatVideo.upgrade(inner);
+      }
+    } catch {}
+  }
+
+  function _findSpoilerWrapTarget(msgEl, msgId) {
+    if (msgEl.querySelector(`#vo-${msgId}`)) return null;
+    if (msgEl.querySelector(`#sp-${msgId}`)) return null;
+    const chatVideo = msgEl.querySelector('.chat-video');
+    if (chatVideo) return chatVideo;
+    const sticker = msgEl.querySelector('.frog-sticker-mount');
+    if (sticker) return sticker;
+    const img = msgEl.querySelector('img.msg-media, img.clickable-media');
+    if (img) return img;
+    const video = msgEl.querySelector('video.msg-media');
+    if (video && !video.closest('.chat-video')) return video;
+    return null;
+  }
+
   // Apply a blur-state change broadcast to every client (including ours).
   // Updates the in-memory cache so navigating away and back still reflects
   // the new state, then surgically replaces the media element in place so
@@ -743,11 +807,75 @@ const Messages = (() => {
       }
     } catch {}
     if (!cached) return;
+
+    const spoilerWrap = document.getElementById(`sp-${msgId}`);
+    const lazyEl = document.getElementById(`media-lazy-${msgId}`);
+
+    if (!blur && spoilerWrap) {
+      _unwrapDomSpoiler(msgId);
+      _updateSpoilerBtn(msgEl, blur);
+      return;
+    }
+
+    if (blur && spoilerWrap) {
+      spoilerWrap.classList.remove('revealed');
+      spoilerWrap.onclick = () => revealSpoiler(msgId);
+      _updateSpoilerBtn(msgEl, blur);
+      return;
+    }
+
+    if (blur) {
+      const target = _findSpoilerWrapTarget(msgEl, msgId);
+      if (target) {
+        _wrapDomNodeInSpoiler(msgId, target);
+        _updateSpoilerBtn(msgEl, blur);
+        try { _hydrateStickers(msgEl); } catch {}
+        return;
+      }
+      if (lazyEl) {
+        lazyEl.setAttribute('data-blur', '1');
+        loadMedia(msgId);
+        _updateSpoilerBtn(msgEl, blur);
+        return;
+      }
+    }
+
+    if (!blur && lazyEl) {
+      lazyEl.setAttribute('data-blur', '0');
+      _updateSpoilerBtn(msgEl, blur);
+      return;
+    }
+
+    if (!cached.media_data && cached.has_media) {
+      if (blur) {
+        if (!lazyEl) {
+          const tmpStub = document.createElement('div');
+          tmpStub.innerHTML = _buildMediaHtml(cached);
+          const stub = tmpStub.firstElementChild;
+          if (stub) {
+            const anchor = msgEl.querySelector('.msg-content') || msgEl;
+            anchor.insertAdjacentElement('afterend', stub);
+          }
+        } else {
+          lazyEl.setAttribute('data-blur', '1');
+        }
+        loadMedia(msgId);
+        observeLazyMedia(msgEl);
+      }
+      _updateSpoilerBtn(msgEl, blur);
+      return;
+    }
+
+    if (!cached.media_data) {
+      _updateSpoilerBtn(msgEl, blur);
+      return;
+    }
+
     const selectors = [
-      `#sp-${msgId}`,           // existing spoiler-wrap (was blurred)
-      `#vo-${msgId}`,           // view-once wrap (we keep it as-is below)
-      `#media-lazy-${msgId}`,   // history lazy stub
-      `#audio-${msgId}`,        // audio bubble
+      `#sp-${msgId}`,
+      `#vo-${msgId}`,
+      `#media-lazy-${msgId}`,
+      `#audio-${msgId}`,
       '.spoiler-wrap',
       '.chat-video',
       '.msg-media',
@@ -777,16 +905,9 @@ const Messages = (() => {
       const replacement = tmp.firstElementChild;
       if (replacement) body.insertAdjacentElement('afterend', replacement);
     }
-    // Repaint the inline action-button icon so it reflects the new state
-    // without re-rendering the whole message.
-    try {
-      const btn = msgEl.querySelector('.msg-spoiler-btn');
-      if (btn) {
-        btn.textContent = blur ? '👁️‍🗨️' : '👁️';
-        btn.title = blur ? 'Remove spoiler' : 'Mark as spoiler';
-        btn.dataset.blur = blur ? '1' : '0';
-      }
-    } catch {}
+    _updateSpoilerBtn(msgEl, blur);
+    try { _hydrateStickers(msgEl); } catch {}
+    try { observeLazyMedia(msgEl); } catch {}
   }
 
   function applyPreviewSuppress(msgId) {
@@ -1684,7 +1805,7 @@ const Messages = (() => {
     // Edit: author-only. Moderation for others is delete + spoiler blur.
     const canEdit = isOwn;
     const canDelete = isOwn || State.user?.is_admin || isRoomOwner || isRoomMod;
-    // Spoiler toggle: node admins + channel owners/mods may flip blur.
+    // Spoiler toggle: author, node admins, and channel owners/mods may flip blur.
     // We hide the button for audio
     // (no blur UI) and for view-once payloads (the reveal flow handles
     // its own scrim) and only show it on messages that actually carry
@@ -1693,7 +1814,7 @@ const Messages = (() => {
     const _hasVisualMedia = !!(msg.media_data || msg.has_media || msg.media_blur)
       && !_mediaTypeStr.startsWith('audio')
       && !msg.view_once;
-    const canToggleSpoiler = _hasVisualMedia && canModerateHere;
+    const canToggleSpoiler = _hasVisualMedia && (isOwn || canModerateHere);
     const spoilerBtnHtml = canToggleSpoiler
       ? `<button class="msg-act-btn msg-spoiler-btn" data-blur="${msg.media_blur ? 1 : 0}" title="${msg.media_blur ? 'Remove spoiler' : 'Mark as spoiler'}" onclick="Messages.toggleSpoiler(${msg.id})">${msg.media_blur ? '👁️‍🗨️' : '👁️'}</button>`
       : '';
