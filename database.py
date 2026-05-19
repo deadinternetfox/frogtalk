@@ -870,7 +870,11 @@ def delete_user_account(user_id: int) -> bool:
         con.execute("DELETE FROM room_bans WHERE user_id=?", (user_id,))
         con.execute("DELETE FROM user_blocks WHERE blocker_id=? OR blocked_id=?", (user_id, user_id))
         con.execute("DELETE FROM custom_emojis WHERE uploaded_by=?", (user_id,))
-        con.execute("DELETE FROM friendships WHERE user_id=? OR friend_id=?", (user_id, user_id))
+        con.execute("DELETE FROM friends WHERE user_id=? OR friend_id=?", (user_id, user_id))
+        con.execute(
+            "DELETE FROM friend_sound_assets WHERE owner_user_id=? OR friend_user_id=?",
+            (user_id, user_id),
+        )
         con.execute("DELETE FROM dm_participants WHERE user_id=?", (user_id,))
         # Finally delete user
         con.execute("DELETE FROM users WHERE id=?", (user_id,))
