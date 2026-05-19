@@ -8682,10 +8682,34 @@ window.ConnErr = (function(){
            submit stale field values. -->
       <div id="ch-theme-advanced-fields">
         <div id="ch-theme-public-warning" style="display:none;background:rgba(33,150,243,.08);border:1px solid rgba(33,150,243,.3);border-radius:8px;padding:12px;margin-top:14px;margin-bottom:6px;font-size:13px;line-height:1.5;color:#90caf9">
-          ℹ️ <strong>Public channel.</strong> Custom CSS can change the look of this page
-          for every visitor — keep it tasteful. External background images are
-          proxied through FrogTalk so viewers' IP addresses are not exposed to the
-          image host.
+          <details style="margin:0">
+            <summary style="cursor:pointer;list-style:none;outline:none;font-size:13.5px">
+              ℹ️ <strong>Custom CSS is sandboxed.</strong>
+              Some selectors and properties are stripped on save —
+              <span style="text-decoration:underline;text-underline-offset:2px">show what's blocked</span>
+            </summary>
+            <div style="margin-top:10px;font-size:12.5px;color:#b0c8e0">
+              Rules outside the chat area, or that try to reach the rest of the
+              page, are rejected silently. The most common blockers:
+              <ul style="margin:6px 0 0 18px;padding:0;line-height:1.55">
+                <li><code>:root</code>, <code>:host</code>, <code>:scope</code>, <code>:target</code> — anything that escapes the channel scope</li>
+                <li><code>[data-theme]</code>, <code>[data-mode]</code> — platform theme attributes</li>
+                <li>Naked attribute selectors like <code>[class]</code> with no element prefix</li>
+                <li><code>@import</code>, <code>@namespace</code>, <code>@font-face</code>, <code>@charset</code>, <code>@layer</code>, <code>@container</code>, <code>@property</code> and other <code>@-rules</code></li>
+                <li>Pseudo-elements that paint outside the matched element: <code>::column</code>, <code>::part</code>, <code>::slotted</code>, <code>::backdrop</code>, view-transition pseudos, <code>::-webkit-scrollbar</code></li>
+                <li>Combinators and grouping that look like injection: <code>&gt;</code>, <code>&lt;</code>, parens, quotes, backslashes, semicolons inside selectors</li>
+                <li><code>url()</code>, <code>expression()</code>, <code>javascript:</code>, <code>behavior:</code>, <code>-moz-binding</code>, CSS hex / HTML-entity escapes, Unicode whitespace tricks</li>
+              </ul>
+              Allowed: <code>::before</code>, <code>::after</code>, <code>::first-line</code>,
+              <code>::first-letter</code>, <code>::marker</code>, <code>::placeholder</code>,
+              <code>::selection</code>, <code>:hover</code>, <code>:focus</code>,
+              <code>:active</code>, descendant chains (space-separated tags,
+              classes, IDs), and class-stacking like <code>.a.b.c</code>. Anything with parens
+              (<code>:not()</code>, <code>:nth-child()</code>, <code>calc()</code> in selectors) is
+              dropped — keep selectors simple.
+              Preview before saving — rejected rules show up as a toast.
+            </div>
+          </details>
         </div>
         <label class="modal-label">Background Image URL (optional)</label>
         <div style="display:flex;gap:8px;align-items:stretch">
