@@ -804,19 +804,22 @@ _CSP_HEADER_NAME = (
 def _build_csp_header(nonce: str) -> str:
     """Single source of truth for the CSP policy.
 
-    `nonce` is embedded into script-src / style-src so any future
-    template-emitted <script nonce="…"> works without a directive
-    rewrite. The presence of the nonce source list activates CSP3
-    behaviour on modern browsers; however, because `'unsafe-inline'`
-    is still listed (Phase A migration), modern browsers fall back
-    to allowing inline content for back-compat with the legacy
-    handlers. When we drop `'unsafe-inline'` in Phase B, modern
-    browsers will switch to nonce-only enforcement automatically.
+    Phase A keeps `'unsafe-inline'` on script-src / style-src because
+    static/index.html still has a multi-thousand-line inline <style>
+    block and hundreds of inline handlers with no nonces yet.
+
+    IMPORTANT: do NOT add `'nonce-…'` to style-src (or script-src) until
+    every inline <style>/<script> carries that nonce. In CSP3, the
+    presence of a nonce source causes browsers to ignore
+    `'unsafe-inline'`, which strips all CSS/JS and looks like a broken
+    site. `nonce` is still generated per request and stored on
+    request.state.csp_nonce for Phase B template work.
     """
+    _ = nonce  # reserved for Phase B — not emitted in directives yet
     return (
         "default-src 'self'; "
-        f"script-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://frogtalk.xyz; "
-        f"style-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://fonts.googleapis.com; "
+        "script-src 'self' 'unsafe-inline' https://frogtalk.xyz; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: blob: https:; "
         "media-src 'self' data: blob: https:; "

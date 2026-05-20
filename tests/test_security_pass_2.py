@@ -227,15 +227,14 @@ class CSPTests(unittest.TestCase):
         r = client.get("/health")
         csp = r.headers.get("content-security-policy", "")
         self.assertIn("default-src 'self'", csp)
-        self.assertIn("'nonce-", csp)
+        self.assertIn("style-src 'self' 'unsafe-inline'", csp)
+        self.assertIn("script-src 'self' 'unsafe-inline'", csp)
+        # Phase A: nonce must NOT appear in CSP directives (breaks inline
+        # <style> until every tag is nonce-tagged).
+        self.assertNotIn("'nonce-", csp)
         self.assertIn("object-src 'none'", csp)
         self.assertIn("base-uri 'self'", csp)
         self.assertIn("form-action 'self'", csp)
-        # Nonces differ between requests.
-        r2 = client.get("/health")
-        nonce1 = csp.split("'nonce-")[1].split("'")[0]
-        nonce2 = r2.headers["content-security-policy"].split("'nonce-")[1].split("'")[0]
-        self.assertNotEqual(nonce1, nonce2)
 
 
 class CSRFGuardTests(unittest.TestCase):
