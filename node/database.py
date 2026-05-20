@@ -9835,6 +9835,91 @@ def mark_federation_inbox_event(event_id: str, status: str) -> bool:
         return False
 
 
+def ensure_federated_dm_local_user(
+    global_user_id: str,
+    nickname: str,
+    *,
+    origin_server_id: str = "",
+    display_name: str = "",
+    avatar: str = "",
+) -> Optional[Dict]:
+    """Ensure a local ``users`` row exists for a signed federated DM party.
+
+    Federation profile events only populate ``federation_user_profiles``;
+    DM delivery needs a real ``users`` id for channels and WebSocket routing.
+    Only called from verified ``dm.message.created`` handlers (signed origin).
+    """
+    gid = (global_user_id or "").strip()
+    nick = (nickname or "").strip()
+    if not gid:
+        return None
+    if not nick:
+        try:
+            with _conn() as con:
+                row = con.execute(
+                    "SELECT nickname FROM federation_user_profiles WHERE global_user_id=? LIMIT 1",
+                    (gid,),
+                ).fetchone()
+            if row:
+                nick = str(row["nickname"] or "").strip()
+        except Exception:
+            pass
+    if not nick:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT id, nickname, display_name, avatar, bio, is_admin,
+                   global_user_id, identity_pubkey
+            FROM users WHERE global_user_id=? LIMIT 1
+            """,
+            (gid,),
+        ).fetchone()
+        if row:
+            return dict(row)
+    existing = get_user_profile(nick)
+    if existing:
+        uid = int(existing["id"])
+        with _conn() as con:
+            gid_row = con.execute(
+                "SELECT global_user_id FROM users WHERE id=? LIMIT 1",
+                (uid,),
+            ).fetchone()
+        other_gid = str((gid_row["global_user_id"] if gid_row else "") or "").strip()
+        if other_gid and other_gid != gid:
+            return None
+        if not other_gid:
+            try:
+                with _conn() as con:
+                    con.execute("UPDATE users SET global_user_id=? WHERE id=?", (gid, uid))
+                    con.commit()
+            except Exception:
+                pass
+            return get_user_by_id(uid)
+        return get_user_by_id(uid) if other_gid == gid else None
+    upsert_federation_user_profile(
+        gid,
+        nick,
+        display_name=display_name or "",
+        avatar=avatar or "",
+        origin_server_id=origin_server_id or "",
+    )
+    pw_hash = _bcrypt.hashpw(secrets.token_urlsafe(32).encode(), _bcrypt.gensalt()).decode()
+    uid = create_user_with_hash(nick, pw_hash, gid)
+    if uid is None:
+        with _conn() as con:
+            row = con.execute(
+                """
+                SELECT id, nickname, display_name, avatar, bio, is_admin,
+                       global_user_id, identity_pubkey
+                FROM users WHERE global_user_id=? LIMIT 1
+                """,
+                (gid,),
+            ).fetchone()
+        return dict(row) if row else None
+    return get_user_by_id(int(uid))
+
+
 def get_or_create_federation_system_user() -> int:
     """Dedicated local user used to store replicated remote messages."""
     nick = "federation_sync"

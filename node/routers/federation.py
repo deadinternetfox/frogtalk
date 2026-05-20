@@ -1592,29 +1592,31 @@ def _fed_nickname(s) -> str | None:
     return raw if _FED_NAME_RE.match(raw) else None
 
 
-def _fed_resolve_user_for_dm(nickname: str | None, global_user_id: str | None) -> dict | None:
+def _fed_resolve_user_for_dm(
+    nickname: str | None,
+    global_user_id: str | None,
+    *,
+    origin_server_id: str = "",
+) -> dict | None:
     """Map a federated DM party to a local ``users`` row.
 
-    Prefer ``global_user_id`` (stable across nodes); fall back to nickname
-    only when the account already exists locally (no auto-create).
+    Prefer ``global_user_id`` (stable across nodes). When the account is not
+    registered on this node yet, materialize a mirror user from the signed
+    ``dm.message.created`` event so inbox delivery and WebSocket routing work.
     """
     gid = str(global_user_id or "").strip()
+    nick = _fed_nickname(nickname)
     if gid:
-        try:
-            with db._conn() as con:
-                row = con.execute(
-                    """
-                    SELECT id, nickname, display_name, avatar, bio, is_admin,
-                           global_user_id, identity_pubkey
-                    FROM users WHERE global_user_id=? LIMIT 1
-                    """,
-                    (gid,),
-                ).fetchone()
-            if row:
-                return dict(row)
-        except Exception:
-            pass
-    return _ensure_local_user_by_nickname(_fed_nickname(nickname))
+        user = db.ensure_federated_dm_local_user(
+            gid,
+            nick or "",
+            origin_server_id=origin_server_id or "",
+        )
+        if user:
+            return user
+    if nick:
+        return _ensure_local_user_by_nickname(nick)
+    return None
 
 
 def _fed_room_name(s) -> str | None:
@@ -2271,7 +2273,57 @@ async def _handle_message_event(event: dict) -> None:
     else:
         payload["media_type"] = mt or None
         payload["media_data"] = md
-    db.save_federated_room_message(str(event.get("event_id") or ""), payload)
+    msg_id = await asyncio.to_thread(
+        db.save_federated_room_message,
+        str(event.get("event_id") or ""),
+        payload,
+    )
+    if not msg_id:
+        return
+    room_name = str(payload.get("room_name") or "").strip()
+    try:
+        from ws_manager import manager
+        with db._conn() as con:
+            row = con.execute(
+                """
+                SELECT m.id, m.room_name, m.nickname, m.user_id, m.content,
+                       m.media_type, m.media_blur, m.view_once, m.bridge_platform,
+                       u.avatar, u.display_name, u.is_admin
+                FROM messages m
+                JOIN users u ON u.id = m.user_id
+                WHERE m.id = ?
+                """,
+                (int(msg_id),),
+            ).fetchone()
+        if not row:
+            return
+        has_media = bool(payload.get("media_data"))
+        broadcast_payload = {
+            "type": "message",
+            "id": int(row["id"]),
+            "room": row["room_name"],
+            "nickname": row["nickname"],
+            "display_name": row["display_name"],
+            "user_id": int(row["user_id"]),
+            "avatar": row["avatar"],
+            "is_admin": bool(row["is_admin"]),
+            "is_bot": False,
+            "content": row["content"] or "",
+            "media_type": row["media_type"],
+            "media_blur": int(row["media_blur"] or 0),
+            "view_once": int(row["view_once"] or 0),
+            "has_media": has_media,
+            "bridge_platform": row["bridge_platform"],
+            "reply_to": None,
+            "reply_nickname": None,
+            "reply_content": None,
+            "edited": False,
+            "reactions": {},
+            "created_at": str(payload.get("created_at") or datetime.utcnow().isoformat() + "Z"),
+        }
+        await manager.broadcast_room(room_name, broadcast_payload)
+    except Exception:
+        _log.exception("federation: room message WS broadcast failed room=%s", room_name)
 
 
 def _fed_room_moderator(room_name: str, actor_nick: str | None) -> dict | None:
@@ -2952,13 +3004,30 @@ async def _handle_dm_event(event: dict) -> None:
     peer_nick = _fed_nickname(payload.get("peer_nickname"))
     if not sender_nick or not peer_nick:
         return
+    origin = str(event.get("origin_server_id") or "").strip()
+    sender_gid = str(payload.get("sender_global_user_id") or "").strip()
+    peer_gid = str(payload.get("peer_global_user_id") or "").strip()
+    if sender_gid and sender_nick:
+        db.upsert_federation_user_profile(
+            sender_gid,
+            sender_nick,
+            origin_server_id=origin,
+        )
+    if peer_gid and peer_nick:
+        db.upsert_federation_user_profile(
+            peer_gid,
+            peer_nick,
+            origin_server_id=origin,
+        )
     sender = _fed_resolve_user_for_dm(
         sender_nick,
-        payload.get("sender_global_user_id"),
+        sender_gid or None,
+        origin_server_id=origin,
     )
     peer = _fed_resolve_user_for_dm(
         peer_nick,
-        payload.get("peer_global_user_id"),
+        peer_gid or None,
+        origin_server_id=origin,
     )
     if not sender or not peer:
         _log.info(
@@ -3008,6 +3077,8 @@ async def _handle_dm_event(event: dict) -> None:
         "channel_id": channel_id,
         "sender_id": sender["id"],
         "sender_nick": sender["nickname"],
+        "sender_display_name": sender.get("display_name"),
+        "sender_is_admin": bool(sender.get("is_admin")),
         "sender_avatar": sender.get("avatar"),
         "content": content,
         "media_type": media_type,
@@ -3024,6 +3095,9 @@ async def _handle_dm_event(event: dict) -> None:
     try:
         from ws_manager import manager
         await manager.send_to_user(peer["id"], dm_broadcast)
+        # Same account may be open on this node while sending from a peer node.
+        if int(sender["id"]) != int(peer["id"]):
+            await manager.send_to_user(sender["id"], dm_broadcast)
     except Exception:
         pass
     try:
