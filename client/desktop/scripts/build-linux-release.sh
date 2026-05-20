@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Linux desktop artifacts for GitHub Releases + AUR frogtalk-bin.
+# Build Linux desktop artifacts for GitHub Releases.
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/../app" && pwd)"
 cd "$APP_DIR"

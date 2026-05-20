@@ -75,7 +75,6 @@ No company in the middle. Messages stay private. Built in the open.
 | 🪟 **Windows (Portable .exe)** | [Latest portable .exe](https://frogtalk.xyz/download/windows) | Portable single-file — just run |
 | 🪟 **Windows (.zip)** | [Latest .zip](https://frogtalk.xyz/download/windows-zip) | Unzip, then run `FrogTalk.exe` |
 | 🍎 **macOS** | [Open in browser](https://frogtalk.xyz) | Native macOS build not published yet |
-| 🐧 **Arch (AUR)** | [`frogtalk-bin`](https://aur.archlinux.org/packages/frogtalk-bin) | System `electron41` + prebuilt `.deb` repack |
 
 ---
 
@@ -102,30 +101,6 @@ frogtalk
 
 Or use the buttons on **[GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases/latest)** or [frogtalk.xyz/download](https://frogtalk.xyz).
 
-### Arch Linux (AUR)
-
-Requires [`electron41`](https://archlinux.org/packages/?q=electron41) from official repos:
-
-```bash
-# yay / paru
-yay -S frogtalk-bin
-# or build from AUR git
-git clone https://aur.archlinux.org/frogtalk-bin.git && cd frogtalk-bin
-makepkg -si
-frogtalk-bin
-```
-
-Package sources and update script: [`packaging/aur/frogtalk-bin/`](packaging/aur/frogtalk-bin/).
-
-### Snap (when published)
-
-```bash
-sudo snap install frogtalk
-frogtalk
-```
-
-Build & publish: [`packaging/snap/`](packaging/snap/) — `snapcraft upload --release=stable`.
-
 ### Build from source (desktop)
 
 ```bash
@@ -135,7 +110,7 @@ bash client/desktop/scripts/build-linux-release.sh
 # Artifacts: client/desktop/builds/*.AppImage and *.deb
 ```
 
-Details: [`client/README.md`](client/README.md) · store packaging: [`packaging/README.md`](packaging/README.md).
+Details: [`client/README.md`](client/README.md).
 
 ### Browser only
 

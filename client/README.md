@@ -9,13 +9,10 @@ web client + ops scripts) lives in `../node/`.
 |--------|---------|
 | **AppImage** | Download from [Releases](https://github.com/deadinternetfox/frogtalk/releases/latest) → `chmod +x FrogTalk-*.AppImage` → `./FrogTalk-*.AppImage` |
 | **.deb** | `sudo dpkg -i frogtalk_*_amd64.deb` then run `frogtalk` |
-| **Arch AUR** | `yay -S frogtalk-bin` ([package](https://aur.archlinux.org/packages/frogtalk-bin)) |
 | **Build here** | `bash client/desktop/scripts/build-linux-release.sh` |
 
 The app loads the same web UI as the node (`node/static/`). Point **Settings →
 Network** at your node (`https://frogtalk.xyz` or your self-hosted URL / `.onion`).
-
-Packaging for AUR / Snap / Homebrew: [`../packaging/README.md`](../packaging/README.md).
 
 ## Layout
 
@@ -59,8 +56,7 @@ npm run build-all          # AppImage + deb + Windows zip/portable
 ```
 
 Output lands in `client/desktop/builds/` (gitignored). Upload `frogtalk_*_amd64.deb`
-and `FrogTalk-*.AppImage` to [GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases)
-before bumping [AUR `frogtalk-bin`](https://aur.archlinux.org/packages/frogtalk-bin).
+and `FrogTalk-*.AppImage` to [GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases).
 
 ## Building Android
 

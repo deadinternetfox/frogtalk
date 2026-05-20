@@ -20,5 +20,4 @@ Configured in `client/desktop/app/package.json` → `build.directories.output = 
 | `FrogTalk-<version>-win-x64-portable.exe` | Single portable exe |
 
 These binaries are intentionally not committed to git. Publish to
-[GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases), then refresh
-AUR sums: `bash packaging/aur/update-frogtalk-bin.sh`.
+[GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases).
