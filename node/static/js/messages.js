@@ -981,7 +981,7 @@ const Messages = (() => {
             `<div class="chat-share-embed-label">${UI.escHtml(label)}</div>` +
             `<div class="chat-share-embed-name">@${nick}</div>` +
           `</div>` +
-          `<div class="chat-share-embed-logo" aria-hidden="true">${isMusic ? '🎵' : '🐸'}</div>` +
+          (isMusic ? `<div class="chat-share-embed-logo" aria-hidden="true">🎵</div>` : '') +
         `</div>` +
         (caption ? `<div class="chat-share-embed-caption">${safeCap}</div>` : '') +
         mediaHtml +
