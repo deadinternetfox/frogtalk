@@ -1,0 +1,15 @@
+# Apache fallback for the imageboard surface. Production deploys use
+# nginx (see deploy/nginx.conf) which controls routing directly; this
+# file only matters if an operator drops the board into a vanilla
+# LAMP host. The .htaccess in board_uploads/ / board_previews/ /
+# board_data/ provide the upload-execution prevention.
+
+# Disallow direct access to PHP includes that are not entry points.
+<FilesMatch "^(board_config|board_api|board_likes|board_tor_gateway|telegram_bot)\.php$">
+    Require all denied
+</FilesMatch>
+
+# Hide hidden files and dotfiles.
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>

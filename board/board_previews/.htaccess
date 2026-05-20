@@ -1,0 +1,15 @@
+# Mirror board_uploads/.htaccess — preview PNGs only, no executable content.
+<FilesMatch "\.(php[0-9]*|phtml|phar|phps|pl|py|cgi|sh|jsp|asp|aspx|htaccess|htpasswd|env|json|ini|conf)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set Content-Security-Policy "default-src 'none'; sandbox"
+    Header set Referrer-Policy "no-referrer"
+</IfModule>
+
+php_flag engine off
+AddType text/plain .php .phtml .phar .phps .pl .py .cgi .sh
+RemoveHandler .php .phtml .phar .phps .pl .py .cgi .sh
+RemoveType .php .phtml .phar .phps .pl .py .cgi .sh

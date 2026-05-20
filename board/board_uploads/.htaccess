@@ -1,0 +1,29 @@
+# Defense-in-depth: even on a non-nginx deploy (Apache fallback), refuse
+# to interpret anything in this directory as a PHP / CGI / template file.
+# The nginx config in deploy/nginx.conf already denies these extensions,
+# but a stray Apache install would otherwise happily execute a stray
+# .phar / .phtml smuggled past finfo MIME detection.
+<FilesMatch "\.(php[0-9]*|phtml|phar|phps|pl|py|cgi|sh|jsp|asp|aspx|htaccess|htpasswd|env|json|ini|conf)$">
+    Require all denied
+</FilesMatch>
+
+# Force XSS-safe handling: never let the browser sniff a polyglot upload
+# (e.g. valid JPEG that also parses as HTML) into HTML rendering.
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    Header set Referrer-Policy "no-referrer"
+</IfModule>
+
+# SVG can carry inline <script>; force download instead of inline render.
+<FilesMatch "\.svg$">
+    <IfModule mod_headers.c>
+        Header set Content-Disposition "attachment"
+    </IfModule>
+</FilesMatch>
+
+# Strip any PHP engine that might be enabled at the vhost level.
+php_flag engine off
+AddType text/plain .php .phtml .phar .phps .pl .py .cgi .sh
+RemoveHandler .php .phtml .phar .phps .pl .py .cgi .sh
+RemoveType .php .phtml .phar .phps .pl .py .cgi .sh

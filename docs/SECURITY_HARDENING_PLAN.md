@@ -194,6 +194,60 @@ some return values are mutated in place.
 
 ---
 
+## PHP imageboard (`board/`) — SECURITY-PASS-3  *(2026-05-20)*
+
+Commit `af98fcd` + `.htaccess` defense-in-depth. Deploy with
+`bash scripts/deploy_board.sh` (not `scripts/deploy_nodes.sh`, which
+only syncs static assets).
+
+### CRITICAL  `[x]`
+
+- **BOARD-CRIT-1 — Free GOYIM bump inflation:** `goyim_bump` now requires
+  CSRF, valid Solana pubkey, on-chain SPL transfer verification
+  (`verifyGoyimSplTransfer`), tx-hash dedupe ledger, and server-side
+  holder re-check.
+- **BOARD-CRIT-2 — Tor gateway bypass via spoofed headers:** `isTorRequest()`
+  trusts `X-Tor-Client` / `X-Onion-Host` only when `REMOTE_ADDR` is a
+  trusted proxy and `BOARD_TOR_HEADER_TRUSTED=1` in `/board/.env`.
+- **BOARD-CRIT-3 — Hardcoded admin password:** `BOARD_ADMIN_USER` /
+  `BOARD_ADMIN_PASS_HASH` from env; `boardIsDefaultAdminPass()` warns on
+  factory hash.
+
+### HIGH  `[x]`
+
+- CSRF on `like`, `link_wallet`, `board_likes.php`, `goyim_bump`,
+  `check_goyim_holder` (JS passes meta token).
+- `check_goyim_holder` rate-limited + 60s per-wallet RPC cache.
+- Federation peer fetch via `boardFetchPeerJson()` (public IP only,
+  redirect cap, size cap, curl protocol lock).
+- Trusted-proxy gating for `CF-Connecting-IP` / `X-Forwarded-For`.
+- Subject + wallet escape-at-render; live-reply wallet JS escaped.
+- Admin media deletes use `boardSafeUnlinkUpload()`.
+- Removed legacy **Katsa** OSINT widget builders (separate project).
+
+### MEDIUM  `[x]` / `[~]`
+
+- `[x]` `formatPostText` autolink: `htmlspecialchars` on `href`, `rel=ugc`.
+- `[x]` `createThumbnail` refuses undecodable images (no raw `copy()` fallback).
+- `[~]` `temp_upload`: MIME-derived extensions, 10-minute GC TTL; still
+  served under `/board_uploads/temp/` (move outside webroot deferred).
+- `[x]` Chat voice: audio MIME only (dropped `video/webm` from voice allowlist).
+- `[x]` Admin logout: POST + CSRF (was GET `?action=logout`).
+- `[x]` Chat fetch strips `ip_hash` for non-admins.
+- `[x]` Likes/views: `boardWithJsonLock()`; bump thread only on net-new like.
+- `[x]` `boardValidSolanaAddress()` base58 check.
+- `[x]` `telegram_bot.php` uses shared `boardLoadEnv()`.
+- `[x]` `board_data/` created `0750`; upload/preview/data `.htaccess` deny rules.
+
+### Deploy / verify (board)
+
+1. `bash scripts/deploy_board.sh` — SCP all board PHP + `.htaccess` to
+   `161.97.182.73:2222` and `31.220.92.120:22`, then `php -l` each entry file.
+2. Smoke: `/board` loads; admin logout is a form POST; liking a thread
+   requires CSRF; `goyim_bump` without `tx_hash` returns error for non-admin.
+
+---
+
 ## DEFERRED to a later cycle
 
 - HIGH-2: HttpOnly cookie session migration.
@@ -210,7 +264,8 @@ some return values are mutated in place.
 1. Run `pytest`.
 2. Commit in logical chunks (CRIT/HIGH/MED/ops).
 3. `git push origin master`.
-4. `bash scripts/deploy_nodes.sh` to roll to both production nodes.
+4. App/static: `bash scripts/deploy_nodes.sh` (or rsync via `deploy.sh`).
+   Board PHP: `bash scripts/deploy_board.sh`.
 5. After deploy, verify:
    - `/api/network/status` reports `update_available=false`.
    - Posting `{platform:"discord",bridge_token:"discord",...}` against

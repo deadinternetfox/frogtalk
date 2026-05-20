@@ -1,0 +1,8 @@
+# board_data/ holds settings.json, threads.json, bans.json, modlog.json,
+# wallets.json, chat.json — none of these should ever be reachable via
+# HTTP. nginx never aliases this path, but defense in depth.
+Require all denied
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>
