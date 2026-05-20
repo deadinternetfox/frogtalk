@@ -256,71 +256,6 @@
   }
   .hero-cta { display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; }
 
-  /* ── Direct download box (under CTA) ── */
-  .hero-downloads {
-    margin: 1.5rem auto 0;
-    max-width: min(1800px, calc(100vw - 2rem));
-    padding: 1rem 1.1rem 1.05rem;
-    border: 1px solid #1f3a30;
-    border-radius: 14px;
-    background: linear-gradient(180deg,rgba(18,35,30,.55) 0%,rgba(13,26,22,.55) 100%);
-    box-shadow: 0 6px 28px rgba(0,0,0,.35), 0 0 0 1px rgba(74,222,128,.05) inset;
-    backdrop-filter: blur(6px);
-  }
-  .hero-downloads .hd-title {
-    font-size: .68rem; letter-spacing: .14em; text-transform: uppercase;
-    color: #6fcf8a; text-align: center; margin-bottom: .65rem; font-weight: 700;
-  }
-  .hero-downloads .hd-grid {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: .55rem;
-  }
-  .hero-downloads .hd-item {
-    flex: 0 1 auto;
-    display: inline-flex; align-items: center; gap: .5rem;
-    padding: .55rem .85rem;
-    border: 1px solid rgba(74,222,128,.12);
-    border-radius: 10px;
-    background: rgba(13,26,22,.45);
-    color: var(--text);
-    text-decoration: none;
-    transition: transform .15s ease, border-color .15s ease, background .15s ease;
-    min-height: 42px;
-    white-space: nowrap;
-  }
-  .hero-downloads .hd-item:hover,
-  .hero-downloads .hd-item:focus-visible {
-    transform: translateY(-1px);
-    border-color: rgba(74,222,128,.45);
-    background: rgba(20,40,30,.7);
-    outline: none;
-  }
-  .hero-downloads .hd-icon { font-size: 1rem; line-height: 1; flex-shrink: 0; }
-  .hero-downloads .hd-label {
-    font-size: .8rem; font-weight: 600;
-    white-space: nowrap;
-  }
-  .hero-downloads .hd-ext {
-    font-size: .58rem; letter-spacing: .06em; text-transform: uppercase;
-    color: #9ad9a8; opacity: .85; font-weight: 700;
-    white-space: nowrap;
-  }
-  @media (max-width: 1300px) {
-    .hero-downloads .hd-item { padding: .55rem .75rem; }
-  }
-  @media (max-width: 560px) {
-    .hero-downloads {
-      margin: 1.25rem .25rem 0;
-      padding: .9rem .85rem .95rem;
-      border-radius: 12px;
-    }
-    .hero-downloads .hd-grid { gap: .5rem; }
-    .hero-downloads .hd-item { padding: .55rem .7rem; }
-    .hero-downloads .hd-label { font-size: .78rem; }
-  }
-
   /* ── STATS ── */
   .stats {
     display: flex; gap: 3rem; justify-content: center; flex-wrap: wrap;
@@ -1225,18 +1160,6 @@
     <a href="/app" class="btn btn-primary btn-lg">🐸 Join the Pond</a>
     <a href="#features" class="btn btn-ghost btn-lg">See Features ↓</a>
   </div>
-  <div class="hero-downloads" aria-label="Direct downloads">
-    <div class="hd-title">Direct downloads</div>
-    <div class="hd-grid">
-      <a href="/download/android" download class="hd-item"><span class="hd-icon">📱</span><span class="hd-label">Android</span><span class="hd-ext">APK</span></a>
-      <a href="/download/ios" class="hd-item" title="iPhone via TestFlight"><span class="hd-icon">🍎</span><span class="hd-label">iPhone</span><span class="hd-ext">Beta</span></a>
-      <a href="/download/linux" download class="hd-item"><span class="hd-icon">🐧</span><span class="hd-label">Linux</span><span class="hd-ext">AppImage</span></a>
-      <a href="/download/deb" download class="hd-item"><span class="hd-icon">📦</span><span class="hd-label">Debian</span><span class="hd-ext">.deb</span></a>
-      <a href="/download/windows" download class="hd-item" title="Windows portable .exe"><span class="hd-icon">🪟</span><span class="hd-label">Windows</span><span class="hd-ext">Portable</span></a>
-      <a href="/download/windows-zip" download class="hd-item" title="Windows .zip archive"><span class="hd-icon">🪟</span><span class="hd-label">Windows</span><span class="hd-ext">.zip</span></a>
-    </div>
-  </div>
-
   <!-- DEMO PREVIEW -->
   <div style="width:100%;max-width:960px;margin-top:4rem;">
     <div class="demo-preview">
@@ -1715,34 +1638,8 @@
 
 <!-- FOOTER (shared: static/partials/site-footer.html) -->
 <div id="ft-site-footer-mount"></div>
-<script src="/static/js/site-footer.js?v=3" defer></script>
+<script src="/static/js/site-footer.js?v=4" defer></script>
 
-
-<!-- MOBILE APK BANNER -->
-<div class="mobile-banner" id="mobile-banner">
-  <div class="mobile-banner-content">
-    <div class="mobile-banner-icon">🐸</div>
-    <div class="mobile-banner-text">
-      <h4>Get FrogTalk for Android</h4>
-      <p>Secure messaging in your pocket</p>
-    </div>
-  </div>
-  <a href="/download/android" download class="mobile-banner-btn">Download APK</a>
-  <button class="mobile-banner-close" onclick="document.getElementById('mobile-banner').classList.remove('show');localStorage.setItem('hideMobileBanner','1');">×</button>
-</div>
-
-<script>
-// Show mobile banner on Android/mobile devices
-(function() {
-  const ua = navigator.userAgent.toLowerCase();
-  const isMobile = /android|iphone|ipad|ipod|mobile/i.test(ua);
-  const isAndroid = /android/i.test(ua);
-  const hidden = localStorage.getItem('hideMobileBanner');
-  if ((isMobile || isAndroid) && !hidden) {
-    document.getElementById('mobile-banner').classList.add('show');
-  }
-})();
-</script>
 
 </body>
 </html>

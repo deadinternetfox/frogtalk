@@ -5,12 +5,19 @@
   border-top: 1px solid var(--border, #30363d);
   padding: 2rem;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 1rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1.25rem;
   font-size: 0.85rem;
   color: var(--text-muted, var(--muted, #7d8590));
+}
+
+.ft-footer-row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem 2rem;
 }
 
 .ft-site-footer a {
@@ -55,9 +62,70 @@
 
 .ft-footer-copy {
   margin: 0;
-  flex: 0 1 auto;
   font-size: 0.85rem;
   color: var(--text-muted, var(--muted, #7d8590));
+  text-align: center;
+}
+
+/* Downloads row — desktop / wide tablet only. Hidden on phones to keep
+   the footer compact; the hero already exposes the same links there. */
+.ft-footer-downloads {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem 0.75rem;
+  padding-top: 0.85rem;
+  border-top: 1px dashed rgba(125, 133, 144, 0.25);
+}
+
+.ft-footer-downloads-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6fcf8a;
+  font-weight: 700;
+  margin-right: 0.35rem;
+}
+
+.ft-footer-downloads a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgba(74, 222, 128, 0.18);
+  border-radius: 8px;
+  background: rgba(13, 26, 22, 0.45);
+  color: var(--text, #e6edf3);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.ft-footer-downloads a:hover,
+.ft-footer-downloads a:focus-visible {
+  border-color: rgba(74, 222, 128, 0.5);
+  background: rgba(20, 40, 30, 0.7);
+  color: var(--green, #4ade80);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.ft-footer-downloads em {
+  font-style: normal;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9ad9a8;
+  opacity: 0.85;
+  font-weight: 700;
+}
+
+/* Only show the downloads row on screens wide enough to fit it without
+   wrapping to a tower of buttons. */
+@media (min-width: 900px) {
+  .ft-footer-downloads { display: flex; }
 }
 
 /* Mirrored © = copyleft (open source) */
