@@ -659,7 +659,7 @@ const Messages = (() => {
         iconHtml = UI.escHtml(glyph);
       }
       const name = UI.escHtml(data.room_name || '');
-      const desc = data.room_desc ? `<div class="invite-card-desc">${UI.escHtml(data.room_desc.substring(0, 100))}</div>` : '';
+      const descText = data.room_desc ? UI.escHtml(data.room_desc.substring(0, 100)) : '';
       const _rawByNick = ((data.created_by_handle || data.created_by || '').replace(/^@+/, '').trim());
       const byNick = _rawByNick;
       const createdBy = _rawByNick ? `@${_rawByNick}` : '';
@@ -674,15 +674,15 @@ const Messages = (() => {
       placeholder.outerHTML = `
         <div class="invite-card">
           <div class="invite-card-header">You've been invited to join a channel</div>
-          <div class="invite-card-body">
-            <div class="invite-card-icon">${iconHtml}</div>
-            <div class="invite-card-info">
-              <div class="invite-card-name">#${name}</div>
-              ${desc}
+          <div class="invite-card-main">
+            <div class="invite-card-name">#${name}</div>
+            <div class="invite-card-row">
+              <div class="invite-card-icon">${iconHtml}</div>
+              <div class="invite-card-row-desc">${descText || 'No channel description'}</div>
+              <div class="invite-card-action">${btnHtml}</div>
             </div>
-            <div class="invite-card-action">${btnHtml}</div>
+            ${footer}
           </div>
-          ${footer}
         </div>`;
       _scrollIfNearBottom();
     } catch (e) {
