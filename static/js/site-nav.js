@@ -11,7 +11,7 @@
   'use strict';
 
   const MOUNT_ID = 'ft-site-nav-mount';
-  const VER = '1';
+  const VER = '2';
 
   function assetUrl(path) {
     const base = path + '?v=' + VER;
