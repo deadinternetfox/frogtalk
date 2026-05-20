@@ -74,9 +74,17 @@ def lookup(ip: str) -> dict:
 
     Synchronous and time-boxed; callers should run from a thread when on the
     request hot path.
+
+    HIGH-14: Tor-mode nodes skip GeoIP entirely. Any outbound clearnet
+    call from a hidden service ruins the anonymity guarantee, and a
+    third-party GeoIP service watching ``frogtalk.xyz`` correlate session
+    IPs is exactly the metadata leak Tor mode exists to prevent.
     """
     empty = {"country_code": "", "country": "", "city": ""}
     if _DISABLED or not ip:
+        return empty
+    if (os.getenv("FROGTALK_TOR_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+            or os.getenv("FROGTALK_TOR_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")):
         return empty
     ip = (ip or "").strip()
     if not ip or _is_private_ip(ip):
