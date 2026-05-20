@@ -4092,6 +4092,7 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   max-width:300px;
   min-height:0 !important;
   height:auto !important;
+  contain:layout style;
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 90%,var(--accent-color) 10%) 0%,color-mix(in srgb,var(--surface-color) 82%,black) 100%);
   border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color));
   border-radius:8px;
@@ -4315,6 +4316,83 @@ body[data-theme="frog"] .invite-card-icon{
   width:min(100%,300px);
   max-width:300px;
   box-sizing:border-box;
+}
+/* System invite embed lock — must beat channel custom CSS (e.g. #main img
+   { width:100% } or flex/grid on .invite-card-main that stretches the card). */
+#main .msg-content .invite-card.ft-embed-invite,
+#main .msg-body .invite-card.ft-embed-invite,
+#main .msg-share-row .invite-card.ft-embed-invite{
+  display:inline-block !important;
+  vertical-align:top !important;
+  width:min(100%,300px) !important;
+  max-width:300px !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  overflow:hidden !important;
+  contain:layout style !important;
+  box-sizing:border-box !important;
+}
+#main .msg-content .ft-embed-invite .invite-card-main,
+#main .msg-content .ft-embed-invite .ft-embed-invite-main,
+#main .msg-body .ft-embed-invite .invite-card-main{
+  display:block !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  flex:none !important;
+  grid-template:none !important;
+  grid-auto-rows:auto !important;
+}
+#main .msg-content .ft-embed-invite .invite-card-row,
+#main .msg-content .ft-embed-invite .ft-embed-invite-row{
+  display:flex !important;
+  flex-direction:row !important;
+  flex-wrap:nowrap !important;
+  align-items:center !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  flex:none !important;
+}
+#main .msg-content .ft-embed-invite .invite-card-icon,
+#main .msg-content .ft-embed-invite .ft-embed-invite-icon{
+  flex:0 0 40px !important;
+  width:40px !important;
+  height:40px !important;
+  min-width:40px !important;
+  min-height:40px !important;
+  max-width:40px !important;
+  max-height:40px !important;
+  overflow:hidden !important;
+  align-self:center !important;
+}
+#main .msg-content .ft-embed-invite .invite-card-icon img,
+#main .msg-content .ft-embed-invite .invite-card-icon-img,
+#main .msg-content .ft-embed-invite .ft-embed-invite-icon-img{
+  width:40px !important;
+  height:40px !important;
+  min-width:40px !important;
+  min-height:40px !important;
+  max-width:40px !important;
+  max-height:40px !important;
+  object-fit:cover !important;
+  display:block !important;
+  border-radius:50% !important;
+}
+#main .msg-content .ft-embed-invite .invite-card-row-desc,
+#main .msg-content .ft-embed-invite .ft-embed-invite-desc{
+  flex:1 1 auto !important;
+  align-self:center !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+}
+#main .msg-content .ft-embed-invite .invite-card-footer,
+#main .msg-content .ft-embed-invite .ft-embed-invite-footer{
+  height:auto !important;
+  min-height:0 !important;
+  flex:none !important;
 }
 /* Preserve portrait reel geometry (9:16 width derives from height). */
 .msg-body .chat-share-embed:has(.chat-share-video){width:auto;max-width:var(--chat-embed-max-inline)}
@@ -11023,7 +11101,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
   <script src="/static/js/rooms.js?v=452"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>
 <script src="/static/js/text_format.js?v=2"></script>
-<script src="/static/js/messages.js?v=492"></script>
+<script src="/static/js/messages.js?v=493"></script>
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>

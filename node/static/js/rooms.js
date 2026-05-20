@@ -4332,10 +4332,12 @@ function applyChannelThemeOverride(t) {
     _channelThemeStyleEl.textContent = css;
     document.head.appendChild(_channelThemeStyleEl);
   }
+  try { Messages.refreshSystemEmbedGuard?.(); } catch {}
 }
 
 function clearChannelThemeOverride() {
   if (_channelThemeStyleEl) { _channelThemeStyleEl.remove(); _channelThemeStyleEl = null; }
   const existing = document.getElementById('channel-theme-override');
   if (existing) existing.remove();
+  try { Messages.refreshSystemEmbedGuard?.(); } catch {}
 }

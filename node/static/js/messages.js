@@ -606,6 +606,7 @@ const Messages = (() => {
     ).forEach(_hoistShareCardToTop);
 
     msgEl.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
+      _hoistShareCardToTop(el);
       const code = (el.dataset.inviteCode || '').trim();
       if (code) _loadInviteCard(msgId, code);
     });
@@ -623,8 +624,8 @@ const Messages = (() => {
     });
   }
 
-  // Append a late style guard so broad channel custom CSS selectors
-  // cannot stretch system invite embeds.
+  // Late style guard — re-appended to the END of <head> so it wins over
+  // channel-theme-override even when that sheet is injected later.
   function _ensureSystemEmbedStyleGuard() {
     try {
       const id = 'ft-system-embed-guard';
@@ -634,26 +635,45 @@ const Messages = (() => {
         el.id = id;
       }
       el.textContent = `
-#main .ft-embed-invite, #main .ft-embed-invite * {
-  min-height: 0 !important;
-  max-height: none !important;
-}
-#main .ft-embed-invite {
+#main .msg-content .invite-card.ft-embed-invite,
+#main .msg-body .invite-card.ft-embed-invite,
+#main .msg-share-row .invite-card.ft-embed-invite {
   display: inline-block !important;
   vertical-align: top !important;
   width: min(100%, 300px) !important;
   max-width: 300px !important;
   height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
   overflow: hidden !important;
+  contain: layout style !important;
+  box-sizing: border-box !important;
 }
-#main .ft-embed-invite-main { display: block !important; height: auto !important; }
-#main .ft-embed-invite-row {
+#main .msg-content .ft-embed-invite .invite-card-main,
+#main .msg-content .ft-embed-invite .ft-embed-invite-main,
+#main .msg-body .ft-embed-invite .invite-card-main {
+  display: block !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  flex: none !important;
+  grid-template: none !important;
+  grid-auto-rows: auto !important;
+}
+#main .msg-content .ft-embed-invite .invite-card-row,
+#main .msg-content .ft-embed-invite .ft-embed-invite-row {
   display: flex !important;
-  align-items: flex-start !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
   gap: 8px !important;
   height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  flex: none !important;
 }
-#main .ft-embed-invite-icon {
+#main .msg-content .ft-embed-invite .invite-card-icon,
+#main .msg-content .ft-embed-invite .ft-embed-invite-icon {
   flex: 0 0 40px !important;
   width: 40px !important;
   height: 40px !important;
@@ -662,8 +682,11 @@ const Messages = (() => {
   max-width: 40px !important;
   max-height: 40px !important;
   overflow: hidden !important;
+  align-self: center !important;
 }
-#main .ft-embed-invite-icon-img {
+#main .msg-content .ft-embed-invite .invite-card-icon img,
+#main .msg-content .ft-embed-invite .invite-card-icon-img,
+#main .msg-content .ft-embed-invite .ft-embed-invite-icon-img {
   width: 40px !important;
   height: 40px !important;
   min-width: 40px !important;
@@ -674,14 +697,29 @@ const Messages = (() => {
   border-radius: 50% !important;
   display: block !important;
 }
-#main .ft-embed-invite-desc {
+#main .msg-content .ft-embed-invite .invite-card-row-desc,
+#main .msg-content .ft-embed-invite .ft-embed-invite-desc {
   flex: 1 1 auto !important;
+  align-self: center !important;
   min-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
 }
-#main .ft-embed-invite-action { flex: 0 0 auto !important; }
+#main .msg-content .ft-embed-invite .invite-card-action,
+#main .msg-content .ft-embed-invite .ft-embed-invite-action {
+  flex: 0 0 auto !important;
+  align-self: center !important;
+}
+#main .msg-content .ft-embed-invite .invite-card-footer,
+#main .msg-content .ft-embed-invite .ft-embed-invite-footer {
+  height: auto !important;
+  min-height: 0 !important;
+  flex: none !important;
+}
 `;
       document.head.appendChild(el);
     } catch {}
@@ -693,6 +731,7 @@ const Messages = (() => {
     if (!msgEl) return;
     const placeholder = msgEl.querySelector(`.invite-card-placeholder[data-invite-code="${code}"]`);
     if (!placeholder) return;
+    _hoistShareCardToTop(placeholder);
 
     try {
       const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}`);
@@ -3458,7 +3497,9 @@ const Messages = (() => {
     }
   }
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom };
+  _ensureSystemEmbedStyleGuard();
+
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
