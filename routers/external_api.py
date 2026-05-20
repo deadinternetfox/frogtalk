@@ -222,8 +222,31 @@ async def list_channels(
     request: Request,
     auth: dict = Depends(require_api_key(["read"]))
 ):
-    """List all public channels + channels user is member of."""
-    rooms = db.get_all_rooms()
+    """List channels this key is actually allowed to see.
+
+    HIGH-3: previously this returned ``db.get_all_rooms()`` — every room in
+    the system — to any leaked ``frog_*`` / ``bot_*`` key with ``read``,
+    making the external API a one-call recon tool for scraping channel
+    names and metadata across the network. Now we scope the response to:
+
+    * Bot keys: the channels the bot owner has actually added the bot to.
+    * User keys: the rooms the owning user is a member of.
+    """
+    if auth.get("is_bot"):
+        bot = db.get_bot_by_api_key_id(auth["key"]["id"])
+        if not bot:
+            return {"channels": []}
+        try:
+            rows = db.get_bot_channel_names(bot["id"])
+        except Exception:
+            rows = []
+        return {"channels": rows or []}
+
+    owner_id = auth["owner"]["id"]
+    try:
+        rooms = db.get_user_rooms(owner_id) if hasattr(db, "get_user_rooms") else []
+    except Exception:
+        rooms = []
     return {
         "channels": [
             {
@@ -253,10 +276,34 @@ async def get_channel_messages(
     before: Optional[int] = None,
     auth: dict = Depends(require_api_key(["read"]))
 ):
-    """Get messages from a channel."""
+    """Get messages from a channel.
+
+    HIGH-3: enforce membership / bot-install here too. Without this check
+    any leaked ``read`` key could scrape every non-invite-only room's
+    full history.
+    """
     room = db.get_room(name)
     if not room:
         raise HTTPException(status_code=404, detail="Channel not found")
+
+    room_id = int(room.get("id") or 0)
+    room_name = (room.get("name") or name).strip().lower()
+    if auth.get("is_bot"):
+        bot = db.get_bot_by_api_key_id(auth["key"]["id"])
+        if not bot or not db.bot_in_channel(bot["id"], room_id):
+            raise HTTPException(status_code=403, detail="Bot is not installed in this channel")
+    else:
+        owner = auth["owner"]
+        try:
+            if not db.user_can_access_room(
+                owner["id"], room_name, is_admin=bool(owner.get("is_admin"))
+            ):
+                raise HTTPException(status_code=403, detail="No access to this channel")
+        except HTTPException:
+            raise
+        except Exception:
+            # Fail closed: any DB error means we deny rather than leak.
+            raise HTTPException(status_code=403, detail="No access to this channel")
 
     # NOTE: room lookup keys are the room *name*, not id. db.get_messages
     # already left-joins the bots table so is_bot/bot_id come through
@@ -328,6 +375,21 @@ async def send_channel_message(
     # messages into rooms its owner never installed it into.
     if bot and not db.bot_in_channel(int(bot["id"]), int(room["id"])):
         raise HTTPException(status_code=403, detail="Bot is not a member of this channel")
+
+    # HIGH-3: same gate for non-bot (user) keys — without this, a leaked
+    # ``write`` key was enough to post into invite-only rooms the owner
+    # was never a member of.
+    if not bot:
+        room_name_lc = (room.get("name") or name).strip().lower()
+        try:
+            if not db.user_can_access_room(
+                owner["id"], room_name_lc, is_admin=bool(owner.get("is_admin"))
+            ):
+                raise HTTPException(status_code=403, detail="No access to this channel")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=403, detail="No access to this channel")
 
     nickname = bot["name"] if bot else owner["nickname"]
     avatar = (bot.get("avatar") if bot else None) or owner.get("avatar")
@@ -448,12 +510,31 @@ async def send_dm(
     body: SendDMRequest,
     auth: dict = Depends(require_api_key(["write", "dm"]))
 ):
-    """Send a DM to a user. Requires 'dm' permission."""
+    """Send a DM to a user. Requires 'dm' permission.
+
+    HIGH-3: honor blocks here too. Without this check a compromised bot
+    key could be used to harass a user who blocked the bot owner via the
+    UI — the WS path already enforces blocks but the HTTP bot path did
+    not.
+    """
     target = db.get_user_by_id(user_id)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
     owner = auth["owner"]
+
+    if owner["id"] == user_id:
+        raise HTTPException(status_code=400, detail="Cannot DM yourself")
+
+    try:
+        if hasattr(db, "is_blocked_either_way") and db.is_blocked_either_way(owner["id"], user_id):
+            raise HTTPException(status_code=403, detail="User has blocked this account or vice versa")
+    except HTTPException:
+        raise
+    except Exception:
+        # Fail closed — if the block-check helper is unavailable for some
+        # reason, refuse rather than silently leak the DM.
+        raise HTTPException(status_code=403, detail="Cannot send DM right now")
 
     if len(body.content) > 4000:
         raise HTTPException(status_code=400, detail="Message too long")

@@ -65,12 +65,43 @@ class CreateApiKeyRequest(BaseModel):
     permissions: List[str] = ["read", "write"]
 
 
+# HIGH-9: tight allowlist of permissions a user-issued key may carry.
+# Without this allowlist a client could POST ``{"permissions": ["admin"]}``
+# and self-grant the only string ``require_api_key`` treats as a wildcard.
+_ALLOWED_USER_KEY_PERMS = {"read", "write", "dm", "bot"}
+_API_KEYS_PER_USER_MAX = 20
+
+
 @router.post("/keys")
 async def create_api_key(body: CreateApiKeyRequest, current_user: dict = Depends(get_current_user)):
     """Create a new API key."""
     if len(body.name) < 1 or len(body.name) > 64:
         return JSONResponse(status_code=400, content={"error": "Key name must be 1-64 characters"})
-    
+
+    # HIGH-9: ignore any permission the user can't actually grant
+    # themselves. ``bot`` is allowed here because the bot create endpoint
+    # uses the same DB function; ``admin`` is deliberately absent.
+    requested = list(body.permissions or [])
+    perms = [p for p in requested if isinstance(p, str) and p in _ALLOWED_USER_KEY_PERMS]
+    # De-dupe while preserving order so the audit log makes sense.
+    seen: set[str] = set()
+    perms = [p for p in perms if not (p in seen or seen.add(p))]
+    if not perms:
+        return JSONResponse(status_code=400, content={
+            "error": f"Permissions must be a subset of {sorted(_ALLOWED_USER_KEY_PERMS)}"
+        })
+
+    # HIGH-9: cap keys per account so a stolen session can't fan out
+    # thousands of long-lived bearer credentials.
+    try:
+        existing = db.get_user_api_keys(current_user["id"]) or []
+    except Exception:
+        existing = []
+    if len(existing) >= _API_KEYS_PER_USER_MAX:
+        return JSONResponse(status_code=429, content={
+            "error": f"Maximum of {_API_KEYS_PER_USER_MAX} API keys per account. Delete unused keys first."
+        })
+
     # Generate secure key
     raw_key = f"frog_{secrets.token_urlsafe(32)}"
     key_hash = hash_key(raw_key)
@@ -79,7 +110,7 @@ async def create_api_key(body: CreateApiKeyRequest, current_user: dict = Depends
         current_user["id"],
         body.name,
         key_hash,
-        body.permissions
+        perms
     )
     
     # Return raw key only once!
@@ -87,7 +118,7 @@ async def create_api_key(body: CreateApiKeyRequest, current_user: dict = Depends
         "id": key_id,
         "key": raw_key,
         "name": body.name,
-        "permissions": body.permissions,
+        "permissions": perms,
         "message": "Save this key! It won't be shown again."
     }
 
@@ -130,7 +161,17 @@ async def create_bot(body: CreateBotRequest, current_user: dict = Depends(get_cu
     """Create a new bot."""
     if len(body.name) < 2 or len(body.name) > 32:
         return JSONResponse(status_code=400, content={"error": "Bot name must be 2-32 characters"})
-    
+
+    # HIGH-9: bots issue an API key too, so respect the per-account cap.
+    try:
+        existing = db.get_user_api_keys(current_user["id"]) or []
+    except Exception:
+        existing = []
+    if len(existing) >= _API_KEYS_PER_USER_MAX:
+        return JSONResponse(status_code=429, content={
+            "error": f"Maximum of {_API_KEYS_PER_USER_MAX} API keys per account. Delete unused keys first."
+        })
+
     # Create a dedicated API key for the bot
     raw_key = f"bot_{secrets.token_urlsafe(32)}"
     key_hash = hash_key(raw_key)
