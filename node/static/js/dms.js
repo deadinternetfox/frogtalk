@@ -1684,11 +1684,11 @@ function renderDMMessage (m) {
           `<span class="invite-card-loading">🐸 Loading profile…</span></span>`;
       }
       if (social?.type === 'post') {
-        return `<span class="dm-social-post-card-placeholder" data-social-post="${social.postId}">` +
+        return `<span class="social-post-card-placeholder" data-social-post="${social.postId}">` +
           `<span class="invite-card-loading">🐸 Loading post…</span></span>`;
       }
       if (social?.type === 'reel') {
-        return `<span class="dm-social-reel-card-placeholder" data-social-reel="${social.postId}">` +
+        return `<span class="social-reel-card-placeholder" data-social-reel="${social.postId}">` +
           `<span class="invite-card-loading">🐸 Loading reel…</span></span>`;
       }
       return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${esc(url)}">${url}</a>`;

@@ -70,6 +70,12 @@ const Messages = (() => {
     return String(url || '').replace(/&amp;/g, '&');
   }
 
+  function _contentHasSpecialEmbedLink(text) {
+    const t = String(text || '');
+    if (!t) return false;
+    return /https?:\/\/(?:www\.)?(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i|u|p|r)\//i.test(t);
+  }
+
   function _isInviteUrl(url) {
     const u = _normalizeUrl(url);
     return /https?:\/\/(?:www\.)?(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/[A-Za-z0-9_-]{2,32}\b/i.test(u);
@@ -93,6 +99,139 @@ const Messages = (() => {
     requestAnimationFrame(() => { snap(); requestAnimationFrame(snap); });
   }
 
+  function _safeEmbedNick(nick) {
+    const n = String(nick || '').trim();
+    return /^[A-Za-z0-9_]{1,32}$/.test(n) ? n : '';
+  }
+
+  function _safeEmbedPostId(id) {
+    const n = Number(id);
+    return Number.isFinite(n) && n > 0 && n < 2147483647 ? Math.floor(n) : 0;
+  }
+
+  function _safeEmbedInviteCode(code) {
+    const c = String(code || '').trim();
+    return /^[A-Za-z0-9_-]{2,32}$/.test(c) ? c : '';
+  }
+
+  function _ftAppOrigin() {
+    try {
+      const o = String(location.origin || '').trim();
+      if (o.startsWith('http://') || o.startsWith('https://')) return o;
+    } catch {}
+    return 'https://frogtalk.xyz';
+  }
+
+  function _canonicalEmbedUrl(kind, id, rawUrl) {
+    const raw = String(rawUrl || '').trim();
+    if (/^https?:\/\/[^\s<>"]+/i.test(raw)) return raw.match(/^https?:\/\/[^\s<>"]+/i)[0];
+    const origin = _ftAppOrigin();
+    switch (kind) {
+      case 'invite': return raw || `${origin}/i/${encodeURIComponent(String(id))}`;
+      case 'profile': return `${origin}/u/${encodeURIComponent(String(id))}`;
+      case 'post': return `${origin}/p/${encodeURIComponent(String(id))}`;
+      case 'reel': return `${origin}/r/${encodeURIComponent(String(id))}`;
+      default: return '';
+    }
+  }
+
+  function _embedUrlAttr(url) {
+    const u = String(url || '').trim();
+    if (!u || !/^https?:\/\//i.test(u)) return '';
+    return ` data-ft-embed-url="${UI.escHtml(u)}"`;
+  }
+
+  function _collectEmbedUrlsFromMessage(msgEl) {
+    const urls = [];
+    const seen = new Set();
+    const add = (u) => {
+      const v = String(u || '').trim();
+      if (!v || !/^https?:\/\//i.test(v) || seen.has(v)) return;
+      seen.add(v);
+      urls.push(v);
+    };
+    if (!msgEl) return urls;
+    msgEl.querySelectorAll('[data-embed-url],[data-ft-embed-url]').forEach(el => {
+      add(_safeEmbedHttpUrl(el.dataset.embedUrl || el.dataset.ftEmbedUrl));
+    });
+    const contentEl = msgEl.querySelector('.msg-content');
+    const raw = contentEl?.dataset?.rawText || '';
+    if (raw) {
+      const re = /https?:\/\/[^\s<>"]+/g;
+      let m;
+      while ((m = re.exec(raw)) !== null) {
+        const u = m[0];
+        if (_isInviteUrl(u) || _parseFrogSocialUrl(u)) add(u);
+      }
+    }
+    return urls;
+  }
+
+  function _copyTextToClipboard(text, okLabel) {
+    const textVal = String(text || '').trim();
+    if (!textVal) {
+      if (typeof toast === 'function') toast('Nothing to copy', 'info');
+      return;
+    }
+    const done = () => { if (typeof toast === 'function') toast(okLabel || 'Copied', 'success'); };
+    const fail = () => { if (typeof toast === 'function') toast('Copy failed', 'error'); };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(textVal).then(done).catch(() => {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = textVal;
+          ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+          document.body.appendChild(ta);
+          ta.select();
+          const ok = document.execCommand('copy');
+          ta.remove();
+          ok ? done() : fail();
+        } catch { fail(); }
+      });
+    } else {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = textVal;
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy') ? done() : fail();
+        ta.remove();
+      } catch { fail(); }
+    }
+  }
+
+  function copyEmbedLink(msgId, url) {
+    if (url) {
+      _copyTextToClipboard(url, 'Link copied');
+      return;
+    }
+    const msgEl = document.getElementById(`msg-${msgId}`);
+    const urls = _collectEmbedUrlsFromMessage(msgEl);
+    if (!urls.length) {
+      if (typeof toast === 'function') toast('No embed link in this message', 'info');
+      return;
+    }
+    _copyTextToClipboard(urls[0], urls.length > 1 ? 'First link copied' : 'Link copied');
+  }
+
+  function _bindEmbedCopyHandlers(root) {
+    const scope = root || document;
+    scope.querySelectorAll(
+      '.ft-chat-embed[data-embed-url], .ft-chat-embed[data-ft-embed-url]'
+    ).forEach(el => {
+      if (el._ftEmbedCopyBound) return;
+      el._ftEmbedCopyBound = true;
+      el.addEventListener('contextmenu', (e) => {
+        const url = _safeEmbedHttpUrl(el.dataset.embedUrl || el.dataset.ftEmbedUrl || '');
+        if (!url) return;
+        e.preventDefault();
+        e.stopPropagation();
+        _copyTextToClipboard(url, 'Link copied');
+      });
+    });
+  }
+
   function _parseFrogSocialUrl(url) {
     try {
       const parsed = new URL(_normalizeUrl(url));
@@ -100,17 +239,28 @@ const Messages = (() => {
       if (!hostOk) return null;
       const path = parsed.pathname || '/';
       const profilePath = path.match(/^\/u\/([A-Za-z0-9_]{1,32})\/?$/i);
-      if (profilePath) return { type: 'profile', nickname: profilePath[1] };
+      if (profilePath) {
+        const nick = _safeEmbedNick(profilePath[1]);
+        if (nick) return { type: 'profile', nickname: nick };
+      }
       const postPath = path.match(/^\/p\/(\d+)\/?$/i);
-      if (postPath) return { type: 'post', postId: Number(postPath[1]) };
+      if (postPath) {
+        const pid = _safeEmbedPostId(postPath[1]);
+        if (pid) return { type: 'post', postId: pid };
+      }
       const reelPath = path.match(/^\/r\/(\d+)\/?$/i);
-      if (reelPath) return { type: 'reel', postId: Number(reelPath[1]) };
+      if (reelPath) {
+        const pid = _safeEmbedPostId(reelPath[1]);
+        if (pid) return { type: 'reel', postId: pid };
+      }
       const qProfile = (parsed.searchParams.get('profile') || '').trim();
       if (/^[A-Za-z0-9_]{1,32}$/.test(qProfile)) return { type: 'profile', nickname: qProfile };
       const qPost = (parsed.searchParams.get('post') || parsed.searchParams.get('p') || '').trim();
-      if (/^\d+$/.test(qPost)) return { type: 'post', postId: Number(qPost) };
+      const qPid = _safeEmbedPostId(qPost);
+      if (qPid) return { type: 'post', postId: qPid };
       const qReel = (parsed.searchParams.get('reel') || '').trim();
-      if (/^\d+$/.test(qReel)) return { type: 'reel', postId: Number(qReel) };
+      const qRid = _safeEmbedPostId(qReel);
+      if (qRid) return { type: 'reel', postId: qRid };
       return null;
     } catch {
       return null;
@@ -200,20 +350,28 @@ const Messages = (() => {
       // the new short /i/<code-or-vanity> form (2–32 [A-Za-z0-9_-]).
       const inviteMatch = url.match(/^https?:\/\/(?:www\.)?(?:frogtalk\.(?:xyz|app)|localhost(?::\d+)?)\/(?:invite|i)\/([A-Za-z0-9_-]{2,32})/);
       if (inviteMatch) {
-        return `<span class="invite-card-placeholder" data-invite-code="${UI.escHtml(inviteMatch[1])}">` +
+        const code = _safeEmbedInviteCode(inviteMatch[1]);
+        if (!code) return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link">${url}</a>`;
+        return `<span class="invite-card-placeholder" data-invite-code="${UI.escHtml(code)}"${_embedUrlAttr(_canonicalEmbedUrl('invite', code, url))}>` +
           `<span class="invite-card-loading">🐸 Loading invite…</span></span>`;
       }
       const social = _parseFrogSocialUrl(url);
       if (social?.type === 'profile') {
-        return `<span class="social-profile-card-placeholder" data-social-profile="${UI.escHtml(social.nickname)}">` +
+        const nick = _safeEmbedNick(social.nickname);
+        if (!nick) return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link">${url}</a>`;
+        return `<span class="social-profile-card-placeholder" data-social-profile="${UI.escHtml(nick)}"${_embedUrlAttr(_canonicalEmbedUrl('profile', nick, url))}>` +
           `<span class="invite-card-loading">🐸 Loading profile…</span></span>`;
       }
       if (social?.type === 'post') {
-        return `<span class="social-post-card-placeholder" data-social-post="${social.postId}">` +
+        const pid = _safeEmbedPostId(social.postId);
+        if (!pid) return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link">${url}</a>`;
+        return `<span class="social-post-card-placeholder" data-social-post="${pid}"${_embedUrlAttr(_canonicalEmbedUrl('post', pid, url))}>` +
           `<span class="invite-card-loading">🐸 Loading post…</span></span>`;
       }
       if (social?.type === 'reel') {
-        return `<span class="social-reel-card-placeholder" data-social-reel="${social.postId}">` +
+        const pid = _safeEmbedPostId(social.postId);
+        if (!pid) return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link">${url}</a>`;
+        return `<span class="social-reel-card-placeholder" data-social-reel="${pid}"${_embedUrlAttr(_canonicalEmbedUrl('reel', pid, url))}>` +
           `<span class="invite-card-loading">🐸 Loading reel…</span></span>`;
       }
       return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link" data-preview-url="${UI.escHtml(url)}">${url}</a>`;
@@ -240,12 +398,152 @@ const Messages = (() => {
   const _shareInfoCache = new Map(); // key → Promise<{ok,data,kind}>
   const _embedHydrateInflight = new Set(); // `${msgId}|${kind}|${id}`
   const _hydrateCardsTimers = new Map(); // msgId → timeout id
+  let _hydrateAllTimer = null;
+
+  const _FT_SHARE_COMPACT_STYLE =
+    'height:auto!important;min-height:0!important;max-height:none!important;' +
+    'width:fit-content!important;max-width:min(100%,320px)!important;' +
+    'overflow:hidden!important;box-sizing:border-box!important;' +
+    'flex:none!important;flex-grow:0!important;';
+
+  const _FT_SHARE_MUSIC_STYLE =
+    'height:auto!important;min-height:0!important;max-height:none!important;' +
+    'width:min(100%,480px)!important;max-width:min(100%,480px)!important;' +
+    'overflow:hidden!important;box-sizing:border-box!important;' +
+    'flex:none!important;flex-grow:0!important;';
+
+  const _FT_SHARE_PROFILE_STYLE =
+    'height:auto!important;min-height:0!important;max-height:none!important;' +
+    'width:min(100%,360px)!important;max-width:min(100%,360px)!important;' +
+    'overflow:hidden!important;box-sizing:border-box!important;' +
+    'flex:none!important;flex-grow:0!important;';
+
+  // Only accept http(s), data:, blob:, or same-origin paths for media src.
+  // Anything else (javascript:, file:, ftp:…) gets dropped so an upstream
+  // peer can never inject a side-effect-laden URL into a chat embed.
+  function _safeMediaUrl(u) {
+    const v = String(u || '').trim();
+    if (!v) return '';
+    if (/^https?:\/\//i.test(v)) return v;
+    if (/^data:image\//i.test(v) || /^data:video\//i.test(v)) return v;
+    if (/^blob:/i.test(v)) return v;
+    if (/^\/[^\/]/.test(v)) return v;
+    return '';
+  }
+
+  function _safeEmbedHttpUrl(u) {
+    const v = String(u || '').trim();
+    return /^https?:\/\/[^\s<>"]+$/i.test(v) ? v : '';
+  }
 
   function _embedHydrateKey(msgId, kind, id) {
     return `${msgId}|${kind}|${String(id).toLowerCase()}`;
   }
 
-  function _claimEmbedHydrate(msgId, kind, id) {
+  function _embedDoneDatasetKey(kind, id) {
+    return `ftEmbedDone_${kind}_${String(id).toLowerCase()}`;
+  }
+
+  function _placeholderSelector(kind, id) {
+    const sid = String(id);
+    switch (kind) {
+      case 'invite':
+        return `.invite-card-placeholder[data-invite-code="${CSS.escape(sid)}"]`;
+      case 'profile':
+        return `.social-profile-card-placeholder[data-social-profile="${CSS.escape(sid)}"]`;
+      case 'post':
+        return `.social-post-card-placeholder[data-social-post="${sid}"]`;
+      case 'reel':
+        return `.social-reel-card-placeholder[data-social-reel="${sid}"]`;
+      default:
+        return '';
+    }
+  }
+
+  function _embedAlreadyRendered(msgEl, kind, id) {
+    if (!msgEl) return false;
+    const sid = String(id);
+    switch (kind) {
+      case 'invite':
+        return !!msgEl.querySelector('.invite-card.ft-embed-invite');
+      case 'profile':
+        return !!msgEl.querySelector(`.share-card.ft-system-share-embed[data-social-profile="${CSS.escape(sid)}"]`);
+      case 'post':
+        return !!msgEl.querySelector(
+          `.chat-share-embed[data-share-post="${sid}"], .share-card[data-social-post="${sid}"]`
+        );
+      case 'reel':
+        return !!msgEl.querySelector(
+          `.chat-share-embed[data-share-reel="${sid}"], .share-card[data-social-reel="${sid}"]`
+        );
+      default:
+        return false;
+    }
+  }
+
+  function _isEmbedSettled(msgEl, kind, id) {
+    if (!msgEl) return true;
+    if (msgEl.dataset[_embedDoneDatasetKey(kind, id)] === '1') return true;
+    return _embedAlreadyRendered(msgEl, kind, id);
+  }
+
+  function _markEmbedSettled(msgEl, kind, id) {
+    try { if (msgEl) msgEl.dataset[_embedDoneDatasetKey(kind, id)] = '1'; } catch {}
+  }
+
+  function _clearEmbedSettlement(msgEl) {
+    if (!msgEl?.dataset) return;
+    Object.keys(msgEl.dataset).forEach(k => {
+      if (k.startsWith('ftEmbedDone_')) delete msgEl.dataset[k];
+    });
+  }
+
+  function _purgeStalePlaceholders(msgEl, kind, id) {
+    const sel = _placeholderSelector(kind, id);
+    if (!sel || !msgEl) return;
+    try { msgEl.querySelectorAll(sel).forEach(el => el.remove()); } catch {}
+  }
+
+  function _dedupeShareRows(msgEl) {
+    const body = msgEl?.querySelector('.msg-body') || msgEl;
+    if (!body) return;
+    const rows = [...body.querySelectorAll(':scope > .msg-share-row')];
+    if (rows.length < 2) return;
+    const seen = new Set();
+    rows.forEach(row => {
+      const card = row.querySelector(
+        '.chat-share-embed[data-share-post], .chat-share-embed[data-share-reel], ' +
+        '.share-card[data-social-profile], .invite-card.ft-embed-invite'
+      );
+      const key = card
+        ? ('post:' + (card.getAttribute('data-share-post') || '')
+          + '|reel:' + (card.getAttribute('data-share-reel') || '')
+          + '|profile:' + (card.getAttribute('data-social-profile') || '')
+          + '|cls:' + (card.className || ''))
+        : row.innerHTML.slice(0, 80);
+      if (seen.has(key)) row.remove();
+      else seen.add(key);
+    });
+    // Also purge any straggler placeholders for kinds already rendered.
+    ['post', 'reel', 'profile'].forEach(kind => {
+      const selRendered = kind === 'profile'
+        ? '.share-card.ft-system-share-embed[data-social-profile]'
+        : `.chat-share-embed[data-share-${kind}]`;
+      body.querySelectorAll(selRendered).forEach(card => {
+        const idVal = kind === 'profile'
+          ? card.getAttribute('data-social-profile')
+          : card.getAttribute(`data-share-${kind}`);
+        if (!idVal) return;
+        _purgeStalePlaceholders(msgEl, kind, idVal);
+      });
+    });
+  }
+
+  function _claimEmbedHydrate(msgEl, msgId, kind, id) {
+    if (_isEmbedSettled(msgEl, kind, id)) {
+      _purgeStalePlaceholders(msgEl, kind, id);
+      return false;
+    }
     const k = _embedHydrateKey(msgId, kind, id);
     if (_embedHydrateInflight.has(k)) return false;
     _embedHydrateInflight.add(k);
@@ -256,16 +554,20 @@ const Messages = (() => {
     _embedHydrateInflight.delete(_embedHydrateKey(msgId, kind, id));
   }
 
-  // Async loaders can race (double _hydrateSpecialCards, pending echo replacing
-  // the DOM). Re-query and skip if the placeholder was already removed.
-  function _replaceEmbedPlaceholder(placeholder, html, msgEl, selector) {
+  // Async loaders can race (double hydrate, pending echo replacing the DOM).
+  // Only replace live placeholders; re-query after await.
+  function _replaceEmbedPlaceholder(placeholder, html, msgEl, kind, id) {
+    const sel = _placeholderSelector(kind, id);
     let el = placeholder;
-    if ((!el || !el.parentNode) && msgEl && selector) {
-      try { el = msgEl.querySelector(selector); } catch { el = null; }
+    if ((!el || !el.parentNode) && msgEl && sel) {
+      try { el = msgEl.querySelector(sel); } catch { el = null; }
     }
     if (!el || !el.parentNode) return false;
+    if (!String(el.className || '').includes('placeholder')) return false;
     try {
       el.outerHTML = html;
+      _markEmbedSettled(msgEl, kind, id);
+      _bindEmbedCopyHandlers(msgEl);
       return true;
     } catch {
       return false;
@@ -320,39 +622,89 @@ const Messages = (() => {
     }
   }
 
+  function _formatProfileCount(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v) || v < 0) return '0';
+    if (v >= 1_000_000) return (v / 1_000_000).toFixed(v >= 10_000_000 ? 0 : 1).replace(/\.0$/, '') + 'M';
+    if (v >= 1_000) return (v / 1_000).toFixed(v >= 10_000 ? 0 : 1).replace(/\.0$/, '') + 'K';
+    return String(v);
+  }
+
+  function _renderProfileShareEmbed(d, nickKey, placeholderEl) {
+    const nick = UI.escHtml(d.nickname || nickKey);
+    const display = UI.escHtml(d.display_name || d.nickname || nickKey);
+    const subtitle = d.private
+      ? 'Private profile'
+      : UI.escHtml(String(d.bio || d.status_msg || 'Open in Frog Social').substring(0, 120));
+    const profileUrl = (placeholderEl && placeholderEl.dataset.ftEmbedUrl)
+      || _canonicalEmbedUrl('profile', nickKey, '');
+    const safeProfileUrl = _safeEmbedHttpUrl(profileUrl);
+    const profileLinkAttr = safeProfileUrl ? ` data-embed-url="${UI.escHtml(safeProfileUrl)}"` : '';
+    const followerCount = _formatProfileCount(d.follower_count);
+    const postCount = _formatProfileCount(d.post_count);
+    const showStats = !d.private && (typeof d.follower_count === 'number' || typeof d.post_count === 'number');
+    const isSelf = !!d.is_self;
+    const isFollowing = !!d.is_following;
+    // Only render the follow button when we actually know the viewer's
+    // follow state (i.e. the authed endpoint succeeded) AND the target
+    // is not the viewer themselves or a private profile.
+    const showFollow = !isSelf && !d.private && typeof d.is_following === 'boolean'
+      && typeof Social !== 'undefined' && typeof Social.toggleFollow === 'function';
+    const followBtnHtml = showFollow
+      ? `<button type="button" class="profile-embed-follow ${isFollowing ? 'is-following' : 'is-follow'}"` +
+        ` onclick="event.stopPropagation();event.preventDefault();Social.toggleFollow('${UI.escHtml(d.nickname || nickKey)}',this)">` +
+        `${isFollowing ? 'Following' : 'Follow'}</button>`
+      : '';
+    const statsHtml = showStats
+      ? `<div class="profile-embed-stats">` +
+          `<span class="profile-embed-stat"><strong>${UI.escHtml(postCount)}</strong> posts</span>` +
+          `<span class="profile-embed-stat"><strong>${UI.escHtml(followerCount)}</strong> followers</span>` +
+        `</div>`
+      : '';
+    return `<div class="share-card ft-system-share-embed ft-chat-embed profile-embed-card" data-social-profile="${nick}"${profileLinkAttr}` +
+      ` style="${_FT_SHARE_PROFILE_STYLE}"` +
+      ` onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
+      `<div class="profile-embed-row">` +
+        `<div class="share-card-avatar profile-embed-avatar">${UI.avatarEl(d.avatar || null, d.nickname || nickKey, 56)}</div>` +
+        `<div class="share-card-info profile-embed-info">` +
+          `<div class="share-card-label">Frog Social Profile</div>` +
+          `<div class="share-card-name profile-embed-name">${display}</div>` +
+          `<div class="profile-embed-handle">@${nick}</div>` +
+        `</div>` +
+        (followBtnHtml ? `<div class="profile-embed-action">${followBtnHtml}</div>` : '') +
+      `</div>` +
+      (subtitle ? `<div class="share-card-bio profile-embed-bio">${subtitle}</div>` : '') +
+      statsHtml +
+    `</div>`;
+  }
+
   async function _loadSocialProfileCard(msgId, nickname) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    const nickKey = String(nickname || '').trim();
-    if (!nickKey || !_claimEmbedHydrate(msgId, 'profile', nickKey)) return;
-    const sel = `.social-profile-card-placeholder[data-social-profile="${CSS.escape(nickKey)}"]`;
-    const placeholder = msgEl.querySelector(sel);
+    const nickKey = _safeEmbedNick(nickname);
+    if (!nickKey || !_claimEmbedHydrate(msgEl, msgId, 'profile', nickKey)) return;
+    const placeholder = msgEl.querySelector(_placeholderSelector('profile', nickKey));
     if (!placeholder) { _releaseEmbedHydrate(msgId, 'profile', nickKey); return; }
     try {
-      const key = `profile:${nickKey.toLowerCase()}`;
-      const result = await _shareFetchOnce(key, async () => {
+      // Prefer the AUTHED endpoint when we have a session so the rendered
+      // card carries follower count + is_following for the Follow button.
+      // Fall back to the public /api/share/* page when the viewer isn't
+      // logged in (federated peer / public OG fetch).
+      const hasSession = !!(State?.token);
+      const cacheKey = `profile:${hasSession ? 'auth' : 'pub'}:${nickKey.toLowerCase()}`;
+      const result = await _shareFetchOnce(cacheKey, async () => {
+        if (hasSession) {
+          const auth = await _authedGet(`/api/social/profile/${encodeURIComponent(nickKey)}`);
+          if (auth.ok) return auth;
+        }
         const pub = await _publicGet(`/api/share/profile/${encodeURIComponent(nickKey)}`);
         if (pub.ok) return pub;
-        return await _authedGet(`/api/social/profile/${encodeURIComponent(nickKey)}`);
+        return hasSession ? { ok: false } : await _authedGet(`/api/social/profile/${encodeURIComponent(nickKey)}`);
       });
       const html = !result.ok
         ? `<span class="invite-card invite-card-invalid">❌ Profile unavailable</span>`
-        : (() => {
-            const d = result.data || {};
-            const nick = UI.escHtml(d.nickname || nickKey);
-            const subtitle = d.private
-              ? 'Private profile'
-              : UI.escHtml(String(d.bio || d.status_msg || 'Open in Frog Social').substring(0, 80));
-            return `<div class="share-card ft-system-share-embed" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
-              `<div class="share-card-avatar">${UI.avatarEl(d.avatar || null, d.nickname || nickKey, 42)}</div>` +
-              `<div class="share-card-info">` +
-                `<div class="share-card-label">Frog Social Profile</div>` +
-                `<div class="share-card-name">@${nick}</div>` +
-                `<div class="share-card-bio">${subtitle}</div>` +
-              `</div>` +
-            `</div>`;
-          })();
-      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, sel)) _scrollIfNearBottom();
+        : _renderProfileShareEmbed(result.data || {}, nickKey, placeholder);
+      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, 'profile', nickKey)) _scrollIfNearBottom();
     } finally {
       _releaseEmbedHydrate(msgId, 'profile', nickKey);
     }
@@ -364,6 +716,33 @@ const Messages = (() => {
   // client so the inline player works for any music/* share — including
   // ones served via /api/wall/posts where we never get a parsed
   // provider/video_id back.
+  function _detectMusicProvider(url) {
+    const u = String(url || '');
+    if (/(?:youtube\.com|youtu\.be)/i.test(u)) return 'youtube';
+    if (/open\.spotify\.com/i.test(u)) return 'spotify';
+    if (/soundcloud\.com|on\.soundcloud\.com/i.test(u)) return 'soundcloud';
+    return '';
+  }
+
+  function _buildSendToPlayerBtnHtml(opts) {
+    const url = String(opts?.url || '');
+    if (!url) return '';
+    const provider = String(opts?.provider || _detectMusicProvider(url) || 'youtube');
+    const title = String(opts?.title || (provider === 'youtube' ? 'YouTube video' : provider === 'spotify' ? 'Spotify track' : 'SoundCloud track'));
+    const thumb = String(opts?.thumbnail || '');
+    try {
+      if (window.Music && Music.isMediaChannelContext && Music.isMediaChannelContext()
+          && Music.canQueueInCurrentRoom && !Music.canQueueInCurrentRoom()) {
+        return '';
+      }
+    } catch {}
+    const payload = UI.escHtml(JSON.stringify({ url, title, provider, thumbnail: thumb }));
+    return `<button type="button" class="embed-send-player" data-payload="${payload}"` +
+      ` onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));var M=window.Music;var inMedia=!!(M&&M.isMediaChannelContext&&M.isMediaChannelContext());var canQ=inMedia&&!!(M&&M.canQueueInCurrentRoom&&M.canQueueInCurrentRoom());if(inMedia&&canQ&&M.queueFromUrl){M.queueFromUrl(p.url).then(function(ok){try{UI&&UI.showToast&&UI.showToast(ok?'Added to channel queue':'Could not queue — playing in side player','info');}catch(_){}if(!ok&&M.playSolo){try{M.playSolo(p);}catch(_){}}});}else if(inMedia&&!canQ){try{UI&&UI.showToast&&UI.showToast('You don\\u0027t have queue permission in this channel','error');}catch(_){}return;}else if(M&&M.playSolo){M.playSolo(p);try{UI&&UI.showToast&&UI.showToast('Playing in side player');}catch(_){}}try{window._pauseChatEmbed&&window._pauseChatEmbed(b);}catch(_){}}catch(e){}})(this)"` +
+      ` onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"` +
+      ` title="Send this track to the player">▸ Send to player</button>`;
+  }
+
   function _musicEmbedSrc(provider, url) {
     if (!url || typeof url !== 'string') return null;
     const u = url.trim();
@@ -403,7 +782,7 @@ const Messages = (() => {
     return null;
   }
 
-  function _renderRichShareEmbed(p, kind, postId) {
+  function _renderRichShareEmbed(p, kind, postId, embedUrl) {
     const nick = UI.escHtml(p.nickname || 'frog');
     const mediaType = String(p.media_type || '').toLowerCase();
     const isVideo = mediaType.startsWith('video/');
@@ -431,23 +810,24 @@ const Messages = (() => {
 
     // Pick a public media URL (works for share-enabled public posts only).
     // For authed responses without a public URL, fall back to the inline
-    // data: URI returned in the post payload.
-    let mediaUrl = p.media_url || null;
+    // data: URI returned in the post payload. Every candidate goes through
+    // _safeMediaUrl so a federated peer can't slip a javascript:/file:
+    // scheme into a chat embed.
+    let mediaUrl = _safeMediaUrl(p.media_url || '');
     if (!mediaUrl && (isVideo || isImage)) {
-      if (typeof p.media_data === 'string' && p.media_data.startsWith('data:')) {
-        mediaUrl = p.media_data;
-      } else if (typeof p.media_data === 'string' && /^https?:\/\//i.test(p.media_data)) {
-        mediaUrl = p.media_data;
-      } else {
-        mediaUrl = isVideo ? `/r/${pid}/media` : `/og/post/${pid}.img`;
-      }
+      const candidate = typeof p.media_data === 'string' ? p.media_data : '';
+      if (candidate) mediaUrl = _safeMediaUrl(candidate);
+      if (!mediaUrl) mediaUrl = isVideo ? `/r/${pid}/media` : `/og/post/${pid}.img`;
     }
     // Music: media_url comes from /api/share/post (public) as the
     // provider URL; fall back to media_data on the authed response.
-    let musicUrl = null;
+    let musicUrl = '';
     if (isMusic) {
-      if (mediaUrl && /^https?:\/\//i.test(mediaUrl)) musicUrl = mediaUrl;
-      else if (typeof p.media_data === 'string' && /^https?:\/\//i.test(p.media_data)) musicUrl = p.media_data;
+      const candidates = [p.media_url, p.media_data];
+      for (const c of candidates) {
+        const safe = _safeEmbedHttpUrl(c);
+        if (safe) { musicUrl = safe; break; }
+      }
     }
 
     let mediaHtml = '';
@@ -512,10 +892,17 @@ const Messages = (() => {
         `</div>`;
     }
 
-    const cardCls = `chat-share-embed ft-system-share-embed${isMusic ? ' is-music' : ''}`;
+    const cardCls = `chat-share-embed ft-system-share-embed ft-chat-embed${isMusic ? ' is-music' : ''}`;
     const footLabel = isMusic ? 'Open music post →' : 'Open in Frog Social →';
+    const linkUrl = _canonicalEmbedUrl(kind === 'reel' ? 'reel' : 'post', pid, embedUrl);
+    const linkAttr = linkUrl ? ` data-embed-url="${UI.escHtml(linkUrl)}"` : '';
+    const musicProv = isMusic && musicUrl ? (provider || _detectMusicProvider(musicUrl) || 'youtube') : '';
+    const sendBtnHtml = isMusic && musicUrl
+      ? `<div class="chat-share-music-actions">${_buildSendToPlayerBtnHtml({ url: musicUrl, title: caption, provider: musicProv })}</div>`
+      : '';
+    const inlineStyle = isMusic ? _FT_SHARE_MUSIC_STYLE : _FT_SHARE_COMPACT_STYLE;
     return (
-      `<div class="${cardCls}" data-share-${kind}="${pid}" onclick="${onclick}">` +
+      `<div class="${cardCls}" data-share-${kind}="${pid}"${linkAttr} style="${inlineStyle}" onclick="${onclick}">` +
         `<div class="chat-share-embed-head">` +
           `<div class="chat-share-embed-avatar">${avatar}</div>` +
           `<div class="chat-share-embed-meta">` +
@@ -526,6 +913,7 @@ const Messages = (() => {
         `</div>` +
         (caption ? `<div class="chat-share-embed-caption">${safeCap}</div>` : '') +
         mediaHtml +
+        sendBtnHtml +
         `<div class="chat-share-embed-foot">${footLabel}</div>` +
       `</div>`
     );
@@ -559,12 +947,16 @@ const Messages = (() => {
   async function _loadSocialPostCard(msgId, postId) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    const pid = Number(postId);
-    if (!Number.isFinite(pid) || pid <= 0) return;
-    if (!_claimEmbedHydrate(msgId, 'post', pid)) return;
-    const sel = `.social-post-card-placeholder[data-social-post="${pid}"], .dm-social-post-card-placeholder[data-social-post="${pid}"]`;
-    const placeholder = msgEl.querySelector(sel);
+    const pid = _safeEmbedPostId(postId);
+    if (!pid || !_claimEmbedHydrate(msgEl, msgId, 'post', pid)) return;
+    const placeholder = msgEl.querySelector(_placeholderSelector('post', pid));
     if (!placeholder) { _releaseEmbedHydrate(msgId, 'post', pid); return; }
+    if (_embedAlreadyRendered(msgEl, 'post', pid)) {
+      _purgeStalePlaceholders(msgEl, 'post', pid);
+      _markEmbedSettled(msgEl, 'post', pid);
+      _releaseEmbedHydrate(msgId, 'post', pid);
+      return;
+    }
     try {
       const key = `post:${pid}`;
       const result = await _shareFetchOnce(key, async () => {
@@ -572,10 +964,11 @@ const Messages = (() => {
         if (pub.ok) return pub;
         return await _authedGet(`/api/wall/posts/${encodeURIComponent(pid)}`);
       });
+      const embedUrl = placeholder.dataset.ftEmbedUrl || '';
       const html = !result.ok
         ? `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`
-        : _renderRichShareEmbed(result.data || {}, 'post', pid);
-      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, sel)) _scrollIfNearBottom();
+        : _renderRichShareEmbed(result.data || {}, 'post', pid, embedUrl);
+      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, 'post', pid)) _scrollIfNearBottom();
     } finally {
       _releaseEmbedHydrate(msgId, 'post', pid);
     }
@@ -584,12 +977,19 @@ const Messages = (() => {
   async function _loadSocialReelCard(msgId, postId) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    const pid = Number(postId);
-    if (!Number.isFinite(pid) || pid <= 0) return;
-    if (!_claimEmbedHydrate(msgId, 'reel', pid)) return;
-    const sel = `.social-reel-card-placeholder[data-social-reel="${pid}"], .dm-social-reel-card-placeholder[data-social-reel="${pid}"]`;
-    const placeholder = msgEl.querySelector(sel);
+    const pid = _safeEmbedPostId(postId);
+    if (!pid || !_claimEmbedHydrate(msgEl, msgId, 'reel', pid)) return;
+    const placeholder = msgEl.querySelector(_placeholderSelector('reel', pid));
     if (!placeholder) { _releaseEmbedHydrate(msgId, 'reel', pid); return; }
+    // Belt-and-braces: if a reel card for THIS pid already rendered (race
+    // between hydrate timers and pending-reconcile), drop any stale
+    // placeholders and bail before the async fetch.
+    if (_embedAlreadyRendered(msgEl, 'reel', pid)) {
+      _purgeStalePlaceholders(msgEl, 'reel', pid);
+      _markEmbedSettled(msgEl, 'reel', pid);
+      _releaseEmbedHydrate(msgId, 'reel', pid);
+      return;
+    }
     try {
       const key = `reel:${pid}`;
       const result = await _shareFetchOnce(key, async () => {
@@ -603,11 +1003,12 @@ const Messages = (() => {
       } else {
         const data = result.data || {};
         const mt = String(data.media_type || '').toLowerCase();
+        const embedUrl = placeholder.dataset.ftEmbedUrl || '';
         html = !mt.startsWith('video/')
           ? `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`
-          : _renderRichShareEmbed(data, 'reel', pid);
+          : _renderRichShareEmbed(data, 'reel', pid, embedUrl);
       }
-      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, sel)) _scrollIfNearBottom();
+      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, 'reel', pid)) _scrollIfNearBottom();
     } finally {
       _releaseEmbedHydrate(msgId, 'reel', pid);
     }
@@ -653,36 +1054,52 @@ const Messages = (() => {
   function _hydrateSpecialCardsNow(msgId) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    // Hoist Frog Social / music embed placeholders only (not invites — hoisting
-    // invites raced with pending-message reconcile and duplicated embeds).
+    _ensureSystemEmbedStyleGuard();
+    _dedupeShareRows(msgEl);
+
+    // Hoist Frog Social / music placeholders (not invites — avoids duplicate
+    // cards when pending echo rebuilds .msg-content).
     msgEl.querySelectorAll(
       '.social-profile-card-placeholder[data-social-profile],' +
       '.social-post-card-placeholder[data-social-post],' +
-      '.social-reel-card-placeholder[data-social-reel],' +
-      '.dm-social-post-card-placeholder[data-social-post],' +
-      '.dm-social-reel-card-placeholder[data-social-reel]'
+      '.social-reel-card-placeholder[data-social-reel]'
     ).forEach(_hoistShareCardToTop);
 
     msgEl.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
-      const code = (el.dataset.inviteCode || '').trim();
-      if (code) _loadInviteCard(msgId, code);
+      const code = _safeEmbedInviteCode(el.dataset.inviteCode);
+      if (code && !_isEmbedSettled(msgEl, 'invite', code)) _loadInviteCard(msgId, code);
+      else if (code) _purgeStalePlaceholders(msgEl, 'invite', code);
     });
     msgEl.querySelectorAll('.social-profile-card-placeholder[data-social-profile]').forEach(el => {
-      const nick = (el.dataset.socialProfile || '').trim();
-      if (nick) _loadSocialProfileCard(msgId, nick);
+      const nick = _safeEmbedNick(el.dataset.socialProfile);
+      if (nick && !_isEmbedSettled(msgEl, 'profile', nick)) _loadSocialProfileCard(msgId, nick);
+      else if (nick) _purgeStalePlaceholders(msgEl, 'profile', nick);
     });
-    msgEl.querySelectorAll(
-      '.social-post-card-placeholder[data-social-post], .dm-social-post-card-placeholder[data-social-post]'
-    ).forEach(el => {
-      const postId = Number(el.dataset.socialPost || '0');
-      if (Number.isFinite(postId) && postId > 0) _loadSocialPostCard(msgId, postId);
+    msgEl.querySelectorAll('.social-post-card-placeholder[data-social-post]').forEach(el => {
+      const pid = _safeEmbedPostId(el.dataset.socialPost);
+      if (pid && !_isEmbedSettled(msgEl, 'post', pid)) _loadSocialPostCard(msgId, pid);
+      else if (pid) _purgeStalePlaceholders(msgEl, 'post', pid);
     });
-    msgEl.querySelectorAll(
-      '.social-reel-card-placeholder[data-social-reel], .dm-social-reel-card-placeholder[data-social-reel]'
-    ).forEach(el => {
-      const postId = Number(el.dataset.socialReel || '0');
-      if (Number.isFinite(postId) && postId > 0) _loadSocialReelCard(msgId, postId);
+    msgEl.querySelectorAll('.social-reel-card-placeholder[data-social-reel]').forEach(el => {
+      const pid = _safeEmbedPostId(el.dataset.socialReel);
+      if (pid && !_isEmbedSettled(msgEl, 'reel', pid)) _loadSocialReelCard(msgId, pid);
+      else if (pid) _purgeStalePlaceholders(msgEl, 'reel', pid);
     });
+    _bindEmbedCopyHandlers(msgEl);
+  }
+
+  function _scheduleHydrateAllEmbeds() {
+    if (_hydrateAllTimer) clearTimeout(_hydrateAllTimer);
+    _hydrateAllTimer = setTimeout(() => {
+      _hydrateAllTimer = null;
+      _ensureSystemEmbedStyleGuard();
+      const area = document.getElementById('messages-area');
+      if (!area) return;
+      area.querySelectorAll('[id^="msg-"]').forEach(el => {
+        const id = el.id.replace(/^msg-/, '');
+        if (id) _hydrateSpecialCardsNow(id);
+      });
+    }, 60);
   }
 
   // Late style guard — re-appended to the END of <head> so it wins over
@@ -691,7 +1108,10 @@ const Messages = (() => {
 #main .msg-content .invite-card.ft-embed-invite,
 #main .msg-body .invite-card.ft-embed-invite,
 #main .msg-share-row .invite-card.ft-embed-invite {
-  display: inline-block !important;
+  display: inline-grid !important;
+  grid-template-rows: auto auto auto !important;
+  grid-template-columns: 1fr !important;
+  align-content: start !important;
   vertical-align: top !important;
   width: min(100%, 300px) !important;
   max-width: 300px !important;
@@ -702,6 +1122,8 @@ const Messages = (() => {
   box-sizing: border-box !important;
   flex: none !important;
   flex-grow: 0 !important;
+  flex-direction: unset !important;
+  justify-content: flex-start !important;
 }
 #main .msg-content .ft-embed-invite .invite-card-header,
 #main .msg-content .ft-embed-invite .invite-card-main,
@@ -709,8 +1131,7 @@ const Messages = (() => {
 #main .msg-content .ft-embed-invite .invite-card-name,
 #main .msg-content .ft-embed-invite .invite-card-row,
 #main .msg-content .ft-embed-invite .ft-embed-invite-row,
-#main .msg-content .ft-embed-invite .invite-card-footer,
-#main .msg-content .ft-embed-invite .ft-embed-invite-footer,
+#main .msg-content .ft-embed-invite .invite-card-main,
 #main .msg-body .ft-embed-invite .invite-card-main {
   display: block !important;
   height: auto !important;
@@ -720,6 +1141,18 @@ const Messages = (() => {
   flex-grow: 0 !important;
   grid-template: none !important;
   grid-auto-rows: auto !important;
+}
+#main .msg-content .ft-embed-invite > .invite-card-footer,
+#main .msg-content .ft-embed-invite > .ft-embed-invite-footer,
+#main .msg-body .ft-embed-invite > .invite-card-footer {
+  display: block !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  flex: none !important;
+  flex-grow: 0 !important;
+  margin-top: 0 !important;
+  padding: 5px 10px 7px !important;
 }
 #main .msg-content .ft-embed-invite .invite-card-row,
 #main .msg-content .ft-embed-invite .ft-embed-invite-row {
@@ -785,6 +1218,33 @@ const Messages = (() => {
   display: inline-flex !important;
   align-items: center !important;
 }
+#main .ft-system-share-embed .chat-share-embed-head,
+#main .ft-system-share-embed .chat-share-embed-caption,
+#main .ft-system-share-embed .chat-share-embed-foot,
+#main .ft-system-share-embed .share-card-info {
+  height: auto !important;
+  min-height: 0 !important;
+  flex: none !important;
+  flex-grow: 0 !important;
+}
+#main .ft-system-share-embed .chat-share-media {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: 300px !important;
+  flex: none !important;
+}
+#main .ft-system-share-embed .chat-share-music-yt-frame {
+  position: relative !important;
+  padding-bottom: 56.25% !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+#main .ft-system-share-embed .chat-share-music-yt-frame iframe {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
 `;
 
   function _ensureSystemEmbedStyleGuard() {
@@ -804,10 +1264,9 @@ const Messages = (() => {
   async function _loadInviteCard(msgId, code) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    const inviteCode = String(code || '').trim();
-    if (!inviteCode || !_claimEmbedHydrate(msgId, 'invite', inviteCode)) return;
-    const sel = `.invite-card-placeholder[data-invite-code="${CSS.escape(inviteCode)}"]`;
-    const placeholder = msgEl.querySelector(sel);
+    const inviteCode = _safeEmbedInviteCode(code);
+    if (!inviteCode || !_claimEmbedHydrate(msgEl, msgId, 'invite', inviteCode)) return;
+    const placeholder = msgEl.querySelector(_placeholderSelector('invite', inviteCode));
     if (!placeholder) { _releaseEmbedHydrate(msgId, 'invite', inviteCode); return; }
 
     try {
@@ -816,7 +1275,7 @@ const Messages = (() => {
       if (!res.ok || !data.valid) {
         if (_replaceEmbedPlaceholder(placeholder,
           `<span class="invite-card invite-card-invalid">❌ Invite invalid or expired</span>`,
-          msgEl, sel)) _scrollIfNearBottom();
+          msgEl, 'invite', inviteCode)) _scrollIfNearBottom();
         return;
       }
       // room_icon can be a single emoji, an uploaded image (data: URL,
@@ -844,35 +1303,31 @@ const Messages = (() => {
       const byNick = _rawByNick;
       const createdBy = _rawByNick ? `@${_rawByNick}` : '';
       const footer = createdBy
-        ? `<div class="invite-card-footer ft-embed-invite-footer">Invited by <strong class="invite-card-by-nick"${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" tabindex="0" role="button"` : ''}>${UI.escHtml(createdBy)}</strong></div>`
+        ? `<div class="invite-card-footer ft-embed-invite-footer" style="display:block!important;flex:none!important;flex-grow:0!important;height:auto!important;min-height:0!important;margin:0!important;padding:5px 10px 7px!important;">Invited by <strong class="invite-card-by-nick"${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" tabindex="0" role="button"` : ''}>${UI.escHtml(createdBy)}</strong></div>`
         : '';
+      const inviteUrl = placeholder.dataset.ftEmbedUrl
+        || _canonicalEmbedUrl('invite', inviteCode, '');
+      const inviteLinkAttr = inviteUrl ? ` data-embed-url="${UI.escHtml(inviteUrl)}"` : '';
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
-        ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`
-        : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(inviteCode)}',this)">Join Channel</button>`;
+        ? `<button type="button" class="invite-join-btn invite-join-btn--already" onclick="event.stopPropagation();Rooms.openChannelLink('${name}')">Open Channel</button>`
+        : `<button type="button" class="invite-join-btn" onclick="event.stopPropagation();Messages.joinViaInvite('${UI.escHtml(inviteCode)}',this)">Join Channel</button>`;
       _ensureSystemEmbedStyleGuard();
-      const cardHtml = `
-        <div class="invite-card ft-embed-invite"
-             style="display:inline-block!important;vertical-align:top!important;width:min(100%,300px)!important;max-width:300px!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:hidden!important;box-sizing:border-box!important;">
-          <div class="invite-card-header ft-embed-invite-header">You've been invited to join a channel</div>
-          <div class="invite-card-main ft-embed-invite-main"
-               style="display:block!important;height:auto!important;min-height:0!important;max-height:none!important;padding:8px 10px 6px!important;">
-            <div class="invite-card-name ft-embed-invite-name">#${name}</div>
-            <div class="invite-card-row ft-embed-invite-row"
-                 style="display:flex!important;align-items:center!important;gap:8px!important;height:auto!important;min-height:0!important;max-height:none!important;">
-              <div class="invite-card-icon ft-embed-invite-icon"
-                   style="flex:0 0 40px!important;width:40px!important;height:40px!important;min-width:40px!important;max-width:40px!important;min-height:40px!important;max-height:40px!important;overflow:hidden!important;">${iconHtml}</div>
-              <div class="invite-card-row-desc ft-embed-invite-desc">${descText || 'No channel description'}</div>
-              <div class="invite-card-action ft-embed-invite-action">${btnHtml}</div>
-            </div>
-            ${footer}
-          </div>
-        </div>`;
-      if (_replaceEmbedPlaceholder(placeholder, cardHtml, msgEl, sel)) _scrollIfNearBottom();
+      const cardHtml =
+        `<div class="invite-card ft-embed-invite ft-chat-embed"${inviteLinkAttr} style="display:inline-grid!important;grid-template-rows:auto auto auto!important;align-content:start!important;vertical-align:top!important;width:min(100%,300px)!important;max-width:300px!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:hidden!important;flex:none!important;box-sizing:border-box!important;white-space:normal!important;">` +
+        `<div class="invite-card-header ft-embed-invite-header">You've been invited to join a channel</div>` +
+        `<div class="invite-card-main ft-embed-invite-main" style="display:block!important;height:auto!important;min-height:0!important;max-height:none!important;padding:8px 10px 6px!important;white-space:normal!important;">` +
+        `<div class="invite-card-name ft-embed-invite-name">#${name}</div>` +
+        `<div class="invite-card-row ft-embed-invite-row" style="display:flex!important;align-items:center!important;gap:8px!important;height:auto!important;min-height:0!important;max-height:none!important;">` +
+        `<div class="invite-card-icon ft-embed-invite-icon" style="flex:0 0 40px!important;width:40px!important;height:40px!important;min-width:40px!important;max-width:40px!important;min-height:40px!important;max-height:40px!important;overflow:hidden!important;">${iconHtml}</div>` +
+        `<div class="invite-card-row-desc ft-embed-invite-desc">${descText || 'No channel description'}</div>` +
+        `<div class="invite-card-action ft-embed-invite-action">${btnHtml}</div>` +
+        `</div></div>${footer}</div>`;
+      if (_replaceEmbedPlaceholder(placeholder, cardHtml, msgEl, 'invite', inviteCode)) _scrollIfNearBottom();
     } catch (e) {
       _replaceEmbedPlaceholder(placeholder,
         `<span class="invite-card invite-card-invalid">❌ Could not load invite</span>`,
-        msgEl, sel);
+        msgEl, 'invite', inviteCode);
       _scrollIfNearBottom();
     } finally {
       _releaseEmbedHydrate(msgId, 'invite', inviteCode);
@@ -1165,36 +1620,12 @@ const Messages = (() => {
     // the anchor's default navigation. The click handler also swallows
     // bubbling so the parent <a> can't fire.
     function _buildSendToPlayerBtn(provider) {
-      const url = String(preview.url || '');
-      if (!url) return '';
-      const title = String(preview.title || (provider === 'youtube' ? 'YouTube video' : provider === 'spotify' ? 'Spotify track' : 'SoundCloud track'));
-      const thumb = String(preview.image || preview.thumbnail || '');
-      // Render-time hide: in a media channel where the user can't queue
-      // (DJ-only mode and they're not a DJ/mod/owner), don't show the
-      // affordance at all. We only check this on render — the queue-vs-
-      // solo routing is decided at click time below so a late Music.mount
-      // doesn't leave us stuck on the wrong path. The click handler also
-      // re-checks "no queue permission" and bails out gracefully if the
-      // permission flipped between render and click.
-      try {
-        if (window.Music && Music.isMediaChannelContext && Music.isMediaChannelContext()
-            && Music.canQueueInCurrentRoom && !Music.canQueueInCurrentRoom()) {
-          return '';
-        }
-      } catch {}
-      // JSON-encode then HTML-escape — safe to drop into an attribute.
-      const payload = UI.escHtml(JSON.stringify({ url, title, provider, thumbnail: thumb }));
-      // Click handler routes at click time:
-      //   • Media channel + queue permission → queue into the big channel
-      //     player so the whole room hears it together.
-      //   • Otherwise → side / solo player.
-      // Always pause the inline embed afterwards so the chat iframe and
-      // the player don't double-play out of sync.
-      return `<button type="button" class="embed-send-player" data-payload="${payload}"
-        onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));var M=window.Music;var inMedia=!!(M&&M.isMediaChannelContext&&M.isMediaChannelContext());var canQ=inMedia&&!!(M&&M.canQueueInCurrentRoom&&M.canQueueInCurrentRoom());if(inMedia&&canQ&&M.queueFromUrl){M.queueFromUrl(p.url).then(function(ok){try{UI&&UI.showToast&&UI.showToast(ok?'Added to channel queue':'Could not queue — playing in side player','info');}catch(_){}if(!ok&&M.playSolo){try{M.playSolo(p);}catch(_){}}});}else if(inMedia&&!canQ){try{UI&&UI.showToast&&UI.showToast('You don\\u0027t have queue permission in this channel','error');}catch(_){}return;}else if(M&&M.playSolo){M.playSolo(p);try{UI&&UI.showToast&&UI.showToast('Playing in side player');}catch(_){}}try{window._pauseChatEmbed&&window._pauseChatEmbed(b);}catch(_){}}catch(e){}})(this)"
-        onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
-        title="Send this track to the player"
-      >▸ Send to player</button>`;
+      return _buildSendToPlayerBtnHtml({
+        url: preview.url,
+        title: preview.title,
+        provider,
+        thumbnail: preview.image || preview.thumbnail,
+      });
     }
     
     let html = '';
@@ -1981,7 +2412,12 @@ const Messages = (() => {
     const mediaHtml = _buildMediaHtml(msg);
     const fwdBadge = _forwardedBadgeHtml(msg);
     const isForwarded = !!(msg && msg.forwarded_from);
-    const messageTextHtml = (!isForwarded && contentHtml) ? `<div class="msg-content">${contentHtml}</div>` : '';
+    const rawTextAttr = msg.content
+      ? ` data-raw-text="${UI.escHtml(String(msg.content))}"`
+      : '';
+    const messageTextHtml = (!isForwarded && contentHtml)
+      ? `<div class="msg-content"${rawTextAttr}>${contentHtml}</div>`
+      : '';
 
     // Pin button only shows in rooms (not DMs) AND only for users who can
     // actually pin — owners, mods, or global admins. Showing it to regular
@@ -2039,6 +2475,7 @@ const Messages = (() => {
         <button class="msg-act-btn" title="Reply" data-rid="${msg.id}" data-rnick="${UI.escHtml(msg.nickname)}" data-rtxt="${UI.escHtml((msg.content||'').substring(0,80))}" onclick="Messages.setReplyTo(+this.dataset.rid,this.dataset.rnick,this.dataset.rtxt)">↩️</button>
         <button class="msg-act-btn" title="React" onclick="Messages.showReactMenu(${msg.id}, this)">😀</button>
         <button class="msg-act-btn" title="Copy" onclick="Messages.copyMessage(${msg.id})">📋</button>
+        ${_contentHasSpecialEmbedLink(msg.content) ? `<button class="msg-act-btn" title="Copy link" onclick="Messages.copyEmbedLink(${msg.id})">🔗</button>` : ''}
         ${State.currentRoomForwardingDisabled ? '' : `<button class="msg-act-btn" title="Forward" onclick="Messages.forwardMessage(${msg.id})">📤</button>`}
         ${canPin ? `<button class="msg-act-btn" title="Pin" onclick="pinMessage(${msg.id})">📌</button>` : ''}
         ${canEdit ? `<button class="msg-act-btn" title="Edit" onclick="Messages.startEdit(${msg.id})">✏️</button>` : ''}
@@ -2274,14 +2711,7 @@ const Messages = (() => {
       setTimeout(() => _loadLinkPreview(id, url), 100);
     });
 
-    // Load invite + Frog Social cards
-    const area2 = document.getElementById('messages-area');
-    if (area2) {
-      area2.querySelectorAll('[id^="msg-"]').forEach(msgEl => {
-        const msgId = msgEl.id.replace('msg-', '');
-        if (msgId) setTimeout(() => _hydrateSpecialCards(msgId), 150);
-      });
-    }
+    _scheduleHydrateAllEmbeds();
   }
 
   function appendMessage(room, msg) {
@@ -2429,7 +2859,8 @@ const Messages = (() => {
           _attachLongPress(pendingEl, msg.id);
           const previewUrl = _extractPreviewUrl(String(msg.content || ''));
           if (previewUrl && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, previewUrl), 100);
-          setTimeout(() => _hydrateSpecialCards(msg.id), 100);
+          _clearEmbedSettlement(pendingEl);
+          _hydrateSpecialCards(msg.id);
           const cached = State.messages[room] || [];
           const idx = cached.findIndex(m => m && m._pending && (nonce ? m._nonce === nonce : true));
           if (idx >= 0) cached[idx] = msg;
@@ -2515,7 +2946,7 @@ const Messages = (() => {
     // Load link preview for this message
     const previewUrl = _extractPreviewUrl(String(msg.content || ''));
     if (previewUrl && !msg.preview_suppressed) setTimeout(() => _loadLinkPreview(msg.id, previewUrl), 200);
-    setTimeout(() => _hydrateSpecialCards(msg.id), 200);
+    _hydrateSpecialCards(msg.id);
   }
 
   function updateEdited(id, content, room) {
@@ -2528,15 +2959,20 @@ const Messages = (() => {
       const body = el.querySelector('.msg-body') || el;
       body.querySelectorAll(':scope > .msg-share-row').forEach(r => r.remove());
     } catch {}
+    _clearEmbedSettlement(el);
     const contentEl = el.querySelector('.msg-content');
-    if (contentEl) contentEl.innerHTML = _formatContent(content);
+    if (contentEl) {
+      contentEl.innerHTML = _formatContent(content);
+      if (content) contentEl.dataset.rawText = String(content);
+      else delete contentEl.dataset.rawText;
+    }
     const meta = el.querySelector('.msg-meta');
     if (meta && !meta.querySelector('.msg-edited')) {
       meta.insertAdjacentHTML('beforeend', '<span class="msg-edited">(edited)</span>');
     }
     const previewUrl = _extractPreviewUrl(String(content || ''));
     if (previewUrl) setTimeout(() => _loadLinkPreview(id, previewUrl), 120);
-    setTimeout(() => _hydrateSpecialCards(id), 120);
+    _hydrateSpecialCards(id);
   }
 
   function removeMessage(id) {
@@ -2579,26 +3015,16 @@ const Messages = (() => {
     const el = document.getElementById(`msg-${id}`);
     if (!el) return;
     const contentEl = el.querySelector('.msg-content');
-    // Prefer the raw text stashed on the element (preserves original before
-    // link/mention/emoji enhancement); fall back to innerText.
-    const text = (contentEl && (contentEl.dataset.rawText || contentEl.innerText || '')).trim();
+    const embedUrls = _collectEmbedUrlsFromMessage(el);
+    const raw = (contentEl?.dataset?.rawText || '').trim();
+    // Prefer canonical embed URLs, then the original message text (usually the raw link).
+    let text = '';
+    if (embedUrls.length) text = embedUrls.join('\n');
+    else if (raw) text = raw;
+    else text = (contentEl?.innerText || '').trim();
     if (!text) { if (typeof toast === 'function') toast('Nothing to copy', 'info'); return; }
-    const done = () => { if (typeof toast === 'function') toast('Copied', 'success'); };
-    const fail = () => { if (typeof toast === 'function') toast('Copy failed', 'error'); };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done).catch(() => {
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-          document.body.appendChild(ta); ta.select();
-          const ok = document.execCommand('copy');
-          ta.remove();
-          ok ? done() : fail();
-        } catch { fail(); }
-      });
-    } else {
-      fail();
-    }
+    const label = embedUrls.length > 1 ? 'Links copied' : (embedUrls.length || /^https?:\/\//i.test(text) ? 'Link copied' : 'Copied');
+    _copyTextToClipboard(text, label);
   }
 
   function startEdit(id) {
@@ -2664,7 +3090,8 @@ const Messages = (() => {
     const original = contentEl.dataset.originalText || '';
     delete contentEl.dataset.originalText;
     contentEl.innerHTML = _formatContent(original);
-    setTimeout(() => _hydrateSpecialCards(id), 80);
+    _clearEmbedSettlement(el);
+    _hydrateSpecialCards(id);
   }
 
   function openSocialProfile(nickname) {
@@ -3383,6 +3810,22 @@ const Messages = (() => {
     `;
     const itemsWrap = sheet.querySelector('.as-items');
 
+    const embedUrls = _collectEmbedUrlsFromMessage(msgEl);
+    embedUrls.forEach((url, i) => {
+      const asBtn = document.createElement('button');
+      asBtn.className = 'as-btn';
+      asBtn.style.animationDelay = (20 + i * 24) + 'ms';
+      const label = embedUrls.length > 1 ? `Copy link ${i + 1}` : 'Copy link';
+      asBtn.innerHTML = `<span class="as-ic">🔗</span><span>${UI.escHtml(label)}</span>`;
+      asBtn.onclick = (e) => {
+        e.stopPropagation();
+        try { navigator.vibrate?.(8); } catch {}
+        _copyTextToClipboard(url, 'Link copied');
+        close(true);
+      };
+      itemsWrap.appendChild(asBtn);
+    });
+
     const labelFor = (btn) => {
       const t = (btn.getAttribute('title') || '').trim();
       const txt = (btn.textContent || '').trim();
@@ -3430,7 +3873,7 @@ const Messages = (() => {
       itemsWrap.appendChild(asBtn);
     });
 
-    if (!itemsWrap.children.length) return; // nothing to show
+    if (!itemsWrap.children.length) return;
 
     const close = (immediate) => {
       if (sheet.classList.contains('closing')) return;
@@ -3453,6 +3896,16 @@ const Messages = (() => {
     el._lpBound = true;
     // Desktop: right-click opens the same action sheet as mobile long-press.
     el.addEventListener('contextmenu', (e) => {
+      const embedEl = e.target.closest('.ft-chat-embed[data-embed-url], .ft-chat-embed[data-ft-embed-url]');
+      if (embedEl) {
+        const url = embedEl.dataset.embedUrl || embedEl.dataset.ftEmbedUrl || '';
+        if (url) {
+          e.preventDefault();
+          e.stopPropagation();
+          _copyTextToClipboard(url, 'Link copied');
+          return;
+        }
+      }
       if (e.target.closest('a,button,input,textarea,.reaction-pill,.mention,.room-mention,.msg-avatar,.msg-author')) return;
       e.preventDefault();
       openActionSheet(msgId);
@@ -3499,6 +3952,7 @@ const Messages = (() => {
       const id = el.id && el.id.startsWith('msg-') ? +el.id.slice(4) : null;
       if (id) _attachLongPress(el, id);
     });
+    _bindEmbedCopyHandlers(scope);
   }
 
   function openModMenu(ev, nickname, userId, scope) {
@@ -3581,7 +4035,7 @@ const Messages = (() => {
 
   _ensureSystemEmbedStyleGuard();
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
@@ -4837,11 +5291,11 @@ window._showRoomUnbannedBanner = function _showRoomUnbannedBanner(room, opts) {
 window._pauseChatEmbed = function _pauseChatEmbed(btn) {
   try {
     if (!btn || !btn.closest) return;
-    const wrap = btn.closest('.yt-embed, .spotify-embed');
+    const wrap = btn.closest('.yt-embed, .spotify-embed, .chat-share-music-yt, .chat-share-music');
     if (!wrap) return;
     const iframe = wrap.querySelector('iframe');
     if (!iframe) return;
-    if (wrap.classList.contains('yt-embed')) {
+    if (wrap.classList.contains('yt-embed') || wrap.classList.contains('chat-share-music-yt')) {
       try {
         iframe.contentWindow && iframe.contentWindow.postMessage(
           JSON.stringify({ event: 'command', func: 'pauseVideo', args: [] }),
@@ -4859,7 +5313,7 @@ window._pauseChatEmbed = function _pauseChatEmbed(btn) {
           }
         } catch {}
       }, 250);
-    } else if (wrap.classList.contains('spotify-embed')) {
+    } else if (wrap.classList.contains('spotify-embed') || wrap.classList.contains('chat-share-music')) {
       try {
         const src = iframe.getAttribute('src');
         if (src) iframe.setAttribute('src', src);

@@ -2428,6 +2428,15 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
    `overflow-wrap:anywhere` keeps long URLs / unbroken strings from
    pushing the bubble outside the message column. */
 .msg-content{font-size:15px;line-height:1.48;word-break:break-word;color:#d0d0d0;white-space:pre-wrap;overflow-wrap:anywhere}
+/* Rich embeds are block HTML — pre-wrap must not preserve template whitespace */
+.msg-content .invite-card,
+.msg-content .invite-card *,
+.msg-content .chat-share-embed,
+.msg-content .chat-share-embed *,
+.msg-content .share-card.ft-system-share-embed,
+.msg-content .share-card.ft-system-share-embed *{
+  white-space:normal !important;
+}
 .msg-pending{opacity:.62}
 .msg-pending .msg-actions,
 .msg-pending .msg-more-trigger{display:none !important}
@@ -3933,7 +3942,7 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 /* ─── Rich chat share embed (reel/post inline player) ──────────── */
 .chat-share-embed{
   display:block;margin-top:8px;
-  width:fit-content;max-width:240px;
+  width:fit-content;max-width:320px;
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 90%,var(--accent-color) 10%) 0%,color-mix(in srgb,var(--surface-color) 86%,black) 100%);
   border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color));border-left:4px solid var(--accent-color);
   border-radius:14px;overflow:hidden;cursor:pointer;
@@ -3942,10 +3951,11 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   text-decoration:none;
 }
 /* Reel posts are vertical 9:16 — let the video drive the embed width
-   so we wrap the video tightly with no black side-bars. Other share
-   types (profile / image post) keep the wider 240px text card. */
+   so we wrap the video tightly with no black side-bars. We give the
+   card a min-width so the FROG SOCIAL REEL label/handle doesn't get
+   crushed into 3 wrapped lines next to the 32px avatar. */
 .chat-share-embed:has(.chat-share-video){
-  width:auto;
+  width:auto;min-width:260px;
 }
 .chat-share-embed:hover{
   border-color:var(--accent-color);
@@ -3953,17 +3963,18 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   box-shadow:0 6px 22px color-mix(in srgb,var(--accent-color) 20%,rgba(0,0,0,.55));
 }
 .chat-share-embed-head{
-  display:flex;align-items:center;gap:10px;padding:10px 12px 8px;
+  display:flex;align-items:center;gap:10px;padding:10px 12px 8px;min-width:0;
 }
 .chat-share-embed-avatar{flex-shrink:0}
-.chat-share-embed-meta{flex:1;min-width:0}
+.chat-share-embed-meta{flex:1 1 auto;min-width:0;overflow:hidden}
 .chat-share-embed-label{
   font-size:10px;color:color-mix(in srgb,var(--accent-color) 65%,white);text-transform:uppercase;
-  letter-spacing:0.6px;font-weight:700;margin-bottom:2px
+  letter-spacing:0.6px;font-weight:700;margin-bottom:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2;
 }
 .chat-share-embed-name{
   font-size:14px;font-weight:700;color:var(--text-color);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25;
 }
 .chat-share-embed-logo{
   font-size:18px;flex-shrink:0;opacity:.7;line-height:1;
@@ -4039,6 +4050,10 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 .chat-share-video.is-playing .chat-share-play-overlay{
   opacity:0;pointer-events:none;transform:translate(-50%,-50%) scale(.85)
 }
+.chat-share-music-actions{
+  display:flex;align-items:center;justify-content:flex-end;gap:8px;
+  padding:6px 12px 0;
+}
 .chat-share-embed-foot{
   padding:8px 12px 10px;font-size:11px;color:color-mix(in srgb,var(--accent-color) 70%,white);
   text-transform:uppercase;letter-spacing:0.5px;font-weight:600;
@@ -4054,8 +4069,12 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 84%,var(--accent-color) 16%) 0%,color-mix(in srgb,var(--surface-color) 80%,black) 100%);
   border-color:color-mix(in srgb,var(--accent-color) 42%,var(--border-color));
   border-left-color:var(--accent-color);
-  width:auto;max-width:420px;
+  width:min(100%,480px);max-width:min(100%,480px);min-width:320px;
 }
+.chat-share-embed.is-music .chat-share-embed-head{padding:12px 14px 10px}
+.chat-share-embed.is-music .chat-share-embed-caption{padding:0 14px 10px}
+.chat-share-embed.is-music .chat-share-music-actions{padding:8px 14px 0}
+.chat-share-embed.is-music .chat-share-embed-foot{padding:10px 14px 12px}
 .chat-share-embed.is-music:hover{
   border-color:var(--accent-color);
   box-shadow:0 6px 22px color-mix(in srgb,var(--accent-color) 28%,transparent)
@@ -4085,14 +4104,16 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 
 /* ─── Invite card (mobile-safe deterministic layout) ─────────────────────── */
 .invite-card{
-  display:inline-block !important;
+  display:inline-grid !important;
+  grid-template-rows:auto auto auto;
+  grid-template-columns:1fr;
+  align-content:start !important;
   vertical-align:top;
   margin-top:8px;
   width:min(100%,300px);
   max-width:300px;
   min-height:0 !important;
   height:auto !important;
-  contain:layout style;
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 90%,var(--accent-color) 10%) 0%,color-mix(in srgb,var(--surface-color) 82%,black) 100%);
   border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color));
   border-radius:8px;
@@ -4193,12 +4214,16 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 }
 .invite-card-action{flex:0 0 auto}
 .invite-card-footer{
-  margin-top:6px;
-  padding-top:5px;
+  margin-top:0;
+  padding:5px 10px 7px;
   font-size:10px;
   color:color-mix(in srgb,var(--text-muted) 88%,var(--accent-color));
   border-top:1px solid color-mix(in srgb,var(--accent-color) 20%,var(--border-color));
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.invite-card-main .invite-card-footer{
+  margin-top:6px;
+  padding:5px 0 0;
 }
 .invite-card-footer strong{color:color-mix(in srgb,var(--text-color) 86%,var(--accent-color))}
 .invite-card-by-nick[onclick]{cursor:pointer}
@@ -4307,11 +4332,17 @@ body[data-theme="frog"] .invite-card-icon{
 .msg-body .link-preview,
 .msg-body .yt-embed,
 .msg-body .spotify-embed,
-.msg-body .share-card,
-.msg-body .chat-share-embed,
+.msg-body .share-card:not(.ft-system-share-embed),
+.msg-body .chat-share-embed:not(.ft-system-share-embed),
 .msg-body .preview-wrap{
   max-width:var(--chat-embed-max-inline);
   width:100%;
+  box-sizing:border-box;
+}
+.msg-body .share-card.ft-system-share-embed,
+.msg-body .chat-share-embed.ft-system-share-embed{
+  width:fit-content;
+  max-width:var(--chat-embed-max-inline);
   box-sizing:border-box;
 }
 /* Invite cards: never stretch to full message width — that made them
@@ -4327,7 +4358,10 @@ body[data-theme="frog"] .invite-card-icon{
 #main .msg-content .invite-card.ft-embed-invite,
 #main .msg-body .invite-card.ft-embed-invite,
 #main .msg-share-row .invite-card.ft-embed-invite{
-  display:inline-block !important;
+  display:inline-grid !important;
+  grid-template-rows:auto auto auto !important;
+  grid-template-columns:1fr !important;
+  align-content:start !important;
   vertical-align:top !important;
   width:min(100%,300px) !important;
   max-width:300px !important;
@@ -4335,7 +4369,10 @@ body[data-theme="frog"] .invite-card-icon{
   min-height:0 !important;
   max-height:none !important;
   overflow:hidden !important;
-  contain:layout style !important;
+  flex:none !important;
+  flex-grow:0 !important;
+  flex-direction:unset !important;
+  justify-content:flex-start !important;
   box-sizing:border-box !important;
 }
 #main .msg-content .ft-embed-invite .invite-card-main,
@@ -4393,12 +4430,19 @@ body[data-theme="frog"] .invite-card-icon{
   min-height:0 !important;
   max-height:none !important;
 }
-#main .msg-content .ft-embed-invite .invite-card-footer,
-#main .msg-content .ft-embed-invite .ft-embed-invite-footer{
+#main .msg-content .ft-embed-invite > .invite-card-footer,
+#main .msg-content .ft-embed-invite > .ft-embed-invite-footer,
+#main .msg-body .ft-embed-invite > .invite-card-footer{
+  display:block !important;
   height:auto !important;
   min-height:0 !important;
+  max-height:none !important;
   flex:none !important;
+  flex-grow:0 !important;
+  margin-top:0 !important;
+  padding:5px 10px 7px !important;
 }
+.ft-chat-embed{cursor:context-menu}
 /* Frog Social / music / profile link embeds — same channel-CSS hardening */
 #main .msg-body .ft-system-share-embed,
 #main .msg-content .ft-system-share-embed,
@@ -4418,10 +4462,34 @@ body[data-theme="frog"] .invite-card-icon{
   display:inline-flex !important;
   align-items:center !important;
 }
+#main .ft-system-share-embed.share-card.profile-embed-card{
+  display:block !important;
+  width:min(100%,360px) !important;
+  max-width:min(100%,360px) !important;
+}
+#main .ft-system-share-embed.chat-share-embed.is-music{
+  display:block !important;
+  width:min(100%,480px) !important;
+  max-width:min(100%,480px) !important;
+}
 #main .ft-system-share-embed *:not(iframe):not(video):not(.chat-share-video):not(.chat-share-video *){
   min-height:0 !important;
   max-height:none !important;
+  height:auto !important;
   flex-grow:0 !important;
+}
+#main .ft-system-share-embed .chat-share-embed-head,
+#main .ft-system-share-embed .chat-share-embed-caption,
+#main .ft-system-share-embed .chat-share-embed-foot,
+#main .ft-system-share-embed .share-card-info{
+  height:auto !important;
+  min-height:0 !important;
+  flex:none !important;
+}
+#main .ft-system-share-embed .chat-share-media{
+  height:auto !important;
+  min-height:0 !important;
+  max-height:300px !important;
 }
 #main .ft-system-share-embed .share-card-avatar,
 #main .ft-system-share-embed .share-card-avatar img,
@@ -4502,6 +4570,74 @@ body[data-theme="frog"] .invite-card-icon{
 
 /* ─── Share-card avatar slot (was inline flex-shrink:0) ─────────────── */
 .share-card-avatar{flex-shrink:0;display:block}
+
+/* ─── Profile share embed (richer card with Follow + stats) ─────── */
+.profile-embed-card{
+  display:block !important;
+  padding:12px 14px 10px;
+  gap:0;
+  width:min(100%,360px);
+  max-width:min(100%,360px);
+}
+.profile-embed-row{display:flex;align-items:center;gap:12px}
+.profile-embed-avatar{flex:0 0 56px;width:56px;height:56px}
+.profile-embed-avatar img,
+.profile-embed-avatar > span{
+  width:56px !important;height:56px !important;
+  min-width:56px !important;min-height:56px !important;
+  border-radius:50%;object-fit:cover;display:block
+}
+.profile-embed-info{
+  flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px
+}
+.profile-embed-name{
+  font-size:15px;font-weight:700;color:var(--text-color);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2
+}
+.profile-embed-handle{
+  font-size:12px;color:var(--text-muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.2
+}
+.profile-embed-bio{
+  margin-top:8px;font-size:12px;color:var(--text-muted);line-height:1.4;
+  white-space:normal;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden
+}
+.profile-embed-stats{
+  display:flex;gap:14px;margin-top:8px;
+  font-size:11px;color:var(--text-muted);
+}
+.profile-embed-stat strong{color:var(--text-color);font-weight:700;margin-right:2px}
+.profile-embed-action{flex:0 0 auto;align-self:center}
+.profile-embed-follow{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:78px;height:30px;padding:0 12px;
+  font-size:12px;font-weight:700;line-height:1;
+  border-radius:8px;cursor:pointer;
+  transition:background .15s,border-color .15s,color .15s,transform .1s;
+  white-space:nowrap;
+}
+.profile-embed-follow.is-follow{
+  background:var(--accent-color);
+  border:1px solid color-mix(in srgb,var(--accent-color) 70%,black);
+  color:#06170c;
+}
+.profile-embed-follow.is-follow:hover{
+  background:color-mix(in srgb,var(--accent-color) 90%,white);
+  border-color:color-mix(in srgb,var(--accent-color) 60%,black);
+}
+.profile-embed-follow.is-following{
+  background:transparent;
+  border:1px solid color-mix(in srgb,var(--accent-color) 55%,var(--border-color));
+  color:color-mix(in srgb,var(--text-color) 85%,var(--accent-color));
+}
+.profile-embed-follow.is-following:hover{
+  background:color-mix(in srgb,var(--accent-color) 12%,transparent);
+  border-color:var(--accent-color);
+}
+.profile-embed-follow:active{transform:scale(.97)}
+.profile-embed-follow:disabled{opacity:.6;cursor:wait}
 
 /* ─── Frog-themed retry button used on Frog Social error states ────── */
 .social-retry-btn{
@@ -11142,7 +11278,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
   <script src="/static/js/rooms.js?v=452"></script>
 <script src="/static/js/sticker-fx.js?v=2"></script>
 <script src="/static/js/text_format.js?v=2"></script>
-<script src="/static/js/messages.js?v=495"></script>
+<script src="/static/js/messages.js?v=__APP_ASSET_VERSION__"></script>
 <script src="/static/js/format_toolbar.js?v=2"></script>
 <script src="/static/js/users.js?v=202"></script>
 <script src="/static/js/emoji.js?v=193"></script>
