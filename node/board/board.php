@@ -1928,6 +1928,7 @@ if ($singleThread) {
         body[data-theme="read"] .vignette,
         body[data-theme="read"] .sigil-watermark,
         body[data-theme="read"] .matrix-bg,
+        body[data-theme="read"] .viewport-bottom-cut,
         body[data-theme="read"] .header-bg-overlay { opacity: 0 !important; pointer-events: none !important; }
         /* ── Read mode: live bar ── */
         body[data-theme="read"] .live-bar { background: #ede4d2 !important; border-color: #d8c8ae !important; color: #4a3018 !important; }
@@ -2418,9 +2419,31 @@ if ($singleThread) {
         .frog-mini-btn:hover { filter:brightness(1.05); }
         
         /* ── OCCULT VISUAL EFFECTS ── */
-        
+        :root {
+            --fx-matrix-line: rgba(0,255,65,0.05);
+            --fx-matrix-gap: 18px;
+            --fx-matrix-tile: 220px;
+            --fx-scanline: rgba(0,0,0,0.03);
+            --fx-scanline-step: 4px;
+            --fx-viewport-cut: rgba(0,255,65,0.22);
+        }
+
+        /* Shared fixed overlay shell — dvh keeps layers pinned to the visible viewport on mobile. */
+        .matrix-bg,
+        .scanlines,
+        .vignette,
+        .occult-symbols,
+        .viewport-bottom-cut {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            height: 100dvh;
+            pointer-events: none;
+        }
+
         /* Floating occult symbols */
-        .occult-symbols { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: hidden; }
+        .occult-symbols { z-index: 0; overflow: hidden; }
         .occult-sym { position: absolute; font-size: 24px; opacity: 0; animation: floatSymbol linear infinite; filter: blur(0.5px); color: rgba(0,255,65,0.08); }
         @keyframes floatSymbol {
             0% { transform: translateY(110vh) rotate(0deg); opacity: 0; }
@@ -2428,58 +2451,73 @@ if ($singleThread) {
             90% { opacity: 1; }
             100% { transform: translateY(-10vh) rotate(360deg); opacity: 0; }
         }
-        
-        /* Matrix-rain backdrop — transform-based drift (mobile Safari freezes
-         * background-position animations on position:fixed layers). */
+
+        /* Matrix backdrop — glow + drifting rain on a child layer (not ::before — iOS
+         * can freeze one repeating-gradient row mid-viewport on fixed pseudo-elements). */
         .matrix-bg {
-            position: fixed; inset: 0; pointer-events: none; z-index: 0;
+            z-index: 0;
             opacity: 0.55;
             overflow: hidden;
             background:
                 radial-gradient(1200px 600px at 50% -10%, rgba(0,255,65,0.10), transparent 62%),
                 radial-gradient(900px 500px at 10% 110%, rgba(0,200,80,0.07), transparent 65%);
         }
-        .matrix-bg::before {
-            content: '';
+        .matrix-rain {
             position: absolute;
             left: 0;
             right: 0;
-            top: -220px;
-            height: calc(100% + 440px);
+            top: calc(-1 * var(--fx-matrix-tile));
+            height: calc(100% + (2 * var(--fx-matrix-tile)));
             background: repeating-linear-gradient(180deg,
                 transparent 0,
-                transparent 18px,
-                rgba(0,255,65,0.05) 18px,
-                rgba(0,255,65,0.05) 19px);
-            background-size: 100% 220px;
+                transparent var(--fx-matrix-gap),
+                var(--fx-matrix-line) var(--fx-matrix-gap),
+                var(--fx-matrix-line) calc(var(--fx-matrix-gap) + 1px));
+            background-size: 100% var(--fx-matrix-tile);
             animation: matrixDriftY 24s linear infinite;
-            transform: translate3d(0, 0, 0);
+            will-change: transform;
         }
         @keyframes matrixDriftY {
             from { transform: translate3d(0, 0, 0); }
-            to   { transform: translate3d(0, 220px, 0); }
+            to   { transform: translate3d(0, var(--fx-matrix-tile), 0); }
         }
 
-        /* Scanline overlay — static texture; no animation (avoids compositor stalls). */
+        /* Scanline overlay — static CRT texture, no animation. */
         .scanlines {
-            position: fixed; inset: 0; pointer-events: none; z-index: 1;
+            z-index: 1;
             background: repeating-linear-gradient(0deg,
-                transparent, transparent 2px,
-                rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
-            transform: translateZ(0);
+                transparent 0,
+                transparent calc(var(--fx-scanline-step) / 2),
+                var(--fx-scanline) calc(var(--fx-scanline-step) / 2),
+                var(--fx-scanline) var(--fx-scanline-step));
+            contain: strict;
         }
 
-        /* Mobile / touch: drop drifting lines — one stuck scan row was reported on iOS. */
+        /* Intentional bottom horizon — pinned to viewport edge on touch/narrow screens. */
+        .viewport-bottom-cut {
+            display: none;
+            z-index: 4990;
+            inset: auto 0 0 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent 4%, var(--fx-viewport-cut) 50%, transparent 96%);
+            box-shadow: 0 0 10px rgba(0,255,65,0.10);
+        }
+
         @media (max-width: 768px), (hover: none) and (pointer: coarse) {
-            .matrix-bg::before { animation: none; opacity: 0.65; top: 0; height: 100%; transform: none; }
-            .scanlines { opacity: 0.85; }
+            /* Rain lines caused a stuck bright row mid-page on iOS — hide them, keep glow + scanlines. */
+            .matrix-rain { display: none; }
+            .viewport-bottom-cut { display: block; bottom: 0; }
+            body:has(.chat-widget) .viewport-bottom-cut {
+                bottom: calc(40px + var(--safe-bottom));
+            }
+            .board-container { padding-bottom: calc(52px + var(--safe-bottom)); }
         }
         @media (prefers-reduced-motion: reduce) {
-            .matrix-bg::before { animation: none; }
+            .matrix-rain { animation: none; }
         }
-        
+
         /* Vignette edges */
-        .vignette { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.4) 100%); }
+        .vignette { z-index: 1; background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.4) 100%); }
         
         /* Occult sigil watermark */
         .sigil-watermark { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); pointer-events: none; z-index: 0; font-size: 30vw; opacity: 0.012; color: #00ff41; animation: sigilPulse 12s ease-in-out infinite; user-select: none; }
@@ -2956,12 +2994,13 @@ if ($singleThread) {
 </head>
 <body>
 <script>(function(){var t=localStorage.getItem('ph_theme');if(t){document.body.setAttribute('data-theme',t);document.documentElement.setAttribute('data-theme',t);}})()</script>
-    <div class="matrix-bg"></div>
+    <div class="matrix-bg" aria-hidden="true"><div class="matrix-rain"></div></div>
     <div class="header-bg-overlay"></div>
     
     <!-- Occult atmosphere -->
     <div class="occult-symbols" id="occultSymbols"></div>
-    <div class="scanlines"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="viewport-bottom-cut" aria-hidden="true"></div>
     <div class="vignette"></div>
     <div class="sigil-watermark">ᛟ</div>
 
@@ -3984,7 +4023,7 @@ if ($singleThread) {
             <span class="frog-mini-note" id="frogMiniState">Checking login…</span>
             <button class="chat-toggle" id="chatToggleBtn">▲</button>
         </div>
-        <div class="chat-body" id="chatBody" style="display:block;max-height:none;">
+        <div class="chat-body" id="chatBody">
             <div id="frogMiniGuest" class="frog-mini-guest">
                 <div class="frog-mini-guest-title">Sign in to use FrogTalk while browsing</div>
                 <div class="frog-mini-guest-copy">Open your channels and DMs in this side panel without leaving Frog Channel.</div>
