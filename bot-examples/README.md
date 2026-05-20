@@ -97,7 +97,7 @@ requests.post(
 The server stamps the message with `is_bot: true` so the client renders
 the `BOT` pill next to the bot's name in chat.
 
-### 5. Profile 
+### 5. Profile
 
 `PUT /api/developer/bots/{bot_id}` accepts:
 
@@ -112,17 +112,20 @@ This endpoint uses your **user session**, not the bot key — typically
 you'll use the in-app Edit modal. If you want to ship a botfather-style
 CLI, hit the same endpoint with `apiFetch`-equivalent cookies.
 
-## Repo structure note
+### 6. Optional: DMs and discovery
 
-FrogTalk now keeps client surfaces under `client/` (`client/desktop/app`,
-`client/mobile/android`, `client/mobile/ios`) while bot examples remain in
-`bot-examples/` as standalone API consumers. Bot code should continue using
-only documented HTTP APIs (`/api/external/*`), not internal server imports.
+- **`GET /api/external/me/channels`** — list channels the bot is installed in (poll ~30s instead of hardcoding names).
+- **`POST /api/external/dms/{user_id}`** — bot DMs when the key has `dm` permission; respects blocks.
+- **`GET /api/external/health`** — no auth; uptime checks.
+- **`GET /api/external/docs`** — JSON summary of endpoints and rate limits.
+
+Full reference: [frogtalk.xyz/docs/api](https://frogtalk.xyz/docs/api) (External Token API section).
 
 ## Bot etiquette
 
-- **Rate limits** — `/messages` POST is capped at 30/minute per key.
-  Stay well under that.
+- **Rate limits** — channel message POST is capped at **30/minute** per key;
+  most GET routes are **60/minute**. See `GET /api/external/docs` on your node.
+  Stay well under limits.
 - **Don't spam mentions** — only respond when explicitly addressed.
 - **Be transparent** — set a useful description so users know what
   data your bot processes.
