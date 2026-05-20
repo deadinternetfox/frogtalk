@@ -1,5 +1,5 @@
 /* FrogTalk Service Worker — caching + web push */
-const CACHE_NAME = 'frogtalk-v675';
+const CACHE_NAME = 'frogtalk-v678';
 const STATIC_ASSETS = [
   '/app',
   '/static/js/app.js',
@@ -70,6 +70,7 @@ self.addEventListener('fetch', event => {
     url.pathname === '/app' ||
     url.pathname.startsWith('/app/') ||
     url.pathname === '/static/index.html' ||
+    url.pathname === '/sw.js' ||
     url.pathname.startsWith('/static/js/')
   ) {
     event.respondWith(fetch(event.request, { cache: 'no-store' }));

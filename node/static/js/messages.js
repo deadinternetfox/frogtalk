@@ -414,7 +414,7 @@ const Messages = (() => {
 
   const _FT_SHARE_PROFILE_STYLE =
     'height:auto!important;min-height:0!important;max-height:none!important;' +
-    'width:min(100%,360px)!important;max-width:min(100%,360px)!important;' +
+    'width:min(100%,300px)!important;max-width:min(100%,300px)!important;' +
     'overflow:hidden!important;box-sizing:border-box!important;' +
     'flex:none!important;flex-grow:0!important;';
 
@@ -630,8 +630,61 @@ const Messages = (() => {
     return String(v);
   }
 
+  function _viewerIsProfileOwner(nickKey) {
+    const me = String(State?.user?.nickname || '').trim().toLowerCase();
+    const them = String(nickKey || '').trim().toLowerCase();
+    return !!(me && them && me === them);
+  }
+
+  async function toggleProfileFollow(nickname, btn) {
+    const nick = _safeEmbedNick(nickname);
+    if (!nick) return;
+    if (_viewerIsProfileOwner(nick)) {
+      if (typeof toast === 'function') toast('That\'s your profile', 'info');
+      return;
+    }
+    if (typeof Social !== 'undefined' && typeof Social.toggleFollow === 'function') {
+      return Social.toggleFollow(nick, btn);
+    }
+    const isFollowing = btn?.classList?.contains('is-following')
+      || btn?.textContent?.trim() === 'Following';
+    const method = isFollowing ? 'DELETE' : 'POST';
+    if (btn) btn.disabled = true;
+    try {
+      const res = await apiFetch(`/api/social/follow/${encodeURIComponent(nick)}`, method);
+      if (!res.ok) {
+        if (typeof toast === 'function') toast('Could not update follow', 'error');
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (btn) {
+        if (data.following) {
+          btn.textContent = 'Following';
+          btn.classList.remove('is-follow');
+          btn.classList.add('is-following');
+        } else {
+          btn.textContent = 'Follow';
+          btn.classList.remove('is-following');
+          btn.classList.add('is-follow');
+        }
+      }
+      if (typeof data.follower_count === 'number') {
+        const card = btn?.closest('.profile-embed-card');
+        const stat = card?.querySelector('.profile-embed-stat strong');
+        if (stat && stat.parentElement?.textContent?.includes('followers')) {
+          stat.textContent = _formatProfileCount(data.follower_count);
+        }
+      }
+    } catch {
+      if (typeof toast === 'function') toast('Network error', 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   function _renderProfileShareEmbed(d, nickKey, placeholderEl) {
-    const nick = UI.escHtml(d.nickname || nickKey);
+    const rawNick = d.nickname || nickKey;
+    const nick = UI.escHtml(rawNick);
     const display = UI.escHtml(d.display_name || d.nickname || nickKey);
     const subtitle = d.private
       ? 'Private profile'
@@ -643,16 +696,13 @@ const Messages = (() => {
     const followerCount = _formatProfileCount(d.follower_count);
     const postCount = _formatProfileCount(d.post_count);
     const showStats = !d.private && (typeof d.follower_count === 'number' || typeof d.post_count === 'number');
-    const isSelf = !!d.is_self;
+    const isSelf = !!d.is_self || _viewerIsProfileOwner(nickKey);
     const isFollowing = !!d.is_following;
-    // Only render the follow button when we actually know the viewer's
-    // follow state (i.e. the authed endpoint succeeded) AND the target
-    // is not the viewer themselves or a private profile.
-    const showFollow = !isSelf && !d.private && typeof d.is_following === 'boolean'
-      && typeof Social !== 'undefined' && typeof Social.toggleFollow === 'function';
-    const followBtnHtml = showFollow
+    const canFollow = !!(State?.token) && !isSelf && !d.private;
+    const followBtnHtml = canFollow
       ? `<button type="button" class="profile-embed-follow ${isFollowing ? 'is-following' : 'is-follow'}"` +
-        ` onclick="event.stopPropagation();event.preventDefault();Social.toggleFollow('${UI.escHtml(d.nickname || nickKey)}',this)">` +
+        ` data-profile-nick="${nick}"` +
+        ` onclick="event.stopPropagation();event.preventDefault();Messages.toggleProfileFollow(this.dataset.profileNick,this)">` +
         `${isFollowing ? 'Following' : 'Follow'}</button>`
       : '';
     const statsHtml = showStats
@@ -661,20 +711,25 @@ const Messages = (() => {
           `<span class="profile-embed-stat"><strong>${UI.escHtml(followerCount)}</strong> followers</span>` +
         `</div>`
       : '';
+    const footerHtml = (statsHtml || followBtnHtml)
+      ? `<div class="profile-embed-footer">` +
+          statsHtml +
+          (followBtnHtml ? `<div class="profile-embed-action">${followBtnHtml}</div>` : '') +
+        `</div>`
+      : '';
     return `<div class="share-card ft-system-share-embed ft-chat-embed profile-embed-card" data-social-profile="${nick}"${profileLinkAttr}` +
       ` style="${_FT_SHARE_PROFILE_STYLE}"` +
       ` onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
       `<div class="profile-embed-row">` +
-        `<div class="share-card-avatar profile-embed-avatar">${UI.avatarEl(d.avatar || null, d.nickname || nickKey, 56)}</div>` +
+        `<div class="share-card-avatar profile-embed-avatar">${UI.avatarEl(d.avatar || null, rawNick, 56)}</div>` +
         `<div class="share-card-info profile-embed-info">` +
           `<div class="share-card-label">Frog Social Profile</div>` +
           `<div class="share-card-name profile-embed-name">${display}</div>` +
           `<div class="profile-embed-handle">@${nick}</div>` +
         `</div>` +
-        (followBtnHtml ? `<div class="profile-embed-action">${followBtnHtml}</div>` : '') +
       `</div>` +
       (subtitle ? `<div class="share-card-bio profile-embed-bio">${subtitle}</div>` : '') +
-      statsHtml +
+      footerHtml +
     `</div>`;
   }
 
@@ -698,6 +753,23 @@ const Messages = (() => {
           if (auth.ok) return auth;
         }
         const pub = await _publicGet(`/api/share/profile/${encodeURIComponent(nickKey)}`);
+        if (pub.ok && hasSession) {
+          // Public payload lacks is_following — merge authed follow state when possible.
+          const auth2 = await _authedGet(`/api/social/profile/${encodeURIComponent(nickKey)}`);
+          if (auth2.ok) {
+            return {
+              ok: true,
+              data: {
+                ...pub.data,
+                is_following: !!auth2.data?.is_following,
+                is_self: !!auth2.data?.is_self,
+                post_count: auth2.data?.post_count ?? pub.data?.post_count,
+                follower_count: auth2.data?.follower_count ?? pub.data?.follower_count,
+              },
+            };
+          }
+          return { ok: true, data: { ...pub.data, is_following: false, is_self: _viewerIsProfileOwner(nickKey) } };
+        }
         if (pub.ok) return pub;
         return hasSession ? { ok: false } : await _authedGet(`/api/social/profile/${encodeURIComponent(nickKey)}`);
       });
@@ -1214,9 +1286,52 @@ const Messages = (() => {
   flex: none !important;
   flex-grow: 0 !important;
 }
-#main .ft-system-share-embed.share-card {
+#main .ft-system-share-embed.share-card:not(.profile-embed-card) {
   display: inline-flex !important;
   align-items: center !important;
+}
+#main .ft-system-share-embed.share-card.profile-embed-card {
+  display: block !important;
+  width: min(100%, 300px) !important;
+  max-width: min(100%, 300px) !important;
+}
+#main .ft-system-share-embed.profile-embed-card .profile-embed-footer {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+}
+#main .ft-system-share-embed.profile-embed-card .profile-embed-follow {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  padding: 5px 12px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  flex: 0 0 auto !important;
+  flex-grow: 0 !important;
+  box-sizing: border-box !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  border: 1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color)) !important;
+  background: color-mix(in srgb, var(--accent-color) 10%, var(--surface-color)) !important;
+  color: color-mix(in srgb, var(--text-color) 88%, var(--accent-color)) !important;
+  box-shadow: none !important;
+}
+#main .ft-system-share-embed.profile-embed-card .profile-embed-follow.is-follow {
+  background: color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)) !important;
+  border-color: color-mix(in srgb, var(--accent-color) 28%, var(--border-color)) !important;
+  color: var(--accent-color) !important;
+}
+#main .ft-system-share-embed.profile-embed-card .profile-embed-follow.is-following {
+  background: transparent !important;
+  border-color: color-mix(in srgb, var(--accent-color) 18%, var(--border-color)) !important;
+  color: var(--text-muted) !important;
 }
 #main .ft-system-share-embed .chat-share-embed-head,
 #main .ft-system-share-embed .chat-share-embed-caption,
@@ -4035,7 +4150,7 @@ const Messages = (() => {
 
   _ensureSystemEmbedStyleGuard();
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, copyEmbedLink, toggleProfileFollow, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
