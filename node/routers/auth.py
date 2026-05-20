@@ -1316,8 +1316,9 @@ async def pin_set(request: Request, body: PinSetRequest,
     # password — treat this session as freshly unlocked so the
     # server-side pin_gate doesn't immediately 423-bounce the next
     # request (e.g. "save settings") the user just made.
+    token = session_token_from_request(request) or (x_session_token or "").strip()
     try:
-        pin_mark_unlocked(x_session_token or "")
+        pin_mark_unlocked(token)
     except Exception:
         pass
     return res
@@ -1338,11 +1339,12 @@ async def pin_verify(request: Request, body: PinVerifyRequest,
     )
     if not res.get("ok"):
         return JSONResponse(status_code=401, content=res)
+    token = session_token_from_request(request) or (x_session_token or "").strip()
     try:
-        pin_mark_unlocked(x_session_token or "")
+        pin_mark_unlocked(token)
         # HIGH-1: typing the PIN is also what satisfies the admin grace
         # window, so refresh it here.
-        admin_pin_mark_unlocked(x_session_token or "")
+        admin_pin_mark_unlocked(token)
     except Exception:
         pass
     return res
@@ -1361,9 +1363,10 @@ async def pin_disable(request: Request, body: PinDisableRequest,
         return JSONResponse(status_code=400, content=res)
     # PIN is gone — the gate is a no-op now, but drop the unlock entry
     # too so memory stays clean.
+    token = session_token_from_request(request) or (x_session_token or "").strip()
     try:
-        pin_clear_for_token(x_session_token or "")
-        admin_pin_clear_for_token(x_session_token or "")
+        pin_clear_for_token(token)
+        admin_pin_clear_for_token(token)
     except Exception:
         pass
     return res

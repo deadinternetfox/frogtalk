@@ -313,7 +313,8 @@ async def pin_gate(
     for any router serving sensitive data (messages, DMs, social, …).
     """
     user = await get_current_user(request, x_session_token)
-    if _pin_session_is_locked(user, x_session_token or ""):
+    token = session_token_from_request(request) or (x_session_token or "").strip()
+    if _pin_session_is_locked(user, token):
         # 423 Locked is the natural code here (WebDAV repurposed). The
         # body deliberately contains no user info — only the signal the
         # client needs to pop its PIN prompt.
@@ -443,7 +444,8 @@ async def admin_pin_gate(
                            dependencies=_PIN_GATED + [Depends(admin_pin_gate)])
     """
     user = await get_current_user(request, x_session_token)
-    if _pin_session_is_locked(user, x_session_token or "") or _admin_pin_required(user, x_session_token or ""):
+    token = session_token_from_request(request) or (x_session_token or "").strip()
+    if _pin_session_is_locked(user, token) or _admin_pin_required(user, token):
         raise HTTPException(
             status_code=423,
             detail={
