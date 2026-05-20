@@ -1,10 +1,10 @@
 # FrogTalk Node
 
-This folder is the **entire federated server**: the FastAPI app, its static
-assets, deploy templates, container build, operator scripts, and tests. If you
-want to self-host FrogTalk, everything you touch lives here.
+This folder is the **federated server**: FastAPI app, web client static assets,
+deploy templates, Docker build, operator scripts, and tests. Self-hosting
+starts here.
 
-## Linux quick start (self-host a node)
+## Quick start (Linux)
 
 ```bash
 git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
@@ -13,7 +13,7 @@ cd /opt/frogtalk
 # 1) Wizard: venv, .env, symlinks (node/data → ../data)
 bash node/scripts/node_setup_wizard.sh
 
-# 2) Join federation: official server list + /board/ peer nav pills
+# 2) Join federation: official directory + board peer nav
 bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
 
 # 3) systemd (production)
@@ -22,86 +22,71 @@ sudo systemctl daemon-reload && sudo systemctl enable --now frogtalk
 journalctl -u frogtalk -f
 ```
 
-Tor-only node: re-run the wizard with onion enabled, or set `FROGTALK_TOR_ENABLED=1`
-and `FROGTALK_ONION_URL=http://….onion` in `.env`, then federation-join again.
+**Tor-only:** set `FROGTALK_TOR_ENABLED=1` and `FROGTALK_ONION_URL=http://….onion` in `.env` (or use the wizard), then run federation-join again.
 
-Updates (signature-verified):
+**Updates** (signature-verified when signers are configured):
 
 ```bash
 bash node/scripts/node_update_check.sh
 bash node/scripts/node_update_check.sh --apply
 ```
 
-The wizard creates `venv/`, writes a safe `.env`, and links runtime state
-(`data/`, `secrets/`, `.env`) into the source tree so the systemd unit
-(`WorkingDirectory=/opt/frogtalk/node`) keeps finding them.
+The wizard creates `venv/`, writes `.env`, and symlinks `data/`, `secrets/`, and `.env` into the tree so the unit (`WorkingDirectory=/opt/frogtalk/node`) finds runtime state.
 
-Docs: [`static/docs-node.html`](static/docs-node.html) (also at `/docs/node` on a
-running node) · deploy templates: [`deploy/README.md`](deploy/README.md).
+**Docs:** [Node guide](static/docs-node.html) (`/docs/node` on a live server) · [Deploy](deploy/README.md) · [API reference](static/docs-api.html) (`/docs/api`)
 
 ## Layout
 
 ```
 node/
 ├── main.py                # FastAPI entrypoint
-├── database.py            # SQLite schema + migrations (DB_PATH respected)
-├── routers/               # one module per surface (auth, dms, ws, federation…)
-├── static/                # web client + marketing pages
-├── board/                 # Frog Channel PHP imageboard (public URL /board/)
-├── deploy/
-│   ├── frogtalk.service   # systemd unit (WorkingDirectory=/opt/frogtalk/node)
-│   ├── nginx.conf
-│   └── env.example
+├── database.py            # SQLite schema + migrations
+├── crypto_fed.py          # Ed25519 federation signing
+├── ws_manager.py          # WebSocket fan-out
+├── routers/               # auth, rooms, dms, ws, federation, social, wall…
+├── static/                # web client + docs pages
+├── board/                 # Frog Channel imageboard → /board/
+├── deploy/                # systemd, nginx, env.example
 ├── scripts/
 │   ├── node_setup_wizard.sh
-│   ├── node_federation_join.sh   # colored CLI: mesh chat + board peers
+│   ├── node_federation_join.sh
 │   ├── node_update_check.sh
-│   ├── deploy.sh
-│   ├── deploy_board.sh
-│   ├── build_server_release.sh
-│   └── migrations/        # one-shot historical migrations
-├── tests/                 # pytest suite (sanitizers, proxy, security pass)
+│   ├── deploy_nodes.sh          # rsync deploy to production peers
+│   └── migrations/
+├── tests/
 ├── requirements.txt
-├── Dockerfile             # docker build -f node/Dockerfile -t frogtalk .
-└── builds/                # release tarballs (gitignored)
+└── Dockerfile
 ```
 
-## Runtime contract
+## Runtime paths
 
-| Path on disk                  | Owner            | Notes                                  |
-|-------------------------------|------------------|----------------------------------------|
-| `/opt/frogtalk/.env`          | operator         | secrets, never overwritten by deploy   |
-| `/opt/frogtalk/data/`         | operator         | SQLite DB + upload bookkeeping         |
-| `/opt/frogtalk/secrets/`      | operator         | release signer pubkeys, federation keys |
-| `/opt/frogtalk/venv/`         | operator         | Python virtualenv                      |
-| `/opt/frogtalk/node/`         | rsync target     | matches this folder, replaced on deploy|
-| `/opt/frogtalk/node/data`     | symlink          | → `/opt/frogtalk/data`                 |
-| `/opt/frogtalk/node/.env`     | symlink          | → `/opt/frogtalk/.env`                 |
-| `/opt/frogtalk/node/secrets`  | symlink          | → `/opt/frogtalk/secrets`              |
+| Path | Purpose |
+|------|---------|
+| `/opt/frogtalk/.env` | Secrets and config (not overwritten by deploy) |
+| `/opt/frogtalk/data/` | SQLite database and uploads |
+| `/opt/frogtalk/secrets/` | Federation keys, release signer pubkeys |
+| `/opt/frogtalk/venv/` | Python virtualenv |
+| `/opt/frogtalk/node/` | Application code (replaced on deploy) |
+| `/opt/frogtalk/node/data` | Symlink → `../data` |
+| `/opt/frogtalk/node/.env` | Symlink → `../.env` |
+| `/opt/frogtalk/node/secrets` | Symlink → `../secrets` |
 
-## Safe defaults (post 2026-05 hardening)
+## Recommended environment defaults
 
-- `FROGTALK_AUTO_UPDATE_ENABLED=0` — operators opt in explicitly.
-- `FROGTALK_FEDERATION_REQUIRE_SIGS=1` — unsigned federation events rejected.
-- `FROGTALK_RELEASE_SIGNERS=` — must be set to trusted Ed25519 pubkey hex
-  before any update will apply.
-- `FROGTALK_TOR_ENABLED=1` plus `FROGTALK_ONION_URL=…` runs the node as a
-  hidden service with no clearnet leak.
+| Variable | Default intent |
+|----------|----------------|
+| `FROGTALK_AUTO_UPDATE_ENABLED=0` | Updates are opt-in |
+| `FROGTALK_FEDERATION_REQUIRE_SIGS=1` | Unsigned federation events rejected |
+| `FROGTALK_RELEASE_SIGNERS=` | Trusted Ed25519 hex pubkeys required to apply updates |
+| `FROGTALK_TOR_ENABLED=1` + `FROGTALK_ONION_URL=…` | Hidden-service mode without clearnet leak |
 
-**FrogSocial federation:** plaintext wall posts replicate only when
-`privacy` is `public` or `followers`. Friends-only / private content must use
-`POST /api/wall/posts/encrypted` (client wraps via Signal); peers receive
-targeted `social.post.created.encrypted` / `social.post.keys.extended` events.
-Full event list and security rules: `/docs/api` → Federation section.
+**FrogSocial across nodes:** only plaintext posts with `privacy` `public` or `followers` replicate to peers. Friends-only or private audiences use encrypted wall posts (`POST /api/wall/posts/encrypted`); peers receive targeted `social.post.created.encrypted` and `social.post.keys.extended` events. Details: `/docs/api` (Federation section).
 
-## Design rules for ops scripts
+## Operator scripts
 
-- **Idempotent.** Re-runs are safe; a missing symlink is created, an existing
-  one is left alone.
-- **Skip on error, never abort.** Edge cases print what was skipped so the
-  operator can fix it without rolling back.
-- **No silent `.env` mutation.** The wizard sets keys you confirmed; everything
-  else is left alone.
+- **Idempotent** — safe to re-run; missing symlinks are created.
+- **Non-fatal skips** — edge cases are reported, not rolled back silently.
+- **No silent `.env` edits** — only values you confirm in the wizard.
 
 ## Tests
 
@@ -109,5 +94,10 @@ Full event list and security rules: `/docs/api` → Federation section.
 cd node && python -m pytest tests/ -q
 ```
 
-The suite covers HTML/CSS sanitizers, image proxy guards, Tor-mode behaviour,
-and the 2026-05 security pass.
+Covers sanitizers, federation/Tor behaviour, media proxy guards, and related security regressions.
+
+## See also
+
+- [Repository README](../README.md) — product overview, encryption model, downloads
+- [frogtalk.xyz](https://frogtalk.xyz) — public node
+- [API docs](https://frogtalk.xyz/docs/api) · [Node docs](https://frogtalk.xyz/docs/node)
