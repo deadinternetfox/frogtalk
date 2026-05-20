@@ -11,7 +11,7 @@
   'use strict';
 
   const MOUNT_ID = 'ft-site-footer-mount';
-  const VER = '4';
+  const VER = '5';
 
   function assetUrl(path) {
     const base = path + '?v=' + VER;
