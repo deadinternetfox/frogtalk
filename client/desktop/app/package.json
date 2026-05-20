@@ -68,6 +68,9 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true
     },
+    "directories": {
+      "output": "../builds"
+    },
     "files": [
       "main.js",
       "preload.js",

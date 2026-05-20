@@ -101,6 +101,7 @@ body {
   line-height: 1.6;
   overflow-x: hidden;
 }
+body.ft-has-site-nav .shell { padding-top: 96px; }
 .shell {
   width: min(1120px, calc(100vw - 32px));
   margin: 0 auto;
@@ -476,12 +477,12 @@ h1 {
 </style>
 </head>
 <body>
+  <!-- NAV (shared: static/partials/site-nav.html) -->
+  <div id="ft-site-nav-mount"></div>
+  <script src="/static/js/site-nav.js?v=1" defer></script>
+
   <main class="shell">
     <header class="top">
-      <a class="brand" href="/">
-        <img src="/static/icons/icon-96.png" alt="FrogTalk icon">
-        <span>FrogTalk</span>
-      </a>
       <span class="badge">iOS launch in progress</span>
     </header>
 

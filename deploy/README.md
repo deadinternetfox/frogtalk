@@ -2,6 +2,13 @@
 
 Full documentation: **https://frogtalk.xyz/docs/node**
 
+Operator helpers from repo root:
+
+```bash
+bash scripts/node_setup_wizard.sh
+bash scripts/node_update_check.sh
+```
+
 ## Quick Start
 
 ### 1. Clone & configure

@@ -39,7 +39,7 @@ modules:
       - type: file
         path: io.github.deadinternetfox.frogtalk.metainfo.xml
     build-commands:
-      - cd source/desktop && npm ci --offline
+      - cd source/client/desktop/app && npm ci --offline
       - |
         case "$FLATPAK_ARCH" in
           x86_64)  EB_ARCH=--x64 ;;
@@ -47,9 +47,9 @@ modules:
           arm)     EB_ARCH=--armv7l ;;
           *)       EB_ARCH= ;;
         esac
-        cd source/desktop && npx electron-builder --linux dir $EB_ARCH
+        cd source/client/desktop/app && npx electron-builder --linux dir $EB_ARCH
       - install -dm755 /app/frogtalk
-      - cp -a source/desktop/dist/linux-unpacked/. /app/frogtalk/
+      - cp -a source/client/desktop/builds/linux-unpacked/. /app/frogtalk/
       - install -Dm755 run.sh /app/bin/frogtalk
       - install -Dm644 io.github.deadinternetfox.frogtalk.desktop /app/share/applications/io.github.deadinternetfox.frogtalk.desktop
       - install -Dm644 io.github.deadinternetfox.frogtalk.metainfo.xml /app/share/metainfo/io.github.deadinternetfox.frogtalk.metainfo.xml

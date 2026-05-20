@@ -93,6 +93,19 @@ python main.py                   # → http://localhost:8080
 
 Default admin login: `admin` / the value of `ADMIN_PASSWORD` in your `.env`.
 
+### Guided setup + update scripts
+
+```bash
+# interactive self-host wizard (safe defaults + edge-case handling)
+bash scripts/node_setup_wizard.sh
+
+# check for upstream updates
+bash scripts/node_update_check.sh
+
+# apply updates safely (fast-forward only)
+bash scripts/node_update_check.sh --apply
+```
+
 ### Server Web Admin (node management)
 
 Enable the secure node management dashboard:
@@ -237,21 +250,27 @@ for a DM, or the channel's encryption mode for a room.
 
 ```
 frogtalk/
-├── main.py              # FastAPI app entry point
-├── database.py          # SQLite persistence layer
-├── routers/             # API route modules
-├── static/              # Frontend SPA (HTML + vanilla JS)
-│   └── js/              # Client-side modules
-├── bridge_discord.py    # Discord ↔ FrogTalk bridge bot
-├── bridge_telegram.py   # Telegram ↔ FrogTalk bridge bot
-├── deploy/              # Server deployment files
-│   ├── frogtalk.service # systemd unit
-│   └── env.example      # environment variable template
-├── android/             # Android app source
-├── desktop/             # Electron desktop app source
-├── Dockerfile
-└── requirements.txt
+├── client/              # client surfaces (desktop app + mobile sources + builds)
+│   ├── desktop/app/     # Electron source
+│   ├── desktop/builds/  # Electron artifacts
+│   └── mobile/
+│       ├── android/     # Android app source
+│       └── ios/         # iOS app source/docs
+├── backend/             # backend boundary docs (API/runtime surface)
+├── node/                # node-operator boundary docs (self-host workflows)
+├── static/              # current web client + marketing pages
+├── routers/             # current FastAPI route modules
+├── deploy/              # deployment templates (systemd/nginx/env)
+├── scripts/
+│   ├── node_setup_wizard.sh   # guided node setup
+│   └── node_update_check.sh   # update check/apply helper
+├── desktop -> client/desktop/app     # compatibility symlink
+├── android -> client/mobile/android  # compatibility symlink
+├── ios -> client/mobile/ios          # compatibility symlink
+└── docs/PROJECT_STRUCTURE.md  # migration map and structure rules
 ```
+
+Detailed migration map: `docs/PROJECT_STRUCTURE.md`
 
 ---
 

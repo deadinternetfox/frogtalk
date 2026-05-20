@@ -3,8 +3,8 @@
   "entry": [
     "static/index.html",
     "static/server_admin.html",
-    "desktop/main.js",
-    "desktop/preload.js",
+    "client/desktop/app/main.js",
+    "client/desktop/app/preload.js",
     "static/sw.js",
     "static/vendor/qr/jsQR.js",
     "static/vendor/qr/qrcode.min.js"

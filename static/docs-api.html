@@ -49,6 +49,7 @@
       var(--bg);
     line-height: 1.55;
   }
+  body.ft-has-site-nav .wrap { padding-top: 5.3rem; }
   .top {
     position: sticky;
     top: 0;
@@ -186,17 +187,9 @@
 </style>
 </head>
 <body>
-  <div class="top">
-    <div class="top-inner">
-      <a href="/" class="brand">FrogTalk API Reference</a>
-      <div class="links">
-        <a href="/">Home</a>
-        <a href="/app">Open App</a>
-        <a href="/docs/node">Run Node</a>
-        <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer">GitHub</a>
-      </div>
-    </div>
-  </div>
+  <!-- NAV (shared: static/partials/site-nav.html) -->
+  <div id="ft-site-nav-mount"></div>
+  <script src="/static/js/site-nav.js?v=1" defer></script>
 
   <main class="wrap">
     <section class="hero">

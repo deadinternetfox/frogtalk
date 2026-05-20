@@ -53,6 +53,9 @@ rsync -avz --delete --human-readable --stats \
   --exclude='node_modules/' \
   --exclude='android/' \
   --exclude='desktop/' \
+  --exclude='client/mobile/android/' \
+  --exclude='client/desktop/app/' \
+  --exclude='client/desktop/builds/' \
   "$SCRIPT_DIR/" \
   "${REMOTE}:${REMOTE_DIR}/" | awk '
     /^sending incremental/ { print "    " $0; next }

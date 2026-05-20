@@ -22,6 +22,10 @@ rsync -a \
   --exclude 'dist' \
   --exclude 'android/app/build' \
   --exclude 'android/.gradle' \
+  --exclude 'client/mobile/android/app/build' \
+  --exclude 'client/mobile/android/.gradle' \
+  --exclude 'client/desktop/app' \
+  --exclude 'client/desktop/builds' \
   --exclude '.DS_Store' \
   "$ROOT_DIR/" "$OUT_DIR/"
 
