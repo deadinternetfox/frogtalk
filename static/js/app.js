@@ -102,6 +102,7 @@ const App = {
       const payload = {
         callId,
         peerNick: String(pending?.peerNick || '').trim(),
+        action: String(pending?.action || '').trim().toLowerCase(),
         ts: Date.now(),
       };
       localStorage.setItem(this.PENDING_CALL_KEY, JSON.stringify(payload));
@@ -118,6 +119,7 @@ const App = {
       return {
         callId,
         peerNick: String(p?.peerNick || '').trim(),
+        action: String(p?.action || '').trim().toLowerCase(),
       };
     } catch {
       return null;
@@ -237,10 +239,12 @@ const App = {
     const incomingCall = params.get('incoming_call');
     const pendingCallId = params.get('call_id');
     const pendingPeerNick = params.get('peer_nick');
+    const pendingCallAction = String(params.get('action') || params.get('call_action') || '').trim().toLowerCase();
     if (incomingCall === '1' && pendingCallId) {
       this.pendingIncomingCall = {
         callId: pendingCallId,
         peerNick: pendingPeerNick || '',
+        action: pendingCallAction,
       };
       this.setPendingIncomingCall(this.pendingIncomingCall);
       window.history.replaceState({}, '', window.location.pathname);
@@ -680,6 +684,9 @@ const App = {
       }
       if (typeof handleCallOffer === 'function') {
         await handleCallOffer(offer);
+        if (String(pending?.action || '').toLowerCase() === 'answer' && typeof acceptCall === 'function') {
+          try { await acceptCall(); } catch {}
+        }
         return true;
       }
       return false;

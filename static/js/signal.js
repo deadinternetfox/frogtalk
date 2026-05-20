@@ -608,11 +608,14 @@
   // /api/signal/bundle/<peer> endpoint.
   const _idkCache = new Map(); // peerUserId -> { b64, ts }
   const _IDK_TTL_MS = 5 * 60 * 1000;
-  async function getPeerIdentityKey(peerUserId) {
+  async function getPeerIdentityKey(peerUserId, opts) {
     const key = String(peerUserId);
     const now = Date.now();
-    const hit = _idkCache.get(key);
-    if (hit && (now - hit.ts) < _IDK_TTL_MS) return hit.b64;
+    const noCache = !!(opts && opts.noCache);
+    if (!noCache) {
+      const hit = _idkCache.get(key);
+      if (hit && (now - hit.ts) < _IDK_TTL_MS) return hit.b64;
+    }
     try {
       const bundle = await _fetchPeerBundle(key);
       if (!bundle || !bundle.identity_pub) return null;
@@ -775,6 +778,9 @@
       _store = null;
       _ready = false;
       _bundleHealthy = false;
+      _idkCache.clear();
+      _peerIdentCache.clear();
+      _idkSeen.clear();
       await init();
       await ensureMyBundleFresh();
     },

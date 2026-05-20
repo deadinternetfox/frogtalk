@@ -63,6 +63,7 @@ let _pendingAnswerRetryTimer = null;
 // call_offer has arrived, acceptCall() can't run yet (no _pendingOffer). We
 // remember the intent and auto-accept the moment the offer lands.
 let _autoAcceptPending = false;
+const _voiceOutboundQueue = [];
 
 // Outbound buffer for call signaling that fires before the WS reaches OPEN
 // (cold-start callees gather ICE while the socket is still in CONNECTING).
@@ -91,6 +92,31 @@ function _flushOutboundCallQueue() {
     try { wsSend(msg); } catch { /* dropped: peer can recover via ICE-restart */ }
   }
 }
+function _sendVoiceSignal(payload) {
+  if (!payload) return;
+  if (_wsLooksOpen()) {
+    try { wsSend(payload); return; } catch {}
+  }
+  _voiceOutboundQueue.push(payload);
+  if (_voiceOutboundQueue.length > 128) _voiceOutboundQueue.splice(0, _voiceOutboundQueue.length - 128);
+}
+function _flushVoiceOutboundQueue() {
+  if (!_voiceOutboundQueue.length) return;
+  if (!_wsLooksOpen()) return;
+  while (_voiceOutboundQueue.length) {
+    const msg = _voiceOutboundQueue.shift();
+    try { wsSend(msg); } catch {}
+  }
+}
+async function _bestEffortRefreshSignalBundle() {
+  try {
+    if (!window.Signal || !Signal.isReady?.()) return;
+    await Promise.race([
+      Signal.ensureMyBundleFresh(),
+      new Promise(resolve => setTimeout(resolve, 2500)),
+    ]);
+  } catch {}
+}
 // Resolve when WS reaches OPEN (or timeout). Used by startCall so we don't
 // fire call_offer into a half-dead socket and leave the user staring at a
 // 45 s ringing screen for nothing.
@@ -107,7 +133,10 @@ function _waitForWsOpen(timeoutMs) {
 try {
   window.addEventListener('ws:open', () => {
     // Tiny delay so wsSend() sees readyState=OPEN.
-    setTimeout(_flushOutboundCallQueue, 0);
+    setTimeout(() => {
+      _flushOutboundCallQueue();
+      _flushVoiceOutboundQueue();
+    }, 0);
   });
 } catch {}
 
@@ -171,7 +200,7 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
   if (!expectedIdentityPub) {
     return { ok: 'unverified', reason: 'no_peer_identity' };
   }
-  try {
+  const buildVopts = () => {
     const vopts = {
       expectedPeerUserId: Number(myId),
       expectedFingerprint: fp,
@@ -182,10 +211,23 @@ async function _verifyCallFp(envelope, callId, fromId, sdp, opts) {
     if (!(opts && opts.bindCallId === false)) {
       vopts.expectedCallId = Number(callId);
     }
-    const res = await Signal.verifyCallFingerprint(envelope, vopts);
+    return vopts;
+  };
+  try {
+    let res = await Signal.verifyCallFingerprint(envelope, buildVopts());
     if (res && res.ok) return { ok: true };
+    if (res && res.reason === 'identity_mismatch') {
+      try {
+        const freshIdentity = await Signal.getPeerIdentityKey(fromId, { noCache: true });
+        if (freshIdentity && freshIdentity !== expectedIdentityPub) {
+          expectedIdentityPub = freshIdentity;
+          res = await Signal.verifyCallFingerprint(envelope, buildVopts());
+          if (res && res.ok) return { ok: true };
+        }
+      } catch {}
+    }
     return { ok: false, reason: (res && res.reason) || 'unknown' };
-  } catch (e) {
+  } catch {
     return { ok: false, reason: 'verify_threw' };
   }
 }
@@ -318,6 +360,7 @@ async function startCall (type, nick, uid) {
   // Now that we hold mic/cam permission, it is safe to start the native
   // foreground-service call notification on Android 14+.
   _startAndroidCallNotification(_callPeerNick);
+  await _bestEffortRefreshSignalBundle();
 
   try {
     if (type === 'video') {
@@ -501,7 +544,7 @@ async function acceptCall () {
   } catch {}
   await _ensureCallPeerAvatar();
   showCallOverlay(_callType, _callPeerNick, 'Connecting…', _callPeerAvatar);
-  _callState = 'active';
+  _callState = 'calling';
 
   try {
     _localStream = await navigator.mediaDevices.getUserMedia(
@@ -510,7 +553,7 @@ async function acceptCall () {
   } catch (e) {
     console.error('getUserMedia (accept) failed', e);
     toast('Microphone/camera permission denied', 'error');
-    endCall();
+    endCall(true, { wasConnected: false });
     return;
   }
 
@@ -527,6 +570,7 @@ async function acceptCall () {
     const answer = await _pc.createAnswer();
     await _pc.setLocalDescription(answer);
 
+    await _bestEffortRefreshSignalBundle();
     const answerCallId = offer.call_id || _callId || 0;
     const fp_sig = await _signCallFp(answerCallId, _callPeerUID || (_pendingOffer && _pendingOffer.from_id) || 0, answer.sdp);
 
@@ -537,6 +581,7 @@ async function acceptCall () {
       sdp         : answer.sdp,
       fp_sig      : fp_sig || undefined,
     });
+    _callState = 'active';
     _armConnectingHardCap();
 
     if (_callType === 'video') {
@@ -548,7 +593,7 @@ async function acceptCall () {
   } catch (e) {
     console.error('acceptCall setup failed', e);
     toast('Call setup failed: ' + (e?.message || 'unknown error'), 'error');
-    endCall();
+    endCall(true, { wasConnected: false });
     return;
   } finally {
     _pendingOffer = null;
@@ -601,9 +646,7 @@ async function handleCallAnswer (data) {
     _flushPendingIce();
   } catch (e) {
     console.warn('setRemoteDescription (answer) failed', e);
-    // Don't silently swallow — the call is dead. End cleanly with
-    // was_connected:true so the server doesn't mark it as a missed call
-    // (we *did* reach the answer step; the failure is local SDP).
+    // Don't silently swallow — the call is dead.
     toast('Call setup failed (answer)', 'error');
     endCall();
     return;
@@ -705,6 +748,29 @@ function handleCallReject (data) {
   endCall(false);
 }
 
+function handleCallError(data) {
+  const reason = String(data?.reason || '').trim();
+  if (!reason) {
+    toast('Call failed', 'error');
+    endCall(false);
+    return;
+  }
+  if (reason === 'peer_offline') {
+    toast((_callPeerNick || 'User') + ' is offline right now — trying push ring', 'info');
+    return;
+  }
+  if (reason === 'busy') {
+    toast((_callPeerNick || 'User') + ' is busy', 'info');
+  } else if (reason === 'user_not_found') {
+    toast('Could not find that user', 'error');
+  } else if (reason === 'tampering') {
+    toast('Call blocked: signalling verification failed', 'error');
+  } else {
+    toast('Call failed: ' + reason, 'error');
+  }
+  endCall(false);
+}
+
 /* ── Call handled elsewhere (this user accepted/declined on another session) ─ */
 function handleCallHandled (data) {
   // Only act if we are currently in the ringing-incoming state (or have an
@@ -761,9 +827,12 @@ function handleCallEnd (data) {
 }
 
 /* ── End call ──────────────────────────────────────────────────────────────── */
-function endCall (notifyPeer = true) {
+function endCall (notifyPeer = true, opts) {
   if (notifyPeer) {
-    const wasConnected = (_callState === 'active') || ((_callSeconds | 0) > 0);
+    const forced = opts && typeof opts.wasConnected === 'boolean' ? opts.wasConnected : null;
+    const wasConnected = forced === null
+      ? (_callState === 'active') || ((_callSeconds | 0) > 0)
+      : forced;
     const durationSecs = (_callSeconds | 0) > 0 ? (_callSeconds | 0) : undefined;
     try {
       _sendCallSignal({
@@ -810,6 +879,17 @@ function _sendCallAnswerReliable (payload) {
 
 function resetCall () {
   try {
+    if (_pc) {
+      try {
+        _pc.onicecandidate = null;
+        _pc.ontrack = null;
+        _pc.onconnectionstatechange = null;
+        _pc.oniceconnectionstatechange = null;
+        _pc.getSenders?.().forEach(s => { try { s.replaceTrack(null); } catch {} });
+        _pc.close();
+      } catch {}
+      _pc = null;
+    }
     if (_localStream) { try { _localStream.getTracks().forEach(t => t.stop()); } catch {} _localStream = null; }
     if (_screenStream) { try { _screenStream.getTracks().forEach(t => t.stop()); } catch {} _screenStream = null; }
     clearInterval(_callTimer); _callTimer = null; _callSeconds = 0;
@@ -820,6 +900,7 @@ function resetCall () {
     _pendingAnswerSend = null;
     _pendingIceQueue.length = 0;
     _outboundCallQueue.length = 0;
+    _voiceOutboundQueue.length = 0;
     _remoteDescApplied = false;
     _callUnverified = false;
     _didRelayRetry = false;
@@ -976,14 +1057,18 @@ function toggleCallMute () {
 async function _renegotiate () {
   if (!_pc || !_callPeerNick) return;
   try {
+    await _bestEffortRefreshSignalBundle();
     const offer = await _pc.createOffer();
     await _pc.setLocalDescription(offer);
-    wsSend({
+    const fp_sig = await _signCallFp(_callId || 0, _callPeerUID || 0, offer.sdp);
+    _sendCallSignal({
       type: 'call_offer',
       to_nickname: _callPeerNick,
+      call_id: _callId || undefined,
       call_type: _callType,
       sdp: offer.sdp,
       renegotiate: true,
+      fp_sig: fp_sig || undefined,
     });
   } catch (e) { console.warn('renegotiate failed', e); }
 }
@@ -1092,6 +1177,7 @@ async function toggleScreenShare () {
 
 function toggleCallSpeaker () {
   const rv = document.getElementById('remote-video');
+  if (!rv) return;
   _speakerMuted = !_speakerMuted;
   rv.muted = _speakerMuted;
   document.getElementById('btn-call-speaker').textContent = _speakerMuted ? '🔈' : '🔊';
@@ -1429,7 +1515,7 @@ async function joinVoiceChannel() {
   document.getElementById('voice-join-btn').style.display = 'none';
 
   // Tell server we're joining
-  wsSend({ type: 'voice_join' });
+  _sendVoiceSignal({ type: 'voice_join' });
   // Refresh member list to show voice badge
   if (typeof Users !== 'undefined' && State.onlineUsers) Users.updateList(State.onlineUsers);
 }
@@ -1441,7 +1527,7 @@ function leaveVoiceChannel() {
   if (!_voiceRoom) return;
 
   // Tell server we're leaving
-  wsSend({ type: 'voice_leave' });
+  _sendVoiceSignal({ type: 'voice_leave' });
 
   // Close all peer connections
   for (const [uid, peer] of _voicePeers) {
@@ -1553,7 +1639,7 @@ function _createVoicePeer(userId, nickname, avatar, isOfferer) {
   // Send ICE candidates to peer
   pc.onicecandidate = (e) => {
     if (e.candidate) {
-      wsSend({
+      _sendVoiceSignal({
         type: 'voice_ice',
         to_id: userId,
         candidate: JSON.stringify(e.candidate)
@@ -1567,7 +1653,7 @@ function _createVoicePeer(userId, nickname, avatar, isOfferer) {
     }
   };
 
-  _voicePeers.set(userId, { pc, nickname, avatar, stream: null });
+  _voicePeers.set(userId, { pc, nickname, avatar, stream: null, pendingIce: [], remoteDescApplied: false });
   
   return pc;
 }
@@ -1640,7 +1726,7 @@ async function handleVoiceJoined(data) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    wsSend({
+    _sendVoiceSignal({
       type: 'voice_offer',
       to_id: p.user_id,
       sdp: offer.sdp
@@ -1707,10 +1793,21 @@ async function handleVoiceOffer(data) {
   }
   
   await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
+  const refreshed = _voicePeers.get(data.from_id);
+  if (refreshed) {
+    refreshed.remoteDescApplied = true;
+    if (Array.isArray(refreshed.pendingIce) && refreshed.pendingIce.length) {
+      const queued = refreshed.pendingIce.slice();
+      refreshed.pendingIce.length = 0;
+      for (const cand of queued) {
+        try { await pc.addIceCandidate(cand); } catch {}
+      }
+    }
+  }
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   
-  wsSend({
+  _sendVoiceSignal({
     type: 'voice_answer',
     to_id: data.from_id,
     sdp: answer.sdp
@@ -1729,6 +1826,14 @@ async function handleVoiceAnswer(data) {
   if (!peer) return;
   
   await peer.pc.setRemoteDescription({ type: 'answer', sdp: data.sdp });
+  peer.remoteDescApplied = true;
+  if (Array.isArray(peer.pendingIce) && peer.pendingIce.length) {
+    const queued = peer.pendingIce.slice();
+    peer.pendingIce.length = 0;
+    for (const cand of queued) {
+      try { await peer.pc.addIceCandidate(cand); } catch {}
+    }
+  }
 }
 
 /**
@@ -1740,8 +1845,16 @@ async function handleVoiceIce(data) {
   const peer = _voicePeers.get(data.from_id);
   if (!peer) return;
   
+  let parsed;
+  try { parsed = JSON.parse(data.candidate); } catch { return; }
+  if (!peer.remoteDescApplied) {
+    if (!Array.isArray(peer.pendingIce)) peer.pendingIce = [];
+    peer.pendingIce.push(parsed);
+    if (peer.pendingIce.length > 64) peer.pendingIce.splice(0, peer.pendingIce.length - 64);
+    return;
+  }
   try {
-    await peer.pc.addIceCandidate(JSON.parse(data.candidate));
+    await peer.pc.addIceCandidate(parsed);
   } catch {}
 }
 
