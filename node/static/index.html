@@ -4244,6 +4244,26 @@ body[data-theme="frog"] .invite-card-icon{
 .msg-share-row .invite-card-loading,
 .msg-share-row .invite-card-invalid{margin-top:0}
 
+/* Keep chat embeds compact across channel + DM renders.
+   JS renderers still emit legacy inline max-width values (560/480/400),
+   which can make cards oversized on wide panes. Clamp all major embed
+   variants to one consistent maximum width. */
+:root{--chat-embed-max-inline:360px}
+.msg-body .link-preview,
+.msg-body .yt-embed,
+.msg-body .spotify-embed,
+.msg-body .invite-card,
+.msg-body .share-card,
+.msg-body .chat-share-embed{
+  width:min(100%,var(--chat-embed-max-inline)) !important;
+  max-width:var(--chat-embed-max-inline) !important;
+}
+/* Preserve portrait reel geometry (9:16 width derives from height). */
+.msg-body .chat-share-embed:has(.chat-share-video){width:auto !important}
+@media(max-width:520px){
+  :root{--chat-embed-max-inline:320px}
+}
+
 /* ─── Frog-themed retry button used on Frog Social error states ────── */
 .social-retry-btn{
   display:inline-flex;align-items:center;gap:6px;
