@@ -200,7 +200,7 @@
 
     <section class="panel">
       <h2>Docs freshness and structure</h2>
-      <p class="muted">This page is updated against current `main` after recent security hardening and the client-structure migration (`client/desktop/app`, `client/mobile/android`, `client/mobile/ios`). API paths stay stable.</p>
+      <p class="muted">Updated May 2026 for FrogSocial cross-node federation (signed <code>social.*</code> events, encrypted wall posts, targeted peer fan-out) plus the client-structure migration. API paths stay stable.</p>
       <pre><code>Server API surface remains:
 /api/auth/*
 /api/rooms/*
@@ -403,14 +403,23 @@ DELETE /api/social/stories/{story_id}
 GET    /api/social/stories/{story_id}/viewers
 
 GET    /api/wall/users/{username}
-POST   /api/wall/posts
+POST   /api/wall/posts                    (plaintext; public or followers privacy)
+GET    /api/wall/audience-recipients      (?audience=followers|friends|list:&lt;id&gt;)
+POST   /api/wall/posts/encrypted          (Track D; friends/followers audiences)
+POST   /api/wall/posts/{post_id}/wrapped-keys  (extend audience after new follower/friend)
 GET    /api/wall/posts/{post_id}
+GET    /api/wall/posts/{post_id}/media
+GET    /api/wall/posts/{post_id}/media-inline
 PUT    /api/wall/posts/{post_id}
 DELETE /api/wall/posts/{post_id}
+DELETE /api/wall/posts/{post_id}/media
 POST   /api/wall/posts/{post_id}/reactions
 GET    /api/wall/posts/{post_id}/reactions
+GET    /api/wall/posts/{post_id}/reactions/detail
+POST   /api/wall/posts/{post_id}/repost
 GET    /api/wall/posts/{post_id}/comments
 POST   /api/wall/posts/{post_id}/comments
+POST   /api/wall/posts/{post_id}/comments/{comment_id}/vote
 DELETE /api/wall/comments/{comment_id}
 PATCH  /api/wall/settings
 GET    /api/wall/settings
@@ -438,6 +447,20 @@ DELETE /api/invites/channels/{room_name}/{code}
 GET    /api/invites/{code}
 POST   /api/invites/{code}/join
 GET    /api/invites/{code}/landing</code></pre>
+
+          <h3 style="margin-top:14px">Encrypted wall posts (cross-node friends)</h3>
+          <p class="muted"><strong>Plaintext</strong> <code>POST /api/wall/posts</code> with
+          <code>privacy: private</code> or <code>friends</code> is <em>not</em> replicated to peer nodes.
+          For friends-only or followers-only content that must sync across the mesh, use
+          <code>POST /api/wall/posts/encrypted</code> with client-side AES-256-GCM + per-recipient Signal wraps
+          (see <code>/static/js/wall_crypto.js</code>).</p>
+          <p class="muted"><code>GET /api/wall/audience-recipients</code> returns
+          <code>{ user_id, nickname, global_user_id }</code> per recipient so the client can wrap keys
+          for federated accounts. The server re-validates every <code>recipient_id</code> against the
+          social graph on create and on <code>wrapped-keys</code> extend.</p>
+          <p class="muted">When a new follower or accepted friend needs access to older encrypted posts,
+          the server may push a WebSocket <code>wall_rewrap_needed</code> event; the author client calls
+          <code>POST /api/wall/posts/{id}/wrapped-keys</code> (requires the payload key cached locally).</p>
         </article>
 
         <article class="panel" id="bots">
@@ -744,7 +767,60 @@ GET    /api/federation/failover/status</code></pre>
 
           <h3 style="margin-top:14px">No shadow auto-create (CRIT-4)</h3>
           <p class="muted">Federation events referencing an unknown local nickname or room are now
-          dropped instead of silently creating a placeholder user or room.</p>
+          dropped instead of silently creating a placeholder user or room. Encrypted-post recipient
+          wraps only attach to <strong>existing</strong> local <code>users</code> rows (materialized
+          earlier via signed <code>dm.*</code> / <code>friend.*</code> events).</p>
+
+          <h3 style="margin-top:14px">FrogSocial replication (<code>social.*</code>)</h3>
+          <p class="muted">Sensitive prefix — requires pinned origin pubkey + valid Ed25519 signature.
+          Outbox events are signed at push time; per-peer scoped payloads are re-signed when wraps are
+          filtered for targeted delivery.</p>
+<pre><code>social.post.created              plaintext; privacy public|followers only
+social.post.created.encrypted    ciphertext_b64 + wrapped_keys[] (by global_user_id)
+social.post.keys.extended        add wraps to existing encrypted post
+social.post.updated / social.post.deleted
+social.comment.created / social.reaction.changed / social.repost.created
+social.follow.changed            action: follow | unfollow
+social.story.created / social.story.deleted</code></pre>
+          <p class="muted"><strong>Targeted fan-out:</strong> encrypted posts and key extensions enqueue
+          one outbox row per peer <code>server_id</code> that hosts at least one recipient
+          (<code>event_id</code> suffix <code>@&lt;peer_server_id&gt;</code>). Peers receive only wraps
+          for recipients homed on that node — not the full recipient list. Broadcast rows
+          (<code>target_server_id=""</code>) still go to every enabled peer (public posts, DMs, etc.).</p>
+          <p class="muted"><strong>Origin binding:</strong> actors must carry
+          <code>author_global_user_id</code> / <code>actor_global_user_id</code> (UUID v4). Events whose
+          gid is homed on a different server than <code>origin_server_id</code> are rejected (prevents
+          cross-peer impersonation). Post update/delete require author ownership on the mapped local row.</p>
+          <p class="muted">Also signed under sensitive prefixes: <code>user.*</code>, <code>dm.*</code>,
+          <code>friend.*</code> (e.g. <code>friend.requested</code>, <code>friend.accepted</code>).</p>
+
+          <h3 style="margin-top:14px">Inbox envelope (peer → peer)</h3>
+<pre><code>POST /api/federation/events/inbox
+{
+  "events": [{
+    "event_id": "evt_…",
+    "event_type": "social.post.created.encrypted",
+    "origin_server_id": "&lt;uuid&gt;",
+    "origin_time": "2026-05-21T12:00:00Z",
+    "signature": "&lt;base64-ed25519&gt;",
+    "signer_pubkey_fingerprint": "…",
+    "payload": {
+      "global_post_id": "&lt;uuid&gt;",
+      "author_global_user_id": "&lt;uuid&gt;",
+      "nickname": "alice",
+      "audience": "friends",
+      "ciphertext_b64": "…",
+      "wrapped_keys": [{
+        "recipient_global_user_id": "&lt;uuid&gt;",
+        "recipient_nickname": "bob",
+        "wrapped_b64": "…"
+      }]
+    }
+  }]
+}</code></pre>
+          <p class="muted">Push workers attach <code>x-federation-token</code> (legacy) and/or request
+          Ed25519 headers (<code>FROGTALK_FEDERATION_AUTH_MODE=signed</code>). Rate limit: 600 events /
+          60s per origin.</p>
         </article>
 
         <article class="panel" id="admin">

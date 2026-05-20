@@ -88,6 +88,12 @@ node/
 - `FROGTALK_TOR_ENABLED=1` plus `FROGTALK_ONION_URL=…` runs the node as a
   hidden service with no clearnet leak.
 
+**FrogSocial federation:** plaintext wall posts replicate only when
+`privacy` is `public` or `followers`. Friends-only / private content must use
+`POST /api/wall/posts/encrypted` (client wraps via Signal); peers receive
+targeted `social.post.created.encrypted` / `social.post.keys.extended` events.
+Full event list and security rules: `/docs/api` → Federation section.
+
 ## Design rules for ops scripts
 
 - **Idempotent.** Re-runs are safe; a missing symlink is created, an existing
