@@ -463,9 +463,19 @@ async def delete_message(channel_id: int, msg_id: int,
 @router.post("/{channel_id}/messages/{msg_id}/react")
 async def react(channel_id: int, msg_id: int, body: dict,
                 current_user: dict = Depends(get_current_user)):
-    emoji = str(body.get("emoji", ""))[:10]
+    emoji = str(body.get("emoji", ""))[:16]
     if not emoji:
         return JSONResponse(status_code=400, content={"error": "No emoji"})
+    # MED-E1: same allowlist as the wall + channel-message reactions.
+    # Without this, the DM reactions endpoint accepted arbitrary up-to-10-
+    # character strings — including HTML / zero-width payloads that other
+    # clients then rendered as if it were a real reaction emoji.
+    try:
+        from routers.wall import ALLOWED_WALL_REACTION_EMOJIS as _ALLOWED
+    except Exception:
+        _ALLOWED = None
+    if _ALLOWED is not None and emoji not in _ALLOWED:
+        return JSONResponse(status_code=400, content={"error": "Emoji not allowed"})
     counts = db.toggle_dm_reaction(msg_id, current_user["id"], emoji)
     return {"reactions": counts}
 

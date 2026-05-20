@@ -17,8 +17,11 @@ from pydantic import BaseModel
 import database as db
 from ws_manager import manager
 from routers import federation as federation_router
+from deps import client_ip
+from slowapi import Limiter
 
 router = APIRouter(tags=["server-admin"])
+limiter = Limiter(key_func=client_ip)
 
 _SERVER_ADMIN_HTML_PATH = "static/server_admin.html"
 _SERVER_ADMIN_JS_PATH = "static/js/server_admin.js"
@@ -73,8 +76,15 @@ def _webui_username() -> str:
 
 
 def _webui_password() -> str:
-    # Fallback keeps first-time setup simple, but dedicated password is preferred.
-    return os.getenv("FROGTALK_SERVER_WEBUI_PASSWORD", "") or os.getenv("ADMIN_PASSWORD", "")
+    """Return the server-admin WebUI password.
+
+    HIGH-5: the historical fallback to ``ADMIN_PASSWORD`` is gone. That
+    env var seeds the application *user* admin account and shipped with a
+    weak default in ``deploy/env.example``; treating it as the WebUI
+    bootstrap password meant a single leaked value unlocked both layers.
+    Operators must now set ``FROGTALK_SERVER_WEBUI_PASSWORD`` explicitly.
+    """
+    return os.getenv("FROGTALK_SERVER_WEBUI_PASSWORD", "")
 
 
 def _session_ttl_sec() -> int:
@@ -555,7 +565,11 @@ async def public_server_easter_egg():
 
 
 @router.post("/api/server-admin/login")
+@limiter.limit("10/minute;30/hour")
 async def server_webui_login(request: Request, body: LoginBody, response: Response):
+    """HIGH-5: rate-limit the server-admin login. With no limit, an
+    operator who white-listed too broad an IP range (or forgot to set
+    one) could be bruteforced from a single host inside the allowlist."""
     disabled = _require_enabled()
     if disabled:
         return disabled

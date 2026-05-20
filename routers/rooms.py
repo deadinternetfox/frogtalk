@@ -610,8 +610,12 @@ async def create_room(request: Request, body: CreateRoomRequest,
     )
     if room_id is None:
         return JSONResponse(status_code=409, content={"error": "Room name already exists"})
-    # Set invite_only if requested
-    if body.invite_only:
+    # HIGH-13: invite_only is the only real gate, so private rooms MUST
+    # have it on. Previously a client could create a room with
+    # `type:"private"` but `invite_only:false`, and `user_can_access_room`
+    # would happily let anyone read it because invite_only was 0.
+    needs_invite_only = bool(body.invite_only) or body.type == "private"
+    if needs_invite_only:
         db.update_room_settings(body.name, invite_only=1)
     # Auto-join creator
     db.join_room(current_user["id"], room_id)
@@ -702,6 +706,15 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     # Validate invite_only
     if body.invite_only is not None and body.invite_only not in (0, 1):
         return JSONResponse(status_code=400, content={"error": "invite_only must be 0 or 1"})
+    # HIGH-13: private rooms must stay invite-only. Refuse explicit
+    # downgrades so the UI never offers a foot-gun where toggling
+    # invite_only=0 silently exposes a private room.
+    if body.invite_only == 0:
+        _peek = db.get_room_by_name(room_name)
+        if _peek and (_peek.get("type") or "public") == "private":
+            return JSONResponse(status_code=400, content={
+                "error": "Private rooms must remain invite-only. Change room type first."
+            })
     if body.forwarding_disabled is not None and body.forwarding_disabled not in (0, 1):
         return JSONResponse(status_code=400, content={"error": "forwarding_disabled must be 0 or 1"})
     
