@@ -358,9 +358,9 @@ async function apiFetch (url, method = 'GET', body = null) {
   // by hand.
   const _pinRetried = !!(isOptsObject && method && method._pinRetried);
   const opts = isOptsObject
-    ? { ...method, method: method.method || 'GET', credentials: 'include',
+    ? { ...method, method: method.method || 'GET', credentials: 'include', cache: 'no-store',
         headers: { ...(method.headers || {}), ...authHeaders } }
-    : { method, credentials: 'include', headers: authHeaders };
+    : { method, credentials: 'include', cache: 'no-store', headers: authHeaders };
   // CSRF: attach double-submit token for mutating methods. The cookie
   // is HMAC(session_token, FROGTALK_CSRF_SECRET) and the server
   // recomputes + compares. Missing cookie just skips — pure-header

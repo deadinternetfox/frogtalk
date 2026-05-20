@@ -1867,12 +1867,32 @@ def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
         if t_lower in seen_targets:
             continue
         seen_targets.add(t_lower)
+        _try_pin_peer_pubkey_from_status_sync(str(srv.get("server_id") or ""), normalized_target)
         targets.append(normalized_target)
 
     if not targets:
         return local_server_id, targets, []
     events = db.list_federation_outbox_events(status="pending", limit=50)
     return local_server_id, targets, events
+
+
+def _try_pin_peer_pubkey_from_status_sync(server_id: str, base_url: str) -> None:
+    """Best-effort TOFU: fetch /api/network/status and pin pubkey once."""
+    sid = str(server_id or "").strip()
+    url = _normalize_base_url(base_url)
+    if not sid or not url or db.get_federation_server_pubkey(sid):
+        return
+    try:
+        raw = _fetch_url_bytes(
+            f"{url}/api/network/status",
+            timeout_s=6.0,
+        )
+        data = json.loads(raw.decode("utf-8", errors="replace") or "{}")
+        pem = str((data.get("server") or {}).get("federation_pubkey_pem") or "").strip()
+        if pem:
+            db.pin_federation_server_pubkey(sid, pem)
+    except Exception:
+        pass
 
 
 async def federation_outbox_processor() -> int:
@@ -1889,7 +1909,17 @@ async def federation_outbox_processor() -> int:
     Returns the number of events marked delivered this tick.
     """
     fed_token = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
-    if not fed_token:
+    auth_mode = crypto_fed.federation_auth_mode()
+    can_sign_push = False
+    try:
+        can_sign_push = bool(crypto_fed.get_local_public_key_pem())
+    except Exception:
+        can_sign_push = False
+    # Legacy mode requires the shared bearer. dual/signed may push using only
+    # per-request Ed25519 headers (receiver must have our pubkey pinned).
+    if not fed_token and auth_mode == "legacy":
+        return 0
+    if not fed_token and not can_sign_push:
         return 0
 
     try:
@@ -1932,8 +1962,9 @@ async def federation_outbox_processor() -> int:
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": "FrogTalk-FederationPush/1.0",
-        "x-federation-token": fed_token,
     }
+    if fed_token:
+        headers["x-federation-token"] = fed_token
     # SECURITY-PASS-2: attach Ed25519 per-request signature headers so
     # peers running on FROGTALK_FEDERATION_AUTH_MODE=signed will accept
     # this push without the shared bearer. The local server's own

@@ -1,5 +1,5 @@
 /* FrogTalk Service Worker — caching + web push */
-const CACHE_NAME = 'frogtalk-v681';
+const CACHE_NAME = 'frogtalk-v682';
 const STATIC_ASSETS = [
   '/app',
   '/static/js/app.js',
@@ -62,6 +62,13 @@ self.addEventListener('fetch', event => {
     url.pathname.startsWith('/api/upload') ||
     url.pathname.includes('/upload')
   ) {
+    return;
+  }
+
+  // Never cache API JSON — Tor/slow links often hit SW fallback and show stale
+  // rooms, messages, and social feeds from an old cache entry.
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }
 

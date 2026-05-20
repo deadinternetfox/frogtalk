@@ -9987,6 +9987,30 @@ def get_federation_server_transport(server_id: str) -> str:
     return row["transport_preference"] if row else "auto"
 
 
+def pin_federation_server_pubkey(server_id: str, server_pubkey: str) -> bool:
+    """Pin a peer Ed25519 public key when the row has none yet.
+
+    Does not overwrite an existing pin — operators must re-register to
+    rotate keys deliberately.
+    """
+    sid = str(server_id or "").strip()
+    pem = str(server_pubkey or "").strip()
+    if not sid or not pem or "BEGIN PUBLIC KEY" not in pem:
+        return False
+    with _conn() as con:
+        cur = con.execute(
+            """
+            UPDATE federation_servers
+            SET server_pubkey=?
+            WHERE server_id=?
+              AND (server_pubkey IS NULL OR TRIM(server_pubkey)='')
+            """,
+            (pem, sid),
+        )
+        con.commit()
+        return int(cur.rowcount or 0) > 0
+
+
 def get_federation_server_pubkey(server_id: str) -> str:
     """Return the pinned PEM public key for a peer server, or empty string.
 
