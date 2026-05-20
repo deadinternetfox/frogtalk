@@ -362,43 +362,15 @@ async function _loadDMSocialReelCard(msgId, postId) {
 }
 
 function _hydrateDMSocialCards(msgId) {
-  const msgEl = document.getElementById(`msg-${msgId}`);
-  if (!msgEl) return;
-  // Invite cards: delegate to the channel-side loader so DMs and channels
-  // render identical join cards (icon + room name + Join/Open button).
-  // The channel loader is keyed off the same .invite-card-placeholder
-  // [data-invite-code] markup we emit during DM render.
-  msgEl.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
-    const code = (el.dataset.inviteCode || '').trim();
-    if (!code) return;
-    try {
-      if (typeof Messages !== 'undefined' && typeof Messages._loadInviteCard === 'function') {
-        Messages._loadInviteCard(msgId, code);
-      } else if (typeof window !== 'undefined' && window.Messages && typeof window.Messages._loadInviteCard === 'function') {
-        window.Messages._loadInviteCard(msgId, code);
-      }
-    } catch {}
-  });
-  // FrogSocial profile cards: same delegation pattern as invites.
-  msgEl.querySelectorAll('.social-profile-card-placeholder[data-social-profile]').forEach(el => {
-    const nick = (el.dataset.socialProfile || '').trim();
-    if (!nick) return;
-    try {
-      if (typeof Messages !== 'undefined' && typeof Messages._loadSocialProfileCard === 'function') {
-        Messages._loadSocialProfileCard(msgId, nick);
-      } else if (typeof window !== 'undefined' && window.Messages && typeof window.Messages._loadSocialProfileCard === 'function') {
-        window.Messages._loadSocialProfileCard(msgId, nick);
-      }
-    } catch {}
-  });
-  msgEl.querySelectorAll('.dm-social-post-card-placeholder[data-social-post]').forEach(el => {
-    const postId = Number(el.dataset.socialPost || '0');
-    if (Number.isFinite(postId) && postId > 0) _loadDMSocialPostCard(msgId, postId);
-  });
-  msgEl.querySelectorAll('.dm-social-reel-card-placeholder[data-social-reel]').forEach(el => {
-    const postId = Number(el.dataset.socialReel || '0');
-    if (Number.isFinite(postId) && postId > 0) _loadDMSocialReelCard(msgId, postId);
-  });
+  try {
+    if (typeof Messages !== 'undefined' && typeof Messages._hydrateSpecialCards === 'function') {
+      Messages._hydrateSpecialCards(msgId);
+      return;
+    }
+    if (typeof window !== 'undefined' && window.Messages?._hydrateSpecialCards) {
+      window.Messages._hydrateSpecialCards(msgId);
+    }
+  } catch {}
 }
 
 function _extractYouTubeVideoId(text) {

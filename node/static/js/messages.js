@@ -238,6 +238,39 @@ const Messages = (() => {
   // allowed to see (friends/followers). All loaders dedupe per-postId so
   // the same shared link in 10 messages only fetches once.
   const _shareInfoCache = new Map(); // key → Promise<{ok,data,kind}>
+  const _embedHydrateInflight = new Set(); // `${msgId}|${kind}|${id}`
+  const _hydrateCardsTimers = new Map(); // msgId → timeout id
+
+  function _embedHydrateKey(msgId, kind, id) {
+    return `${msgId}|${kind}|${String(id).toLowerCase()}`;
+  }
+
+  function _claimEmbedHydrate(msgId, kind, id) {
+    const k = _embedHydrateKey(msgId, kind, id);
+    if (_embedHydrateInflight.has(k)) return false;
+    _embedHydrateInflight.add(k);
+    return true;
+  }
+
+  function _releaseEmbedHydrate(msgId, kind, id) {
+    _embedHydrateInflight.delete(_embedHydrateKey(msgId, kind, id));
+  }
+
+  // Async loaders can race (double _hydrateSpecialCards, pending echo replacing
+  // the DOM). Re-query and skip if the placeholder was already removed.
+  function _replaceEmbedPlaceholder(placeholder, html, msgEl, selector) {
+    let el = placeholder;
+    if ((!el || !el.parentNode) && msgEl && selector) {
+      try { el = msgEl.querySelector(selector); } catch { el = null; }
+    }
+    if (!el || !el.parentNode) return false;
+    try {
+      el.outerHTML = html;
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   function _shareFetchOnce(key, fn) {
     if (_shareInfoCache.has(key)) return _shareInfoCache.get(key);
@@ -290,36 +323,39 @@ const Messages = (() => {
   async function _loadSocialProfileCard(msgId, nickname) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    const placeholder = msgEl.querySelector(`.social-profile-card-placeholder[data-social-profile="${nickname}"]`);
-    if (!placeholder) return;
-    const key = `profile:${nickname.toLowerCase()}`;
-    const result = await _shareFetchOnce(key, async () => {
-      // Public first — works for any profile_public=1 user
-      const pub = await _publicGet(`/api/share/profile/${encodeURIComponent(nickname)}`);
-      if (pub.ok) return pub;
-      // Fall back to the authed social endpoint for friends/private profiles
-      return await _authedGet(`/api/social/profile/${encodeURIComponent(nickname)}`);
-    });
-    if (!result.ok) {
-      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Profile unavailable</span>`;
-      _scrollIfNearBottom();
-      return;
+    const nickKey = String(nickname || '').trim();
+    if (!nickKey || !_claimEmbedHydrate(msgId, 'profile', nickKey)) return;
+    const sel = `.social-profile-card-placeholder[data-social-profile="${CSS.escape(nickKey)}"]`;
+    const placeholder = msgEl.querySelector(sel);
+    if (!placeholder) { _releaseEmbedHydrate(msgId, 'profile', nickKey); return; }
+    try {
+      const key = `profile:${nickKey.toLowerCase()}`;
+      const result = await _shareFetchOnce(key, async () => {
+        const pub = await _publicGet(`/api/share/profile/${encodeURIComponent(nickKey)}`);
+        if (pub.ok) return pub;
+        return await _authedGet(`/api/social/profile/${encodeURIComponent(nickKey)}`);
+      });
+      const html = !result.ok
+        ? `<span class="invite-card invite-card-invalid">❌ Profile unavailable</span>`
+        : (() => {
+            const d = result.data || {};
+            const nick = UI.escHtml(d.nickname || nickKey);
+            const subtitle = d.private
+              ? 'Private profile'
+              : UI.escHtml(String(d.bio || d.status_msg || 'Open in Frog Social').substring(0, 80));
+            return `<div class="share-card" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
+              `<div class="share-card-avatar">${UI.avatarEl(d.avatar || null, d.nickname || nickKey, 42)}</div>` +
+              `<div class="share-card-info">` +
+                `<div class="share-card-label">Frog Social Profile</div>` +
+                `<div class="share-card-name">@${nick}</div>` +
+                `<div class="share-card-bio">${subtitle}</div>` +
+              `</div>` +
+            `</div>`;
+          })();
+      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, sel)) _scrollIfNearBottom();
+    } finally {
+      _releaseEmbedHydrate(msgId, 'profile', nickKey);
     }
-    const d = result.data || {};
-    const nick = UI.escHtml(d.nickname || nickname);
-    const subtitle = d.private
-      ? 'Private profile'
-      : UI.escHtml(String(d.bio || d.status_msg || 'Open in Frog Social').substring(0, 80));
-    placeholder.outerHTML =
-      `<div class="share-card" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
-        `<div class="share-card-avatar">${UI.avatarEl(d.avatar || null, d.nickname || nickname, 42)}</div>` +
-        `<div class="share-card-info">` +
-          `<div class="share-card-label">Frog Social Profile</div>` +
-          `<div class="share-card-name">@${nick}</div>` +
-          `<div class="share-card-bio">${subtitle}</div>` +
-        `</div>` +
-      `</div>`;
-    _scrollIfNearBottom();
   }
 
   // Build a provider-iframe src for a music-post URL. Returns null if
@@ -523,48 +559,58 @@ const Messages = (() => {
   async function _loadSocialPostCard(msgId, postId) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    const placeholder = msgEl.querySelector(`.social-post-card-placeholder[data-social-post="${postId}"]`);
-    if (!placeholder) return;
-    const key = `post:${postId}`;
-    const result = await _shareFetchOnce(key, async () => {
-      const pub = await _publicGet(`/api/share/post/${encodeURIComponent(postId)}`);
-      if (pub.ok) return pub;
-      return await _authedGet(`/api/wall/posts/${encodeURIComponent(postId)}`);
-    });
-    if (!result.ok) {
-      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`;
-      _scrollIfNearBottom();
-      return;
+    const pid = Number(postId);
+    if (!Number.isFinite(pid) || pid <= 0) return;
+    if (!_claimEmbedHydrate(msgId, 'post', pid)) return;
+    const sel = `.social-post-card-placeholder[data-social-post="${pid}"], .dm-social-post-card-placeholder[data-social-post="${pid}"]`;
+    const placeholder = msgEl.querySelector(sel);
+    if (!placeholder) { _releaseEmbedHydrate(msgId, 'post', pid); return; }
+    try {
+      const key = `post:${pid}`;
+      const result = await _shareFetchOnce(key, async () => {
+        const pub = await _publicGet(`/api/share/post/${encodeURIComponent(pid)}`);
+        if (pub.ok) return pub;
+        return await _authedGet(`/api/wall/posts/${encodeURIComponent(pid)}`);
+      });
+      const html = !result.ok
+        ? `<span class="invite-card invite-card-invalid">❌ Post unavailable</span>`
+        : _renderRichShareEmbed(result.data || {}, 'post', pid);
+      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, sel)) _scrollIfNearBottom();
+    } finally {
+      _releaseEmbedHydrate(msgId, 'post', pid);
     }
-    placeholder.outerHTML = _renderRichShareEmbed(result.data || {}, 'post', postId);
-    _scrollIfNearBottom();
   }
 
   async function _loadSocialReelCard(msgId, postId) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    const placeholder = msgEl.querySelector(`.social-reel-card-placeholder[data-social-reel="${postId}"]`);
-    if (!placeholder) return;
-    const key = `reel:${postId}`;
-    const result = await _shareFetchOnce(key, async () => {
-      const pub = await _publicGet(`/api/share/reel/${encodeURIComponent(postId)}`);
-      if (pub.ok) return pub;
-      return await _authedGet(`/api/wall/posts/${encodeURIComponent(postId)}`);
-    });
-    if (!result.ok) {
-      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Reel unavailable</span>`;
-      _scrollIfNearBottom();
-      return;
+    const pid = Number(postId);
+    if (!Number.isFinite(pid) || pid <= 0) return;
+    if (!_claimEmbedHydrate(msgId, 'reel', pid)) return;
+    const sel = `.social-reel-card-placeholder[data-social-reel="${pid}"], .dm-social-reel-card-placeholder[data-social-reel="${pid}"]`;
+    const placeholder = msgEl.querySelector(sel);
+    if (!placeholder) { _releaseEmbedHydrate(msgId, 'reel', pid); return; }
+    try {
+      const key = `reel:${pid}`;
+      const result = await _shareFetchOnce(key, async () => {
+        const pub = await _publicGet(`/api/share/reel/${encodeURIComponent(pid)}`);
+        if (pub.ok) return pub;
+        return await _authedGet(`/api/wall/posts/${encodeURIComponent(pid)}`);
+      });
+      let html;
+      if (!result.ok) {
+        html = `<span class="invite-card invite-card-invalid">❌ Reel unavailable</span>`;
+      } else {
+        const data = result.data || {};
+        const mt = String(data.media_type || '').toLowerCase();
+        html = !mt.startsWith('video/')
+          ? `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`
+          : _renderRichShareEmbed(data, 'reel', pid);
+      }
+      if (_replaceEmbedPlaceholder(placeholder, html, msgEl, sel)) _scrollIfNearBottom();
+    } finally {
+      _releaseEmbedHydrate(msgId, 'reel', pid);
     }
-    const data = result.data || {};
-    const mt = String(data.media_type || '').toLowerCase();
-    if (!mt.startsWith('video/')) {
-      placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Not a reel</span>`;
-      _scrollIfNearBottom();
-      return;
-    }
-    placeholder.outerHTML = _renderRichShareEmbed(data, 'reel', postId);
-    _scrollIfNearBottom();
   }
 
   // Hoist share-card placeholders (and the cards they become) onto
@@ -594,19 +640,30 @@ const Messages = (() => {
   }
 
   function _hydrateSpecialCards(msgId) {
+    const id = String(msgId || '').trim();
+    if (!id) return;
+    const prev = _hydrateCardsTimers.get(id);
+    if (prev) clearTimeout(prev);
+    _hydrateCardsTimers.set(id, setTimeout(() => {
+      _hydrateCardsTimers.delete(id);
+      _hydrateSpecialCardsNow(id);
+    }, 40));
+  }
+
+  function _hydrateSpecialCardsNow(msgId) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    // Hoist all share placeholders to the top of the body BEFORE kicking
-    // off async loads, so the in-flight loader (and the eventual card or
-    // failure state) always sit above the message text.
+    // Hoist Frog Social / music embed placeholders only (not invites — hoisting
+    // invites raced with pending-message reconcile and duplicated embeds).
     msgEl.querySelectorAll(
       '.social-profile-card-placeholder[data-social-profile],' +
       '.social-post-card-placeholder[data-social-post],' +
-      '.social-reel-card-placeholder[data-social-reel]'
+      '.social-reel-card-placeholder[data-social-reel],' +
+      '.dm-social-post-card-placeholder[data-social-post],' +
+      '.dm-social-reel-card-placeholder[data-social-reel]'
     ).forEach(_hoistShareCardToTop);
 
     msgEl.querySelectorAll('.invite-card-placeholder[data-invite-code]').forEach(el => {
-      _hoistShareCardToTop(el);
       const code = (el.dataset.inviteCode || '').trim();
       if (code) _loadInviteCard(msgId, code);
     });
@@ -614,11 +671,15 @@ const Messages = (() => {
       const nick = (el.dataset.socialProfile || '').trim();
       if (nick) _loadSocialProfileCard(msgId, nick);
     });
-    msgEl.querySelectorAll('.social-post-card-placeholder[data-social-post]').forEach(el => {
+    msgEl.querySelectorAll(
+      '.social-post-card-placeholder[data-social-post], .dm-social-post-card-placeholder[data-social-post]'
+    ).forEach(el => {
       const postId = Number(el.dataset.socialPost || '0');
       if (Number.isFinite(postId) && postId > 0) _loadSocialPostCard(msgId, postId);
     });
-    msgEl.querySelectorAll('.social-reel-card-placeholder[data-social-reel]').forEach(el => {
+    msgEl.querySelectorAll(
+      '.social-reel-card-placeholder[data-social-reel], .dm-social-reel-card-placeholder[data-social-reel]'
+    ).forEach(el => {
       const postId = Number(el.dataset.socialReel || '0');
       if (Number.isFinite(postId) && postId > 0) _loadSocialReelCard(msgId, postId);
     });
@@ -729,17 +790,19 @@ const Messages = (() => {
   async function _loadInviteCard(msgId, code) {
     const msgEl = document.getElementById(`msg-${msgId}`);
     if (!msgEl) return;
-    const placeholder = msgEl.querySelector(`.invite-card-placeholder[data-invite-code="${code}"]`);
-    if (!placeholder) return;
-    _hoistShareCardToTop(placeholder);
+    const inviteCode = String(code || '').trim();
+    if (!inviteCode || !_claimEmbedHydrate(msgId, 'invite', inviteCode)) return;
+    const sel = `.invite-card-placeholder[data-invite-code="${CSS.escape(inviteCode)}"]`;
+    const placeholder = msgEl.querySelector(sel);
+    if (!placeholder) { _releaseEmbedHydrate(msgId, 'invite', inviteCode); return; }
 
     try {
-      const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}`);
+      const res = await apiFetch(`/api/invites/${encodeURIComponent(inviteCode)}`);
       const data = await res.json();
-      if (!placeholder.parentNode) return;
       if (!res.ok || !data.valid) {
-        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Invite invalid or expired</span>`;
-        _scrollIfNearBottom();
+        if (_replaceEmbedPlaceholder(placeholder,
+          `<span class="invite-card invite-card-invalid">❌ Invite invalid or expired</span>`,
+          msgEl, sel)) _scrollIfNearBottom();
         return;
       }
       // room_icon can be a single emoji, an uploaded image (data: URL,
@@ -772,10 +835,9 @@ const Messages = (() => {
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
         ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`
-        : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join Channel</button>`;
+        : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(inviteCode)}',this)">Join Channel</button>`;
       _ensureSystemEmbedStyleGuard();
-      if (!placeholder.parentNode) return;
-      placeholder.outerHTML = `
+      const cardHtml = `
         <div class="invite-card ft-embed-invite">
           <div class="invite-card-header ft-embed-invite-header">You've been invited to join a channel</div>
           <div class="invite-card-main ft-embed-invite-main">
@@ -788,12 +850,14 @@ const Messages = (() => {
             ${footer}
           </div>
         </div>`;
-      _scrollIfNearBottom();
+      if (_replaceEmbedPlaceholder(placeholder, cardHtml, msgEl, sel)) _scrollIfNearBottom();
     } catch (e) {
-      if (placeholder.parentNode) {
-        placeholder.outerHTML = `<span class="invite-card invite-card-invalid">❌ Could not load invite</span>`;
-        _scrollIfNearBottom();
-      }
+      _replaceEmbedPlaceholder(placeholder,
+        `<span class="invite-card invite-card-invalid">❌ Could not load invite</span>`,
+        msgEl, sel);
+      _scrollIfNearBottom();
+    } finally {
+      _releaseEmbedHydrate(msgId, 'invite', inviteCode);
     }
   }
 
@@ -3499,7 +3563,7 @@ const Messages = (() => {
 
   _ensureSystemEmbedStyleGuard();
 
-  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
+  return { loadHistory, appendMessage, updateEdited, removeMessage, updateReactions, startEdit, submitEdit, cancelEdit, deleteMsg, showReactMenu, toggleReaction, openMedia, openSticker, hydrateStickers: _hydrateStickers, revealSpoiler, hideSpoiler, revealViewOnce, loadMedia, observeLazyMedia, playInlineAudio, setReplyTo, clearReply, getReplyToId, getReplyTo, openModMenu, openActionSheet, bindLongPress, copyMessage, scrollToBottom, joinViaInvite, openSocialProfile, openSocialPost, openSocialReel, _toggleChatVideo, forwardMessage, openForwardPicker: _openForwardPicker, forwardedBadgeHtml: _forwardedBadgeHtml, _renderRichShareEmbed, suppressPreview, applyPreviewSuppress, toggleSpoiler, applyMediaBlur, _loadInviteCard, _loadSocialProfileCard, _loadSocialPostCard, _loadSocialReelCard, _hydrateSpecialCards, _scrollIfNearBottom, refreshSystemEmbedGuard: _ensureSystemEmbedStyleGuard };
 })();
 
 // ── Scroll-to-bottom + "jump to latest" pip ─────────────────────────────────
