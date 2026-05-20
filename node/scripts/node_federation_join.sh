@@ -310,11 +310,11 @@ configure_env() {
     set_env_value "$env_path" "FROGTALK_TOR_ENABLED" "1"
     set_env_value "$env_path" "FROGTALK_ONION_URL" "$onion"
     if ! grep -qE '^FROGTALK_TOR_SOCKS_PROXY=' "$env_path" 2>/dev/null; then
-      set_env_value "$env_path" "FROGTALK_TOR_SOCKS_PROXY" "socks5://127.0.0.1:9050"
+      set_env_value "$env_path" "FROGTALK_TOR_SOCKS_PROXY" "socks5h://127.0.0.1:9050"
     fi
     ok "Tor mode · ${C_DIM}${onion}${C_RESET}"
   elif ! grep -qE '^FROGTALK_TOR_SOCKS_PROXY=' "$env_path" 2>/dev/null; then
-    set_env_value "$env_path" "FROGTALK_TOR_SOCKS_PROXY" "socks5://127.0.0.1:9050"
+    set_env_value "$env_path" "FROGTALK_TOR_SOCKS_PROXY" "socks5h://127.0.0.1:9050"
   fi
 
   load_env_file "$env_path"
