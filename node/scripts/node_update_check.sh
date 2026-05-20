@@ -2,7 +2,7 @@
 # FrogTalk node update helper.
 #
 # Default: check only.
-# Apply:   bash scripts/node_update_check.sh --apply
+# Apply:   bash node/scripts/node_update_check.sh --apply
 
 set -u
 set -o pipefail
@@ -13,7 +13,7 @@ for arg in "$@"; do
     --apply) APPLY=1 ;;
     *)
       echo "Unknown argument: $arg"
-      echo "Usage: bash scripts/node_update_check.sh [--apply]"
+      echo "Usage: bash node/scripts/node_update_check.sh [--apply]"
       exit 1
       ;;
   esac
@@ -63,7 +63,7 @@ fi
 if [[ "$APPLY" -ne 1 ]]; then
   echo
   echo "Dry run only. To apply updates:"
-  echo "  bash scripts/node_update_check.sh --apply"
+  echo "  bash node/scripts/node_update_check.sh --apply"
   exit 0
 fi
 

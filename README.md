@@ -352,7 +352,7 @@ deslopper. Quick start:
 2. If your PR is AI-drafted, label it `vibe-coded` — we'll deslop it together.
 3. Run `node --check node/static/js/<file>.js` for any JS you touched — silent parse
    errors break every onclick on the page.
-4. Run `python -m py_compile <file>.py` for any Python you touched.
+4. Run `python -m py_compile node/<file>.py` for any Python you touched.
 5. Open a PR with the template filled in. For security fixes, include a PoC.
 6. Add yourself to `CONTRIBUTORS.md` in the same PR.
 

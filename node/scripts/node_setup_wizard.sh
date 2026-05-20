@@ -7,7 +7,7 @@
 # - non-fatal fallbacks for common edge cases
 #
 # Run:
-#   bash scripts/node_setup_wizard.sh
+#   bash node/scripts/node_setup_wizard.sh
 
 set -u
 set -o pipefail

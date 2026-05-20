@@ -4105,7 +4105,7 @@ async function confirmDeleteAccount() {
 
 // ── Custom profile CSS — inline-style application (Track B) ───────────────
 //
-// Track B (see docs/SECURITY_REFACTOR_PLAN.md) eliminates every <style>
+// Track B (see docs/SECURITY_MODEL.md) eliminates every <style>
 // block built from user data. Instead, we apply one inline `style`
 // attribute to one container element via el.style.setProperty(), which
 // the browser parses in property-value context (never HTML context).

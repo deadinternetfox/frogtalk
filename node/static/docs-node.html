@@ -263,6 +263,7 @@ curl -s https://your-node.example/api/network/update/status</code></pre>
     ├── main.py                   # FastAPI entrypoint
     ├── routers/                  # FastAPI route modules
     ├── static/                   # web client + marketing pages
+    ├── board/                    # Frog Channel PHP imageboard (public /board/)
     ├── deploy/                   # systemd / nginx / env.example
     ├── scripts/                  # setup, update, deploy, build helpers
     ├── tests/                    # pytest suite
@@ -270,6 +271,7 @@ curl -s https://your-node.example/api/network/update/status</code></pre>
     └── Dockerfile</code></pre>
       <p class="hint">On a running node, operator state (<code>.env</code>, <code>data/</code>, <code>secrets/</code>, <code>venv/</code>) stays at <code>/opt/frogtalk/</code> and the runtime source at <code>/opt/frogtalk/node/</code>. The setup wizard wires symlinks so the service can run with <code>WorkingDirectory=/opt/frogtalk/node</code> without copying secrets into the source tree.</p>
       <p class="hint">Build entrypoints: <code>client/desktop/app/package.json</code> (Electron), <code>client/mobile/android/build.gradle.kts</code>, <code>client/mobile/ios/FrogTalk.xcodeproj</code>, and <code>node/Dockerfile</code> for containerized deploys.</p>
+      <p class="hint">The nginx file in git (<code>node/deploy/nginx.conf</code>) is a reusable <em>template</em>. Set your own <code>server_name</code>, cert paths, and upstream port to match your service override.</p>
     </section>
 
   </main>

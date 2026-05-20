@@ -7,6 +7,8 @@ This folder ships the production deploy templates the setup wizard installs:
 - `frogtalk.service` — systemd unit. Defaults to `WorkingDirectory=/opt/frogtalk/node`,
   `EnvironmentFile=/opt/frogtalk/.env`, runs as user `deploy`.
 - `nginx.conf` — reverse-proxy example with WebSocket upgrade headers.
+  It is intentionally template-style: set your own `server_name`, cert paths,
+  and app upstream port.
 - `env.example` — annotated template; copy to `/opt/frogtalk/.env` and fill in
   secrets, base URL, federation token, release signers.
 
@@ -64,6 +66,31 @@ docker run -d -p 8080:8080 \
   -v $(pwd)/data:/app/data \
   --name frogtalk frogtalk
 ```
+
+## Cloudflare Tunnel
+
+Production nodes terminate TLS at Cloudflare and run `cloudflared` locally.
+The tunnel should forward to **nginx on port 8080** (not uvicorn directly).
+
+1. Install `cloudflared` from the [official .deb release](https://github.com/cloudflare/cloudflared/releases).
+2. In **Cloudflare Zero Trust → Networks → Tunnels**, create or open your tunnel
+   and set the public hostname origin to `http://localhost:8080`.
+3. Run the connector with your tunnel token (store the token outside git):
+
+```bash
+sudo cloudflared service install <TUNNEL_TOKEN>
+sudo systemctl enable --now cloudflared
+```
+
+Or run manually: `cloudflared tunnel run --token <TUNNEL_TOKEN>`
+
+**nginx:** enable only the live `frogtalk` site under `/etc/nginx/sites-enabled/`.
+Do not leave stale `frogtalk.bak.*` copies there — duplicate vhosts can send
+`Host: frogtalk.xyz` traffic to the wrong upstream port and cause 502s.
+
+**Upgrade:** use the same package manager that installed `cloudflared`
+(`dpkg -i` for the .deb, then `systemctl restart cloudflared`). Expect a brief
+tunnel reconnect.
 
 ## Nginx reverse proxy (HTTPS)
 
