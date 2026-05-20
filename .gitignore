@@ -26,6 +26,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# ── Flatpak (maintained out-of-tree / Flathub) ─────────────────
+flatpak/
+
 # ── Build outputs ──────────────────────────────────────────────
 dist/
 build/

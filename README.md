@@ -282,13 +282,9 @@ frogtalk/
 │   └── builds/                   # release tarballs (gitignored)
 ├── bot-examples/                 # standalone reference bots
 ├── board/                        # standalone PHP imageboard mirror (legacy)
-├── flatpak/                      # flatpak manifest for the desktop client
 ├── github-build-mirror/          # release binaries published to GitHub
 ├── docs/
-│   ├── PROJECT_STRUCTURE.md
-│   ├── SECURITY_MODEL.md
-│   ├── SECURITY_HARDENING_PLAN.md
-│   └── SECURITY_SCAN_2026_05_18.md
+│   └── SECURITY_MODEL.md         # encryption + threat model
 ├── README.md / SECURITY.md / CONTRIBUTING.md / CONTRIBUTORS.md / LICENSE
 └── .gitignore / .dockerignore / .fallowrc.json
 ```
