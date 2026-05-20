@@ -197,6 +197,15 @@ def _assert_safe_url(url: str) -> None:
         raise _UnsafeURLError(f"no usable IPs for {host}")
 
 
+# HIGH-12: hard byte cap on outbound federation HTTP responses. A
+# malicious or compromised peer that streams gigabytes back at us would
+# otherwise OOM the worker; the JSON cap is tight (federation manifests
+# / status payloads are small), the binary cap is generous enough for
+# update tarballs.
+_FED_RESPONSE_MAX_JSON = 4 * 1024 * 1024              # 4 MB
+_FED_RESPONSE_MAX_BIN = 256 * 1024 * 1024             # 256 MB (update packages)
+
+
 def _fetch_url_bytes(
     url: str,
     *,
@@ -204,23 +213,45 @@ def _fetch_url_bytes(
     method: str = "GET",
     headers: dict | None = None,
     data: bytes | None = None,
+    max_bytes: int | None = None,
 ) -> bytes:
     # SSRF allowlist runs first regardless of transport. We only do this
     # for outbound peer fetches — user-supplied URLs (link previews,
     # imageboard, etc.) have their own checks elsewhere.
     _assert_safe_url(url)
+    if max_bytes is None:
+        max_bytes = _FED_RESPONSE_MAX_JSON
     if _url_uses_tor(url):
         # follow_redirects=False so a malicious onion can't bounce us
         # to a clearnet attacker target after the SSRF check passed.
         with httpx.Client(proxy=_tor_proxy_url(), timeout=timeout_s, follow_redirects=False) as client:
-            resp = client.request(method, url, headers=headers, content=data)
-            resp.raise_for_status()
-            return resp.content
+            with client.stream(method, url, headers=headers, content=data) as resp:
+                resp.raise_for_status()
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise _UnsafeURLError(
+                            f"federation response from {url!r} exceeded {max_bytes} bytes"
+                        )
+                    chunks.append(chunk)
+                return b"".join(chunks)
 
     req = urllib.request.Request(url, headers=headers or {}, data=data, method=method)
     opener = urllib.request.build_opener(_NoRedirectHandler())
     with opener.open(req, timeout=timeout_s) as resp:
-        return resp.read()
+        buf = bytearray()
+        while True:
+            chunk = resp.read(65536)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            if len(buf) > max_bytes:
+                raise _UnsafeURLError(
+                    f"federation response from {url!r} exceeded {max_bytes} bytes"
+                )
+        return bytes(buf)
 
 
 def _select_peer_target(server: dict) -> str:
@@ -244,7 +275,20 @@ def _select_peer_target(server: dict) -> str:
 
 
 def _tor_mode_enabled() -> bool:
-    return (os.getenv("FROGTALK_TOR_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
+    """True iff this node should treat the network as Tor-only.
+
+    HIGH-14: accept either ``FROGTALK_TOR_ENABLED`` or
+    ``FROGTALK_TOR_MODE``. Different subsystems were checking different
+    env vars (federation read TOR_ENABLED, geoip read TOR_MODE), so an
+    operator who only set one ended up with a partially-Tor build that
+    still phoned home to clearnet GeoIP services on Tor nodes.
+    """
+    v1 = (os.getenv("FROGTALK_TOR_ENABLED", "") or "").strip().lower()
+    v2 = (os.getenv("FROGTALK_TOR_MODE", "") or "").strip().lower()
+    for raw in (v1, v2):
+        if raw in ("1", "true", "yes", "on"):
+            return True
+    return False
 
 
 def _server_advertises_onion_only(server: dict) -> bool:
@@ -345,6 +389,67 @@ def _fetch_update_manifest(feed_url: str, timeout_s: float = 4.0) -> dict:
     return payload
 
 
+def _release_signer_pubkeys() -> list[str]:
+    """Allowed Ed25519 PEM public keys for release-manifest verification.
+
+    Configured via ``FROGTALK_RELEASE_SIGNERS`` — a semicolon-separated
+    list of PEM blocks (newlines may be escaped as ``\\n``). Returns ``[]``
+    when the env var is unset, which disables auto-apply verification.
+    """
+    raw = (os.getenv("FROGTALK_RELEASE_SIGNERS") or "").strip()
+    if not raw:
+        return []
+    out: list[str] = []
+    for chunk in raw.split(";"):
+        chunk = chunk.strip().replace("\\n", "\n")
+        if "BEGIN PUBLIC KEY" in chunk:
+            out.append(chunk)
+    return out
+
+
+def _manifest_signature_ok(manifest: dict) -> tuple[bool, str]:
+    """Verify the release manifest's Ed25519 signature.
+
+    The manifest must contain ``signature`` (base64 Ed25519 signature)
+    and either ``signed_payload`` (raw bytes/string that was signed) or
+    fall back to the canonical JSON of the manifest minus the signature
+    fields. Returns ``(ok, reason)``.
+    """
+    signers = _release_signer_pubkeys()
+    if not signers:
+        return False, "no_release_signers_configured"
+    sig_b64 = str(manifest.get("signature") or manifest.get("manifest_signature") or "").strip()
+    if not sig_b64:
+        return False, "missing_signature"
+    try:
+        sig = base64.b64decode(sig_b64)
+    except Exception:
+        return False, "bad_signature_encoding"
+    payload = manifest.get("signed_payload")
+    if isinstance(payload, str) and payload:
+        canonical = payload.encode("utf-8")
+    else:
+        # Canonicalize the manifest sans signature fields. Stable ordering
+        # so the signer can reproduce it. Both sides must agree on this.
+        clean = {k: v for k, v in manifest.items() if k not in {"signature", "manifest_signature", "signed_payload"}}
+        canonical = json.dumps(clean, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    try:
+        from cryptography.hazmat.primitives.serialization import load_pem_public_key
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        for pem in signers:
+            try:
+                pk = load_pem_public_key(pem.encode("utf-8"))
+                if not isinstance(pk, Ed25519PublicKey):
+                    continue
+                pk.verify(sig, canonical)
+                return True, "ok"
+            except Exception:
+                continue
+        return False, "no_signer_verified"
+    except Exception as exc:
+        return False, f"verify_error:{exc}"
+
+
 def _sha256_of_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -357,7 +462,15 @@ def _sha256_of_file(path: str) -> str:
 
 
 def _download_update_package(url: str, target_path: str, timeout_s: float = 15.0) -> None:
-    raw = _fetch_url_bytes(url, timeout_s=timeout_s, headers={"User-Agent": "FrogTalk-Updater/1.0"}, method="GET")
+    # HIGH-12: the JSON cap (_FED_RESPONSE_MAX_JSON) would refuse most
+    # legitimate release tarballs, so request the larger binary cap here.
+    raw = _fetch_url_bytes(
+        url,
+        timeout_s=timeout_s,
+        headers={"User-Agent": "FrogTalk-Updater/1.0"},
+        method="GET",
+        max_bytes=_FED_RESPONSE_MAX_BIN,
+    )
     with open(target_path, "wb") as out:
         out.write(raw)
 
@@ -480,6 +593,49 @@ def _check_update_once(auto_apply: bool = False) -> dict:
 
     applied = None
     if update_available and auto_apply:
+        # CRIT-3: require a verified Ed25519 manifest signature before
+        # we ever overwrite the install. Operators who haven't set up
+        # FROGTALK_RELEASE_SIGNERS yet get a noisy log + no apply, never
+        # a silent rollback into a poisoned tarball.
+        sig_ok, sig_reason = _manifest_signature_ok(latest)
+        if not sig_ok:
+            db.set_config("update.last_apply_at", str(int(time.time())))
+            db.set_config("update.last_apply_status", f"unsigned:{sig_reason}")
+            _log.warning(
+                "Auto-update refused: manifest signature check failed (%s). "
+                "Set FROGTALK_RELEASE_SIGNERS or apply manually.", sig_reason,
+            )
+            return {
+                "ok": True,
+                "feed_url": feed_url,
+                "local": local,
+                "latest": latest,
+                "update_available": update_available,
+                "applied": {"ok": False, "error": f"unsigned_manifest:{sig_reason}"},
+            }
+
+        # Downgrade guard: refuse to apply if the manifest version is
+        # older than what's currently installed (string compare on
+        # semver-ish "x.y.z"). Same-version reapplies are still allowed
+        # for legitimate hash-only rebuilds.
+        try:
+            cur_v = tuple(int(x) for x in str(local.get("version") or "0").split(".")[:3])
+            new_v = tuple(int(x) for x in str(latest.get("version") or "0").split(".")[:3])
+            if new_v < cur_v:
+                db.set_config("update.last_apply_at", str(int(time.time())))
+                db.set_config("update.last_apply_status", "downgrade_blocked")
+                _log.warning("Auto-update refused: manifest version %s is older than installed %s", new_v, cur_v)
+                return {
+                    "ok": True,
+                    "feed_url": feed_url,
+                    "local": local,
+                    "latest": latest,
+                    "update_available": update_available,
+                    "applied": {"ok": False, "error": "downgrade_blocked"},
+                }
+        except Exception:
+            pass
+
         pkg_url = str(latest.get("package_url") or "").strip()
         pkg_sha = str(latest.get("package_sha256") or "").strip().lower()
         if pkg_url and pkg_sha:
@@ -639,7 +795,7 @@ async def network_status():
             "base_url": public["base_url"],
             "onion_url": public["onion_url"],
             "federation_enabled": os.getenv("FROGTALK_FEDERATION_ENABLED", "0") in ("1", "true", "yes"),
-            "tor_enabled": os.getenv("FROGTALK_TOR_ENABLED", "0") in ("1", "true", "yes"),
+            "tor_enabled": _tor_mode_enabled(),
             "federation_pubkey_pem": local_pubkey_pem,
             "federation_pubkey_fingerprint": local_pubkey_fp,
         }
@@ -824,8 +980,16 @@ async def network_verify_peer_builds(
 
 
 def run_update_check_background() -> dict:
-    """Used by app background task for fleet update sync."""
-    auto = (os.getenv("FROGTALK_AUTO_UPDATE_ENABLED", "1") or "1").strip().lower() in ("1", "true", "yes")
+    """Used by app background task for fleet update sync.
+
+    CRIT-3: Auto-apply is now opt-in. The release manifest is not yet
+    publisher-signed, so a compromised feed could otherwise hand every
+    auto-updating node a malicious package whose SHA-256 matches what
+    the feed itself supplied. Operators who want hands-off updates must
+    explicitly set ``FROGTALK_AUTO_UPDATE_ENABLED=1`` *and*, once the
+    signed-manifest path lands, configure ``FROGTALK_RELEASE_SIGNERS``.
+    """
+    auto = (os.getenv("FROGTALK_AUTO_UPDATE_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes")
     return _check_update_once(auto_apply=auto)
 
 
@@ -872,7 +1036,7 @@ async def network_update_status():
     }
     return {
         "feed_url": _get_update_feed_url(),
-        "auto_update_enabled": (os.getenv("FROGTALK_AUTO_UPDATE_ENABLED", "1") or "1").strip().lower() in ("1", "true", "yes"),
+        "auto_update_enabled": (os.getenv("FROGTALK_AUTO_UPDATE_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes"),
         "local": local,
         "latest": latest,
         "update_available": (db.get_config("update.available") or "0") == "1",
@@ -915,18 +1079,31 @@ async def register_network_server(
     x_federation_token: str | None = Header(default=None),
     x_session_token: str | None = Header(default=None),
 ):
+    """Register / upsert a federated peer.
+
+    HIGH-11: ``official`` and ``trust_tier`` may only be set by a local
+    admin. A bearer of the shared ``FROGTALK_FEDERATION_TOKEN`` (every
+    peer holds one) could otherwise mark itself ``official=True``,
+    ``trust_tier="gold"`` and ride the resulting UI badge to phish users.
+    The token path still works for everything else — base URL, public key,
+    capabilities — so genuine peer self-registration keeps working.
+    """
     current_user = await _current_user_from_header(x_session_token)
     is_admin = bool(current_user and current_user.get("is_admin"))
     if not (is_admin or _fed_token_ok(x_federation_token)):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
+
+    official = bool(body.official) if is_admin else False
+    trust_tier = (body.trust_tier or "") if is_admin else ""
+
     db.upsert_federation_server(
         server_id=body.server_id,
         display_name=body.display_name,
         base_url=body.base_url,
         onion_url=body.onion_url,
         region=body.region,
-        official=body.official,
-        trust_tier=body.trust_tier,
+        official=official,
+        trust_tier=trust_tier,
         server_pubkey=body.server_pubkey,
         capabilities=body.capabilities,
     )
@@ -1009,11 +1186,14 @@ async def get_user_identity_claim(
 def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
     accepted = 0
     rejected = 0
-    # Configurable per-deploy. We default to 0 (off) so the next deploy
-    # can roll out signing-capable clients across the federation without
-    # immediately rejecting unsigned events from peers that haven't
-    # upgraded yet. Flip to 1 after one release of soak.
-    require_sigs = (os.getenv("FROGTALK_FEDERATION_REQUIRE_SIGS", "0").strip().lower()
+    # CRIT-2: default to *require* signatures. The shared
+    # ``FROGTALK_FEDERATION_TOKEN`` is a bearer that lets a peer push events
+    # claiming any ``origin_server_id``; without a pinned per-origin pubkey
+    # + valid Ed25519 signature, a leaked token reduces the federation to
+    # an unauthenticated injection bus. Operators who still need the old
+    # behavior during a rolling upgrade can set
+    # ``FROGTALK_FEDERATION_REQUIRE_SIGS=0`` explicitly.
+    require_sigs = (os.getenv("FROGTALK_FEDERATION_REQUIRE_SIGS", "1").strip().lower()
                     in ("1", "true", "yes", "on"))
     # Events that mutate a SPECIFIC user's identity / inbox / social
     # graph. For these we ALWAYS require a pinned server key + a valid
@@ -1301,17 +1481,85 @@ async def register_build_manifest(
     if not _fed_token_ok(x_federation_token):
         return JSONResponse(status_code=403, content={"error": "Not authorised"})
 
+    # HIGH-11: federation-token holders can register manifests for their
+    # own builds but cannot mark them official. Only the local server
+    # admin UI (which calls this endpoint via the X-Session-Token path
+    # in `register_official_manifest`) can flip `official=True`.
+    official = False
+
+    # HIGH-15: actually verify the signature before insert. The DB
+    # function stored the (signer, signature) pair without checking
+    # them, so a peer with the federation token could insert manifests
+    # for arbitrary (platform, version, build_hash) tuples and then
+    # have ``/federation/manifests/verify`` confirm them. We require
+    # the signer pubkey to appear in ``FROGTALK_RELEASE_SIGNERS`` and
+    # the Ed25519 signature to cover the canonical
+    # ``platform|version|build_hash`` payload.
+    sig_ok = _manifest_field_signature_ok(
+        signer=body.signer,
+        signature=body.signature,
+        platform=body.platform,
+        version=body.version,
+        build_hash=body.build_hash,
+    )
+    if not sig_ok:
+        return JSONResponse(status_code=403, content={"error": "Invalid manifest signature"})
+
     ok = db.register_build_manifest(
         platform=body.platform,
         version=body.version,
         build_hash=body.build_hash,
         signer=body.signer,
         signature=body.signature,
-        official=bool(body.official),
+        official=official,
     )
     if not ok:
         return JSONResponse(status_code=400, content={"error": "Manifest registration failed"})
     return {"ok": True}
+
+
+def _manifest_field_signature_ok(
+    signer: str,
+    signature: str,
+    platform: str,
+    version: str,
+    build_hash: str,
+) -> bool:
+    """Verify the Ed25519 signature on a registered build manifest.
+
+    The signer must be an allowed release signer (configured via
+    ``FROGTALK_RELEASE_SIGNERS``) and the signature must cover the
+    canonical ``platform|version|build_hash`` byte string.
+    """
+    signer = (signer or "").strip()
+    sig_b64 = (signature or "").strip()
+    if not signer or not sig_b64:
+        return False
+    allowed = _release_signer_pubkeys()
+    if not allowed:
+        return False
+    try:
+        sig_bytes = base64.b64decode(sig_b64)
+    except Exception:
+        return False
+    payload = f"{platform}|{version}|{build_hash}".encode("utf-8")
+    try:
+        from cryptography.hazmat.primitives.serialization import load_pem_public_key
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    except Exception:
+        return False
+    candidates: list[str] = [signer] if "BEGIN PUBLIC KEY" in signer else []
+    candidates.extend(allowed)
+    for pem in candidates:
+        try:
+            pk = load_pem_public_key(pem.encode("utf-8"))
+            if not isinstance(pk, Ed25519PublicKey):
+                continue
+            pk.verify(sig_bytes, payload)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 @router.get("/federation/manifests/verify")
@@ -1813,6 +2061,21 @@ async def _handle_room_event(event: dict) -> None:
 
     room = db.get_room_by_name(room_name)
     if not room:
+        # CRIT-4: never auto-create a local room from federated events.
+        # Doing so used to let any peer materialize arbitrary room names
+        # (e.g. "admin-chat") on every node in the network, owned by the
+        # federation system user, and then drop fake members and messages
+        # into them. Operators who want federated room mirroring should
+        # create the room locally first.
+        allow_legacy_rooms = (
+            os.getenv("FROGTALK_FEDERATION_AUTOCREATE_ROOMS", "0") or "0"
+        ).strip().lower() in ("1", "true", "yes", "on")
+        if not allow_legacy_rooms:
+            _log.info(
+                "federation: dropping %s for unknown local room %s",
+                event_type, room_name,
+            )
+            return
         owner = db.get_or_create_federation_system_user()
         room_id = db.create_room(room_name, "Federated room", "public", owner, None)
         if room_id is None:
@@ -2245,12 +2508,28 @@ async def _handle_user_event(event: dict) -> None:
 
 
 def _ensure_local_user_by_nickname(nickname: str) -> dict | None:
+    """Look up a local user by nickname for federated event application.
+
+    CRIT-4: this helper used to silently auto-create a shadow ``users``
+    row whenever a federated event referenced an unknown nickname. That
+    let any peer (or any token holder) squat arbitrary names, fake the
+    "User X joined" UI signal, and prep impersonation. We now return
+    ``None`` for unknown nicks — the callers must drop the event, never
+    create a local account as a side effect.
+
+    Operators can opt back into the legacy behavior for a single rolling
+    upgrade window by setting ``FROGTALK_FEDERATION_AUTOCREATE_USERS=1``,
+    but the default is fail-closed.
+    """
     nick = (nickname or "").strip()
     if not _FED_NAME_RE.match(nick):
         return None
     user = db.get_user_by_nick(nick)
     if user:
         return user
+    allow_legacy = (os.getenv("FROGTALK_FEDERATION_AUTOCREATE_USERS", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
+    if not allow_legacy:
+        return None
     uid = db.create_user(nick, secrets.token_urlsafe(24))
     if uid is None:
         return db.get_user_by_nick(nick)
