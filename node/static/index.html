@@ -4248,7 +4248,7 @@ body[data-theme="frog"] .invite-card-icon{
    JS renderers still emit legacy inline max-width values (560/480/400),
    which can make cards oversized on wide panes. Clamp all major embed
    variants to one consistent maximum width. */
-:root{--chat-embed-max-inline:360px}
+:root{--chat-embed-max-inline:320px}
 .msg-body .link-preview,
 .msg-body .yt-embed,
 .msg-body .spotify-embed,
@@ -4261,7 +4261,7 @@ body[data-theme="frog"] .invite-card-icon{
 /* Preserve portrait reel geometry (9:16 width derives from height). */
 .msg-body .chat-share-embed:has(.chat-share-video){width:auto !important}
 @media(max-width:520px){
-  :root{--chat-embed-max-inline:320px}
+  :root{--chat-embed-max-inline:300px}
 }
 
 /* ─── Frog-themed retry button used on Frog Social error states ────── */
@@ -7828,7 +7828,7 @@ body.mini-embedded .auth-tabs { margin-bottom:14px; }
 .preview-wrap{
   position:relative;
   display:block;
-  max-width:560px;
+  max-width:var(--chat-embed-max-inline);
   margin:0;
   padding:0;
 }

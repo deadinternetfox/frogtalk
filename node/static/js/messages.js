@@ -1019,7 +1019,7 @@ const Messages = (() => {
     // YouTube embed
     if (preview.type === 'youtube' && preview.video_id) {
       html = `
-        <div class="yt-embed" style="margin-top:8px;max-width:560px;width:100%;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+        <div class="yt-embed" style="margin-top:8px;max-width:320px;width:100%;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
             <iframe 
               src="https://www.youtube.com/embed/${UI.escHtml(preview.video_id)}?enablejsapi=1" 
@@ -1045,7 +1045,7 @@ const Messages = (() => {
     else if (preview.type === 'spotify' && preview.embed_url) {
       const height = preview.spotify_type === 'track' ? '80' : '152';
       html = `
-        <div class="spotify-embed" style="margin-top:8px;max-width:400px;border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+        <div class="spotify-embed" style="margin-top:8px;max-width:320px;border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           <iframe 
             src="${UI.escHtml(preview.embed_url)}?theme=0" 
             width="100%" 
@@ -1064,7 +1064,7 @@ const Messages = (() => {
     // Twitter/X - show link preview (can't embed due to restrictions)
     else if (preview.type === 'twitter') {
       html = `
-        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-left:4px solid #1da1f2;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:400px;padding:12px;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-left:4px solid #1da1f2;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:320px;padding:12px;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           <div style="font-size:11px;color:#1da1f2;display:flex;align-items:center;gap:4px;margin-bottom:4px">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="#1da1f2"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
             X (Twitter)
@@ -1086,7 +1086,7 @@ const Messages = (() => {
       const _musicProvider = _isSoundcloud ? 'soundcloud' : (_isYouTube ? 'youtube' : (_isSpotify ? 'spotify' : null));
       const _sendBtn = _musicProvider ? _buildSendToPlayerBtn(_musicProvider) : '';
       html = `
-        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:480px;width:100%;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:320px;width:100%;box-shadow:0 2px 12px rgba(0,0,0,.35)">
           ${preview.image ? `<img src="${UI.escHtml(preview.image)}" alt="" style="width:100%;max-height:260px;object-fit:cover" onerror="this.style.display='none'">` : ''}
           <div style="padding:10px;background:rgba(12,28,22,.52)">
             <div style="font-size:11px;color:#85a89a;display:flex;align-items:center;gap:4px;margin-bottom:4px">
@@ -1143,10 +1143,8 @@ const Messages = (() => {
           // Move top spacing from embed to wrapper so the X anchor point is stable.
           wrap.style.marginTop = '8px';
           newEmbed.style.marginTop = '0';
-          // Lock wrapper width to the actual rendered card so the X sits
-          // on the preview corner instead of the full message row edge.
-          const embedW = Math.round(newEmbed.getBoundingClientRect().width || newEmbed.offsetWidth || 0);
-          if (embedW > 0) wrap.style.width = `${embedW}px`;
+          // Keep wrapper auto-sized so CSS width clamps can apply uniformly.
+          wrap.style.width = 'fit-content';
           wrap.style.maxWidth = '100%';
           const btn = document.createElement('button');
           btn.type = 'button';

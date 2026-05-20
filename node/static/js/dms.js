@@ -477,7 +477,7 @@ function _renderDMPreview(msgId, preview) {
   let html = '';
   if (preview.type === 'youtube' && preview.video_id) {
     html = `
-      <div class="yt-embed" style="margin-top:8px;max-width:560px;width:100%;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+      <div class="yt-embed" style="margin-top:8px;max-width:320px;width:100%;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
         <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
           <iframe
             src="https://www.youtube.com/embed/${esc(preview.video_id)}"
@@ -497,7 +497,7 @@ function _renderDMPreview(msgId, preview) {
   } else if (preview.type === 'spotify' && preview.embed_url) {
     const height = preview.spotify_type === 'track' ? '80' : '152';
     html = `
-      <div class="spotify-embed" style="margin-top:8px;max-width:400px;border-radius:12px;overflow:hidden">
+      <div class="spotify-embed" style="margin-top:8px;max-width:320px;border-radius:12px;overflow:hidden">
         <iframe
           src="${esc(preview.embed_url)}?theme=0"
           width="100%"
@@ -509,7 +509,7 @@ function _renderDMPreview(msgId, preview) {
       </div>`;
   } else {
     html = `
-      <a href="${esc(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:480px;width:100%;box-shadow:0 2px 12px rgba(0,0,0,.35)">
+      <a href="${esc(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:320px;width:100%;box-shadow:0 2px 12px rgba(0,0,0,.35)">
         ${preview.image ? `<img src="${esc(preview.image)}" alt="" style="width:100%;max-height:260px;object-fit:cover" onerror="this.style.display='none'">` : ''}
         <div style="padding:10px;background:rgba(12,28,22,.52)">
           <div style="font-size:11px;color:#85a89a;display:flex;align-items:center;gap:4px;margin-bottom:4px">
@@ -545,10 +545,8 @@ function _renderDMPreview(msgId, preview) {
         // Move top spacing from embed to wrapper so the X anchor point is stable.
         wrap.style.marginTop = '8px';
         newEmbed.style.marginTop = '0';
-        // Lock wrapper width to the actual rendered card so the X sits
-        // on the preview corner instead of the full message row edge.
-        const embedW = Math.round(newEmbed.getBoundingClientRect().width || newEmbed.offsetWidth || 0);
-        if (embedW > 0) wrap.style.width = `${embedW}px`;
+        // Keep wrapper auto-sized so CSS width clamps can apply uniformly.
+        wrap.style.width = 'fit-content';
         wrap.style.maxWidth = '100%';
         const btn = document.createElement('button');
         btn.type = 'button';
