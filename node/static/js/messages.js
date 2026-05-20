@@ -343,7 +343,7 @@ const Messages = (() => {
             const subtitle = d.private
               ? 'Private profile'
               : UI.escHtml(String(d.bio || d.status_msg || 'Open in Frog Social').substring(0, 80));
-            return `<div class="share-card" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
+            return `<div class="share-card ft-system-share-embed" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
               `<div class="share-card-avatar">${UI.avatarEl(d.avatar || null, d.nickname || nickKey, 42)}</div>` +
               `<div class="share-card-info">` +
                 `<div class="share-card-label">Frog Social Profile</div>` +
@@ -512,7 +512,7 @@ const Messages = (() => {
         `</div>`;
     }
 
-    const cardCls = `chat-share-embed${isMusic ? ' is-music' : ''}`;
+    const cardCls = `chat-share-embed ft-system-share-embed${isMusic ? ' is-music' : ''}`;
     const footLabel = isMusic ? 'Open music post →' : 'Open in Frog Social →';
     return (
       `<div class="${cardCls}" data-share-${kind}="${pid}" onclick="${onclick}">` +
@@ -687,15 +687,7 @@ const Messages = (() => {
 
   // Late style guard — re-appended to the END of <head> so it wins over
   // channel-theme-override even when that sheet is injected later.
-  function _ensureSystemEmbedStyleGuard() {
-    try {
-      const id = 'ft-system-embed-guard';
-      let el = document.getElementById(id);
-      if (!el) {
-        el = document.createElement('style');
-        el.id = id;
-      }
-      el.textContent = `
+  const _FT_EMBED_GUARD_CSS = `
 #main .msg-content .invite-card.ft-embed-invite,
 #main .msg-body .invite-card.ft-embed-invite,
 #main .msg-share-row .invite-card.ft-embed-invite {
@@ -707,17 +699,25 @@ const Messages = (() => {
   min-height: 0 !important;
   max-height: none !important;
   overflow: hidden !important;
-  contain: layout style !important;
   box-sizing: border-box !important;
+  flex: none !important;
+  flex-grow: 0 !important;
 }
+#main .msg-content .ft-embed-invite .invite-card-header,
 #main .msg-content .ft-embed-invite .invite-card-main,
 #main .msg-content .ft-embed-invite .ft-embed-invite-main,
+#main .msg-content .ft-embed-invite .invite-card-name,
+#main .msg-content .ft-embed-invite .invite-card-row,
+#main .msg-content .ft-embed-invite .ft-embed-invite-row,
+#main .msg-content .ft-embed-invite .invite-card-footer,
+#main .msg-content .ft-embed-invite .ft-embed-invite-footer,
 #main .msg-body .ft-embed-invite .invite-card-main {
   display: block !important;
   height: auto !important;
   min-height: 0 !important;
   max-height: none !important;
   flex: none !important;
+  flex-grow: 0 !important;
   grid-template: none !important;
   grid-auto-rows: auto !important;
 }
@@ -728,13 +728,10 @@ const Messages = (() => {
   flex-wrap: nowrap !important;
   align-items: center !important;
   gap: 8px !important;
-  height: auto !important;
-  min-height: 0 !important;
-  max-height: none !important;
-  flex: none !important;
 }
 #main .msg-content .ft-embed-invite .invite-card-icon,
 #main .msg-content .ft-embed-invite .ft-embed-invite-icon {
+  display: flex !important;
   flex: 0 0 40px !important;
   width: 40px !important;
   height: 40px !important;
@@ -775,13 +772,30 @@ const Messages = (() => {
   flex: 0 0 auto !important;
   align-self: center !important;
 }
-#main .msg-content .ft-embed-invite .invite-card-footer,
-#main .msg-content .ft-embed-invite .ft-embed-invite-footer {
+#main .msg-body .ft-system-share-embed,
+#main .msg-content .ft-system-share-embed,
+#main .msg-share-row .ft-system-share-embed {
   height: auto !important;
   min-height: 0 !important;
+  max-height: none !important;
   flex: none !important;
+  flex-grow: 0 !important;
+}
+#main .ft-system-share-embed.share-card {
+  display: inline-flex !important;
+  align-items: center !important;
 }
 `;
+
+  function _ensureSystemEmbedStyleGuard() {
+    try {
+      const id = 'ft-system-embed-guard';
+      let el = document.getElementById(id);
+      if (!el) {
+        el = document.createElement('style');
+        el.id = id;
+      }
+      el.textContent = _FT_EMBED_GUARD_CSS;
       document.head.appendChild(el);
     } catch {}
   }
@@ -838,12 +852,16 @@ const Messages = (() => {
         : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(inviteCode)}',this)">Join Channel</button>`;
       _ensureSystemEmbedStyleGuard();
       const cardHtml = `
-        <div class="invite-card ft-embed-invite">
+        <div class="invite-card ft-embed-invite"
+             style="display:inline-block!important;vertical-align:top!important;width:min(100%,300px)!important;max-width:300px!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:hidden!important;box-sizing:border-box!important;">
           <div class="invite-card-header ft-embed-invite-header">You've been invited to join a channel</div>
-          <div class="invite-card-main ft-embed-invite-main">
+          <div class="invite-card-main ft-embed-invite-main"
+               style="display:block!important;height:auto!important;min-height:0!important;max-height:none!important;padding:8px 10px 6px!important;">
             <div class="invite-card-name ft-embed-invite-name">#${name}</div>
-            <div class="invite-card-row ft-embed-invite-row">
-              <div class="invite-card-icon ft-embed-invite-icon">${iconHtml}</div>
+            <div class="invite-card-row ft-embed-invite-row"
+                 style="display:flex!important;align-items:center!important;gap:8px!important;height:auto!important;min-height:0!important;max-height:none!important;">
+              <div class="invite-card-icon ft-embed-invite-icon"
+                   style="flex:0 0 40px!important;width:40px!important;height:40px!important;min-width:40px!important;max-width:40px!important;min-height:40px!important;max-height:40px!important;overflow:hidden!important;">${iconHtml}</div>
               <div class="invite-card-row-desc ft-embed-invite-desc">${descText || 'No channel description'}</div>
               <div class="invite-card-action ft-embed-invite-action">${btnHtml}</div>
             </div>
