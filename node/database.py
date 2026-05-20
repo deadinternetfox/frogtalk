@@ -9955,13 +9955,49 @@ def upsert_federation_user_profile(
     return True
 
 
+def _resolve_federated_message_sender(payload: Dict) -> tuple[int, str, Optional[str], Optional[str]]:
+    """Map a replicated sender to a local ``users`` row when possible.
+
+    Returns ``(user_id, nickname, bridge_platform, bridge_avatar)``.
+    When the account exists on this node (same ``global_user_id`` or
+    nickname), store as a normal message — no FEDERATION bridge badge.
+    Otherwise fall back to the federation_sync system user.
+    """
+    nick = str(payload.get("nickname") or "remote").strip() or "remote"
+    gid = str(payload.get("sender_global_user_id") or "").strip()
+    if gid:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT id, nickname, avatar FROM users WHERE global_user_id=? LIMIT 1",
+                (gid,),
+            ).fetchone()
+        if row:
+            return (
+                int(row["id"]),
+                str(row["nickname"] or nick),
+                None,
+                str(row["avatar"] or "") or None,
+            )
+    prof = get_user_profile(nick)
+    if prof and prof.get("id"):
+        return (
+            int(prof["id"]),
+            str(prof["nickname"] or nick),
+            None,
+            str(prof.get("avatar") or "") or None,
+        )
+    bridge_avatar = str(payload.get("avatar") or "").strip() or None
+    if bridge_avatar and len(bridge_avatar) > 256 * 1024:
+        bridge_avatar = None
+    return get_or_create_federation_system_user(), nick, "federation", bridge_avatar
+
+
 def save_federated_room_message(event_id: str, payload: Dict) -> Optional[int]:
     """Apply replicated message event idempotently into local room timeline."""
     eid = (event_id or "").strip()
     if not eid:
         return None
     room_name = str(payload.get("room_name") or "").strip()
-    nickname = str(payload.get("nickname") or "remote").strip() or "remote"
     content = str(payload.get("content") or "")
     media_data = payload.get("media_data")
     media_type = payload.get("media_type")
@@ -9969,6 +10005,8 @@ def save_federated_room_message(event_id: str, payload: Dict) -> Optional[int]:
     view_once = int(payload.get("view_once") or 0)
     if not room_name:
         return None
+
+    user_id, nickname, bridge_platform, bridge_avatar = _resolve_federated_message_sender(payload)
 
     with _conn() as con:
         seen = con.execute(
@@ -9986,7 +10024,6 @@ def save_federated_room_message(event_id: str, payload: Dict) -> Optional[int]:
                 (room_name, "Federated room", "public", owner_id, None, "text"),
             )
 
-        user_id = get_or_create_federation_system_user()
         cur = con.execute(
             """
             INSERT INTO messages (room_name, user_id, nickname, content, media_data, media_type,
@@ -9994,7 +10031,7 @@ def save_federated_room_message(event_id: str, payload: Dict) -> Optional[int]:
             VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """,
             (room_name, user_id, nickname, content, media_data, media_type,
-             media_blur, view_once, "federation", None, None),
+             media_blur, view_once, bridge_platform, bridge_avatar, None),
         )
         msg_id = int(cur.lastrowid)
         con.execute(

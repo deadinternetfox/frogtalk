@@ -54,7 +54,14 @@ const Messages = (() => {
   // targets. Centralised so we don't drift when adding new bridge fields
   // (e.g. the remote @username surfaced on the bridged-user profile).
   function _userInfoOnclick(msg) {
-    return `showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(msg.bridge_platform||'')}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}','${UI.escHtml(msg.bridge_sender_username||'')}')`;
+    let bridge = String(msg.bridge_platform || '');
+    if (bridge.toLowerCase() === 'federation') {
+      const selfNick = (window.State && State.user && State.user.nickname) || '';
+      if (selfNick && String(msg.nickname || '').toLowerCase() === String(selfNick).toLowerCase()) {
+        bridge = '';
+      }
+    }
+    return `showUserInfo('${UI.escHtml(msg.nickname)}',${msg.user_id||'null'},'${UI.escHtml(bridge)}','${UI.escHtml(msg.bridge_source_name||'')}','${UI.escHtml(msg.bridge_source_id||'')}','${UI.escHtml(msg.bridge_source_parent||'')}','${UI.escHtml(msg.avatar||'')}','${UI.escHtml(msg.bridge_sender_username||'')}')`;
   }
 
   // BOT pill — small accent-tinted badge rendered immediately after the

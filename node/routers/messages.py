@@ -230,16 +230,16 @@ async def send_message(request: Request, room_name: str, body: SendMessageReques
     # Federation phase-2: replicate message envelope to peer nodes (signed).
     try:
         from routers import federation as federation_mod
-        federation_mod.enqueue_server_event("message.created", {
-            "room_name": room_name,
-            "nickname": current_user["nickname"],
-            "content": content,
-            "media_data": body.media_data,
-            "media_type": body.media_type,
-            "media_blur": int(body.media_blur or 0),
-            "view_once": int(body.view_once or 0),
-            "created_at": datetime.utcnow().isoformat() + "Z",
-        })
+        federation_mod.enqueue_room_message_created(
+            current_user,
+            room_name=room_name,
+            content=content,
+            media_data=body.media_data,
+            media_type=body.media_type,
+            media_blur=int(body.media_blur or 0),
+            view_once=int(body.view_once or 0),
+            created_at=datetime.utcnow().isoformat() + "Z",
+        )
     except Exception:
         pass
 

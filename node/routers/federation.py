@@ -199,6 +199,40 @@ def enqueue_user_profile_updated(user: dict, *, extra: dict | None = None) -> di
     return enqueue_server_event("user.profile.updated", payload)
 
 
+def enqueue_room_message_created(
+    sender: dict,
+    *,
+    room_name: str,
+    content: str = "",
+    media_data: str | None = None,
+    media_type: str | None = None,
+    media_blur: int = 0,
+    view_once: int = 0,
+    created_at: str | None = None,
+) -> dict:
+    """Enqueue a signed ``message.created`` for peer nodes."""
+    ts = created_at or (datetime.utcnow().isoformat() + "Z")
+    avatar = str(sender.get("avatar") or "")
+    if len(avatar) > _PROFILE_FED_FIELD_MAX_CHARS:
+        avatar = ""
+    return enqueue_server_event(
+        "message.created",
+        {
+            "room_name": str(room_name or "").strip(),
+            "nickname": str(sender.get("nickname") or "").strip(),
+            "display_name": str(sender.get("display_name") or ""),
+            "sender_global_user_id": str(sender.get("global_user_id") or "").strip(),
+            "avatar": avatar,
+            "content": content or "",
+            "media_data": media_data,
+            "media_type": media_type,
+            "media_blur": int(media_blur or 0),
+            "view_once": int(view_once or 0),
+            "created_at": ts,
+        },
+    )
+
+
 def _tor_proxy_url() -> str:
     return (os.getenv("FROGTALK_TOR_SOCKS_PROXY") or "socks5://127.0.0.1:9050").strip()
 
@@ -2219,6 +2253,15 @@ async def _handle_message_event(event: dict) -> None:
         return
     nick = _fed_nickname(payload.get("nickname")) or "remote"
     payload["nickname"] = nick
+    dn = _fed_clip(payload.get("display_name"), _FED_DISPLAY_MAX)
+    if dn:
+        payload["display_name"] = dn
+    av = _fed_clip(payload.get("avatar"), _FED_AVATAR_MAX)
+    if av:
+        payload["avatar"] = av
+    gid = str(payload.get("sender_global_user_id") or "").strip()
+    if gid:
+        payload["sender_global_user_id"] = gid
     payload["content"] = _fed_clip(payload.get("content"), _FED_CONTENT_MAX)
     mt = _fed_media_type(payload.get("media_type"))
     md = _fed_media_data(payload.get("media_data"))

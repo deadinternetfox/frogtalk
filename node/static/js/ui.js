@@ -5805,6 +5805,11 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
       color: '#8aa5f5',
       logo: "<svg viewBox='0 0 24 24' width='16' height='16' fill='currentColor' aria-hidden='true'><path d='M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z'/></svg>",
     },
+    federation: {
+      label: 'Federation',
+      color: '#7dcea0',
+      logo: "<span style='font-size:13px;line-height:1' aria-hidden='true'>🌐</span>",
+    },
   })[plat] || {
     label: 'Bridge',
     color: '#9aa4ae',
@@ -5857,8 +5862,12 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
         <div class="profile-section" style="background:#1a1a1a;border-radius:12px;padding:14px;margin-bottom:12px;border-left:3px solid ${meta.color}">
           <div class="profile-section-title" style="font-size:11px;color:${meta.color};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;font-weight:700">Bridged Connection</div>
           <div style="font-size:14px;color:#e0e0e0;line-height:1.55">
-            ${safeNickPlain} is chatting from <strong style="color:${meta.color}">${safePlat}</strong> through a bridged connection &mdash; they're not a FrogTalk account.
-            <div style="margin-top:8px;color:#aaa;font-size:13px">Their messages are mirrored here in real time, but features that need a FrogTalk account aren't available.</div>
+            ${plat === 'federation'
+              ? `${safeNickPlain} is a FrogTalk user on another node &mdash; their messages are synced here in real time, but they don't have a profile on this server yet.`
+              : `${safeNickPlain} is chatting from <strong style="color:${meta.color}">${safePlat}</strong> through a bridged connection &mdash; they're not a FrogTalk account.`}
+            <div style="margin-top:8px;color:#aaa;font-size:13px">${plat === 'federation'
+              ? 'Friend requests, DMs, and other features that need a local account may be limited until they join this node.'
+              : 'Their messages are mirrored here in real time, but features that need a FrogTalk account aren\'t available.'}</div>
           </div>
         </div>
 
@@ -5911,6 +5920,43 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
 }
 
 function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar, bridgeSenderUsername) {
+  const plat = String(bridgePlatform || '').toLowerCase();
+  // Federated room messages may still carry bridge_platform=federation even when
+  // the sender has a real account on this node (legacy rows or remote-only users).
+  // Resolve by nickname first so local FrogTalk profiles open normally.
+  if (plat === 'federation') {
+    const nick = String(nickname || '').trim();
+    if (nick && typeof apiFetch === 'function') {
+      void (async () => {
+        try {
+          const res = await apiFetch('/api/users/profile/' + encodeURIComponent(nick) + '?v=' + Date.now());
+          if (res.ok) {
+            const u = await res.json();
+            showUserInfo(
+              u.nickname || nick,
+              u.id || userId,
+              '', '', '', '',
+              u.avatar || bridgeAvatar || '',
+              ''
+            );
+            return;
+          }
+        } catch (_) {}
+        if (typeof showBridgedUserInfo === 'function') {
+          showBridgedUserInfo(
+            nickname,
+            'federation',
+            bridgeSourceName || 'Another FrogTalk node',
+            bridgeSourceId,
+            bridgeSourceParent,
+            bridgeAvatar,
+            bridgeSenderUsername
+          );
+        }
+      })();
+      return;
+    }
+  }
   // Bridge users (Telegram / Discord mirrors) have no FrogTalk account.
   // Showing the regular profile modal results in a permanently-blank
   // "Loading…" state and exposes irrelevant DM / call / friend buttons.

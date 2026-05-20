@@ -630,16 +630,16 @@ async def websocket_endpoint(
                 if not room_name.startswith("dm-"):
                     try:
                         from routers import federation as federation_mod
-                        federation_mod.enqueue_server_event("message.created", {
-                            "room_name": room_name,
-                            "nickname": user["nickname"],
-                            "content": content,
-                            "media_data": media_data,
-                            "media_type": media_type,
-                            "media_blur": media_blur,
-                            "view_once": view_once,
-                            "created_at": payload["created_at"],
-                        })
+                        federation_mod.enqueue_room_message_created(
+                            user,
+                            room_name=room_name,
+                            content=content,
+                            media_data=media_data,
+                            media_type=media_type,
+                            media_blur=media_blur,
+                            view_once=view_once,
+                            created_at=payload["created_at"],
+                        )
                     except Exception:
                         logger.exception("federation: failed to enqueue room message")
 
