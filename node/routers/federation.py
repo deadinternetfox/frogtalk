@@ -233,6 +233,258 @@ def enqueue_room_message_created(
     )
 
 
+def _social_user_fields(user: dict) -> dict:
+    return {
+        "nickname": str(user.get("nickname") or "").strip(),
+        "author_global_user_id": str(user.get("global_user_id") or "").strip(),
+        "global_user_id": str(user.get("global_user_id") or "").strip(),
+    }
+
+
+def enqueue_social_post_created(
+    user: dict,
+    *,
+    global_post_id: str,
+    content: str = "",
+    media_data: str | None = None,
+    media_type: str | None = None,
+    privacy: str = "public",
+    share_enabled: bool = True,
+    allow_comments: bool = True,
+    track_title: str | None = None,
+    track_room: str | None = None,
+    track_mood: str | None = None,
+) -> dict:
+    return enqueue_server_event(
+        "social.post.created",
+        {
+            "global_post_id": str(global_post_id or "").strip(),
+            **_social_user_fields(user),
+            "content": (content or "")[:_FED_SOCIAL_CONTENT_MAX],
+            "media_data": media_data,
+            "media_type": media_type,
+            "privacy": privacy,
+            "share_enabled": bool(share_enabled),
+            "allow_comments": bool(allow_comments),
+            "track_title": track_title,
+            "track_room": track_room,
+            "track_mood": track_mood,
+        },
+    )
+
+
+def enqueue_social_post_created_encrypted(
+    user: dict,
+    *,
+    global_post_id: str,
+    audience: str,
+    ciphertext_b64: str,
+    wrapped_keys: list[dict],
+    media_data: str | None = None,
+    media_type: str | None = None,
+    share_enabled: bool = True,
+    allow_comments: bool = True,
+    track_title: str | None = None,
+    track_room: str | None = None,
+    track_mood: str | None = None,
+) -> dict:
+    return enqueue_server_event(
+        "social.post.created.encrypted",
+        {
+            "global_post_id": str(global_post_id or "").strip(),
+            **_social_user_fields(user),
+            "audience": audience,
+            "ciphertext_b64": ciphertext_b64,
+            "wrapped_keys": wrapped_keys,
+            "media_data": media_data,
+            "media_type": media_type,
+            "share_enabled": bool(share_enabled),
+            "allow_comments": bool(allow_comments),
+            "track_title": track_title,
+            "track_room": track_room,
+            "track_mood": track_mood,
+        },
+    )
+
+
+def enqueue_social_post_updated(
+    user: dict,
+    *,
+    global_post_id: str,
+    updates: dict,
+) -> dict:
+    payload = {"global_post_id": str(global_post_id or "").strip(), **_social_user_fields(user)}
+    payload.update(updates or {})
+    return enqueue_server_event("social.post.updated", payload)
+
+
+def enqueue_social_post_deleted(
+    user: dict,
+    *,
+    global_post_id: str,
+    force_delete: bool = False,
+) -> dict:
+    # force_delete is local-admin only; remote peers ignore it by design.
+    _ = force_delete
+    return enqueue_server_event(
+        "social.post.deleted",
+        {
+            "global_post_id": str(global_post_id or "").strip(),
+            **_social_user_fields(user),
+        },
+    )
+
+
+def enqueue_social_comment_created(
+    actor: dict,
+    *,
+    global_post_id: str,
+    global_comment_id: str,
+    owner_nickname: str,
+    content: str,
+) -> dict:
+    return enqueue_server_event(
+        "social.comment.created",
+        {
+            "global_post_id": str(global_post_id or "").strip(),
+            "global_comment_id": str(global_comment_id or "").strip(),
+            "actor_nickname": str(actor.get("nickname") or "").strip(),
+            "actor_global_user_id": str(actor.get("global_user_id") or "").strip(),
+            "owner_nickname": str(owner_nickname or "").strip(),
+            "content": content[:_FED_SOCIAL_COMMENT_MAX],
+        },
+    )
+
+
+def enqueue_social_reaction_changed(
+    actor: dict,
+    *,
+    global_post_id: str,
+    owner_nickname: str,
+    emoji: str,
+    active: bool,
+) -> dict:
+    return enqueue_server_event(
+        "social.reaction.changed",
+        {
+            "global_post_id": str(global_post_id or "").strip(),
+            "actor_nickname": str(actor.get("nickname") or "").strip(),
+            "actor_global_user_id": str(actor.get("global_user_id") or "").strip(),
+            "owner_nickname": str(owner_nickname or "").strip(),
+            "emoji": emoji,
+            "active": bool(active),
+        },
+    )
+
+
+def enqueue_social_repost_created(
+    actor: dict,
+    *,
+    global_post_id: str,
+    owner_nickname: str,
+    quote: str | None,
+    active: bool = True,
+) -> dict:
+    return enqueue_server_event(
+        "social.repost.created",
+        {
+            "global_post_id": str(global_post_id or "").strip(),
+            "actor_nickname": str(actor.get("nickname") or "").strip(),
+            "actor_global_user_id": str(actor.get("global_user_id") or "").strip(),
+            "owner_nickname": str(owner_nickname or "").strip(),
+            "quote": (str(quote)[:_FED_SOCIAL_QUOTE_MAX] if quote else None),
+            "active": bool(active),
+        },
+    )
+
+
+def enqueue_social_follow_changed(
+    follower: dict,
+    following: dict,
+    *,
+    action: str,
+) -> dict:
+    return enqueue_server_event(
+        "social.follow.changed",
+        {
+            "action": action,
+            "follower_nickname": str(follower.get("nickname") or "").strip(),
+            "follower_global_user_id": str(follower.get("global_user_id") or "").strip(),
+            "following_nickname": str(following.get("nickname") or "").strip(),
+            "following_global_user_id": str(following.get("global_user_id") or "").strip(),
+        },
+    )
+
+
+def enqueue_social_story_created(
+    user: dict,
+    *,
+    global_story_id: str,
+    media_data: str,
+    media_type: str,
+    caption: str = "",
+    privacy: str = "public",
+) -> dict:
+    return enqueue_server_event(
+        "social.story.created",
+        {
+            "global_story_id": str(global_story_id or "").strip(),
+            **_social_user_fields(user),
+            "media_data": media_data,
+            "media_type": media_type,
+            "caption": caption,
+            "privacy": privacy,
+        },
+    )
+
+
+def enqueue_social_story_deleted(user: dict, *, global_story_id: str) -> dict:
+    return enqueue_server_event(
+        "social.story.deleted",
+        {
+            "global_story_id": str(global_story_id or "").strip(),
+            **_social_user_fields(user),
+        },
+    )
+
+
+def _fed_resolve_social_user(payload: dict, origin_server_id: str = "") -> dict | None:
+    """Map a federated social actor to a local users row (signed global_user_id only)."""
+    nick = _fed_nickname(
+        payload.get("nickname")
+        or payload.get("actor_nickname")
+        or payload.get("author_nickname")
+        or payload.get("follower_nickname")
+        or payload.get("following_nickname")
+    )
+    gid = _fed_global_id(
+        payload.get("global_user_id")
+        or payload.get("author_global_user_id")
+        or payload.get("actor_global_user_id")
+        or payload.get("follower_global_user_id")
+        or payload.get("following_global_user_id")
+    )
+    if gid:
+        return db.ensure_federated_dm_local_user(
+            gid, nick or "", origin_server_id=origin_server_id or "",
+        )
+    if nick:
+        return _ensure_local_user_by_nickname(nick)
+    return None
+
+
+def _fed_wall_owner_matches_post(owner: dict | None, local_post_id: int) -> bool:
+    if not owner or not local_post_id:
+        return False
+    meta = db.get_wall_post_meta(int(local_post_id))
+    if not meta:
+        return False
+    try:
+        return int(meta.get("user_id") or 0) == int(owner["id"])
+    except Exception:
+        return False
+
+
 def _tor_proxy_url() -> str:
     return (os.getenv("FROGTALK_TOR_SOCKS_PROXY") or "socks5://127.0.0.1:9050").strip()
 
@@ -1582,6 +1834,19 @@ _FED_BIO_MAX = 1024
 _FED_AVATAR_MAX = 256 * 1024
 _FED_STATUS_MAX = 128
 _FED_DISPLAY_MAX = 32
+_FED_GLOBAL_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+_FED_SOCIAL_CONTENT_MAX = 5000
+_FED_SOCIAL_COMMENT_MAX = 4000
+_FED_SOCIAL_QUOTE_MAX = 4000
+_FED_SOCIAL_CAPTION_MAX = 500
+_FED_SOCIAL_PRIVACY_REPLICATE = frozenset({"public", "followers"})
+_FED_WALL_REACTION_EMOJIS = frozenset({
+    "❤️", "👍", "😂", "😮", "😢", "🔥", "🐸", "👏", "💯", "✨",
+    "🎉", "💪", "😍",
+})
 
 
 def _fed_clip(s, n: int) -> str:
@@ -1592,6 +1857,228 @@ def _fed_nickname(s) -> str | None:
     """Return a safe nickname or None when input is missing/hostile."""
     raw = str(s or "").strip()
     return raw if _FED_NAME_RE.match(raw) else None
+
+
+def _fed_global_id(s) -> str | None:
+    raw = str(s or "").strip()
+    return raw if _FED_GLOBAL_ID_RE.match(raw) else None
+
+
+def _fed_sanitize_social_payload(event_type: str, payload: dict) -> dict | None:
+    """Validate and bound an inbound FrogSocial federation payload."""
+    p = dict(payload or {})
+    et = str(event_type or "").strip()
+
+    def _gid(key: str) -> str | None:
+        return _fed_global_id(p.get(key))
+
+    if et in ("social.post.created", "social.post.updated", "social.post.deleted"):
+        gpid = _gid("global_post_id")
+        if not gpid:
+            return None
+        p["global_post_id"] = gpid
+        nick = _fed_nickname(p.get("nickname"))
+        agid = _fed_global_id(p.get("author_global_user_id"))
+        if not nick or not agid:
+            return None
+        p["nickname"] = nick
+        p["author_global_user_id"] = agid
+        if et == "social.post.created":
+            priv = str(p.get("privacy") or "public").strip().lower()
+            if priv not in _FED_SOCIAL_PRIVACY_REPLICATE:
+                return None
+            p["privacy"] = priv
+            p["content"] = _fed_clip(p.get("content"), _FED_SOCIAL_CONTENT_MAX)
+            mt = _fed_media_type(p.get("media_type"))
+            if mt is None:
+                p.pop("media_data", None)
+                p.pop("media_type", None)
+            else:
+                md = _fed_media_data(p.get("media_data"))
+                if md is None and p.get("media_data"):
+                    return None
+                p["media_type"] = mt
+                p["media_data"] = md
+            try:
+                from routers.wall import _sanitize_track_room
+                p["track_room"] = _sanitize_track_room(p.get("track_room"))
+            except Exception:
+                p["track_room"] = None
+            p["track_title"] = _fed_clip(p.get("track_title"), 200) or None
+            p["track_mood"] = _fed_clip(p.get("track_mood"), 64) or None
+        elif et == "social.post.updated":
+            if "content" in p and p.get("content") is not None:
+                p["content"] = _fed_clip(p.get("content"), _FED_SOCIAL_CONTENT_MAX)
+            if p.get("privacy") is not None:
+                priv = str(p.get("privacy")).strip().lower()
+                if priv not in _FED_SOCIAL_PRIVACY_REPLICATE:
+                    p.pop("privacy", None)
+                else:
+                    p["privacy"] = priv
+        p.pop("force_delete", None)
+        return p
+
+    if et == "social.post.created.encrypted":
+        gpid = _gid("global_post_id")
+        if not gpid:
+            return None
+        p["global_post_id"] = gpid
+        nick = _fed_nickname(p.get("nickname"))
+        agid = _fed_global_id(p.get("author_global_user_id"))
+        if not nick or not agid:
+            return None
+        p["nickname"] = nick
+        p["author_global_user_id"] = agid
+        aud = str(p.get("audience") or "followers").strip().lower()
+        if aud not in ("followers", "friends"):
+            return None
+        p["audience"] = aud
+        ct = str(p.get("ciphertext_b64") or "").strip()
+        if not ct or len(ct) > 512 * 1024:
+            return None
+        p["ciphertext_b64"] = ct
+        wraps = []
+        for w in (p.get("wrapped_keys") or [])[:512]:
+            if not isinstance(w, dict):
+                continue
+            rgid = _fed_global_id(w.get("recipient_global_user_id"))
+            wb = str(w.get("wrapped_b64") or "").strip()
+            if not rgid or not wb or len(wb) > 8192:
+                continue
+            wraps.append({
+                "recipient_global_user_id": rgid,
+                "recipient_nickname": _fed_nickname(w.get("recipient_nickname")) or "",
+                "wrapped_b64": wb,
+            })
+        if not wraps:
+            return None
+        p["wrapped_keys"] = wraps
+        mt = _fed_media_type(p.get("media_type"))
+        if mt is None:
+            p.pop("media_data", None)
+            p.pop("media_type", None)
+        else:
+            md = _fed_media_data(p.get("media_data"))
+            if md is None and p.get("media_data"):
+                return None
+            p["media_type"] = mt
+            p["media_data"] = md
+        return p
+
+    if et == "social.comment.created":
+        gpid, gcid = _gid("global_post_id"), _gid("global_comment_id")
+        if not gpid or not gcid:
+            return None
+        p["global_post_id"] = gpid
+        p["global_comment_id"] = gcid
+        actor_nick = _fed_nickname(p.get("actor_nickname"))
+        actor_gid = _fed_global_id(p.get("actor_global_user_id"))
+        owner_nick = _fed_nickname(p.get("owner_nickname"))
+        if not actor_nick or not actor_gid or not owner_nick:
+            return None
+        p["actor_nickname"] = actor_nick
+        p["actor_global_user_id"] = actor_gid
+        p["owner_nickname"] = owner_nick
+        p["content"] = _fed_clip(p.get("content"), _FED_SOCIAL_COMMENT_MAX)
+        if not str(p.get("content") or "").strip():
+            return None
+        p.pop("actor_avatar", None)
+        return p
+
+    if et == "social.reaction.changed":
+        gpid = _gid("global_post_id")
+        if not gpid:
+            return None
+        p["global_post_id"] = gpid
+        actor_nick = _fed_nickname(p.get("actor_nickname"))
+        actor_gid = _fed_global_id(p.get("actor_global_user_id"))
+        owner_nick = _fed_nickname(p.get("owner_nickname"))
+        emoji = str(p.get("emoji") or "").strip()
+        if not actor_nick or not actor_gid or not owner_nick or emoji not in _FED_WALL_REACTION_EMOJIS:
+            return None
+        p["actor_nickname"] = actor_nick
+        p["actor_global_user_id"] = actor_gid
+        p["owner_nickname"] = owner_nick
+        p["emoji"] = emoji
+        p.pop("actor_avatar", None)
+        return p
+
+    if et == "social.repost.created":
+        gpid = _gid("global_post_id")
+        if not gpid:
+            return None
+        p["global_post_id"] = gpid
+        actor_nick = _fed_nickname(p.get("actor_nickname"))
+        actor_gid = _fed_global_id(p.get("actor_global_user_id"))
+        owner_nick = _fed_nickname(p.get("owner_nickname"))
+        if not actor_nick or not actor_gid or not owner_nick:
+            return None
+        p["actor_nickname"] = actor_nick
+        p["actor_global_user_id"] = actor_gid
+        p["owner_nickname"] = owner_nick
+        if p.get("quote") is not None:
+            p["quote"] = _fed_clip(p.get("quote"), _FED_SOCIAL_QUOTE_MAX)
+        p.pop("actor_avatar", None)
+        return p
+
+    if et == "social.story.created":
+        gsid = _gid("global_story_id")
+        if not gsid:
+            return None
+        p["global_story_id"] = gsid
+        nick = _fed_nickname(p.get("nickname"))
+        agid = _fed_global_id(p.get("author_global_user_id") or p.get("global_user_id"))
+        if not nick or not agid:
+            return None
+        p["nickname"] = nick
+        p["author_global_user_id"] = agid
+        p["global_user_id"] = agid
+        priv = str(p.get("privacy") or "public").strip().lower()
+        p["privacy"] = priv if priv in ("public", "followers") else "public"
+        md = _fed_media_data(p.get("media_data"))
+        if not md:
+            return None
+        mt = _fed_media_type(p.get("media_type"))
+        if mt is None:
+            return None
+        p["media_data"] = md
+        p["media_type"] = mt
+        p["caption"] = _fed_clip(p.get("caption"), _FED_SOCIAL_CAPTION_MAX)
+        return p
+
+    if et == "social.story.deleted":
+        gsid = _gid("global_story_id")
+        if not gsid:
+            return None
+        p["global_story_id"] = gsid
+        nick = _fed_nickname(p.get("nickname"))
+        agid = _fed_global_id(p.get("author_global_user_id") or p.get("global_user_id"))
+        if not nick or not agid:
+            return None
+        p["nickname"] = nick
+        p["author_global_user_id"] = agid
+        p["global_user_id"] = agid
+        p.pop("story_id", None)
+        return p
+
+    if et == "social.follow.changed":
+        action = str(p.get("action") or "").strip().lower()
+        if action not in ("follow", "unfollow"):
+            return None
+        p["action"] = action
+        fn = _fed_nickname(p.get("follower_nickname"))
+        fg = _fed_global_id(p.get("follower_global_user_id"))
+        wn = _fed_nickname(p.get("following_nickname"))
+        wg = _fed_global_id(p.get("following_global_user_id"))
+        if not fn or not fg or not wn or not wg:
+            return None
+        p["follower_nickname"] = fn
+        p["follower_global_user_id"] = fg
+        p["following_nickname"] = wn
+        p["following_global_user_id"] = wg
+        return p
+
+    return None
 
 
 def _fed_resolve_user_for_dm(
@@ -3260,52 +3747,145 @@ async def _handle_friend_event(event: dict) -> None:
         return
 
 
+async def _federated_social_notify(
+    owner: dict,
+    actor: dict,
+    kind: str,
+    local_post_id: int,
+    *,
+    preview: str | None = None,
+    emoji: str | None = None,
+) -> None:
+    """Best-effort local notification after federated engagement is applied."""
+    notif_id = db.add_social_notification(
+        user_id=int(owner["id"]),
+        actor_id=int(actor["id"]),
+        kind=kind,
+        post_id=int(local_post_id),
+        preview=preview,
+        emoji=emoji,
+    )
+    if notif_id is None:
+        return
+    unread = db.get_social_notification_unread_count(int(owner["id"]))
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(int(owner["id"]), {
+            "type": "social_notification",
+            "event": kind,
+            "id": notif_id,
+            "actor": actor.get("nickname"),
+            "actor_avatar": actor.get("avatar"),
+            "post_id": int(local_post_id),
+            "preview": preview,
+            "emoji": emoji,
+            "unread": unread,
+        })
+    except Exception:
+        _log.debug("federated social notify failed kind=%s", kind, exc_info=True)
+
+
 async def _handle_social_event(event: dict) -> None:
-    """Handle incoming social follow/post events."""
-    payload = event.get("payload") or {}
+    """Handle incoming FrogSocial / wall federation events."""
     event_type = str(event.get("event_type") or "")
+    origin = str(event.get("origin_server_id") or "").strip()
+    payload = _fed_sanitize_social_payload(event_type, dict(event.get("payload") or {}))
+    if payload is None:
+        _log.debug("dropped hostile social event type=%s origin=%s", event_type, origin)
+        return
 
     if event_type == "social.post.created":
-        author_nick = str(payload.get("nickname") or "").strip()
-        author = _ensure_local_user_by_nickname(author_nick)
-        if not author:
-            return
-        # Use existing DB helper so post appears in feed/explore as normal.
-        from routers.wall import _sanitize_track_room
-        db.create_wall_post(
-            author["id"],
-            str(payload.get("content") or ""),
-            payload.get("media_data"),
-            payload.get("media_type"),
-            str(payload.get("privacy") or "public"),
-            1 if bool(payload.get("allow_comments", True)) else 0,
-            payload.get("track_title") or None,
-            _sanitize_track_room(payload.get("track_room")),
-            payload.get("track_mood") or None,
-        )
+        await asyncio.to_thread(db.apply_federated_wall_post_created, payload, origin)
+        return
+
+    if event_type == "social.post.created.encrypted":
+        await asyncio.to_thread(db.apply_federated_wall_post_encrypted, payload, origin)
+        return
+
+    if event_type == "social.post.updated":
+        await asyncio.to_thread(db.apply_federated_wall_post_updated, payload, origin)
+        return
+
+    if event_type == "social.post.deleted":
+        await asyncio.to_thread(db.apply_federated_wall_post_deleted, payload, origin)
+        return
+
+    if event_type == "social.comment.created":
+        await asyncio.to_thread(db.apply_federated_wall_comment_created, payload, origin)
+        post_gid = payload.get("global_post_id")
+        local_post = db.resolve_federation_wall_local_id(origin, "post", post_gid) if post_gid else None
+        actor = _fed_resolve_social_user(payload, origin)
+        owner = _ensure_local_user_by_nickname(payload.get("owner_nickname"))
+        if (
+            actor and owner and local_post
+            and int(actor["id"]) != int(owner["id"])
+            and _fed_wall_owner_matches_post(owner, int(local_post))
+        ):
+            await _federated_social_notify(
+                owner, actor, "comment", int(local_post),
+                preview=str(payload.get("content") or "")[:140],
+            )
+        return
+
+    if event_type == "social.reaction.changed":
+        await asyncio.to_thread(db.apply_federated_wall_reaction_changed, payload, origin)
+        post_gid = payload.get("global_post_id")
+        local_post = db.resolve_federation_wall_local_id(origin, "post", post_gid) if post_gid else None
+        actor = _fed_resolve_social_user(payload, origin)
+        owner = _ensure_local_user_by_nickname(payload.get("owner_nickname"))
+        if (
+            actor and owner and local_post
+            and int(actor["id"]) != int(owner["id"])
+            and _fed_wall_owner_matches_post(owner, int(local_post))
+        ):
+            if bool(payload.get("active")):
+                await _federated_social_notify(
+                    owner, actor, "like", int(local_post),
+                    emoji=str(payload.get("emoji") or "")[:8],
+                )
+            else:
+                db.remove_social_like_notification(
+                    int(owner["id"]), int(actor["id"]), int(local_post),
+                )
+        return
+
+    if event_type == "social.repost.created":
+        await asyncio.to_thread(db.apply_federated_wall_repost_created, payload, origin)
+        post_gid = payload.get("global_post_id")
+        local_post = db.resolve_federation_wall_local_id(origin, "post", post_gid) if post_gid else None
+        actor = _fed_resolve_social_user(payload, origin)
+        owner = _ensure_local_user_by_nickname(payload.get("owner_nickname"))
+        if (
+            actor and owner and local_post
+            and int(actor["id"]) != int(owner["id"])
+            and bool(payload.get("active", True))
+            and _fed_wall_owner_matches_post(owner, int(local_post))
+        ):
+            await _federated_social_notify(
+                owner, actor, "repost", int(local_post),
+                preview=str(payload.get("quote") or "")[:140] or None,
+            )
         return
 
     if event_type == "social.story.created":
-        author_nick = str(payload.get("nickname") or "").strip()
-        author = _ensure_local_user_by_nickname(author_nick)
+        author = _fed_resolve_social_user(payload, origin)
         if not author:
             return
-        media_data = payload.get("media_data")
-        if not media_data:
-            return
-        privacy = str(payload.get("privacy") or "public")
-        if privacy not in ("public", "followers"):
-            privacy = "public"
-        db.create_story(
-            author["id"],
-            str(media_data),
-            str(payload.get("media_type") or "application/octet-stream"),
-            str(payload.get("caption") or ""),
-            privacy,
+        story_gid = payload.get("global_story_id")
+        local_sid = (
+            db.resolve_federation_wall_local_id(origin, "story", story_gid)
+            if story_gid else None
         )
-        # Notify locally connected clients so chat-avatar story rings
-        # update live for users on this node when the poster lives on
-        # a federated peer.
+        if not local_sid:
+            local_sid = db.create_story(
+                author["id"],
+                str(payload["media_data"]),
+                str(payload["media_type"]),
+                str(payload.get("caption") or ""),
+                str(payload.get("privacy") or "public"),
+            )
+            if story_gid:
+                db.map_federation_wall_object(origin, "story", story_gid, int(local_sid))
         try:
             from ws_manager import manager
             await manager.broadcast_all({
@@ -3318,189 +3898,43 @@ async def _handle_social_event(event: dict) -> None:
         return
 
     if event_type == "social.story.deleted":
-        author_nick = str(payload.get("nickname") or "").strip()
-        author = _ensure_local_user_by_nickname(author_nick)
+        author = _fed_resolve_social_user(payload, origin)
         if not author:
             return
-        story_id = payload.get("story_id")
-        try:
-            sid = int(story_id)
-        except Exception:
+        story_gid = payload.get("global_story_id")
+        local_sid = db.resolve_federation_wall_local_id(origin, "story", story_gid) if story_gid else None
+        if not local_sid:
             return
         with db._conn() as con:
-            con.execute("DELETE FROM stories WHERE id=? AND user_id=?", (sid, author["id"]))
+            con.execute(
+                "DELETE FROM stories WHERE id=? AND user_id=?",
+                (int(local_sid), author["id"]),
+            )
             con.commit()
         return
 
     if event_type == "social.follow.changed":
-        follower_nick = str(payload.get("follower_nickname") or "").strip()
-        following_nick = str(payload.get("following_nickname") or "").strip()
         action = str(payload.get("action") or "").strip().lower()
-        follower = _ensure_local_user_by_nickname(follower_nick)
-        following = _ensure_local_user_by_nickname(following_nick)
+        follower = _fed_resolve_social_user(
+            {
+                "follower_nickname": payload.get("follower_nickname"),
+                "follower_global_user_id": payload.get("follower_global_user_id"),
+            },
+            origin,
+        )
+        following = _fed_resolve_social_user(
+            {
+                "following_nickname": payload.get("following_nickname"),
+                "following_global_user_id": payload.get("following_global_user_id"),
+            },
+            origin,
+        )
         if not follower or not following:
             return
         if action == "follow":
             db.follow_user(follower["id"], following["id"])
         elif action == "unfollow":
             db.unfollow_user(follower["id"], following["id"])
-        return
-
-    if event_type == "social.repost.created":
-        actor_nick = str(payload.get("actor_nickname") or "").strip()
-        owner_nick = str(payload.get("owner_nickname") or "").strip()
-        if not actor_nick or not owner_nick:
-            return
-        actor = _ensure_local_user_by_nickname(actor_nick)
-        owner = _ensure_local_user_by_nickname(owner_nick)
-        if not actor or not owner or actor["id"] == owner["id"]:
-            return
-
-        post_id = payload.get("post_id")
-        try:
-            post_id_int = int(post_id)
-        except Exception:
-            post_id_int = None
-        if post_id_int is not None and post_id_int <= 0:
-            post_id_int = None
-
-        quote = str(payload.get("quote") or "").strip() or None
-        notif_id = db.add_social_notification(
-            user_id=owner["id"],
-            actor_id=actor["id"],
-            kind="repost",
-            post_id=post_id_int,
-            preview=(quote[:140] if quote else None),
-        )
-        if notif_id is None:
-            return
-
-        unread = db.get_social_notification_unread_count(owner["id"])
-        try:
-            from ws_manager import manager
-            await manager.send_to_user(owner["id"], {
-                "type": "social_notification",
-                "event": "repost",
-                "id": notif_id,
-                "actor": actor_nick,
-                "actor_avatar": str(payload.get("actor_avatar") or actor.get("avatar") or ""),
-                "post_id": post_id_int,
-                "preview": (quote[:140] if quote else None),
-                "unread": unread,
-            })
-        except Exception:
-            _log.debug("federated repost notif WS push failed", exc_info=True)
-
-    if event_type == "social.comment.created":
-        actor_nick = str(payload.get("actor_nickname") or "").strip()
-        owner_nick = str(payload.get("owner_nickname") or "").strip()
-        if not actor_nick or not owner_nick:
-            return
-        actor = _ensure_local_user_by_nickname(actor_nick)
-        owner = _ensure_local_user_by_nickname(owner_nick)
-        if not actor or not owner or actor["id"] == owner["id"]:
-            return
-
-        post_id = payload.get("post_id")
-        comment_id = payload.get("comment_id")
-        try:
-            post_id_int = int(post_id)
-        except Exception:
-            post_id_int = None
-        try:
-            comment_id_int = int(comment_id)
-        except Exception:
-            comment_id_int = None
-        preview = str(payload.get("preview") or "").strip() or None
-
-        notif_id = db.add_social_notification(
-            user_id=owner["id"],
-            actor_id=actor["id"],
-            kind="comment",
-            post_id=post_id_int,
-            comment_id=comment_id_int,
-            preview=(preview[:140] if preview else None),
-        )
-        if notif_id is None:
-            return
-
-        unread = db.get_social_notification_unread_count(owner["id"])
-        try:
-            from ws_manager import manager
-            await manager.send_to_user(owner["id"], {
-                "type": "social_notification",
-                "event": "comment",
-                "id": notif_id,
-                "actor": actor_nick,
-                "actor_avatar": str(payload.get("actor_avatar") or actor.get("avatar") or ""),
-                "post_id": post_id_int,
-                "comment_id": comment_id_int,
-                "preview": (preview[:140] if preview else None),
-                "unread": unread,
-            })
-        except Exception:
-            _log.debug("federated comment notif WS push failed", exc_info=True)
-
-    if event_type == "social.reaction.changed":
-        actor_nick = str(payload.get("actor_nickname") or "").strip()
-        owner_nick = str(payload.get("owner_nickname") or "").strip()
-        emoji = str(payload.get("emoji") or "").strip()
-        active = bool(payload.get("active"))
-        if not actor_nick or not owner_nick:
-            return
-        actor = _ensure_local_user_by_nickname(actor_nick)
-        owner = _ensure_local_user_by_nickname(owner_nick)
-        if not actor or not owner or actor["id"] == owner["id"]:
-            return
-
-        post_id = payload.get("post_id")
-        try:
-            post_id_int = int(post_id)
-        except Exception:
-            post_id_int = None
-        if post_id_int is not None and post_id_int <= 0:
-            post_id_int = None
-
-        if active:
-            notif_id = db.add_social_notification(
-                user_id=owner["id"],
-                actor_id=actor["id"],
-                kind="like",
-                post_id=post_id_int,
-                emoji=(emoji[:8] if emoji else None),
-            )
-            if notif_id is None:
-                return
-            unread = db.get_social_notification_unread_count(owner["id"])
-            try:
-                from ws_manager import manager
-                await manager.send_to_user(owner["id"], {
-                    "type": "social_notification",
-                    "event": "like",
-                    "id": notif_id,
-                    "actor": actor_nick,
-                    "actor_avatar": str(payload.get("actor_avatar") or actor.get("avatar") or ""),
-                    "post_id": post_id_int,
-                    "emoji": (emoji[:8] if emoji else None),
-                    "unread": unread,
-                })
-            except Exception:
-                _log.debug("federated reaction notif WS push failed", exc_info=True)
-        else:
-            removed = db.remove_social_like_notification(owner["id"], actor["id"], post_id_int)
-            if removed:
-                unread = db.get_social_notification_unread_count(owner["id"])
-                try:
-                    from ws_manager import manager
-                    await manager.send_to_user(owner["id"], {
-                        "type": "social_notification",
-                        "event": "unlike",
-                        "actor": actor_nick,
-                        "post_id": post_id_int,
-                        "unread": unread,
-                    })
-                except Exception:
-                    _log.debug("federated unlike notif WS push failed", exc_info=True)
 
 
 async def _handle_sticker_event(event: dict) -> None:

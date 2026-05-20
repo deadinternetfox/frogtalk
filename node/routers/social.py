@@ -98,15 +98,10 @@ async def follow_user(request: Request, nickname: str, current_user: dict = Depe
     ok = db.follow_user(current_user["id"], target["id"])
     if ok:
         try:
-            db.insert_federation_outbox_event({
-                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-                "event_type": "social.follow.changed",
-                "payload": {
-                    "action": "follow",
-                    "follower_nickname": current_user["nickname"],
-                    "following_nickname": target["nickname"],
-                },
-            })
+            from routers import federation as federation_mod
+            federation_mod.enqueue_social_follow_changed(
+                current_user, target, action="follow",
+            )
         except Exception:
             pass
         # Notify the target that they have a new follower.
@@ -142,15 +137,10 @@ async def unfollow_user(nickname: str, current_user: dict = Depends(get_current_
         return JSONResponse(status_code=404, content={"error": "User not found"})
     db.unfollow_user(current_user["id"], target["id"])
     try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "social.follow.changed",
-            "payload": {
-                "action": "unfollow",
-                "follower_nickname": current_user["nickname"],
-                "following_nickname": target["nickname"],
-            },
-        })
+        from routers import federation as federation_mod
+        federation_mod.enqueue_social_follow_changed(
+            current_user, target, action="unfollow",
+        )
     except Exception:
         pass
     return {
@@ -861,6 +851,20 @@ async def media_to_wall(msg_id: int, current_user: dict = Depends(get_current_us
         privacy="public",
         track_room=track_room,
     )
+    try:
+        from routers import federation as federation_mod
+        global_post_id, _ = db.register_local_wall_post_global_id(int(post_id))
+        federation_mod.enqueue_social_post_created(
+            current_user,
+            global_post_id=global_post_id,
+            content=f"📸 From #{caption_room}",
+            media_data=msg["media_data"],
+            media_type=msg.get("media_type"),
+            privacy="public",
+            track_room=track_room,
+        )
+    except Exception:
+        pass
     # Flag the source message so it no longer appears in Private Media.
     try:
         with db._conn() as con:
@@ -979,17 +983,16 @@ async def create_story(request: Request, body: CreateStoryRequest, current_user:
     privacy = body.privacy if body.privacy in ("public", "followers") else "public"
     story_id = db.create_story(current_user["id"], body.media_data, body.media_type, body.caption, privacy)
     try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "social.story.created",
-            "payload": {
-                "nickname": current_user["nickname"],
-                "media_data": body.media_data,
-                "media_type": body.media_type,
-                "caption": body.caption,
-                "privacy": privacy,
-            },
-        })
+        from routers import federation as federation_mod
+        global_story_id, _ = db.register_local_story_global_id(int(story_id))
+        federation_mod.enqueue_social_story_created(
+            current_user,
+            global_story_id=global_story_id,
+            media_data=body.media_data,
+            media_type=body.media_type,
+            caption=body.caption,
+            privacy=privacy,
+        )
     except Exception:
         pass
     try:
@@ -1035,17 +1038,16 @@ async def create_story_upload(
     safe_privacy = privacy if privacy in ("public", "followers") else "public"
     story_id = db.create_story(current_user["id"], media_data, media_type, caption or "", safe_privacy)
     try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "social.story.created",
-            "payload": {
-                "nickname": current_user["nickname"],
-                "media_data": media_data,
-                "media_type": media_type,
-                "caption": caption or "",
-                "privacy": safe_privacy,
-            },
-        })
+        from routers import federation as federation_mod
+        global_story_id, _ = db.register_local_story_global_id(int(story_id))
+        federation_mod.enqueue_social_story_created(
+            current_user,
+            global_story_id=global_story_id,
+            media_data=media_data,
+            media_type=media_type,
+            caption=caption or "",
+            privacy=safe_privacy,
+        )
     except Exception:
         pass
     try:
@@ -1106,20 +1108,23 @@ async def get_story_media(story_id: int, current_user: dict = Depends(get_curren
 
 @router.delete("/stories/{story_id}")
 async def delete_story(story_id: int, current_user: dict = Depends(get_current_user)):
+    global_story_id = ""
+    try:
+        origin = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
+        global_story_id = db.get_federation_wall_global_id(origin, "story", int(story_id)) or ""
+    except Exception:
+        pass
     ok = db.delete_story(story_id, current_user["id"])
     if not ok:
         return JSONResponse(status_code=404, content={"error": "Story not found or not yours"})
-    try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "social.story.deleted",
-            "payload": {
-                "nickname": current_user["nickname"],
-                "story_id": int(story_id),
-            },
-        })
-    except Exception:
-        pass
+    if global_story_id:
+        try:
+            from routers import federation as federation_mod
+            federation_mod.enqueue_social_story_deleted(
+                current_user, global_story_id=global_story_id,
+            )
+        except Exception:
+            pass
     return {"ok": True}
 
 

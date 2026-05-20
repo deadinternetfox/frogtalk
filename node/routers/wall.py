@@ -217,22 +217,22 @@ async def create_wall_post(request: Request, body: CreatePostRequest, current_us
     )
 
     try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "social.post.created",
-            "payload": {
-                "nickname": current_user["nickname"],
-                "content": body.content.strip(),
-                "media_data": body.media_data,
-                "media_type": body.media_type,
-                "privacy": body.privacy,
-                "share_enabled": bool(body.share_enabled),
-                "allow_comments": bool(body.allow_comments),
-                "track_title": body.track_title,
-                "track_room": track_room,
-                "track_mood": body.track_mood,
-            },
-        })
+        if body.privacy in ("public", "followers"):
+            from routers import federation as federation_mod
+            global_post_id, _origin = db.register_local_wall_post_global_id(int(post_id))
+            federation_mod.enqueue_social_post_created(
+                current_user,
+                global_post_id=global_post_id,
+                content=body.content.strip(),
+                media_data=body.media_data,
+                media_type=body.media_type,
+                privacy=body.privacy,
+                share_enabled=bool(body.share_enabled),
+                allow_comments=bool(body.allow_comments),
+                track_title=body.track_title,
+                track_room=track_room,
+                track_mood=body.track_mood,
+            )
     except Exception:
         pass
     
@@ -394,31 +394,32 @@ async def create_wall_post_encrypted(request: Request,
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
-    # Federation: opaque ciphertext + only the wraps for users on each
-    # peer node (the receiving side filters down at apply-time).
+    # Federation: opaque ciphertext + wraps keyed by global_user_id per recipient.
     try:
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "social.post.created.encrypted",
-            "payload": {
-                "nickname": current_user["nickname"],
-                "post_id": post_id,
-                "audience": aud,
-                "ciphertext_b64": body.ciphertext_b64,
-                "wrapped_keys": [
-                    {"recipient_id": rid,
-                     "wrapped_b64": _b64.b64encode(blob).decode("ascii")}
-                    for rid, blob in wraps_decoded
-                ],
-                "media_data": body.media_data,
-                "media_type": body.media_type,
-                "share_enabled": bool(body.share_enabled),
-                "allow_comments": bool(body.allow_comments),
-                "track_title": body.track_title,
-                "track_room": enc_track_room,
-                "track_mood": body.track_mood,
-            },
-        })
+        from routers import federation as federation_mod
+        global_post_id, _origin = db.register_local_wall_post_global_id(int(post_id))
+        fed_wraps = []
+        for rid, blob in wraps_decoded:
+            recip = db.get_user_by_id(int(rid)) or {}
+            fed_wraps.append({
+                "recipient_global_user_id": str(recip.get("global_user_id") or "").strip(),
+                "recipient_nickname": str(recip.get("nickname") or "").strip(),
+                "wrapped_b64": _b64.b64encode(blob).decode("ascii"),
+            })
+        federation_mod.enqueue_social_post_created_encrypted(
+            current_user,
+            global_post_id=global_post_id,
+            audience=aud,
+            ciphertext_b64=body.ciphertext_b64,
+            wrapped_keys=fed_wraps,
+            media_data=body.media_data,
+            media_type=body.media_type,
+            share_enabled=bool(body.share_enabled),
+            allow_comments=bool(body.allow_comments),
+            track_title=body.track_title,
+            track_room=enc_track_room,
+            track_mood=body.track_mood,
+        )
     except Exception:
         pass
 
@@ -574,6 +575,18 @@ async def update_wall_post(post_id: int, body: UpdatePostRequest, current_user: 
         return JSONResponse(status_code=400, content={"error": "Nothing to update"})
     
     if db.update_wall_post(post_id, current_user["id"], **updates):
+        try:
+            meta = db.get_wall_post_meta(post_id)
+            priv = str((meta or {}).get("privacy") or "public").lower()
+            if priv in ("public", "followers"):
+                from routers import federation as federation_mod
+                gpid, _ = db.ensure_federation_wall_post_global_id(int(post_id))
+                if gpid:
+                    federation_mod.enqueue_social_post_updated(
+                        current_user, global_post_id=gpid, updates=updates,
+                    )
+        except Exception:
+            pass
         return {"ok": True}
     return JSONResponse(status_code=404, content={"error": "Post not found or not yours"})
 
@@ -583,6 +596,17 @@ async def delete_wall_post(post_id: int, current_user: dict = Depends(get_curren
     """Delete a wall post. Admins can delete any post."""
     force = bool(current_user.get("is_admin"))
     if db.delete_wall_post(post_id, current_user["id"], force=force):
+        try:
+            from routers import federation as federation_mod
+            gpid, _ = db.ensure_federation_wall_post_global_id(int(post_id))
+            if gpid:
+                federation_mod.enqueue_social_post_deleted(
+                    current_user,
+                    global_post_id=gpid,
+                    force_delete=force,
+                )
+        except Exception:
+            pass
         # Bust the social /feed and /explore micro-caches so the deleted
         # post doesn't briefly resurface in the next 1.5s window.
         try:
@@ -697,18 +721,16 @@ async def add_post_reaction(request: Request, post_id: int, body: AddReactionReq
                 })
 
         try:
-            db.insert_federation_outbox_event({
-                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-                "event_type": "social.reaction.changed",
-                "payload": {
-                    "actor_nickname": current_user.get("nickname") or "",
-                    "actor_avatar": current_user.get("avatar") or "",
-                    "owner_nickname": post.get("nickname") or "",
-                    "post_id": post_id,
-                    "emoji": body.emoji,
-                    "active": bool(added),
-                },
-            })
+            from routers import federation as federation_mod
+            gpid, _ = db.ensure_federation_wall_post_global_id(int(post_id))
+            if gpid:
+                federation_mod.enqueue_social_reaction_changed(
+                    current_user,
+                    global_post_id=gpid,
+                    owner_nickname=post.get("nickname") or "",
+                    emoji=body.emoji,
+                    active=bool(added),
+                )
         except Exception:
             _log.debug("reaction federation emit failed", exc_info=True)
 
@@ -808,19 +830,32 @@ async def toggle_post_repost(
             _log.debug("repost notif failed", exc_info=True)
 
         try:
-            db.insert_federation_outbox_event({
-                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-                "event_type": "social.repost.created",
-                "payload": {
-                    "actor_nickname": current_user.get("nickname") or "",
-                    "actor_avatar": current_user.get("avatar") or "",
-                    "owner_nickname": post.get("nickname") or "",
-                    "post_id": post_id,
-                    "quote": quote,
-                },
-            })
+            from routers import federation as federation_mod
+            gpid, _ = db.ensure_federation_wall_post_global_id(int(post_id))
+            if gpid:
+                federation_mod.enqueue_social_repost_created(
+                    current_user,
+                    global_post_id=gpid,
+                    owner_nickname=post.get("nickname") or "",
+                    quote=quote,
+                    active=True,
+                )
         except Exception:
             _log.debug("repost federation emit failed", exc_info=True)
+    elif not reposted:
+        try:
+            from routers import federation as federation_mod
+            gpid, _ = db.ensure_federation_wall_post_global_id(int(post_id))
+            if gpid:
+                federation_mod.enqueue_social_repost_created(
+                    current_user,
+                    global_post_id=gpid,
+                    owner_nickname=post.get("nickname") or "",
+                    quote=None,
+                    active=False,
+                )
+        except Exception:
+            pass
 
     return {
         "ok": True,
@@ -899,18 +934,17 @@ async def add_post_comment(request: Request, post_id: int, body: AddCommentReque
             })
 
         try:
-            db.insert_federation_outbox_event({
-                "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-                "event_type": "social.comment.created",
-                "payload": {
-                    "actor_nickname": current_user.get("nickname") or "",
-                    "actor_avatar": current_user.get("avatar") or "",
-                    "owner_nickname": post.get("nickname") or "",
-                    "post_id": post_id,
-                    "comment_id": comment_id,
-                    "preview": preview[:140],
-                },
-            })
+            from routers import federation as federation_mod
+            gpid, _ = db.ensure_federation_wall_post_global_id(int(post_id))
+            gcid, _ = db.register_local_wall_comment_global_id(int(comment_id))
+            if gpid:
+                federation_mod.enqueue_social_comment_created(
+                    current_user,
+                    global_post_id=gpid,
+                    global_comment_id=gcid,
+                    owner_nickname=post.get("nickname") or "",
+                    content=body.content.strip(),
+                )
         except Exception:
             _log.debug("comment federation emit failed", exc_info=True)
 

@@ -2039,6 +2039,24 @@ def _migrate():
         )
         con.execute(
             """
+            CREATE TABLE IF NOT EXISTS federation_wall_map (
+                origin_server_id TEXT NOT NULL,
+                object_kind      TEXT NOT NULL,
+                global_id        TEXT NOT NULL,
+                local_id         INTEGER NOT NULL,
+                PRIMARY KEY (origin_server_id, object_kind, global_id)
+            )
+            """
+        )
+        try:
+            con.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_fed_wall_map_local "
+                "ON federation_wall_map(origin_server_id, object_kind, local_id)"
+            )
+        except Exception:
+            pass
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS federation_message_events (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id         TEXT NOT NULL UNIQUE,
@@ -9833,6 +9851,431 @@ def mark_federation_inbox_event(event_id: str, status: str) -> bool:
         return True
     except Exception:
         return False
+
+
+_FED_WALL_OBJECT_KINDS = frozenset({"post", "comment", "story"})
+_FED_WALL_CONTENT_MAX = 5000
+_FED_WALL_COMMENT_MAX = 4000
+_FED_WALL_QUOTE_MAX = 4000
+_FED_WALL_REPLICATE_PRIVACY = frozenset({"public", "followers"})
+_FED_WALL_REACTION_EMOJIS = frozenset({
+    "❤️", "👍", "😂", "😮", "😢", "🔥", "🐸", "👏", "💯", "✨",
+    "🎉", "💪", "😍",
+})
+
+
+def _federated_wall_actor(
+    payload: Dict,
+    origin_server_id: str,
+    *,
+    gid_key: str,
+    nick_key: str,
+    require_global_id: bool = False,
+) -> Optional[Dict]:
+    """Resolve a federated wall actor. Materialize only when ``global_user_id`` is set."""
+    gid = str(payload.get(gid_key) or "").strip()
+    nick = str(payload.get(nick_key) or "").strip()
+    origin = (origin_server_id or "").strip()
+    if gid:
+        return ensure_federated_dm_local_user(gid, nick, origin_server_id=origin)
+    if require_global_id:
+        return None
+    if nick:
+        return get_user_profile(nick)
+    return None
+
+
+def _federated_wall_post_owned_by(local_post_id: int, user_id: int) -> bool:
+    meta = get_wall_post_meta(int(local_post_id))
+    if not meta:
+        return False
+    try:
+        return int(meta.get("user_id") or 0) == int(user_id)
+    except Exception:
+        return False
+
+
+def map_federation_wall_object(
+    origin_server_id: str,
+    object_kind: str,
+    global_id: str,
+    local_id: int,
+) -> bool:
+    """Record stable federated id → local row id mapping."""
+    origin = (origin_server_id or "").strip()
+    kind = (object_kind or "").strip().lower()
+    gid = (global_id or "").strip()
+    if not origin or not kind or not gid or kind not in _FED_WALL_OBJECT_KINDS:
+        return False
+    if len(gid) > 64:
+        return False
+    try:
+        lid = int(local_id)
+    except Exception:
+        return False
+    if lid <= 0:
+        return False
+    try:
+        with _conn() as con:
+            con.execute(
+                """
+                INSERT INTO federation_wall_map
+                    (origin_server_id, object_kind, global_id, local_id)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(origin_server_id, object_kind, global_id) DO NOTHING
+                """,
+                (origin, kind, gid, lid),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
+def resolve_federation_wall_local_id(
+    origin_server_id: str,
+    object_kind: str,
+    global_id: str,
+) -> Optional[int]:
+    origin = (origin_server_id or "").strip()
+    kind = (object_kind or "").strip().lower()
+    gid = (global_id or "").strip()
+    if not origin or not kind or not gid:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT local_id FROM federation_wall_map
+            WHERE origin_server_id=? AND object_kind=? AND global_id=?
+            LIMIT 1
+            """,
+            (origin, kind, gid),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        return int(row["local_id"])
+    except Exception:
+        return None
+
+
+def get_federation_wall_global_id(
+    origin_server_id: str,
+    object_kind: str,
+    local_id: int,
+) -> Optional[str]:
+    origin = (origin_server_id or "").strip()
+    kind = (object_kind or "").strip().lower()
+    try:
+        lid = int(local_id)
+    except Exception:
+        return None
+    if not origin or not kind or lid <= 0:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT global_id FROM federation_wall_map
+            WHERE origin_server_id=? AND object_kind=? AND local_id=?
+            LIMIT 1
+            """,
+            (origin, kind, lid),
+        ).fetchone()
+    return str(row["global_id"]).strip() if row and row["global_id"] else None
+
+
+def register_local_wall_post_global_id(post_id: int) -> tuple[str, str]:
+    """Assign a new global post id for a locally-created wall post."""
+    gid = str(uuid.uuid4())
+    ident = get_or_create_local_server_identity() or {}
+    origin = str(ident.get("server_id") or "").strip()
+    if origin:
+        map_federation_wall_object(origin, "post", gid, int(post_id))
+    return gid, origin
+
+
+def register_local_wall_comment_global_id(comment_id: int) -> tuple[str, str]:
+    gid = str(uuid.uuid4())
+    ident = get_or_create_local_server_identity() or {}
+    origin = str(ident.get("server_id") or "").strip()
+    if origin:
+        map_federation_wall_object(origin, "comment", gid, int(comment_id))
+    return gid, origin
+
+
+def register_local_story_global_id(story_id: int) -> tuple[str, str]:
+    gid = str(uuid.uuid4())
+    ident = get_or_create_local_server_identity() or {}
+    origin = str(ident.get("server_id") or "").strip()
+    if origin:
+        map_federation_wall_object(origin, "story", gid, int(story_id))
+    return gid, origin
+
+
+def ensure_federation_wall_post_global_id(post_id: int) -> tuple[str, str]:
+    """Return (global_post_id, origin_server_id), registering if needed."""
+    ident = get_or_create_local_server_identity() or {}
+    origin = str(ident.get("server_id") or "").strip()
+    if not origin:
+        return "", ""
+    existing = get_federation_wall_global_id(origin, "post", int(post_id))
+    if existing:
+        return existing, origin
+    return register_local_wall_post_global_id(int(post_id))
+
+
+def apply_federated_wall_post_created(payload: Dict, origin_server_id: str) -> Optional[int]:
+    """Idempotently apply a plaintext federated wall post."""
+    origin = (origin_server_id or "").strip()
+    gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not gid:
+        return None
+    existing = resolve_federation_wall_local_id(origin, "post", gid)
+    if existing:
+        return existing
+
+    author = _federated_wall_actor(
+        payload, origin,
+        gid_key="author_global_user_id",
+        nick_key="nickname",
+        require_global_id=True,
+    )
+    if not author:
+        return None
+    author_id = int(author["id"])
+
+    privacy = str(payload.get("privacy") or "public").strip().lower()
+    if privacy not in _FED_WALL_REPLICATE_PRIVACY:
+        return None
+
+    allow_comments = 1 if bool(payload.get("allow_comments", True)) else 0
+    share_enabled = 1 if bool(payload.get("share_enabled", True)) else 0
+    content = str(payload.get("content") or "")[:_FED_WALL_CONTENT_MAX]
+    local_id = create_wall_post(
+        author_id,
+        content,
+        payload.get("media_data"),
+        payload.get("media_type"),
+        privacy,
+        share_enabled,
+        allow_comments,
+        payload.get("track_title"),
+        payload.get("track_room"),
+        payload.get("track_mood"),
+    )
+    map_federation_wall_object(origin, "post", gid, int(local_id))
+    return int(local_id)
+
+
+def apply_federated_wall_post_encrypted(payload: Dict, origin_server_id: str) -> Optional[int]:
+    """Idempotently apply an encrypted federated wall post + recipient wraps."""
+    import base64 as _b64
+
+    origin = (origin_server_id or "").strip()
+    gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not gid:
+        return None
+    existing = resolve_federation_wall_local_id(origin, "post", gid)
+    if existing:
+        return existing
+
+    author = _federated_wall_actor(
+        payload, origin,
+        gid_key="author_global_user_id",
+        nick_key="nickname",
+        require_global_id=True,
+    )
+    if not author:
+        return None
+    author_id = int(author["id"])
+
+    try:
+        ct = _b64.b64decode(str(payload.get("ciphertext_b64") or ""), validate=True)
+    except Exception:
+        return None
+    if not ct or len(ct) > 256 * 1024:
+        return None
+
+    aud = str(payload.get("audience") or "followers").strip().lower()
+    if aud not in ("followers", "friends"):
+        return None
+
+    wraps_in = payload.get("wrapped_keys") or []
+    if not isinstance(wraps_in, list) or len(wraps_in) > 512:
+        return None
+    wraps_decoded = []
+    for w in wraps_in:
+        if not isinstance(w, dict):
+            continue
+        rgid = str(w.get("recipient_global_user_id") or "").strip()
+        rnick = str(w.get("recipient_nickname") or "").strip()
+        wb = str(w.get("wrapped_b64") or "").strip()
+        if not rgid or not wb:
+            continue
+        local_recipient = ensure_federated_dm_local_user(
+            rgid, rnick, origin_server_id=origin,
+        )
+        if not local_recipient:
+            continue
+        rid = int(local_recipient["id"])
+        if rid == author_id:
+            continue
+        try:
+            blob = _b64.b64decode(wb, validate=True)
+        except Exception:
+            continue
+        if blob and len(blob) <= 4096:
+            wraps_decoded.append((rid, blob))
+    if not wraps_decoded:
+        return None
+
+    try:
+        local_id = create_wall_post_encrypted(
+            user_id=author_id,
+            audience=aud,
+            ciphertext=ct,
+            wrapped_keys=wraps_decoded,
+            media_data=payload.get("media_data"),
+            media_type=payload.get("media_type"),
+            share_enabled=1 if bool(payload.get("share_enabled", True)) else 0,
+            allow_comments=1 if bool(payload.get("allow_comments", True)) else 0,
+            track_title=payload.get("track_title"),
+            track_room=payload.get("track_room"),
+            track_mood=payload.get("track_mood"),
+        )
+    except ValueError:
+        return None
+    map_federation_wall_object(origin, "post", gid, int(local_id))
+    return int(local_id)
+
+
+def apply_federated_wall_post_updated(payload: Dict, origin_server_id: str) -> bool:
+    origin = (origin_server_id or "").strip()
+    gid = str(payload.get("global_post_id") or "").strip()
+    local_id = resolve_federation_wall_local_id(origin, "post", gid)
+    if not local_id:
+        return False
+    author = _federated_wall_actor(
+        payload, origin,
+        gid_key="author_global_user_id",
+        nick_key="nickname",
+        require_global_id=True,
+    )
+    if not author or not _federated_wall_post_owned_by(int(local_id), int(author["id"])):
+        return False
+    kwargs = {}
+    if "content" in payload and payload.get("content") is not None:
+        kwargs["content"] = str(payload.get("content") or "")[:_FED_WALL_CONTENT_MAX]
+    if payload.get("privacy") is not None:
+        priv = str(payload.get("privacy")).strip().lower()
+        if priv in _FED_WALL_REPLICATE_PRIVACY:
+            kwargs["privacy"] = priv
+    if payload.get("share_enabled") is not None:
+        kwargs["share_enabled"] = 1 if bool(payload.get("share_enabled")) else 0
+    if payload.get("allow_comments") is not None:
+        kwargs["allow_comments"] = 1 if bool(payload.get("allow_comments")) else 0
+    if not kwargs:
+        return False
+    return update_wall_post(int(local_id), int(author["id"]), **kwargs)
+
+
+def apply_federated_wall_post_deleted(payload: Dict, origin_server_id: str) -> bool:
+    origin = (origin_server_id or "").strip()
+    gid = str(payload.get("global_post_id") or "").strip()
+    local_id = resolve_federation_wall_local_id(origin, "post", gid)
+    if not local_id:
+        return False
+    author = _federated_wall_actor(
+        payload, origin,
+        gid_key="author_global_user_id",
+        nick_key="nickname",
+        require_global_id=True,
+    )
+    if not author or not _federated_wall_post_owned_by(int(local_id), int(author["id"])):
+        return False
+    return delete_wall_post(int(local_id), int(author["id"]), force=False)
+
+
+def apply_federated_wall_comment_created(payload: Dict, origin_server_id: str) -> Optional[int]:
+    origin = (origin_server_id or "").strip()
+    post_gid = str(payload.get("global_post_id") or "").strip()
+    comment_gid = str(payload.get("global_comment_id") or "").strip()
+    if not origin or not post_gid or not comment_gid:
+        return None
+    existing_cid = resolve_federation_wall_local_id(origin, "comment", comment_gid)
+    if existing_cid:
+        return existing_cid
+    local_post = resolve_federation_wall_local_id(origin, "post", post_gid)
+    if not local_post:
+        return None
+    actor = _federated_wall_actor(
+        payload, origin,
+        gid_key="actor_global_user_id",
+        nick_key="actor_nickname",
+        require_global_id=True,
+    )
+    if not actor:
+        return None
+    content = str(payload.get("content") or "")[:_FED_WALL_COMMENT_MAX]
+    if not content.strip():
+        return None
+    cid = add_wall_comment(int(local_post), int(actor["id"]), content)
+    if cid:
+        map_federation_wall_object(origin, "comment", comment_gid, int(cid))
+    return cid
+
+
+def apply_federated_wall_reaction_changed(payload: Dict, origin_server_id: str) -> bool:
+    origin = (origin_server_id or "").strip()
+    post_gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not post_gid:
+        return False
+    local_post = resolve_federation_wall_local_id(origin, "post", post_gid)
+    if not local_post:
+        return False
+    actor = _federated_wall_actor(
+        payload, origin,
+        gid_key="actor_global_user_id",
+        nick_key="actor_nickname",
+        require_global_id=True,
+    )
+    if not actor:
+        return False
+    emoji = str(payload.get("emoji") or "").strip()
+    if emoji not in _FED_WALL_REACTION_EMOJIS:
+        return False
+    active = bool(payload.get("active"))
+    set_wall_reaction(int(local_post), int(actor["id"]), emoji, active)
+    return True
+
+
+def apply_federated_wall_repost_created(payload: Dict, origin_server_id: str) -> bool:
+    origin = (origin_server_id or "").strip()
+    post_gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not post_gid:
+        return False
+    local_post = resolve_federation_wall_local_id(origin, "post", post_gid)
+    if not local_post:
+        return False
+    actor = _federated_wall_actor(
+        payload, origin,
+        gid_key="actor_global_user_id",
+        nick_key="actor_nickname",
+        require_global_id=True,
+    )
+    if not actor:
+        return False
+    quote = (str(payload.get("quote") or "").strip()[:_FED_WALL_QUOTE_MAX] or None)
+    if payload.get("active") is False:
+        with _conn() as con:
+            con.execute(
+                "DELETE FROM wall_reposts WHERE post_id=? AND user_id=?",
+                (int(local_post), int(actor["id"])),
+            )
+            con.commit()
+        return False
+    toggle_wall_repost(int(local_post), int(actor["id"]), quote)
+    return True
 
 
 def ensure_federated_dm_local_user(
