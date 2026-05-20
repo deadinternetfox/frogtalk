@@ -26,6 +26,8 @@ yarn-error.log*
 dist/
 build/
 *.log
+deploy.tar.gz
+*.tar.gz
 
 # ── Release binaries (served at runtime, not stored in git) ────
 static/*.AppImage
