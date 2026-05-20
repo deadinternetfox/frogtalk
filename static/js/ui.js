@@ -5482,8 +5482,11 @@ function toggleEncryptionInfo() {
     if (dmWrap) dmWrap.style.display = isRoom ? 'none' : '';
     if (roomCard) roomCard.style.display = isRoom ? '' : 'none';
 
-    if (peerEl) peerEl.textContent = them ? '@' + them : 'this chat';
-    if (slot) slot.textContent = them ? '· · · ·' : '— — — —';
+    if (peerEl) peerEl.textContent = them ? '@' + them : 'your contact';
+    // SECURITY-PASS-2: the legacy emoji slot is hidden by default; do not
+    // populate it so cached scripts that still call into this path don't
+    // accidentally surface the deprecated nickname-derived emojis.
+    if (slot) slot.textContent = '';
     if (fpEl) fpEl.innerHTML = '<span style="color:#666">Loading…</span>';
     if (modeLine) {
       // Default header; the room populator may upgrade this to "Signal
@@ -5495,16 +5498,10 @@ function toggleEncryptionInfo() {
     openModal('modal-encrypt-verify');
 
     if (!isRoom) {
-      if (them && me && Crypto.fingerprint) {
-        Crypto.fingerprint(me, them).then(emojis => {
-          if (slot) slot.textContent = emojis.join(' ');
-        }).catch(() => {
-          if (slot) slot.textContent = '—';
-        });
-      }
-      // Track A Phase 3 — Signal v2 safety number card. Shown only when
-      // libsignal is initialised on this device AND we can reach the
-      // peer's published bundle. Falls back to hiding the card silently.
+      // SECURITY-PASS-2: legacy emoji fingerprint card is now hidden by
+      // markup (#enc-dm-emoji-wrap[hidden]). Identity verification is
+      // performed ONLY via the Signal safety-number card, which binds
+      // to the peer's published identity key — not their nickname.
       _populateSignalSafetyCard(peer).catch(() => {
         const card = document.getElementById('enc-signal-card');
         if (card) card.style.display = 'none';
@@ -5712,32 +5709,17 @@ async function resetEncryptionKeys() {
 }
 window.resetEncryptionKeys = resetEncryptionKeys;
 
+// SECURITY-PASS-2: legacy copy-emoji-fingerprint helper. The DM verify
+// modal no longer shows a nickname-derived emoji code; this stub stays
+// only for older cached HTML / Electron shells that still call into it.
+// It is a no-op now and surfaces a toast pointing the user at the
+// canonical Signal safety number instead.
 async function copyEncVerifyEmojis() {
-  const slot = document.getElementById('enc-verify-emojis');
-  const hint = document.getElementById('enc-verify-copy-hint');
-  if (!slot) return;
-  const text = (slot.textContent || '').trim();
-  if (!text || text === '· · · ·' || text === '—') return;
   try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(text);
-    } else {
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(slot);
-      sel.removeAllRanges(); sel.addRange(range);
-      document.execCommand('copy');
-      sel.removeAllRanges();
+    if (window.UI && UI.showToast) {
+      UI.showToast('Use the Signal safety number to verify identity.', 'info');
     }
-    if (hint) { hint.textContent = '✅ Copied!'; hint.style.color = '#4caf50'; }
-    slot.style.borderColor = '#4caf50';
-    setTimeout(() => {
-      if (hint) { hint.textContent = 'Tap the emojis to copy'; hint.style.color = '#666'; }
-      slot.style.borderColor = '#2a4a2a';
-    }, 1400);
-  } catch {
-    UI.showToast('Could not copy', 'error');
-  }
+  } catch {}
 }
 window.copyEncVerifyEmojis = copyEncVerifyEmojis;
 

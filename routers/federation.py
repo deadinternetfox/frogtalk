@@ -687,6 +687,79 @@ def _fed_token_ok(token: str | None) -> bool:
     return _hmac.compare_digest((token or "").strip(), expected)
 
 
+# ── SECURITY-PASS-2: per-peer signed-request auth ──────────────────────────
+#
+# Wrapper around `crypto_fed.verify_signed_request` that handles:
+#   * mode gating (FROGTALK_FEDERATION_AUTH_MODE = dual | signed | legacy)
+#   * DB pubkey lookup (cached per process; refreshed on miss)
+#   * legacy bearer fallback
+#
+# Returns (ok, peer_id_or_None, reason_or_None).
+#
+# Callers should treat `peer_id` as authenticated identity ONLY when
+# `ok` is True AND `peer_id` is not None. (legacy bearer path returns
+# (True, None, "legacy_bearer") so the caller can decide whether to
+# accept anonymous peers for that specific route.)
+async def authenticate_federation_request(
+    request: Request,
+    body: bytes,
+    x_federation_token: str | None,
+) -> tuple[bool, str | None, str | None]:
+    """Authenticate an inbound federation request under any supported
+    auth mode. Reads the request method + path + headers itself, so the
+    route handler only has to call this once per request.
+
+    `body` MUST be the raw request body bytes (after Starlette parsing
+    has consumed it, you need to pass the cached bytes — see
+    `_read_body_bytes_once` helper below).
+    """
+    mode = crypto_fed.federation_auth_mode()
+    method = (request.method or "POST").upper()
+    path = request.url.path or ""
+    headers = dict(request.headers)
+
+    # 1. Try signed path (always allowed unless mode == 'legacy').
+    if mode in ("dual", "signed"):
+        ok, peer_id, reason = await asyncio.to_thread(
+            crypto_fed.verify_signed_request,
+            method,
+            path,
+            body,
+            headers,
+            db.get_federation_server_pubkey,
+        )
+        if ok:
+            return True, peer_id, None
+        # In strict 'signed' mode, never fall back to bearer.
+        if mode == "signed":
+            return False, peer_id, reason or "signature_required"
+        # In 'dual', if the request DID try to sign (peer_id provided)
+        # but the signature was bad, refuse outright instead of
+        # silently downgrading to bearer — otherwise a malformed signed
+        # request would be ambiguous and could mask attacks.
+        if peer_id and reason and reason not in ("missing_headers",):
+            return False, peer_id, reason
+
+    # 2. Legacy bearer fallback (dual or legacy mode).
+    if mode in ("dual", "legacy") and _fed_token_ok(x_federation_token):
+        return True, None, "legacy_bearer"
+
+    return False, None, "auth_failed"
+
+
+# Starlette consumes the body when it parses JSON into pydantic; cache the
+# raw body once on the request state so verify_signed_request can see the
+# exact bytes we received. This is wired in via dependency in the routes
+# that need signed verification.
+async def _read_body_bytes_once(request: Request) -> bytes:
+    cached = getattr(request.state, "_raw_body", None)
+    if cached is not None:
+        return cached
+    raw = await request.body()
+    request.state._raw_body = raw
+    return raw
+
+
 async def _current_user_from_header(x_session_token: str | None) -> dict | None:
     # Threadpool-hop so the sync sqlite lookup doesn't block the event
     # loop on hot federation routes (peer ping, build verify, etc.
@@ -1231,6 +1304,18 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         if not origin:
             rejected += 1
             continue
+        # SECURITY-PASS-2: when the transport auth was per-peer signed
+        # (request-level), bind the event to that peer. A peer that
+        # signs the HTTP request must not be able to ship events
+        # claiming a different origin_server_id — that would let a
+        # less-trusted peer launder events through a more-trusted one.
+        signed_peer = str(ev.get("_signed_peer_id") or "").strip()
+        if signed_peer and signed_peer != origin:
+            rejected += 1
+            continue
+        # Strip the transport-auth helper field before persisting so it
+        # never lands in payload_json / replays.
+        ev.pop("_signed_peer_id", None)
 
         # ---- Time window check (replay defence, applies even without sigs) ----
         origin_time_str = str(ev.get("origin_time") or "").strip()
@@ -1428,17 +1513,50 @@ def _peer_inbox_allowed(origin: str) -> bool:
 
 @router.post("/federation/events/inbox")
 async def federation_inbox(
-    body: FederationInboxBody,
+    request: Request,
     x_federation_token: str | None = Header(default=None),
 ):
-    if not _fed_token_ok(x_federation_token):
-        return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
+    # SECURITY-PASS-2: accept either legacy shared bearer OR per-peer
+    # Ed25519 signed request (see crypto_fed.verify_signed_request).
+    # Operator flips FROGTALK_FEDERATION_AUTH_MODE=signed to retire
+    # the shared bearer once every peer has a registered public key.
+    raw_body = await _read_body_bytes_once(request)
+    auth_ok, peer_id, auth_reason = await authenticate_federation_request(
+        request, raw_body, x_federation_token
+    )
+    if not auth_ok:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid federation auth", "reason": auth_reason or "auth_failed"},
+        )
+    # Parse the cached raw body into our typed model — we can't rely on
+    # pydantic having read the body for us because we consumed it
+    # ourselves above for signature verification.
+    try:
+        parsed = json.loads(raw_body.decode("utf-8") or "{}")
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad JSON body"})
+    try:
+        body = FederationInboxBody(**parsed)
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "Bad event batch shape"})
 
     # Bound the per-request payload so a peer can't ship a million-event
     # batch and tie up the worker thread (combined with WS-frame and
     # request body limits this caps total memory pressure).
     if not isinstance(body.events, list) or len(body.events) > _INBOX_BODY_MAX:
         return JSONResponse(status_code=413, content={"error": "Event batch too large"})
+
+    # If we authenticated via per-peer signed request, attach the peer_id
+    # to every event so the inbox insert path can require that the
+    # signed-peer matches the event origin_server_id (prevents peer A
+    # from injecting events claiming origin = peer B even with valid
+    # signed-request auth). Legacy bearer path leaves this None and
+    # falls back to the existing per-event signature check.
+    if peer_id:
+        for ev in body.events:
+            if isinstance(ev, dict):
+                ev.setdefault("_signed_peer_id", peer_id)
 
     # Per-peer rate limit. Drop events whose origin is over quota; we
     # don't reject the whole batch because a benign peer can still ship
@@ -1816,6 +1934,20 @@ async def federation_outbox_processor() -> int:
         "User-Agent": "FrogTalk-FederationPush/1.0",
         "x-federation-token": fed_token,
     }
+    # SECURITY-PASS-2: attach Ed25519 per-request signature headers so
+    # peers running on FROGTALK_FEDERATION_AUTH_MODE=signed will accept
+    # this push without the shared bearer. The local server's own
+    # server_id (= local_server_id) is the "peer id" the receiver looks
+    # up in its federation_servers table to find our public key. Adding
+    # these headers is harmless to peers still on legacy mode — they
+    # just ignore them and validate the bearer instead.
+    try:
+        signed = crypto_fed.sign_request_headers(
+            "POST", "/api/federation/events/inbox", body, str(local_server_id or "")
+        )
+        headers.update(signed)
+    except Exception:
+        _log.exception("federation: outbox signed-header attach failed")
 
     async def _push(base: str) -> tuple[bool, bool]:
         """Returns (delivered, payload_too_large).

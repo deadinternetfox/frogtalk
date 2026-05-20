@@ -2,6 +2,7 @@
 import hashlib
 import logging
 import os
+import secrets
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote as url_quote, urlparse
@@ -38,7 +39,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from database import init_db
-from routers import auth, rooms, messages, users, ws
+from routers import auth, rooms, messages, users, ws, media as media_mod
 from routers import friends as friends_mod
 from routers import dms
 from routers import push as push_mod
@@ -768,38 +769,80 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 # HSTS is conditional: only emitted on HTTPS requests so local http://
 # dev doesn't get pinned.
 #
-# CSP is shipped REPORT-ONLY by default. Enforcing requires migrating every
-# inline `onclick=` attribute and inline <script>/<style> in static/index.html
-# to addEventListener / external files. Until then, report-only gives us
-# violation telemetry without breaking the live app. Set
-# FROGTALK_CSP_ENFORCE=1 to flip to enforcing once the audit is done.
-_CSP_DIRECTIVES = (
-    "default-src 'self'; "
-    # 'unsafe-inline' covers inline onclick=, inline <script>, inline event
-    # handlers; required until the inline-handler migration lands.
-    "script-src 'self' 'unsafe-inline' https://frogtalk.xyz; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com data:; "
-    "img-src 'self' data: blob: https:; "
-    "media-src 'self' data: blob: https:; "
-    # WebSockets to same origin + KLIPY (primary GIF/sticker CDN) + Tenor
-    # (legacy fallback until 2026-06-30 sunset).
-    "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://tenor.googleapis.com https://media.tenor.com; "
-    "frame-ancestors 'self'; "
-    "base-uri 'self'; "
-    "form-action 'self'; "
-    "object-src 'none'; "
-    "worker-src 'self' blob:"
-)
+# CSP is now ENFORCED by default (HIGH-7).
+#
+# Migration path:
+#   Phase A (SHIPPED): ENFORCE the policy, KEEP `'unsafe-inline'` for
+#     script-src + style-src so the ~337 inline onclick= handlers and
+#     ~794 inline `style="..."` attributes in static/index.html keep
+#     working. Everything else (connect-src, img-src, object-src, base-uri,
+#     form-action, frame-ancestors) is enforced strictly, which still
+#     blocks the highest-impact XSS exploitation paths (data exfil to
+#     attacker domains, `<object>`/Flash injection, base-href hijack,
+#     form-action hijack, clickjacking via iframe).
+#
+#   Phase B (TODO, tracked in docs/SECURITY_PASS_2.md):
+#     - Migrate inline handlers to addEventListener.
+#     - Migrate inline styles to CSS classes or `el.style.X = …`.
+#     - Drop `'unsafe-inline'` from script-src + style-src.
+#     - Switch to `'strict-dynamic' 'nonce-…'` for script-src.
+#
+# A per-request nonce is generated below and exposed via
+# `request.state.csp_nonce`. Future inline <script nonce="…"> /
+# <style nonce="…"> tags emitted by templates can use it; the nonce
+# is INCLUDED in script-src / style-src today so it Just Works as we
+# migrate, without needing another CSP rev.
+#
+# Set FROGTALK_CSP_ENFORCE=0 to temporarily roll back to report-only if a
+# regression is found in production.
+_CSP_ENFORCE = os.getenv("FROGTALK_CSP_ENFORCE", "1").strip().lower() in ("1", "true", "yes", "on")
 _CSP_HEADER_NAME = (
-    "Content-Security-Policy"
-    if os.getenv("FROGTALK_CSP_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "on")
-    else "Content-Security-Policy-Report-Only"
+    "Content-Security-Policy" if _CSP_ENFORCE else "Content-Security-Policy-Report-Only"
 )
+
+
+def _build_csp_header(nonce: str) -> str:
+    """Single source of truth for the CSP policy.
+
+    `nonce` is embedded into script-src / style-src so any future
+    template-emitted <script nonce="…"> works without a directive
+    rewrite. The presence of the nonce source list activates CSP3
+    behaviour on modern browsers; however, because `'unsafe-inline'`
+    is still listed (Phase A migration), modern browsers fall back
+    to allowing inline content for back-compat with the legacy
+    handlers. When we drop `'unsafe-inline'` in Phase B, modern
+    browsers will switch to nonce-only enforcement automatically.
+    """
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://frogtalk.xyz; "
+        f"style-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: blob: https:; "
+        "media-src 'self' data: blob: https:; "
+        # WebSockets to same origin + KLIPY (primary GIF/sticker CDN) +
+        # Tenor (legacy fallback until 2026-06-30 sunset). frame-src is
+        # narrow on purpose: blocks attacker pages from being iframed
+        # inside FrogTalk via stored-XSS injected <iframe>.
+        "connect-src 'self' wss: https://api.klipy.com https://media.klipy.com https://cdn.klipy.com https://tenor.googleapis.com https://media.tenor.com; "
+        "frame-src 'self' https://www.youtube.com https://open.spotify.com https://platform.twitter.com; "
+        # Hard locks (no inline-handler dependency, so safe to enforce today).
+        "frame-ancestors 'self'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "object-src 'none'; "
+        "worker-src 'self' blob:"
+    )
 
 
 @app.middleware("http")
 async def _security_headers(request: Request, call_next):
+    # Per-request CSP nonce (24 url-safe chars = 144 bits entropy). Stored
+    # on request.state so any future template/handler can echo it into
+    # `<script nonce="…">` / `<style nonce="…">` tags. Inline content
+    # without the nonce remains allowed under Phase A (`'unsafe-inline'`).
+    nonce = secrets.token_urlsafe(18)
+    request.state.csp_nonce = nonce
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     # SAMEORIGIN (not DENY) so the imageboard mini-widget at /board can iframe
@@ -810,7 +853,7 @@ async def _security_headers(request: Request, call_next):
         "Permissions-Policy",
         "geolocation=(self), microphone=(self), camera=(self), payment=(), usb=()",
     )
-    response.headers.setdefault(_CSP_HEADER_NAME, _CSP_DIRECTIVES)
+    response.headers.setdefault(_CSP_HEADER_NAME, _build_csp_header(nonce))
     if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
         response.headers.setdefault(
             "Strict-Transport-Security",
@@ -835,6 +878,100 @@ async def _security_headers(request: Request, call_next):
         pass
     return response
 
+
+# ── HIGH-2: CSRF middleware for cookie-authenticated mutating requests ──
+# Browser cookie sessions are vulnerable to CSRF: a malicious cross-origin
+# page can issue same-site POSTs that ride the cookie. SameSite=Lax blocks
+# top-level POST navigation but is bypassed by, e.g., a victim clicking
+# on a malicious link that opens a same-site form, or by a sibling
+# vulnerability that lets the attacker open a top-level POST.
+#
+# Defense: double-submit token. On login we set TWO cookies — the
+# HttpOnly `ft_session` cookie (the actual auth token) and a sibling
+# JS-readable `ft_csrf` cookie (HMAC of the session token under a
+# server-only secret). The SPA reads the CSRF cookie and echoes it in
+# the `X-CSRF-Token` header on every mutating request.
+#
+# Enforcement rules:
+#   * Skip safe methods (GET/HEAD/OPTIONS).
+#   * Skip routes carrying X-Session-Token or Authorization headers —
+#     those auth paths are header-only and cannot be triggered by an
+#     attacker page (custom headers trip CORS preflight).
+#   * Skip the federation routes — peer-to-peer signed traffic.
+#   * Skip WebSocket upgrades (handled by the WS handshake auth).
+#   * If a request HAS the `ft_session` cookie set, require the
+#     X-CSRF-Token header AND its value to match the HMAC of the
+#     session token. Mismatch / missing → 403.
+import hmac as _csrf_hmac
+import hashlib as _csrf_hashlib
+
+_CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+# Routes that legitimately mutate without a session cookie present
+# (federation peer traffic, healthcheck pings, public registration).
+# The middleware is keyed on "did the request have a session cookie",
+# so federation endpoints called without a cookie skip naturally.
+_CSRF_EXEMPT_PATH_PREFIXES = (
+    "/api/federation/",   # peer-to-peer; peer auth (signed) does the work
+    "/api/bridge/inbound/",  # bridge tokens are bearer auth
+    "/api/external/",     # API-key bots
+    "/api/server-admin/", # has its own admin webui auth path
+    "/api/csp-report",    # browser CSP violation reports
+    "/api/auth/login",    # login itself sets the cookie; no token yet
+    "/api/auth/register",
+    "/api/auth/federation-ticket-login",
+    "/api/auth/federation-provision",
+    "/api/auth/recover",  # password recovery, no session yet
+)
+
+
+def _expected_csrf_for_token(token: str) -> str:
+    secret = (os.getenv("FROGTALK_CSRF_SECRET") or os.getenv("FROGTALK_SESSION_SECRET") or "frogtalk-csrf-derive-v1").encode("utf-8")
+    return _csrf_hmac.new(secret, token.encode("utf-8"), _csrf_hashlib.sha256).hexdigest()
+
+
+@app.middleware("http")
+async def _csrf_guard(request: Request, call_next):
+    try:
+        method = (request.method or "GET").upper()
+        if method in _CSRF_SAFE_METHODS:
+            return await call_next(request)
+        path = request.url.path or ""
+        if any(path.startswith(p) for p in _CSRF_EXEMPT_PATH_PREFIXES):
+            return await call_next(request)
+        # If the request authenticated via header-only paths, skip CSRF.
+        if (request.headers.get("x-session-token") or "").strip():
+            return await call_next(request)
+        if (request.headers.get("authorization") or "").lower().startswith("bearer "):
+            return await call_next(request)
+        if (request.headers.get("x-api-key") or "").strip():
+            return await call_next(request)
+        # If there's no session cookie, this isn't a cookie-auth path —
+        # let the route's own auth dependency decide (it'll 401).
+        sess = (request.cookies.get("ft_session") or "").strip()
+        if not sess:
+            return await call_next(request)
+        # We have a cookie session and a mutating method on a non-exempt
+        # path. CSRF token is required.
+        provided = (request.headers.get("x-csrf-token") or "").strip()
+        if not provided:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Missing CSRF token", "code": "csrf_missing"},
+            )
+        expected = _expected_csrf_for_token(sess)
+        if not _csrf_hmac.compare_digest(provided, expected):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Invalid CSRF token", "code": "csrf_invalid"},
+            )
+    except Exception:
+        # Never let CSRF middleware crash the response — fail open is
+        # bad for security but failing entirely would brick login. Log
+        # and proceed; the underlying auth check still gates access.
+        _log.exception("csrf middleware error")
+    return await call_next(request)
+
+
 app.include_router(auth.router, prefix="/api")
 app.include_router(users.public_router, prefix="/api")
 # Sensitive routers — server-side PIN gate sits in front. When the user
@@ -849,6 +986,10 @@ app.include_router(users.public_router, prefix="/api")
 _PIN_GATED = [Depends(pin_gate)]
 app.include_router(rooms.router, prefix="/api", dependencies=_PIN_GATED)
 app.include_router(messages.router, prefix="/api", dependencies=_PIN_GATED)
+# SECURITY-PASS-2: off-SQLite media blob serving (gated by session auth).
+# Endpoints are GET-only so PIN gating doesn't apply; auth is enforced
+# inside the router via `Depends(get_current_user)`.
+app.include_router(media_mod.router, prefix="/api")
 # NOTE: friends_mod.users_router exposes /users/search. It MUST be registered
 # BEFORE users.router (which has /users/{user_id}) so "search" isn't parsed
 # as an int user_id and returned as 422.

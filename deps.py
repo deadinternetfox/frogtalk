@@ -76,23 +76,31 @@ def client_ip(request: Request) -> str:
 
 
 async def get_current_user(request: Request = None, x_session_token: str = Header(None, alias="X-Session-Token")):
-    # Fall back to ?token=… query and Bearer authorization so URL-only
-    # consumers (browser-fetched <img src="...?token=..."> posters,
-    # <video src="...?token=..."> media, and any third-party tool using
-    # the documented public token-in-query convention) authenticate the
-    # same way as XHR/fetch clients sending X-Session-Token. Without
-    # this, every PIN-gated route that's reachable from a raw <img>/
-    # <video> element returns 401 even with a valid session, because
-    # browsers don't forward custom headers on those subresource loads.
+    # Auth source priority:
+    #   1. X-Session-Token header (legacy SPA, bots, native clients)
+    #   2. HttpOnly `ft_session` cookie (HIGH-2: not reachable to JS;
+    #      prevents XSS-stolen tokens from logging in elsewhere)
+    #   3. `Authorization: Bearer …` (federated bots, REST clients)
+    #   4. `?token=…` query string (only kept for <img>/<video> src=
+    #      that browsers won't decorate with custom headers; this path
+    #      stays for now but the long-term plan is to move to signed
+    #      short-lived media URLs)
     if not x_session_token and request is not None:
         try:
-            qtok = (request.query_params.get("token") or "").strip()
-            if qtok:
-                x_session_token = qtok
+            # 2. Cookie — preferred for browser SPA sessions.
+            cookie_tok = (request.cookies.get("ft_session") or "").strip()
+            if cookie_tok:
+                x_session_token = cookie_tok
             else:
+                # 3. Bearer.
                 auth = (request.headers.get("authorization") or "").strip()
                 if auth.lower().startswith("bearer "):
                     x_session_token = auth[7:].strip()
+                if not x_session_token:
+                    # 4. Query — last resort.
+                    qtok = (request.query_params.get("token") or "").strip()
+                    if qtok:
+                        x_session_token = qtok
         except Exception:
             pass
     if not x_session_token:

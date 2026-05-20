@@ -1119,6 +1119,17 @@ def save_message(room_name: str, user_id: int, nickname: str, content: str,
                  forwarded_from: Optional[str] = None,
                  key_version: int = 0,
                  system_kind: Optional[str] = None) -> int:
+    # SECURITY-PASS-2: when FROGTALK_MEDIA_OFFLOAD_ENABLED=1, move
+    # base64 data: URLs larger than the configured inline threshold
+    # to disk (and store a `ref:<sha>` sentinel in the column). The
+    # offload helper is a no-op when the flag is off, so this is
+    # backward-compatible by default.
+    try:
+        import media_storage as _ms
+        media_data = _ms.maybe_offload(media_data)
+    except Exception:
+        # Never fail an insert because the offload module had a hiccup.
+        pass
     with _conn() as con:
         cur = con.execute(
             """INSERT INTO messages (room_name, user_id, nickname, content, media_data, media_type,
@@ -4460,6 +4471,13 @@ def send_dm_message(channel_id: int, sender_id: int, content: str,
                     media_name: Optional[str] = None, reply_to: Optional[int] = None,
                     media_blur: int = 0, view_once: int = 0,
                     forwarded_from: Optional[str] = None) -> int:
+    # SECURITY-PASS-2: opportunistic off-SQLite media offload (no-op
+    # unless FROGTALK_MEDIA_OFFLOAD_ENABLED=1).
+    try:
+        import media_storage as _ms
+        media_data = _ms.maybe_offload(media_data)
+    except Exception:
+        pass
     with _conn() as con:
         cur = con.execute(
             """INSERT INTO dm_messages

@@ -9043,11 +9043,19 @@ window.ConnErr = (function(){
       End-to-end · AES-256-GCM
     </div>
 
-    <!-- Emoji safety code (DM-only) -->
-    <div id="enc-dm-emoji-wrap">
+    <!-- SECURITY-PASS-2: the emoji "fingerprint" is a nickname-derived
+         hash (sorted lowercase nicknames). It DOES NOT bind to any
+         cryptographic identity key — two users with the same nickname
+         pair will always see the same emojis even if the underlying
+         identity keys were silently swapped by a MITM. We hide the
+         emoji block from the verification modal by default and show
+         only the Signal-compatible 60-digit safety number, which is
+         derived from sort(identity_key_A || identity_key_B). The
+         emoji DOM is kept hidden+stripped so the existing copy helper
+         doesn't crash; a future commit will remove it entirely. -->
+    <div id="enc-dm-emoji-wrap" hidden style="display:none">
     <div id="enc-verify-emojis"
-         onclick="copyEncVerifyEmojis()"
-         title="Tap to copy"
+         title="Deprecated"
          style="font-size:54px;letter-spacing:12px;margin:0 auto 6px;line-height:1;user-select:all;
                 cursor:pointer;padding:18px 12px;border-radius:14px;
                 background:linear-gradient(180deg,#0d1410,#070b09);
@@ -9059,13 +9067,31 @@ window.ConnErr = (function(){
     <div id="enc-verify-copy-hint" style="color:#7a7a7a;font-size:11px;margin:0 0 14px">Tap the emojis to copy</div>
 
     <p style="color:#cfd8d2;font-size:13px;margin:0 0 8px;line-height:1.5">
-      If these four emoji <strong style="color:#7fd8a5">match</strong> the ones shown on
-      <strong id="enc-verify-peer" style="color:#fff">your friend's</strong> device, your
-      messages are end-to-end encrypted and nobody else can read them.
+      Deprecated nickname-derived emoji code.
     </p>
     <p style="color:#888;font-size:11px;margin:0 0 14px;line-height:1.45">
-      Derived from both nicknames · Server only sees ciphertext.
+      Use the Signal safety number below — it is bound to the actual
+      identity keys and changes if the key rotates.
     </p>
+    </div>
+
+    <!-- Replacement header that always shows, points the user at the
+         safety number card. Peer name still surfaces here so context
+         is preserved. -->
+    <div id="enc-verify-header" style="margin:6px 0 14px;padding:12px 14px;background:rgba(127,216,165,.04);
+                border:1px solid #2f5f48;border-radius:12px;text-align:left">
+      <div style="font-size:13px;color:#d8e8de;line-height:1.55">
+        Verify the <strong style="color:#7fd8a5">Signal safety number</strong> below
+        with <strong id="enc-verify-peer" style="color:#fff">your contact</strong>
+        in person, over a video call, or via a separate trusted channel.
+        Identical numbers on both sides mean your session is not being
+        intercepted.
+      </div>
+      <div style="font-size:11px;color:#7a8a82;margin-top:8px;line-height:1.45">
+        If the number changes unexpectedly, the other side may have re-installed,
+        wiped their device — or someone is attempting to intercept the
+        conversation. Always re-verify after seeing the "identity changed" banner.
+      </div>
     </div>
 
     <!-- Channel encryption card -->
@@ -9091,19 +9117,22 @@ window.ConnErr = (function(){
       </div>
     </div>
 
-    <!-- Signal v2 Safety Number card (Track A Phase 3) -->
+    <!-- Signal v2 Safety Number card — the ONLY identity verification UI
+         since SECURITY-PASS-2. Bound to the per-device identity key, NOT
+         to the nickname, so a nickname change does not move it and a
+         silent key swap does. -->
     <div id="enc-signal-card" style="display:none;margin:14px 0 6px;padding:12px 14px;background:rgba(127,216,165,.04);
                 border:1px solid #2f5f48;border-radius:12px;text-align:left">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
         <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
                      border-radius:6px;background:#1a3a2a;border:1px solid #2f5f48;font-size:12px">🛡️</span>
         <div style="display:flex;flex-direction:column;line-height:1.2;flex:1;min-width:0">
-          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Numeric fingerprint</span>
-          <span style="font-size:11px;color:#6a7a72">Same verification as the emoji, in Signal's 60-digit format</span>
+          <span style="font-size:11px;color:#88a89a;text-transform:uppercase;letter-spacing:.5px;font-weight:700">Signal safety number</span>
+          <span style="font-size:11px;color:#6a7a72">60 digits derived from both identity keys — the only number that proves you are talking to the same device</span>
         </div>
         <button id="enc-signal-safety-toggle" type="button" onclick="toggleEncSignalSafetyNumber()"
           style="background:#172a1f;border:1px solid #2f5f48;color:#a8d8b8;font-size:11px;padding:4px 9px;
-                 border-radius:7px;cursor:pointer;flex-shrink:0">Show numeric fingerprint</button>
+                 border-radius:7px;cursor:pointer;flex-shrink:0">Show safety number</button>
       </div>
       <div id="enc-signal-safety-wrap" style="display:none">
         <div id="enc-signal-safety-number"
@@ -9113,7 +9142,7 @@ window.ConnErr = (function(){
           <span style="color:#666">Loading…</span>
         </div>
         <div style="font-size:11px;color:#7a8a82;margin-top:9px;line-height:1.5">
-          Both people should see identical 60 digits. If they don't match — or change unexpectedly — your session may have been tampered with.
+          Both people should see identical 60 digits. If they don't match — or change unexpectedly — your session may have been tampered with, or the other side reinstalled / wiped keys.
         </div>
       </div>
     </div>

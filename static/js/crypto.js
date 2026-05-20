@@ -444,10 +444,21 @@ const Crypto = (() => {
   }
 
   /**
-   * Telegram-style emoji fingerprint for DM key verification.
-   * Both peers compute identical output because it derives only from the
-   * sorted lowercase nickname pair, which is also how the DM AES key is
-   * seeded. If two users see the same 4 emojis, nobody is MITMing them.
+   * DEPRECATED — kept only to avoid breaking older cached UI code paths.
+   *
+   * This function derives 4 emoji from the sorted lowercase nickname
+   * pair (SHA-256 of `"frogtalk-fingerprint-v1::" + sorted`). It does
+   * NOT bind to any cryptographic identity key — two users with the
+   * same nickname pair will always see the same emojis even if the
+   * underlying identity keys were swapped by an active MITM. It also
+   * collides trivially when a nickname is reused.
+   *
+   * The DM verification modal now shows ONLY the Signal-compatible
+   * 60-digit safety number (`Signal.safetyNumberWith`) which is
+   * derived from sort(identity_key_A || identity_key_B). New code
+   * MUST NOT rely on `Crypto.fingerprint` for any security claim.
+   *
+   * @deprecated Use `Signal.safetyNumberWith(peerUserId)` instead.
    * @param {string} userA
    * @param {string} userB
    * @returns {Promise<string[]>} array of 4 emoji characters

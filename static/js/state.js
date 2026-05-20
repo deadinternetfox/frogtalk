@@ -329,6 +329,24 @@ try { if (typeof window !== 'undefined') window.Css = Css; } catch {}
 // apiFetch() — authenticated fetch using current State.token.
 // Signals ConnErr on network-level failures (TypeError) so the retry overlay
 // appears after repeated offline failures.
+//
+// SECURITY-PASS-2 (HIGH-2): we now also include credentials so the
+// HttpOnly `ft_session` cookie set on login goes out on every request.
+// The legacy `X-Session-Token` header is still sent (the SPA still
+// keeps a JS-readable copy in State.token for now, gated behind a
+// future cleanup commit) so the server happily auths either way.
+// CSRF: when the request is a mutating method (POST/PUT/PATCH/DELETE)
+// and we have a JS-readable `ft_csrf` cookie, echo it back into the
+// `X-CSRF-Token` header. The server's CSRF middleware only enforces
+// when authentication comes from the cookie, but adding the header
+// unconditionally is cheap and forward-compatible.
+function _ftReadCookie(name) {
+  try {
+    const v = ('; ' + (document.cookie || '')).split('; ' + name + '=');
+    if (v.length === 2) return decodeURIComponent(v.pop().split(';').shift());
+  } catch {}
+  return '';
+}
 async function apiFetch (url, method = 'GET', body = null) {
   const authHeaders = { 'X-Session-Token': State.token || '' };
   // Back-compat: many callers pass a fetch-style options object as the 2nd
@@ -340,8 +358,20 @@ async function apiFetch (url, method = 'GET', body = null) {
   // by hand.
   const _pinRetried = !!(isOptsObject && method && method._pinRetried);
   const opts = isOptsObject
-    ? { ...method, method: method.method || 'GET', headers: { ...(method.headers || {}), ...authHeaders } }
-    : { method, headers: authHeaders };
+    ? { ...method, method: method.method || 'GET', credentials: 'include',
+        headers: { ...(method.headers || {}), ...authHeaders } }
+    : { method, credentials: 'include', headers: authHeaders };
+  // CSRF: attach double-submit token for mutating methods. The cookie
+  // is HMAC(session_token, FROGTALK_CSRF_SECRET) and the server
+  // recomputes + compares. Missing cookie just skips — pure-header
+  // auth paths don't need CSRF (custom header trips CORS preflight).
+  const _verb = String(opts.method || 'GET').toUpperCase();
+  if (_verb !== 'GET' && _verb !== 'HEAD' && _verb !== 'OPTIONS') {
+    const csrf = _ftReadCookie('ft_csrf');
+    if (csrf && !opts.headers['X-CSRF-Token']) {
+      opts.headers['X-CSRF-Token'] = csrf;
+    }
+  }
   if (body && String(opts.method).toUpperCase() !== 'GET') {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);

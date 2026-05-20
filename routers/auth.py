@@ -722,7 +722,10 @@ async def register(
         except Exception:
             _log.exception("register: peer fanout failed")
     token = _create_session_with_meta(request, user_id)
-    return _auth_session_response(user_id, token)
+    payload = _auth_session_response(user_id, token)
+    resp = JSONResponse(content=payload)
+    _attach_session_cookies(resp, request, token)
+    return resp
 
 
 @router.post("/login")
@@ -789,13 +792,24 @@ async def login(request: Request, body: LoginRequest):
     if nick_key:
         _login_clear_failures(nick_key)
     token = _create_session_with_meta(request, user["id"])
-    return _auth_session_response(user["id"], token)
+    payload = _auth_session_response(user["id"], token)
+    resp = JSONResponse(content=payload)
+    _attach_session_cookies(resp, request, token)
+    return resp
 
 
 def _auth_session_response(user_id: int, token: str) -> dict:
     """Login/ticket payload — always include server-stored presence + status."""
     ident = db.get_user_by_id(user_id) or {}
     return {
+        # NOTE: token is still echoed in the JSON body for back-compat with
+        #   * existing native/Electron/Android clients that store it
+        #   * bots / API consumers
+        # The browser SPA now ALSO receives an HttpOnly `ft_session`
+        # cookie (set by the route handler via response.set_cookie); the
+        # SPA will prefer the cookie path going forward. Once all
+        # browser clients have migrated, the json token field can be
+        # removed for SPA flows.
         "token": token,
         "nickname": ident.get("nickname") or "",
         "display_name": ident.get("display_name"),
@@ -807,6 +821,103 @@ def _auth_session_response(user_id: int, token: str) -> dict:
         "presence": ident.get("presence") or "online",
         "status_msg": ident.get("status_msg") or "",
     }
+
+
+# ── HIGH-2: HttpOnly session cookie helpers ─────────────────────────────────
+# We set the session token in two places:
+#   1. The legacy JSON body (`token`) so existing clients keep working.
+#   2. A new HttpOnly cookie `ft_session` so XSS cannot read it from JS.
+#
+# When the SPA stops persisting the JSON token to localStorage (a separate
+# frontend change), the cookie alone keeps the session alive. Server-side
+# `deps.get_current_user` already accepts both the header and the cookie.
+#
+# Cookie flags:
+#   * HttpOnly       — JS cannot read it (defeats XSS-driven token theft).
+#   * Secure         — only sent over HTTPS in production (auto-detected).
+#   * SameSite=Lax   — blocks cross-origin POST CSRF for top-level
+#                      navigation but still lets in legitimate same-site
+#                      mutating requests. We pair this with a CSRF
+#                      double-submit token on mutating requests
+#                      (X-CSRF-Token) for defense in depth.
+#   * Path=/         — covers the whole app.
+#   * Max-Age        — matches the DB session TTL (30 days; see
+#                      database._SESSION_TTL).
+import os as _auth_os  # local import alias to avoid colliding with the top-level
+_COOKIE_NAME = "ft_session"
+_CSRF_COOKIE_NAME = "ft_csrf"
+_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+
+
+def _cookie_is_secure(request: Request) -> bool:
+    """Set `secure` only when the request actually arrived over HTTPS.
+    Local http://localhost dev must still receive the cookie; otherwise
+    the SPA can't authenticate during local testing. Production behind
+    Cloudflare/nginx sets `X-Forwarded-Proto: https`.
+    """
+    try:
+        if request.url.scheme == "https":
+            return True
+        if (request.headers.get("x-forwarded-proto") or "").lower() == "https":
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _attach_session_cookies(response, request: Request, token: str) -> None:
+    """Set the HttpOnly session cookie AND a sibling CSRF cookie.
+
+    The CSRF cookie is intentionally NOT HttpOnly — JS must be able to
+    read it to echo back into the `X-CSRF-Token` header on mutating
+    requests (double-submit pattern). The CSRF value is HMAC-derived
+    from the session token + a server-only secret so a CSRF cookie
+    from a different session can't be reused.
+    """
+    secure = _cookie_is_secure(request)
+    # Session cookie — HttpOnly, locked-down.
+    try:
+        response.set_cookie(
+            key=_COOKIE_NAME,
+            value=token,
+            max_age=_COOKIE_MAX_AGE,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+        )
+    except Exception:
+        # Don't break the login response if the framework chokes on a
+        # cookie flag combination — the JSON `token` body fallback
+        # still gives the client a usable session.
+        _log.exception("auth: failed to set ft_session cookie")
+    # CSRF cookie — readable by JS, value derived from token via HMAC
+    # so it's bound to the session and can be regenerated server-side
+    # for comparison without server state.
+    try:
+        import hmac as _hmac
+        import hashlib as _hashlib
+        secret = (_auth_os.getenv("FROGTALK_CSRF_SECRET") or _auth_os.getenv("FROGTALK_SESSION_SECRET") or "frogtalk-csrf-derive-v1").encode("utf-8")
+        csrf = _hmac.new(secret, token.encode("utf-8"), _hashlib.sha256).hexdigest()
+        response.set_cookie(
+            key=_CSRF_COOKIE_NAME,
+            value=csrf,
+            max_age=_COOKIE_MAX_AGE,
+            httponly=False,  # JS reads it intentionally
+            secure=secure,
+            samesite="lax",
+            path="/",
+        )
+    except Exception:
+        _log.exception("auth: failed to set ft_csrf cookie")
+
+
+def _clear_session_cookies(response) -> None:
+    try:
+        response.delete_cookie(_COOKIE_NAME, path="/")
+        response.delete_cookie(_CSRF_COOKIE_NAME, path="/")
+    except Exception:
+        pass
 
 
 @router.post("/federation-ticket")
@@ -859,7 +970,10 @@ async def login_with_federation_ticket(
         })
 
     token = _create_session_with_meta(request, user["id"])
-    return _auth_session_response(user["id"], token)
+    payload_out = _auth_session_response(user["id"], token)
+    resp = JSONResponse(content=payload_out)
+    _attach_session_cookies(resp, request, token)
+    return resp
 
 
 class FederationProvisionRequest(BaseModel):
@@ -911,6 +1025,7 @@ async def federation_provision(request: Request, body: FederationProvisionReques
 
 @router.post("/logout")
 async def logout(
+    request: Request,
     x_session_token: str = Header(None, alias="X-Session-Token"),
     current_user: dict = Depends(get_current_user),
 ):
@@ -919,7 +1034,15 @@ async def logout(
 
     Also drops the user's FCM/push tokens so a stolen device push token
     can't keep receiving notifications after the user signs out."""
+    # Cover both auth paths: a SPA request will have the cookie set but
+    # may not echo X-Session-Token (after the SPA migration), and a
+    # legacy/native client will only have the header.
     token = (x_session_token or "").strip()
+    if not token:
+        try:
+            token = (request.cookies.get(_COOKIE_NAME) or "").strip()
+        except Exception:
+            token = ""
     if token:
         await asyncio.to_thread(db.delete_session, token)
         invalidate_token_cache(token)
@@ -932,7 +1055,9 @@ async def logout(
         await asyncio.to_thread(db.delete_user_fcm_tokens, current_user["id"])
     except Exception:
         _log.exception("logout: fcm token purge failed for user_id=%s", current_user.get("id"))
-    return {"ok": True}
+    resp = JSONResponse(content={"ok": True})
+    _clear_session_cookies(resp)
+    return resp
 
 
 @router.get("/sessions")
