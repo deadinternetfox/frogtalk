@@ -3979,6 +3979,13 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 .chat-share-embed-logo{
   font-size:18px;flex-shrink:0;opacity:.7;line-height:1;
 }
+.chat-share-embed-music-ico{
+  display:inline-block;margin-right:5px;font-size:11px;line-height:1;
+  opacity:.9;vertical-align:0.05em;flex-shrink:0;
+}
+.chat-share-embed.is-music .chat-share-embed-label{
+  display:inline-flex;align-items:center;gap:0;min-width:0;
+}
 .chat-share-embed-caption{
   padding:0 12px 10px;font-size:13px;line-height:1.45;color:color-mix(in srgb,var(--text-color) 88%,var(--text-muted));
   white-space:pre-wrap;word-wrap:break-word;
@@ -4054,6 +4061,12 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   display:flex;align-items:center;justify-content:flex-end;gap:8px;
   padding:6px 12px 0;
 }
+.chat-share-embed.is-music .chat-share-music-actions{
+  padding:10px 16px 6px;
+}
+.chat-share-embed.is-music .embed-send-player{
+  margin:0 2px 2px 0;padding:3px 8px;
+}
 .chat-share-embed-foot{
   padding:8px 12px 10px;font-size:11px;color:color-mix(in srgb,var(--accent-color) 70%,white);
   text-transform:uppercase;letter-spacing:0.5px;font-weight:600;
@@ -4073,7 +4086,6 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 }
 .chat-share-embed.is-music .chat-share-embed-head{padding:12px 14px 10px}
 .chat-share-embed.is-music .chat-share-embed-caption{padding:0 14px 10px}
-.chat-share-embed.is-music .chat-share-music-actions{padding:8px 14px 0}
 .chat-share-embed.is-music .chat-share-embed-foot{padding:10px 14px 12px}
 .chat-share-embed.is-music:hover{
   border-color:var(--accent-color);

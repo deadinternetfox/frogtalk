@@ -871,7 +871,7 @@ const Messages = (() => {
     if (!caption) {
       if (isImage) caption = '📷 Photo post';
       else if (isVideo) caption = kind === 'reel' ? '🎬 Watch this reel' : '🎬 Video post';
-      else if (isMusic) caption = '🎵 Music post';
+      else if (isMusic) caption = 'Music post';
       else caption = 'Open in Frog Social';
     }
     const safeCap = UI.escHtml(caption.substring(0, 220));
@@ -978,10 +978,11 @@ const Messages = (() => {
         `<div class="chat-share-embed-head">` +
           `<div class="chat-share-embed-avatar">${avatar}</div>` +
           `<div class="chat-share-embed-meta">` +
-            `<div class="chat-share-embed-label">${UI.escHtml(label)}</div>` +
+            `<div class="chat-share-embed-label">` +
+              (isMusic ? `<span class="chat-share-embed-music-ico" aria-hidden="true">🎵</span>` : '') +
+              `${UI.escHtml(label)}</div>` +
             `<div class="chat-share-embed-name">@${nick}</div>` +
           `</div>` +
-          (isMusic ? `<div class="chat-share-embed-logo" aria-hidden="true">🎵</div>` : '') +
         `</div>` +
         (caption ? `<div class="chat-share-embed-caption">${safeCap}</div>` : '') +
         mediaHtml +
