@@ -1,0 +1,74 @@
+# LOW-G1: keep secrets, build artifacts, and the runtime database out of
+# any docker build context. Without this, the entire ~200 MB of state
+# (including data/frogtalk.db, secrets/*, .env, etc.) ended up in the
+# image cache and could ship to a registry.
+
+# ── Version control & editor ────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+
+# ── Local data / runtime state ──────────────────────────────────────
+data/
+secrets/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.bootstrap_admin_password
+
+# ── Local secrets — never bake these into an image ──────────────────
+.env
+.env.*
+!.env.example
+deploy/env.example
+firebase-service-account*.json
+google-services.json
+apns*.p8
+*.pem
+*.key
+*.crt
+
+# ── Python / build artefacts ────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage*
+htmlcov/
+build/
+dist/
+*.egg-info/
+venv/
+.venv/
+
+# ── Frontend bundles + heavy desktop / android artifacts ───────────
+desktop/dist/
+desktop/out/
+android/build/
+android/app/build/
+node_modules/
+static/*.apk
+static/*.AppImage
+static/*.deb
+static/*.exe
+static/*.zip
+static/*.dmg
+static/*.snap
+static/*.tar.gz
+
+# ── Logs & temp ─────────────────────────────────────────────────────
+*.log
+logs/
+tmp/
+.tmp/
