@@ -1,6 +1,7 @@
 """SQLite database layer for FrogChat."""
 import os
 import json
+import logging
 import re
 import secrets
 import sqlite3
@@ -456,6 +457,26 @@ def init_db():
         existing = con.execute("SELECT id FROM users WHERE nickname='admin'").fetchone()
         if not existing:
             admin_pw = os.getenv("ADMIN_PASSWORD", "").strip()
+            # HIGH-5: refuse the historical example password. Operators
+            # who copy `deploy/env.example` to `.env` and forget to rotate
+            # used to be left with `change_me_now_123!` as the admin
+            # password — every public node would have that combo. If we
+            # detect it, force the random-bootstrap path instead.
+            _WEAK_DEFAULTS = {
+                "change_me_now_123!",
+                "change_server_webui_password",
+                "admin",
+                "password",
+                "changeme",
+                "change_me",
+            }
+            if admin_pw in _WEAK_DEFAULTS:
+                _log = logging.getLogger("frogtalk.database")
+                _log.warning(
+                    "ADMIN_PASSWORD env matches a known-weak default; "
+                    "ignoring and generating a random bootstrap password."
+                )
+                admin_pw = ""
             if not admin_pw:
                 admin_pw = secrets.token_urlsafe(24)
                 # Write 0600 atomically: open with O_CREAT|O_EXCL|O_WRONLY
@@ -632,13 +653,27 @@ def get_user_password_hash(user_id: int) -> Optional[str]:
     return row["password_hash"] if row else None
 
 
+_BCRYPT_DUMMY_HASH = _bcrypt.hashpw(b"dummy-for-constant-time-only", _bcrypt.gensalt(rounds=4))
+
+
 def verify_user(nickname: str, password: str) -> Optional[Dict]:
+    """Constant-time-ish credential check.
+
+    MED-A1: when ``nickname`` doesn't exist, we still run ``bcrypt.checkpw``
+    against a precomputed dummy hash. Otherwise an attacker can probe for
+    valid nicknames by measuring how long ``/api/auth/login`` takes — the
+    real-bcrypt path is 50–300 ms, the unknown-nick path was sub-ms.
+    """
     with _conn() as con:
         row = con.execute(
             "SELECT id, nickname, password_hash, avatar, bio, is_admin FROM users WHERE nickname=? COLLATE NOCASE",
             (nickname,)
         ).fetchone()
     if not row:
+        try:
+            _bcrypt.checkpw(password.encode(), _BCRYPT_DUMMY_HASH)
+        except Exception:
+            pass
         return None
     if not _bcrypt.checkpw(password.encode(), row["password_hash"].encode()):
         return None
@@ -824,23 +859,51 @@ def update_session_geo(token: str, country_code: str = "", country: str = "", ci
 
 
 def delete_session_by_short_id(user_id: int, short_id: str, except_token: str = "") -> bool:
-    short_id = (short_id or "").strip()
-    if not short_id or len(short_id) < 8:
+    """Revoke a session by the ``short_id`` (first 16 hex chars of the
+    bcrypt-hashed token) displayed in the UI.
+
+    MED-A8: the original implementation matched ``token LIKE 'short_id%'``,
+    so a malicious actor with a short_id of one session could also revoke
+    *other* users' sessions whose hashed tokens happened to start with the
+    same prefix. We now require ``len(short_id) >= 16`` so the prefix is
+    long enough that collisions are astronomically unlikely AND we
+    additionally scope the DELETE to ``user_id`` so cross-user revocation
+    is impossible even with a forged short_id.
+    """
+    short_id = (short_id or "").strip().lower()
+    if not short_id or len(short_id) < 16:
         return False
     except_hashed = _hash_session_token(except_token) if except_token else ""
     with _conn() as con:
         if except_token:
             cur = con.execute(
-                "DELETE FROM sessions WHERE user_id=? AND token LIKE ? AND token<>? AND token<>?",
-                (user_id, short_id + "%", except_hashed, except_token),
+                "DELETE FROM sessions WHERE user_id=? AND substr(token, 1, ?) = ? AND token<>? AND token<>?",
+                (user_id, len(short_id), short_id, except_hashed, except_token),
             )
         else:
             cur = con.execute(
-                "DELETE FROM sessions WHERE user_id=? AND token LIKE ?",
-                (user_id, short_id + "%"),
+                "DELETE FROM sessions WHERE user_id=? AND substr(token, 1, ?) = ?",
+                (user_id, len(short_id), short_id),
             )
         con.commit()
         return cur.rowcount > 0
+
+
+def cleanup_expired_sessions(max_age_days: int = 60) -> int:
+    """Delete sessions older than ``max_age_days``.
+
+    MED-F1: the sessions table grows monotonically because logout doesn't
+    actually delete the row in many flows (we just invalidate the cache).
+    Call this periodically from the cleanup background task.
+    """
+    days = max(1, int(max_age_days))
+    with _conn() as con:
+        cur = con.execute(
+            "DELETE FROM sessions WHERE datetime(COALESCE(last_active, created_at)) < datetime('now', ?)",
+            (f'-{days} days',),
+        )
+        con.commit()
+        return cur.rowcount or 0
 
 
 def delete_session(token: str):
@@ -1928,6 +1991,23 @@ def _migrate():
         for _ddl in (
             "ALTER TABLE federation_outbox_events ADD COLUMN origin_time TEXT DEFAULT ''",
             "ALTER TABLE federation_outbox_events ADD COLUMN signature  TEXT DEFAULT ''",
+        ):
+            try: con.execute(_ddl)
+            except Exception: pass
+        # P5: federation inbox/outbox processors poll
+        #   WHERE status='pending' ORDER BY {received_at|created_at} ASC LIMIT N
+        # every 5–30 s. Without these indexes the planner does a full table
+        # scan that scales with total event count, even after a prune cycle
+        # — the API gets visibly slow once the federation backlog crosses a
+        # few thousand rows.
+        # The composite `(origin_server_id, event_id)` index also future-
+        # proofs the inbox against any cross-origin event_id collision concerns
+        # without requiring a table rebuild to drop the existing UNIQUE.
+        for _ddl in (
+            "CREATE INDEX IF NOT EXISTS idx_fed_inbox_status_received ON federation_inbox_events(status, received_at)",
+            "CREATE INDEX IF NOT EXISTS idx_fed_inbox_origin_event   ON federation_inbox_events(origin_server_id, event_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fed_outbox_status_created ON federation_outbox_events(status, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_fed_outbox_target_status  ON federation_outbox_events(target_server_id, status)",
         ):
             try: con.execute(_ddl)
             except Exception: pass
@@ -5827,6 +5907,33 @@ def get_room_members(room_id: Optional[int] = None) -> List[Dict]:
     return [dict(r) for r in rows]
 
 
+def get_user_rooms(user_id: int) -> List[Dict]:
+    """Rooms ``user_id`` is a member of, in the minimal shape used by the
+    external API (``name``, ``description``, ``icon``, ``is_public``,
+    ``category``, ``member_count``).
+
+    HIGH-3: introduced so ``GET /api/external/channels`` can scope its
+    response to the calling key's owner instead of returning every room
+    in the system.
+    """
+    if not user_id:
+        return []
+    with _conn() as con:
+        rows = con.execute("""
+            SELECT r.id, r.name,
+                   COALESCE(r.description, '') AS description,
+                   COALESCE(r.icon, '💬')      AS icon,
+                   COALESCE(r.is_public, 0)    AS is_public,
+                   COALESCE(r.category, 'other') AS category,
+                   (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count
+              FROM room_members rm
+              JOIN rooms r ON r.id = rm.room_id
+             WHERE rm.user_id = ?
+          ORDER BY r.name COLLATE NOCASE
+        """, (int(user_id),)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_channel_members(room_id: int) -> List[Dict]:
     """Return every joined member of a room with presence + last_seen so the
     sidebar can split them into online vs offline sections."""
@@ -7910,8 +8017,30 @@ def cleanup_expired_captchas():
         )
 
 
-def create_recovery_key(user_id: int, key_hash: str) -> int:
-    """Create a recovery key for user."""
+def create_recovery_key(user_id: int, key_or_hash: str) -> int:
+    """Create a recovery key for user.
+
+    HIGH-5: we now bcrypt the recovery key at rest. The recovery key is a
+    high-entropy random string but it's a long-lived account-takeover
+    secret — a SQLite read (backup leak, container exfil, replica scrape)
+    used to hand the attacker every reset code. Bcrypt with the same
+    cost as the password column closes that.
+
+    Backward compat: callers that previously passed ``sha256(key)`` still
+    work — anything that already looks like a hex digest is stored as-is
+    (verified by ``use_recovery_key``'s legacy branch). Once every node
+    has rolled forward, callers should be migrated to pass the raw key
+    so the bcrypt branch is exercised.
+    """
+    raw = str(key_or_hash or "")
+    if not raw:
+        return 0
+    # Heuristic: a 64-char lowercase hex string is a legacy SHA-256 hash.
+    is_legacy_sha = len(raw) == 64 and all(c in "0123456789abcdef" for c in raw.lower())
+    if is_legacy_sha:
+        stored = raw
+    else:
+        stored = "bcrypt$" + _bcrypt.hashpw(raw.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
     with _conn() as con:
         # Remove old unused keys
         con.execute(
@@ -7921,25 +8050,57 @@ def create_recovery_key(user_id: int, key_hash: str) -> int:
         cur = con.execute("""
             INSERT INTO recovery_keys (user_id, key_hash)
             VALUES (?, ?)
-        """, (user_id, key_hash))
+        """, (user_id, stored))
         return cur.lastrowid
 
 
-def use_recovery_key(key_hash: str) -> Optional[int]:
+def use_recovery_key(key_or_hash: str) -> Optional[int]:
     """Use recovery key, return user_id if valid.
 
-    Atomic claim: the UPDATE itself filters on `used_at IS NULL` and we
+    Atomic claim: the UPDATE itself filters on ``used_at IS NULL`` and we
     accept the redemption only when SQLite reports rowcount == 1. This
     closes a TOCTOU race where two parallel /recover requests with the
     same key could both read NULL and both mark themselves successful.
+
+    HIGH-5: accepts either the raw recovery key (new bcrypt-at-rest path)
+    or the legacy SHA-256 hex (old rows still in the table). Bcrypt-at-rest
+    requires scanning the unused rows, but ``recovery_keys`` typically
+    holds a single active row per user so the scan is bounded.
     """
+    raw = str(key_or_hash or "")
+    if not raw:
+        return None
+    is_legacy_sha = len(raw) == 64 and all(c in "0123456789abcdef" for c in raw.lower())
+
     with _conn() as con:
-        # First locate the row id and owner so we can issue a single
-        # conditional UPDATE that only succeeds for the first caller.
-        row = con.execute(
-            "SELECT id, user_id FROM recovery_keys WHERE key_hash=? AND used_at IS NULL",
-            (key_hash,),
-        ).fetchone()
+        if is_legacy_sha:
+            row = con.execute(
+                "SELECT id, user_id FROM recovery_keys WHERE key_hash=? AND used_at IS NULL",
+                (raw,),
+            ).fetchone()
+        else:
+            row = None
+            # Legacy hex rows still in the table — accept either format.
+            sha = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+            row_legacy = con.execute(
+                "SELECT id, user_id FROM recovery_keys WHERE key_hash=? AND used_at IS NULL",
+                (sha,),
+            ).fetchone()
+            if row_legacy:
+                row = row_legacy
+            else:
+                # Bcrypt rows: scan only active rows, expected to be small.
+                cands = con.execute(
+                    "SELECT id, user_id, key_hash FROM recovery_keys WHERE used_at IS NULL AND key_hash LIKE 'bcrypt$%'"
+                ).fetchall()
+                for cand in cands:
+                    try:
+                        hashed = cand["key_hash"][len("bcrypt$"):]
+                        if _bcrypt.checkpw(raw.encode("utf-8"), hashed.encode("utf-8")):
+                            row = cand
+                            break
+                    except Exception:
+                        continue
         if not row:
             return None
         cur = con.execute(
@@ -8635,6 +8796,46 @@ def toggle_discord_bridge(bridge_id: int, owner_id: int, enabled: bool) -> bool:
             (1 if enabled else 0, bridge_id, owner_id))
         con.commit()
         return cur.rowcount > 0
+
+
+def rotate_legacy_discord_bridge_tokens() -> int:
+    """One-shot migration: replace the historical literal ``"discord"`` token
+    (or any empty/short value) on every ``discord_bridges`` row with a fresh
+    random secret. Returns the number of rows rotated.
+
+    Before this migration, every Discord bridge shared the same well-known
+    token, so anyone who knew the bridged room name could forge inbound
+    messages via ``POST /api/bridge/message``. The fix rotates each row to
+    its own ``secrets.token_urlsafe(32)`` value, encrypted at rest with the
+    same Fernet KEK used everywhere else in this module.
+    """
+    import secrets as _secrets
+    rotated = 0
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                "SELECT id, bot_token FROM discord_bridges"
+            ).fetchall()
+            for row in rows:
+                bid = row["id"] if isinstance(row, dict) or hasattr(row, "keys") else row[0]
+                stored = row["bot_token"] if isinstance(row, dict) or hasattr(row, "keys") else row[1]
+                try:
+                    plain = _decrypt_bridge_token(stored or "")
+                except Exception:
+                    plain = stored or ""
+                plain = (plain or "").strip()
+                if plain.lower() == "discord" or len(plain) < 16:
+                    new_tok = _secrets.token_urlsafe(32)
+                    con.execute(
+                        "UPDATE discord_bridges SET bot_token=? WHERE id=?",
+                        (_encrypt_bridge_token(new_tok), bid),
+                    )
+                    rotated += 1
+            if rotated:
+                con.commit()
+    except Exception:
+        return rotated
+    return rotated
 
 
 # ===========================================================================

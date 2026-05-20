@@ -64,9 +64,9 @@ from routers import proxy as proxy_mod
 from routers import signal as signal_mod
 
 import asyncio
-from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories, cleanup_inactive_public_rooms, wal_checkpoint_truncate
+from database import cleanup_expired_dm_messages, cleanup_expired_captchas, cleanup_expired_stories, cleanup_inactive_public_rooms, cleanup_expired_sessions, wal_checkpoint_truncate
 
-from deps import client_ip, pin_gate
+from deps import client_ip, pin_gate, admin_pin_gate
 limiter = Limiter(key_func=client_ip)
 
 
@@ -83,6 +83,16 @@ async def cleanup_task():
             if deleted > 0:
                 _log.info("Cleanup deleted %d expired DM messages", deleted)
             await asyncio.to_thread(cleanup_expired_captchas)
+            try:
+                # MED-F1: prune sessions that haven't been used in 60+ days.
+                # Sessions get inserted on every login but are rarely
+                # actively revoked; this keeps the table (and the
+                # rate-limit / PIN-state hashes derived from it) bounded.
+                pruned_sessions = await asyncio.to_thread(cleanup_expired_sessions, 60)
+                if pruned_sessions:
+                    _log.info("Cleanup deleted %d expired sessions", pruned_sessions)
+            except Exception:
+                _log.exception("session cleanup error")
             try:
                 await asyncio.to_thread(cleanup_expired_stories)
             except Exception:
@@ -236,6 +246,17 @@ async def _run_boot_sync_nonblocking():
 async def _start_discord_bridge_nonblocking():
     """Start Discord bridge with timeout guard so startup cannot deadlock."""
     try:
+        # CRIT-1: rotate any historical bridges that still carry the
+        # well-known literal `"discord"` token before the bot reloads
+        # bridge state, so the new per-bridge secret is what gets sent
+        # on the first inbound message after restart.
+        try:
+            from database import rotate_legacy_discord_bridge_tokens
+            rotated = await asyncio.to_thread(rotate_legacy_discord_bridge_tokens)
+            if rotated:
+                _log.info("Discord bridge: rotated %d legacy bridge token(s)", rotated)
+        except Exception:
+            _log.exception("Discord bridge: legacy token rotation failed")
         from bridge_discord import start_discord_bridge
         await asyncio.wait_for(start_discord_bridge(), timeout=10)
     except asyncio.TimeoutError:
@@ -803,7 +824,11 @@ async def _security_headers(request: Request, call_next):
         host_hdr = (request.headers.get("host") or "").lower()
         fwd_host = (request.headers.get("x-forwarded-host") or "").lower()
         is_onion = host_hdr.endswith(".onion") or fwd_host.endswith(".onion")
-        is_tor_node = os.getenv("FROGTALK_TOR_MODE", "").strip() in ("1", "true", "yes", "on")
+        # HIGH-14: treat TOR_MODE and TOR_ENABLED as equivalent.
+        is_tor_node = (
+            os.getenv("FROGTALK_TOR_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+            or os.getenv("FROGTALK_TOR_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+        )
         if is_onion or is_tor_node:
             response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
     except Exception:
@@ -857,7 +882,13 @@ app.include_router(social_mod.router, prefix="/api", dependencies=_PIN_GATED)
 # their own `Depends(get_current_user)` per-route.
 app.include_router(bridge_mod.router, prefix="/api")
 app.include_router(calls_mod.router, prefix="/api", dependencies=_PIN_GATED)
-app.include_router(admin_mod.router, prefix="/api", dependencies=_PIN_GATED)
+# HIGH-1: admin moderation endpoints get the stricter `admin_pin_gate`
+# *in addition to* the regular PIN gate. The stricter gate honors
+# `pin_require_for_admin`, which was previously enforced only in the
+# browser via `static/js/pin.js` `gateAdmin()`. A stolen session token
+# can no longer call `POST /api/admin/ban/{nick}` without a recent PIN
+# verification when the user has opted into admin re-prompting.
+app.include_router(admin_mod.router, prefix="/api", dependencies=_PIN_GATED + [Depends(admin_pin_gate)])
 app.include_router(federation_mod.router, prefix="/api")
 app.include_router(server_admin_mod.router)
 app.include_router(bug_reports_mod.router, prefix="/api")
@@ -1997,7 +2028,10 @@ async def serve_robots(request: Request):
     host_hdr = (request.headers.get("host") or "").lower()
     fwd_host = (request.headers.get("x-forwarded-host") or "").lower()
     is_onion = host_hdr.endswith(".onion") or fwd_host.endswith(".onion")
-    is_tor_node = os.getenv("FROGTALK_TOR_MODE", "").strip() in ("1", "true", "yes", "on")
+    is_tor_node = (
+        os.getenv("FROGTALK_TOR_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+        or os.getenv("FROGTALK_TOR_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+    )
     if is_onion or is_tor_node:
         from fastapi.responses import Response
         body = (
@@ -2069,7 +2103,10 @@ async def serve_llms_txt(request: Request):
     host_hdr = (request.headers.get("host") or "").lower()
     fwd_host = (request.headers.get("x-forwarded-host") or "").lower()
     is_onion = host_hdr.endswith(".onion") or fwd_host.endswith(".onion")
-    is_tor_node = os.getenv("FROGTALK_TOR_MODE", "").strip() in ("1", "true", "yes", "on")
+    is_tor_node = (
+        os.getenv("FROGTALK_TOR_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+        or os.getenv("FROGTALK_TOR_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+    )
     if is_onion or is_tor_node:
         from fastapi.responses import Response
         body = (

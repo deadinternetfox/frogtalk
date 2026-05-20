@@ -33,6 +33,11 @@ router = APIRouter(tags=["bridge"])
 _pending_codes: dict = {}
 _CODE_TTL = 15 * 60  # 15 minutes
 
+# HIGH-10: hard cap on inbound bridge ``data:`` URLs (covers media_url and
+# sender_avatar both). Rendered in base64 so a "10 MB image" is ~13.3 MB
+# of URL. 8 MB of URL ≈ 6 MB of binary, which is generous for chat media.
+_BRIDGE_DATA_URL_MAX = 8 * 1024 * 1024
+
 
 def _discord_client_id_from_token(token: str) -> Optional[str]:
     """Best-effort extract Discord bot user/client id from token prefix.
@@ -652,7 +657,11 @@ async def discord_bridge_prepare_code(body: PrepareDiscordCodeRequest,
         "platform": "discord",
         "room_name": body.room_name,
         "owner_id": current_user["id"],
-        "bot_token": "discord",
+        # Per-bridge random secret so inbound /api/bridge/message can't be
+        # forged by anyone who guesses the room name. Stored in the
+        # discord_bridges row (Fernet-encrypted if BRIDGE_KEK is set) at
+        # claim time and pulled by the Discord bot via load_bridges().
+        "bot_token": secrets.token_urlsafe(32),
         "bot_name": body.bot_name or "Discord Bridge",
         "expires_at": time.time() + _CODE_TTL,
         "status": "pending",
@@ -693,7 +702,7 @@ async def discord_bridge_claim_code(body: ClaimDiscordCodeRequest, request: Requ
     bridge_id = db.create_discord_bridge(
         room_name=entry["room_name"],
         discord_channel_id=body.discord_channel_id,
-        bot_token="discord",
+        bot_token=entry.get("bot_token") or secrets.token_urlsafe(32),
         bot_name=entry.get("bot_name") or "Discord Bridge",
         owner_id=entry["owner_id"],
         discord_guild_id=body.discord_guild_id or 0,
@@ -774,15 +783,21 @@ async def create_discord_bridge_endpoint(body: CreateDiscordBridgeRequest, curre
     if (room.get("type") or "public") == "private":
         raise HTTPException(403, "Bridges are not available for private (E2EE) rooms")
     channel_id, guild_id = await _validate_discord_channel_access(body.discord_channel_id)
+    # LOW-I1: the manual create path previously referenced `details.get(...)`
+    # without ever fetching them; fall back to the validate snapshot.
+    try:
+        details = await _fetch_discord_channel_details(channel_id)
+    except Exception:
+        details = {}
     bridge_id = db.create_discord_bridge(
         room_name=body.room_name,
         discord_channel_id=channel_id,
-        bot_token="discord",
+        bot_token=secrets.token_urlsafe(32),
         bot_name=body.bot_name or "Discord Bridge",
         owner_id=current_user["id"],
         discord_guild_id=body.discord_guild_id or guild_id,
-        discord_channel_name=details.get("channel_name") or "",
-        discord_guild_name=details.get("guild_name") or "",
+        discord_channel_name=(details.get("channel_name") or "") if isinstance(details, dict) else "",
+        discord_guild_name=(details.get("guild_name") or "") if isinstance(details, dict) else "",
     )
     if not bridge_id:
         raise HTTPException(409, "Bridge already exists for this room/channel combination")
@@ -823,7 +838,14 @@ async def receive_bridge_message(request: Request, body: BridgeMessageRequest):
     else:
         candidates = []
     matched_bridge = None
-    supplied_token = (body.bridge_token or "").encode("utf-8")
+    supplied_token_raw = (body.bridge_token or "").strip()
+    # Defence-in-depth against the legacy literal `"discord"` token. Even
+    # after the startup migration rotates every existing row, refuse the
+    # well-known string outright so a stale node or a forgotten test fixture
+    # can't be tricked into accepting forged Discord messages.
+    if supplied_token_raw.lower() == "discord" or len(supplied_token_raw) < 16:
+        raise HTTPException(403, "Invalid bridge token")
+    supplied_token = supplied_token_raw.encode("utf-8")
     for b in candidates:
         stored = (b.get("bot_token") or "").encode("utf-8")
         ok = (
@@ -857,14 +879,23 @@ async def receive_bridge_message(request: Request, body: BridgeMessageRequest):
     # Scheme allow-list — reject javascript:/file:/etc. that could be
     # broadcast to clients. media_url may also be a data: URL (we decode
     # those server-side for Discord uploads); sender_avatar must be remote.
+    #
+    # HIGH-10: cap inbound ``data:`` URLs at _BRIDGE_DATA_URL_MAX bytes.
+    # Without this a compromised bridge bot could spam ``data:image/...``
+    # blobs that get base64-stored straight into the messages table and
+    # rebroadcast to every WebSocket on the room.
     if body.media_url:
         _mu = body.media_url.strip()
         if not (_mu.startswith("http://") or _mu.startswith("https://") or _mu.startswith("data:")):
             raise HTTPException(400, "Unsupported media_url scheme")
+        if _mu.startswith("data:") and len(_mu) > _BRIDGE_DATA_URL_MAX:
+            raise HTTPException(413, "media_url too large")
     if body.sender_avatar:
         _av = body.sender_avatar.strip()
         if not (_av.startswith("http://") or _av.startswith("https://") or _av.startswith("data:")):
             raise HTTPException(400, "Unsupported sender_avatar scheme")
+        if _av.startswith("data:") and len(_av) > _BRIDGE_DATA_URL_MAX:
+            raise HTTPException(413, "sender_avatar too large")
 
     # Honor direction setting: 'out' means FrogTalk→remote only, so we
     # deliberately drop inbound messages. 'both' / 'in' accept them.
@@ -1057,7 +1088,8 @@ def _match_bridge_token(body, platform: str) -> Optional[dict]:
 
 
 @router.post("/bridge/delete")
-async def bridge_delete_message(body: BridgeMutateRequest):
+@limiter.limit("120/minute")
+async def bridge_delete_message(request: Request, body: BridgeMutateRequest):
     """Mirror a remote-platform deletion onto the FrogTalk side.
 
     Resolves the (platform, remote_chat_id, remote_msg_id) → FT msg_id via
@@ -1125,7 +1157,8 @@ async def bridge_delete_message(body: BridgeMutateRequest):
 
 
 @router.post("/bridge/edit")
-async def bridge_edit_message(body: BridgeMutateRequest):
+@limiter.limit("120/minute")
+async def bridge_edit_message(request: Request, body: BridgeMutateRequest):
     """Mirror a remote-platform edit onto the FrogTalk side."""
     platform = (body.platform or "telegram").lower()
     if platform not in _ALLOWED_PLATFORMS:
