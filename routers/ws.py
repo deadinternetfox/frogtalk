@@ -1,4 +1,5 @@
 """WebSocket route - real-time messaging, DM delivery, WebRTC signaling."""
+import asyncio
 import json
 import logging
 import time
@@ -11,6 +12,13 @@ from ws_manager import manager, voice_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
+
+# HIGH-4: cap the number of concurrent worker threads we'll burn on
+# best-effort push notifications. Without a cap a sudden 1000-message
+# burst would spawn 1000 simultaneous FCM/APNs/web-push attempts and
+# starve the threadpool for legitimate request work.
+_PUSH_CONCURRENCY = 32
+_push_semaphore = asyncio.Semaphore(_PUSH_CONCURRENCY)
 
 MAX_MSG_LEN = 10_000
 MAX_MEDIA_BYTES = 20 * 1024 * 1024
@@ -67,6 +75,47 @@ def _ws_origin_allowed(websocket: WebSocket) -> bool:
     return False
 
 
+def _validate_call_participant(call_id: int, sender_id: int, to_id: int) -> bool:
+    """Reject WebRTC signaling messages whose ``call_id`` doesn't actually
+    bind the sender and the recipient.
+
+    HIGH-6: ``ice_candidate`` / ``call_answer`` / call_offer-renegotiate
+    used to forward any ``(call_id, to_id)`` pair the sender claimed —
+    so an authenticated attacker could spray ICE/SDP at any user by
+    guessing/observing a ``call_id`` and forging the ``from_*`` fields
+    the recipient renders in their incoming-call UI.
+
+    Returns False (drop the message) when:
+
+    * ``call_id`` is missing or doesn't exist;
+    * the sender isn't the caller or callee on the row;
+    * the recipient isn't the *other* participant; or
+    * the call is already closed (``rejected`` / ``ended`` / ``missed``).
+    """
+    if not call_id or not sender_id or not to_id:
+        return False
+    try:
+        with db._conn() as con:
+            row = con.execute(
+                "SELECT caller_id, callee_id, status FROM calls WHERE id=?",
+                (int(call_id),),
+            ).fetchone()
+    except Exception:
+        return False
+    if not row:
+        return False
+    caller_id = int(row["caller_id"] or 0)
+    callee_id = int(row["callee_id"] or 0)
+    status = (row["status"] or "").lower()
+    if status in {"rejected", "ended", "missed", "declined", "cancelled"}:
+        return False
+    if sender_id == caller_id and to_id == callee_id:
+        return True
+    if sender_id == callee_id and to_id == caller_id:
+        return True
+    return False
+
+
 def _resolve_to_id(data: dict) -> int:
     """Get target user_id from to_id or to_nickname field.
     Nickname lookup is case-insensitive."""
@@ -84,25 +133,51 @@ def _resolve_to_id(data: dict) -> int:
     return uid
 
 
+async def _push_bg(user_id: int, title: str, body: str, url: str, extra: dict) -> None:
+    """Worker coroutine: bounded by ``_push_semaphore`` so a message burst
+    can't spawn unlimited threads. ``send_push`` is synchronous (httpx
+    + FCM + APNs + web-push) so it must run off the event loop."""
+    async with _push_semaphore:
+        try:
+            from routers.push import send_push
+            await asyncio.to_thread(send_push, user_id, title, body, url, **extra)
+        except Exception:
+            logger.exception("background push failed for user=%s", user_id)
+
+
 def _push(user_id: int, title: str, body: str, url: str = "/app", **extra):
-    """Fire-and-forget web push when user is not online via WS."""
+    """Fire-and-forget web push when user is not online via WS.
+
+    HIGH-4: scheduled on the event loop and run in a worker thread. The
+    old implementation called ``send_push`` synchronously inside the
+    WebSocket coroutine, which blocked the entire loop for the duration
+    of the FCM/APNs round-trips (often 300–1500 ms).
+    """
     if manager.is_user_online(user_id):
         return  # already connected, no need for push
     try:
-        from routers.push import send_push
-        send_push(user_id, title, body, url, **extra)
-    except Exception:
-        pass
+        asyncio.create_task(_push_bg(user_id, title, body, url, extra))
+    except RuntimeError:
+        # No running loop (shouldn't happen in a WS context) — fall back
+        # to a direct sync call so we still attempt delivery.
+        try:
+            from routers.push import send_push
+            send_push(user_id, title, body, url, **extra)
+        except Exception:
+            pass
 
 
 def _push_always(user_id: int, title: str, body: str, url: str = "/app", **extra):
     """Push even if the user appears online — used for calls so locked phones /
     backgrounded browsers still wake up and ring."""
     try:
-        from routers.push import send_push
-        send_push(user_id, title, body, url, **extra)
-    except Exception:
-        pass
+        asyncio.create_task(_push_bg(user_id, title, body, url, extra))
+    except RuntimeError:
+        try:
+            from routers.push import send_push
+            send_push(user_id, title, body, url, **extra)
+        except Exception:
+            pass
 
 
 def _call_log_content(title: str, subtitle: str, icon: str = "📞",
@@ -890,6 +965,10 @@ async def websocket_endpoint(
                 call_type = data.get("call_type", "voice")
                 is_renegotiate = bool(data.get("renegotiate"))
                 if is_renegotiate:
+                    # HIGH-6: a renegotiate must reference an active call
+                    # the sender is actually a participant in.
+                    if not _validate_call_participant(int(data.get("call_id") or 0), user["id"], to_id):
+                        continue
                     # Don't create a new call row; just forward the SDP to the peer.
                     reneg_payload = {
                         "type": "call_offer",
@@ -1009,6 +1088,10 @@ async def websocket_endpoint(
                     continue
                 call_id = int(data.get("call_id", 0))
                 is_renegotiate = bool(data.get("renegotiate"))
+                # HIGH-6: refuse to relay an answer for a call the sender
+                # isn't a participant in.
+                if not _validate_call_participant(call_id, user["id"], to_id):
+                    continue
                 print(f"[CALLDBG] call_answer from uid={user['id']} call_id={call_id} is_renegotiate={is_renegotiate}", flush=True)
                 if call_id and not is_renegotiate:
                     db.update_call_status(call_id, "active",
@@ -1202,6 +1285,12 @@ async def websocket_endpoint(
             elif msg_type == "ice_candidate":
                 to_id = _resolve_to_id(data)
                 if not to_id:
+                    continue
+                # HIGH-6: ICE candidates can leak the recipient's WAN IP /
+                # NAT topology, and a flood of forged ones can exhaust
+                # their TURN budget. Refuse unless sender + recipient
+                # match the call row.
+                if not _validate_call_participant(int(data.get("call_id") or 0), user["id"], to_id):
                     continue
                 cand = data.get("candidate")
                 ice_payload = {
