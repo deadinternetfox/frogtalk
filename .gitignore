@@ -99,6 +99,7 @@ client/desktop/builds/*.AppImage
 client/desktop/builds/*.deb
 client/desktop/builds/*.exe
 client/desktop/builds/*.zip
+client/desktop/builds/linux-unpacked/
 
 # ── tmp deploy / ship scripts and logs (not part of repo) ──────
 .tmp_*.sh

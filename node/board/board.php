@@ -2429,32 +2429,54 @@ if ($singleThread) {
             100% { transform: translateY(-10vh) rotate(360deg); opacity: 0; }
         }
         
-        /* Matrix-rain backdrop — drifting green columns behind everything */
+        /* Matrix-rain backdrop — transform-based drift (mobile Safari freezes
+         * background-position animations on position:fixed layers). */
         .matrix-bg {
             position: fixed; inset: 0; pointer-events: none; z-index: 0;
             opacity: 0.55;
+            overflow: hidden;
             background:
                 radial-gradient(1200px 600px at 50% -10%, rgba(0,255,65,0.10), transparent 62%),
-                radial-gradient(900px 500px at 10% 110%, rgba(0,200,80,0.07), transparent 65%),
-                repeating-linear-gradient(180deg,
-                    transparent 0,
-                    transparent 18px,
-                    rgba(0,255,65,0.05) 18px,
-                    rgba(0,255,65,0.05) 19px);
-            background-size: 100% 100%, 100% 100%, 100% 220px;
-            animation: matrixDrift 24s linear infinite;
-            will-change: background-position;
+                radial-gradient(900px 500px at 10% 110%, rgba(0,200,80,0.07), transparent 65%);
         }
-        @keyframes matrixDrift {
-            from { background-position: 0 0, 0 0, 0 0; }
-            to   { background-position: 0 0, 0 0, 0 220px; }
+        .matrix-bg::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: -220px;
+            height: calc(100% + 440px);
+            background: repeating-linear-gradient(180deg,
+                transparent 0,
+                transparent 18px,
+                rgba(0,255,65,0.05) 18px,
+                rgba(0,255,65,0.05) 19px);
+            background-size: 100% 220px;
+            animation: matrixDriftY 24s linear infinite;
+            transform: translate3d(0, 0, 0);
         }
-        @media (prefers-reduced-motion: reduce) {
-            .matrix-bg { animation: none; }
+        @keyframes matrixDriftY {
+            from { transform: translate3d(0, 0, 0); }
+            to   { transform: translate3d(0, 220px, 0); }
         }
 
-        /* Scanline overlay */
-        .scanlines { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px); }
+        /* Scanline overlay — static texture; no animation (avoids compositor stalls). */
+        .scanlines {
+            position: fixed; inset: 0; pointer-events: none; z-index: 1;
+            background: repeating-linear-gradient(0deg,
+                transparent, transparent 2px,
+                rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px);
+            transform: translateZ(0);
+        }
+
+        /* Mobile / touch: drop drifting lines — one stuck scan row was reported on iOS. */
+        @media (max-width: 768px), (hover: none) and (pointer: coarse) {
+            .matrix-bg::before { animation: none; opacity: 0.65; top: 0; height: 100%; transform: none; }
+            .scanlines { opacity: 0.85; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .matrix-bg::before { animation: none; }
+        }
         
         /* Vignette edges */
         .vignette { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; background: radial-gradient(ellipse at center, transparent 60%, rgba(0,0,0,0.4) 100%); }

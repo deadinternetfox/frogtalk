@@ -1,0 +1,66 @@
+# FrogTalk desktop — Snap package
+# Build: cd packaging/snap && snapcraft
+# Publish: snapcraft upload --release=stable frogtalk_*.snap
+#
+# Requires: snapcraft, multipass or lxd, Node 20+
+
+name: frogtalk
+base: core22
+version: '1.5.3'
+summary: Federated E2E encrypted chat
+description: |
+  FrogTalk is a privacy-first messenger with voice/video calls, channels,
+  DMs, social feed, and Frog Channel imageboard. Self-host your own node
+  or connect to the public mesh at frogtalk.xyz.
+
+grade: stable
+confinement: strict
+
+apps:
+  frogtalk:
+    command: bin/frogtalk-launch
+    extensions: [gnome]
+    plugs:
+      - network
+      - network-bind
+      - audio-playback
+      - audio-record
+      - camera
+      - pulseaudio
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - opengl
+      - removable-media
+
+parts:
+  frogtalk:
+    plugin: nil
+    source: ../../client/desktop/app
+    build-packages:
+      - curl
+      - git
+    stage-packages:
+      - libnss3
+      - libatk1.0-0
+      - libatk-bridge2.0-0
+      - libcups2
+      - libdrm2
+      - libgbm1
+      - libasound2
+      - libxcomposite1
+      - libxdamage1
+      - libxfixes3
+      - libxrandr2
+      - libxkbcommon0
+    override-build: |
+      curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+      apt-get install -y nodejs
+      npm ci
+      npm run build-deb
+      dpkg -x ../builds/frogtalk_*.deb "$SNAPCRAFT_PART_INSTALL/"
+    organize:
+      opt/FrogTalk: opt/frogtalk
+    override-prime: |
+      install -Dm755 "$CRAFT_PROJECT_DIR/frogtalk-launch" "$CRAFT_PRIME/bin/frogtalk-launch"

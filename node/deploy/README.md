@@ -36,9 +36,16 @@ $EDITOR .env                       # ADMIN_PASSWORD, PUBLIC_URL, federation toke
 
 # Runtime symlinks (the wizard would do this for you):
 mkdir -p data
+# IMPORTANT: node/data must be a symlink, not a real directory. If deploy
+# creates node/data/ as a folder, uvicorn will open an empty frogtalk.db and
+# every API call fails with "no such table: sessions".
 ln -sfn /opt/frogtalk/data    node/data
 ln -sfn /opt/frogtalk/.env    node/.env
 [ -d secrets ] && ln -sfn /opt/frogtalk/secrets node/secrets
+
+# Imageboard JSON state lives under node/board/board_data/ — php-fpm must
+# be able to write settings.json (peer pills, federation). Typical fix:
+#   sudo chown -R www-data:www-data node/board/board_data node/board/board_uploads
 
 # Try it locally:
 cd node && python main.py          # http://localhost:8080
@@ -111,6 +118,19 @@ server {
     }
 }
 ```
+
+## Join the federation mesh
+
+After install, run the colored operator CLI (fixes `node/data` symlink,
+enables federation in `.env`, syncs the official directory, links board nav
+pills):
+
+```bash
+bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
+sudo systemctl restart frogtalk   # if not restarted by the script
+```
+
+Dry-run first: add `--dry-run`. Tor nodes: pass `--onion-url http://….onion`.
 
 ## Federation, API, and ops details
 

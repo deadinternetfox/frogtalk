@@ -155,9 +155,24 @@ main() {
   # Symlinks so runtime data/, secrets/, .env live at $install_dir root
   # but the node process (cwd=$install_dir/node) can still reach them.
   mkdir -p data
+  if [[ -d node/data && ! -L node/data ]]; then
+    warn "node/data is a real directory (not a symlink). Move it aside and link to $install_dir/data or the app will use an empty DB."
+    if ask_yes_no "Replace node/data with symlink to $install_dir/data now?" "y"; then
+      ts="$(date +%Y%m%d-%H%M%S)"
+      mv node/data "node/data.misplaced-${ts}"
+      ok "Moved node/data -> node/data.misplaced-${ts}"
+    fi
+  fi
   ln -sfn "$install_dir/data"    node/data
   ln -sfn "$install_dir/.env"    node/.env 2>/dev/null || true
   [[ -d secrets ]] && ln -sfn "$install_dir/secrets" node/secrets
+
+  # board_data must be writable by php-fpm (usually www-data).
+  if [[ -d node/board/board_data ]]; then
+    if id www-data >/dev/null 2>&1; then
+      chown -R www-data:www-data node/board/board_data node/board/board_uploads node/board/board_previews 2>/dev/null || true
+    fi
+  fi
 
   if [[ ! -f "$ENV_FILE" ]]; then
     if [[ -f "$ENV_TEMPLATE" ]]; then
@@ -188,6 +203,15 @@ main() {
     fi
   fi
 
+  if ask_yes_no "Join the FrogTalk federation mesh now (chat + board nav)?" "y"; then
+    info "Running federation join CLI…"
+  if bash "$install_dir/node/scripts/node_federation_join.sh" --install-dir "$install_dir" -y --skip-restart; then
+      ok "Federation join finished"
+    else
+      warn "Federation join had issues — re-run: bash node/scripts/node_federation_join.sh"
+    fi
+  fi
+
   cat <<EOF
 
 ===============================================
@@ -201,6 +225,9 @@ Start manually:
   cd "$install_dir"
   source venv/bin/activate
   cd node && python main.py
+
+Join federation (chat directory + board pills):
+  bash node/scripts/node_federation_join.sh --install-dir "$install_dir" -y
 
 Optional systemd:
   sudo cp node/deploy/frogtalk.service /etc/systemd/system/frogtalk.service

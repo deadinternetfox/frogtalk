@@ -11,6 +11,9 @@ git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
 bash node/scripts/node_setup_wizard.sh
 
+# join the public mesh (chat directory + board nav pills):
+bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
+
 # later, check for updates (signature-verified):
 bash node/scripts/node_update_check.sh           # check only
 bash node/scripts/node_update_check.sh --apply   # fast-forward apply
@@ -38,6 +41,7 @@ node/
 │   └── env.example
 ├── scripts/
 │   ├── node_setup_wizard.sh
+│   ├── node_federation_join.sh   # colored CLI: mesh chat + board peers
 │   ├── node_update_check.sh
 │   ├── deploy.sh
 │   ├── deploy_board.sh
