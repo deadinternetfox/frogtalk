@@ -199,6 +199,18 @@ async def get_admin_user(request: Request = None, x_session_token: str = Header(
     return user
 
 
+async def resolve_current_user(request: Request) -> dict:
+    """Load the session user when calling outside FastAPI Depends (e.g. /server)."""
+    token = session_token_from_request(request)
+    return await get_current_user(request, token or None)
+
+
+async def resolve_admin_user(request: Request) -> dict:
+    """Admin check for hand-rolled request handlers."""
+    token = session_token_from_request(request)
+    return await get_admin_user(request, token or None)
+
+
 # ── Server-side PIN lock enforcement ────────────────────────────────────
 # Until this pass the PIN was a *client* lock only: an attacker holding a
 # valid session token could just bypass the overlay and call the API

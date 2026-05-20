@@ -19,8 +19,8 @@ from ws_manager import manager
 from routers import federation as federation_router
 from deps import (
     client_ip,
-    get_current_user,
-    get_admin_user,
+    resolve_current_user,
+    resolve_admin_user,
     admin_area_access_status,
     session_token_from_request,
 )
@@ -374,7 +374,7 @@ def _legacy_webui_login_enabled() -> bool:
 async def _require_frogtalk_admin(request: Request) -> tuple[dict | None, JSONResponse | None]:
     """Require FrogTalk session, node admin role, and admin PIN grace if enabled."""
     try:
-        user = await get_admin_user(request)
+        user = await resolve_admin_user(request)
     except HTTPException as exc:
         if exc.status_code == 401:
             return None, JSONResponse(
@@ -534,7 +534,7 @@ async def server_webui_config(request: Request):
     token = session_token_from_request(request)
     user = None
     try:
-        user = await get_current_user(request)
+        user = await resolve_current_user(request)
     except HTTPException:
         user = None
     gate = admin_area_access_status(user, token)
@@ -557,7 +557,7 @@ async def server_admin_session(request: Request):
         return disabled
     user = None
     try:
-        user = await get_current_user(request)
+        user = await resolve_current_user(request)
     except HTTPException:
         user = None
     token = session_token_from_request(request)
