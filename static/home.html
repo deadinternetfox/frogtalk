@@ -552,33 +552,6 @@
   .cta-banner h2 { font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 700; margin-bottom: 1rem; }
   .cta-banner p { color: var(--text-muted); margin-bottom: 2rem; }
 
-  /* ── FOOTER ── */
-  footer {
-    background: var(--bg2);
-    border-top: 1px solid var(--border);
-    padding: 2rem 2rem;
-    display: flex; justify-content: space-between; align-items: center;
-    flex-wrap: wrap; gap: 1rem;
-    font-size: .85rem; color: var(--text-muted);
-  }
-  footer a { color: var(--text-muted); text-decoration: none; }
-  footer a:hover { color: var(--green); }
-  .footer-links { display: flex; gap: 1.5rem; }
-  .footer-brand {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: .35rem .45rem;
-    max-width: 100%;
-    line-height: 1.35;
-  }
-  .footer-brand-mark { font-size: 1.2rem; line-height: 1; }
-  .footer-brand-name { font-weight: 600; color: var(--text); }
-  .footer-tagline {
-    color: var(--text-muted);
-    font-weight: 400;
-  }
-
   /* ── DEMO PREVIEW ── */
   .demo-preview {
     max-width: 960px; margin: 0 auto 0;
@@ -815,18 +788,7 @@
 
   @media (max-width: 640px) {
     .privacy-inner { grid-template-columns: 1fr; gap: 2rem; }
-    footer { flex-direction: column; text-align: center; gap: 1rem; }
-    .footer-brand { justify-content: center; }
-    .footer-links { flex-wrap: wrap; justify-content: center; gap: 1rem; }
     .federation-spotlight { grid-template-columns: 1fr; padding: 1rem; }
-  }
-  @media (max-width: 420px) {
-    .footer-tagline {
-      flex: 1 1 100%;
-      text-align: center;
-      font-size: .78rem;
-      letter-spacing: -.01em;
-    }
   }
 
   /* ── MOBILE NAV ── */
@@ -1766,31 +1728,10 @@
   <a href="/app" class="btn btn-primary btn-lg">Create Your Account →</a>
 </section>
 
-<!-- FOOTER -->
-<footer>
-  <div class="footer-brand">
-    <span class="footer-brand-mark" aria-hidden="true">🐸</span>
-    <span class="footer-brand-name">FrogTalk</span>
-    <span class="footer-tagline">Chat, Post, Vibe Together</span>
-  </div>
-  <div class="footer-links">
-    <a href="/app">App</a>
-    <a href="#features">Features</a>
-    <a href="#federation">Federation</a>
-    <a href="/privacy">Privacy</a>
-    <a href="/security">Security</a>
-    <a href="/docs/api">API Docs</a>
-    <a href="/docs/node">Run Your Node</a>
-    <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener noreferrer">GitHub</a>
-    <a href="/download/android" download>📱 Android App</a>
-    <a href="/download/ios" title="iPhone via TestFlight">🍎 iPhone</a>
-    <a href="/download/linux" download>🐧 Linux AppImage</a>
-    <a href="/download/deb" download>📦 .deb</a>
-    <a href="/download/windows" download>🪟 Windows portable .exe</a>
-    <a href="/download/windows-zip" download>🪟 Windows .zip</a>
-  </div>
-  <div>© 2026 FrogTalk. Your chat, your privacy.</div>
-</footer>
+<!-- FOOTER (shared: static/partials/site-footer.html) -->
+<div id="ft-site-footer-mount"></div>
+<script src="/static/js/site-footer.js?v=1" defer></script>
+
 
 <!-- MOBILE APK BANNER -->
 <div class="mobile-banner" id="mobile-banner">

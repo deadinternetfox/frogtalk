@@ -233,29 +233,6 @@
   .contact-card a { color: var(--green); text-decoration: none; font-weight: 600; }
   .contact-card a:hover { text-decoration: underline; }
 
-  /* ── FOOTER ── */
-  footer {
-    border-top: 1px solid var(--border);
-    padding: 2rem;
-    display: flex; align-items: center; justify-content: space-between;
-    flex-wrap: wrap; gap: 1rem;
-    color: var(--text-muted); font-size: .87rem;
-    background: var(--bg2);
-  }
-  footer a { color: var(--text-muted); text-decoration: none; }
-  footer a:hover { color: var(--green); }
-  .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
-  .footer-brand {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: .35rem .45rem;
-    max-width: 100%;
-    line-height: 1.35;
-  }
-  .footer-brand-mark { font-size: 1.2rem; line-height: 1; }
-  .footer-brand-name { font-weight: 600; color: var(--text); }
-  .footer-tagline { color: var(--text-muted); font-weight: 400; }
 
   @media (max-width: 768px) {
     body > nav { padding: 0 .75rem; gap: .4rem; }
@@ -307,17 +284,6 @@
     }
     body > nav .nav-links .btn-ghost { display: none; }
     .privacy-hero { padding-top: 5rem; }
-    footer { flex-direction: column; text-align: center; gap: 1rem; }
-    .footer-brand { justify-content: center; }
-    .footer-links { justify-content: center; gap: 1rem; }
-  }
-  @media (max-width: 420px) {
-    .footer-tagline {
-      flex: 1 1 100%;
-      text-align: center;
-      font-size: .78rem;
-      letter-spacing: -.01em;
-    }
   }
   @media (max-width: 400px) {
     body > nav { padding: 0 .55rem; height: 54px; gap: .3rem; }
@@ -595,23 +561,10 @@
 
 </div>
 
-<!-- FOOTER -->
-<footer>
-  <div class="footer-brand">
-    <span class="footer-brand-mark" aria-hidden="true">🐸</span>
-    <span class="footer-brand-name">FrogTalk</span>
-    <span class="footer-tagline">Chat, Post, Vibe Together</span>
-  </div>
-  <div class="footer-links">
-    <a href="/">Home</a>
-    <a href="/app">App</a>
-    <a href="/#features">Features</a>
-    <a href="/privacy">Privacy</a>
-    <a href="/docs/api">API Docs</a>
-    <a href="/docs/node">Run Your Node</a>
-  </div>
-  <div>© 2026 FrogTalk. Your chat, your privacy.</div>
-</footer>
+<!-- FOOTER (shared: static/partials/site-footer.html) -->
+<div id="ft-site-footer-mount"></div>
+<script src="/static/js/site-footer.js?v=1" defer></script>
+
 
 </body>
 </html>

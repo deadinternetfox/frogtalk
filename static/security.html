@@ -294,18 +294,6 @@
   }
   .hof-outcome strong { color: var(--green); }
 
-  /* ── FOOTER ── */
-  footer {
-    border-top: 1px solid var(--border);
-    padding: 2rem;
-    display: flex; align-items: center; justify-content: space-between;
-    flex-wrap: wrap; gap: 1rem;
-    color: var(--text-muted); font-size: .87rem;
-    background: var(--bg2);
-  }
-  footer a { color: var(--text-muted); text-decoration: none; }
-  footer a:hover { color: var(--green); }
-  .footer-links { display: flex; gap: 1.5rem; flex-wrap: wrap; }
 
   @media (max-width: 768px) {
     body > nav { padding: 0 .75rem; gap: .4rem; }
@@ -357,8 +345,6 @@
     }
     body > nav .nav-links .btn-ghost { display: none; }
     .hero { padding-top: 5rem; }
-    footer { flex-direction: column; text-align: center; gap: 1rem; }
-    .footer-links { justify-content: center; gap: 1rem; }
   }
   @media (max-width: 400px) {
     body > nav { padding: 0 .55rem; height: 54px; gap: .3rem; }
@@ -631,13 +617,9 @@
 
 </div>
 
-<footer>
-  <div>© FrogTalk · <a href="/privacy">Privacy</a> · <a href="/security">Security</a> · <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">GitHub</a></div>
-  <div class="footer-links">
-    <a href="/">Home</a>
-    <a href="/app">Open app</a>
-  </div>
-</footer>
+<!-- FOOTER (shared: static/partials/site-footer.html) -->
+<div id="ft-site-footer-mount"></div>
+<script src="/static/js/site-footer.js?v=1" defer></script>
 
 <script>
 (function () {
@@ -716,6 +698,7 @@
   });
 })();
 </script>
+
 
 </body>
 </html>
