@@ -2399,6 +2399,21 @@ function _syncApplicationTabVisibility() {
   if (!enabled && pane) pane.style.display = 'none';
 }
 
+/** Native mobile app (APK / iOS WebView) — not desktop Electron or plain browser. */
+function _canUseNotificationVibration() {
+  try {
+    return !!(window.Android && typeof window.Android.vibrate === 'function');
+  } catch {
+    return false;
+  }
+}
+
+function _syncNotifyVibrateRowVisibility() {
+  const row = document.getElementById('profile-notify-vibrate-row');
+  if (!row) return;
+  row.style.display = _canUseNotificationVibration() ? '' : 'none';
+}
+
 async function _loadDesktopAppSettingsIntoProfile() {
   const row = document.getElementById('profile-close-to-tray');
   const note = document.getElementById('profile-close-to-tray-note');
@@ -4875,15 +4890,18 @@ async function showProfile() {
     }
   }
   _syncApplicationTabVisibility();
+  _syncNotifyVibrateRowVisibility();
   await _loadDesktopAppSettingsIntoProfile();
   // Notifications tab
   document.getElementById('profile-notify-sounds').checked = u.notify_sounds !== 0;
   document.getElementById('profile-notify-desktop').checked = u.notify_desktop !== 0;
   document.getElementById('profile-notify-dms').checked = u.notify_dms !== 0;
   document.getElementById('profile-notify-mentions').checked = u.notify_mentions !== 0;
-  // Vibration + tone (client-side prefs)
+  // Vibration + tone (client-side prefs; mobile native app only)
   const vibEl = document.getElementById('profile-notify-vibrate');
-  if (vibEl) vibEl.checked = localStorage.getItem('ft_notify_vibrate') !== '0';
+  if (vibEl && _canUseNotificationVibration()) {
+    vibEl.checked = localStorage.getItem('ft_notify_vibrate') !== '0';
+  }
   const apEl = document.getElementById('profile-autoplay-media');
   if (apEl) apEl.checked = localStorage.getItem('ft_autoplay_media') !== '0';
   const toneEl = document.getElementById('profile-notify-tone');
@@ -5259,12 +5277,14 @@ async function saveProfile() {
   const notifyDesktop  = document.getElementById('profile-notify-desktop')?.checked ?? true;
   const notifyDms      = document.getElementById('profile-notify-dms')?.checked ?? true;
   const notifyMentions = document.getElementById('profile-notify-mentions')?.checked ?? true;
-  // Vibration + tone (client-side only)
-  const notifyVibrate = document.getElementById('profile-notify-vibrate')?.checked ?? true;
+  // Vibration + tone (client-side only; vibrate pref is mobile-native only)
   const notifyTone    = document.getElementById('profile-notify-tone')?.value || 'pop';
   const notifyRing    = document.getElementById('profile-notify-ring')?.value || 'default';
   const autoplayMedia = document.getElementById('profile-autoplay-media')?.checked ?? true;
-  localStorage.setItem('ft_notify_vibrate', notifyVibrate ? '1' : '0');
+  if (_canUseNotificationVibration()) {
+    const notifyVibrate = document.getElementById('profile-notify-vibrate')?.checked ?? true;
+    localStorage.setItem('ft_notify_vibrate', notifyVibrate ? '1' : '0');
+  }
   localStorage.setItem('ft_notify_tone', notifyTone);
   localStorage.setItem('ft_notify_ring', notifyRing);
   localStorage.setItem('ft_autoplay_media', autoplayMedia ? '1' : '0');
