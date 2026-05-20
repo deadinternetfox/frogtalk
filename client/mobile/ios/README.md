@@ -22,14 +22,14 @@ WKWebView wrapper for FrogTalk with full feature parity to the Android app:
 ### Open the project
 
 ```bash
-cd ios
+cd client/mobile/ios
 open FrogTalk.xcodeproj
 ```
 
 Or generate fresh:
 
 ```bash
-cd ios
+cd client/mobile/ios
 xcodebuild -project FrogTalk.xcodeproj -scheme FrogTalk -configuration Release \
   -archivePath build/FrogTalk.xcarchive archive
 xcodebuild -exportArchive -archivePath build/FrogTalk.xcarchive \
@@ -52,7 +52,7 @@ xcodebuild -exportArchive -archivePath build/FrogTalk.xcarchive \
    use it for Android):
    - Add an iOS app to the existing Firebase project, bundle id
      `xyz.frogtalk.app`.
-   - Download `GoogleService-Info.plist` into `ios/FrogTalk/`.
+   - Download `GoogleService-Info.plist` into `client/mobile/ios/FrogTalk/`.
    - Upload the APNs `.p8` to Firebase → Project Settings → Cloud Messaging.
 
 VoIP push (cold-launch incoming calls) does **not** go through FCM. The

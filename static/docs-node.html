@@ -133,6 +133,21 @@
     </section>
 
     <section class="step">
+      <h2>0) Fast setup wizard (recommended)</h2>
+      <p class="hint">Use the built-in CLI helpers for first-time setup and safe updates on self-hosted nodes.</p>
+      <pre><code>git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
+cd /opt/frogtalk
+bash scripts/node_setup_wizard.sh
+
+# later, check for updates
+bash scripts/node_update_check.sh
+
+# apply update safely (fast-forward only)
+bash scripts/node_update_check.sh --apply</code></pre>
+      <p class="hint">The wizard configures `.env`, installs dependencies, and handles common edge cases without aborting the whole flow.</p>
+    </section>
+
+    <section class="step">
       <h2>1) Deploy FrogTalk Service</h2>
       <p class="hint">Clone the official repo, create a virtualenv, install requirements, and copy the env template.</p>
       <pre><code>git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
@@ -151,16 +166,27 @@ FROGTALK_FEDERATION_ENABLED=1
 FROGTALK_FEDERATION_TOKEN=CHANGE_THIS_SHARED_SECRET
 FROGTALK_OFFICIAL_DIRECTORY_URL=https://frogtalk.xyz/api/network/servers
 
+# Signed inbox (default ON since 2026-05 hardening).
+# Reject events from origins with no pinned server_pubkey.
+FROGTALK_FEDERATION_REQUIRE_SIGS=1
+
 # Centralized release feed from main site
 FROGTALK_UPDATE_FEED_URL=https://frogtalk.xyz/api/network/updates/latest
 FROGTALK_UPDATE_CHECK_INTERVAL_SEC=300
-FROGTALK_AUTO_UPDATE_ENABLED=1
+
+# Auto-apply is OFF by default (CRIT-3). Opt in explicitly.
+FROGTALK_AUTO_UPDATE_ENABLED=0
+
+# Ed25519 release signer pubkeys (hex), semicolon separated. Update
+# apply refuses to run if the manifest signature isn't from one of these.
+FROGTALK_RELEASE_SIGNERS=
 
 # Public URL clients and federation peers should use (clearnet nodes)
 PUBLIC_URL=https://your-node.example
 # Optional alias — same role as PUBLIC_URL when set
 # FROGTALK_BASE_URL=https://your-node.example</code></pre>
-      <p class="hint">Use the same federation token only for trusted nodes under your control.</p>
+      <p class="hint">Use the same federation token only for trusted nodes under your control. Generate a strong value via
+      <code>python -c "import secrets; print(secrets.token_urlsafe(32))"</code>.</p>
     </section>
 
     <section class="step">
@@ -197,18 +223,21 @@ curl -s https://your-node.example/api/network/update/status</code></pre>
     </section>
 
     <section class="step">
-      <h2>5) Publish Releases From Main Site</h2>
-      <p class="hint">On frogtalk.xyz, publish metadata once per release so nodes can pull updates safely.</p>
+      <h2>5) Publish Releases From Main Site (signed)</h2>
+      <p class="hint">On frogtalk.xyz, publish a <strong>signed</strong> manifest once per release so nodes can verify and pull updates safely.</p>
       <pre><code>curl -X POST https://frogtalk.xyz/api/network/updates/publish \
   -H "X-Session-Token: ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "version": "1.4.0",
-    "package_url": "https://frogtalk.xyz/releases/frogtalk-1.4.0.tar.gz",
+    "version": "1.5.4",
+    "package_url": "https://frogtalk.xyz/releases/frogtalk-1.5.4.tar.gz",
     "package_sha256": "PUT_REAL_SHA256",
     "build_hash": "PUT_REAL_WEB_BUILD_HASH",
+    "signature": "ED25519_SIGNATURE_OVER_CANONICAL_MANIFEST",
+    "signer": "ED25519_PUBKEY_HEX",
     "notes": "Federation-safe rollout"
   }'</code></pre>
+      <p class="hint">Operators set <code>FROGTALK_RELEASE_SIGNERS</code> in <code>.env</code> to the Ed25519 pubkey hex (semicolon-separated for multiple). Update apply refuses to run if the signature isn't from one of these signers — even if auto-apply is enabled.</p>
     </section>
 
     <section class="step">
@@ -222,11 +251,42 @@ curl -s https://your-node.example/api/network/update/status</code></pre>
       </ul>
     </section>
 
+    <section class="step">
+      <h2>7) Repo structure for operators</h2>
+      <p class="hint">As of the 2026-05 restructure, client surfaces live under <code>client/</code> so node operators have a cleaner picture of what they're shipping:</p>
+      <pre><code>client/
+├── desktop/app/        # Electron source (legacy: desktop/)
+├── desktop/builds/     # Electron build outputs (gitignored)
+└── mobile/
+    ├── android/        # Android source (legacy: android/)
+    └── ios/            # iOS source (legacy: ios/)
+
+backend/                # API/runtime boundary docs
+node/                   # node-operator boundary docs
+deploy/                 # systemd/nginx/env templates
+scripts/                # node_setup_wizard.sh, node_update_check.sh</code></pre>
+      <p class="hint">Legacy top-level <code>desktop/</code>, <code>android/</code>, <code>ios/</code> are now compatibility symlinks pointing into <code>client/</code>, so any existing scripts you have keep working.</p>
+    </section>
+
+    <section class="step">
+      <h2>7) Project structure (2026 layout)</h2>
+      <p class="hint">Current repository structure separates operator, backend, and client surfaces:</p>
+      <pre><code>frogtalk/
+├── node/                    # operator docs/workflows
+├── backend/                 # backend boundary docs
+├── client/                  # desktop/mobile surfaces
+│   ├── desktop/app
+│   └── mobile/{android,ios}
+├── static/                  # web app + site pages (runtime path)
+└── scripts/                 # setup/update/deploy helpers</code></pre>
+      <p class="hint">Legacy root paths (`desktop`, `android`, `ios`) are compatibility symlinks so older tooling keeps working while migration finishes.</p>
+    </section>
+
   </main>
 
 <!-- FOOTER (shared: static/partials/site-footer.html) -->
 <div id="ft-site-footer-mount"></div>
-<script src="/static/js/site-footer.js?v=2" defer></script>
+<script src="/static/js/site-footer.js?v=3" defer></script>
 
 </body>
 </html>

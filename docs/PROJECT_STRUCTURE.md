@@ -2,39 +2,44 @@
 
 This document defines a clean split between user-facing client surfaces, backend services, and node-operator tooling while keeping runtime behavior stable.
 
-## Current runtime layout
-
-- `static/` - web client pages and browser assets
-- `routers/` - FastAPI route modules
-- `main.py` - backend entrypoint
-- `deploy/` - service/deployment templates
-- `scripts/` - maintenance and deploy scripts
-
-## Target logical layout (migration map)
-
-We are aligning the repo around three top-level concerns:
-
-- `client/` - frontend surfaces (`static/`, desktop packaging, mobile docs/builds)
-- `backend/` - API/runtime (`main.py`, `routers/`, persistence/services)
-- `node/` - self-host/operator workflows (setup, update, release operations)
-
-### Concrete target tree (implemented for desktop/mobile)
+## Top-level layout
 
 ```
 frogtalk/
-├── client/
+├── client/                        # client surfaces
 │   ├── desktop/
-│   │   ├── app/            # moved from root desktop/
-│   │   └── builds/         # Electron output artifacts
+│   │   ├── app/                   # Electron source (moved from root desktop/)
+│   │   └── builds/                # Electron build outputs (gitignored)
 │   └── mobile/
-│       ├── android/        # moved from root android/
-│       └── ios/            # moved from root ios/
-├── desktop -> client/desktop/app      # compatibility symlink
-├── android -> client/mobile/android   # compatibility symlink
-├── ios -> client/mobile/ios           # compatibility symlink
-├── backend/
-└── node/
+│       ├── android/               # Android app source (moved from root android/)
+│       └── ios/                   # iOS app source / docs (moved from root ios/)
+├── backend/                       # backend boundary docs (API/runtime surface)
+│   └── README.md
+├── node/                          # node-operator boundary docs
+│   └── README.md
+├── static/                        # web client + marketing pages (live runtime)
+├── routers/                       # FastAPI route modules
+├── main.py                        # backend entrypoint
+├── deploy/                        # systemd / nginx / env templates
+├── scripts/
+│   ├── node_setup_wizard.sh       # interactive self-host setup
+│   ├── node_update_check.sh       # update check / safe apply (fast-forward only)
+│   └── deploy_nodes.sh            # operator multi-node deploy
+├── bot-examples/                  # standalone reference bots + bot dev docs
+├── docs/                          # design / security / structure docs
+├── desktop -> client/desktop/app  # compatibility symlink (existing tools)
+├── android -> client/mobile/android
+└── ios    -> client/mobile/ios
 ```
+
+## Why this split
+
+| Folder    | Audience                  | What lives here                                                          |
+|-----------|---------------------------|--------------------------------------------------------------------------|
+| `client/` | App users / packagers     | Desktop (Electron) + mobile sources and platform-specific build outputs. |
+| `backend/`| Backend devs              | Boundary doc pointing at the active runtime tree (`main.py`, `routers/`, `static/`). |
+| `node/`   | Self-host operators       | Boundary doc pointing at `scripts/` + `deploy/` for running a node.       |
+| `static/` | Runtime                   | The actual web client served by the FastAPI app. Kept at root so deploy paths stay stable. |
 
 ## Safe migration rules
 
@@ -48,5 +53,10 @@ frogtalk/
 
 ## Operator scripts
 
-- `scripts/node_setup_wizard.sh` - interactive self-host setup
-- `scripts/node_update_check.sh` - update check + optional safe apply
+- `scripts/node_setup_wizard.sh` — interactive self-host setup with safe defaults (`FROGTALK_AUTO_UPDATE_ENABLED=0`, `FROGTALK_FEDERATION_REQUIRE_SIGS=1`).
+- `scripts/node_update_check.sh` — checks the official feed and, with `--apply`, fast-forwards only if the signed manifest verifies against `FROGTALK_RELEASE_SIGNERS`.
+- `scripts/deploy_nodes.sh` — operator-side multi-node deploy (lives outside the repo's gitignored shape).
+
+## Compatibility
+
+The three root symlinks (`desktop/`, `android/`, `ios/`) preserve existing tooling and external scripts that expected the old layout. New code should reference the canonical paths under `client/`.

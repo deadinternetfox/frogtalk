@@ -250,27 +250,34 @@ for a DM, or the channel's encryption mode for a room.
 
 ```
 frogtalk/
-├── client/              # client surfaces (desktop app + mobile sources + builds)
-│   ├── desktop/app/     # Electron source
-│   ├── desktop/builds/  # Electron artifacts
+├── client/                       # client surfaces (desktop + mobile + builds)
+│   ├── desktop/
+│   │   ├── app/                  # Electron source
+│   │   └── builds/               # Electron output artifacts (gitignored)
 │   └── mobile/
-│       ├── android/     # Android app source
-│       └── ios/         # iOS app source/docs
-├── backend/             # backend boundary docs (API/runtime surface)
-├── node/                # node-operator boundary docs (self-host workflows)
-├── static/              # current web client + marketing pages
-├── routers/             # current FastAPI route modules
-├── deploy/              # deployment templates (systemd/nginx/env)
+│       ├── android/              # Android app source
+│       └── ios/                  # iOS app source / docs
+├── backend/README.md             # backend boundary docs (API/runtime)
+├── node/README.md                # node-operator boundary docs
+├── static/                       # web client + marketing pages
+├── routers/                      # FastAPI route modules
+├── deploy/                       # systemd/nginx/env templates
 ├── scripts/
-│   ├── node_setup_wizard.sh   # guided node setup
-│   └── node_update_check.sh   # update check/apply helper
-├── desktop -> client/desktop/app     # compatibility symlink
-├── android -> client/mobile/android  # compatibility symlink
-├── ios -> client/mobile/ios          # compatibility symlink
-└── docs/PROJECT_STRUCTURE.md  # migration map and structure rules
+│   ├── node_setup_wizard.sh      # guided node setup
+│   ├── node_update_check.sh      # update check / safe apply
+│   └── deploy_nodes.sh           # operator multi-node deploy (gitignored)
+├── bot-examples/                 # standalone reference bots
+├── docs/
+│   ├── PROJECT_STRUCTURE.md      # current structure + migration rules
+│   ├── SECURITY_MODEL.md
+│   ├── SECURITY_HARDENING_PLAN.md
+│   └── SECURITY_SCAN_2026_05_18.md
+├── desktop -> client/desktop/app # compatibility symlink
+├── android -> client/mobile/android
+└── ios    -> client/mobile/ios
 ```
 
-Detailed migration map: `docs/PROJECT_STRUCTURE.md`
+Detailed structure: [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md)
 
 ---
 

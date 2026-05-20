@@ -45,6 +45,20 @@ X-API-Key: bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 Authorization: Bearer bot_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
+**Permission allowlist (HIGH-9).** User-issued API keys may only carry
+permissions from `{read, write, dm, bot}`. Any other value — including
+`admin` — is rejected when you POST to `/api/developer/keys`. You cannot
+self-grant elevated scopes via the API.
+
+**Per-user key cap.** Each user is limited to **20** active API keys.
+Rotate by deleting old ones first.
+
+**Bot channel membership.** Bots can only read or post in channels they
+have been installed into via Settings → Developer → Bots → Add to
+channel. Otherwise the server returns `403 Bot is not a member of this
+channel`. Use `GET /api/external/me/channels` to discover where your bot
+is currently installed.
+
 ### 3. Poll for new messages
 
 Bots **cannot** open a WebSocket — they poll. The recommended pattern
@@ -97,6 +111,13 @@ the `BOT` pill next to the bot's name in chat.
 This endpoint uses your **user session**, not the bot key — typically
 you'll use the in-app Edit modal. If you want to ship a botfather-style
 CLI, hit the same endpoint with `apiFetch`-equivalent cookies.
+
+## Repo structure note
+
+FrogTalk now keeps client surfaces under `client/` (`client/desktop/app`,
+`client/mobile/android`, `client/mobile/ios`) while bot examples remain in
+`bot-examples/` as standalone API consumers. Bot code should continue using
+only documented HTTP APIs (`/api/external/*`), not internal server imports.
 
 ## Bot etiquette
 

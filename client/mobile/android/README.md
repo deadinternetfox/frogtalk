@@ -18,7 +18,7 @@ Android WebView wrapper for FrogTalk with full feature support:
 
 ### Command Line Build
 ```bash
-cd android
+cd client/mobile/android
 ./gradlew assembleRelease
 ```
 
@@ -51,12 +51,12 @@ style), native Firebase Cloud Messaging is required. The full change set:
 
 1. Create a Firebase project at <https://console.firebase.google.com> and
    add an Android app with package `xyz.frogtalk.app`. Download
-   `google-services.json` into `android/app/`.
-2. Add to `android/build.gradle.kts`:
+   `google-services.json` into `client/mobile/android/app/`.
+2. Add to `client/mobile/android/build.gradle.kts`:
    ```kotlin
    plugins { id("com.google.gms.google-services") version "4.4.2" apply false }
    ```
-   And in `android/app/build.gradle.kts`:
+   And in `client/mobile/android/app/build.gradle.kts`:
    ```kotlin
    plugins { id("com.google.gms.google-services") }
    dependencies {

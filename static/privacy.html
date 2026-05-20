@@ -334,7 +334,7 @@
 <section class="privacy-hero">
   <h1>Privacy Policy</h1>
   <p>FrogTalk is built privacy-first. Your messages are encrypted before they leave your device, we run no analytics, and we sell nothing to anyone. This page explains exactly what that means in plain English.</p>
-  <div class="updated">Last updated: 28 April 2026</div>
+  <div class="updated">Last updated: 20 May 2026</div>
 </section>
 
 <!-- BODY -->
@@ -384,7 +384,8 @@
     <h3>Account information</h3>
     <ul>
       <li><strong>Nickname</strong> — your display handle, chosen by you.</li>
-      <li><strong>Password hash</strong> — stored salted and hashed; we never see your plaintext password.</li>
+      <li><strong>Password hash</strong> — stored salted and hashed with bcrypt; we never see your plaintext password. Failed-login attempts are counted server-side and trigger a temporary per-account lockout to slow brute force.</li>
+      <li><strong>Recovery key</strong> (optional) — if you generate one, the value is bcrypt-hashed at rest. Older accounts created before May 2026 may still have a SHA-256 row that gets migrated on next successful use.</li>
       <li><strong>Public encryption keys</strong> — your Signal identity key plus a signed prekey and a pool of one-time prekeys, so other users can start an encrypted DM with you even while you're offline. Your private keys never leave your device.</li>
       <li><strong>Optional profile data</strong> — avatar, status, bio, pronouns. Whatever you fill in is shown to other users; what you leave blank is never collected.</li>
     </ul>
@@ -464,6 +465,8 @@
     </div>
 
     <p>The one explicit exception is a <strong>public channel with an outbound Discord or Telegram bridge enabled</strong>. Because the bridge has to forward readable text to a third-party platform, those channels are plaintext by design. <strong>Bridges are blocked for private (E2EE) rooms</strong> — all four bridge-create endpoints reject private rooms with HTTP 403, so a moderator cannot accidentally leak an end-to-end encrypted channel to Discord or Telegram. DMs are <strong>never</strong> bridged.</p>
+
+    <p>Each enabled bridge gets a fresh per-bridge secret (<code>secrets.token_urlsafe(32)</code>) minted on create; the literal sentinel token <code>"discord"</code> that used to be acceptable is rejected at the inbound endpoint and any legacy row carrying it is rotated on boot.</p>
   </section>
 
   <section class="policy" id="bridges">
@@ -548,7 +551,7 @@
 
 <!-- FOOTER (shared: static/partials/site-footer.html) -->
 <div id="ft-site-footer-mount"></div>
-<script src="/static/js/site-footer.js?v=2" defer></script>
+<script src="/static/js/site-footer.js?v=3" defer></script>
 
 
 </body>

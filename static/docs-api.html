@@ -198,6 +198,18 @@
       <div class="meta">Base URL: <code>https://your-host/api</code> · Session header: <code>X-Session-Token</code> · Developer header: <code>X-API-Key</code> or <code>Authorization: Bearer KEY</code></div>
     </section>
 
+    <section class="panel">
+      <h2>Docs freshness and structure</h2>
+      <p class="muted">This page is updated against current `main` after recent security hardening and the client-structure migration (`client/desktop/app`, `client/mobile/android`, `client/mobile/ios`). API paths stay stable.</p>
+      <pre><code>Server API surface remains:
+/api/auth/*
+/api/rooms/*
+/api/messages/*
+/api/dms/*
+/api/external/*</code></pre>
+      <p class="muted">Bot examples for these endpoints live in <code>bot-examples/</code> on GitHub.</p>
+    </section>
+
     <div class="layout">
       <aside class="toc">
         <h3>Sections</h3>
@@ -443,6 +455,14 @@ DELETE /api/developer/channels/{room_name}/bots/{bot_id}
 GET    /api/developer/channels/{room_name}/bots
 GET    /api/developer/bots/public</code></pre>
           <p class="muted">Use these endpoints to mint API keys and manage bot accounts/channels from your own backend tools.</p>
+          <p class="muted"><strong>Permission allowlist (HIGH-9).</strong> User-issued keys may only carry permissions from the set
+          <code>{ read, write, dm, bot }</code>. Any other value (including <code>admin</code>) is rejected at create time —
+          you cannot self-grant elevated scopes via the API.</p>
+          <p class="muted"><strong>Per-user key cap.</strong> Each user is limited to <strong>20</strong> active API keys.
+          Delete unused keys before creating new ones, or rotate by deleting first.</p>
+          <p class="muted"><strong>Bot channel membership (HIGH-3).</strong> Bots can only read or post in channels they've been
+          installed into. Server replies with <code>403 Bot is not a member of this channel</code> otherwise. Use
+          <code>GET /api/external/me/channels</code> to discover where the bot is installed.</p>
         </article>
 
         <article class="panel" id="building-a-bot">
@@ -698,6 +718,33 @@ GET    /api/federation/manifests/list
 POST   /api/federation/events/emit
 GET    /api/federation/events/outbox
 GET    /api/federation/failover/status</code></pre>
+
+          <h3 style="margin-top:14px">Signed update channel (CRIT-3, HIGH-15)</h3>
+          <p class="muted">Update apply now refuses to run unless the release manifest carries an Ed25519 signature
+          from a pubkey listed in <code>FROGTALK_RELEASE_SIGNERS</code>. Auto-apply is off by default
+          (<code>FROGTALK_AUTO_UPDATE_ENABLED=0</code>) — operators opt in explicitly.</p>
+<pre><code>POST /api/network/updates/publish
+{
+  "version": "1.5.4",
+  "package_url": "https://frogtalk.xyz/releases/frogtalk-1.5.4.tar.gz",
+  "package_sha256": "&lt;sha256&gt;",
+  "build_hash": "&lt;web-build-hash&gt;",
+  "signature": "&lt;ed25519-sig-over-canonical-manifest&gt;",
+  "signer": "&lt;ed25519-pubkey-hex&gt;",
+  "notes": "Federation-safe rollout"
+}</code></pre>
+          <p class="muted">The <code>POST /api/network/update/apply</code> endpoint verifies the signature,
+          checks <code>package_sha256</code>, and enforces version monotonicity before running the apply
+          step.</p>
+
+          <h3 style="margin-top:14px">Inbox signing required by default (CRIT-2)</h3>
+          <p class="muted"><code>FROGTALK_FEDERATION_REQUIRE_SIGS</code> defaults to <code>1</code>. Events
+          from origins with no pinned <code>server_pubkey</code> are rejected. Inbox idempotency uses a
+          composite <code>(origin_server_id, event_id)</code> key so two peers cannot collide.</p>
+
+          <h3 style="margin-top:14px">No shadow auto-create (CRIT-4)</h3>
+          <p class="muted">Federation events referencing an unknown local nickname or room are now
+          dropped instead of silently creating a placeholder user or room.</p>
         </article>
 
         <article class="panel" id="admin">
@@ -744,7 +791,7 @@ WebSocket: /ws/{room_name}?token=SESSION_TOKEN</code></pre>
 
 <!-- FOOTER (shared: static/partials/site-footer.html) -->
 <div id="ft-site-footer-mount"></div>
-<script src="/static/js/site-footer.js?v=2" defer></script>
+<script src="/static/js/site-footer.js?v=3" defer></script>
 
 </body>
 </html>
