@@ -192,12 +192,11 @@ run_py() {
   load_env_file "$INSTALL_DIR/$ENV_FILE_NAME"
   export FT_INSTALL_DIR="$INSTALL_DIR"
   export FT_NODE_DIR="$INSTALL_DIR/node"
-  # shellcheck disable=SC1091
-  if [[ -f "$INSTALL_DIR/venv/bin/activate" ]]; then
-    # shellcheck source=/dev/null
-    source "$INSTALL_DIR/venv/bin/activate"
-  fi
-  (cd "$INSTALL_DIR/node" && python3 "$@")
+  local py="$INSTALL_DIR/venv/bin/python3"
+  [[ -x "$py" ]] || py="python3"
+  # Run from /tmp with -I so /opt/frogtalk/signal.py and node/signal.py never
+  # shadow the stdlib signal module (asyncio/import chain breaks otherwise).
+  (cd /tmp && "$py" -I "$@")
 }
 
 curl_retry() {
@@ -334,17 +333,14 @@ sync_chat_federation() {
   fi
 
   local py_out
-  py_out="$(run_py - <<'PY'
+  py_out="$(run_py - 2>/dev/null <<'PY'
 import asyncio, json, os, sys
 
-# node/signal.py shadows stdlib signal — preload stdlib before node on sys.path.
-_node_dir = os.path.abspath(os.environ.get("FT_NODE_DIR", "."))
-_sys_path = [p for p in sys.path if os.path.abspath(p or ".") != _node_dir]
-sys.path[:] = _sys_path
-import signal as _stdlib_signal  # noqa: F401
-sys.modules["signal"] = _stdlib_signal
-if _node_dir not in sys.path:
-    sys.path.insert(0, _node_dir)
+_node_dir = os.path.abspath(os.environ.get("FT_NODE_DIR", ""))
+if not _node_dir or not os.path.isdir(_node_dir):
+    raise SystemExit("FT_NODE_DIR missing or not a directory")
+sys.path.insert(0, _node_dir)
+os.chdir(_node_dir)
 
 import database as db
 from database import init_db
@@ -474,22 +470,25 @@ asyncio.run(main())
 PY
 )" || die "Python federation sync failed (is venv + requirements installed?)"
 
+  # Python may log to stderr; JSON result is the last line of stdout.
+  py_json="$(printf '%s\n' "$py_out" | awk 'NF' | tail -n1)"
+
   local sync_ok imported total
-  sync_ok="$(printf '%s' "$py_out" | python3 -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('sync',{}).get('ok') else '0')")"
-  imported="$(printf '%s' "$py_out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sync',{}).get('imported',0))")"
-  total="$(printf '%s' "$py_out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sync',{}).get('total',0))")"
-  BOARD_PEER_URLS="$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin).get('board_urls',[])))")"
+  sync_ok="$(printf '%s' "$py_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('sync',{}).get('ok') else '0')")"
+  imported="$(printf '%s' "$py_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sync',{}).get('imported',0))")"
+  total="$(printf '%s' "$py_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sync',{}).get('total',0))")"
+  BOARD_PEER_URLS="$(printf '%s' "$py_json" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin).get('board_urls',[])))")"
 
   local used_fallback pinned_n
-  used_fallback="$(printf '%s' "$py_out" | python3 -c "import sys,json; print('1' if json.load(sys.stdin).get('sync',{}).get('fallback') else '0')")"
-  pinned_n="$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sync',{}).get('pinned',0))")"
+  used_fallback="$(printf '%s' "$py_json" | python3 -c "import sys,json; print('1' if json.load(sys.stdin).get('sync',{}).get('fallback') else '0')")"
+  pinned_n="$(printf '%s' "$py_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sync',{}).get('pinned',0))")"
 
   if [[ "$sync_ok" != "1" ]]; then
     warn "Directory sync returned an error (check FROGTALK_OFFICIAL_DIRECTORY_URL / network)."
-    detail "$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sync',{}).get('error',''))")"
+    detail "$(printf '%s' "$py_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sync',{}).get('error',''))")"
   elif [[ "$used_fallback" == "1" ]]; then
     warn "Directory unreachable — applied built-in FrogTalk mesh fallback (${imported} peer(s))."
-    detail "$(printf '%s' "$py_out" | python3 -c "import sys,json; e=json.load(sys.stdin).get('sync',{}).get('error',''); print(e if e else '')")"
+    detail "$(printf '%s' "$py_json" | python3 -c "import sys,json; e=json.load(sys.stdin).get('sync',{}).get('error',''); print(e if e else '')")"
   else
     ok "Imported ${C_BOLD}${imported}${C_RESET} server(s) from directory (${total} listed)"
   fi
@@ -498,13 +497,13 @@ PY
   fi
 
   local local_sid peer_n board_n
-  local_sid="$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.load(sys.stdin).get('local_server_id',''))")"
-  peer_n="$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.load(sys.stdin).get('peer_count',0))")"
+  local_sid="$(printf '%s' "$py_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('local_server_id',''))")"
+  peer_n="$(printf '%s' "$py_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('peer_count',0))")"
   board_n="$(printf '%s' "$BOARD_PEER_URLS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")"
   detail "Local server_id: ${C_DIM}${local_sid}${C_RESET} · registry rows: ${peer_n} · board candidates: ${board_n}"
   while IFS= read -r line; do
     [[ -n "$line" ]] && detail "$line"
-  done < <(printf '%s' "$py_out" | python3 -c "
+  done < <(printf '%s' "$py_json" | python3 -c "
 import sys, json
 for p in json.load(sys.stdin).get('peers', []):
     pk = 'pinned' if p.get('has_pubkey') else 'no-pubkey'
