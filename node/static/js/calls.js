@@ -32,7 +32,7 @@ const ICE_SERVERS = [
 
 let _iceConfigCache = { at: 0, key: '', servers: null };
 
-/** Cached probe: Brave Tor / strict private tabs block RTCPeerConnection by design. */
+/** Cached probe: Tor Browser / strict private tabs block RTCPeerConnection by design. */
 let _webrtcCapCache = null;
 
 function _webrtcCapability() {
@@ -65,9 +65,9 @@ function _webrtcBlockedMessage() {
   if (cap.ok) return '';
   if (cap.reason === 'browser_blocked') {
     return (
-      'Voice and video calls cannot run in this tab. Brave Tor (and some strict ' +
-      'private modes) block WebRTC so your real IP cannot leak. Use a normal ' +
-      'browser window (not Tor), or the FrogTalk mobile app.'
+      'Calls are blocked here. Tor Browser, private tabs, and some privacy ' +
+      'extensions disable WebRTC to protect your IP. Use a normal window or ' +
+      'the FrogTalk app.'
     );
   }
   if (cap.reason === 'missing') {
