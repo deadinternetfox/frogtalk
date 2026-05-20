@@ -1221,20 +1221,40 @@ async def _current_user_from_header(x_session_token: str | None) -> dict | None:
     return await asyncio.to_thread(db.get_user_by_token, x_session_token)
 
 
-def _load_directory_entries(directory_url: str, timeout_s: float = 4.0) -> list[dict]:
-    raw = _fetch_url_bytes(
-        directory_url,
-        timeout_s=timeout_s,
-        headers={"User-Agent": "FrogTalk-DirectorySync/1.0", "Accept": "application/json"},
-        method="GET",
-    ).decode("utf-8", errors="replace")
-    payload = json.loads(raw)
-    if isinstance(payload, list):
-        return [p for p in payload if isinstance(p, dict)]
-    if isinstance(payload, dict):
-        servers = payload.get("servers")
-        if isinstance(servers, list):
-            return [p for p in servers if isinstance(p, dict)]
+def _load_directory_entries(
+    directory_url: str,
+    timeout_s: float = 8.0,
+    *,
+    retries: int = 3,
+) -> list[dict]:
+    """Fetch official server directory with bounded retries."""
+    last_err: Exception | None = None
+    attempts = max(1, int(retries or 1))
+    for attempt in range(attempts):
+        try:
+            raw = _fetch_url_bytes(
+                directory_url,
+                timeout_s=timeout_s,
+                headers={
+                    "User-Agent": "FrogTalk-DirectorySync/1.0",
+                    "Accept": "application/json",
+                },
+                method="GET",
+            ).decode("utf-8", errors="replace")
+            payload = json.loads(raw)
+            if isinstance(payload, list):
+                return [p for p in payload if isinstance(p, dict)]
+            if isinstance(payload, dict):
+                servers = payload.get("servers")
+                if isinstance(servers, list):
+                    return [p for p in servers if isinstance(p, dict)]
+            return []
+        except Exception as e:
+            last_err = e
+            if attempt + 1 < attempts:
+                time.sleep(min(4.0, 1.0 * (attempt + 1)))
+    if last_err is not None:
+        raise last_err
     return []
 
 

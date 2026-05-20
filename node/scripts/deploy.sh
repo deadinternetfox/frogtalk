@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────
-# FrogChat Deploy Script
-# Usage: ./deploy.sh [--restart]
+# FrogTalk Deploy Script — full rsync of node/ to one remote host
+# Usage: bash node/scripts/deploy.sh
 #
 # Reads SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY_PATH, REMOTE_DIR
-# from .env in this directory.
+# from node/scripts/.env (copy from deploy/env.example SSH section).
+#
+# Fleet hot deploy (two production nodes): node/scripts/deploy_nodes.sh
+# Board PHP only: node/scripts/deploy_board.sh
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -25,7 +28,7 @@ REMOTE="${SSH_USER:-deploy}@${SSH_HOST:?SSH_HOST not set}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/frogtalk}"
 
 START_TS=$(date +%s)
-echo "🚀  Deploying FrogChat to ${REMOTE}:${REMOTE_DIR}"
+echo "🚀  Deploying FrogTalk node/ to ${REMOTE}:${REMOTE_DIR}"
 echo "────────────────────────────────────────────────────────"
 
 # ── 0. Quick pre-flight summary ────────────────────────────────

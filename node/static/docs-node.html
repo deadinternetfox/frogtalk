@@ -169,6 +169,15 @@ FROGTALK_OFFICIAL_DIRECTORY_URL=https://frogtalk.xyz/api/network/servers
 # Signed inbox (default ON since 2026-05 hardening).
 # Reject events from origins with no pinned server_pubkey.
 FROGTALK_FEDERATION_REQUIRE_SIGS=1
+# Pin peer keys from GET /api/network/status (directory has no pubkeys).
+# Optional: federated voice/video + channel voice mesh
+# FROGTALK_FEDERATION_CALLS_ENABLED=1
+# FROGTALK_TURN_URLS=stun:stun.l.google.com:19302,turn:turn.example:3478
+# FROGTALK_TURN_USERNAME=…
+# FROGTALK_TURN_CREDENTIAL=…
+# Inbox/outbox poll (seconds) — defaults 8 idle, 2 busy
+# FROGTALK_FEDERATION_INBOX_IDLE_SEC=8
+# FROGTALK_FEDERATION_OUTBOX_IDLE_SEC=8
 
 # Centralized release feed from main site
 FROGTALK_UPDATE_FEED_URL=https://frogtalk.xyz/api/network/updates/latest
@@ -199,8 +208,25 @@ FROGTALK_ONION_URL=http://yourhiddenserviceaddress.onion
 FROGTALK_BASE_URL=
 
 # Tor Browser and other clients should open:
-# http://yourhiddenserviceaddress.onion/app</code></pre>
+# http://yourhiddenserviceaddress.onion/app
+
+# Clearnet hub pushing to onion peers needs local Tor SOCKS:
+FROGTALK_TOR_SOCKS_PROXY=socks5://127.0.0.1:9050</code></pre>
       <div class="callout">Use <code>/app</code> for client handoff links and network-tab switches. The Node Control and network UI now prefer onion app links so users land inside the chat client, not the marketing site.</div>
+      <p class="hint"><strong>Calls in Tor Browser:</strong> voice/video need WebRTC. Tor Browser, private tabs, and some privacy extensions block it — use a normal window or the FrogTalk mobile app.</p>
+    </section>
+
+    <section class="step">
+      <h2>2.6) Join the mesh + federated calls</h2>
+      <pre><code>bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
+# Clearnet hub:
+#   --public-url https://your-node.example
+# Tor mirror:
+#   --onion-url http://….onion --public-url ""
+# Re-sync after deploys (safe to re-run):
+bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y</code></pre>
+      <p class="hint">Syncs <a href="https://frogtalk.xyz/api/network/servers">frogtalk.xyz/api/network/servers</a> (retries; falls back to the official Main + Tor mirror pair if unreachable), pins peer keys from <code>/api/network/status</code>, fixes <code>node/data</code> symlinks, and links board nav pills. Clearnet hubs need <code>FROGTALK_TOR_SOCKS_PROXY</code> to fetch <code>.onion</code> boards.</p>
+      <p class="hint">Cross-node calls: set <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code>, install <a href="https://github.com/coturn/coturn" target="_blank" rel="noopener noreferrer">coturn</a>, and expose TURN in <code>.env</code>. Clients use <code>GET /api/network/ice-config</code> (authenticated). Spec: <code>docs/FEDERATED_CALLS.md</code> in the repo.</p>
     </section>
 
     <section class="step">
@@ -253,7 +279,24 @@ curl -s https://your-node.example/api/network/update/status</code></pre>
     </section>
 
     <section class="step">
-      <h2>7) Project structure (post 2026-05 restructure)</h2>
+      <h2>7) Maintainer deploy scripts</h2>
+      <p class="hint">From a dev checkout at repo root (see <code>node/deploy/README.md</code>):</p>
+      <pre><code># Production fleet — SCP files + restart frogtalk on both nodes
+node/scripts/deploy_nodes.sh node/static/js/calls.js
+
+# Single server — full rsync of node/ (configure node/scripts/.env)
+node/scripts/deploy.sh
+
+# Imageboard PHP only
+node/scripts/deploy_board.sh
+
+# Publish docs pages after editing docs-node.html / docs-api.html
+node/scripts/deploy_nodes.sh node/static/docs-node.html node/static/docs-api.html</code></pre>
+      <p class="hint">Hot deploy does not run DB migrations — use <code>node_update_check.sh --apply</code> when <code>database.py</code> changes.</p>
+    </section>
+
+    <section class="step">
+      <h2>8) Project structure (post 2026-05 restructure)</h2>
       <p class="hint">The repo now splits cleanly into <code>client/</code> (what end-users install) and <code>node/</code> (the federated server you run):</p>
       <pre><code>frogtalk/
 ├── client/                       # everything end-users install

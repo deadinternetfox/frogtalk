@@ -65,23 +65,18 @@ define('THUMB_WIDTH', 250);
 // three slightly-different regexes drifting apart. Values with quotes,
 // inline comments, or trailing whitespace are normalised the same way
 // everywhere.
-if (!function_exists('boardLoadEnv')) {
-    function boardLoadEnv(): array {
-        static $cache = null;
-        if ($cache !== null) return $cache;
-        $cache = [];
-        $envFile = __DIR__ . '/.env';
-        if (!is_file($envFile)) return $cache;
-        foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+if (!function_exists('boardParseEnvFile')) {
+    /** @return array<string, string> */
+    function boardParseEnvFile(string $path): array {
+        $out = [];
+        if (!is_file($path)) return $out;
+        foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
             $line = ltrim($line);
             if ($line === '' || $line[0] === '#') continue;
             $eq = strpos($line, '=');
             if ($eq === false) continue;
             $k = trim(substr($line, 0, $eq));
             $v = trim(substr($line, $eq + 1));
-            // Strip an inline comment that's separated from the value by
-            // whitespace (e.g. `KEY=value # note`). A `#` inside a quoted
-            // string is preserved.
             if ($v !== '' && $v[0] !== '"' && $v[0] !== "'") {
                 if (($hash = strpos($v, ' #')) !== false) $v = substr($v, 0, $hash);
             }
@@ -90,9 +85,30 @@ if (!function_exists('boardLoadEnv')) {
                                     ($v[0] === "'" && substr($v, -1) === "'"))) {
                 $v = substr($v, 1, -1);
             }
-            $cache[$k] = $v;
+            $out[$k] = $v;
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('boardLoadEnv')) {
+    function boardLoadEnv(): array {
+        static $cache = null;
+        if ($cache !== null) return $cache;
+        $cache = [];
+        // board/.env, then node/.env (symlink), then install-root .env
+        foreach ([__DIR__ . '/.env', __DIR__ . '/../.env', __DIR__ . '/../../.env'] as $envFile) {
+            $cache = array_merge($cache, boardParseEnvFile($envFile));
         }
         return $cache;
+    }
+}
+
+if (!function_exists('boardTorSocksProxy')) {
+    /** SOCKS URL for outbound .onion peer fetches (clearnet hub → Tor mirror). */
+    function boardTorSocksProxy(): string {
+        $env = boardLoadEnv();
+        return trim((string)($env['FROGTALK_TOR_SOCKS_PROXY'] ?? 'socks5://127.0.0.1:9050'));
     }
 }
 
@@ -1170,44 +1186,55 @@ if (!function_exists('boardFetchPeerJson')) {
         if (!is_array($parts)) return [null, 'malformed_url'];
         $scheme = strtolower($parts['scheme'] ?? '');
         if ($scheme !== 'http' && $scheme !== 'https') return [null, 'bad_scheme'];
-        $host = $parts['host'] ?? '';
+        $host = strtolower($parts['host'] ?? '');
         if ($host === '') return [null, 'missing_host'];
-        // Pre-resolve so we can refuse SSRF targets before the connect.
-        $ips = boardResolvePublicIps($host);
-        if (!$ips) return [null, 'host_not_routable'];
+
+        $isOnion = str_ends_with($host, '.onion');
+        $ips = [];
+        if (!$isOnion) {
+            // Pre-resolve so we can refuse SSRF targets before the connect.
+            $ips = boardResolvePublicIps($host);
+            if (!$ips) return [null, 'host_not_routable'];
+        }
 
         $ch = curl_init($url);
         if ($ch === false) return [null, 'curl_init_failed'];
         $body = '';
         $bytes = 0;
         $cap = 65536;
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_RETURNTRANSFER => false,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS      => 1,
-            CURLOPT_TIMEOUT        => 8,
-            CURLOPT_CONNECTTIMEOUT => 4,
+            CURLOPT_FOLLOWLOCATION => false,
+            CURLOPT_MAXREDIRS      => 0,
+            CURLOPT_TIMEOUT        => 12,
+            CURLOPT_CONNECTTIMEOUT => 6,
             CURLOPT_USERAGENT      => 'FrogTalk-Federation/1',
             CURLOPT_HTTPHEADER     => ['Accept: application/json'],
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_SSL_VERIFYHOST => 2,
-            // Lock cURL to http(s) on both the initial request and any
-            // redirect — defeats file://, gopher://, dict://, etc.
             CURLOPT_PROTOCOLS         => CURLPROTO_HTTP | CURLPROTO_HTTPS,
             CURLOPT_REDIR_PROTOCOLS   => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            // Pin DNS resolution to the public IPs we whitelisted above
-            // so a redirect or DNS-rebind to 127.0.0.1 can't sneak in.
-            CURLOPT_RESOLVE => array_map(
-                fn(string $ip) => $host . ':' . ($parts['port'] ?? ($scheme === 'https' ? 443 : 80)) . ':' . $ip,
-                $ips
-            ),
             CURLOPT_WRITEFUNCTION => function ($ch, string $chunk) use (&$body, &$bytes, $cap): int {
                 $bytes += strlen($chunk);
-                if ($bytes > $cap) return 0; // signal abort
+                if ($bytes > $cap) return 0;
                 $body .= $chunk;
                 return strlen($chunk);
             },
-        ]);
+        ];
+        if ($isOnion) {
+            $proxy = boardTorSocksProxy();
+            if ($proxy === '') return [null, 'tor_proxy_not_configured'];
+            $opts[CURLOPT_PROXY] = $proxy;
+            $opts[CURLOPT_PROXYTYPE] = defined('CURLPROXY_SOCKS5_HOSTNAME')
+                ? CURLPROXY_SOCKS5_HOSTNAME
+                : CURLPROXY_SOCKS5;
+        } else {
+            $opts[CURLOPT_RESOLVE] = array_map(
+                fn(string $ip) => $host . ':' . ($parts['port'] ?? ($scheme === 'https' ? 443 : 80)) . ':' . $ip,
+                $ips
+            );
+        }
+        curl_setopt_array($ch, $opts);
         $ok    = curl_exec($ch);
         $errno = curl_errno($ch);
         $code  = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);

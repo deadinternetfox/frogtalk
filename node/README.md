@@ -51,7 +51,9 @@ node/
 │   ├── node_setup_wizard.sh
 │   ├── node_federation_join.sh
 │   ├── node_update_check.sh
-│   ├── deploy_nodes.sh          # rsync deploy to production peers
+│   ├── deploy_nodes.sh          # SCP hot deploy to production fleet
+│   ├── deploy.sh                # rsync full node/ to one host (.env in scripts/)
+│   ├── deploy_board.sh          # imageboard PHP hotfix
 │   └── migrations/
 ├── tests/
 ├── requirements.txt
@@ -77,16 +79,31 @@ node/
 |----------|----------------|
 | `FROGTALK_AUTO_UPDATE_ENABLED=0` | Updates are opt-in |
 | `FROGTALK_FEDERATION_REQUIRE_SIGS=1` | Unsigned federation events rejected |
+| `FROGTALK_FEDERATION_CALLS_ENABLED=1` | Federated `call.*` / `voice.*` + `GET /api/network/ice-config` |
+| `FROGTALK_TURN_URLS` + username/credential | STUN/TURN for cross-node WebRTC (coturn on relay nodes) |
+| `FROGTALK_FEDERATION_*_IDLE_SEC` / `*_BUSY_SEC` | Inbox/outbox processor poll (defaults 8 / 2) |
 | `FROGTALK_RELEASE_SIGNERS=` | Trusted Ed25519 hex pubkeys required to apply updates |
 | `FROGTALK_TOR_ENABLED=1` + `FROGTALK_ONION_URL=…` | Hidden-service mode without clearnet leak |
+| `FROGTALK_TOR_SOCKS_PROXY=…` | Outbound fetch to `.onion` peers from clearnet hubs |
 
 **FrogSocial across nodes:** only plaintext posts with `privacy` `public` or `followers` replicate to peers. Friends-only or private audiences use encrypted wall posts (`POST /api/wall/posts/encrypted`); peers receive targeted `social.post.created.encrypted` and `social.post.keys.extended` events. Details: `/docs/api` (Federation section).
 
 ## Operator scripts
 
+| Script | Purpose |
+|--------|---------|
+| `node_setup_wizard.sh` | First-time venv, `.env`, symlinks |
+| `node_federation_join.sh` | Mesh join: directory sync (retries), pubkey pin, board nav, resilient fallback |
+| `node_update_check.sh` | Signed update check / `--apply` |
+| `deploy_nodes.sh` | Maintainer SCP to production peers (see `deploy/README.md`) |
+| `deploy.sh` | Full rsync deploy to one server |
+| `deploy_board.sh` | Board PHP-only hotfix |
+
 - **Idempotent** — safe to re-run; missing symlinks are created.
 - **Non-fatal skips** — edge cases are reported, not rolled back silently.
 - **No silent `.env` edits** — only values you confirm in the wizard.
+
+Peer Ed25519 keys are pinned from each peer’s `/api/network/status` (the official directory listing does not include pubkeys). See `deploy/README.md` (Federation chat delivery).
 
 ## Tests
 

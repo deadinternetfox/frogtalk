@@ -136,9 +136,19 @@ FROGTALK_TURN_USERNAME=your_turn_user
 FROGTALK_TURN_CREDENTIAL=your_turn_secret
 ```
 
-Clients fetch merged ICE via `GET /api/network/ice-config?peer_server_id=<uuid>`.
+Clients fetch merged ICE via `GET /api/network/ice-config?peer_server_id=<uuid>` (session auth required).
 Install [coturn](https://github.com/coturn/coturn) on each node that relays media.
 Spec: [docs/FEDERATED_CALLS.md](../../docs/FEDERATED_CALLS.md).
+
+**Tor Browser:** WebRTC is blocked in Tor tabs (and some strict privacy extensions). Voice/video calls need a normal browser window or the FrogTalk mobile app — not a server misconfiguration.
+
+## Federation chat delivery
+
+| Mechanism | Notes |
+|-----------|--------|
+| **Pubkey pinning** | The official directory does not ship `federation_pubkey_pem`. Each node TOFU-pins peers from `GET /api/network/status` after directory sync and before outbox push. With `FROGTALK_FEDERATION_REQUIRE_SIGS=1`, unsigned or unpinned-origin events are rejected. |
+| **Processors** | Background inbox/outbox workers default to **8s idle / 2s busy** poll (`FROGTALK_FEDERATION_*_IDLE_SEC`, `*_BUSY_SEC`). Lower only on tiny meshes. |
+| **Clearnet → onion** | Hub nodes pushing to `.onion` peers need a local Tor SOCKS proxy (`FROGTALK_TOR_SOCKS_PROXY`, default `socks5://127.0.0.1:9050`). |
 
 ## Nginx and app port
 
@@ -177,30 +187,42 @@ Full reference: `node/deploy/nginx.conf` (CSP is emitted by FastAPI; do not dupl
 bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
 ```
 
-The CLI fixes common footguns (`node/data` symlink, board permissions), enables federation in `.env`, syncs the [official directory](https://frogtalk.xyz/api/network/servers), and links imageboard peer nav pills.
+The CLI fixes common footguns (`node/data` / `node/secrets` symlinks, board permissions), enables federation in `.env`, syncs the [official directory](https://frogtalk.xyz/api/network/servers) (retries + built-in fallback to **FrogTalk Main** + **Tor Mirror** if HTTP fails), TOFU-pins peer Ed25519 keys from `/api/network/status`, and links imageboard peer nav pills (`.onion` boards via `FROGTALK_TOR_SOCKS_PROXY`).
 
 | Flag | Effect |
 |------|--------|
 | `--dry-run` | Print actions without writing |
+| `--public-url URL` | Clearnet URL for this node (omit for onion-only) |
 | `--onion-url URL` | Set `FROGTALK_ONION_URL` (Tor mode) |
+| `--directory-url URL` | Override official directory feed |
 | `--skip-board` | Skip imageboard peer linking |
 | `--skip-restart` | Do not restart `frogtalk` |
+
+Re-run safely after deploys: `bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y`
 
 Restart if the script did not: `sudo systemctl restart frogtalk`.
 
 **FrogSocial replication:** only plaintext posts with `privacy` `public` or `followers` federate to peers. Friends-only audiences use encrypted wall posts and targeted federation events — see [API docs](https://frogtalk.xyz/docs/api) (Federation section).
 
-## Hot deploy (maintainers)
+## Deploy scripts (maintainers)
 
-From a dev checkout at repo root, sync specific files to remote nodes and restart:
+| Script | Use when |
+|--------|----------|
+| `node/scripts/deploy_nodes.sh` | FrogTalk production fleet — SCP selected files to both nodes, restart `frogtalk` |
+| `node/scripts/deploy.sh` | Single host — full `rsync` of `node/` (reads `node/scripts/.env`: `SSH_HOST`, `REMOTE_DIR`, …) |
+| `node/scripts/deploy_board.sh` | PHP imageboard hotfix only (`board.php`, `.htaccess`, …) |
+
+**Fleet hot deploy** (repo root):
 
 ```bash
-node/scripts/deploy_nodes.sh node/routers/federation.py node/static/js/wall_crypto.js
+node/scripts/deploy_nodes.sh node/routers/federation.py node/static/js/calls.js
 ```
 
-Paths under `node/` map to `/opt/frogtalk/node/` on the server. Hosts and SSH ports are defined inside the script — edit there for your fleet. Default invocation without arguments ships a curated static/JS bundle.
+Paths under `node/` map to `/opt/frogtalk/node/` on the server. Hosts and SSH ports are in the script (`HOSTS`, `HOST_PORT`). Bare `static/…` or `routers/…` args are rewritten to `node/…`. With no args, a curated client bundle is synced (includes `calls.js`, `ws.js`, core UI JS).
 
-Does **not** replace `git pull` for schema migrations; use `node_update_check.sh --apply` or a full deploy when `database.py` migrations change.
+Does **not** replace `git pull` for schema migrations; use `node_update_check.sh --apply` or a full `deploy.sh` when `database.py` migrations change.
+
+**Docs on live nodes:** after editing `node/static/docs-node.html` or `docs-api.html`, deploy those paths the same way so `/docs/node` and `/docs/api` update.
 
 ## Recommended production defaults
 

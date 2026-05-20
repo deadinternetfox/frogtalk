@@ -19,7 +19,6 @@ set -o pipefail
 INSTALL_DIR_DEFAULT="/opt/frogtalk"
 OFFICIAL_DIRECTORY_DEFAULT="https://frogtalk.xyz/api/network/servers"
 ENV_FILE_NAME=".env"
-
 # ── Colors (disabled when not a TTY or NO_COLOR set) ─────────────────────────
 if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
   C_RESET=$'\033[0m'
@@ -190,12 +189,27 @@ load_env_file() {
 }
 
 run_py() {
+  load_env_file "$INSTALL_DIR/$ENV_FILE_NAME"
+  export FT_INSTALL_DIR="$INSTALL_DIR"
   # shellcheck disable=SC1091
   if [[ -f "$INSTALL_DIR/venv/bin/activate" ]]; then
     # shellcheck source=/dev/null
     source "$INSTALL_DIR/venv/bin/activate"
   fi
   (cd "$INSTALL_DIR/node" && python3 "$@")
+}
+
+curl_retry() {
+  local url="$1" max="${2:-3}" attempt=1 out=""
+  while [[ "$attempt" -le "$max" ]]; do
+    if out="$(curl -sf -m 12 "$url" 2>/dev/null)"; then
+      printf '%s' "$out"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep "$attempt"
+  done
+  return 1
 }
 
 fix_data_symlink() {
@@ -234,6 +248,15 @@ fix_data_symlink() {
     fi
   fi
 
+  if [[ -d "$INSTALL_DIR/secrets" && ! -L "$INSTALL_DIR/node/secrets" ]]; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      detail "[dry-run] ln -sfn $INSTALL_DIR/secrets node/secrets"
+    else
+      ln -sfn "$INSTALL_DIR/secrets" "$INSTALL_DIR/node/secrets"
+      ok "node/secrets → $INSTALL_DIR/secrets"
+    fi
+  fi
+
   if [[ -d "$INSTALL_DIR/node/board/board_data" ]] && id www-data >/dev/null 2>&1; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
       detail "[dry-run] chown www-data board_data board_uploads board_previews"
@@ -253,8 +276,8 @@ configure_env() {
   [[ -f "$env_path" ]] || die "No $env_path — run node_setup_wizard.sh first."
 
   local pub="${PUBLIC_URL_OVERRIDE:-${PUBLIC_URL:-}}"
-  if [[ -z "$pub" ]]; then
-    pub="$(ask "Public clearnet URL (https://…)" "https://frogtalk.xyz")"
+  if [[ -z "$pub" ]] && [[ "$ASSUME_YES" -eq 0 ]]; then
+    pub="$(ask "Public clearnet URL (https://…, empty if onion-only)" "")"
   fi
   pub="${pub%/}"
 
@@ -262,8 +285,13 @@ configure_env() {
 
   badge "CHAT FEDERATION"
   set_env_value "$env_path" "FROGTALK_FEDERATION_ENABLED" "1"
-  set_env_value "$env_path" "PUBLIC_URL" "$pub"
-  set_env_value "$env_path" "FROGTALK_BASE_URL" "$pub"
+  if ! grep -qE '^FROGTALK_FEDERATION_REQUIRE_SIGS=' "$env_path" 2>/dev/null; then
+    set_env_value "$env_path" "FROGTALK_FEDERATION_REQUIRE_SIGS" "1"
+  fi
+  if [[ -n "$pub" ]]; then
+    set_env_value "$env_path" "PUBLIC_URL" "$pub"
+    set_env_value "$env_path" "FROGTALK_BASE_URL" "$pub"
+  fi
   set_env_value "$env_path" "FROGTALK_OFFICIAL_DIRECTORY_URL" "$dir_url"
   if ! grep -qE '^FROGTALK_OFFICIAL_DIRECTORY_SYNC_INTERVAL_SEC=' "$env_path" 2>/dev/null; then
     set_env_value "$env_path" "FROGTALK_OFFICIAL_DIRECTORY_SYNC_INTERVAL_SEC" "900"
@@ -281,7 +309,12 @@ configure_env() {
     badge "TOR MODE"
     set_env_value "$env_path" "FROGTALK_TOR_ENABLED" "1"
     set_env_value "$env_path" "FROGTALK_ONION_URL" "$onion"
+    if ! grep -qE '^FROGTALK_TOR_SOCKS_PROXY=' "$env_path" 2>/dev/null; then
+      set_env_value "$env_path" "FROGTALK_TOR_SOCKS_PROXY" "socks5://127.0.0.1:9050"
+    fi
     ok "Tor mode · ${C_DIM}${onion}${C_RESET}"
+  elif ! grep -qE '^FROGTALK_TOR_SOCKS_PROXY=' "$env_path" 2>/dev/null; then
+    set_env_value "$env_path" "FROGTALK_TOR_SOCKS_PROXY" "socks5://127.0.0.1:9050"
   fi
 
   load_env_file "$env_path"
@@ -303,8 +336,6 @@ sync_chat_federation() {
   py_out="$(run_py - <<'PY'
 import asyncio, json, os, sys
 
-# Ensure .env from parent install dir is visible (systemd uses EnvironmentFile;
-# this script exports it in bash before calling us).
 sys.path.insert(0, ".")
 import database as db
 from database import init_db
@@ -312,11 +343,69 @@ from routers import federation as fed
 
 init_db()
 
+# Last-resort mesh rows when directory HTTP is down (frogtalk.xyz production pair).
+FALLBACK_PEERS = [
+    {
+        "server_id": "srv_ee3f0ff0c6e74fadb542",
+        "display_name": "FrogTalk Main",
+        "base_url": "https://frogtalk.xyz",
+        "onion_url": "",
+        "capabilities": ["federation-v1"],
+    },
+    {
+        "server_id": "srv_c93cf598b239402c8452",
+        "display_name": "FrogTalk Tor Mirror",
+        "base_url": "",
+        "onion_url": "http://icn3a43nb6byhdmon4rqzeqswkskk2bnvf54l6at3iskmqlture3blqd.onion",
+        "capabilities": ["federation-v1"],
+    },
+]
+
 async def main():
-    result = await fed.sync_official_directory_once()
+    dir_url = (os.getenv("FROGTALK_OFFICIAL_DIRECTORY_URL") or "").strip()
+    result = await fed.sync_official_directory_once(dir_url or None)
+    if not result.get("ok") and FALLBACK_PEERS:
+        imported = skipped = 0
+        for item in FALLBACK_PEERS:
+            row = fed._coerce_server_row(item)
+            if not row:
+                skipped += 1
+                continue
+            db.upsert_federation_server(
+                server_id=row["server_id"],
+                display_name=row["display_name"],
+                base_url=row["base_url"],
+                onion_url=row["onion_url"],
+                official=True,
+                trust_tier="official",
+                capabilities=row["capabilities"],
+            )
+            imported += 1
+        try:
+            pinned = await asyncio.to_thread(fed.ensure_peer_pubkeys_pinned)
+        except Exception:
+            pinned = 0
+        result = {
+            "ok": True,
+            "imported": imported,
+            "skipped": skipped,
+            "total": len(FALLBACK_PEERS),
+            "fallback": True,
+            "pinned": pinned,
+            "error": result.get("error"),
+        }
+    else:
+        try:
+            pinned = await asyncio.to_thread(fed.ensure_peer_pubkeys_pinned)
+        except Exception:
+            pinned = 0
+        result["pinned"] = pinned
+
     local = db.get_or_create_local_server_identity()
     local_sid = (local or {}).get("server_id") or ""
-    db.set_config("federation.base_url", os.getenv("PUBLIC_URL", "") or db.get_config("federation.base_url") or "")
+    pub = (os.getenv("PUBLIC_URL") or os.getenv("FROGTALK_BASE_URL") or "").strip()
+    if pub:
+        db.set_config("federation.base_url", pub)
     onion = (os.getenv("FROGTALK_ONION_URL") or "").strip()
     if onion:
         db.set_config("federation.onion_url", onion)
@@ -326,27 +415,49 @@ async def main():
     board_urls = []
     seen = set()
     rows = db.list_federation_servers(official_only=False)
+    tor_local = fed._tor_mode_enabled()
     for row in rows:
         sid = row.get("server_id") or ""
-        if sid == local_sid:
+        if sid == local_sid or not row.get("enabled"):
             continue
-        for key in ("base_url", "onion_url"):
-            raw = (row.get(key) or "").strip().rstrip("/")
-            if not raw:
-                continue
-            if not raw.startswith("http"):
-                continue
+        targets = []
+        base = (row.get("base_url") or "").strip().rstrip("/")
+        onion_u = (row.get("onion_url") or "").strip().rstrip("/")
+        if base.startswith("http"):
+            targets.append(base)
+        if onion_u.startswith("http"):
+            targets.append(onion_u)
+        if tor_local and onion_u.startswith("http"):
+            targets = [onion_u] + [t for t in targets if t != onion_u]
+        elif not tor_local and base.startswith("http"):
+            targets = [base] + [t for t in targets if t != base]
+        for raw in targets:
             board = raw + "/board/"
             if board in seen:
                 continue
             seen.add(board)
             board_urls.append(board)
 
+    peers = []
+    for row in rows:
+        sid = row.get("server_id") or ""
+        if not sid or sid == local_sid:
+            continue
+        peers.append({
+            "server_id": sid,
+            "display_name": row.get("display_name") or sid,
+            "enabled": bool(row.get("enabled")),
+            "has_pubkey": bool((db.get_federation_server_pubkey(sid) or "").strip()),
+            "base_url": row.get("base_url") or "",
+            "onion_url": row.get("onion_url") or "",
+        })
+
     out = {
         "sync": result,
         "local_server_id": local_sid,
         "peer_count": len(rows),
         "board_urls": board_urls,
+        "peers": peers,
     }
     print(json.dumps(out))
 
@@ -360,11 +471,21 @@ PY
   total="$(printf '%s' "$py_out" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sync',{}).get('total',0))")"
   BOARD_PEER_URLS="$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin).get('board_urls',[])))")"
 
+  local used_fallback pinned_n
+  used_fallback="$(printf '%s' "$py_out" | python3 -c "import sys,json; print('1' if json.load(sys.stdin).get('sync',{}).get('fallback') else '0')")"
+  pinned_n="$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sync',{}).get('pinned',0))")"
+
   if [[ "$sync_ok" != "1" ]]; then
     warn "Directory sync returned an error (check FROGTALK_OFFICIAL_DIRECTORY_URL / network)."
     detail "$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sync',{}).get('error',''))")"
+  elif [[ "$used_fallback" == "1" ]]; then
+    warn "Directory unreachable — applied built-in FrogTalk mesh fallback (${imported} peer(s))."
+    detail "$(printf '%s' "$py_out" | python3 -c "import sys,json; e=json.load(sys.stdin).get('sync',{}).get('error',''); print(e if e else '')")"
   else
     ok "Imported ${C_BOLD}${imported}${C_RESET} server(s) from directory (${total} listed)"
+  fi
+  if [[ "${pinned_n:-0}" -gt 0 ]]; then
+    ok "Pinned ${C_BOLD}${pinned_n}${C_RESET} peer Ed25519 key(s) from /api/network/status"
   fi
 
   local local_sid peer_n board_n
@@ -372,6 +493,16 @@ PY
   peer_n="$(printf '%s' "$py_out" | python3 -c "import sys,json; print(json.load(sys.stdin).get('peer_count',0))")"
   board_n="$(printf '%s' "$BOARD_PEER_URLS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")"
   detail "Local server_id: ${C_DIM}${local_sid}${C_RESET} · registry rows: ${peer_n} · board candidates: ${board_n}"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && detail "$line"
+  done < <(printf '%s' "$py_out" | python3 -c "
+import sys, json
+for p in json.load(sys.stdin).get('peers', []):
+    pk = 'pinned' if p.get('has_pubkey') else 'no-pubkey'
+    en = 'on' if p.get('enabled') else 'off'
+    urls = p.get('base_url') or p.get('onion_url') or '(no url)'
+    print(f\"peer {p.get('server_id','?')[:12]}… {en} {pk} — {p.get('display_name','')} — {urls}\")
+")
   CHAT_IMPORTED="$imported"
   CHAT_TOTAL="$total"
 }
@@ -455,7 +586,7 @@ PHP
     ok "Board nav: ${C_BOLD}${BOARD_ADDED}${C_RESET} peer pill(s) linked"
   fi
   if [[ "${BOARD_FAILED:-0}" -gt 0 ]]; then
-    warn "${BOARD_FAILED} peer(s) unreachable (Tor-only from clearnet is normal)"
+    warn "${BOARD_FAILED} peer(s) unreachable — ensure Tor SOCKS (FROGTALK_TOR_SOCKS_PROXY) for .onion boards"
   fi
 }
 
@@ -484,15 +615,23 @@ verify_and_restart() {
     fi
   fi
 
-  local port="${PORT:-8000}"
-  if curl -sf -m 5 "http://127.0.0.1:${port}/api/ping" >/dev/null 2>&1; then
+  local port="${PORT:-8080}"
+  local ping_ok=0
+  for try_port in "$port" 8080 8000; do
+    if curl -sf -m 5 "http://127.0.0.1:${try_port}/api/ping" >/dev/null 2>&1; then
+      port="$try_port"
+      ping_ok=1
+      break
+    fi
+  done
+  if [[ "$ping_ok" -eq 1 ]]; then
     ok "API ping http://127.0.0.1:${port}/api/ping"
   else
-    warn "API not responding on port ${port} (start the node or check nginx upstream)"
+    warn "API not responding on PORT/8080/8000 (start frogtalk or check nginx upstream)"
   fi
 
   local status_line
-  status_line="$(curl -sf -m 5 "http://127.0.0.1:${port}/api/network/status" 2>/dev/null | python3 -c "
+  status_line="$(curl -sf -m 8 "http://127.0.0.1:${port}/api/network/status" 2>/dev/null | python3 -c "
 import sys,json
 try:
     d=json.load(sys.stdin)
@@ -532,6 +671,7 @@ print_summary() {
   say "    ${C_DIM}1.${C_RESET} Open ${C_CYAN}/app → Settings → Network${C_RESET} — probe & pick a node"
   say "    ${C_DIM}2.${C_RESET} Visit ${C_CYAN}/board/${C_RESET} — federated pills should appear at the top"
   say "    ${C_DIM}3.${C_RESET} Tune identity in ${C_CYAN}/board/admin${C_RESET} (title, node_id, topic)"
+  say "    ${C_DIM}4.${C_RESET} Re-sync anytime: ${C_CYAN}bash node/scripts/node_federation_join.sh --install-dir ${INSTALL_DIR} -y${C_RESET}"
   say ""
   if [[ "$DRY_RUN" -eq 1 ]]; then
     warn "Dry-run only — re-run without --dry-run to apply."

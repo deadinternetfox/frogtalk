@@ -752,6 +752,13 @@ GET    /api/federation/failover/status</code></pre>
           <p class="muted"><code>FROGTALK_FEDERATION_REQUIRE_SIGS</code> defaults to <code>1</code>. Events
           from origins with no pinned <code>server_pubkey</code> are rejected. Inbox idempotency uses a
           composite <code>(origin_server_id, event_id)</code> key so two peers cannot collide.</p>
+          <p class="muted"><strong>Pubkey pinning:</strong> <code>GET /api/network/servers</code> (directory)
+          does not include <code>federation_pubkey_pem</code>. Nodes TOFU-pin each enabled peer from
+          <code>GET /api/network/status</code> after directory sync and before outbox push. Operators can
+          also read <code>federation_pubkey_fingerprint</code> there when verifying a peer manually.</p>
+          <p class="muted"><strong>Delivery:</strong> background inbox/outbox processors poll every
+          <code>FROGTALK_FEDERATION_INBOX_IDLE_SEC</code> / <code>OUTBOX_IDLE_SEC</code> (default 8s when idle,
+          2s when busy). Clearnet hubs reach <code>.onion</code> peers via <code>FROGTALK_TOR_SOCKS_PROXY</code>.</p>
 
           <h3 style="margin-top:14px">No shadow auto-create (CRIT-4)</h3>
           <p class="muted">Federation events referencing an unknown local nickname or room are now
@@ -766,7 +773,8 @@ GET    /api/federation/failover/status</code></pre>
 voice.session.join / voice.session.leave / voice.signal (offer|answer|ice)
 GET  /api/network/ice-config?peer_server_id=&lt;uuid&gt;  (session auth required)</code></pre>
           <p class="muted">WebRTC media stays P2P/TURN; signaling only crosses federation. See
-          <code>docs/FEDERATED_CALLS.md</code> in the repo.</p>
+          <code>docs/FEDERATED_CALLS.md</code> in the repo. Tor Browser and strict privacy tabs block WebRTC
+          in-page — clients show a toast; use a normal browser window or the mobile app for calls.</p>
 
           <h3 style="margin-top:14px">FrogSocial replication (<code>social.*</code>)</h3>
           <p class="muted">Sensitive prefix — requires pinned origin pubkey + valid Ed25519 signature.

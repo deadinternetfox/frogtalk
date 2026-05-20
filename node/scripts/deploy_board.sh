@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Deploy board PHP + .htaccess to both FrogTalk production nodes.
 # Usage (from repo root):  bash node/scripts/deploy_board.sh
+#
+# App/Python hot deploy: node/scripts/deploy_nodes.sh
+# Full node rsync (one host): node/scripts/deploy.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
