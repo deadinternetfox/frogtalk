@@ -170,7 +170,7 @@ Deslopper responsibilities:
 
 - **Credit goes in `CONTRIBUTORS.md`.** Add yourself in your PR.
 - **Security researchers** are credited in the release notes and on the [Hall of Fame](https://frogtalk.xyz/security#hall-of-fame).
-- **Be excellent to each other.** No harassment, no doxxing, no "you should have known better" — we're all here because we want FrogTalk to be safer and better.
+- **Be excellent to each other.** See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) (Contributor Covenant 2.1). Report issues to `security@frogtalk.xyz` (subject: `Code of Conduct`) or via [Discussions](https://github.com/deadinternetfox/frogtalk/discussions).
 
 ---
 
