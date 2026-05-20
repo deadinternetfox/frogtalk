@@ -1077,7 +1077,7 @@ const Social = (() => {
 
   function _commentsSkeletonHtml(count = 3, includeInput = true) {
     const rows = Array.from({ length: count }).map(() => `
-      <div class="sf-comment skel-row" aria-hidden="true" style="pointer-events:none">
+      <div class="sf-comment skel-row" aria-hidden="true">
         <div class="sf-comment-avatar"><div class="skel-circle" style="width:24px;height:24px"></div></div>
         <div class="sf-comment-body">
           <div class="skel-line" style="width:28%;height:10px;margin-bottom:6px"></div>
@@ -1087,7 +1087,7 @@ const Social = (() => {
       </div>
     `).join('');
     const input = includeInput ? `
-      <div class="sf-comment-input skel-row" aria-hidden="true" style="pointer-events:none">
+      <div class="sf-comment-input skel-row" aria-hidden="true">
         <div class="skel-line" style="height:34px;border-radius:10px;flex:1"></div>
         <div class="skel-line" style="width:72px;height:34px;border-radius:10px"></div>
       </div>
@@ -1243,7 +1243,7 @@ const Social = (() => {
 
   function _spChannelsSkeletonHtml(count = 3) {
     return `<div class="sp-channels-list">${Array.from({ length: count }).map(() => `
-      <div class="sp-channel-card skel-row" style="pointer-events:none">
+      <div class="sp-channel-card skel-row">
         <div class="skel-circle" style="width:46px;height:46px;flex-shrink:0"></div>
         <div style="flex:1;min-width:0">
           <div class="skel-line" style="width:42%;height:12px;margin-bottom:7px"></div>
@@ -1591,7 +1591,7 @@ const Social = (() => {
 
   function _socialPostSkeletonCards(count = 3) {
     return Array.from({ length: count }).map(() => `
-      <div class="sf-post skel-row" aria-hidden="true" style="pointer-events:none">
+      <div class="sf-post skel-row" aria-hidden="true">
         <div class="sf-post-header">
           <div class="skel-circle" style="width:36px;height:36px"></div>
           <div style="flex:1;min-width:0">
@@ -1619,7 +1619,7 @@ const Social = (() => {
         <div class="stories-bar" aria-hidden="true">
           <div class="stories-scroll">
             ${Array.from({ length: 5 }).map(() => `
-              <div class="story-circle" style="pointer-events:none">
+              <div class="story-circle">
                 <div class="story-avatar-ring viewed"><div class="story-avatar skel-circle" style="width:56px;height:56px"></div></div>
                 <span class="story-nick"><span class="skel-line" style="display:inline-block;width:46px;height:9px"></span></span>
               </div>
@@ -1643,7 +1643,7 @@ const Social = (() => {
         <span class="explore-refresh is-skeleton-chip" title="Refresh">🔄</span>
       </div>
       <div class="social-grid" aria-hidden="true">
-        ${Array.from({ length: 6 }).map(() => `<div class="social-grid-item" style="pointer-events:none"><div class="skel-block" style="height:100%;min-height:120px;border-radius:0"></div></div>`).join('')}
+        ${Array.from({ length: 6 }).map(() => `<div class="social-grid-item"><div class="skel-block" style="height:100%;min-height:120px;border-radius:0"></div></div>`).join('')}
       </div>
       <div class="social-feed">${_socialPostSkeletonCards(2)}</div>
     `;
@@ -1664,7 +1664,7 @@ const Social = (() => {
       <div class="reels-stage">
         <div class="reels-snap" aria-hidden="true" style="gap:14px">
           ${Array.from({ length: 3 }).map(() => `
-            <div class="reel-card" style="pointer-events:none">
+            <div class="reel-card">
               <div class="skel-block" style="height:100%;border-radius:14px"></div>
             </div>
           `).join('')}
@@ -3210,8 +3210,8 @@ const Social = (() => {
 
     if (!posts.length) {
       html += `<div class="social-empty">
-        <div style="font-size:48px;margin-bottom:12px">🐸</div>
-        <div style="font-size:16px;font-weight:600;margin-bottom:6px">Your feed is empty</div>
+        <div class="se-icon se-icon--lg">🐸</div>
+        <div class="se-title se-title--lg">Your feed is empty</div>
         <div style="color:#888;font-size:14px">Follow people to see their posts here, or check out <a href="#" onclick="Social.switchTab('explore');return false" style="color:#4caf50">Explore</a>.</div>
       </div>`;
     } else {
@@ -3357,7 +3357,7 @@ const Social = (() => {
           content.innerHTML = `
             <div class="social-empty">
               <div style="font-size:42px;margin-bottom:10px">⏳</div>
-              <div style="font-size:16px;font-weight:600;margin-bottom:6px">Feed is taking too long</div>
+              <div class="se-title se-title--lg">Feed is taking too long</div>
               <div style="color:#8aa08f;font-size:14px;margin-bottom:10px">Try refreshing the feed.</div>
               <button type="button" class="explore-refresh" onclick="Social.loadFeed({force:true})" style="margin:0 auto">Retry feed</button>
             </div>`;
@@ -3384,7 +3384,7 @@ const Social = (() => {
 
     if (posts.length === 0) {
       html += `<div class="social-empty">
-        <div style="font-size:48px;margin-bottom:12px">🌍</div>
+        <div class="se-icon se-icon--lg">🌍</div>
         <div style="font-size:16px;font-weight:600">Nothing to explore yet</div>
         <div style="color:#888;font-size:14px;margin-top:6px">Be the first to post something!</div>
       </div>`;
@@ -3435,7 +3435,7 @@ const Social = (() => {
       </div>
       <div class="explore-channels-scroll">${channels.slice(0, 8).map(ch => {
         const iconHtml = ch.icon && ch.icon.startsWith('data:image')
-          ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+          ? `<img class="avatar-fill" src="${esc(ch.icon)}" alt="">`
           : esc(ch.icon || '💬');
         return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
           <div class="explore-channel-icon">${iconHtml}</div>
@@ -3535,7 +3535,7 @@ const Social = (() => {
           </div>
           <div class="explore-channels-scroll">${channels.slice(0, 8).map(ch => {
             const iconHtml = ch.icon && ch.icon.startsWith('data:image')
-              ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+              ? `<img class="avatar-fill" src="${esc(ch.icon)}" alt="">`
               : esc(ch.icon || '💬');
             return `<div class="explore-channel-card" onclick="viewChannelProfile(${jsStr(ch.name)})">
               <div class="explore-channel-icon">${iconHtml}</div>
@@ -3828,9 +3828,9 @@ const Social = (() => {
           p.media_type && (p.media_type.startsWith('image/') || p.media_type.startsWith('video/'))
         );
         if (mediaPosts.length === 0) {
-          container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-            <div style="font-size:36px;margin-bottom:8px">🌍</div>
-            <div style="font-size:15px;color:#888">No public media yet</div>
+          container.innerHTML = `<div class="social-empty social-empty--pad">
+            <div class="se-icon">🌍</div>
+            <div class="se-sub">No public media yet</div>
           </div>`;
           return;
         }
@@ -3867,9 +3867,9 @@ const Social = (() => {
         };
         const musicPosts = posts.filter(isMusic);
         if (musicPosts.length === 0) {
-          container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-            <div style="font-size:36px;margin-bottom:8px;opacity:.7">♫</div>
-            <div style="font-size:15px;color:#888">No music shared yet</div>
+          container.innerHTML = `<div class="social-empty social-empty--pad">
+            <div class="se-icon se-icon--dim">♫</div>
+            <div class="se-sub">No music shared yet</div>
           </div>`;
           return;
         }
@@ -3880,9 +3880,9 @@ const Social = (() => {
 
       // Default "wall" view: all posts (text + media) the viewer may see
       if (posts.length === 0) {
-        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-          <div style="font-size:36px;margin-bottom:8px">📝</div>
-          <div style="font-size:15px;color:#888">Nothing on the wall yet</div>
+        container.innerHTML = `<div class="social-empty social-empty--pad">
+          <div class="se-icon">📝</div>
+          <div class="se-sub">Nothing on the wall yet</div>
         </div>`;
         return;
       }
@@ -3963,10 +3963,10 @@ const Social = (() => {
         const items = data.media || [];
 
         if (items.length === 0) {
-          container.innerHTML = `${toggleHtml}<div class="social-empty" style="padding:32px 0">
-            <div style="font-size:36px;margin-bottom:8px">🖼️</div>
-            <div style="font-size:15px;color:#888">No private media yet</div>
-            <div style="color:#666;font-size:12px;margin-top:6px">Media you send in channels shows here — only you can see it until you hit <em>Make Public</em>.</div>
+          container.innerHTML = `${toggleHtml}<div class="social-empty social-empty--pad-sm">
+            <div class="se-icon">🖼️</div>
+            <div class="se-sub">No private media yet</div>
+            <div class="se-hint">Media you send in channels shows here — only you can see it until you hit <em>Make Public</em>.</div>
           </div>`;
           return;
         }
@@ -4006,9 +4006,9 @@ const Social = (() => {
       );
 
       if (mediaPosts.length === 0) {
-        container.innerHTML = `${toggleHtml}<div class="social-empty" style="padding:32px 0">
-          <div style="font-size:36px;margin-bottom:8px">🌍</div>
-          <div style="font-size:15px;color:#888">No public media yet</div>
+        container.innerHTML = `${toggleHtml}<div class="social-empty social-empty--pad-sm">
+          <div class="se-icon">🌍</div>
+          <div class="se-sub">No public media yet</div>
         </div>`;
         return;
       }
@@ -5872,10 +5872,10 @@ const Social = (() => {
       if (!_isProfileTabLoadCurrent('reels', loadToken)) return;
 
       if (posts.length === 0) {
-        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-          <div style="font-size:36px;margin-bottom:8px">🎞</div>
-          <div style="font-size:15px;color:#888">No reels yet</div>
-          <div style="color:#666;font-size:12px;margin-top:6px">Video posts will appear here.</div>
+        container.innerHTML = `<div class="social-empty social-empty--pad">
+          <div class="se-icon">🎞</div>
+          <div class="se-sub">No reels yet</div>
+          <div class="se-hint">Video posts will appear here.</div>
         </div>`;
         return;
       }
@@ -5925,10 +5925,10 @@ const Social = (() => {
       if (posts === null || !_isProfileTabLoadCurrent('reposts', loadToken)) return;
 
       if (posts.length === 0) {
-        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-          <div style="font-size:36px;margin-bottom:8px">🔁</div>
-          <div style="font-size:15px;color:#888">No reposts yet</div>
-          <div style="color:#666;font-size:12px;margin-top:6px">When you repost posts from people you follow, they'll appear here.</div>
+        container.innerHTML = `<div class="social-empty social-empty--pad">
+          <div class="se-icon">🔁</div>
+          <div class="se-sub">No reposts yet</div>
+          <div class="se-hint">When you repost posts from people you follow, they'll appear here.</div>
         </div>`;
         return;
       }
@@ -5951,10 +5951,10 @@ const Social = (() => {
       const isSelf = data.is_self;
 
       if (items.length === 0) {
-        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-          <div style="font-size:36px;margin-bottom:8px">🖼️</div>
-          <div style="font-size:15px;color:#888">No private media yet</div>
-          <div style="color:#666;font-size:12px;margin-top:6px">Media you send in channels shows here — only you can see it until you hit <em>Make Public</em>.</div>
+        container.innerHTML = `<div class="social-empty social-empty--pad">
+          <div class="se-icon">🖼️</div>
+          <div class="se-sub">No private media yet</div>
+          <div class="se-hint">Media you send in channels shows here — only you can see it until you hit <em>Make Public</em>.</div>
         </div>`;
         return;
       }
@@ -5978,9 +5978,9 @@ const Social = (() => {
           </div>`;
       }).join('')}</div>`;
     } catch {
-      container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-        <div style="font-size:36px;margin-bottom:8px">🖼️</div>
-        <div style="font-size:15px;color:#888">No media yet</div>
+      container.innerHTML = `<div class="social-empty social-empty--pad">
+        <div class="se-icon">🖼️</div>
+        <div class="se-sub">No media yet</div>
       </div>`;
     }
   }
@@ -6029,9 +6029,9 @@ const Social = (() => {
       if (channels === null || !_isProfileTabLoadCurrent('channels', loadToken)) return;
 
       if (channels.length === 0) {
-        container.innerHTML = `<div class="social-empty" style="padding:40px 0">
-          <div style="font-size:36px;margin-bottom:8px">📺</div>
-          <div style="font-size:15px;color:#888">No channels created yet</div>
+        container.innerHTML = `<div class="social-empty social-empty--pad">
+          <div class="se-icon">📺</div>
+          <div class="se-sub">No channels created yet</div>
         </div>`;
         return;
       }
@@ -6039,7 +6039,7 @@ const Social = (() => {
       const catIcons = {gaming:'🎮',music:'🎵',art:'🎨',tech:'💻',social:'💬',education:'📚',memes:'😂',crypto:'💰',sports:'⚽',other:'📦'};
       container.innerHTML = `<div class="sp-channels-list">${channels.map(ch => {
         const iconHtml = ch.icon && ch.icon.startsWith('data:image')
-          ? `<img src="${esc(ch.icon)}" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`
+          ? `<img class="avatar-fill" src="${esc(ch.icon)}" alt="">`
           : esc(ch.icon || '💬');
         let tags = [];
         try { tags = typeof ch.tags === 'string' ? JSON.parse(ch.tags) : (ch.tags || []); } catch {}
@@ -6617,8 +6617,8 @@ const Social = (() => {
         if (activeMood) {
           const moodLabel = (moodMeta[activeMood] && moodMeta[activeMood].label) || 'this mood';
           feed = `<div class="social-empty">
-            <div style="font-size:36px;margin-bottom:8px;opacity:.7">🕳️</div>
-            <div style="font-size:15px;font-weight:600;margin-bottom:4px">No tracks in ${moodLabel}</div>
+            <div class="se-icon se-icon--dim">🕳️</div>
+            <div class="se-title">No tracks in ${moodLabel}</div>
             <div style="color:#888;font-size:13px">Try another mood or switch sort.</div>
           </div>`;
           content.innerHTML = hero + feed;
@@ -6630,13 +6630,13 @@ const Social = (() => {
           : { t: 'No music shares yet',        s: 'Tap <b>Share a track</b> above — or switch to <b>Explore</b> to hear what everyone\'s playing.' };
         feed = `<div class="social-empty">
           <div style="font-size:48px;margin-bottom:12px;opacity:.7">♫</div>
-          <div style="font-size:16px;font-weight:600;margin-bottom:6px">${emptyCopy.t}</div>
+          <div class="se-title se-title--lg">${emptyCopy.t}</div>
           <div style="color:#888;font-size:14px;max-width:420px;margin:0 auto">${emptyCopy.s}</div>
         </div>`;
       } else if (filteredPosts.length === 0) {
         feed = `<div class="social-empty">
-          <div style="font-size:36px;margin-bottom:8px;opacity:.7">🕳️</div>
-          <div style="font-size:15px;font-weight:600;margin-bottom:4px">No tracks in this mood yet</div>
+          <div class="se-icon se-icon--dim">🕳️</div>
+          <div class="se-title">No tracks in this mood yet</div>
           <div style="color:#888;font-size:13px">${_musicTabScope === 'explore' ? 'Try another mood or switch sort.' : 'Be the first to share one.'}</div>
         </div>`;
       } else {

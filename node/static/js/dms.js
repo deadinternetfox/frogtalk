@@ -477,47 +477,47 @@ function _renderDMPreview(msgId, preview) {
   let html = '';
   if (preview.type === 'youtube' && preview.video_id) {
     html = `
-      <div class="yt-embed" style="margin-top:8px;max-width:320px;width:100%;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
-        <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
+      <div class="yt-embed">
+        <div class="yt-embed-frame">
           <iframe
             src="https://www.youtube.com/embed/${esc(preview.video_id)}"
-            style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowfullscreen
           ></iframe>
         </div>
-        <div style="padding:8px 12px;border-top:1px solid #2f5548;background:rgba(12,28,22,.52)">
-          <div style="font-size:11px;color:#ff0000;display:flex;align-items:center;gap:4px;margin-bottom:4px">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path fill="#fff" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
-            YouTube${preview.author ? ` • ${esc(preview.author)}` : ''}
+        <div class="yt-embed-meta">
+          <div class="yt-embed-info">
+            <div class="yt-embed-brand">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path fill="#fff" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+              YouTube${preview.author ? ` • ${esc(preview.author)}` : ''}
+            </div>
+            <a href="${esc(preview.url)}" target="_blank" rel="noopener" class="yt-embed-title">${esc(preview.title || 'YouTube Video')}</a>
           </div>
-          <a href="${esc(preview.url)}" target="_blank" rel="noopener" style="font-weight:600;color:#dff5e8;font-size:13px;text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview.title || 'YouTube Video')}</a>
         </div>
       </div>`;
   } else if (preview.type === 'spotify' && preview.embed_url) {
     const height = preview.spotify_type === 'track' ? '80' : '152';
     html = `
-      <div class="spotify-embed" style="margin-top:8px;max-width:320px;border-radius:12px;overflow:hidden">
+      <div class="spotify-embed">
         <iframe
           src="${esc(preview.embed_url)}?theme=0"
           width="100%"
           height="${height}"
           frameBorder="0"
           allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-          style="border-radius:12px"
         ></iframe>
       </div>`;
   } else {
     html = `
-      <a href="${esc(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:320px;width:100%;box-shadow:0 2px 12px rgba(0,0,0,.35)">
-        ${preview.image ? `<img src="${esc(preview.image)}" alt="" style="width:100%;max-height:260px;object-fit:cover" onerror="this.style.display='none'">` : ''}
-        <div style="padding:10px;background:rgba(12,28,22,.52)">
-          <div style="font-size:11px;color:#85a89a;display:flex;align-items:center;gap:4px;margin-bottom:4px">
-            ${preview.favicon ? `<img src="${esc(preview.favicon)}" style="width:14px;height:14px;border-radius:2px" onerror="this.style.display='none'">` : ''}
-            ${esc(preview.site_name || '')}
+      <a href="${esc(preview.url)}" target="_blank" rel="noopener" class="link-preview">
+        ${preview.image ? `<img class="link-preview-image" src="${esc(preview.image)}" alt="" onerror="this.style.display='none'">` : ''}
+        <div class="link-preview-body">
+          <div class="link-preview-head">
+            ${preview.favicon ? `<img class="link-preview-favicon" src="${esc(preview.favicon)}" onerror="this.style.display='none'">` : ''}
+            <span class="link-preview-site">${esc(preview.site_name || '')}</span>
           </div>
-          ${preview.title ? `<div style="font-weight:600;color:#dff5e8;margin-bottom:4px;font-size:14px">${esc(preview.title)}</div>` : ''}
-          ${preview.description ? `<div style="font-size:12px;color:#85a89a;line-height:1.4">${esc(preview.description.substring(0, 150))}${preview.description.length > 150 ? '…' : ''}</div>` : ''}
+          ${preview.title ? `<div class="link-preview-title">${esc(preview.title)}</div>` : ''}
+          ${preview.description ? `<div class="link-preview-desc">${esc(preview.description.substring(0, 150))}${preview.description.length > 150 ? '…' : ''}</div>` : ''}
         </div>
       </a>`;
   }
@@ -542,12 +542,7 @@ function _renderDMPreview(msgId, preview) {
         wrap.className = 'preview-wrap';
         newEmbed.parentNode.insertBefore(wrap, newEmbed);
         wrap.appendChild(newEmbed);
-        // Move top spacing from embed to wrapper so the X anchor point is stable.
-        wrap.style.marginTop = '8px';
-        newEmbed.style.marginTop = '0';
-        // Keep wrapper auto-sized so CSS width clamps can apply uniformly.
-        wrap.style.width = 'fit-content';
-        wrap.style.maxWidth = '100%';
+        newEmbed.classList.add('preview-wrap__inner');
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'preview-suppress-btn';

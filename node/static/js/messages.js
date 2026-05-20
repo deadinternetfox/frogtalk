@@ -145,7 +145,7 @@ const Messages = (() => {
           // +; bad values become NaN → showUserInfo handles that gracefully.
           const _sUid = Number(d.user_id) || 0;
           return `<div class="share-card" onclick="showUserInfo(${jsStr(d.nickname)},${_sUid || 'null'})">
-            <div style="flex-shrink:0">${UI.avatarEl(d.avatar || null, d.nickname, 42)}</div>
+            <div class="share-card-avatar">${UI.avatarEl(d.avatar || null, d.nickname, 42)}</div>
             <div class="share-card-info">
               <div class="share-card-label">FrogTalk Profile</div>
               <div class="share-card-name">@${UI.escHtml(d.nickname)}</div>
@@ -312,7 +312,7 @@ const Messages = (() => {
       : UI.escHtml(String(d.bio || d.status_msg || 'Open in Frog Social').substring(0, 80));
     placeholder.outerHTML =
       `<div class="share-card" data-social-profile="${nick}" onclick="Messages.openSocialProfile(this.dataset.socialProfile)">` +
-        `<div style="flex-shrink:0">${UI.avatarEl(d.avatar || null, d.nickname || nickname, 42)}</div>` +
+        `<div class="share-card-avatar">${UI.avatarEl(d.avatar || null, d.nickname || nickname, 42)}</div>` +
         `<div class="share-card-info">` +
           `<div class="share-card-label">Frog Social Profile</div>` +
           `<div class="share-card-name">@${nick}</div>` +
@@ -652,7 +652,7 @@ const Messages = (() => {
       );
       let iconHtml;
       if (isImg) {
-        iconHtml = `<img src="${UI.escHtml(rawIconStr)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:block">`;
+        iconHtml = `<img src="${UI.escHtml(rawIconStr)}" alt="">`;
       } else {
         let glyph = rawIconStr || '💬';
         try { glyph = Array.from(glyph)[0] || '💬'; } catch { glyph = glyph.charAt(0) || '💬'; }
@@ -672,11 +672,11 @@ const Messages = (() => {
         : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join Channel</button>`;
       if (!placeholder.parentNode) return;
       placeholder.outerHTML = `
-        <div class="invite-card" style="width:fit-content;max-width:340px">
+        <div class="invite-card">
           <div class="invite-card-header">You've been invited to join a channel</div>
-          <div class="invite-card-body" style="padding:10px 12px;gap:10px">
-            <div class="invite-card-icon" style="width:40px;height:40px;font-size:22px;flex:0 0 40px">${iconHtml}</div>
-            <div class="invite-card-info" style="min-width:0">
+          <div class="invite-card-body">
+            <div class="invite-card-icon">${iconHtml}</div>
+            <div class="invite-card-info">
               <div class="invite-card-name">#${name}</div>
               ${desc}
               ${by}
@@ -1008,9 +1008,6 @@ const Messages = (() => {
         onclick="event.preventDefault();event.stopPropagation();(function(b){try{var p=JSON.parse(b.getAttribute('data-payload'));var M=window.Music;var inMedia=!!(M&&M.isMediaChannelContext&&M.isMediaChannelContext());var canQ=inMedia&&!!(M&&M.canQueueInCurrentRoom&&M.canQueueInCurrentRoom());if(inMedia&&canQ&&M.queueFromUrl){M.queueFromUrl(p.url).then(function(ok){try{UI&&UI.showToast&&UI.showToast(ok?'Added to channel queue':'Could not queue — playing in side player','info');}catch(_){}if(!ok&&M.playSolo){try{M.playSolo(p);}catch(_){}}});}else if(inMedia&&!canQ){try{UI&&UI.showToast&&UI.showToast('You don\\u0027t have queue permission in this channel','error');}catch(_){}return;}else if(M&&M.playSolo){M.playSolo(p);try{UI&&UI.showToast&&UI.showToast('Playing in side player');}catch(_){}}try{window._pauseChatEmbed&&window._pauseChatEmbed(b);}catch(_){}}catch(e){}})(this)"
         onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()"
         title="Send this track to the player"
-        style="background:transparent;border:0;padding:2px 8px;font-size:11px;font-weight:500;color:rgba(76,175,80,.72);cursor:pointer;border-radius:4px;line-height:1.4;letter-spacing:.2px;flex:0 0 auto;transition:color .15s,background .15s"
-        onmouseover="this.style.color='#7ed28a';this.style.background='rgba(76,175,80,.10)'"
-        onmouseout="this.style.color='rgba(76,175,80,.72)';this.style.background='transparent'"
       >▸ Send to player</button>`;
     }
     
@@ -1019,22 +1016,21 @@ const Messages = (() => {
     // YouTube embed
     if (preview.type === 'youtube' && preview.video_id) {
       html = `
-        <div class="yt-embed" style="margin-top:8px;max-width:320px;width:100%;border-radius:10px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
-          <div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden">
-            <iframe 
-              src="https://www.youtube.com/embed/${UI.escHtml(preview.video_id)}?enablejsapi=1" 
-              style="position:absolute;top:0;left:0;width:100%;height:100%;border:0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+        <div class="yt-embed">
+          <div class="yt-embed-frame">
+            <iframe
+              src="https://www.youtube.com/embed/${UI.escHtml(preview.video_id)}?enablejsapi=1"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowfullscreen
             ></iframe>
           </div>
-          <div style="padding:8px 12px;border-top:1px solid #2f5548;background:rgba(12,28,22,.52);display:flex;align-items:center;gap:10px">
-            <div style="flex:1 1 auto;min-width:0">
-              <div style="font-size:11px;color:#ff0000;display:flex;align-items:center;gap:4px;margin-bottom:4px">
+          <div class="yt-embed-meta">
+            <div class="yt-embed-info">
+              <div class="yt-embed-brand">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="#ff0000"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814z"/><path fill="#fff" d="M9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
                 YouTube${preview.author ? ` • ${UI.escHtml(preview.author)}` : ''}
               </div>
-              <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" style="font-weight:600;color:#dff5e8;font-size:13px;text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${UI.escHtml(preview.title || 'YouTube Video')}</a>
+              <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="yt-embed-title">${UI.escHtml(preview.title || 'YouTube Video')}</a>
             </div>
             ${_buildSendToPlayerBtn('youtube')}
           </div>
@@ -1045,17 +1041,16 @@ const Messages = (() => {
     else if (preview.type === 'spotify' && preview.embed_url) {
       const height = preview.spotify_type === 'track' ? '80' : '152';
       html = `
-        <div class="spotify-embed" style="margin-top:8px;max-width:320px;border-radius:12px;overflow:hidden;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;box-shadow:0 2px 12px rgba(0,0,0,.35)">
-          <iframe 
-            src="${UI.escHtml(preview.embed_url)}?theme=0" 
-            width="100%" 
-            height="${height}" 
-            frameBorder="0" 
+        <div class="spotify-embed">
+          <iframe
+            src="${UI.escHtml(preview.embed_url)}?theme=0"
+            width="100%"
+            height="${height}"
+            frameBorder="0"
             allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            style="display:block;border:0"
           ></iframe>
-          <div style="padding:6px 10px;border-top:1px solid #2f5548;background:rgba(12,28,22,.52);display:flex;align-items:center;gap:10px">
-            <div style="flex:1 1 auto;min-width:0;font-size:11px;color:#1db954;font-weight:600;letter-spacing:.3px">Spotify</div>
+          <div class="spotify-embed-meta">
+            <div class="spotify-embed-brand">Spotify</div>
             ${_buildSendToPlayerBtn('spotify')}
           </div>
         </div>
@@ -1064,13 +1059,13 @@ const Messages = (() => {
     // Twitter/X - show link preview (can't embed due to restrictions)
     else if (preview.type === 'twitter') {
       html = `
-        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-left:4px solid #1da1f2;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:320px;padding:12px;box-shadow:0 2px 12px rgba(0,0,0,.35)">
-          <div style="font-size:11px;color:#1da1f2;display:flex;align-items:center;gap:4px;margin-bottom:4px">
+        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview link-preview--twitter">
+          <div class="link-preview-brand link-preview-brand--twitter">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="#1da1f2"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
             X (Twitter)
           </div>
-          <div style="font-weight:500;color:#dff5e8;font-size:13px">View post on X</div>
-          <div style="font-size:12px;color:#85a89a;margin-top:4px">${UI.escHtml(preview.url)}</div>
+          <div class="link-preview-title">View post on X</div>
+          <div class="link-preview-url">${UI.escHtml(preview.url)}</div>
         </a>
       `;
     }
@@ -1086,16 +1081,16 @@ const Messages = (() => {
       const _musicProvider = _isSoundcloud ? 'soundcloud' : (_isYouTube ? 'youtube' : (_isSpotify ? 'spotify' : null));
       const _sendBtn = _musicProvider ? _buildSendToPlayerBtn(_musicProvider) : '';
       html = `
-        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview" style="display:block;margin-top:8px;background:linear-gradient(180deg,#173027 0%,#102018 100%);border:1px solid #2f5548;border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;max-width:320px;width:100%;box-shadow:0 2px 12px rgba(0,0,0,.35)">
-          ${preview.image ? `<img src="${UI.escHtml(preview.image)}" alt="" style="width:100%;max-height:260px;object-fit:cover" onerror="this.style.display='none'">` : ''}
-          <div style="padding:10px;background:rgba(12,28,22,.52)">
-            <div style="font-size:11px;color:#85a89a;display:flex;align-items:center;gap:4px;margin-bottom:4px">
-              ${preview.favicon ? `<img src="${UI.escHtml(preview.favicon)}" style="width:14px;height:14px;border-radius:2px" onerror="this.style.display='none'">` : ''}
-              <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(preview.site_name || '')}</span>
+        <a href="${UI.escHtml(preview.url)}" target="_blank" rel="noopener" class="link-preview">
+          ${preview.image ? `<img class="link-preview-image" src="${UI.escHtml(preview.image)}" alt="" onerror="this.style.display='none'">` : ''}
+          <div class="link-preview-body">
+            <div class="link-preview-head">
+              ${preview.favicon ? `<img class="link-preview-favicon" src="${UI.escHtml(preview.favicon)}" onerror="this.style.display='none'">` : ''}
+              <span class="link-preview-site">${UI.escHtml(preview.site_name || '')}</span>
               ${_sendBtn}
             </div>
-            ${preview.title ? `<div style="font-weight:600;color:#dff5e8;margin-bottom:4px;font-size:14px">${UI.escHtml(preview.title)}</div>` : ''}
-            ${preview.description ? `<div style="font-size:12px;color:#85a89a;line-height:1.4">${UI.escHtml(preview.description.substring(0, 150))}${preview.description.length > 150 ? '…' : ''}</div>` : ''}
+            ${preview.title ? `<div class="link-preview-title">${UI.escHtml(preview.title)}</div>` : ''}
+            ${preview.description ? `<div class="link-preview-desc">${UI.escHtml(preview.description.substring(0, 150))}${preview.description.length > 150 ? '…' : ''}</div>` : ''}
           </div>
         </a>
       `;
@@ -1140,12 +1135,7 @@ const Messages = (() => {
           wrap.className = 'preview-wrap';
           newEmbed.parentNode.insertBefore(wrap, newEmbed);
           wrap.appendChild(newEmbed);
-          // Move top spacing from embed to wrapper so the X anchor point is stable.
-          wrap.style.marginTop = '8px';
-          newEmbed.style.marginTop = '0';
-          // Keep wrapper auto-sized so CSS width clamps can apply uniformly.
-          wrap.style.width = 'fit-content';
-          wrap.style.maxWidth = '100%';
+          newEmbed.classList.add('preview-wrap__inner');
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'preview-suppress-btn';

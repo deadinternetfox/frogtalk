@@ -1815,6 +1815,8 @@ if ($singleThread) {
         }
         .media-pending-small { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #6baf6b; background: rgba(0,255,65,0.03); border: 1px dashed rgba(0,255,65,0.12); border-radius: 4px; padding: 4px 8px; margin: 4px 0 6px; font-family: 'Courier New', monospace; }
         .media-pending-admin { flex-wrap: wrap; gap: 6px; color: #ff8c00; border-color: rgba(255,140,0,0.3); background: rgba(255,140,0,0.04); }
+        .media-pending-admin.media-pending-stack { flex-direction: column; align-items: flex-start; gap: 6px; }
+        .media-pending-small.media-pending-centered { font-size: 13px; padding: 10px 12px; justify-content: center; flex-direction: column; text-align: center; gap: 4px; }
         .view-mode-btn { display: inline-flex; align-items: center; gap: 5px; background: rgba(0,20,0,0.4); border: 1px solid rgba(0,255,65,0.12); border-radius: 4px; padding: 5px 13px; color: #4a8f4a; font-family: 'Courier New', monospace; font-size: 12px; cursor: pointer; text-decoration: none; transition: all 0.2s; white-space: nowrap; }
         .view-mode-btn:hover { border-color: rgba(0,255,65,0.4); color: #00ff41; background: rgba(0,40,0,0.5); }
         .view-mode-btn.active { color: #00ff41; border-color: rgba(0,255,65,0.55); background: rgba(0,50,0,0.5); font-weight: bold; text-shadow: 0 0 8px rgba(0,255,65,0.3); }
@@ -2990,6 +2992,33 @@ if ($singleThread) {
         .post, .thread, .reply { max-width: 100%; overflow-wrap: break-word; word-wrap: break-word; word-break: break-word; }
         .post-comment { max-width: 100%; overflow-wrap: break-word; word-wrap: break-word; }
         .post-comment a { word-break: break-all; }
+
+        /* ── Inline-style cleanup utilities (May 2026 audit) ───────
+           These replace dozens of repeated style="..." attributes that
+           previously fought !important rules and theme switches. */
+        .ft-inline-form { display: inline; }
+        .ft-inline-form-ml { display: inline; margin-left: 4px; }
+        .ft-hidden { display: none; }
+        .ft-txt-orange { color: #ffa500; }
+        .ft-txt-amber { color: #ffaa33; }
+        .ft-txt-mint { color: #5fffaf; }
+        .ft-txt-green { color: #4caf50; }
+        .ft-txt-matrix { color: #00ff41; }
+        .ft-txt-mute { color: #4a8f4a; font-size: 11px; }
+        .ft-row-tight { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+        .ft-col-tight { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+        .ft-audio-w { width: 100%; max-width: 400px; }
+        .ft-media-preview {
+            max-width: 100%; max-height: 280px;
+            border: 1px solid rgba(255,140,0,0.5); border-radius: 4px;
+        }
+        .ft-media-pending-msg {
+            font-size: 13px; padding: 10px 12px; justify-content: center;
+            flex-direction: column; text-align: center; gap: 4px;
+        }
+        .ft-media-pending-icon { font-size: 1.8em; line-height: 1; }
+        .ft-mm-accent { accent-color: #f6851b; }
+        .ft-tip-btn-sm { padding: 2px 8px; font-size: 11px; }
     </style>
 </head>
 <body>
@@ -3249,8 +3278,8 @@ if ($singleThread) {
                             <?php endif; ?>
                             <?php if ($isAdmin): ?>
                                 <span class="admin-controls">
-                                    <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="delete_post"><input type="hidden" name="post_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_thread" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Delete thread?')" title="Delete">🗑</button></form>
-                                    <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="ban_user"><input type="hidden" name="ip_hash" value="<?= $singleThread['ip_hash'] ?>"><input type="hidden" name="reason" value="Banned by admin"><input type="hidden" name="duration" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Ban this user?')" title="Ban">🔨</button></form>
+                                    <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="delete_post"><input type="hidden" name="post_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_thread" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Delete thread?')" title="Delete">🗑</button></form>
+                                    <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="ban_user"><input type="hidden" name="ip_hash" value="<?= $singleThread['ip_hash'] ?>"><input type="hidden" name="reason" value="Banned by admin"><input type="hidden" name="duration" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Ban this user?')" title="Ban">🔨</button></form>
                                 </span>
                             <?php endif; ?>
                         </div>
@@ -3266,20 +3295,20 @@ if ($singleThread) {
                         </div>
                         <?php elseif (!($m['approved'] ?? true)): ?>
                         <?php if ($isAdmin): ?>
-                        <div class="media-pending-small media-pending-admin" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                        <div class="media-pending-small media-pending-admin media-pending-stack">
                             <?php if ($m['type']==='video'): ?>
-                            <video controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" style="max-width:100%;max-height:280px;border:1px solid rgba(255,140,0,0.5);border-radius:4px;" preload="metadata"></video>
+                            <video controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" class="ft-media-preview" preload="metadata"></video>
                             <?php else: ?>
-                            <audio controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" style="width:100%;max-width:400px;"></audio>
+                            <audio controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" class="ft-audio-w"></audio>
                             <?php endif; ?>
-                            <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                            <div class="ft-row-tight">
                             <?= $m['type']==='audio' ? '🎤 Voice note' : '🎥 Video' ?> pending approval
-                            <form method="POST" action="/board/admin" style="display:inline;margin-left:4px;"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅ Approve</button></form>
-                            <form method="POST" action="/board/admin" style="display:inline;"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌ Reject</button></form>
+                            <form method="POST" action="/board/admin" class="ft-inline-form-ml"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅ Approve</button></form>
+                            <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌ Reject</button></form>
                             </div>
                         </div>
                         <?php else: ?>
-                        <div class="media-pending-small" style="font-size:13px;padding:10px 12px;justify-content:center;flex-direction:column;text-align:center;gap:4px;"><span style="font-size:1.8em;line-height:1;"><?= $m['type']==='audio' ? '🎤' : '🎥' ?></span><span><?= $m['type']==='audio' ? 'Voice note' : 'Video' ?> pending admin approval</span></div>
+                        <div class="media-pending-small media-pending-centered"><span class="ft-media-pending-icon"><?= $m['type']==='audio' ? '🎤' : '🎥' ?></span><span><?= $m['type']==='audio' ? 'Voice note' : 'Video' ?> pending admin approval</span></div>
                         <?php endif; ?>
                         <?php endif; ?>
                         <?php endif; ?>
@@ -3329,8 +3358,8 @@ if ($singleThread) {
                                 <?php endif; ?>
                                 <?php if ($isAdmin): ?>
                                     <span class="admin-controls">
-                                        <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="delete_post"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_thread" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Delete reply?')" title="Delete">🗑</button></form>
-                                        <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="ban_user"><input type="hidden" name="ip_hash" value="<?= $reply['ip_hash'] ?>"><input type="hidden" name="reason" value="Banned by admin"><input type="hidden" name="duration" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Ban?')" title="Ban">🔨</button></form>
+                                        <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="delete_post"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_thread" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Delete reply?')" title="Delete">🗑</button></form>
+                                        <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="ban_user"><input type="hidden" name="ip_hash" value="<?= $reply['ip_hash'] ?>"><input type="hidden" name="reason" value="Banned by admin"><input type="hidden" name="duration" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Ban?')" title="Ban">🔨</button></form>
                                     </span>
                                 <?php endif; ?>
                             </div>
@@ -3346,20 +3375,20 @@ if ($singleThread) {
                             </div>
                             <?php elseif (!($m['approved'] ?? true)): ?>
                             <?php if ($isAdmin): ?>
-                            <div class="media-pending-small media-pending-admin" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                            <div class="media-pending-small media-pending-admin media-pending-stack">
                                 <?php if ($m['type']==='video'): ?>
-                                <video controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" style="max-width:100%;max-height:280px;border:1px solid rgba(255,140,0,0.5);border-radius:4px;" preload="metadata"></video>
+                                <video controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" class="ft-media-preview" preload="metadata"></video>
                                 <?php else: ?>
-                                <audio controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" style="width:100%;max-width:400px;"></audio>
+                                <audio controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" class="ft-audio-w"></audio>
                                 <?php endif; ?>
-                                <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                                <div class="ft-row-tight">
                                 <?= $m['type']==='audio' ? '🎤 Voice note' : '🎥 Video' ?> pending approval
-                                <form method="POST" action="/board/admin" style="display:inline;margin-left:4px;"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_reply" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅ Approve</button></form>
-                                <form method="POST" action="/board/admin" style="display:inline;"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_reply" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌ Reject</button></form>
+                                <form method="POST" action="/board/admin" class="ft-inline-form-ml"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_reply" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅ Approve</button></form>
+                                <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $singleThread['id'] ?>"><input type="hidden" name="is_reply" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌ Reject</button></form>
                                 </div>
                             </div>
                             <?php else: ?>
-                            <div class="media-pending-small" style="font-size:13px;padding:10px 12px;justify-content:center;flex-direction:column;text-align:center;gap:4px;"><span style="font-size:1.8em;line-height:1;"><?= $m['type']==='audio' ? '🎤' : '🎥' ?></span><span><?= $m['type']==='audio' ? 'Voice note' : 'Video' ?> pending admin approval</span></div>
+                            <div class="media-pending-small media-pending-centered"><span class="ft-media-pending-icon"><?= $m['type']==='audio' ? '🎤' : '🎥' ?></span><span><?= $m['type']==='audio' ? 'Voice note' : 'Video' ?> pending admin approval</span></div>
                             <?php endif; ?>
                             <?php endif; ?>
                             <?php endif; ?>
@@ -3368,7 +3397,7 @@ if ($singleThread) {
                                 <button class="like-btn <?= hasLiked($reply['id']) ? 'liked' : '' ?>" onclick="toggleLike('<?= $reply['id'] ?>', this)" data-post="<?= $reply['id'] ?>">
                                     🐸 <span class="like-count"><?= getLikeCount($reply['id']) ?></span>
                                 </button>
-                                <button class="tip-btn" onclick="tipPost('<?= $reply['id'] ?>')" data-post="<?= $reply['id'] ?>" style="padding:2px 8px;font-size:11px;">💰 Tip</button>
+                                <button class="tip-btn" onclick="tipPost('<?= $reply['id'] ?>')" data-post="<?= $reply['id'] ?>" class="ft-tip-btn-sm">💰 Tip</button>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -3411,7 +3440,7 @@ if ($singleThread) {
                                 <button type="button" class="wallet-toggle-btn" onclick="var c=this.closest('.wallet-connect-row').querySelector('.wallet-connect-collapsible');var open=c.style.display==='block';c.style.display=open?'none':'block';this.classList.toggle('open',!open);">🦊 Wallet for tips <span class="wtb-arrow">▼</span></button>
                                 <div class="wallet-connect-collapsible">
                                 <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#4a8f4a;font-size:12px;font-family:'Courier New',monospace;margin-top:6px;">
-                                    <input type="checkbox" id="replyWalletToggle" onchange="toggleWalletField('reply')" style="accent-color:#f6851b;"> Include in post
+                                    <input type="checkbox" id="replyWalletToggle" onchange="toggleWalletField('reply')" class="ft-mm-accent"> Include in post
                                 </label>
                                 <div id="replyWalletField" style="display:none; margin-top:6px; width:100%;">
                                     <!-- MetaMask panel (desktop with wallet provider) -->
@@ -3511,7 +3540,7 @@ if ($singleThread) {
                             <button type="button" class="wallet-toggle-btn" onclick="var c=this.closest('.wallet-connect-row').querySelector('.wallet-connect-collapsible');var open=c.style.display==='block';c.style.display=open?'none':'block';this.classList.toggle('open',!open);">🦊 Wallet for tips <span class="wtb-arrow">▼</span></button>
                             <div class="wallet-connect-collapsible">
                             <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#4a8f4a;font-size:12px;font-family:'Courier New',monospace;margin-top:6px;">
-                                <input type="checkbox" id="threadWalletToggle" onchange="toggleWalletField('thread')" style="accent-color:#f6851b;"> Include in post
+                                <input type="checkbox" id="threadWalletToggle" onchange="toggleWalletField('thread')" class="ft-mm-accent"> Include in post
                             </label>
                             <div id="threadWalletField" style="display:none; margin-top:6px; width:100%;">
                                 <!-- MetaMask panel (desktop with wallet provider) -->
@@ -3636,8 +3665,8 @@ if ($singleThread) {
                             <?php if (!empty($thread['media']) && !isMediaVisible($thread['media']) && $isAdmin): $catMpa = $thread['media']; ?>
                             <div class="media-pending-small media-pending-admin" style="font-size:10px;padding:4px 8px;gap:4px;flex-wrap:wrap;border-radius:0 0 6px 6px;">
                                 <?= $catMpa['type']==='audio' ? '🎤 Voice' : '🎥 Video' ?> pending
-                                <form method="POST" action="/board/admin" style="display:inline;"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅</button></form>
-                                <form method="POST" action="/board/admin" style="display:inline;"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌</button></form>
+                                <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅</button></form>
+                                <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌</button></form>
                             </div>
                             <?php endif; ?>
                         </div>
@@ -3676,10 +3705,10 @@ if ($singleThread) {
                                     <a href="/board?thread=<?= $thread['id'] ?>#p<?= $thread['id'] ?>" class="post-no" style="text-decoration:none;color:inherit;">No.<?= $thread['id'] ?></a>
                                     <?php if ($isAdmin): ?>
                                         <span class="admin-controls">
-                                            <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="sticky_thread"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button title="Pin/Unpin">📌</button></form>
-                                            <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="lock_thread"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button title="Lock/Unlock">🔒</button></form>
-                                            <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="delete_post"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_thread" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Delete thread?')" title="Delete">🗑</button></form>
-                                            <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="ban_user"><input type="hidden" name="ip_hash" value="<?= $thread['ip_hash'] ?>"><input type="hidden" name="reason" value="Banned by admin"><input type="hidden" name="duration" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Ban this user?')" title="Ban IP">🚫</button></form>
+                                            <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="sticky_thread"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button title="Pin/Unpin">📌</button></form>
+                                            <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="lock_thread"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button title="Lock/Unlock">🔒</button></form>
+                                            <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="delete_post"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_thread" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Delete thread?')" title="Delete">🗑</button></form>
+                                            <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="ban_user"><input type="hidden" name="ip_hash" value="<?= $thread['ip_hash'] ?>"><input type="hidden" name="reason" value="Banned by admin"><input type="hidden" name="duration" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Ban this user?')" title="Ban IP">🚫</button></form>
                                         </span>
                                     <?php endif; ?>
                                 </div>
@@ -3695,20 +3724,20 @@ if ($singleThread) {
                                 </div>
                                 <?php elseif (!($m['approved'] ?? true)): ?>
                                 <?php if ($isAdmin): ?>
-                                <div class="media-pending-small media-pending-admin" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                                <div class="media-pending-small media-pending-admin media-pending-stack">
                                     <?php if ($m['type']==='video'): ?>
-                                    <video controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" style="max-width:100%;max-height:280px;border:1px solid rgba(255,140,0,0.5);border-radius:4px;" preload="metadata"></video>
+                                    <video controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" class="ft-media-preview" preload="metadata"></video>
                                     <?php else: ?>
-                                    <audio controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" style="width:100%;max-width:400px;"></audio>
+                                    <audio controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" class="ft-audio-w"></audio>
                                     <?php endif; ?>
-                                    <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                                    <div class="ft-row-tight">
                                     <?= $m['type']==='audio' ? '🎤 Voice note' : '🎥 Video' ?> pending approval
-                                    <form method="POST" action="/board/admin" style="display:inline;margin-left:4px;"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅ Approve</button></form>
-                                    <form method="POST" action="/board/admin" style="display:inline;"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌ Reject</button></form>
+                                    <form method="POST" action="/board/admin" class="ft-inline-form-ml"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅ Approve</button></form>
+                                    <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌ Reject</button></form>
                                     </div>
                                 </div>
                                 <?php else: ?>
-                                <div class="media-pending-small" style="font-size:13px;padding:10px 12px;justify-content:center;flex-direction:column;text-align:center;gap:4px;"><span style="font-size:1.8em;line-height:1;"><?= $m['type']==='audio' ? '🎤' : '🎥' ?></span><span><?= $m['type']==='audio' ? 'Voice note' : 'Video' ?> pending admin approval</span></div>
+                                <div class="media-pending-small media-pending-centered"><span class="ft-media-pending-icon"><?= $m['type']==='audio' ? '🎤' : '🎥' ?></span><span><?= $m['type']==='audio' ? 'Voice note' : 'Video' ?> pending admin approval</span></div>
                                 <?php endif; ?>
                                 <?php endif; ?>
                                 <?php endif; ?>
@@ -3742,8 +3771,8 @@ if ($singleThread) {
                                         <a href="/board?thread=<?= $thread['id'] ?>#p<?= $reply['id'] ?>" class="post-no" style="text-decoration:none;color:inherit;">No.<?= $reply['id'] ?></a>
                                         <?php if ($isAdmin): ?>
                                             <span class="admin-controls">
-                                                <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="delete_post"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_thread" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Delete reply?')" title="Delete">🗑</button></form>
-                                                <form method="POST" action="/board/admin" style="display:inline"><input type="hidden" name="action" value="ban_user"><input type="hidden" name="ip_hash" value="<?= $reply['ip_hash'] ?>"><input type="hidden" name="reason" value="Banned by admin"><input type="hidden" name="duration" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Ban this user?')" title="Ban IP">🚫</button></form>
+                                                <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="delete_post"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_thread" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Delete reply?')" title="Delete">🗑</button></form>
+                                                <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="ban_user"><input type="hidden" name="ip_hash" value="<?= $reply['ip_hash'] ?>"><input type="hidden" name="reason" value="Banned by admin"><input type="hidden" name="duration" value="0"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button onclick="return confirm('Ban this user?')" title="Ban IP">🚫</button></form>
                                             </span>
                                         <?php endif; ?>
                                     </div>
@@ -3759,20 +3788,20 @@ if ($singleThread) {
                                     </div>
                                     <?php elseif (!($m['approved'] ?? true)): ?>
                                     <?php if ($isAdmin): ?>
-                                    <div class="media-pending-small media-pending-admin" style="flex-direction:column;align-items:flex-start;gap:6px;">
+                                    <div class="media-pending-small media-pending-admin media-pending-stack">
                                         <?php if ($m['type']==='video'): ?>
-                                        <video controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" style="max-width:100%;max-height:280px;border:1px solid rgba(255,140,0,0.5);border-radius:4px;" preload="metadata"></video>
+                                        <video controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" class="ft-media-preview" preload="metadata"></video>
                                         <?php else: ?>
-                                        <audio controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" style="width:100%;max-width:400px;"></audio>
+                                        <audio controls src="/board_uploads/<?= htmlspecialchars($m['file'],ENT_QUOTES,'UTF-8') ?>" class="ft-audio-w"></audio>
                                         <?php endif; ?>
-                                        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                                        <div class="ft-row-tight">
                                         <?= $m['type']==='audio' ? '🎤 Voice note' : '🎥 Video' ?> pending approval
-                                        <form method="POST" action="/board/admin" style="display:inline;margin-left:4px;"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅ Approve</button></form>
-                                        <form method="POST" action="/board/admin" style="display:inline;"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌ Reject</button></form>
+                                        <form method="POST" action="/board/admin" class="ft-inline-form-ml"><input type="hidden" name="action" value="approve_media"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="approve-overlay-btn">✅ Approve</button></form>
+                                        <form method="POST" action="/board/admin" class="ft-inline-form"><input type="hidden" name="action" value="reject_media"><input type="hidden" name="post_id" value="<?= $reply['id'] ?>"><input type="hidden" name="thread_id" value="<?= $thread['id'] ?>"><input type="hidden" name="is_reply" value="1"><input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI']) ?>"><button class="reject-overlay-btn">❌ Reject</button></form>
                                         </div>
                                     </div>
                                     <?php else: ?>
-                                    <div class="media-pending-small" style="font-size:13px;padding:10px 12px;justify-content:center;flex-direction:column;text-align:center;gap:4px;"><span style="font-size:1.8em;line-height:1;"><?= $m['type']==='audio' ? '🎤' : '🎥' ?></span><span><?= $m['type']==='audio' ? 'Voice note' : 'Video' ?> pending admin approval</span></div>
+                                    <div class="media-pending-small media-pending-centered"><span class="ft-media-pending-icon"><?= $m['type']==='audio' ? '🎤' : '🎥' ?></span><span><?= $m['type']==='audio' ? 'Voice note' : 'Video' ?> pending admin approval</span></div>
                                     <?php endif; ?>
                                     <?php endif; ?>
                                     <?php endif; ?>
@@ -3832,7 +3861,7 @@ if ($singleThread) {
                                         <button type="button" class="wallet-toggle-btn" onclick="var c=this.closest('.wallet-connect-row').querySelector('.wallet-connect-collapsible');var open=c.style.display==='block';c.style.display=open?'none':'block';this.classList.toggle('open',!open);">🦊 Wallet for tips <span class="wtb-arrow">▼</span></button>
                                         <div class="wallet-connect-collapsible">
                                         <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#4a8f4a;font-size:11px;font-family:'Courier New',monospace;margin-top:6px;">
-                                            <input type="checkbox" onchange="this.closest('.wallet-connect-row').querySelector('.qr-wallet-fields').style.display=this.checked?'block':'none';try{localStorage.setItem('walletToggle',this.checked?'1':'0');if(this.checked&&typeof restoreWalletAddresses==='function')restoreWalletAddresses();}catch(e){}" style="accent-color:#f6851b;"> Include in post
+                                            <input type="checkbox" onchange="this.closest('.wallet-connect-row').querySelector('.qr-wallet-fields').style.display=this.checked?'block':'none';try{localStorage.setItem('walletToggle',this.checked?'1':'0');if(this.checked&&typeof restoreWalletAddresses==='function')restoreWalletAddresses();}catch(e){}" class="ft-mm-accent"> Include in post
                                         </label>
                                         <div class="qr-wallet-fields" style="display:none;margin-top:6px;">
                                             <div class="wallet-chain-inputs">
@@ -3929,17 +3958,17 @@ if ($singleThread) {
                     <div class="tip-chain-selector" id="tipMobileChainSelector"></div>
                     <div style="background:rgba(246,133,27,0.05); border:1px solid rgba(246,133,27,0.2); border-radius:8px; padding:14px; margin:10px 0; text-align:left;">
                         <div style="margin-bottom:10px;">
-                            <span style="color:#4a8f4a; font-size:11px;">CHAIN</span><br>
+                            <span class="ft-txt-mute">CHAIN</span><br>
                             <span id="tipMobileChainName" style="color:#f6851b; font-size:14px; font-weight:bold; font-family:'Courier New',monospace;">Ethereum</span>
                             <span style="color:#888;"> · </span>
                             <span id="tipMobileChainSymbol" style="color:#f6851b; font-family:'Courier New',monospace;">ETH</span>
                         </div>
                         <div style="margin-bottom:10px;">
-                            <span style="color:#4a8f4a; font-size:11px;">SEND TO ADDRESS</span><br>
+                            <span class="ft-txt-mute">SEND TO ADDRESS</span><br>
                             <span id="tipMobileAddr" style="color:#f6851b; font-size:12px; font-family:'Courier New',monospace; word-break:break-all; user-select:all;"></span>
                         </div>
                         <div>
-                            <span style="color:#4a8f4a; font-size:11px;">SUGGESTED AMOUNTS</span><br>
+                            <span class="ft-txt-mute">SUGGESTED AMOUNTS</span><br>
                             <span id="tipMobileSuggested" style="color:#ffd700; font-size:13px; font-family:'Courier New',monospace;">0.001, 0.005, 0.01, 0.05 ETH</span>
                         </div>
                     </div>
@@ -3984,21 +4013,21 @@ if ($singleThread) {
     <!-- ═══ FED TOR-ONLY PEER DIALOG (shown to clearnet visitors) ═══ -->
     <div class="tip-modal-overlay" id="fedTorOverlay" onclick="if(event.target===this)closeFedTorDialog()">
         <div class="tip-modal" style="max-width:460px;border-color:rgba(255,170,51,0.45);">
-            <h3 style="color:#ffaa33;">🧅 Tor-only peer board</h3>
+            <h3 class="ft-txt-amber">🧅 Tor-only peer board</h3>
             <p style="color:#c8ffc8;font-size:12px;margin:0 0 10px;">
-                <strong id="fedTorPeerTitle" style="color:#00ff41;"></strong>
+                <strong id="fedTorPeerTitle" class="ft-txt-matrix"></strong>
                 <span id="fedTorPeerNode" style="color:#6baf6b;font-size:10px;"></span>
             </p>
             <p style="color:#c8d8c8;font-size:12px;line-height:1.55;margin:0 0 12px;">
-                This peer only accepts connections over <strong style="color:#ffaa33;">Tor</strong>. Clearnet
-                browsers can't reach <code style="color:#ffaa33;">.onion</code> addresses directly.
+                This peer only accepts connections over <strong class="ft-txt-amber">Tor</strong>. Clearnet
+                browsers can't reach <code class="ft-txt-amber">.onion</code> addresses directly.
             </p>
             <div style="background:rgba(255,170,51,0.06);border:1px solid rgba(255,170,51,0.25);border-radius:6px;padding:10px;margin:0 0 12px;">
                 <div style="color:#6a6040;font-size:10px;letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">onion address</div>
                 <code id="fedTorOnionUrl" style="color:#ffaa33;font-size:11px;word-break:break-all;display:block;"></code>
             </div>
             <p style="color:#6baf6b;font-size:11px;margin:0 0 14px;line-height:1.55;">
-                Install <a href="https://www.torproject.org/download/" target="_blank" rel="noopener" style="color:#ffaa33;">Tor Browser</a>
+                Install <a href="https://www.torproject.org/download/" target="_blank" rel="noopener" class="ft-txt-amber">Tor Browser</a>
                 (or use a system Tor proxy) and paste the address above.
             </p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -5328,7 +5357,7 @@ if ($singleThread) {
             _gbumpPhantomPubkey  = 'admin';
             _gbumpHolderVerified = true;
             if (phantomArea) phantomArea.style.display = 'none';
-            if (phantomStatus) { phantomStatus.innerHTML = '\u2705 <span style="color:#ffa500;">Admin — boost bypass enabled</span>'; phantomStatus.style.color = '#ffa500'; }
+            if (phantomStatus) { phantomStatus.innerHTML = '\u2705 <span class="ft-txt-orange">Admin — boost bypass enabled</span>'; phantomStatus.style.color = '#ffa500'; }
             if (sendBtn) { sendBtn.disabled = false; sendBtn.style.display = ''; sendBtn.textContent = '\uD83D\uDD25 Boost Thread (Admin)'; }
         } else {
             if (connectBtn) { connectBtn.disabled = false; connectBtn.textContent = '\uD83D\uDC7B Connect Phantom Wallet'; connectBtn.style.display = ''; }
@@ -5341,7 +5370,7 @@ if ($singleThread) {
         var treasuryEl    = document.getElementById('gbumpTreasury');
         if (tokenStatusEl) {
             tokenStatusEl.innerHTML = BOARD_GOYIM_CA
-                ? '<span style="color:#00ff41;">LIVE</span> &mdash; <code style="font-size:9px;color:#888;">' + BOARD_GOYIM_CA.slice(0,8) + '...' + BOARD_GOYIM_CA.slice(-6) + '</code>'
+                ? '<span class="ft-txt-matrix">LIVE</span> &mdash; <code style="font-size:9px;color:#888;">' + BOARD_GOYIM_CA.slice(0,8) + '...' + BOARD_GOYIM_CA.slice(-6) + '</code>'
                 : '<span style="color:#888;">Pre-launch</span>';
         }
         if (treasuryEl) treasuryEl.textContent = BOARD_GOYIM_TREASURY ? BOARD_GOYIM_TREASURY.slice(0,8)+'...'+BOARD_GOYIM_TREASURY.slice(-4) : 'TBA';
@@ -5422,7 +5451,7 @@ if ($singleThread) {
                 _gbumpHolderVerified = true;
                 _gbumpHolderBalance  = 0;
                 var shortAddr = _gbumpPhantomPubkey.slice(0,6) + '...' + _gbumpPhantomPubkey.slice(-4);
-                if (phantomStatus) { phantomStatus.innerHTML = '\u2705 <span style="color:#ffa500;">Admin wallet — boost bypass enabled</span> \u2014 ' + shortAddr; phantomStatus.style.color = '#ffa500'; }
+                if (phantomStatus) { phantomStatus.innerHTML = '\u2705 <span class="ft-txt-orange">Admin wallet — boost bypass enabled</span> \u2014 ' + shortAddr; phantomStatus.style.color = '#ffa500'; }
                 if (connectBtn) connectBtn.style.display = 'none';
                 if (sendBtn) { sendBtn.style.display = ''; sendBtn.disabled = false; sendBtn.textContent = '\uD83D\uDD25 Boost Thread (Admin)'; }
                 return;
@@ -5440,10 +5469,10 @@ if ($singleThread) {
             _gbumpHolderBalance  = result.balance || 0;
             var shortAddr = _gbumpPhantomPubkey.slice(0,6) + '...' + _gbumpPhantomPubkey.slice(-4);
             if (_gbumpHolderVerified) {
-                phantomStatus.innerHTML = '\u2705 <span style="color:#00ff41;">HOLDER VERIFIED</span> &#x2014; ' + shortAddr + ' <span style="color:#ffa500;">' + Math.round(_gbumpHolderBalance).toLocaleString() + 'G &#x1F525;</span>';
+                phantomStatus.innerHTML = '\u2705 <span class="ft-txt-matrix">HOLDER VERIFIED</span> &#x2014; ' + shortAddr + ' <span class="ft-txt-orange">' + Math.round(_gbumpHolderBalance).toLocaleString() + 'G &#x1F525;</span>';
                 phantomStatus.style.color = '#00ff41';
             } else {
-                phantomStatus.innerHTML = '<span style="color:#ff9900;">&#x26A0;&#xFE0F; No $GOYIM detected</span> &#x2014; ' + shortAddr + '. <a href="https://pump.fun/coin/' + BOARD_GOYIM_CA + '" target="_blank" style="color:#ffa500;">Buy on pump.fun</a>';
+                phantomStatus.innerHTML = '<span style="color:#ff9900;">&#x26A0;&#xFE0F; No $GOYIM detected</span> &#x2014; ' + shortAddr + '. <a href="https://pump.fun/coin/' + BOARD_GOYIM_CA + '" target="_blank" class="ft-txt-orange">Buy on pump.fun</a>';
                 phantomStatus.style.color = '#ff9900';
             }
             connectBtn.style.display = 'none';
@@ -5457,7 +5486,7 @@ if ($singleThread) {
                 // Not a holder — keep send hidden, show buy link prominently
                 sendBtn.style.display = 'none';
                 phantomStatus.innerHTML = '\u274C <strong style="color:#ff6b6b;">You must hold $GOYIM to boost.</strong><br>'
-                    + '&#x1F4B8; <a href="https://pump.fun/coin/' + BOARD_GOYIM_CA + '" target="_blank" style="color:#ffa500;">Buy $GOYIM on pump.fun</a> then reconnect.';
+                    + '&#x1F4B8; <a href="https://pump.fun/coin/' + BOARD_GOYIM_CA + '" target="_blank" class="ft-txt-orange">Buy $GOYIM on pump.fun</a> then reconnect.';
                 phantomStatus.style.color = '#ff6b6b';
                 // Let them retry with a different wallet
                 connectBtn.style.display = '';
@@ -5534,7 +5563,7 @@ if ($singleThread) {
                 return;
             }
             if (!_gbumpHolderVerified) {
-                if (status) { status.innerHTML = '\u274C You must hold $GOYIM to boost. <a href="https://pump.fun/coin/' + BOARD_GOYIM_CA + '" target="_blank" style="color:#ffa500;">Buy on pump.fun</a>'; status.style.color = '#ff6b6b'; }
+                if (status) { status.innerHTML = '\u274C You must hold $GOYIM to boost. <a href="https://pump.fun/coin/' + BOARD_GOYIM_CA + '" target="_blank" class="ft-txt-orange">Buy on pump.fun</a>'; status.style.color = '#ff6b6b'; }
                 return;
             }
             // Client-side balance check — catch insufficient funds before hitting chain
@@ -5728,7 +5757,7 @@ if ($singleThread) {
                 params: [{ from, to: recipient, value: weiValue }]
             });
             
-            status.innerHTML = '✅ ' + amount + ' ' + chain.symbol + ' sent! <a href="' + chain.explorer + txHash + '" target="_blank" style="color:#5fffaf;">View TX ↗</a>';
+            status.innerHTML = '✅ ' + amount + ' ' + chain.symbol + ' sent! <a href="' + chain.explorer + txHash + '" target="_blank" class="ft-txt-mint">View TX ↗</a>';
             status.style.color = '#00ff41';
             setTimeout(updateWalletBar, 3000);
         } catch (err) {
@@ -6556,7 +6585,7 @@ if ($singleThread) {
                     + '<span class="reply-count"><span>' + t.replyCount + '</span> repl' + (t.replyCount === 1 ? 'y' : 'ies') + '</span>'
                     + '<span class="view-count">👁 ' + t.views + '</span>'
                     + '<button class="like-btn" onclick="toggleLike(\'' + t.id + '\', this)" data-post="' + t.id + '">&#x1F438; <span class="like-count">' + t.likes + '</span></button>'
-                    + '<button class="goyim-bump-btn" onclick="openGoyimBump(\'' + t.id + '\')" style="padding:2px 8px;font-size:11px;">&#x1F525; Boost' + (t.goyimTips > 0 ? ' <span class="gbump-count">' + Math.round(t.goyimTips) + 'G</span>' : '') + '</button>'
+                    + '<button class="goyim-bump-btn" onclick="openGoyimBump(\'' + t.id + '\')" class="ft-tip-btn-sm">&#x1F525; Boost' + (t.goyimTips > 0 ? ' <span class="gbump-count">' + Math.round(t.goyimTips) + 'G</span>' : '') + '</button>'
                     + '<a href="/board?thread=' + t.id + '" class="thread-link">View Thread →</a>'
                     + '</div>';
                 container.insertBefore(div, container.firstChild);
@@ -6690,7 +6719,7 @@ if ($singleThread) {
                                 + '<input type="hidden" name="is_reply" value="1">'
                                 + '<input type="hidden" name="return_url" value="' + location.pathname + location.search + '">'
                                 + '<button class="approve-overlay-btn">✅ Approve</button></form>'
-                                + '<form method="POST" action="/board/admin" style="display:inline;">'
+                                + '<form method="POST" action="/board/admin" class="ft-inline-form">'
                                 + '<input type="hidden" name="action" value="reject_media">'
                                 + '<input type="hidden" name="post_id" value="' + r.id + '">'
                                 + '<input type="hidden" name="thread_id" value="' + VIEW_THREAD_ID + '">'
@@ -6807,7 +6836,7 @@ if ($singleThread) {
         // Copy address to clipboard
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(addr).then(function() {
-                status.innerHTML = '✅ ' + chain.name + ' address copied!<br><span style="font-size:11px;opacity:0.8;">Send <b>' + (amount || '') + ' ' + chain.symbol + '</b> to: <code style="color:#5fffaf;">' + addr.slice(0,10) + '...' + addr.slice(-6) + '</code></span>';
+                status.innerHTML = '✅ ' + chain.name + ' address copied!<br><span style="font-size:11px;opacity:0.8;">Send <b>' + (amount || '') + ' ' + chain.symbol + '</b> to: <code class="ft-txt-mint">' + addr.slice(0,10) + '...' + addr.slice(-6) + '</code></span>';
                 status.style.color = '#00ff41';
             });
         } else {
@@ -6818,7 +6847,7 @@ if ($singleThread) {
             ta.select();
             try { document.execCommand('copy'); } catch(e) {}
             document.body.removeChild(ta);
-            status.innerHTML = '✅ ' + chain.name + ' address copied!<br><span style="font-size:11px;opacity:0.8;">Send <b>' + (amount || '') + ' ' + chain.symbol + '</b> to: <code style="color:#5fffaf;">' + addr.slice(0,10) + '...' + addr.slice(-6) + '</code></span>';
+            status.innerHTML = '✅ ' + chain.name + ' address copied!<br><span style="font-size:11px;opacity:0.8;">Send <b>' + (amount || '') + ' ' + chain.symbol + '</b> to: <code class="ft-txt-mint">' + addr.slice(0,10) + '...' + addr.slice(-6) + '</code></span>';
             status.style.color = '#00ff41';
         }
         

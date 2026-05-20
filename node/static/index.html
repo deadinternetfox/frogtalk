@@ -322,55 +322,9 @@ html, body, *{
   outline:2px solid var(--accent-color) !important;
 }
 
-/* ── Chat embeds: invite cards, FrogSocial shares, link previews ───────── */
-/* These were originally rendered with inline #173027 / #2f5548 / #dff5e8 /
-   #85a89a greens. !important in a stylesheet beats inline style values
-   that don't carry !important, so we retint them via CSS only \u2014 no
-   per-render code changes required. */
-.invite-card, .share-card,
-.link-preview, .yt-embed, .spotify-embed,
-.chat-share-embed, .chat-share-music, .chat-share-video,
-.chat-share-profile, .chat-share-post, .chat-share-reel{
-  background: linear-gradient(180deg,
-      color-mix(in srgb, var(--accent-color) 16%, var(--surface-color)) 0%,
-      color-mix(in srgb, var(--bg-color) 70%, var(--surface-color)) 100%) !important;
-  border:1px solid color-mix(in srgb, var(--accent-color) 35%, var(--border-color)) !important;
-  color:var(--text-color) !important;
-}
-.invite-card *, .share-card *,
-.link-preview *, .yt-embed *, .spotify-embed *,
-.chat-share-embed *, .chat-share-music *, .chat-share-video *,
-.chat-share-profile *, .chat-share-post *, .chat-share-reel *{
-  border-color: color-mix(in srgb, var(--accent-color) 28%, var(--border-color)) !important;
-}
-/* Light text inside embeds should track --text-color; muted lines pick up
-   --text-muted. Anchor titles in the legacy markup used #dff5e8. */
-.invite-card a, .share-card a,
-.link-preview a, .yt-embed a, .spotify-embed a,
-.chat-share-embed a, .chat-share-music a, .chat-share-video a{
-  color:var(--text-color) !important;
-}
-.link-preview [style*="#85a89a"], .yt-embed [style*="#85a89a"],
-.chat-share-embed [style*="#85a89a"], .invite-card [style*="#85a89a"]{
-  color:var(--text-muted) !important;
-}
-.link-preview [style*="#dff5e8"], .yt-embed [style*="#dff5e8"],
-.chat-share-embed [style*="#dff5e8"]{
-  color:var(--text-color) !important;
-}
-/* Inline accent-green chips inside embeds (badges, labels). */
-.share-card-label, .chat-share-label, .invite-card-label{
-  color:var(--accent-color) !important;
-}
-/* "Send to side player" button inside link previews. */
-.embed-send-player{
-  background: color-mix(in srgb, var(--accent-color) 80%, var(--surface-color)) !important;
-  border:1px solid var(--accent-color) !important;
-  color: color-mix(in srgb, var(--accent-color) 12%, #000) !important;
-}
-.embed-send-player:hover{
-  background: var(--accent-color) !important;
-}
+/* Embed surfaces (link previews, YT/Spotify, invite + share cards) now
+   take their colors from CSS variables defined alongside each component
+   below, so no theme-override !important block is needed here. */
 /* /Theme bridge ───────────────────────────────────────────────────────── */
 .modal-overlay{background:rgba(0,0,0,.7) !important}
 .modal{
@@ -4131,7 +4085,7 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
 
 /* ─── Invite card ─────────────────────────────────────────────────────────── */
 .invite-card{
-  display:block;margin-top:8px;width:fit-content;max-width:340px;
+  display:block;margin-top:8px;width:100%;max-width:340px;
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 90%,var(--accent-color) 10%) 0%,color-mix(in srgb,var(--surface-color) 82%,black) 100%);
   border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color));border-radius:10px;overflow:hidden;
   box-shadow:0 2px 12px color-mix(in srgb,var(--accent-color) 14%,rgba(0,0,0,.35));
@@ -4141,25 +4095,30 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   text-transform:uppercase;letter-spacing:0.5px;font-weight:600;
   border-bottom:1px solid color-mix(in srgb,var(--accent-color) 30%,var(--border-color));
 }
+/* CSS Grid guarantees a single icon|info|button row even when the card
+   is squeezed below the natural sum of the children. flex was wrapping
+   on narrow chat panes once we tightened the embed clamp. */
 .invite-card-body{
-  display:flex;align-items:center;gap:10px;padding:10px 12px;
+  display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;
+  gap:10px;padding:10px 12px;
 }
 .invite-card-icon{
-  font-size:22px;flex-shrink:0;width:40px;height:40px;
+  font-size:20px;width:36px;height:36px;
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 94%,var(--accent-color) 6%),color-mix(in srgb,var(--surface-color) 86%,black));
   border:1px solid color-mix(in srgb,var(--accent-color) 28%,var(--border-color));border-radius:50%;display:flex;align-items:center;
   justify-content:center;line-height:1;overflow:hidden;
   text-align:center;white-space:nowrap;
 }
-.invite-card-info{flex:1;min-width:0}
-.invite-card-name{font-size:16px;font-weight:700;color:var(--text-color);margin-bottom:3px}
-.invite-card-desc{font-size:12px;color:var(--text-muted);line-height:1.4;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.invite-card-by{font-size:11px;color:color-mix(in srgb,var(--text-muted) 88%,var(--accent-color))}
+.invite-card-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
+.invite-card-info{min-width:0;overflow:hidden}
+.invite-card-name{font-size:14px;font-weight:700;color:var(--text-color);margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.invite-card-desc{font-size:11px;color:var(--text-muted);line-height:1.35;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.invite-card-by{font-size:10px;color:color-mix(in srgb,var(--text-muted) 88%,var(--accent-color));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
 .invite-card-by strong{color:color-mix(in srgb,var(--text-color) 86%,var(--accent-color))}
 .invite-card-by-nick[onclick]{cursor:pointer}
 .invite-join-btn{
-  flex-shrink:0;padding:8px 20px;border-radius:6px;border:1px solid #3a7a54;cursor:pointer;
-  background:linear-gradient(180deg,#1f5c3a,#173f28);color:#b8e8c8;font-size:13px;font-weight:700;
+  padding:6px 12px;border-radius:6px;border:1px solid #3a7a54;cursor:pointer;
+  background:linear-gradient(180deg,#1f5c3a,#173f28);color:#b8e8c8;font-size:12px;font-weight:700;
   transition:background .15s,transform .1s,box-shadow .15s;white-space:nowrap;
   box-shadow:0 2px 6px rgba(20,80,50,.35);
 }
@@ -4226,11 +4185,9 @@ body[data-theme="frog"] .invite-card-icon{
 
 @media(max-width:640px){
   .invite-card{max-width:100%}
-  .invite-card-body{padding:12px;gap:10px;align-items:flex-start}
-  .invite-card-icon{width:42px;height:42px;font-size:22px}
-  .invite-card-name{font-size:14px}
-  .invite-card-desc{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
-  .invite-join-btn{margin-left:auto;padding:8px 14px;min-height:36px}
+  .invite-card-body{padding:10px;gap:8px}
+  .invite-card-name{font-size:13px}
+  .invite-join-btn{padding:6px 10px}
 }
 @keyframes fadeInOut{0%,100%{opacity:.6}50%{opacity:1}}
 
@@ -4244,25 +4201,90 @@ body[data-theme="frog"] .invite-card-icon{
 .msg-share-row .invite-card-loading,
 .msg-share-row .invite-card-invalid{margin-top:0}
 
-/* Keep chat embeds compact across channel + DM renders.
-   JS renderers still emit legacy inline max-width values (560/480/400),
-   which can make cards oversized on wide panes. Clamp all major embed
-   variants to one consistent maximum width. */
+/* ─── Unified chat embed sizing ───────────────────────────────────────
+   One canonical max-width for every embed flavour rendered in chat. All
+   per-renderer sizing was previously inline (320/480/560), which fought
+   with theming and made the cards oversized on wide panes. The token
+   below drives every variant; tweak in one place. */
 :root{--chat-embed-max-inline:320px}
 .msg-body .link-preview,
 .msg-body .yt-embed,
 .msg-body .spotify-embed,
 .msg-body .invite-card,
 .msg-body .share-card,
-.msg-body .chat-share-embed{
-  width:min(100%,var(--chat-embed-max-inline)) !important;
-  max-width:var(--chat-embed-max-inline) !important;
+.msg-body .chat-share-embed,
+.msg-body .preview-wrap{
+  max-width:var(--chat-embed-max-inline);
+  width:100%;
+  box-sizing:border-box;
 }
 /* Preserve portrait reel geometry (9:16 width derives from height). */
-.msg-body .chat-share-embed:has(.chat-share-video){width:auto !important}
+.msg-body .chat-share-embed:has(.chat-share-video){width:auto;max-width:var(--chat-embed-max-inline)}
 @media(max-width:520px){
   :root{--chat-embed-max-inline:300px}
 }
+
+/* ─── Link preview (generic OG card) ───────────────────────────────── */
+.link-preview{
+  display:block;margin-top:8px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 92%,var(--accent-color) 8%) 0%,color-mix(in srgb,var(--surface-color) 84%,black) 100%);
+  border:1px solid color-mix(in srgb,var(--accent-color) 30%,var(--border-color));
+  border-radius:8px;overflow:hidden;text-decoration:none;color:inherit;
+  box-shadow:0 2px 12px rgba(0,0,0,.3);
+}
+.link-preview--twitter{border-left:4px solid #1da1f2;padding:12px}
+.link-preview-image{width:100%;max-height:200px;object-fit:cover;display:block}
+.link-preview-body{padding:8px 10px;background:color-mix(in srgb,var(--surface-color) 86%,black)}
+.link-preview-head{display:flex;align-items:center;gap:4px;margin-bottom:4px;font-size:11px;color:var(--text-muted)}
+.link-preview-favicon{width:14px;height:14px;border-radius:2px;flex-shrink:0}
+.link-preview-site{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.link-preview-brand{display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:4px;color:var(--text-muted)}
+.link-preview-brand--twitter{color:#1da1f2}
+.link-preview-title{font-weight:600;color:var(--text-color);font-size:13px;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.link-preview-desc{font-size:12px;color:var(--text-muted);line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.link-preview-url{font-size:11px;color:var(--text-muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ─── YouTube embed ────────────────────────────────────────────────── */
+.yt-embed{
+  display:block;margin-top:8px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 92%,var(--accent-color) 8%) 0%,color-mix(in srgb,var(--surface-color) 84%,black) 100%);
+  border:1px solid color-mix(in srgb,var(--accent-color) 30%,var(--border-color));
+  border-radius:10px;overflow:hidden;
+  box-shadow:0 2px 12px rgba(0,0,0,.3);
+}
+.yt-embed-frame{position:relative;padding-bottom:56.25%;height:0;overflow:hidden}
+.yt-embed-frame > iframe{position:absolute;top:0;left:0;width:100%;height:100%;border:0}
+.yt-embed-meta{padding:6px 10px;border-top:1px solid color-mix(in srgb,var(--accent-color) 25%,var(--border-color));background:color-mix(in srgb,var(--surface-color) 86%,black);display:flex;align-items:center;gap:8px}
+.yt-embed-info{flex:1 1 auto;min-width:0}
+.yt-embed-brand{font-size:10px;color:#ff0000;display:flex;align-items:center;gap:4px;margin-bottom:2px}
+.yt-embed-title{font-weight:600;color:var(--text-color);font-size:12px;text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ─── Spotify embed ────────────────────────────────────────────────── */
+.spotify-embed{
+  display:block;margin-top:8px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 92%,var(--accent-color) 8%) 0%,color-mix(in srgb,var(--surface-color) 84%,black) 100%);
+  border:1px solid color-mix(in srgb,var(--accent-color) 30%,var(--border-color));
+  border-radius:12px;overflow:hidden;
+  box-shadow:0 2px 12px rgba(0,0,0,.3);
+}
+.spotify-embed > iframe{display:block;border:0;width:100%}
+.spotify-embed-meta{padding:5px 10px;border-top:1px solid color-mix(in srgb,var(--accent-color) 25%,var(--border-color));background:color-mix(in srgb,var(--surface-color) 86%,black);display:flex;align-items:center;gap:8px}
+.spotify-embed-brand{flex:1 1 auto;min-width:0;font-size:10px;color:#1db954;font-weight:600;letter-spacing:.3px}
+
+/* ─── Send-to-player button (chat link previews) ────────────────────── */
+.embed-send-player{
+  background:transparent;border:0;padding:2px 6px;font-size:10px;font-weight:500;
+  color:color-mix(in srgb,var(--accent-color) 80%,var(--text-muted));
+  cursor:pointer;border-radius:4px;line-height:1.4;letter-spacing:.2px;flex:0 0 auto;
+  transition:color .15s,background .15s;white-space:nowrap;
+}
+.embed-send-player:hover{
+  color:var(--accent-color);
+  background:color-mix(in srgb,var(--accent-color) 14%,transparent);
+}
+
+/* ─── Share-card avatar slot (was inline flex-shrink:0) ─────────────── */
+.share-card-avatar{flex-shrink:0;display:block}
 
 /* ─── Frog-themed retry button used on Frog Social error states ────── */
 .social-retry-btn{
@@ -5500,7 +5522,13 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 }
 .skel-circle{border-radius:50%}
 .skel-block{width:100%;height:100px;border-radius:10px}
-.skel-row{opacity:.9}
+.skel-row{opacity:.9;pointer-events:none}
+/* Skeleton placeholders rendered inside an aria-hidden region should be
+   non-interactive even when they reuse interactive classes (story-circle,
+   reel-card, etc). */
+[aria-hidden="true"] .story-circle,
+[aria-hidden="true"] .reel-card,
+[aria-hidden="true"] .social-grid-item{pointer-events:none;cursor:default}
 
 /* Global spinner */
 .spinner-ring{display:inline-block;width:20px;height:20px;border:2px solid #2a2a2a;border-top-color:#4caf50;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle}
@@ -5743,6 +5771,32 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
   100%{filter:brightness(1)}
 }
 .social-empty{text-align:center;padding:60px 20px;color:#e0e0e0}
+.social-empty.social-empty--pad{padding:40px 0}
+.social-empty.social-empty--pad-sm{padding:32px 0}
+/* Children inside .social-empty / .social-empty-state convenience classes.
+   Old code used a forest of inline styles for these — kept identical
+   visual sizing so existing screenshots/snapshots stay stable. */
+.social-empty .se-icon,
+.social-empty-state .se-icon{font-size:36px;margin-bottom:8px;line-height:1}
+.social-empty .se-icon--lg,
+.social-empty-state .se-icon--lg{font-size:48px;margin-bottom:12px}
+.social-empty .se-icon--dim{opacity:.7}
+.social-empty .se-title,
+.social-empty-state .se-title{font-size:15px;font-weight:600;color:var(--text-color);margin-bottom:4px}
+.social-empty .se-title--lg,
+.social-empty-state .se-title--lg{font-size:16px;margin-bottom:6px}
+.social-empty .se-sub,
+.social-empty-state .se-sub{font-size:14px;color:#888}
+.social-empty .se-hint,
+.social-empty-state .se-hint{color:#666;font-size:12px;margin-top:6px}
+/* Avatar/icon image that fills its circular container. Used in
+   profile cards, channel thumbnails, story circles. Replaces dozens
+   of inline width:100%;height:100%;object-fit:cover;border-radius:50%. */
+.avatar-fill{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
+/* Common inline-flex-row with-gap pattern used in chips, action rows. */
+.ft-inline-row{display:inline-flex;align-items:center;gap:6px}
+/* Single-line ellipsised text helper. */
+.ft-ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 
 /* Stories bar */
 .stories-bar{padding:12px 16px;border-bottom:1px solid #1a1a1a;background:#0d0d0d}
