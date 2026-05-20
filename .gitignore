@@ -2,9 +2,13 @@
 .env
 data/
 secrets/
-node/data/
+# Runtime symlinks created by install.sh / setup wizard (not directories — need
+# patterns without a trailing slash or git lists the symlink itself as untracked).
+node/data
+node/secrets
 node/.env
-node/secrets/
+# Wizard backup when replacing a real node/data directory with a symlink
+node/data.misplaced-*/
 *.db
 *.sqlite
 *.sqlite3
