@@ -921,29 +921,50 @@ def delete_session(token: str):
 def delete_user_account(user_id: int) -> bool:
     """Permanently delete a user account and all associated data."""
     with _conn() as con:
-        # Check user exists
-        row = con.execute("SELECT id FROM users WHERE id=?", (user_id,)).fetchone()
+        row = con.execute(
+            "SELECT id, global_user_id FROM users WHERE id=?", (user_id,)
+        ).fetchone()
         if not row:
             return False
-        # Delete all user data (cascade will handle most via FK)
-        con.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
-        con.execute("DELETE FROM messages WHERE user_id=?", (user_id,))
-        con.execute("DELETE FROM dm_messages WHERE sender_id=?", (user_id,))
-        con.execute("DELETE FROM push_subscriptions WHERE user_id=?", (user_id,))
-        con.execute("DELETE FROM room_moderators WHERE user_id=?", (user_id,))
-        con.execute("DELETE FROM room_bans WHERE user_id=?", (user_id,))
-        con.execute("DELETE FROM user_blocks WHERE blocker_id=? OR blocked_id=?", (user_id, user_id))
-        con.execute("DELETE FROM custom_emojis WHERE uploaded_by=?", (user_id,))
-        con.execute("DELETE FROM friends WHERE user_id=? OR friend_id=?", (user_id, user_id))
-        con.execute(
-            "DELETE FROM friend_sound_assets WHERE owner_user_id=? OR friend_user_id=?",
-            (user_id, user_id),
-        )
-        con.execute("DELETE FROM dm_participants WHERE user_id=?", (user_id,))
-        # Finally delete user
-        con.execute("DELETE FROM users WHERE id=?", (user_id,))
-        con.commit()
-    return True
+        gid = str(row["global_user_id"] or "").strip()
+        if gid:
+            con.execute(
+                "DELETE FROM federation_user_profiles WHERE global_user_id=?",
+                (gid,),
+            )
+        try:
+            # Explicit cleanup for hot paths; remaining FKs use ON DELETE CASCADE.
+            con.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            con.execute("DELETE FROM messages WHERE user_id=?", (user_id,))
+            con.execute("DELETE FROM dm_messages WHERE sender_id=?", (user_id,))
+            con.execute("DELETE FROM push_subscriptions WHERE user_id=?", (user_id,))
+            con.execute("DELETE FROM room_moderators WHERE user_id=?", (user_id,))
+            con.execute("DELETE FROM room_bans WHERE user_id=?", (user_id,))
+            con.execute(
+                "DELETE FROM user_blocks WHERE blocker_id=? OR blocked_id=?",
+                (user_id, user_id),
+            )
+            con.execute("DELETE FROM custom_emojis WHERE uploaded_by=?", (user_id,))
+            con.execute("DELETE FROM friends WHERE user_id=? OR friend_id=?", (user_id, user_id))
+            con.execute(
+                "DELETE FROM friend_sound_assets WHERE owner_user_id=? OR friend_user_id=?",
+                (user_id, user_id),
+            )
+            con.execute(
+                "DELETE FROM dm_channels WHERE user_a=? OR user_b=?",
+                (user_id, user_id),
+            )
+            con.execute("DELETE FROM users WHERE id=?", (user_id,))
+            con.commit()
+            return True
+        except sqlite3.IntegrityError:
+            con.rollback()
+            logging.exception("delete_user_account: integrity error uid=%s", user_id)
+            return False
+        except Exception:
+            con.rollback()
+            logging.exception("delete_user_account: failed uid=%s", user_id)
+            raise
 def update_profile(user_id: int, avatar: Optional[str] = None, bio: Optional[str] = None,
                    new_password: Optional[str] = None, banner: Optional[str] = None):
     with _conn() as con:

@@ -4775,6 +4775,18 @@ async function loadSocialStats() {
 }
 
 async function showProfile() {
+  if (State.token) {
+    try {
+      const meRes = await apiFetch('/api/auth/me');
+      if (meRes.ok) {
+        const fresh = await meRes.json();
+        if (fresh && State.user) {
+          State.user = { ...State.user, ...fresh };
+          State.save();
+        }
+      }
+    } catch {}
+  }
   const u = State.user;
   if (!u) return;
   // Close social overlay if open (so modal appears on top)
@@ -5399,6 +5411,9 @@ async function saveProfile() {
     const data = await parseJsonSafe(res);
     if (!res.ok) { errEl.textContent = data.error || 'Save failed'; return false; }
     profileSaved = true;
+    if (data && data.id && State.user) {
+      State.user = { ...State.user, ...data };
+    }
     // Update local state
     State.user.bio = bio;
     State.user.status_msg = statusMsg;

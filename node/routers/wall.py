@@ -10,7 +10,7 @@ from slowapi import Limiter
 from typing import Optional
 
 import database as db
-from deps import get_current_user, client_ip
+from deps import get_current_user, client_ip, invalidate_request_session_cache
 from ws_manager import manager
 # Track B — declaration-list inline sanitiser. The old
 # `_css_safety.sanitize_scoped_css` (selector-aware <style> sanitiser)
@@ -1133,7 +1133,11 @@ class UpdateWallSettingsRequest(BaseModel):
 
 
 @router.patch("/settings")
-async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: dict = Depends(get_current_user)):
+async def update_wall_settings(
+    request: Request,
+    body: UpdateWallSettingsRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """Update user's wall settings."""
     with db._conn() as con:
         updates = []
@@ -1205,7 +1209,12 @@ async def update_wall_settings(body: UpdateWallSettingsRequest, current_user: di
             })
     except Exception:
         pass
-    
+
+    try:
+        invalidate_request_session_cache(request)
+    except Exception:
+        pass
+
     return dict(row) if row else {"ok": True}
 
 

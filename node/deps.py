@@ -432,6 +432,15 @@ def session_token_from_request(request: Request | None) -> str:
     return (request.cookies.get("ft_session") or "").strip()
 
 
+def invalidate_request_session_cache(request: Request | None) -> None:
+    """Drop the cached user row for the session on this HTTP request."""
+    tok = session_token_from_request(request)
+    if tok:
+        invalidate_token_cache(tok)
+    else:
+        invalidate_token_cache(None)
+
+
 async def admin_pin_gate(
     request: Request = None,
     x_session_token: str = Header(None, alias="X-Session-Token"),

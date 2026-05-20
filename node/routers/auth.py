@@ -29,6 +29,7 @@ from deps import (
     get_current_user,
     client_ip,
     invalidate_token_cache,
+    invalidate_request_session_cache,
     pin_mark_unlocked,
     pin_clear_for_token,
     admin_pin_mark_unlocked,
@@ -1461,11 +1462,10 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
     # session can't keep working for up to 15 s on its old auth lookup.
     if body.new_password:
         try:
-            current_token = (request.headers.get("x-session-token") or "").strip()
+            current_token = session_token_from_request(request)
             if current_token:
                 db.delete_other_sessions(current_user["id"], current_token)
-            from deps import invalidate_token_cache as _invalidate_token_cache
-            _invalidate_token_cache(None)
+            invalidate_token_cache(None)
         except Exception:
             pass
     status_or_presence_changed = (body.status_msg is not None or body.presence is not None)
@@ -1544,15 +1544,10 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
             })
         except Exception:
             pass
-    # Flush this token's cached user record so the next /me (or any other
-    # authed request) re-reads the freshly-written row instead of serving
-    # the 15 s-stale copy from the deps.py in-memory cache. Without this
-    # the Settings panel reopens with the *old* privacy / notify / theme
-    # values and the user thinks the save silently failed.
+    # Flush cached user (header *or* ft_session cookie — cookie-only browsers
+    # never sent X-Session-Token so the old header-only invalidation was a no-op).
     try:
-        current_token = (request.headers.get("x-session-token") or "").strip()
-        if current_token:
-            invalidate_token_cache(current_token)
+        invalidate_request_session_cache(request)
     except Exception:
         pass
     # Federation: push profile after every local field is committed so peers
@@ -1565,6 +1560,20 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
         federation_mod.enqueue_user_profile_updated(merged)
     except Exception:
         _log.exception("federation: failed to enqueue user.profile.updated")
+    # Return the fresh row so clients can merge without a follow-up /me that
+    # might still race the cache on very fast reopen.
+    try:
+        tok = session_token_from_request(request)
+        if tok:
+            fresh = db.get_user_by_token(tok)
+            if fresh:
+                out = dict(fresh)
+                out.setdefault("display_name", out.get("display_name"))
+                out["username"] = out.get("nickname")
+                out["ok"] = True
+                return out
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -1595,10 +1604,19 @@ async def delete_account(body: DeleteAccountRequest, current_user: dict = Depend
     except Exception:
         pass
 
-    # Delete the account
-    ok = db.delete_user_account(current_user["id"])
+    try:
+        ok = db.delete_user_account(current_user["id"])
+    except Exception:
+        _log.exception("delete_account: db.delete_user_account failed uid=%s", current_user.get("id"))
+        return JSONResponse(status_code=500, content={"error": "Account deletion failed"})
     if not ok:
         return JSONResponse(status_code=500, content={"error": "Failed to delete account"})
+    try:
+        invalidate_request_session_cache(request)
+        pin_clear_for_token(session_token_from_request(request))
+        admin_pin_clear_for_token(session_token_from_request(request))
+    except Exception:
+        pass
 
     # Federation fan-out: peers will purge their federation_user_profiles
     # entry for this gid (with origin-pinning enforced by the inbox).
