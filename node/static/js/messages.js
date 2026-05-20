@@ -652,7 +652,7 @@ const Messages = (() => {
       );
       let iconHtml;
       if (isImg) {
-        iconHtml = `<img src="${UI.escHtml(rawIconStr)}" alt="">`;
+        iconHtml = `<img class="invite-card-icon-img" src="${UI.escHtml(rawIconStr)}" alt="" width="40" height="40" loading="lazy">`;
       } else {
         let glyph = rawIconStr || '💬';
         try { glyph = Array.from(glyph)[0] || '💬'; } catch { glyph = glyph.charAt(0) || '💬'; }
@@ -663,8 +663,8 @@ const Messages = (() => {
       const _rawByNick = ((data.created_by_handle || data.created_by || '').replace(/^@+/, '').trim());
       const byNick = _rawByNick;
       const createdBy = _rawByNick ? `@${_rawByNick}` : '';
-      const by = createdBy
-        ? `<span class="invite-card-by">Invited by <strong class="invite-card-by-nick"${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" tabindex="0" role="button"` : ''}>${UI.escHtml(createdBy)}</strong></span>`
+      const footer = createdBy
+        ? `<div class="invite-card-footer">Invited by <strong class="invite-card-by-nick"${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" tabindex="0" role="button"` : ''}>${UI.escHtml(createdBy)}</strong></div>`
         : '';
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
@@ -679,10 +679,10 @@ const Messages = (() => {
             <div class="invite-card-info">
               <div class="invite-card-name">#${name}</div>
               ${desc}
-              ${by}
             </div>
-            ${btnHtml}
+            <div class="invite-card-action">${btnHtml}</div>
           </div>
+          ${footer}
         </div>`;
       _scrollIfNearBottom();
     } catch (e) {

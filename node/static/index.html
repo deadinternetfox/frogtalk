@@ -4083,39 +4083,58 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   position:absolute;inset:0;width:100%;height:100%;border:0
 }
 
-/* ─── Invite card ─────────────────────────────────────────────────────────── */
+/* ─── Invite card (compact Discord-style) ─────────────────────────────────── */
 .invite-card{
-  display:block;margin-top:8px;width:100%;max-width:340px;
+  display:inline-block;vertical-align:top;margin-top:8px;
+  width:min(100%,300px);max-width:300px;
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 90%,var(--accent-color) 10%) 0%,color-mix(in srgb,var(--surface-color) 82%,black) 100%);
-  border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color));border-radius:10px;overflow:hidden;
-  box-shadow:0 2px 12px color-mix(in srgb,var(--accent-color) 14%,rgba(0,0,0,.35));
+  border:1px solid color-mix(in srgb,var(--accent-color) 34%,var(--border-color));border-radius:8px;overflow:hidden;
+  box-shadow:0 2px 10px color-mix(in srgb,var(--accent-color) 12%,rgba(0,0,0,.32));
+  contain:layout style;
 }
 .invite-card-header{
-  padding:6px 12px;background:color-mix(in srgb,var(--surface-color) 72%,rgba(0,0,0,.28));font-size:11px;color:var(--text-muted);
-  text-transform:uppercase;letter-spacing:0.5px;font-weight:600;
-  border-bottom:1px solid color-mix(in srgb,var(--accent-color) 30%,var(--border-color));
+  padding:5px 10px;background:color-mix(in srgb,var(--surface-color) 72%,rgba(0,0,0,.28));font-size:10px;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:0.4px;font-weight:600;line-height:1.3;
+  border-bottom:1px solid color-mix(in srgb,var(--accent-color) 28%,var(--border-color));
 }
-/* CSS Grid guarantees a single icon|info|button row even when the card
-   is squeezed below the natural sum of the children. flex was wrapping
-   on narrow chat panes once we tightened the embed clamp. */
+/* Flex row — channel icons must never inflate row height (grid was
+   stretching when a large room_icon image loaded at intrinsic size). */
 .invite-card-body{
-  display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;
-  gap:10px;padding:10px 12px;
+  display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;
+  gap:10px;padding:8px 10px;min-height:0;max-height:none;
 }
 .invite-card-icon{
-  font-size:20px;width:36px;height:36px;
+  flex:0 0 40px;width:40px;height:40px;min-width:40px;max-width:40px;
+  min-height:40px;max-height:40px;
+  font-size:18px;line-height:1;
   background:linear-gradient(180deg,color-mix(in srgb,var(--surface-color) 94%,var(--accent-color) 6%),color-mix(in srgb,var(--surface-color) 86%,black));
-  border:1px solid color-mix(in srgb,var(--accent-color) 28%,var(--border-color));border-radius:50%;display:flex;align-items:center;
-  justify-content:center;line-height:1;overflow:hidden;
-  text-align:center;white-space:nowrap;
+  border:1px solid color-mix(in srgb,var(--accent-color) 28%,var(--border-color));border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;text-align:center;white-space:nowrap;
 }
-.invite-card-icon img{width:100%;height:100%;object-fit:cover;border-radius:50%;display:block}
-.invite-card-info{min-width:0;overflow:hidden}
-.invite-card-name{font-size:14px;font-weight:700;color:var(--text-color);margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.invite-card-desc{font-size:11px;color:var(--text-muted);line-height:1.35;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.invite-card-by{font-size:10px;color:color-mix(in srgb,var(--text-muted) 88%,var(--accent-color));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
-.invite-card-by strong{color:color-mix(in srgb,var(--text-color) 86%,var(--accent-color))}
+.invite-card-icon img,
+.invite-card-icon-img{
+  width:40px!important;height:40px!important;max-width:40px!important;max-height:40px!important;
+  object-fit:cover;border-radius:50%;display:block;
+}
+.invite-card-info{flex:1 1 auto;min-width:0;overflow:hidden}
+.invite-card-name{
+  font-size:14px;font-weight:700;color:var(--text-color);line-height:1.25;
+  margin:0 0 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.invite-card-desc{
+  font-size:11px;color:var(--text-muted);line-height:1.3;margin:0 0 2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.invite-card-footer{
+  padding:4px 10px 6px;font-size:10px;color:color-mix(in srgb,var(--text-muted) 88%,var(--accent-color));
+  border-top:1px solid color-mix(in srgb,var(--accent-color) 20%,var(--border-color));
+  background:color-mix(in srgb,var(--surface-color) 88%,rgba(0,0,0,.15));
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.invite-card-footer strong{color:color-mix(in srgb,var(--text-color) 86%,var(--accent-color))}
 .invite-card-by-nick[onclick]{cursor:pointer}
+.invite-card-action{flex:0 0 auto}
 .invite-join-btn{
   padding:6px 12px;border-radius:6px;border:1px solid #3a7a54;cursor:pointer;
   background:linear-gradient(180deg,#1f5c3a,#173f28);color:#b8e8c8;font-size:12px;font-weight:700;
@@ -4184,10 +4203,10 @@ body[data-theme="frog"] .invite-card-icon{
 }
 
 @media(max-width:640px){
-  .invite-card{max-width:100%}
-  .invite-card-body{padding:10px;gap:8px}
+  .invite-card{width:min(100%,100%);max-width:100%}
+  .invite-card-body{padding:8px;gap:8px}
   .invite-card-name{font-size:13px}
-  .invite-join-btn{padding:6px 10px}
+  .invite-join-btn{padding:6px 10px;font-size:11px}
 }
 @keyframes fadeInOut{0%,100%{opacity:.6}50%{opacity:1}}
 
@@ -4210,12 +4229,19 @@ body[data-theme="frog"] .invite-card-icon{
 .msg-body .link-preview,
 .msg-body .yt-embed,
 .msg-body .spotify-embed,
-.msg-body .invite-card,
 .msg-body .share-card,
 .msg-body .chat-share-embed,
 .msg-body .preview-wrap{
   max-width:var(--chat-embed-max-inline);
   width:100%;
+  box-sizing:border-box;
+}
+/* Invite cards: never stretch to full message width — that made them
+   look like giant panels and let oversized room icons blow up row height. */
+.msg-body .invite-card{
+  display:inline-block;
+  width:min(100%,300px);
+  max-width:300px;
   box-sizing:border-box;
 }
 /* Preserve portrait reel geometry (9:16 width derives from height). */
