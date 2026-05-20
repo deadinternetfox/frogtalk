@@ -75,39 +75,120 @@ No company in the middle. Messages stay private. Built in the open.
 | 🪟 **Windows (Portable .exe)** | [Latest portable .exe](https://frogtalk.xyz/download/windows) | Portable single-file — just run |
 | 🪟 **Windows (.zip)** | [Latest .zip](https://frogtalk.xyz/download/windows-zip) | Unzip, then run `FrogTalk.exe` |
 | 🍎 **macOS** | [Open in browser](https://frogtalk.xyz) | Native macOS build not published yet |
+| 🐧 **Arch (AUR)** | [`frogtalk-bin`](https://aur.archlinux.org/packages/frogtalk-bin) | System `electron41` + prebuilt `.deb` repack |
 
 ---
 
-## Self-Host
+## Linux quick start (chat client)
 
-### Quick start
+Pick one way to run FrogTalk on Linux — all clients talk to a node (default
+[`frogtalk.xyz`](https://frogtalk.xyz); change server in **Settings → Network**).
+
+### Download (fastest)
+
+```bash
+# AppImage — no install, any distro
+curl -fsSL -o FrogTalk.AppImage "$(curl -fsSL https://api.github.com/repos/deadinternetfox/frogtalk/releases/latest \
+  | grep -o 'https://[^"]*AppImage' | head -1)"
+chmod +x FrogTalk.AppImage
+./FrogTalk.AppImage
+
+# .deb — Debian / Ubuntu / Mint
+curl -fsSL -o frogtalk.deb "$(curl -fsSL https://api.github.com/repos/deadinternetfox/frogtalk/releases/latest \
+  | grep -o 'https://[^"]*_amd64.deb' | head -1)"
+sudo dpkg -i frogtalk.deb
+frogtalk
+```
+
+Or use the buttons on **[GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases/latest)** or [frogtalk.xyz/download](https://frogtalk.xyz).
+
+### Arch Linux (AUR)
+
+Requires [`electron41`](https://archlinux.org/packages/?q=electron41) from official repos:
+
+```bash
+# yay / paru
+yay -S frogtalk-bin
+# or build from AUR git
+git clone https://aur.archlinux.org/frogtalk-bin.git && cd frogtalk-bin
+makepkg -si
+frogtalk-bin
+```
+
+Package sources and update script: [`packaging/aur/frogtalk-bin/`](packaging/aur/frogtalk-bin/).
+
+### Snap (when published)
+
+```bash
+sudo snap install frogtalk
+frogtalk
+```
+
+Build & publish: [`packaging/snap/`](packaging/snap/) — `snapcraft upload --release=stable`.
+
+### Build from source (desktop)
 
 ```bash
 git clone https://github.com/deadinternetfox/frogtalk.git
 cd frogtalk
-cp node/deploy/env.example .env        # set ADMIN_PASSWORD, PORT, ALLOWED_ORIGINS
+bash client/desktop/scripts/build-linux-release.sh
+# Artifacts: client/desktop/builds/*.AppImage and *.deb
+```
+
+Details: [`client/README.md`](client/README.md) · store packaging: [`packaging/README.md`](packaging/README.md).
+
+### Browser only
+
+Open **[frogtalk.xyz/app](https://frogtalk.xyz/app)** — no install; works on Linux mobile and desktop browsers.
+
+---
+
+## Self-Host (run your own node)
+
+### Quick start (Linux server)
+
+```bash
+git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
+cd /opt/frogtalk
+
+# Interactive wizard: venv, .env, data/ symlinks, optional Tor
+bash node/scripts/node_setup_wizard.sh
+
+# Join the public mesh (official directory + board nav pills)
+bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
+
+# Production service (optional)
+sudo cp node/deploy/frogtalk.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now frogtalk
+```
+
+Manual path without the wizard:
+
+```bash
+git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
+cd /opt/frogtalk
 python3 -m venv venv && source venv/bin/activate
 pip install -r node/requirements.txt
-cd node && python main.py              # → http://localhost:8080
+cp node/deploy/env.example .env    # set ADMIN_PASSWORD, PUBLIC_URL, ALLOWED_ORIGINS
+mkdir -p data && ln -sfn /opt/frogtalk/data node/data && ln -sfn /opt/frogtalk/.env node/.env
+cd node && python main.py          # → http://localhost:8080
 ```
 
 Default admin login: `admin` / the value of `ADMIN_PASSWORD` in your `.env`.
 
-> All node code lives under `node/`. The runtime expects `data/`, `secrets/`, and `.env`
-> at the project root and reaches them via in-place symlinks (`node/data`, `node/secrets`,
-> `node/.env`) so operator state stays at `/opt/frogtalk/` while source lives at
-> `/opt/frogtalk/node/`. The setup wizard creates those symlinks for you.
+> All node code lives under `node/`. Runtime state (`data/`, `secrets/`, `.env`) stays at
+> the install root; `node/data` and `node/.env` must be **symlinks**, not real folders
+> (otherwise you get an empty DB and broken sessions). The wizard and
+> `node_federation_join.sh` fix this automatically.
 
-### Guided setup + update scripts
+### Guided setup + updates
 
 ```bash
-# interactive self-host wizard (safe defaults + edge-case handling)
-bash node/scripts/node_setup_wizard.sh
+# Federation mesh (re-run after changing PUBLIC_URL or onion address)
+bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
 
-# check for upstream updates
+# Check / apply signed upstream updates
 bash node/scripts/node_update_check.sh
-
-# apply updates safely (fast-forward only)
 bash node/scripts/node_update_check.sh --apply
 ```
 

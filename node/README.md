@@ -4,27 +4,40 @@ This folder is the **entire federated server**: the FastAPI app, its static
 assets, deploy templates, container build, operator scripts, and tests. If you
 want to self-host FrogTalk, everything you touch lives here.
 
-## Self-host quickstart
+## Linux quick start (self-host a node)
 
 ```bash
 git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
+
+# 1) Wizard: venv, .env, symlinks (node/data → ../data)
 bash node/scripts/node_setup_wizard.sh
 
-# join the public mesh (chat directory + board nav pills):
+# 2) Join federation: official server list + /board/ peer nav pills
 bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
 
-# later, check for updates (signature-verified):
-bash node/scripts/node_update_check.sh           # check only
-bash node/scripts/node_update_check.sh --apply   # fast-forward apply
+# 3) systemd (production)
+sudo cp node/deploy/frogtalk.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now frogtalk
+journalctl -u frogtalk -f
+```
+
+Tor-only node: re-run the wizard with onion enabled, or set `FROGTALK_TOR_ENABLED=1`
+and `FROGTALK_ONION_URL=http://….onion` in `.env`, then federation-join again.
+
+Updates (signature-verified):
+
+```bash
+bash node/scripts/node_update_check.sh
+bash node/scripts/node_update_check.sh --apply
 ```
 
 The wizard creates `venv/`, writes a safe `.env`, and links runtime state
 (`data/`, `secrets/`, `.env`) into the source tree so the systemd unit
 (`WorkingDirectory=/opt/frogtalk/node`) keeps finding them.
 
-Full walkthrough: [`static/docs-node.html`](static/docs-node.html) (served at
-`/docs/node`).
+Docs: [`static/docs-node.html`](static/docs-node.html) (also at `/docs/node` on a
+running node) · deploy templates: [`deploy/README.md`](deploy/README.md).
 
 ## Layout
 

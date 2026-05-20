@@ -2,15 +2,23 @@
 
 Electron build artifacts are generated here for a cleaner repo layout.
 
-Configured in `client/desktop/app/package.json`:
+## Build
 
-- `build.directories.output = ../builds`
+```bash
+bash client/desktop/scripts/build-linux-release.sh
+```
 
-Typical outputs:
+Configured in `client/desktop/app/package.json` → `build.directories.output = ../builds`.
 
-- `FrogTalk-<version>.AppImage`
-- `frogtalk_<version>_amd64.deb`
-- `FrogTalk-<version>-win-x64.zip`
-- `FrogTalk-<version>-win-x64-portable.exe`
+## Typical outputs
 
-These binaries are intentionally not committed to git.
+| File | Linux install |
+|------|----------------|
+| `FrogTalk-<version>.AppImage` | `chmod +x` then `./FrogTalk-*.AppImage` |
+| `frogtalk_<version>_amd64.deb` | `sudo dpkg -i frogtalk_*.deb` → `frogtalk` |
+| `FrogTalk-<version>-win-x64.zip` | Unzip, run `FrogTalk.exe` |
+| `FrogTalk-<version>-win-x64-portable.exe` | Single portable exe |
+
+These binaries are intentionally not committed to git. Publish to
+[GitHub Releases](https://github.com/deadinternetfox/frogtalk/releases), then refresh
+AUR sums: `bash packaging/aur/update-frogtalk-bin.sh`.

@@ -2,6 +2,21 @@
 
 Templates for third-party stores. **Publishing requires maintainer accounts** on each platform.
 
+## Linux quick start (end users)
+
+```bash
+# Any distro — AppImage from GitHub Releases
+chmod +x FrogTalk-*.AppImage && ./FrogTalk-*.AppImage
+
+# Debian / Ubuntu
+sudo dpkg -i frogtalk_*_amd64.deb && frogtalk
+
+# Arch Linux (AUR)
+yay -S frogtalk-bin && frogtalk-bin
+```
+
+Full client + self-host guide: [root README](../README.md#linux-quick-start-chat-client).
+
 | Channel | Path | Submit |
 |---------|------|--------|
 | [AUR `frogtalk-bin`](https://aur.archlinux.org/packages/frogtalk-bin) | `aur/frogtalk-bin/` | SSH git push to `aur` (see below) |
