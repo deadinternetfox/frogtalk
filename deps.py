@@ -302,3 +302,89 @@ async def pin_gate(
             detail={"pin_required": True, "error": "PIN required"},
         )
     return user
+
+
+# ── Admin-area PIN gate ─────────────────────────────────────────────────
+# HIGH-1: ``pin_require_for_admin`` used to be enforced only in the
+# browser via ``static/js/pin.js`` ``gateAdmin()``. The actual admin
+# routes (``routers/admin.py``, the server-admin mount, etc.) were only
+# behind ``pin_gate`` which checks ``pin_require_on_unlock``. A stolen
+# bearer token + ``pin_require_on_unlock=0`` was enough to call
+# ``POST /api/admin/ban/{nick}`` directly without ever facing the PIN
+# prompt the user had explicitly enabled. ``admin_pin_gate`` closes that
+# gap: any user who enabled "Require PIN for admin areas" must have
+# re-typed the PIN within ``_ADMIN_PIN_TTL`` seconds before the request
+# is served, regardless of the unlock-on-resume setting.
+
+_ADMIN_PIN_TTL = 300  # seconds; matches the client-side `gateAdmin()` default
+
+# Per-session "admin grace" tracker, separate from `_pin_state` so that
+# unlocking the lock screen does NOT also satisfy the admin re-prompt.
+_admin_pin_state_lock = threading.Lock()
+_admin_pin_state: dict[str, float] = {}
+_ADMIN_PIN_STATE_MAX = 4096
+
+
+def admin_pin_mark_unlocked(token: str) -> None:
+    """Record a fresh admin-area unlock. Called by ``/api/auth/pin/verify``
+    after a successful PIN check so the next admin call goes through."""
+    k = _pin_key(token)
+    if not k:
+        return
+    now = time.time()
+    with _admin_pin_state_lock:
+        _admin_pin_state[k] = now
+        if len(_admin_pin_state) > _ADMIN_PIN_STATE_MAX:
+            stale = sorted(_admin_pin_state.items(), key=lambda kv: kv[1])
+            for ks, _ in stale[: _ADMIN_PIN_STATE_MAX // 2]:
+                _admin_pin_state.pop(ks, None)
+
+
+def admin_pin_clear_for_token(token: str) -> None:
+    k = _pin_key(token)
+    if not k:
+        return
+    with _admin_pin_state_lock:
+        _admin_pin_state.pop(k, None)
+
+
+def _admin_pin_required(user: dict, token: str) -> bool:
+    if not user or not token:
+        return False
+    if not int(user.get("has_pin") or 0):
+        return False
+    if not int(user.get("pin_require_for_admin") or 0):
+        return False
+    k = _pin_key(token)
+    now = time.time()
+    with _admin_pin_state_lock:
+        ts = _admin_pin_state.get(k)
+        if ts is not None and (now - ts) <= _ADMIN_PIN_TTL:
+            # Bump so an active admin session doesn't lock mid-action.
+            _admin_pin_state[k] = now
+            return False
+    return True
+
+
+async def admin_pin_gate(
+    request: Request = None,
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+):
+    """Strict version of ``pin_gate`` for admin areas.
+
+    Mount with::
+
+        app.include_router(admin_mod.router, prefix="/api",
+                           dependencies=_PIN_GATED + [Depends(admin_pin_gate)])
+    """
+    user = await get_current_user(request, x_session_token)
+    if _pin_session_is_locked(user, x_session_token or "") or _admin_pin_required(user, x_session_token or ""):
+        raise HTTPException(
+            status_code=423,
+            detail={
+                "pin_required": True,
+                "admin": True,
+                "error": "PIN required for admin actions",
+            },
+        )
+    return user

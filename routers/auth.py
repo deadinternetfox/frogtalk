@@ -25,7 +25,15 @@ from slowapi import Limiter
 
 import database as db
 import geoip
-from deps import get_current_user, client_ip, invalidate_token_cache, pin_mark_unlocked, pin_clear_for_token
+from deps import (
+    get_current_user,
+    client_ip,
+    invalidate_token_cache,
+    pin_mark_unlocked,
+    pin_clear_for_token,
+    admin_pin_mark_unlocked,
+    admin_pin_clear_for_token,
+)
 from routers._media_safety import safe_reencode as _media_reencode
 from ws_manager import manager
 
@@ -33,6 +41,77 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 limiter = Limiter(key_func=client_ip)
 
 NICKNAME_RE = re.compile(r"^[a-zA-Z0-9_\-]{2,32}$")
+
+
+# ── Per-account login lockout ────────────────────────────────────────────
+# HIGH-5: slowapi's `20/hour` limit on `/api/auth/login` is keyed by IP.
+# A botnet with even 50 IPs can run 1000 attempts/hour against a single
+# nickname. Track failures *per account*: 10 strikes locks for 15 min.
+# In-memory only — process restart clears it; restart-as-bypass is
+# acceptable because an attacker doesn't get to restart the server.
+
+_LOGIN_LOCKOUT_THRESHOLD = 10
+_LOGIN_LOCKOUT_WINDOW = 15 * 60       # seconds — counter horizon
+_LOGIN_LOCKOUT_DURATION = 15 * 60     # seconds — actual lockout
+_LOGIN_LOCKOUT_MAX = 8192             # cap memory footprint
+
+_login_state_lock = threading.Lock() if False else None  # placeholder, replaced below
+import threading as _threading
+_login_state_lock = _threading.Lock()
+_login_state: dict[str, dict] = {}
+
+
+def _login_record_failure(nick_key: str) -> None:
+    """Record a failed login for ``nick_key`` (already lowercased nickname).
+
+    Counters reset after ``_LOGIN_LOCKOUT_WINDOW`` of no activity. Hitting
+    ``_LOGIN_LOCKOUT_THRESHOLD`` flips the entry into a "locked" state for
+    ``_LOGIN_LOCKOUT_DURATION``; further failures while locked extend the
+    lock so a steady attacker can't grind underneath the threshold.
+    """
+    if not nick_key:
+        return
+    now = time.time()
+    with _login_state_lock:
+        st = _login_state.get(nick_key) or {"count": 0, "first": now, "locked_until": 0.0}
+        # Reset counter if the previous failure was outside the window.
+        if (now - st.get("first", now)) > _LOGIN_LOCKOUT_WINDOW:
+            st = {"count": 0, "first": now, "locked_until": 0.0}
+        st["count"] = int(st.get("count", 0)) + 1
+        if st["count"] >= _LOGIN_LOCKOUT_THRESHOLD:
+            st["locked_until"] = max(st.get("locked_until", 0.0), now + _LOGIN_LOCKOUT_DURATION)
+        _login_state[nick_key] = st
+        if len(_login_state) > _LOGIN_LOCKOUT_MAX:
+            stale = sorted(_login_state.items(), key=lambda kv: kv[1].get("first", 0))
+            for k, _ in stale[: _LOGIN_LOCKOUT_MAX // 2]:
+                _login_state.pop(k, None)
+
+
+def _login_locked_until(nick_key: str) -> float:
+    """Return the unlock time for ``nick_key`` if currently locked, else 0."""
+    if not nick_key:
+        return 0.0
+    now = time.time()
+    with _login_state_lock:
+        st = _login_state.get(nick_key)
+        if not st:
+            return 0.0
+        if st.get("locked_until", 0.0) <= now:
+            # Expired lock — clear so the next failure starts fresh.
+            if st.get("locked_until", 0.0):
+                st["locked_until"] = 0.0
+                st["count"] = 0
+                st["first"] = now
+            return 0.0
+        return float(st["locked_until"])
+
+
+def _login_clear_failures(nick_key: str) -> None:
+    """Drop the counter on successful login."""
+    if not nick_key:
+        return
+    with _login_state_lock:
+        _login_state.pop(nick_key, None)
 
 MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB in base64
 FED_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FrogTalkFederation/1.0"
@@ -240,7 +319,10 @@ def _federation_legacy_plaintext_enabled() -> bool:
 
 
 def _tor_mode_enabled() -> bool:
-    return (os.getenv("FROGTALK_TOR_ENABLED", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
+    # HIGH-14: equivalence between TOR_ENABLED and TOR_MODE
+    v1 = (os.getenv("FROGTALK_TOR_ENABLED", "") or "").strip().lower()
+    v2 = (os.getenv("FROGTALK_TOR_MODE", "") or "").strip().lower()
+    return any(v in ("1", "true", "yes", "on") for v in (v1, v2))
 
 
 def _peer_target(row: dict) -> str:
@@ -646,6 +728,24 @@ async def register(
 @router.post("/login")
 @limiter.limit("20/hour")
 async def login(request: Request, body: LoginRequest):
+    # HIGH-5: per-account lockout. The 20/hour slowapi limit is keyed by
+    # IP, so a botnet can comfortably grind a single account from 1000
+    # different addresses. Track failures per nickname and lock for a
+    # cooling-off window after _LOGIN_LOCKOUT_THRESHOLD consecutive bad
+    # passwords. Successful login clears the counter.
+    nick_key = (body.nickname or "").strip().lower()
+    if nick_key:
+        locked_until = _login_locked_until(nick_key)
+        if locked_until:
+            wait = int(max(1, locked_until - time.time()))
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Too many failed attempts. Try again later.",
+                    "retry_after_seconds": wait,
+                },
+                headers={"Retry-After": str(wait)},
+            )
     # bcrypt.checkpw is CPU-bound (50–300 ms). Running it directly inside an
     # async route blocks the single uvicorn event loop for that whole window,
     # which is what made the very first /api/auth/me + /api/auth/login feel
@@ -653,6 +753,8 @@ async def login(request: Request, body: LoginRequest):
     # worker thread so other requests keep flowing while bcrypt runs.
     user = await asyncio.to_thread(db.verify_user, body.nickname, body.password)
     if not user:
+        if nick_key:
+            _login_record_failure(nick_key)
         # Optional federated bootstrap: if credentials are valid on a known
         # peer server, create the local account/profile so server switches feel
         # seamless while each node keeps independent encrypted storage.
@@ -684,6 +786,8 @@ async def login(request: Request, body: LoginRequest):
             "expires_at": ban.get("expires_at"),
             "banned_by": (banner or {}).get("nickname"),
         })
+    if nick_key:
+        _login_clear_failures(nick_key)
     token = _create_session_with_meta(request, user["id"])
     return _auth_session_response(user["id"], token)
 
@@ -821,6 +925,7 @@ async def logout(
         invalidate_token_cache(token)
         try:
             pin_clear_for_token(token)
+            admin_pin_clear_for_token(token)
         except Exception:
             pass
     try:
@@ -1088,6 +1193,9 @@ async def pin_verify(request: Request, body: PinVerifyRequest,
         return JSONResponse(status_code=401, content=res)
     try:
         pin_mark_unlocked(x_session_token or "")
+        # HIGH-1: typing the PIN is also what satisfies the admin grace
+        # window, so refresh it here.
+        admin_pin_mark_unlocked(x_session_token or "")
     except Exception:
         pass
     return res
@@ -1108,6 +1216,7 @@ async def pin_disable(request: Request, body: PinDisableRequest,
     # too so memory stays clean.
     try:
         pin_clear_for_token(x_session_token or "")
+        admin_pin_clear_for_token(x_session_token or "")
     except Exception:
         pass
     return res
@@ -1566,11 +1675,11 @@ async def generate_recovery_key(request: Request, body: GenerateRecoveryKeyReque
     if not db.verify_user(current_user["nickname"], body.password):
         return JSONResponse(status_code=401, content={"error": "Incorrect password"})
     
-    # Generate recovery key
+    # Generate recovery key. Pass the *raw* key to db.create_recovery_key
+    # so the bcrypt-at-rest path (HIGH-5) runs. The function detects the
+    # legacy hex-digest format too, so older callers keep working.
     raw_key = secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    
-    db.create_recovery_key(current_user["id"], key_hash)
+    db.create_recovery_key(current_user["id"], raw_key)
     
     # Create recovery file content
     recovery_data = {
@@ -1606,8 +1715,9 @@ async def recover_account(request: Request, body: RecoverAccountRequest):
     if len(body.new_password) < 6:
         return JSONResponse(status_code=400, content={"error": "Password must be at least 6 characters"})
     
-    key_hash = hashlib.sha256(body.recovery_key.encode()).hexdigest()
-    user_id = db.use_recovery_key(key_hash)
+    # HIGH-5: pass the raw key so db.use_recovery_key takes the bcrypt
+    # path. Legacy SHA-256 rows are still accepted by the same call.
+    user_id = db.use_recovery_key(body.recovery_key)
     
     if not user_id:
         return JSONResponse(status_code=401, content={"error": "Invalid or already used recovery key"})
@@ -1649,15 +1759,36 @@ class VerifyRecoveryKeyRequest(BaseModel):
 @limiter.limit("20/hour")
 async def verify_recovery_key(request: Request, body: VerifyRecoveryKeyRequest):
     """Check if a recovery key is valid (without using it)."""
-    key_hash = hashlib.sha256(body.recovery_key.encode()).hexdigest()
-    
+    raw = (body.recovery_key or "").strip()
+    if not raw:
+        return {"valid": False}
+    # Legacy SHA-256-at-rest rows: O(1) lookup by hash.
+    key_hash = hashlib.sha256(raw.encode()).hexdigest()
     with db._conn() as con:
         row = con.execute("""
             SELECT rk.id, u.nickname FROM recovery_keys rk
             JOIN users u ON rk.user_id = u.id
             WHERE rk.key_hash=? AND rk.used_at IS NULL
         """, (key_hash,)).fetchone()
-    
     if row:
         return {"valid": True, "username": row["nickname"]}
+    # HIGH-5: bcrypt-at-rest rows — scan only unused bcrypt rows. Small
+    # working set because there's at most one active key per user.
+    try:
+        import bcrypt as _bcrypt_local
+    except Exception:
+        return {"valid": False}
+    with db._conn() as con:
+        cands = con.execute("""
+            SELECT rk.id, u.nickname, rk.key_hash FROM recovery_keys rk
+            JOIN users u ON rk.user_id = u.id
+            WHERE rk.used_at IS NULL AND rk.key_hash LIKE 'bcrypt$%'
+        """).fetchall()
+    for cand in cands:
+        try:
+            hashed = cand["key_hash"][len("bcrypt$"):]
+            if _bcrypt_local.checkpw(raw.encode("utf-8"), hashed.encode("utf-8")):
+                return {"valid": True, "username": cand["nickname"]}
+        except Exception:
+            continue
     return {"valid": False}
