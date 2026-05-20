@@ -200,6 +200,10 @@ const App = {
 
     // Check for invite link / share link params in URL
     const params = new URLSearchParams(window.location.search);
+    const returnTo = (params.get('return') || '').trim();
+    if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
+      this.pendingReturn = returnTo;
+    }
     const inviteCode = params.get('invite');
     if (inviteCode) {
       this.pendingInvite = inviteCode;
@@ -370,6 +374,19 @@ const App = {
   },
 
   async launch() {
+    const pendingReturn = (this.pendingReturn || '').trim();
+    if (pendingReturn) {
+      this.pendingReturn = null;
+      try {
+        if (window.Pin && typeof Pin.gateAdmin === 'function') {
+          const ok = await Pin.gateAdmin();
+          if (!ok) return;
+        }
+      } catch {}
+      window.location.assign(pendingReturn);
+      return;
+    }
+
     document.getElementById('auth-overlay').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     try { window.__ftApplyMiniBoardGuestMode && window.__ftApplyMiniBoardGuestMode(); } catch {}

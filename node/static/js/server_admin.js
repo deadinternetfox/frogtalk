@@ -34,12 +34,16 @@
   const saveChannelRetentionBtn = document.getElementById('save-channel-retention-btn');
   const channelRetentionStatus = document.getElementById('channel-retention-status');
   const channelRetentionLastSaved = document.getElementById('channel-retention-last-saved');
+  const blockTorPeers = document.getElementById('block-tor-peers');
+  const saveFederationPolicyBtn = document.getElementById('save-federation-policy-btn');
+  const federationPolicyStatus = document.getElementById('federation-policy-status');
   let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
   let easterEggLoaded = false;
   let easterEggDirty = false;
   let frogTapCount = 0;
   let frogTapTimer = null;
   let retentionBaseline = '';
+  let federationPolicyBaseline = '';
 
   function retentionSig() {
     const d = Math.max(1, Number(channelActiveDays?.value || 30) || 30);
@@ -58,6 +62,59 @@
     saveChannelRetentionBtn.disabled = !!isSaving;
     saveChannelRetentionBtn.classList.toggle('is-loading', !!isSaving);
     saveChannelRetentionBtn.textContent = isSaving ? 'Saving Channel Timing…' : 'Save Channel Timing';
+  }
+
+  function federationPolicySig() {
+    return blockTorPeers?.checked ? '1' : '0';
+  }
+
+  function setFederationPolicyStatus(state, text) {
+    if (!federationPolicyStatus) return;
+    federationPolicyStatus.className = `status-pill state-${state}`;
+    federationPolicyStatus.textContent = text || '';
+  }
+
+  function refreshFederationPolicyDirtyUi() {
+    const dirty = federationPolicySig() !== federationPolicyBaseline;
+    if (dirty) {
+      setFederationPolicyStatus('dirty', 'Unsaved local changes');
+    } else if (!federationPolicyStatus?.classList.contains('state-saved')) {
+      setFederationPolicyStatus('saved', 'No local changes');
+    }
+  }
+
+  function syncFederationPolicy(policy) {
+    const block = !!(policy && policy.block_tor_peers);
+    if (blockTorPeers) blockTorPeers.checked = block;
+    federationPolicyBaseline = federationPolicySig();
+    setFederationPolicyStatus('saved', 'Loaded from this node');
+  }
+
+  async function saveFederationPolicy() {
+    if (!saveFederationPolicyBtn) return;
+    saveFederationPolicyBtn.disabled = true;
+    saveFederationPolicyBtn.classList.add('is-loading');
+    saveFederationPolicyBtn.textContent = 'Saving Federation Policy…';
+    setFederationPolicyStatus('saving', 'Saving to this node…');
+    try {
+      const payload = await api('/api/server-admin/federation-policy', {
+        method: 'PUT',
+        body: JSON.stringify({ block_tor_peers: !!blockTorPeers?.checked }),
+      });
+      syncFederationPolicy(payload.federation_policy || {});
+      const n = Number(payload.tor_peers_disabled || 0);
+      const extra = n > 0 ? ` Disabled ${n} Tor peer${n === 1 ? '' : 's'}.` : '';
+      setFederationPolicyStatus('saved', 'Saved on this node');
+      setActionMessage(`Federation policy saved.${extra}`);
+      await refreshNodes();
+    } catch (e) {
+      setFederationPolicyStatus('error', 'Save failed');
+      setActionMessage(e.message, true);
+    } finally {
+      saveFederationPolicyBtn.disabled = false;
+      saveFederationPolicyBtn.classList.remove('is-loading');
+      saveFederationPolicyBtn.textContent = 'Save Federation Policy';
+    }
   }
 
   function refreshRetentionDirtyUi() {
@@ -125,12 +182,12 @@
   }
 
   function _readCsrfCookie() {
-    // Double-submit pattern: the server set ``frogtalk_admin_csrf`` as a
-    // non-HttpOnly cookie at login. We echo it in a header so the server
-    // can compare against the session-bound token. A cross-origin
-    // attacker can't read this cookie thanks to SameSite=Strict.
-    const m = (document.cookie || '').match(/(?:^|;\s*)frogtalk_admin_csrf=([^;]+)/);
-    return m ? decodeURIComponent(m[1]) : '';
+    // FrogTalk session CSRF (``ft_csrf``) — bound to HttpOnly ``ft_session``.
+    const m = (document.cookie || '').match(/(?:^|;\s*)ft_csrf=([^;]+)/);
+    if (m) return decodeURIComponent(m[1]);
+    // Legacy WebUI fallback (env-only emergency login).
+    const legacy = (document.cookie || '').match(/(?:^|;\s*)frogtalk_admin_csrf=([^;]+)/);
+    return legacy ? decodeURIComponent(legacy[1]) : '';
   }
 
   async function api(path, opts = {}) {
@@ -148,7 +205,10 @@
     let data = {};
     try { data = await res.json(); } catch {}
     if (!res.ok) {
-      throw new Error(data.error || `Request failed (${res.status})`);
+      const err = new Error(data.error || `Request failed (${res.status})`);
+      err.status = res.status;
+      err.payload = data;
+      throw err;
     }
     return data;
   }
@@ -890,6 +950,7 @@
               ${n.is_local ? '<span class="mini-badge mini-badge-local">local</span>' : ''}
               ${n.official ? '<span class="mini-badge success">official</span>' : ''}
               ${n.onion_available ? '<span class="mini-badge">onion</span>' : ''}
+              ${n.policy_tor_blocked ? '<span class="mini-badge" style="border-color:#7a4a2a;color:#ffb347;">tor policy</span>' : ''}
             </div>
             <div class="node-endpoint">${escHtml(n.display_endpoint || 'hidden endpoint')}</div>
             <div class="node-meta">${escHtml(n.transport_label || 'Route unknown')} · ${escHtml(n.privacy_label || 'Privacy unknown')} · ${escHtml(n.region || 'Unknown region')} · ${caps} cap${caps === 1 ? '' : 's'} · ${escHtml(lastSeen)}</div>
@@ -1273,6 +1334,7 @@
     const pingMs = Math.max(1, Math.round(performance.now() - t0));
     latencyBadge.textContent = `Latency: ${pingMs} ms`;
     syncChannelRetention(config.channel_retention || {});
+    syncFederationPolicy(config.federation_policy || {});
     renderServerMeta(stats);
     renderStats(stats, pingMs);
     renderResources(stats);
@@ -1285,37 +1347,107 @@
     if (!easterEggLoaded) await loadEasterEgg();
   }
 
+  function _appLoginUrl() {
+    const ret = encodeURIComponent('/server');
+    return `/app?return=${ret}`;
+  }
+
+  async function _runAdminPinGate() {
+    if (!window.Pin || typeof Pin.gateAdmin !== 'function') {
+      setLoginMessage('PIN module failed to load. Hard-refresh and try again.', true);
+      return false;
+    }
+    try {
+      if (typeof Pin.refreshFromServer === 'function') {
+        await Pin.refreshFromServer();
+      }
+    } catch {}
+    const ok = await Pin.gateAdmin();
+    if (!ok) {
+      setLoginMessage('PIN required to open the server panel.', true);
+      return false;
+    }
+    return true;
+  }
+
   async function ensureAuth() {
+    loginScreen.classList.remove('hidden');
+    app.classList.add('hidden');
+    let gate = {};
+    try {
+      gate = await api('/api/server-admin/session');
+    } catch (e) {
+      if (e.status === 404) {
+        setLoginMessage('Server WebUI is disabled on this node.', true);
+        return false;
+      }
+      setLoginMessage(e.message || 'Could not reach server.', true);
+      return false;
+    }
+    const legacyBox = document.getElementById('gate-legacy');
+    const frogtalkBox = document.getElementById('gate-frogtalk');
+    if (legacyBox) legacyBox.classList.toggle('hidden', !gate.legacy_webui_login);
+    if (!gate.authenticated) {
+      setLoginMessage('Sign in with a FrogTalk account that has node admin rights.');
+      return false;
+    }
+    if (!gate.is_admin) {
+      setLoginMessage('This account is not a node admin. Use an admin account or ask the operator.');
+      return false;
+    }
+    if (gate.pin_required) {
+      setLoginMessage('Enter your privacy PIN to unlock the server panel.');
+      const pinOk = await _runAdminPinGate();
+      if (!pinOk) return false;
+      try {
+        gate = await api('/api/server-admin/session');
+      } catch (e) {
+        setLoginMessage(e.message || 'Session check failed after PIN.', true);
+        return false;
+      }
+      if (!gate.ok) {
+        setLoginMessage('PIN accepted but session is not cleared for admin access.', true);
+        return false;
+      }
+    }
     try {
       await api('/api/server-admin/me');
       loginScreen.classList.add('hidden');
       app.classList.remove('hidden');
       await refreshDashboard();
       return true;
-    } catch {
-      loginScreen.classList.remove('hidden');
-      app.classList.add('hidden');
+    } catch (e) {
+      setLoginMessage(e.message || 'Could not load server panel.', true);
       return false;
     }
   }
 
   async function login() {
-    const username = document.getElementById('login-user').value.trim();
-    const password = document.getElementById('login-pass').value;
+    const legacyMsg = document.getElementById('legacy-login-msg');
+    const say = (msg, isError) => {
+      if (legacyMsg) {
+        legacyMsg.textContent = msg || '';
+        legacyMsg.style.color = isError ? '#ff9f9f' : '#93ab9a';
+      } else {
+        setLoginMessage(msg, isError);
+      }
+    };
+    const username = document.getElementById('login-user')?.value.trim();
+    const password = document.getElementById('login-pass')?.value;
     if (!username || !password) {
-      setLoginMessage('Enter username and password.', true);
+      say('Enter username and password.', true);
       return;
     }
-    setLoginMessage('Signing in...');
+    say('Signing in...');
     try {
       await api('/api/server-admin/login', {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
-      setLoginMessage('Authenticated.');
+      say('Authenticated.');
       await ensureAuth();
     } catch (e) {
-      setLoginMessage(e.message, true);
+      say(e.message, true);
     }
   }
 
@@ -1360,8 +1492,11 @@
     }
   }
 
-  document.getElementById('login-btn').addEventListener('click', login);
-  document.getElementById('login-pass').addEventListener('keydown', (e) => {
+  document.getElementById('gate-app-login-btn')?.addEventListener('click', () => {
+    window.location.assign(_appLoginUrl());
+  });
+  document.getElementById('login-btn')?.addEventListener('click', login);
+  document.getElementById('login-pass')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') login();
   });
 
@@ -1371,6 +1506,10 @@
   saveChannelRetentionBtn?.addEventListener('click', () => {
     saveChannelRetention().catch(() => {});
   });
+  saveFederationPolicyBtn?.addEventListener('click', () => {
+    saveFederationPolicy().catch(() => {});
+  });
+  blockTorPeers?.addEventListener('change', refreshFederationPolicyDirtyUi);
   channelActiveDays?.addEventListener('input', refreshRetentionDirtyUi);
   channelAutoDeleteDays?.addEventListener('input', refreshRetentionDirtyUi);
   frogTrigger?.addEventListener('click', handleFrogTap);

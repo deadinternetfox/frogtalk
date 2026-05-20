@@ -970,6 +970,36 @@ function checkAjaxRateLimit(string $action, int $cooldown = 2): bool {
     return true;
 }
 
+/**
+ * FrogTalk operator gate — mirrors /api/auth/admin-gate-status.
+ * Requires browser ``ft_session`` cookie (forwarded to local uvicorn).
+ */
+function frogtalkAdminGateStatus(): array {
+    $cookie = trim((string)($_SERVER['HTTP_COOKIE'] ?? ''));
+    if ($cookie === '') {
+        return ['ok' => false, 'authenticated' => false, 'is_admin' => false, 'pin_required' => false];
+    }
+    $base = getenv('FROGTALK_INTERNAL_API') ?: 'http://127.0.0.1:8000';
+    $url = rtrim($base, '/') . '/api/auth/admin-gate-status';
+    $ctx = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "Cookie: {$cookie}\r\nAccept: application/json\r\n",
+            'timeout' => 6,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $raw = @file_get_contents($url, false, $ctx);
+    if ($raw === false || $raw === '') {
+        return ['ok' => false, 'authenticated' => false, 'is_admin' => false, 'pin_required' => false];
+    }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) {
+        return ['ok' => false, 'authenticated' => false, 'is_admin' => false, 'pin_required' => false];
+    }
+    return $data;
+}
+
 // Admin auth check
 function isAdminLoggedIn(): bool {
     if (session_status() === PHP_SESSION_NONE) session_start();

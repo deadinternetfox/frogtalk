@@ -3397,6 +3397,49 @@ def get_channel_auto_delete_days() -> int:
     )
 
 
+FEDERATION_BLOCK_TOR_PEERS_KEY = "federation.block_tor_peers"
+
+
+def get_federation_policy_settings() -> Dict[str, object]:
+    """Operator federation policy stored in node_config."""
+    raw = (get_config(FEDERATION_BLOCK_TOR_PEERS_KEY) or "0").strip().lower()
+    return {
+        "block_tor_peers": raw in ("1", "true", "yes", "on"),
+    }
+
+
+def set_federation_policy_settings(block_tor_peers: bool) -> Dict[str, object]:
+    set_config(FEDERATION_BLOCK_TOR_PEERS_KEY, "1" if block_tor_peers else "0")
+    return get_federation_policy_settings()
+
+
+def get_federation_server_row(server_id: str) -> Optional[Dict]:
+    """Return one federation_servers row as a dict, or None."""
+    sid = str(server_id or "").strip()
+    if not sid:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            """
+            SELECT server_id, display_name, base_url, onion_url, region,
+                   official, trust_tier, capabilities_json, enabled, last_seen,
+                   transport_preference
+            FROM federation_servers
+            WHERE server_id=?
+            """,
+            (sid,),
+        ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    try:
+        d["capabilities"] = json.loads(d.pop("capabilities_json") or "[]")
+    except Exception:
+        d["capabilities"] = []
+        d.pop("capabilities_json", None)
+    return d
+
+
 def get_channel_retention_settings() -> Dict[str, int]:
     directory_days = get_channel_directory_active_days()
     auto_delete_days = get_channel_auto_delete_days()
@@ -9349,7 +9392,13 @@ def upsert_federation_server(
                 region=excluded.region,
                 official=excluded.official,
                 trust_tier=excluded.trust_tier,
-                server_pubkey=excluded.server_pubkey,
+                server_pubkey=CASE
+                    WHEN excluded.server_pubkey IS NOT NULL
+                         AND TRIM(excluded.server_pubkey) != ''
+                         AND excluded.server_pubkey LIKE '%BEGIN PUBLIC KEY%'
+                    THEN excluded.server_pubkey
+                    ELSE federation_servers.server_pubkey
+                END,
                 capabilities_json=excluded.capabilities_json,
                 enabled=1,
                 last_seen=datetime('now')

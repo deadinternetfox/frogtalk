@@ -17,8 +17,15 @@ from pydantic import BaseModel
 import database as db
 from ws_manager import manager
 from routers import federation as federation_router
-from deps import client_ip
+from deps import (
+    client_ip,
+    get_current_user,
+    get_admin_user,
+    admin_area_access_status,
+    session_token_from_request,
+)
 from slowapi import Limiter
+from fastapi import HTTPException
 
 router = APIRouter(tags=["server-admin"])
 limiter = Limiter(key_func=client_ip)
@@ -215,6 +222,12 @@ def _admin_node_view(node: dict) -> dict:
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
     display_endpoint = _safe_host_label(onion_url if route_mode == "tor" and onion_url else target)
     transport_preference = str(raw.get("transport_preference") or "auto").strip().lower() or "auto"
+    tor_policy = bool(db.get_federation_policy_settings().get("block_tor_peers"))
+    policy_tor_blocked = (
+        tor_policy
+        and route_mode == "tor"
+        and not bool(raw.get("enabled", True))
+    )
     return {
         "server_id": raw.get("server_id"),
         "display_name": raw.get("display_name"),
@@ -230,6 +243,7 @@ def _admin_node_view(node: dict) -> dict:
         "display_endpoint": display_endpoint,
         "transport_label": "Tor onion route" if route_mode == "tor" else "Direct clearnet route",
         "privacy_label": "IP hidden" if route_mode == "tor" or display_endpoint == "hidden clearnet ip" else "Public host",
+        "policy_tor_blocked": policy_tor_blocked,
     }
 
 
@@ -353,12 +367,49 @@ def _require_enabled() -> Optional[JSONResponse]:
     return JSONResponse(status_code=404, content={"error": "Server WebUI disabled"})
 
 
+def _legacy_webui_login_enabled() -> bool:
+    return _is_true(os.getenv("FROGTALK_SERVER_WEBUI_LEGACY_LOGIN", "0"))
+
+
+async def _require_frogtalk_admin(request: Request) -> tuple[dict | None, JSONResponse | None]:
+    """Require FrogTalk session, node admin role, and admin PIN grace if enabled."""
+    try:
+        user = await get_admin_user(request)
+    except HTTPException as exc:
+        if exc.status_code == 401:
+            return None, JSONResponse(
+                status_code=401,
+                content={"error": "Not authenticated", "login_required": True},
+            )
+        if exc.status_code == 403:
+            return None, JSONResponse(
+                status_code=403,
+                content={"error": "Admin access required", "admin_required": True},
+            )
+        return None, JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
+    token = session_token_from_request(request)
+    status = admin_area_access_status(user, token)
+    if not status.get("allowed"):
+        return None, JSONResponse(
+            status_code=423,
+            content={
+                "error": "PIN required for admin actions",
+                "pin_required": True,
+                "admin": True,
+            },
+        )
+    return user, None
+
+
 def _require_auth(request: Request) -> Optional[JSONResponse]:
+    """Sync wrapper kept for legacy webui cookie auth (emergency ops only)."""
+    if not _legacy_webui_login_enabled():
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Use FrogTalk login", "login_required": True},
+        )
     if not _is_authenticated(request):
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
-    # Enforce CSRF on every state-changing method. GET/HEAD/OPTIONS are
-    # safe by definition. The /login endpoint is exempt because it has
-    # no session yet \u2014 it gets its own brute-force throttle elsewhere.
     method = (request.method or "").upper()
     if method not in ("GET", "HEAD", "OPTIONS"):
         if not request.url.path.endswith("/api/server-admin/login"):
@@ -388,6 +439,10 @@ class EasterEggBody(BaseModel):
 class ChannelRetentionBody(BaseModel):
     directory_active_days: int = 30
     auto_delete_days: int = 0
+
+
+class FederationPolicyBody(BaseModel):
+    block_tor_peers: bool = False
 
 
 def _cfg_easter_enabled() -> bool:
@@ -472,15 +527,62 @@ async def server_webui_page():
 
 
 @router.get("/api/server-admin/config")
-async def server_webui_config():
+async def server_webui_config(request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
+    token = session_token_from_request(request)
+    user = None
+    try:
+        user = await get_current_user(request)
+    except HTTPException:
+        user = None
+    gate = admin_area_access_status(user, token)
     return {
         "enabled": True,
-        "username_hint": _webui_username(),
+        "auth_mode": "frogtalk",
+        "legacy_webui_login": _legacy_webui_login_enabled(),
+        "gate": gate,
         "channel_retention": db.get_channel_retention_settings(),
+        "federation_policy": db.get_federation_policy_settings(),
         "easter_egg": _current_easter_egg_payload(),
+    }
+
+
+@router.get("/api/server-admin/session")
+async def server_admin_session(request: Request):
+    """Bootstrap auth state for direct /server visits (no legacy cookie)."""
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+    user = None
+    try:
+        user = await get_current_user(request)
+    except HTTPException:
+        user = None
+    token = session_token_from_request(request)
+    gate = admin_area_access_status(user, token)
+    return {"ok": gate.get("allowed", False), **gate}
+
+
+@router.put("/api/server-admin/federation-policy")
+async def server_admin_put_federation_policy(body: FederationPolicyBody, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+
+    policy = db.set_federation_policy_settings(bool(body.block_tor_peers))
+    tor_disabled = 0
+    if policy.get("block_tor_peers"):
+        tor_disabled = federation_router.apply_tor_peer_blocks_if_enabled()
+    return {
+        "ok": True,
+        "federation_policy": policy,
+        "tor_peers_disabled": tor_disabled,
     }
 
 
@@ -490,7 +592,7 @@ async def server_admin_put_channel_retention(body: ChannelRetentionBody, request
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -508,7 +610,7 @@ async def server_admin_get_easter_egg(request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
     return _current_easter_egg_payload()
@@ -520,7 +622,7 @@ async def server_admin_put_easter_egg(body: EasterEggBody, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
     return _save_easter_egg(bool(body.enabled), body.title, body.html)
@@ -532,7 +634,7 @@ async def server_admin_upload_easter_egg_asset(request: Request, media: UploadFi
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
     if not media:
@@ -567,12 +669,15 @@ async def public_server_easter_egg():
 @router.post("/api/server-admin/login")
 @limiter.limit("10/minute;30/hour")
 async def server_webui_login(request: Request, body: LoginBody, response: Response):
-    """HIGH-5: rate-limit the server-admin login. With no limit, an
-    operator who white-listed too broad an IP range (or forgot to set
-    one) could be bruteforced from a single host inside the allowlist."""
+    """Legacy env-only operator login. Production uses FrogTalk session + PIN."""
     disabled = _require_enabled()
     if disabled:
         return disabled
+    if not _legacy_webui_login_enabled():
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Sign in with your FrogTalk admin account at /app first"},
+        )
 
     # Enforce IP allowlist BEFORE the credential check so a brute-force
     # from outside the allowlist can't even tell whether the username is
@@ -645,10 +750,14 @@ async def server_webui_me(request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
-    return {"ok": True, "username": _webui_username()}
+    return {
+        "ok": True,
+        "username": _user.get("nickname") or _user.get("display_name") or "",
+        "user_id": _user.get("id"),
+    }
 
 
 @router.get("/api/server-admin/stats")
@@ -657,7 +766,7 @@ async def server_admin_stats(request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -709,7 +818,7 @@ async def server_admin_imageboard_stats(request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -859,7 +968,7 @@ async def server_admin_imageboard_identity(request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
     try:
@@ -928,7 +1037,7 @@ async def server_admin_imageboard_peer_block(request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
     try:
@@ -982,7 +1091,7 @@ async def server_admin_nodes(request: Request, include_disabled: int = 1):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1001,7 +1110,7 @@ async def server_admin_probe_node(server_id: str, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1049,7 +1158,7 @@ async def server_admin_block_node(server_id: str, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1065,7 +1174,7 @@ async def server_admin_unblock_node(server_id: str, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1087,7 +1196,7 @@ async def server_admin_list_bots(request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
     try:
@@ -1102,7 +1211,7 @@ async def server_admin_ban_bot(bot_id: int, request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1133,7 +1242,7 @@ async def server_admin_unban_bot(bot_id: int, request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1149,7 +1258,7 @@ async def server_admin_online_users(request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1162,11 +1271,13 @@ async def server_admin_sync_official_directory(request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
     result = await federation_router.sync_official_directory_once()
+    if result.get("ok") and db.get_federation_policy_settings().get("block_tor_peers"):
+        result["tor_peers_disabled"] = federation_router.apply_tor_peer_blocks_if_enabled()
     if not result.get("ok"):
         return JSONResponse(status_code=400, content=result)
     return result
@@ -1178,7 +1289,7 @@ async def server_admin_kick(body: ModerationBody, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1195,7 +1306,7 @@ async def server_admin_ban(body: ModerationBody, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1216,7 +1327,7 @@ async def server_admin_unban(body: ModerationBody, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1236,7 +1347,7 @@ async def server_admin_mute(body: ModerationBody, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1256,7 +1367,7 @@ async def server_admin_unmute(body: ModerationBody, request: Request):
     if disabled:
         return disabled
 
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1301,7 +1412,7 @@ async def server_admin_list_bug_reports(
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1318,7 +1429,7 @@ async def server_admin_get_bug_report(report_id: int, request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
     row = db.get_bug_report(int(report_id))
@@ -1334,7 +1445,7 @@ async def server_admin_update_bug_report(
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
 
@@ -1359,7 +1470,7 @@ async def server_admin_delete_bug_report(report_id: int, request: Request):
     disabled = _require_enabled()
     if disabled:
         return disabled
-    auth = _require_auth(request)
+    _user, auth = await _require_frogtalk_admin(request)
     if auth:
         return auth
     ok = db.delete_bug_report(int(report_id))

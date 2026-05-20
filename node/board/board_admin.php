@@ -31,8 +31,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'logou
     }
 }
 
-// If not logged in, show login
+// If not logged in, require FrogTalk admin session + PIN before board creds
 if (!isAdminLoggedIn()) {
+    $gate = frogtalkAdminGateStatus();
+    if (!($gate['ok'] ?? false)) {
+        showFrogtalkAdminGatePage($gate, $error);
+        exit;
+    }
     showLoginPage($error);
     exit;
 }
@@ -1581,6 +1586,72 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
 </body>
 </html>
 <?php
+
+function showFrogtalkAdminGatePage(array $gate, string $error = ''): void {
+    $authenticated = !empty($gate['authenticated']);
+    $isAdmin = !empty($gate['is_admin']);
+    $pinRequired = !empty($gate['pin_required']);
+    $returnUrl = '/app?return=' . rawurlencode('/board/admin');
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store');
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Frog Board Admin — Sign in</title>
+    <style>
+        body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+               background:#0a0e0a; color:#b0ffb0; font-family:'Courier New',monospace; }
+        .box { border:1px solid rgba(0,255,65,0.25); border-radius:10px; padding:32px; width:min(420px,92vw); text-align:center; }
+        h1 { color:#00ff41; font-size:18px; margin:0 0 8px; }
+        p { color:#3a6f3a; font-size:12px; line-height:1.5; margin:0 0 18px; }
+        .btn { display:inline-block; width:100%; background:#00ff41; color:#0a0e0a; border:none; border-radius:4px;
+               padding:10px; font-weight:bold; cursor:pointer; text-decoration:none; font-size:14px; }
+        .err { color:#ff6b6b; font-size:12px; margin-bottom:12px; }
+        .hidden { display:none !important; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>🔒 BOARD ADMIN</h1>
+        <?php if ($error): ?><div class="err"><?= htmlspecialchars($error) ?></div><?php endif; ?>
+        <?php if (!$authenticated): ?>
+            <p>Sign in with your FrogTalk account before opening the imageboard admin panel.</p>
+            <a class="btn" href="<?= htmlspecialchars($returnUrl) ?>">Sign in via FrogTalk</a>
+        <?php elseif (!$isAdmin): ?>
+            <p>This FrogTalk account is not a node admin. Switch to an operator account.</p>
+            <a class="btn" href="<?= htmlspecialchars($returnUrl) ?>">Switch account</a>
+        <?php elseif ($pinRequired): ?>
+            <p id="gate-msg">Enter your privacy PIN (required for admin areas in Settings).</p>
+            <div id="pin-host"></div>
+        <?php else: ?>
+            <p>Session check failed. Refresh after signing in.</p>
+            <a class="btn" href="<?= htmlspecialchars($returnUrl) ?>">Sign in via FrogTalk</a>
+        <?php endif; ?>
+        <p style="margin-top:16px"><a href="/board" style="color:#4a8f4a;font-size:12px">← Back to board</a></p>
+    </div>
+    <?php if ($authenticated && $isAdmin && $pinRequired): ?>
+    <script src="/static/js/pin.js?v=12"></script>
+    <script>
+    (async function () {
+      try {
+        if (window.Pin && Pin.refreshFromServer) await Pin.refreshFromServer();
+        const ok = await Pin.gateAdmin();
+        if (ok) location.reload();
+      } catch (e) {
+        const el = document.getElementById('gate-msg');
+        if (el) el.textContent = 'PIN gate failed to load. Hard-refresh and try again.';
+      }
+    })();
+    </script>
+    <?php endif; ?>
+</body>
+</html>
+    <?php
+    exit;
+}
 
 function showLoginPage(string $error = ''): void {
 ?>

@@ -254,6 +254,38 @@ def _fetch_url_bytes(
         return bytes(buf)
 
 
+def peer_uses_tor_route(server: dict) -> bool:
+    """True when this peer's effective federation target is a .onion host."""
+    try:
+        return _url_uses_tor(_select_peer_target(server))
+    except Exception:
+        onion = _normalize_base_url(str((server or {}).get("onion_url") or ""))
+        base = _normalize_base_url(str((server or {}).get("base_url") or ""))
+        return _url_uses_tor(onion or base)
+
+
+def apply_tor_peer_blocks_if_enabled() -> int:
+    """Disable federation peers that route over Tor when policy is on.
+
+    Returns the number of peers newly disabled this call. Does not
+    re-enable peers when the policy is turned off — operators unblock
+    manually from the node list.
+    """
+    if not db.get_federation_policy_settings().get("block_tor_peers"):
+        return 0
+    local_id = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
+    disabled = 0
+    for peer in db.list_federation_servers_admin(include_disabled=True):
+        sid = str(peer.get("server_id") or "").strip()
+        if not sid or sid == local_id:
+            continue
+        if not peer.get("enabled"):
+            continue
+        if peer_uses_tor_route(peer) and db.set_federation_server_enabled(sid, False):
+            disabled += 1
+    return disabled
+
+
 def _select_peer_target(server: dict) -> str:
     # Prefer transport_preference already on the row (avoids per-peer DB roundtrip
     # when called in a hot loop). Fall back to a single SELECT only if missing.
@@ -839,6 +871,7 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
         )
         imported += 1
 
+    tor_disabled = apply_tor_peer_blocks_if_enabled()
     db.set_config("federation.official_directory_last_sync", str(int(time.time())))
     return {
         "ok": True,
@@ -846,6 +879,7 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
         "imported": imported,
         "skipped": skipped,
         "total": len(entries),
+        "tor_peers_disabled": tor_disabled,
     }
 
 
@@ -1304,6 +1338,11 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         if not origin:
             rejected += 1
             continue
+        if db.get_federation_policy_settings().get("block_tor_peers"):
+            origin_row = db.get_federation_server_row(origin)
+            if origin_row and peer_uses_tor_route(origin_row):
+                rejected += 1
+                continue
         # SECURITY-PASS-2: when the transport auth was per-peer signed
         # (request-level), bind the event to that peer. A peer that
         # signs the HTTP request must not be able to ship events
@@ -1841,8 +1880,11 @@ def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
     peers = db.list_federation_servers(official_only=False)
     targets: list[str] = []
     seen_targets: set[str] = set()
+    block_tor = bool(db.get_federation_policy_settings().get("block_tor_peers"))
     for srv in peers:
         if not srv.get("enabled"):
+            continue
+        if block_tor and peer_uses_tor_route(srv):
             continue
         if str(srv.get("server_id") or "") == local_server_id:
             continue
@@ -1945,12 +1987,33 @@ async def federation_outbox_processor() -> int:
                 payload = json.loads(raw_payload)
             except Exception:
                 payload = {}
-        envelopes.append({
+        origin_time = str(row.get("origin_time") or "").strip()
+        if not origin_time:
+            origin_time = datetime.utcnow().isoformat() + "Z"
+        envelope: dict = {
             "event_id": event_id,
             "event_type": str(row.get("event_type") or ""),
             "origin_server_id": local_server_id,
-            "origin_time": str(row.get("origin_time") or ""),
+            "origin_time": origin_time,
+            "event_version": 1,
+            "actor_global_user_id": "server-admin",
             "signature": str(row.get("signature") or ""),
+            "payload": payload,
+        }
+        if not envelope["signature"]:
+            try:
+                crypto_fed.sign_event(envelope)
+            except Exception:
+                _log.exception("federation: failed to sign outbox event %s", event_id)
+        envelopes.append({
+            "event_id": event_id,
+            "event_type": envelope["event_type"],
+            "origin_server_id": local_server_id,
+            "origin_time": origin_time,
+            "signature": str(envelope.get("signature") or ""),
+            "signer_pubkey_fingerprint": str(
+                envelope.get("signer_pubkey_fingerprint") or ""
+            ),
             "payload": payload,
         })
 

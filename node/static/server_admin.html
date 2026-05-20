@@ -275,6 +275,39 @@ a.btn, a.btn:hover { color: inherit; text-decoration: none; }
   margin-top: 10px;
   flex-wrap: wrap;
 }
+.policy-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #2a4f38;
+  border-radius: 12px;
+  background: rgba(10, 22, 14, 0.72);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.policy-toggle:hover {
+  border-color: #3d7a52;
+  background: rgba(14, 30, 20, 0.88);
+}
+.policy-toggle input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.policy-toggle-copy strong {
+  display: block;
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.policy-toggle-copy .field-hint {
+  margin-top: 0;
+}
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -908,15 +941,21 @@ input, select {
 </head>
 <body>
   <div id="login-screen">
-    <div class="login-box">
+    <div class="login-box" id="gate-frogtalk">
       <h1>Server Manager</h1>
-      <p>Secure operator console for this FrogTalk node.</p>
+      <p id="gate-subtitle">Sign in with your FrogTalk admin account, then confirm your PIN if enabled.</p>
+      <button class="btn primary" id="gate-app-login-btn" type="button" style="width:100%">Sign in via FrogTalk</button>
+      <div class="msg" id="login-msg"></div>
+    </div>
+    <div class="login-box hidden" id="gate-legacy">
+      <h1>Legacy operator login</h1>
+      <p>Emergency env-only path. Prefer FrogTalk sign-in above.</p>
       <div class="form-row">
         <input id="login-user" placeholder="Username" autocomplete="username">
         <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password">
       </div>
       <button class="btn primary" id="login-btn" style="width:100%">Log In</button>
-      <div class="msg" id="login-msg"></div>
+      <div class="msg" id="legacy-login-msg"></div>
     </div>
   </div>
 
@@ -1072,8 +1111,19 @@ input, select {
           <div class="control-stack">
             <div class="control-group">
               <div class="control-title">Federation Directory</div>
-              <button class="btn" id="sync-dir-btn" style="width:100%">Sync Official Directory</button>
-              <div class="inline-note">Pulls latest official node metadata and trust state from the directory source.</div>
+              <label class="policy-toggle" for="block-tor-peers">
+                <input type="checkbox" id="block-tor-peers" autocomplete="off">
+                <span class="policy-toggle-copy">
+                  <strong>Block Tor federation peers automatically</strong>
+                  <span class="field-hint">When enabled, peers reached via .onion are disabled for sync, inbox delivery, and outbound push. Does not re-enable peers when turned off. Default: off.</span>
+                </span>
+              </label>
+              <div class="retention-actions" style="margin-top:10px;">
+                <button class="btn" id="save-federation-policy-btn" type="button">Save Federation Policy</button>
+                <span id="federation-policy-status" class="status-pill state-saved">No local changes</span>
+              </div>
+              <button class="btn" id="sync-dir-btn" style="width:100%;margin-top:10px;">Sync Official Directory</button>
+              <div class="inline-note">Pulls latest official node metadata and trust state from the directory source. Tor auto-block runs after sync when the policy above is enabled.</div>
             </div>
 
             <div class="control-group">
@@ -1234,6 +1284,7 @@ input, select {
     </div>
   </div>
 
+<script src="/static/js/pin.js?v=12"></script>
 <script src="/static/js/server_admin.js?v=__SERVER_ADMIN_ASSET_VERSION__"></script>
 </body>
 </html>

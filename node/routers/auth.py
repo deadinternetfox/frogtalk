@@ -18,7 +18,7 @@ import uuid
 from typing import Optional
 
 _log = logging.getLogger(__name__)
-from fastapi import APIRouter, Request, Depends, Header
+from fastapi import APIRouter, Request, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
@@ -33,6 +33,8 @@ from deps import (
     pin_clear_for_token,
     admin_pin_mark_unlocked,
     admin_pin_clear_for_token,
+    admin_area_access_status,
+    session_token_from_request,
 )
 from routers._media_safety import safe_reencode as _media_reencode
 from ws_manager import manager
@@ -1277,6 +1279,26 @@ async def pin_status(request: Request, current_user: dict = Depends(get_current_
     except Exception:
         pass
     return out
+
+
+@router.get("/admin-gate-status")
+@limiter.limit("120/minute")
+async def admin_gate_status(
+    request: Request,
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+):
+    """Bootstrap for /server and /board/admin — no PIN gate on this route.
+
+    Returns whether the caller is signed in, is a node admin, and must
+    re-enter their PIN before operator panels load.
+    """
+    try:
+        user = await get_current_user(request, x_session_token)
+    except HTTPException:
+        user = None
+    token = session_token_from_request(request) or (x_session_token or "").strip()
+    status = admin_area_access_status(user, token)
+    return {"ok": status.get("allowed", False), **status}
 
 
 @router.post("/pin/set")

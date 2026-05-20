@@ -374,6 +374,51 @@ def _admin_pin_required(user: dict, token: str) -> bool:
     return True
 
 
+def admin_area_access_status(user: dict | None, token: str) -> dict:
+    """Return whether this session may access operator areas (/server, /board/admin).
+
+    Used by bootstrap endpoints and PHP gate checks. Does not raise — callers
+    map ``allowed`` to HTTP status codes.
+    """
+    if not user:
+        return {
+            "allowed": False,
+            "authenticated": False,
+            "is_admin": False,
+            "pin_required": False,
+        }
+    if not user.get("is_admin"):
+        return {
+            "allowed": False,
+            "authenticated": True,
+            "is_admin": False,
+            "pin_required": False,
+            "nickname": user.get("nickname") or "",
+        }
+    pin_unlock = _pin_session_is_locked(user, token)
+    pin_admin = _admin_pin_required(user, token)
+    pin_required = pin_unlock or pin_admin
+    return {
+        "allowed": not pin_required,
+        "authenticated": True,
+        "is_admin": True,
+        "pin_required": pin_required,
+        "has_pin": bool(int(user.get("has_pin") or 0)),
+        "pin_require_for_admin": bool(int(user.get("pin_require_for_admin") or 0)),
+        "nickname": user.get("nickname") or "",
+    }
+
+
+def session_token_from_request(request: Request | None) -> str:
+    """Extract the active session token from header or ``ft_session`` cookie."""
+    if request is None:
+        return ""
+    tok = (request.headers.get("x-session-token") or request.headers.get("X-Session-Token") or "").strip()
+    if tok:
+        return tok
+    return (request.cookies.get("ft_session") or "").strip()
+
+
 async def admin_pin_gate(
     request: Request = None,
     x_session_token: str = Header(None, alias="X-Session-Token"),

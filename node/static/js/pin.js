@@ -99,6 +99,8 @@
     const fn = (typeof apiFetch === 'function') ? apiFetch : fetch;
     const opts = (fn === fetch)
       ? { method: method || 'GET',
+          credentials: 'include',
+          cache: 'no-store',
           headers: { 'X-Session-Token': (window.State && State.token) || '',
                      'Content-Type': 'application/json' },
           body: body ? JSON.stringify(body) : undefined }
