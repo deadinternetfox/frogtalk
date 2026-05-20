@@ -127,7 +127,7 @@ git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
 
 # Interactive wizard: venv, .env, data/ symlinks, optional Tor
-bash node/scripts/node_setup_wizard.sh
+bash node/scripts/install.sh
 
 # Join the public mesh (official directory + board nav pills)
 bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
@@ -328,6 +328,7 @@ frogtalk/
 │   ├── board/                    # Frog Channel PHP imageboard → public /board/
 │   ├── deploy/                   # systemd / nginx / env.example
 │   ├── scripts/
+│   │   ├── install.sh            # unified installer menu (recommended)
 │   │   ├── node_setup_wizard.sh  # guided self-host setup
 │   │   ├── node_update_check.sh  # safe update check / apply
 │   │   ├── deploy.sh             # rsync node/ to one host
