@@ -1697,7 +1697,13 @@ async def get_voice_participants(room_name: str,
     """Return who is currently in the voice call of this channel.
     Used to render the Discord-style 'in voice' bar above chat even for users
     who are not (yet) in the call themselves."""
-    return {"participants": voice_manager.participants(room_name)}
+    local = voice_manager.participants(room_name)
+    try:
+        import federation_voice as _fv
+        remote = _fv.federated_voice_registry.remotes_for_room(room_name)
+        return {"participants": local + remote}
+    except Exception:
+        return {"participants": local}
 
 
 @router.post("/{room_name}/leave")

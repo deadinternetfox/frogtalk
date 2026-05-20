@@ -145,6 +145,15 @@ Cross-node friends therefore need: mutual follow/friend graph sync, encrypted po
 wraps, and often a re-wrap after the relationship exists on both sides. Details:
 [API reference](https://frogtalk.xyz/docs/api) (Federation section).
 
+### Federated voice and video calls
+
+When `FROGTALK_FEDERATION_CALLS_ENABLED=1`, signed `call.*` events carry WebRTC
+signaling (offer/answer/ICE) to a peer’s **home server**; media remains P2P or
+TURN. DM calls keep **Signal-signed DTLS fingerprints** (`fp_sig`). Channel voice
+uses federated `voice.session.*` / `voice.signal` mesh v1 (no `fp_sig` on group
+audio). Per-node TURN is published via `/api/network/ice-config`. Full spec:
+[FEDERATED_CALLS.md](FEDERATED_CALLS.md).
+
 ---
 
 ## 6. Linked devices — Track F Phase 1

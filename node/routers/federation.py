@@ -19,8 +19,10 @@ import tempfile
 import shutil
 import subprocess
 from datetime import datetime, timezone
-from fastapi import APIRouter, Header, Request
+from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
+
+from deps import get_current_user
 from pydantic import BaseModel
 
 import database as db
@@ -45,6 +47,9 @@ class ServerRegisterBody(BaseModel):
     trust_tier: str = "community"
     server_pubkey: str = ""
     capabilities: list[str] = []
+    turn_urls: list[str] = []
+    turn_username: str = ""
+    turn_credential: str = ""
 
 
 class FederationInboxBody(BaseModel):
@@ -1300,6 +1305,8 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
 
 @router.get("/network/status")
 async def network_status():
+    from fed_turn import federation_calls_enabled, local_turn_public_view
+
     local = db.get_or_create_local_server_identity()
     public = _public_server_view(local, onion_only=_tor_mode_enabled())
     # Expose the local node's federation signing pubkey so peer admins
@@ -1310,6 +1317,10 @@ async def network_status():
     except Exception:
         local_pubkey_pem = ""
         local_pubkey_fp = ""
+    caps = list(public.get("capabilities") or [])
+    if federation_calls_enabled() and "federation-calls-v1" not in caps:
+        caps.append("federation-calls-v1")
+    turn_view = local_turn_public_view()
     return {
         "server": {
             "server_id": public["server_id"],
@@ -1317,10 +1328,60 @@ async def network_status():
             "base_url": public["base_url"],
             "onion_url": public["onion_url"],
             "federation_enabled": os.getenv("FROGTALK_FEDERATION_ENABLED", "0") in ("1", "true", "yes"),
+            "federation_calls_enabled": federation_calls_enabled(),
             "tor_enabled": _tor_mode_enabled(),
             "federation_pubkey_pem": local_pubkey_pem,
             "federation_pubkey_fingerprint": local_pubkey_fp,
+            "capabilities": caps,
+            **turn_view,
         }
+    }
+
+
+@router.get("/ice-config")
+async def ice_config(
+    peer_server_id: str = "",
+    current_user: dict = Depends(get_current_user),
+):
+    """Merged STUN/TURN for WebRTC (local node + optional peer home server).
+
+    Authentication required: TURN credentials are valuable (a non-user can
+    use them to relay arbitrary traffic and spend our bandwidth budget),
+    so we never publish them to anonymous callers. Only signed-in users
+    can fetch ICE config, and only for peer servers we actively federate
+    with.
+    """
+    from fed_turn import local_turn_public_view, parse_server_turn_json, turn_ice_servers
+
+    merged_urls: list[str] = []
+    user = ""
+    cred = ""
+    local = local_turn_public_view()
+    merged_urls.extend(local.get("turn_urls") or [])
+    user = local.get("turn_username") or ""
+    cred = local.get("turn_credential") or ""
+    peer_sid = (peer_server_id or "").strip()
+    if peer_sid:
+        row = db.get_federation_server_row(peer_sid)
+        # Only honour peer TURN creds when the peer is an active federation
+        # server we've registered. Unknown server_ids are silently ignored
+        # to avoid leaking the registered-peers list via probing.
+        if row and int(row.get("enabled") or 0) == 1:
+            raw = row.get("turn_urls_json") or "[]"
+            if isinstance(raw, str):
+                peer_turn = parse_server_turn_json(raw)
+            else:
+                peer_turn = {"turn_urls": [], "turn_username": "", "turn_credential": ""}
+            for u in peer_turn.get("turn_urls") or []:
+                if u not in merged_urls:
+                    merged_urls.append(u)
+            if not user and peer_turn.get("turn_username"):
+                user = peer_turn["turn_username"]
+            if not cred and peer_turn.get("turn_credential"):
+                cred = peer_turn["turn_credential"]
+    return {
+        "ice_servers": turn_ice_servers(merged_urls, username=user, credential=cred),
+        "turn_urls": merged_urls,
     }
 
 
@@ -1618,6 +1679,11 @@ async def register_network_server(
     official = bool(body.official) if is_admin else False
     trust_tier = (body.trust_tier or "") if is_admin else ""
 
+    turn_json = json.dumps({
+        "turn_urls": body.turn_urls or [],
+        "turn_username": body.turn_username or "",
+        "turn_credential": body.turn_credential or "",
+    })
     db.upsert_federation_server(
         server_id=body.server_id,
         display_name=body.display_name,
@@ -1628,6 +1694,7 @@ async def register_network_server(
         trust_tier=trust_tier,
         server_pubkey=body.server_pubkey,
         capabilities=body.capabilities,
+        turn_urls_json=turn_json,
     )
     return {"ok": True}
 
@@ -1730,6 +1797,8 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         "dm.",
         "friend.",
         "social.",
+        "call.",
+        "voice.",
     )
     # Specific event types that MUST be signed even though their prefix
     # isn't in _SENSITIVE_PREFIXES. Room moderation events grant the
@@ -2548,6 +2617,12 @@ async def federation_inbox_processor() -> int:
                 await _handle_sticker_event(event)
             elif event_type.startswith("bot."):
                 await _handle_bot_event(event)
+            elif event_type.startswith("call."):
+                import federation_calls as _fed_calls
+                await _fed_calls.apply_call_event(event)
+            elif event_type.startswith("voice."):
+                import federation_voice as _fed_voice
+                await _fed_voice.apply_voice_event(event)
 
             await asyncio.to_thread(db.mark_federation_inbox_event, event_id, "applied")
             processed += 1

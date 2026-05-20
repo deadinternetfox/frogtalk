@@ -30,6 +30,37 @@ ALLOWED_MEDIA = (
 # Slowmode tracking: (user_id, room_name) -> last_message_timestamp
 _slowmode_tracker: dict = {}
 
+# Per-user call.offer rate limiter: bounded ring rate so a malicious or
+# compromised account can't ring-bomb their friends list (or pump
+# federation outbox capacity) by enqueueing thousands of call.offer
+# events. ``_call_offer_window`` is the sliding window size in seconds;
+# ``_call_offer_max`` is the number of permitted offers in that window.
+_CALL_OFFER_WINDOW_S = 30
+_CALL_OFFER_MAX = 8
+_call_offer_tracker: dict[int, list[float]] = {}
+
+
+def _call_offer_allowed(user_id: int) -> bool:
+    """Sliding-window throttle for outbound call_offer per caller."""
+    try:
+        uid = int(user_id)
+    except Exception:
+        return False
+    if uid <= 0:
+        return False
+    now = time.monotonic()
+    bucket = _call_offer_tracker.get(uid)
+    if bucket is None:
+        bucket = []
+        _call_offer_tracker[uid] = bucket
+    cutoff = now - _CALL_OFFER_WINDOW_S
+    while bucket and bucket[0] < cutoff:
+        bucket.pop(0)
+    if len(bucket) >= _CALL_OFFER_MAX:
+        return False
+    bucket.append(now)
+    return True
+
 
 def _ws_origin_allowed(websocket: WebSocket) -> bool:
     """Block cross-site WebSocket hijacking (CSWSH).
@@ -1014,6 +1045,51 @@ async def websocket_endpoint(
                         except Exception:
                             logger.exception("queue_call_signal(call_offer renegotiate) failed")
                     continue
+                # Rate-limit new (non-renegotiate) call_offer per caller so
+                # one user can't ring-bomb their friend list or pump
+                # outbound federation queue.
+                if not _call_offer_allowed(user["id"]):
+                    await manager.send_personal(websocket, {
+                        "type": "call_error",
+                        "reason": "rate_limited",
+                    })
+                    continue
+                callee_user = db.get_user_by_id(to_id) or {}
+                try:
+                    import federation_calls as _fc
+                    if _fc.is_remote_peer(callee_user):
+                        block_err = _fc.can_call_user(user["id"], to_id)
+                        if block_err:
+                            await manager.send_personal(websocket, {
+                                "type": "call_error",
+                                "reason": block_err,
+                            })
+                            continue
+                        gid = _fc.new_global_call_id()
+                        call_id_db = db.create_call(
+                            user["id"], to_id, call_type, global_call_id=gid,
+                        )
+                        ident = db.get_or_create_local_server_identity() or {}
+                        local_sid = str(ident.get("server_id") or "").strip()
+                        db.map_federation_call(gid, local_sid, call_id_db, "caller")
+                        _fc.enqueue_call_offer(
+                            user,
+                            callee_user,
+                            global_call_id=gid,
+                            local_call_id=call_id_db,
+                            call_type=call_type,
+                            sdp=data.get("sdp") or "",
+                            fp_sig=data.get("fp_sig") or "",
+                        )
+                        await manager.send_personal(websocket, {
+                            "type": "call_created",
+                            "call_id": call_id_db,
+                            "global_call_id": gid,
+                            "federated": True,
+                        })
+                        continue
+                except Exception:
+                    logger.exception("federated call_offer routing failed")
                 call_id_db = db.create_call(user["id"], to_id, call_type)
                 payload_offer = {
                     "type": "call_offer",
@@ -1123,6 +1199,29 @@ async def websocket_endpoint(
                     "fp_sig": data.get("fp_sig") or "",
                     "renegotiate": is_renegotiate,
                 }
+                try:
+                    import federation_calls as _fc
+                    with db._conn() as con:
+                        crow = con.execute(
+                            "SELECT global_call_id, caller_id, callee_id FROM calls WHERE id=?",
+                            (call_id,),
+                        ).fetchone()
+                    if crow and crow["global_call_id"]:
+                        peer = db.get_user_by_id(to_id) or {}
+                        if _fc.user_home_is_remote(peer):
+                            caller_u = db.get_user_by_id(int(crow["caller_id"])) or {}
+                            caller_gid = str(caller_u.get("global_user_id") or "")
+                            if caller_gid:
+                                _fc.enqueue_call_answer(
+                                    user,
+                                    caller_gid,
+                                    global_call_id=str(crow["global_call_id"]),
+                                    sdp=data.get("sdp") or "",
+                                    fp_sig=data.get("fp_sig") or "",
+                                    renegotiate=is_renegotiate,
+                                )
+                except Exception:
+                    logger.exception("federated call_answer enqueue failed")
                 delivered_ans = await manager.send_to_user(to_id, answer_payload)
                 if not delivered_ans:
                     # Caller's WS is in flap window — buffer the SDP so they
@@ -1316,6 +1415,25 @@ async def websocket_endpoint(
                     "call_id": data.get("call_id"),
                     "candidate": cand,
                 }
+                try:
+                    import federation_calls as _fc
+                    with db._conn() as con:
+                        crow = con.execute(
+                            "SELECT global_call_id FROM calls WHERE id=?",
+                            (int(data.get("call_id") or 0),),
+                        ).fetchone()
+                    peer = db.get_user_by_id(to_id) or {}
+                    if crow and crow["global_call_id"] and _fc.user_home_is_remote(peer):
+                        pgid = str(peer.get("global_user_id") or "")
+                        if pgid:
+                            _fc.enqueue_call_ice(
+                                user,
+                                pgid,
+                                global_call_id=str(crow["global_call_id"]),
+                                candidate=str(cand) if cand else "",
+                            )
+                except Exception:
+                    logger.exception("federated call.ice enqueue failed")
                 delivered = await manager.send_to_user(to_id, ice_payload)
                 # Cold-start callees (push-wake) take 1–3 s to reconnect, during
                 # which the caller has already trickled the first half of its
@@ -1345,7 +1463,17 @@ async def websocket_endpoint(
                         "error": "Voice channel is full (max 8 users)"
                     })
                     continue
-                
+                try:
+                    import federation_voice as _fv
+                    if _fv.federation_calls_enabled() and not _fv.voice_sfu_enabled():
+                        sid = _fv.federated_voice_registry.session_for_room(room_name)
+                        anchor = _fv.room_anchor_server_id(room_name)
+                        _fv.enqueue_voice_session_join(
+                            user, room_name, session_id=sid, anchor_server_id=anchor,
+                        )
+                except Exception:
+                    logger.exception("federated voice_join enqueue failed")
+
                 # Notify existing participants about new joiner
                 await manager.broadcast_room(room_name, {
                     "type": "voice_user_joined",
@@ -1357,16 +1485,34 @@ async def websocket_endpoint(
                 }, exclude=websocket)
                 
                 # Send joiner the list of existing participants to connect to
+                try:
+                    import federation_voice as _fv
+                    remote = _fv.federated_voice_registry.remotes_for_room(room_name)
+                except Exception:
+                    remote = []
+                local_parts = [
+                    {"user_id": p[0], "nickname": p[1], "avatar": p[2]}
+                    for p in (existing or [])
+                ]
                 await manager.send_personal(websocket, {
                     "type": "voice_joined",
-                    "participants": [
-                        {"user_id": p[0], "nickname": p[1], "avatar": p[2]}
-                        for p in existing
-                    ]
+                    "participants": local_parts + remote,
                 })
 
             elif msg_type == "voice_leave":
                 # User leaves voice channel
+                try:
+                    import federation_voice as _fv
+                    if _fv.federation_calls_enabled():
+                        sid = _fv.federated_voice_registry.session_for_room(room_name)
+                        _fv.enqueue_voice_session_leave(user, room_name, session_id=sid)
+                        # Don't ``clear_room`` here: the remote roster only
+                        # updates from inbound ``voice.session.leave`` events
+                        # signed by each remote peer's home server. Wiping it
+                        # locally would let one user drop the cross-node
+                        # roster for everyone in the room.
+                except Exception:
+                    logger.exception("federated voice_leave enqueue failed")
                 voice_manager.leave(room_name, user["id"])
                 await manager.broadcast_room(room_name, {
                     "type": "voice_user_left",
@@ -1377,42 +1523,116 @@ async def websocket_endpoint(
                 })
 
             elif msg_type == "voice_offer":
-                # WebRTC offer to specific participant in voice channel
-                to_id = int(data.get("to_id", 0))
-                if not to_id or not voice_manager.is_in_voice(room_name, to_id):
+                # Sender must currently be in voice for the room; otherwise
+                # they have no business signalling SDP to anyone.
+                if not voice_manager.is_in_voice(room_name, user["id"]):
                     continue
-                await manager.send_to_user(to_id, {
+                to_id = int(data.get("to_id", 0))
+                to_gid = str(data.get("to_global_user_id") or "").strip()
+                if not to_id and to_gid:
+                    with db._conn() as con:
+                        r = con.execute(
+                            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                            (to_gid,),
+                        ).fetchone()
+                    to_id = int(r["id"]) if r else 0
+                in_voice = to_id and voice_manager.is_in_voice(room_name, to_id)
+                if not in_voice and not to_gid:
+                    continue
+                payload_vo = {
                     "type": "voice_offer",
                     "from_id": user["id"],
+                    "from_global_user_id": str(user.get("global_user_id") or ""),
                     "from_nickname": user["nickname"],
                     "sdp": data.get("sdp"),
-                    "room": room_name
-                })
+                    "room": room_name,
+                }
+                if in_voice:
+                    await manager.send_to_user(to_id, payload_vo)
+                if to_gid:
+                    try:
+                        import federation_voice as _fv
+                        import federation_calls as _fc
+                        peer = db.get_user_by_id(to_id) if to_id else {}
+                        if not to_id or _fc.user_home_is_remote(peer or {"global_user_id": to_gid}):
+                            sid = _fv.federated_voice_registry.session_for_room(room_name)
+                            _fv.enqueue_voice_signal(
+                                user, to_gid, session_id=sid, room_name=room_name,
+                                kind="offer", sdp=data.get("sdp") or "",
+                            )
+                    except Exception:
+                        logger.exception("federated voice_offer failed")
 
             elif msg_type == "voice_answer":
-                # WebRTC answer to specific participant
-                to_id = int(data.get("to_id", 0))
-                if not to_id or not voice_manager.is_in_voice(room_name, to_id):
+                if not voice_manager.is_in_voice(room_name, user["id"]):
                     continue
-                await manager.send_to_user(to_id, {
+                to_id = int(data.get("to_id", 0))
+                to_gid = str(data.get("to_global_user_id") or "").strip()
+                if not to_id and to_gid:
+                    with db._conn() as con:
+                        r = con.execute(
+                            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                            (to_gid,),
+                        ).fetchone()
+                    to_id = int(r["id"]) if r else 0
+                in_voice = to_id and voice_manager.is_in_voice(room_name, to_id)
+                if not in_voice and not to_gid:
+                    continue
+                payload_va = {
                     "type": "voice_answer",
                     "from_id": user["id"],
+                    "from_global_user_id": str(user.get("global_user_id") or ""),
                     "from_nickname": user["nickname"],
                     "sdp": data.get("sdp"),
-                    "room": room_name
-                })
+                    "room": room_name,
+                }
+                if in_voice:
+                    await manager.send_to_user(to_id, payload_va)
+                if to_gid:
+                    try:
+                        import federation_voice as _fv
+                        sid = _fv.federated_voice_registry.session_for_room(room_name)
+                        _fv.enqueue_voice_signal(
+                            user, to_gid, session_id=sid, room_name=room_name,
+                            kind="answer", sdp=data.get("sdp") or "",
+                        )
+                    except Exception:
+                        logger.exception("federated voice_answer failed")
 
             elif msg_type == "voice_ice":
-                # ICE candidate for specific participant
-                to_id = int(data.get("to_id", 0))
-                if not to_id or not voice_manager.is_in_voice(room_name, to_id):
+                if not voice_manager.is_in_voice(room_name, user["id"]):
                     continue
-                await manager.send_to_user(to_id, {
+                to_id = int(data.get("to_id", 0))
+                to_gid = str(data.get("to_global_user_id") or "").strip()
+                if not to_id and to_gid:
+                    with db._conn() as con:
+                        r = con.execute(
+                            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                            (to_gid,),
+                        ).fetchone()
+                    to_id = int(r["id"]) if r else 0
+                in_voice = to_id and voice_manager.is_in_voice(room_name, to_id)
+                if not in_voice and not to_gid:
+                    continue
+                payload_vi = {
                     "type": "voice_ice",
                     "from_id": user["id"],
+                    "from_global_user_id": str(user.get("global_user_id") or ""),
                     "candidate": data.get("candidate"),
-                    "room": room_name
-                })
+                    "room": room_name,
+                }
+                if in_voice:
+                    await manager.send_to_user(to_id, payload_vi)
+                if to_gid:
+                    try:
+                        import federation_voice as _fv
+                        sid = _fv.federated_voice_registry.session_for_room(room_name)
+                        _fv.enqueue_voice_signal(
+                            user, to_gid, session_id=sid, room_name=room_name,
+                            kind="ice", candidate=str(data.get("candidate") or ""),
+                        )
+                    except Exception:
+                        logger.exception("federated voice_ice failed")
 
             elif msg_type == "voice_mute":
                 # Broadcast mic-mute state so other clients can render a

@@ -125,6 +125,21 @@ Manual run: `cloudflared tunnel run --token <TUNNEL_TOKEN>`
 
 **Upgrade cloudflared:** reinstall the same package (`dpkg -i` …), then `systemctl restart cloudflared` (brief reconnect).
 
+## WebRTC TURN (cross-node calls)
+
+For federated voice/video, set in `.env`:
+
+```bash
+FROGTALK_FEDERATION_CALLS_ENABLED=1
+FROGTALK_TURN_URLS=stun:stun.l.google.com:19302,turn:turn.yourdomain.com:3478
+FROGTALK_TURN_USERNAME=your_turn_user
+FROGTALK_TURN_CREDENTIAL=your_turn_secret
+```
+
+Clients fetch merged ICE via `GET /api/network/ice-config?peer_server_id=<uuid>`.
+Install [coturn](https://github.com/coturn/coturn) on each node that relays media.
+Spec: [docs/FEDERATED_CALLS.md](../../docs/FEDERATED_CALLS.md).
+
 ## Nginx and app port
 
 Default app port in `env.example` is **`PORT=8080`**.

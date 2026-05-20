@@ -116,6 +116,10 @@ match **home server** for their `global_user_id`. Payloads pass `_fed_*` validat
 Wall helpers used from handlers live in `database.py` (`apply_federated_wall_*`,
 `federation_wall_map`).
 
+Federated WebRTC signaling: `federation_calls.py`, `federation_voice.py`, `fed_turn.py`;
+inbox handlers for `call.*` and `voice.*` in `federation.py`; WS routing in `ws.py`.
+Spec: [docs/FEDERATED_CALLS.md](../../docs/FEDERATED_CALLS.md).
+
 ## WebSocket (`ws.py`)
 
 Single entry: `GET /ws/{room_name}?token=…`. Handles room chat, DM frames, call

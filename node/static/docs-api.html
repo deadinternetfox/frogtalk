@@ -759,6 +759,15 @@ GET    /api/federation/failover/status</code></pre>
           wraps only attach to <strong>existing</strong> local <code>users</code> rows (materialized
           earlier via signed <code>dm.*</code> / <code>friend.*</code> events).</p>
 
+          <h3 style="margin-top:14px">Federated calls (<code>call.*</code> / <code>voice.*</code>)</h3>
+          <p class="muted">Requires <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code> and capability
+          <code>federation-calls-v1</code>. Sensitive prefixes — pinned pubkey + signature. Targeted outbox to callee/home servers.</p>
+<pre><code>call.offer / call.answer / call.ice / call.end / call.reject
+voice.session.join / voice.session.leave / voice.signal (offer|answer|ice)
+GET  /api/network/ice-config?peer_server_id=&lt;uuid&gt;  (session auth required)</code></pre>
+          <p class="muted">WebRTC media stays P2P/TURN; signaling only crosses federation. See
+          <code>docs/FEDERATED_CALLS.md</code> in the repo.</p>
+
           <h3 style="margin-top:14px">FrogSocial replication (<code>social.*</code>)</h3>
           <p class="muted">Sensitive prefix — requires pinned origin pubkey + valid Ed25519 signature.
           Outbox events are signed at push time; per-peer scoped payloads are re-signed when wraps are

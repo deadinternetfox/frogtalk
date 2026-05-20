@@ -2057,6 +2057,39 @@ def _migrate():
             pass
         con.execute(
             """
+            CREATE TABLE IF NOT EXISTS federation_call_map (
+                global_call_id     TEXT NOT NULL,
+                origin_server_id   TEXT NOT NULL,
+                local_call_id      INTEGER NOT NULL,
+                role               TEXT NOT NULL DEFAULT 'participant',
+                PRIMARY KEY (global_call_id, origin_server_id)
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_voice_sessions (
+                global_voice_session_id TEXT PRIMARY KEY,
+                room_name               TEXT NOT NULL,
+                anchor_server_id        TEXT NOT NULL,
+                created_at              TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_voice_remote (
+                global_voice_session_id TEXT NOT NULL,
+                global_user_id          TEXT NOT NULL,
+                nickname                TEXT NOT NULL,
+                home_server_id          TEXT NOT NULL,
+                avatar                  TEXT DEFAULT '',
+                PRIMARY KEY (global_voice_session_id, global_user_id)
+            )
+            """
+        )
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS federation_message_events (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id         TEXT NOT NULL UNIQUE,
@@ -2622,6 +2655,17 @@ def _migrate():
         fed_srv_cols = {r["name"] for r in con.execute("PRAGMA table_info(federation_servers)").fetchall()}
         if fed_srv_cols and "transport_preference" not in fed_srv_cols:
             con.execute("ALTER TABLE federation_servers ADD COLUMN transport_preference TEXT DEFAULT 'auto'")
+        if fed_srv_cols and "turn_urls_json" not in fed_srv_cols:
+            con.execute("ALTER TABLE federation_servers ADD COLUMN turn_urls_json TEXT DEFAULT '[]'")
+        call_cols = {r["name"] for r in con.execute("PRAGMA table_info(calls)").fetchall()}
+        if call_cols and "global_call_id" not in call_cols:
+            con.execute("ALTER TABLE calls ADD COLUMN global_call_id TEXT DEFAULT NULL")
+            try:
+                con.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_calls_global_call_id ON calls(global_call_id)"
+                )
+            except Exception:
+                pass
         fed_profile_cols = {r["name"] for r in con.execute("PRAGMA table_info(federation_user_profiles)").fetchall()}
         if fed_profile_cols and "display_name" not in fed_profile_cols:
             con.execute("ALTER TABLE federation_user_profiles ADD COLUMN display_name TEXT DEFAULT ''")
@@ -3431,31 +3475,53 @@ def set_federation_policy_settings(block_tor_peers: bool) -> Dict[str, object]:
     return get_federation_policy_settings()
 
 
+def _federation_server_row_dict(row) -> Dict:
+    d = dict(row)
+    try:
+        d["capabilities"] = json.loads(d.pop("capabilities_json", None) or "[]")
+    except Exception:
+        d["capabilities"] = []
+        d.pop("capabilities_json", None)
+    raw_turn = d.pop("turn_urls_json", None) if "turn_urls_json" in d.keys() else "[]"
+    try:
+        from fed_turn import parse_server_turn_json
+        d.update(parse_server_turn_json(raw_turn or "[]"))
+    except Exception:
+        pass
+    return d
+
+
 def get_federation_server_row(server_id: str) -> Optional[Dict]:
     """Return one federation_servers row as a dict, or None."""
     sid = str(server_id or "").strip()
     if not sid:
         return None
     with _conn() as con:
-        row = con.execute(
-            """
-            SELECT server_id, display_name, base_url, onion_url, region,
-                   official, trust_tier, capabilities_json, enabled, last_seen,
-                   transport_preference
-            FROM federation_servers
-            WHERE server_id=?
-            """,
-            (sid,),
-        ).fetchone()
+        try:
+            row = con.execute(
+                """
+                SELECT server_id, display_name, base_url, onion_url, region,
+                       official, trust_tier, capabilities_json, enabled, last_seen,
+                       transport_preference, turn_urls_json
+                FROM federation_servers
+                WHERE server_id=?
+                """,
+                (sid,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            row = con.execute(
+                """
+                SELECT server_id, display_name, base_url, onion_url, region,
+                       official, trust_tier, capabilities_json, enabled, last_seen,
+                       transport_preference
+                FROM federation_servers
+                WHERE server_id=?
+                """,
+                (sid,),
+            ).fetchone()
     if not row:
         return None
-    d = dict(row)
-    try:
-        d["capabilities"] = json.loads(d.pop("capabilities_json") or "[]")
-    except Exception:
-        d["capabilities"] = []
-        d.pop("capabilities_json", None)
-    return d
+    return _federation_server_row_dict(row)
 
 
 def get_channel_retention_settings() -> Dict[str, int]:
@@ -4792,15 +4858,180 @@ def toggle_dm_reaction(msg_id: int, user_id: int, emoji: str) -> Dict:
 # ---------------------------------------------------------------------------
 
 def create_call(caller_id: int, callee_id: int, call_type: str,
-                channel_id: Optional[int] = None) -> int:
+                channel_id: Optional[int] = None,
+                global_call_id: Optional[str] = None) -> int:
+    gid = (global_call_id or "").strip() or None
     with _conn() as con:
-        cur = con.execute(
-            """INSERT INTO calls (caller_id, callee_id, call_type, channel_id, status)
-               VALUES (?,?,?,?, 'ringing')""",
-            (caller_id, callee_id, call_type, channel_id)
-        )
+        try:
+            cur = con.execute(
+                """INSERT INTO calls (caller_id, callee_id, call_type, channel_id, status, global_call_id)
+                   VALUES (?,?,?,?, 'ringing', ?)""",
+                (caller_id, callee_id, call_type, channel_id, gid),
+            )
+        except sqlite3.OperationalError:
+            cur = con.execute(
+                """INSERT INTO calls (caller_id, callee_id, call_type, channel_id, status)
+                   VALUES (?,?,?,?, 'ringing')""",
+                (caller_id, callee_id, call_type, channel_id),
+            )
         con.commit()
         return cur.lastrowid
+
+
+def map_federation_call(global_call_id: str, origin_server_id: str,
+                        local_call_id: int, role: str = "participant") -> None:
+    gid = (global_call_id or "").strip()
+    origin = (origin_server_id or "").strip()
+    if not gid or not origin or not local_call_id:
+        return
+    with _conn() as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS federation_call_map (
+                global_call_id     TEXT NOT NULL,
+                origin_server_id   TEXT NOT NULL,
+                local_call_id      INTEGER NOT NULL,
+                role               TEXT NOT NULL DEFAULT 'participant',
+                PRIMARY KEY (global_call_id, origin_server_id)
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO federation_call_map (global_call_id, origin_server_id, local_call_id, role)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(global_call_id, origin_server_id) DO UPDATE SET
+                local_call_id=excluded.local_call_id,
+                role=excluded.role
+            """,
+            (gid, origin, int(local_call_id), (role or "participant").strip()),
+        )
+        con.commit()
+
+
+def resolve_local_call_id(global_call_id: str, origin_server_id: str = "") -> Optional[int]:
+    gid = (global_call_id or "").strip()
+    if not gid:
+        return None
+    with _conn() as con:
+        if origin_server_id:
+            row = con.execute(
+                """
+                SELECT local_call_id FROM federation_call_map
+                WHERE global_call_id=? AND origin_server_id=?
+                """,
+                (gid, origin_server_id.strip()),
+            ).fetchone()
+            if row:
+                return int(row["local_call_id"])
+        row = con.execute(
+            """
+            SELECT local_call_id FROM federation_call_map
+            WHERE global_call_id=? ORDER BY local_call_id DESC LIMIT 1
+            """,
+            (gid,),
+        ).fetchone()
+        row2 = row or con.execute(
+            "SELECT id FROM calls WHERE global_call_id=? ORDER BY id DESC LIMIT 1",
+            (gid,),
+        ).fetchone()
+    if not row2:
+        return None
+    key = "local_call_id" if "local_call_id" in row2.keys() else "id"
+    return int(row2[key])
+
+
+def upsert_federation_voice_remote(
+    session_id: str,
+    global_user_id: str,
+    nickname: str,
+    home_server_id: str,
+    avatar: str = "",
+) -> None:
+    sid = (session_id or "").strip()
+    gid = (global_user_id or "").strip()
+    if not sid or not gid:
+        return
+    with _conn() as con:
+        con.execute(
+            """
+            INSERT INTO federation_voice_remote
+            (global_voice_session_id, global_user_id, nickname, home_server_id, avatar)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(global_voice_session_id, global_user_id) DO UPDATE SET
+                nickname=excluded.nickname,
+                home_server_id=excluded.home_server_id,
+                avatar=excluded.avatar
+            """,
+            (sid, gid, nickname or "remote", home_server_id or "", avatar or ""),
+        )
+        con.commit()
+
+
+def remove_federation_voice_remote(session_id: str, global_user_id: str) -> None:
+    sid = (session_id or "").strip()
+    gid = (global_user_id or "").strip()
+    if not sid or not gid:
+        return
+    with _conn() as con:
+        con.execute(
+            "DELETE FROM federation_voice_remote WHERE global_voice_session_id=? AND global_user_id=?",
+            (sid, gid),
+        )
+        con.commit()
+
+
+def list_federation_voice_remote(session_id: str) -> List[Dict]:
+    sid = (session_id or "").strip()
+    if not sid:
+        return []
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT global_user_id, nickname, home_server_id, avatar
+            FROM federation_voice_remote WHERE global_voice_session_id=?
+            """,
+            (sid,),
+        ).fetchall()
+    return [
+        {
+            "global_user_id": r["global_user_id"],
+            "nickname": r["nickname"],
+            "home_server_id": r["home_server_id"],
+            "avatar": r["avatar"],
+            "federated": True,
+            "user_id": 0,
+        }
+        for r in rows
+    ]
+
+
+def get_call_participants_by_global(global_call_id: str) -> Optional[tuple[int, int]]:
+    """Return (caller_id, callee_id) for a federated call if known locally."""
+    local_id = resolve_local_call_id(global_call_id)
+    if not local_id:
+        return None
+    return get_call_participants_by_global_for_local(local_id)
+
+
+def get_call_participants_by_global_for_local(local_call_id: int) -> Optional[tuple[int, int]]:
+    """Return (caller_id, callee_id) for a known local call id.
+
+    Used by federated call apply paths to verify that the GIDs in an inbound
+    call.* event actually map onto the participants of the local call row,
+    preventing third-party peers from spraying ICE/answer/end events at
+    unrelated users by guessing a ``global_call_id``.
+    """
+    if not local_call_id:
+        return None
+    with _conn() as con:
+        row = con.execute(
+            "SELECT caller_id, callee_id FROM calls WHERE id=?",
+            (int(local_call_id),),
+        ).fetchone()
+    if not row:
+        return None
+    return int(row["caller_id"]), int(row["callee_id"])
 
 
 def save_pending_call_offer(call_id: int, caller_id: int, callee_id: int,
@@ -9302,7 +9533,7 @@ def list_federation_servers(official_only: bool = False) -> List[Dict]:
                 """
                 SELECT server_id, display_name, base_url, onion_url, region,
                        official, trust_tier, capabilities_json, enabled, last_seen,
-                       transport_preference
+                       transport_preference, turn_urls_json
                 FROM federation_servers
                 WHERE enabled=1 AND official=1
                 ORDER BY display_name COLLATE NOCASE
@@ -9313,7 +9544,7 @@ def list_federation_servers(official_only: bool = False) -> List[Dict]:
                 """
                 SELECT server_id, display_name, base_url, onion_url, region,
                        official, trust_tier, capabilities_json, enabled, last_seen,
-                       transport_preference
+                       transport_preference, turn_urls_json
                 FROM federation_servers
                 WHERE enabled=1
                 ORDER BY official DESC, display_name COLLATE NOCASE
@@ -9321,13 +9552,7 @@ def list_federation_servers(official_only: bool = False) -> List[Dict]:
             ).fetchall()
     out = []
     for r in rows:
-        d = dict(r)
-        try:
-            d["capabilities"] = json.loads(d.pop("capabilities_json") or "[]")
-        except Exception:
-            d["capabilities"] = []
-            d.pop("capabilities_json", None)
-        out.append(d)
+        out.append(_federation_server_row_dict(r))
     return out
 
 
@@ -9342,7 +9567,7 @@ def list_federation_servers_admin(include_disabled: bool = True) -> List[Dict]:
                 """
                 SELECT server_id, display_name, base_url, onion_url, region,
                        official, trust_tier, capabilities_json, enabled, last_seen,
-                       transport_preference
+                       transport_preference, turn_urls_json
                 FROM federation_servers
                 ORDER BY official DESC, enabled DESC, display_name COLLATE NOCASE
                 """
@@ -9360,13 +9585,7 @@ def list_federation_servers_admin(include_disabled: bool = True) -> List[Dict]:
             ).fetchall()
     out = []
     for r in rows:
-        d = dict(r)
-        try:
-            d["capabilities"] = json.loads(d.pop("capabilities_json") or "[]")
-        except Exception:
-            d["capabilities"] = []
-            d.pop("capabilities_json", None)
-        out.append(d)
+        out.append(_federation_server_row_dict(r))
     return out
 
 
@@ -9394,45 +9613,93 @@ def upsert_federation_server(
     trust_tier: str = "community",
     server_pubkey: str = "",
     capabilities: Optional[List[str]] = None,
+    turn_urls_json: str = "",
 ) -> None:
     caps_json = json.dumps(capabilities or [])
+    turn_json = turn_urls_json or "[]"
     with _conn() as con:
-        con.execute(
-            """
-            INSERT INTO federation_servers
-            (server_id, display_name, base_url, onion_url, region, official,
-             trust_tier, server_pubkey, capabilities_json, enabled, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
-            ON CONFLICT(server_id) DO UPDATE SET
-                display_name=excluded.display_name,
-                base_url=excluded.base_url,
-                onion_url=excluded.onion_url,
-                region=excluded.region,
-                official=excluded.official,
-                trust_tier=excluded.trust_tier,
-                server_pubkey=CASE
-                    WHEN excluded.server_pubkey IS NOT NULL
-                         AND TRIM(excluded.server_pubkey) != ''
-                         AND excluded.server_pubkey LIKE '%BEGIN PUBLIC KEY%'
-                    THEN excluded.server_pubkey
-                    ELSE federation_servers.server_pubkey
-                END,
-                capabilities_json=excluded.capabilities_json,
-                enabled=1,
-                last_seen=datetime('now')
-            """,
-            (
-                server_id,
-                display_name,
-                base_url,
-                onion_url,
-                region,
-                1 if official else 0,
-                trust_tier,
-                server_pubkey,
-                caps_json,
-            ),
-        )
+        try:
+            con.execute(
+                """
+                INSERT INTO federation_servers
+                (server_id, display_name, base_url, onion_url, region, official,
+                 trust_tier, server_pubkey, capabilities_json, turn_urls_json, enabled, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+                ON CONFLICT(server_id) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    base_url=excluded.base_url,
+                    onion_url=excluded.onion_url,
+                    region=excluded.region,
+                    official=excluded.official,
+                    trust_tier=excluded.trust_tier,
+                    server_pubkey=CASE
+                        WHEN excluded.server_pubkey IS NOT NULL
+                             AND TRIM(excluded.server_pubkey) != ''
+                             AND excluded.server_pubkey LIKE '%BEGIN PUBLIC KEY%'
+                        THEN excluded.server_pubkey
+                        ELSE federation_servers.server_pubkey
+                    END,
+                    capabilities_json=excluded.capabilities_json,
+                    turn_urls_json=CASE
+                        WHEN excluded.turn_urls_json IS NOT NULL
+                             AND TRIM(excluded.turn_urls_json) != ''
+                             AND excluded.turn_urls_json != '[]'
+                        THEN excluded.turn_urls_json
+                        ELSE federation_servers.turn_urls_json
+                    END,
+                    enabled=1,
+                    last_seen=datetime('now')
+                """,
+                (
+                    server_id,
+                    display_name,
+                    base_url,
+                    onion_url,
+                    region,
+                    1 if official else 0,
+                    trust_tier,
+                    server_pubkey,
+                    caps_json,
+                    turn_json,
+                ),
+            )
+        except sqlite3.OperationalError:
+            con.execute(
+                """
+                INSERT INTO federation_servers
+                (server_id, display_name, base_url, onion_url, region, official,
+                 trust_tier, server_pubkey, capabilities_json, enabled, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+                ON CONFLICT(server_id) DO UPDATE SET
+                    display_name=excluded.display_name,
+                    base_url=excluded.base_url,
+                    onion_url=excluded.onion_url,
+                    region=excluded.region,
+                    official=excluded.official,
+                    trust_tier=excluded.trust_tier,
+                    server_pubkey=CASE
+                        WHEN excluded.server_pubkey IS NOT NULL
+                             AND TRIM(excluded.server_pubkey) != ''
+                             AND excluded.server_pubkey LIKE '%BEGIN PUBLIC KEY%'
+                        THEN excluded.server_pubkey
+                        ELSE federation_servers.server_pubkey
+                    END,
+                    capabilities_json=excluded.capabilities_json,
+                    enabled=1,
+                    last_seen=datetime('now')
+                """,
+                (
+                    server_id,
+                    display_name,
+                    base_url,
+                    onion_url,
+                    region,
+                    1 if official else 0,
+                    trust_tier,
+                    server_pubkey,
+                    caps_json,
+                ),
+            )
         con.commit()
 
 

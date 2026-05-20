@@ -30,6 +30,30 @@ const ICE_SERVERS = [
   }
 ];
 
+let _iceConfigCache = { at: 0, key: '', servers: null };
+
+/** Per-node TURN from GET /api/network/ice-config (local + optional peer home). */
+async function buildIceServers(peerServerId) {
+  const key = String(peerServerId || '');
+  const now = Date.now();
+  if (_iceConfigCache.servers && _iceConfigCache.key === key && now - _iceConfigCache.at < 300000) {
+    return _iceConfigCache.servers;
+  }
+  try {
+    const q = key ? `?peer_server_id=${encodeURIComponent(key)}` : '';
+    const r = await apiFetch(`/api/network/ice-config${q}`);
+    if (r.ok) {
+      const d = await r.json();
+      const servers = (d.ice_servers && d.ice_servers.length) ? d.ice_servers : ICE_SERVERS;
+      _iceConfigCache = { at: now, key, servers };
+      return servers;
+    }
+  } catch (e) {
+    console.warn('buildIceServers failed', e);
+  }
+  return ICE_SERVERS;
+}
+
 let _pc           = null;   // RTCPeerConnection
 let _localStream  = null;
 let _screenStream = null;
@@ -46,6 +70,8 @@ let _speakerMuted = false;
 let _callRingTimeout = null;
 let _reconnectTimer = null;
 let _callPeerAvatar = null;
+let _callGlobalId = null;
+let _peerHomeServerId = '';
 // Inbound ICE candidates that arrive before setRemoteDescription resolves
 // would throw on addIceCandidate and be lost forever. Buffer them and drain
 // once the remote description is applied.
@@ -290,14 +316,19 @@ function _renderPeerAvatar(peerNick, avatar) {
   if (typeof UI !== 'undefined' && typeof UI.avatarEl === 'function') {
     ra.innerHTML = UI.avatarEl(avatarData || null, safeNick, 96);
   } else {
-    // Fallback: render simple avatar with initial
+    // Fallback: render simple avatar with initial. The peer nickname /
+    // avatar arrive across the federation trust boundary — always
+    // ``esc()`` them before innerHTML to neutralize any HTML smuggled by
+    // a hostile remote node.
     const s = String(avatarData || '');
-    if (s && (s.startsWith('data:') || s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/'))) {
-      ra.innerHTML = `<img src="${s}" alt="" style="width:96px;height:96px;border-radius:50%;object-fit:cover;display:inline-block">`;
+    const isUrl = s.startsWith('data:image/') || s.startsWith('http://') || s.startsWith('https://') || s.startsWith('/');
+    const escNick = esc(safeNick.charAt(0).toUpperCase());
+    if (s && isUrl) {
+      ra.innerHTML = `<img src="${esc(s)}" alt="">`;
     } else if (s) {
-      ra.innerHTML = `<span style="display:inline-flex;width:96px;height:96px;border-radius:50%;background:#1a2a1a;align-items:center;justify-content:center;font-size:52px;vertical-align:middle">${s}</span>`;
+      ra.innerHTML = `<span class="call-avatar-emoji">${esc(s.slice(0, 2))}</span>`;
     } else {
-      ra.innerHTML = `<div style="font-size:3rem">${safeNick.charAt(0).toUpperCase()}</div>`;
+      ra.innerHTML = `<div class="call-avatar-initial">${escNick}</div>`;
     }
   }
 }
@@ -370,7 +401,7 @@ async function startCall (type, nick, uid) {
       if (la) la.style.display = 'none';
     }
 
-    _pc = createPC();
+    _pc = await createPC();
     _localStream.getTracks().forEach(t => _pc.addTrack(t, _localStream));
 
     const offer = await _pc.createOffer();
@@ -386,10 +417,12 @@ async function startCall (type, nick, uid) {
 
     _maybeWarnIdentityRotation(_callPeerUID);
 
+    const peerGid = _activeDM?.global_user_id || _activeDM?.peer_global_user_id || '';
     _sendCallSignal({
       type         : 'call_offer',
       to_id        : _callPeerUID || undefined,
       to_nickname  : _callPeerNick,
+      to_global_user_id: peerGid || undefined,
       call_type    : type,
       sdp          : offer.sdp,
       fp_sig       : fp_sig || undefined,
@@ -463,6 +496,8 @@ async function handleCallOffer (data) {
   _callPeerUID  = data.from_id || _callPeerUID;
   _callPeerAvatar = data.from_avatar || null;
   _callId       = data.call_id || null;
+  _callGlobalId = data.global_call_id || _callGlobalId;
+  if (data.federated) toast('Incoming call from another node', 'info');
   _pendingOffer = { sdp: data.sdp, call_id: data.call_id || null, from_id: data.from_id, fp_sig: data.fp_sig };
   // Track E: verify caller's signed DTLS fingerprint envelope. The caller
   // signs at offer time before the server has assigned a call_id, so we
@@ -561,7 +596,7 @@ async function acceptCall () {
   _startAndroidCallNotification(_callPeerNick);
 
   try {
-    _pc = createPC();
+    _pc = await createPC();
     _localStream.getTracks().forEach(t => _pc.addTrack(t, _localStream));
 
     await _pc.setRemoteDescription({ type: 'offer', sdp: offer.sdp });
@@ -930,13 +965,28 @@ function resetCall () {
   }
 }
 
+function handleCallCreated(data) {
+  if (!data) return;
+  if (data.call_id) _callId = data.call_id;
+  if (data.global_call_id) _callGlobalId = data.global_call_id;
+  if (data.federated) toast('Calling peer on another node…', 'info');
+}
+
 /* ── RTCPeerConnection factory ─────────────────────────────────────────────── */
-function createPC () {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+async function createPC () {
+  const ice = await buildIceServers(_peerHomeServerId || '');
+  const pc = new RTCPeerConnection({ iceServers: ice });
 
   pc.onicecandidate = e => {
     if (e.candidate && _callPeerNick) {
-      _sendCallSignal({ type: 'ice_candidate', to_nickname: _callPeerNick, call_id: _callId || undefined, candidate: JSON.stringify(e.candidate) });
+      _sendCallSignal({
+        type: 'ice_candidate',
+        to_nickname: _callPeerNick,
+        to_id: _callPeerUID || undefined,
+        call_id: _callId || undefined,
+        global_call_id: _callGlobalId || undefined,
+        candidate: JSON.stringify(e.candidate),
+      });
     }
   };
 
@@ -1262,8 +1312,8 @@ function showCallOverlay (type, peerNick, status, avatar) {
   // Set avatars
   const selfAv = document.getElementById('call-self-avatar');
   if (selfAv) selfAv.innerHTML = State.user?.avatar
-    ? `<img src="${State.user.avatar}" style="width:96px;height:96px;border-radius:50%;object-fit:cover">`
-    : `<div style="font-size:3rem">${(State.user?.nickname||'?')[0].toUpperCase()}</div>`;
+    ? `<img src="${esc(State.user.avatar)}" alt="">`
+    : `<div class="call-avatar-initial">${esc(String(State.user?.nickname||'?')[0].toUpperCase())}</div>`;
   _renderPeerAvatar(peerNick, avatar);
   _ensureCallPeerAvatar(true).catch(() => {});
   document.getElementById('call-overlay')?.classList.remove('hidden');
@@ -1426,16 +1476,40 @@ function _renderVoicePresenceBar(roomName) {
   if (!roster.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
 
   const iAmHere = _voiceRoom === roomName;
+  // Every interpolated value below crosses the federated trust boundary —
+  // nicknames and avatars can be authored by a remote node. Always run
+  // them through ``esc()`` (full HTML entity escape) before splatting
+  // into innerHTML; a partial ``replace(/"/g, '&quot;')`` leaves <script>
+  // tags and 'on*' handlers live. Avatar URLs are additionally restricted
+  // to image-bearing schemes so a hostile node can't smuggle text/html
+  // via data: URLs.
+  const isSafeAvatar = (av) => {
+    if (!av) return false;
+    const s = String(av);
+    return s.startsWith('data:image/') || s.startsWith('http://') || s.startsWith('https://');
+  };
   const avatars = roster.slice(0, 12).map(p => {
     const self = p.user_id === myId;
-    const safeNick = (p.nickname || '?').replace(/"/g, '&quot;');
-    const initials = (p.nickname || '?').slice(0, 2).toUpperCase();
-    const img = (p.avatar && String(p.avatar).startsWith('data:'))
-      ? `<img src="${p.avatar}" alt="">`
-      : (p.avatar ? `<span style="font-size:14px">${p.avatar}</span>` : initials);
-    return `<div class="vp-avatar${self ? ' self' : ''}" title="${safeNick}" data-uid="${p.user_id}">${img}</div>`;
+    const rawNick = String(p.nickname || '?');
+    const safeNick = esc(rawNick);
+    const initials = esc(rawNick.slice(0, 2).toUpperCase());
+    let img;
+    if (isSafeAvatar(p.avatar)) {
+      img = `<img src="${esc(p.avatar)}" alt="">`;
+    } else if (p.avatar && /^\p{Extended_Pictographic}/u.test(String(p.avatar))) {
+      // Emoji-only avatar: only render the first grapheme to keep
+      // an attacker from sneaking trailing markup past the test.
+      img = `<span class="vp-avatar-emoji">${esc(String(p.avatar).slice(0, 2))}</span>`;
+    } else {
+      img = initials;
+    }
+    const uid = String(p.user_id || 0).replace(/[^0-9]/g, '');
+    return `<div class="vp-avatar${self ? ' self' : ''}" title="${safeNick}" data-uid="${uid}">${img}</div>`;
   }).join('');
-  const extra = roster.length > 12 ? `<div class="vp-avatar" title="+${roster.length - 12} more">+${roster.length - 12}</div>` : '';
+  const extraCount = roster.length - 12;
+  const extra = roster.length > 12
+    ? `<div class="vp-avatar" title="+${extraCount} more">+${extraCount}</div>`
+    : '';
 
   bar.innerHTML = `
     <div class="vp-label">🔊 In voice · ${roster.length}</div>
@@ -1447,16 +1521,29 @@ function _renderVoicePresenceBar(roomName) {
   bar.style.display = 'flex';
 }
 
+// Federated participants arrive with user_id=0 (no local row) and a
+// distinct global_user_id; key the roster on whichever identifier the
+// server provided so multiple remote users don't collapse to a single
+// "user_id === 0" entry.
+function _presenceKey(p) {
+  return p?.global_user_id ? `g:${p.global_user_id}` : `u:${p?.user_id || 0}`;
+}
+
 function _presenceAdd(roomName, p) {
   const list = _presenceRoster.get(roomName) || [];
-  if (!list.some(x => x.user_id === p.user_id)) list.push(p);
+  const key = _presenceKey(p);
+  if (!list.some(x => _presenceKey(x) === key)) list.push(p);
   _presenceRoster.set(roomName, list);
   if (roomName === _presenceRoom) _renderVoicePresenceBar(roomName);
 }
 
-function _presenceRemove(roomName, userId) {
+function _presenceRemove(roomName, userIdOrPayload) {
+  const target = (typeof userIdOrPayload === 'object' && userIdOrPayload !== null)
+    ? userIdOrPayload
+    : { user_id: userIdOrPayload };
+  const key = _presenceKey(target);
   const list = _presenceRoster.get(roomName) || [];
-  _presenceRoster.set(roomName, list.filter(x => x.user_id !== userId));
+  _presenceRoster.set(roomName, list.filter(x => _presenceKey(x) !== key));
   if (roomName === _presenceRoom) _renderVoicePresenceBar(roomName);
 }
 
@@ -1611,8 +1698,10 @@ function handleVoiceMute(data) {
 /**
  * Create a peer connection for a specific user in the voice channel.
  */
-function _createVoicePeer(userId, nickname, avatar, isOfferer) {
-  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+async function _createVoicePeer(userId, nickname, avatar, isOfferer, globalUserId) {
+  const ice = await buildIceServers('');
+  const pc = new RTCPeerConnection({ iceServers: ice });
+  const peerKey = userId || globalUserId || nickname;
   
   // Add local audio track
   if (_voiceStream) {
@@ -1621,14 +1710,14 @@ function _createVoicePeer(userId, nickname, avatar, isOfferer) {
 
   // Handle incoming remote audio
   pc.ontrack = (e) => {
-    const existing = _voicePeers.get(userId);
+    const existing = _voicePeers.get(peerKey);
     if (existing) {
       existing.stream = e.streams[0];
-      // Create audio element to play remote audio
-      let audio = document.getElementById(`voice-audio-${userId}`);
+      const aid = `voice-audio-${peerKey}`;
+      let audio = document.getElementById(aid);
       if (!audio) {
         audio = document.createElement('audio');
-        audio.id = `voice-audio-${userId}`;
+        audio.id = aid;
         audio.autoplay = true;
         document.body.appendChild(audio);
       }
@@ -1636,13 +1725,13 @@ function _createVoicePeer(userId, nickname, avatar, isOfferer) {
     }
   };
 
-  // Send ICE candidates to peer
   pc.onicecandidate = (e) => {
     if (e.candidate) {
       _sendVoiceSignal({
         type: 'voice_ice',
-        to_id: userId,
-        candidate: JSON.stringify(e.candidate)
+        to_id: userId || undefined,
+        to_global_user_id: globalUserId || undefined,
+        candidate: JSON.stringify(e.candidate),
       });
     }
   };
@@ -1653,7 +1742,7 @@ function _createVoicePeer(userId, nickname, avatar, isOfferer) {
     }
   };
 
-  _voicePeers.set(userId, { pc, nickname, avatar, stream: null, pendingIce: [], remoteDescApplied: false });
+  _voicePeers.set(peerKey, { pc, nickname, avatar, stream: null, pendingIce: [], remoteDescApplied: false, userId, globalUserId: globalUserId || '' });
   
   return pc;
 }
@@ -1667,11 +1756,9 @@ function _updateVoiceBarParticipants() {
   
   for (const [uid, peer] of _voicePeers) {
     const div = document.createElement('div');
-    div.className = 'voice-bar-avatar';
+    div.className = 'voice-bar-avatar' + (peer.muted ? ' muted-peer' : '');
     div.title = peer.nickname + ' (click to mute/unmute)';
     div.setAttribute('data-uid', uid);
-    div.style.cursor = 'pointer';
-    div.style.position = 'relative';
     if (peer.avatar) {
       div.innerHTML = `<img src="${esc(peer.avatar)}" alt="">`;
     } else {
@@ -1680,8 +1767,7 @@ function _updateVoiceBarParticipants() {
     // Click to mute/unmute this participant
     div.onclick = () => toggleMutePeer(uid);
     if (peer.muted) {
-      div.style.opacity = '0.4';
-      div.innerHTML += '<span style="position:absolute;bottom:-2px;right:-2px;font-size:10px">🔇</span>';
+      div.innerHTML += '<span class="voice-bar-mute-badge" aria-hidden="true">🔇</span>';
     }
     container.appendChild(div);
   }
@@ -1718,18 +1804,18 @@ async function handleVoiceJoined(data) {
     if (_voiceRoom === _presenceRoom) _renderVoicePresenceBar(_voiceRoom);
   }
 
-  // Connect to each existing participant (we are the offerer)
   for (const p of data.participants || []) {
-    const pc = _createVoicePeer(p.user_id, p.nickname, p.avatar, true);
+    if (!p.user_id && !p.global_user_id) continue;
+    const pc = await _createVoicePeer(p.user_id, p.nickname, p.avatar, true, p.global_user_id);
 
-    // Create and send offer
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
     _sendVoiceSignal({
       type: 'voice_offer',
-      to_id: p.user_id,
-      sdp: offer.sdp
+      to_id: p.user_id || undefined,
+      to_global_user_id: p.global_user_id || undefined,
+      sdp: offer.sdp,
     });
   }
 
@@ -1770,7 +1856,10 @@ function handleVoiceUserLeft(data) {
   _voicePeerMuted.delete(data.user_id);
 
   const room = data.room || _voiceRoom || _presenceRoom;
-  if (room) _presenceRemove(room, data.user_id);
+  if (room) _presenceRemove(room, {
+    user_id: data.user_id,
+    global_user_id: data.global_user_id,
+  });
 
   _updateVoiceBarParticipants();
   try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
@@ -1781,19 +1870,19 @@ function handleVoiceUserLeft(data) {
  */
 async function handleVoiceOffer(data) {
   if (!_voiceRoom || data.room !== _voiceRoom) return;
-  
-  // Create peer connection (we are answering)
-  let peer = _voicePeers.get(data.from_id);
+
+  const peerKey = data.from_id || data.from_global_user_id;
+  let peer = _voicePeers.get(peerKey);
   let pc;
-  
+
   if (!peer) {
-    pc = _createVoicePeer(data.from_id, data.from_nickname, null, false);
+    pc = await _createVoicePeer(data.from_id, data.from_nickname, null, false, data.from_global_user_id);
   } else {
     pc = peer.pc;
   }
-  
+
   await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp });
-  const refreshed = _voicePeers.get(data.from_id);
+  const refreshed = _voicePeers.get(peerKey);
   if (refreshed) {
     refreshed.remoteDescApplied = true;
     if (Array.isArray(refreshed.pendingIce) && refreshed.pendingIce.length) {
@@ -1809,8 +1898,9 @@ async function handleVoiceOffer(data) {
   
   _sendVoiceSignal({
     type: 'voice_answer',
-    to_id: data.from_id,
-    sdp: answer.sdp
+    to_id: data.from_id || undefined,
+    to_global_user_id: data.from_global_user_id || undefined,
+    sdp: answer.sdp,
   });
   
   _updateVoiceBarParticipants();
