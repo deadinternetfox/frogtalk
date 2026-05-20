@@ -22,12 +22,16 @@ journalctl -u frogtalk -f
 
 **Tor-only:** set `FROGTALK_TOR_ENABLED=1` and `FROGTALK_ONION_URL=http://….onion` in `.env` (or use the wizard), then run federation-join again.
 
-**Updates** (signature-verified when signers are configured):
+**Updates** (git fast-forward + venv refresh + service restart):
 
 ```bash
-bash node/scripts/node_update_check.sh
-bash node/scripts/node_update_check.sh --apply
+bash node/scripts/install.sh update              # check only
+bash node/scripts/install.sh update-apply -y     # pull, pip, restart
+# or directly:
+bash node/scripts/node_update_check.sh --install-dir /opt/frogtalk --apply
 ```
+
+Shows incoming commits, warns on dirty trees, re-checks runtime symlinks, and pings `/api/ping` after restart. Signed release feed (`FROGTALK_RELEASE_SIGNERS`) is separate — in-app auto-update when configured.
 
 The wizard creates `venv/`, writes `.env`, and symlinks `data/`, `secrets/`, and `.env` into the tree so the unit (`WorkingDirectory=/opt/frogtalk/node`) finds runtime state.
 
@@ -95,7 +99,7 @@ node/
 | **`install.sh`** | **Menu:** setup, federation, update, systemd, status |
 | `node_setup_wizard.sh` | First-time venv, `.env`, symlinks (also via `install.sh setup`) |
 | `node_federation_join.sh` | Mesh join: directory sync, pubkey pin, board nav |
-| `node_update_check.sh` | Git update check / `--apply` |
+| `node_update_check.sh` | Git update check / `--apply` (commits preview, symlinks, pip, restart) |
 | `deploy_nodes.sh` | Maintainer SCP to production peers (see `deploy/README.md`) |
 | `deploy.sh` | Full rsync deploy to one server |
 | `deploy_board.sh` | Board PHP-only hotfix |

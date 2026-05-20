@@ -74,17 +74,27 @@ main() {
   [[ "$missing" -eq 0 ]] || ft_die "Install git, python3, sed and re-run."
 
   local repo_url install_dir public_url admin_password
+  local repo_hint
+  repo_hint="$(cd "$SCRIPT_DIR/../.." && pwd)"
   repo_url="$(ft_ask "Git repository URL" "$PROJECT_REPO_DEFAULT")"
   if [[ -n "$INSTALL_DIR_ARG" ]]; then
     install_dir="$INSTALL_DIR_ARG"
   else
-    install_dir="$(ft_ask "Install directory" "$INSTALL_DIR_DEFAULT")"
+    local default_dir
+    default_dir="$(ft_resolve_install_dir "$INSTALL_DIR_DEFAULT" "$repo_hint")"
+    install_dir="$(ft_ask "Install directory" "$default_dir")"
   fi
 
   if [[ -d "$install_dir/.git" ]]; then
     ft_info "Existing repo at $install_dir"
-    if ft_ask_yes_no "Pull latest (fast-forward only)?" "y"; then
-      safe_run "git pull" git -C "$install_dir" pull --ff-only
+    if ft_ask_yes_no "Check for git updates and pull (fast-forward)?" "y"; then
+      local upd_args=(--install-dir "$install_dir" --apply --skip-federation-hint)
+      [[ "$ASSUME_YES" -eq 1 ]] && upd_args+=(-y --skip-restart)
+      if bash "$SCRIPT_DIR/node_update_check.sh" "${upd_args[@]}"; then
+        ft_ok "Repository up to date or updated"
+      else
+        ft_warn "Update step had issues — retry: bash node/scripts/install.sh update-apply"
+      fi
     fi
   else
     safe_run "git clone" git clone "$repo_url" "$install_dir" || ft_die "Clone failed."
@@ -102,7 +112,6 @@ main() {
     || ft_warn "node/requirements.txt missing — skipped deps."
 
   ft_step "Runtime symlinks"
-  mkdir -p data
   if [[ -d node/data && ! -L node/data ]]; then
     ft_warn "node/data is a real directory — app may use an empty DB."
     if ft_ask_yes_no "Replace with symlink to $install_dir/data?" "y"; then
@@ -111,11 +120,8 @@ main() {
       ft_ok "Moved aside → node/data.misplaced-${ts}"
     fi
   fi
-  ln -sfn "$install_dir/data" node/data
-  [[ -f "$ENV_FILE" ]] || true
-  ln -sfn "$install_dir/$ENV_FILE" node/.env 2>/dev/null || true
-  [[ -d secrets ]] && ln -sfn "$install_dir/secrets" node/secrets
-  ft_ok "node/data · node/.env · node/secrets"
+  ft_ensure_runtime_symlinks "$install_dir" && ft_ok "node/data · node/.env · node/secrets" \
+    || ft_warn "Symlink setup incomplete"
 
   if [[ -d node/board/board_data ]] && id www-data >/dev/null 2>&1; then
     chown -R www-data:www-data node/board/board_data node/board/board_uploads node/board/board_previews 2>/dev/null || true
@@ -182,6 +188,7 @@ main() {
   ft_say "  ${C_BOLD}Config:${C_RESET}   ${install_dir}/${ENV_FILE}"
   ft_say "  ${C_BOLD}Run dev:${C_RESET}   cd ${install_dir} && source venv/bin/activate && cd node && python main.py"
   ft_say "  ${C_BOLD}Menu:${C_RESET}     bash node/scripts/install.sh --install-dir ${install_dir}"
+  ft_say "  ${C_BOLD}Updates:${C_RESET}  bash node/scripts/install.sh update-apply --install-dir ${install_dir}"
   ft_blank
 }
 

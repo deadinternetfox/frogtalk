@@ -130,10 +130,11 @@ ft_resolve_install_dir() {
     (cd "$default" && pwd)
     return 0
   fi
-  local script_root
-  script_root="$(cd "$(dirname "${BASH_SOURCE[1]:-$0}")/../.." 2>/dev/null && pwd)" || true
-  if [[ -n "$script_root" && -f "$script_root/node/main.py" ]]; then
-    (cd "$script_root/.." && pwd)
+  local cli_dir repo_root
+  cli_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  repo_root="$(cd "$cli_dir/../.." && pwd 2>/dev/null)" || true
+  if [[ -n "$repo_root" && -f "$repo_root/node/main.py" ]]; then
+    printf "%s" "$repo_root"
     return 0
   fi
   printf "%s" "$default"
@@ -151,4 +152,41 @@ ft_detect_api_port() {
     fi
   done
   printf "%s" "${port}"
+}
+
+# Ensure node/data, node/.env, node/secrets point at install-root state.
+ft_ensure_runtime_symlinks() {
+  local install_dir="$1"
+  [[ -d "$install_dir/node" ]] || return 1
+  mkdir -p "$install_dir/data"
+  if [[ -d "$install_dir/node/data" && ! -L "$install_dir/node/data" ]]; then
+    ft_warn "node/data is a real directory — use setup wizard to symlink to ${install_dir}/data"
+    return 1
+  fi
+  ln -sfn "$install_dir/data" "$install_dir/node/data"
+  [[ -f "$install_dir/.env" || -f "$install_dir/node/.env" ]] \
+    && ln -sfn "$install_dir/.env" "$install_dir/node/.env" 2>/dev/null || true
+  [[ -d "$install_dir/secrets" ]] \
+    && ln -sfn "$install_dir/secrets" "$install_dir/node/secrets" 2>/dev/null || true
+  return 0
+}
+
+# Print how many commits local HEAD is behind upstream (0 if up to date / unknown).
+ft_git_behind_upstream() {
+  local install_dir="$1"
+  local upstream="${2:-}"
+  (
+    cd "$install_dir" || exit 1
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 1
+    if [[ -z "$upstream" ]]; then
+      upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+      if [[ -z "$upstream" ]]; then
+        local rb
+        rb="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo master)"
+        upstream="origin/${rb}"
+      fi
+    fi
+    git fetch origin --quiet 2>/dev/null || true
+    git rev-list --count "HEAD..${upstream}" 2>/dev/null || echo 0
+  )
 }

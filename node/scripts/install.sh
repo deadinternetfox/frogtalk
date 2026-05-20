@@ -91,6 +91,7 @@ run_federation() {
 
 run_update() {
   local args=(--install-dir "$INSTALL_DIR")
+  [[ "$ASSUME_YES" -eq 1 ]] && args+=(-y)
   exec bash "$SCRIPT_DIR/node_update_check.sh" "${args[@]}" "$@"
 }
 
@@ -139,6 +140,18 @@ run_status() {
     ft_skip "No DB yet"
   fi
   ft_detail "Re-sync: bash node/scripts/install.sh federation -y"
+  ft_step "Git updates"
+  if command -v git >/dev/null 2>&1 && [[ -d "$INSTALL_DIR/.git" ]]; then
+    local behind
+    behind="$(ft_git_behind_upstream "$INSTALL_DIR" 2>/dev/null || echo 0)"
+    if [[ "${behind:-0}" -eq 0 ]]; then
+      ft_ok "Git: up to date with upstream"
+    else
+      ft_warn "Git: ${behind} commit(s) behind — bash node/scripts/install.sh update-apply"
+    fi
+  else
+    ft_skip "Not a git checkout"
+  fi
 }
 
 show_menu() {

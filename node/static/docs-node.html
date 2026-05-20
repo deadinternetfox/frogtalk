@@ -145,7 +145,21 @@ bash node/scripts/install.sh
 bash node/scripts/install.sh setup -y
 bash node/scripts/install.sh federation -y
 bash node/scripts/install.sh update-apply</code></pre>
-      <p class="hint">The wizard configures <code>.env</code>, installs dependencies, wires the runtime symlinks (<code>node/data</code>, <code>node/.env</code>, <code>node/secrets</code>), and handles common edge cases without aborting the whole flow.</p>
+      <p class="hint">The wizard configures <code>.env</code>, installs dependencies, wires the runtime symlinks (<code>node/data</code>, <code>node/.env</code>, <code>node/secrets</code>), and can <strong>pull the latest git release</strong> on an existing checkout. Defaults the install path to your current clone (not only <code>/opt/frogtalk</code>).</p>
+    </section>
+
+    <section class="step">
+      <h2>0.5) Apply git updates (operators)</h2>
+      <p class="hint">After setup, use the same installer menu for safe fast-forward updates — previews commits, refreshes <code>venv</code> deps, restarts <code>frogtalk.service</code>, and verifies <code>/api/ping</code>.</p>
+      <pre><code>bash node/scripts/install.sh update
+bash node/scripts/install.sh update-apply -y
+
+# From a dev checkout (use your repo root, not /opt/frogtalk):
+bash node/scripts/install.sh --install-dir "$(pwd)" update-apply
+
+# Status shows how many commits you are behind upstream
+bash node/scripts/install.sh status</code></pre>
+      <p class="hint">Re-run <code>install.sh federation -y</code> after major releases if peer pills or mesh nav look stale. Hot SCP deploy (<code>deploy_nodes.sh</code>) does not run DB migrations — prefer <code>update-apply</code> when <code>database.py</code> changes.</p>
     </section>
 
     <section class="step">

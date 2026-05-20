@@ -82,14 +82,21 @@ journalctl -u frogtalk -f
 
 `ExecStart` runs `/opt/frogtalk/venv/bin/python main.py` from `/opt/frogtalk/node` (see `frogtalk.service`).
 
-## Signed updates
+## Git updates (recommended for self-hosters)
 
-When `FROGTALK_RELEASE_SIGNERS` lists trusted Ed25519 pubkeys, in-app updates require a valid signature:
+The installer menu wraps `node_update_check.sh` — fast-forward only, incoming commit preview, `venv` pip refresh, runtime symlink check, optional `frogtalk` restart, and `/api/ping` verify:
 
 ```bash
-bash node/scripts/node_update_check.sh          # check only
-bash node/scripts/node_update_check.sh --apply  # git pull + restart
+bash node/scripts/install.sh update
+bash node/scripts/install.sh update-apply -y
+bash node/scripts/install.sh status   # includes “N commits behind upstream”
 ```
+
+Use `--install-dir "$(pwd)"` when testing from a dev clone instead of `/opt/frogtalk`.
+
+## Signed in-app updates
+
+When `FROGTALK_RELEASE_SIGNERS` lists trusted Ed25519 pubkeys, the **in-app** update channel (`FROGTALK_UPDATE_FEED_URL`) requires a valid manifest signature before apply. That is separate from the git helper above.
 
 `FROGTALK_AUTO_UPDATE_ENABLED=0` by default — updates stay opt-in.
 
