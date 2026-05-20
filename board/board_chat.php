@@ -41,6 +41,12 @@ if ($action === 'fetch') {
     
     // Track this user as online (they're actively polling chat)
     trackOnlineUser();
+    if (!isAdminLoggedIn()) {
+        foreach ($messages as &$m) {
+            unset($m['ip_hash']);
+        }
+        unset($m);
+    }
     
     echo json_encode([
         'messages' => $messages,
@@ -129,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'voice') {
     $fMime = finfo_file($finfo, $_FILES['audio']['tmp_name']);
     finfo_close($finfo);
     $origMime = strtolower(explode(';', trim($_FILES['audio']['type'] ?? ''))[0]);
-    $allowed = ['audio/webm','audio/ogg','audio/mp4','audio/mpeg','audio/wav','audio/x-wav','video/webm'];
+    $allowed = ['audio/webm','audio/ogg','audio/mp4','audio/mpeg','audio/wav','audio/x-wav'];
     if (!in_array($fMime, $allowed) && !in_array($origMime, $allowed)) {
         echo json_encode(['error' => 'Unsupported audio format']);
         exit;

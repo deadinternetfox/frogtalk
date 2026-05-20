@@ -20,11 +20,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login
     }
 }
 
-// Handle logout
-if (($_GET['action'] ?? '') === 'logout') {
-    unset($_SESSION['board_admin']);
-    header('Location: /board/admin');
-    exit;
+// Handle logout (POST + CSRF only)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'logout') {
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        $error = 'Session expired. Please refresh and try again.';
+    } else {
+        unset($_SESSION['board_admin']);
+        header('Location: /board/admin');
+        exit;
+    }
 }
 
 // If not logged in, show login
@@ -130,13 +134,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $isReply  = ($_POST['is_reply'] ?? '0') === '1';
             foreach ($threads as &$thread) {
                 if (!$isReply && $thread['id'] === $postId) {
-                    if ($thread['media'] ?? null) { @unlink(UPLOAD_DIR . '/' . $thread['media']['file']); $thread['media'] = null; }
+                    if ($thread['media'] ?? null) { boardSafeUnlinkUpload($thread['media']['file'] ?? ''); $thread['media'] = null; }
                     break;
                 }
                 if ($isReply || $thread['id'] === $threadId) {
                     foreach ($thread['replies'] as &$reply) {
                         if ($reply['id'] === $postId) {
-                            if ($reply['media'] ?? null) { @unlink(UPLOAD_DIR . '/' . $reply['media']['file']); $reply['media'] = null; }
+                            if ($reply['media'] ?? null) { boardSafeUnlinkUpload($reply['media']['file'] ?? ''); $reply['media'] = null; }
                             break 2;
                         }
                     } unset($reply);
@@ -219,14 +223,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Remove from images array
                     if (!empty($thread['images'][$imgIdx])) {
                         $im = $thread['images'][$imgIdx];
-                        @unlink(UPLOAD_DIR . '/' . ($im['file'] ?? ''));
-                        @unlink(UPLOAD_DIR . '/' . ($im['thumb'] ?? ''));
+                        boardSafeUnlinkUpload($im['file'] ?? '');
+                        boardSafeUnlinkUpload($im['thumb'] ?? '');
                         array_splice($thread['images'], $imgIdx, 1);
                         // Re-sync legacy image key
                         $thread['image'] = $thread['images'][0] ?? null;
                     } elseif ($thread['image'] && $imgIdx === 0) {
-                        @unlink(UPLOAD_DIR . '/' . $thread['image']['file']);
-                        @unlink(UPLOAD_DIR . '/' . $thread['image']['thumb']);
+                        boardSafeUnlinkUpload($thread['image']['file'] ?? '');
+                        boardSafeUnlinkUpload($thread['image']['thumb'] ?? '');
                         $thread['image'] = null;
                     }
                     break;
@@ -236,13 +240,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if ($reply['id'] === $postId) {
                             if (!empty($reply['images'][$imgIdx])) {
                                 $im = $reply['images'][$imgIdx];
-                                @unlink(UPLOAD_DIR . '/' . ($im['file'] ?? ''));
-                                @unlink(UPLOAD_DIR . '/' . ($im['thumb'] ?? ''));
+                                boardSafeUnlinkUpload($im['file'] ?? '');
+                                boardSafeUnlinkUpload($im['thumb'] ?? '');
                                 array_splice($reply['images'], $imgIdx, 1);
                                 $reply['image'] = $reply['images'][0] ?? null;
                             } elseif ($reply['image'] && $imgIdx === 0) {
-                                @unlink(UPLOAD_DIR . '/' . $reply['image']['file']);
-                                @unlink(UPLOAD_DIR . '/' . $reply['image']['thumb']);
+                                boardSafeUnlinkUpload($reply['image']['file'] ?? '');
+                                boardSafeUnlinkUpload($reply['image']['thumb'] ?? '');
                                 $reply['image'] = null;
                             }
                             break 2;
@@ -265,13 +269,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($t['id'] === $postId) {
                         // Delete all associated images
                         if ($t['image']) {
-                            @unlink(UPLOAD_DIR . '/' . $t['image']['file']);
-                            @unlink(UPLOAD_DIR . '/' . $t['image']['thumb']);
+                            boardSafeUnlinkUpload($t['image']['file'] ?? '');
+                            boardSafeUnlinkUpload($t['image']['thumb'] ?? '');
                         }
                         foreach ($t['replies'] ?? [] as $r) {
                             if ($r['image'] ?? null) {
-                                @unlink(UPLOAD_DIR . '/' . $r['image']['file']);
-                                @unlink(UPLOAD_DIR . '/' . $r['image']['thumb']);
+                                boardSafeUnlinkUpload($r['image']['file'] ?? '');
+                                boardSafeUnlinkUpload($r['image']['thumb'] ?? '');
                             }
                         }
                         return false;
@@ -295,8 +299,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $thread['replies'] = array_values(array_filter($thread['replies'], function($r) use ($postId) {
                             if ($r['id'] === $postId) {
                                 if ($r['image'] ?? null) {
-                                    @unlink(UPLOAD_DIR . '/' . $r['image']['file']);
-                                    @unlink(UPLOAD_DIR . '/' . $r['image']['thumb']);
+                                    boardSafeUnlinkUpload($r['image']['file'] ?? '');
+                                    boardSafeUnlinkUpload($r['image']['thumb'] ?? '');
                                 }
                                 return false;
                             }
@@ -828,7 +832,10 @@ $pendingWithdrawals = count(array_filter($withdrawals, fn($w) => in_array($w['st
                 <a href="?tab=orders" class="<?= $tab === 'orders' ? 'active' : '' ?>">
                     💳 Orders<?php if ($pendingOrders + $pendingWithdrawals > 0): ?> <span class="badge"><?= $pendingOrders + $pendingWithdrawals ?></span><?php endif; ?>
                 </a>
-                <a href="?action=logout" style="margin-top: 20px; color: #ff6b6b;">🚪 Logout</a>
+                <form method="POST" style="margin-top: 20px;">
+                    <input type="hidden" name="action" value="logout">
+                    <button type="submit" class="btn" style="width:100%;padding:8px 10px;background:transparent;border:1px solid rgba(255,107,107,0.35);color:#ff6b6b;text-align:left;">🚪 Logout</button>
+                </form>
                 <a href="/board" style="color: #4a8f4a;">← Back to Board</a>
             </div>
         </nav>

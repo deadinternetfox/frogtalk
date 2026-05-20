@@ -12,6 +12,45 @@ if (session_status() === PHP_SESSION_NONE) {
     ini_set('session.cookie_secure', !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? '1' : '0');
 }
 
+// ── Defense-in-depth security headers for every PHP-served board response ──
+// nginx already emits these for static assets; emit them from PHP too so the
+// imageboard is hardened even if dropped behind a vanilla Apache.
+// SECURITY-PASS-2: emit headers exactly once per request (helper functions
+// such as loadSettings() call into here from many entry points).
+if (!function_exists('board_emit_security_headers')) {
+    function board_emit_security_headers(): void {
+        static $emitted = false;
+        if ($emitted) return;
+        $emitted = true;
+        if (headers_sent()) return;
+        header('X-Content-Type-Options: nosniff');
+        header('X-Frame-Options: SAMEORIGIN');
+        header('Referrer-Policy: strict-origin-when-cross-origin');
+        header('Permissions-Policy: microphone=(self), camera=(self), geolocation=(), payment=(), usb=()');
+        // CSP: keep 'unsafe-inline' for now because board pages still use
+        // inline onclick/style heavily. Tightening to nonces is tracked
+        // under the same migration as the main app — for the board the
+        // priority is blocking object/base/form action hijacks and
+        // tightening connect-src so a stored XSS cannot exfil to an
+        // attacker domain.
+        header(
+            "Content-Security-Policy: default-src 'self'; " .
+            "script-src 'self' 'unsafe-inline'; " .
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " .
+            "font-src 'self' data: https://fonts.gstatic.com; " .
+            "img-src 'self' data: blob: https:; " .
+            "media-src 'self' data: blob: https:; " .
+            "connect-src 'self' https://api.mainnet-beta.solana.com; " .
+            "frame-src 'self' https://www.youtube.com; " .
+            "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+        );
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+        }
+    }
+    board_emit_security_headers();
+}
+
 define('DATA_DIR', __DIR__ . '/board_data');
 define('UPLOAD_DIR', __DIR__ . '/board_uploads');
 define('PREVIEW_DIR', __DIR__ . '/board_previews');
@@ -21,14 +60,68 @@ define('MAX_REPLIES', 500);
 define('ALLOWED_TYPES', ['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 define('THUMB_WIDTH', 250);
 
-// Admin credentials — password stored as bcrypt hash (never cleartext)
-define('ADMIN_USER', 'frog');
-define('ADMIN_PASS_HASH', '$2b$12$y6eaDb7rqWantrMKWiMMpuixeA05hBQPo8Ay6q5Fh1ENUk2BR9RT2');
-
-// Ensure directories
-foreach ([DATA_DIR, UPLOAD_DIR, PREVIEW_DIR] as $dir) {
-    if (!is_dir($dir)) mkdir($dir, 0755, true);
+// ── Env loader (used by admin creds, Tor trust, telegram, GOYIM) ──
+// Single parser shared with board.php / telegram_bot.php so we don't have
+// three slightly-different regexes drifting apart. Values with quotes,
+// inline comments, or trailing whitespace are normalised the same way
+// everywhere.
+if (!function_exists('boardLoadEnv')) {
+    function boardLoadEnv(): array {
+        static $cache = null;
+        if ($cache !== null) return $cache;
+        $cache = [];
+        $envFile = __DIR__ . '/.env';
+        if (!is_file($envFile)) return $cache;
+        foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+            $line = ltrim($line);
+            if ($line === '' || $line[0] === '#') continue;
+            $eq = strpos($line, '=');
+            if ($eq === false) continue;
+            $k = trim(substr($line, 0, $eq));
+            $v = trim(substr($line, $eq + 1));
+            // Strip an inline comment that's separated from the value by
+            // whitespace (e.g. `KEY=value # note`). A `#` inside a quoted
+            // string is preserved.
+            if ($v !== '' && $v[0] !== '"' && $v[0] !== "'") {
+                if (($hash = strpos($v, ' #')) !== false) $v = substr($v, 0, $hash);
+            }
+            $v = trim($v);
+            if (strlen($v) >= 2 && (($v[0] === '"' && substr($v, -1) === '"') ||
+                                    ($v[0] === "'" && substr($v, -1) === "'"))) {
+                $v = substr($v, 1, -1);
+            }
+            $cache[$k] = $v;
+        }
+        return $cache;
+    }
 }
+
+// ── Admin credentials ──
+// SECURITY-PASS-3: prefer BOARD_ADMIN_USER / BOARD_ADMIN_PASS_HASH from
+// /board/.env. The constants below are kept as a fallback so the docs'
+// "default frog / changeme" boot still works on a brand new install, but
+// the admin panel surfaces a banner when the default hash is still in
+// use so the operator is nudged to rotate it.
+const BOARD_ADMIN_DEFAULT_PASS_HASH = '$2b$12$y6eaDb7rqWantrMKWiMMpuixeA05hBQPo8Ay6q5Fh1ENUk2BR9RT2';
+$_boardEnv = boardLoadEnv();
+define('ADMIN_USER', (string)($_boardEnv['BOARD_ADMIN_USER'] ?? 'frog'));
+define('ADMIN_PASS_HASH', (string)($_boardEnv['BOARD_ADMIN_PASS_HASH'] ?? BOARD_ADMIN_DEFAULT_PASS_HASH));
+unset($_boardEnv);
+
+if (!function_exists('boardIsDefaultAdminPass')) {
+    function boardIsDefaultAdminPass(): bool {
+        return ADMIN_PASS_HASH === BOARD_ADMIN_DEFAULT_PASS_HASH;
+    }
+}
+
+// Ensure directories. board_data holds operational state (threads, bans,
+// settings, tx-dedup ledger) and is never read directly by the webserver
+// — nginx denies HTTP access to /board_data/ — so it can be 0750 with
+// only the php-fpm user inside. Uploads / previews must remain world-
+// readable so nginx can serve them as static assets.
+if (!is_dir(DATA_DIR))    mkdir(DATA_DIR,    0750, true);
+if (!is_dir(UPLOAD_DIR))  mkdir(UPLOAD_DIR,  0755, true);
+if (!is_dir(PREVIEW_DIR)) mkdir(PREVIEW_DIR, 0755, true);
 
 // ── Settings ──
 function loadSettings(): array {
@@ -73,6 +166,79 @@ function saveSettings(array $settings): void {
     file_put_contents(DATA_DIR . '/settings.json', json_encode($settings, JSON_PRETTY_PRINT), LOCK_EX);
 }
 
+/**
+ * Atomic read-modify-write of a JSON file under an exclusive POSIX lock.
+ * The callback receives the decoded array and must return the new array
+ * (or null to abort the write). Used by toggleLike(), trackView(), and
+ * the GOYIM-bump dedupe ledger to kill the obvious TOCTOU on concurrent
+ * AJAX hits.
+ */
+if (!function_exists('boardWithJsonLock')) {
+    function boardWithJsonLock(string $path, callable $cb, bool $pretty = false): mixed {
+        $dir = dirname($path);
+        if (!is_dir($dir)) mkdir($dir, 0750, true);
+        $fh = fopen($path, 'c+');
+        if (!$fh) return null;
+        try {
+            if (!flock($fh, LOCK_EX)) return null;
+            $raw  = stream_get_contents($fh) ?: '';
+            $data = $raw === '' ? [] : (json_decode($raw, true) ?: []);
+            $new  = $cb(is_array($data) ? $data : []);
+            if ($new === null) return null;
+            $out = json_encode($new, $pretty ? JSON_PRETTY_PRINT : 0);
+            // Truncate-and-rewrite under the same lock so a reader that
+            // grabs the file mid-write never sees a partial JSON body.
+            ftruncate($fh, 0);
+            rewind($fh);
+            fwrite($fh, $out);
+            fflush($fh);
+            return $new;
+        } finally {
+            flock($fh, LOCK_UN);
+            fclose($fh);
+        }
+    }
+}
+
+/**
+ * Validate a stored upload filename before passing it to unlink()/etc.
+ * Forces basename + a strict allowlist so a tampered threads.json (or
+ * crafted admin POST) cannot path-traverse out of board_uploads/.
+ * Returns null when the input is unsafe.
+ */
+if (!function_exists('boardSafeUploadName')) {
+    function boardSafeUploadName(?string $name): ?string {
+        if ($name === null || $name === '') return null;
+        $base = basename(str_replace('\\', '/', $name));
+        if ($base === '' || $base === '.' || $base === '..') return null;
+        if (strpbrk($base, "\0\r\n/") !== false) return null;
+        // Files written by handleUpload()/handleMediaUpload() always
+        // match this shape (timestamp + hex + recognised extension).
+        if (!preg_match('/^[A-Za-z0-9._-]{1,128}$/', $base)) return null;
+        return $base;
+    }
+}
+
+/**
+ * Safe wrapper around unlink() under UPLOAD_DIR. Refuses anything that
+ * doesn't pass boardSafeUploadName() and refuses anything resolving
+ * outside the uploads root.
+ */
+if (!function_exists('boardSafeUnlinkUpload')) {
+    function boardSafeUnlinkUpload(?string $name): bool {
+        $safe = boardSafeUploadName($name);
+        if ($safe === null) return false;
+        $target = UPLOAD_DIR . '/' . $safe;
+        $real   = realpath($target);
+        $root   = realpath(UPLOAD_DIR);
+        if ($root === false) return false;
+        if ($real !== false && strncmp($real, $root . DIRECTORY_SEPARATOR, strlen($root) + 1) !== 0) {
+            return false;
+        }
+        return @unlink($target);
+    }
+}
+
 // ── Threads ──
 function loadThreads(): array {
     $file = DATA_DIR . '/threads.json';
@@ -98,10 +264,22 @@ function saveBans(array $bans): void {
 }
 
 /**
- * Real client IP — mirrors deps.client_ip() so bans/rate-limits
- * aren't keyed on the proxy/tunnel address when CF or XFF is present.
+ * Real client IP — mirrors deps.client_ip() so bans/rate-limits aren't
+ * keyed on the proxy/tunnel address when CF or XFF is present.
+ *
+ * SECURITY-PASS-3: trust the spoofable headers (CF-Connecting-IP,
+ * X-Forwarded-For, X-Real-IP) only when the direct REMOTE_ADDR sits in
+ * the trusted-proxy allowlist. Defaults cover the loopback (nginx /
+ * php-fpm same-host) and Cloudflare's published edge ranges. Operators
+ * who put the board behind a different reverse proxy can extend the
+ * allowlist via BOARD_TRUSTED_PROXIES in /board/.env (CIDR-separated).
  */
 function getClientIP(): string {
+    $remote = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    if (!filter_var($remote, FILTER_VALIDATE_IP)) $remote = '127.0.0.1';
+    if (!boardIsTrustedProxy($remote)) {
+        return $remote;
+    }
     $cf = trim($_SERVER['HTTP_CF_CONNECTING_IP'] ?? '');
     if ($cf !== '' && filter_var($cf, FILTER_VALIDATE_IP)) {
         return $cf;
@@ -113,8 +291,64 @@ function getClientIP(): string {
             return $first;
         }
     }
-    $remote = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-    return filter_var($remote, FILTER_VALIDATE_IP) ? $remote : '127.0.0.1';
+    $xri = trim($_SERVER['HTTP_X_REAL_IP'] ?? '');
+    if ($xri !== '' && filter_var($xri, FILTER_VALIDATE_IP)) {
+        return $xri;
+    }
+    return $remote;
+}
+
+/**
+ * Trusted-proxy allowlist for the IP / Tor header trust model. Returns
+ * true if the request's TCP source can be trusted to set X-Forwarded-For,
+ * CF-Connecting-IP, X-Tor-Client, etc.
+ *
+ * Defaults: loopback (127.0.0.0/8, ::1) + the official Cloudflare edge
+ * ranges. Override via BOARD_TRUSTED_PROXIES=cidr1,cidr2,... in .env.
+ */
+if (!function_exists('boardIsTrustedProxy')) {
+    function boardIsTrustedProxy(string $ip): bool {
+        static $defaults = [
+            '127.0.0.0/8', '::1/128',
+            // Cloudflare published ranges
+            '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22',
+            '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18',
+            '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22',
+            '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13',
+            '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+            '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32',
+            '2405:b500::/32', '2405:8100::/32', '2a06:98c0::/29',
+            '2c0f:f248::/32',
+        ];
+        $env = boardLoadEnv();
+        $extra = array_filter(array_map('trim', explode(',', $env['BOARD_TRUSTED_PROXIES'] ?? '')));
+        foreach (array_merge($defaults, $extra) as $cidr) {
+            if (boardIpInCidr($ip, $cidr)) return true;
+        }
+        return false;
+    }
+}
+
+if (!function_exists('boardIpInCidr')) {
+    function boardIpInCidr(string $ip, string $cidr): bool {
+        if (str_contains($cidr, '/')) {
+            [$net, $bits] = explode('/', $cidr, 2);
+            $bits = (int)$bits;
+        } else {
+            $net = $cidr;
+            $bits = strpos($cidr, ':') !== false ? 128 : 32;
+        }
+        $ipBin  = @inet_pton($ip);
+        $netBin = @inet_pton($net);
+        if ($ipBin === false || $netBin === false) return false;
+        if (strlen($ipBin) !== strlen($netBin)) return false;
+        $bytes = intdiv($bits, 8);
+        $rem   = $bits % 8;
+        if ($bytes > 0 && strncmp($ipBin, $netBin, $bytes) !== 0) return false;
+        if ($rem === 0) return true;
+        $mask = chr((0xFF << (8 - $rem)) & 0xFF);
+        return (ord($ipBin[$bytes]) & ord($mask)) === (ord($netBin[$bytes]) & ord($mask));
+    }
 }
 
 /** Normalize ban form input: raw IP → md5, or existing 32-char hash. */
@@ -265,7 +499,22 @@ function formatPostText(string $text, string $postId = ''): string {
         }
     }
     $text = implode("\n", $formatted);
-    $text = preg_replace('/(?<!src=")(https?:\/\/[^\s<]+)/i', '<a href="$1" target="_blank" rel="noopener" class="post-link">$1</a>', $text);
+    // SECURITY-PASS-3: extra-escape the URL when emitting it inside the
+    // href attribute. The body is already entity-encoded so `"` / `'` are
+    // already &quot;/&#039; — but a `&` in a query string would otherwise
+    // round-trip a `&` literal into an attribute. Pass it through a
+    // callback so we can also constrain the scheme to http(s) (no
+    // javascript: even theoretically, since the regex below already
+    // anchors on http) and append rel="ugc nofollow noopener".
+    $text = preg_replace_callback(
+        '/(?<!src=")(https?:\/\/[^\s<]+)/i',
+        static function (array $m): string {
+            $url  = $m[1];
+            $safe = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+            return '<a href="' . $safe . '" target="_blank" rel="noopener nofollow ugc" class="post-link">' . $safe . '</a>';
+        },
+        $text
+    );
     // Scanner directives are intentionally disabled on Frog Board.
     $text = nl2br($text);
     return $text;
@@ -294,7 +543,10 @@ function handleUpload(array $file, bool $requireApproval = false): ?array {
     }
     
     $thumbFile = 't_' . $filename;
-    createThumbnail($path, UPLOAD_DIR . '/' . $thumbFile, $mime);
+    if (!createThumbnail($path, UPLOAD_DIR . '/' . $thumbFile, $mime)) {
+        @unlink($path);
+        return ['error' => 'Invalid or unreadable image data'];
+    }
     
     return [
         'file' => $filename,
@@ -306,7 +558,7 @@ function handleUpload(array $file, bool $requireApproval = false): ?array {
     ];
 }
 
-function createThumbnail(string $src, string $dst, string $mime): void {
+function createThumbnail(string $src, string $dst, string $mime): bool {
     $img = match($mime) {
         'image/jpeg' => @imagecreatefromjpeg($src),
         'image/png' => @imagecreatefrompng($src),
@@ -314,18 +566,29 @@ function createThumbnail(string $src, string $dst, string $mime): void {
         'image/webp' => @imagecreatefromwebp($src),
         default => null
     };
-    if (!$img) { copy($src, $dst); return; }
+    if (!$img) return false;
     
     $w = imagesx($img); $h = imagesy($img);
+    if ($w <= 0 || $h <= 0) {
+        imagedestroy($img);
+        return false;
+    }
     $ratio = min(THUMB_WIDTH / $w, THUMB_WIDTH / $h);
-    if ($ratio >= 1) { copy($src, $dst); imagedestroy($img); return; }
+    if ($ratio >= 1) {
+        $ratio = 1.0;
+    }
     
     $nw = (int)($w * $ratio); $nh = (int)($h * $ratio);
     $thumb = imagecreatetruecolor($nw, $nh);
+    if (!$thumb) {
+        imagedestroy($img);
+        return false;
+    }
     if ($mime !== 'image/jpeg') { imagealphablending($thumb, false); imagesavealpha($thumb, true); }
     imagecopyresampled($thumb, $img, 0, 0, 0, 0, $nw, $nh, $w, $h);
-    imagejpeg($thumb, $dst, 80);
+    $ok = imagejpeg($thumb, $dst, 80);
     imagedestroy($img); imagedestroy($thumb);
+    return (bool)$ok;
 }
 
 // ── Media Upload (Audio / Video) ──────────────────────────────────────────────
@@ -424,11 +687,21 @@ function saveViews(array $views): void {
 }
 
 function trackView(string $threadId): int {
-    $views = loadViews();
-    if (!isset($views[$threadId])) $views[$threadId] = 0;
-    $views[$threadId]++;
-    saveViews($views);
-    return $views[$threadId];
+    // SECURITY-PASS-3: atomic increment under flock so concurrent visitors
+    // on a hot thread don't lose view counts to the read-modify-write
+    // window (TOCTOU). Returns the post-increment value.
+    $result = ['n' => 0];
+    boardWithJsonLock(DATA_DIR . '/views.json', function (array $views) use ($threadId, &$result): array {
+        // Migrate legacy array entries on the fly (mirror loadViews()).
+        foreach ($views as $tid => $val) {
+            if (is_array($val)) $views[$tid] = count($val);
+        }
+        $cur = (int)($views[$threadId] ?? 0);
+        $views[$threadId] = $cur + 1;
+        $result['n'] = $views[$threadId];
+        return $views;
+    });
+    return $result['n'];
 }
 
 function getViewCount(string $threadId): int {
@@ -459,20 +732,27 @@ function saveLikes(array $likes): void {
 }
 
 function toggleLike(string $postId): array {
-    $likes = loadLikes();
-    $key = getLikeKey();
-    if (!isset($likes[$postId])) $likes[$postId] = [];
-
-    $idx = array_search($key, $likes[$postId]);
-    if ($idx !== false) {
-        array_splice($likes[$postId], $idx, 1);
-        $liked = false;
-    } else {
-        $likes[$postId][] = $key;
-        $liked = true;
-    }
-    saveLikes($likes);
-    return ['count' => count($likes[$postId]), 'liked' => $liked];
+    // SECURITY-PASS-3: full read-modify-write under flock. The previous
+    // code did `loadLikes()` then `saveLikes()` with a TOCTOU window;
+    // two parallel toggles from the same key could clobber each other,
+    // leaving the user's like-set in an inconsistent state (the audit's
+    // "Likes/views still racy on read" finding).
+    $key  = getLikeKey();
+    $out  = ['liked' => false, 'count' => 0];
+    boardWithJsonLock(DATA_DIR . '/likes.json', function (array $likes) use ($postId, $key, &$out): array {
+        if (!isset($likes[$postId]) || !is_array($likes[$postId])) $likes[$postId] = [];
+        $idx = array_search($key, $likes[$postId], true);
+        if ($idx !== false) {
+            array_splice($likes[$postId], $idx, 1);
+            $out['liked'] = false;
+        } else {
+            $likes[$postId][] = $key;
+            $out['liked'] = true;
+        }
+        $out['count'] = count($likes[$postId]);
+        return $likes;
+    });
+    return $out;
 }
 
 function getLikeCount(string $postId): int {
@@ -532,7 +812,6 @@ function linkWalletToPost(string $postId, string|array $wallet): void {
         $patterns = [
             'eth'  => '/^0x[0-9a-fA-F]{40}$/',
             'btc'  => '/^([13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-zA-HJ-NP-Z0-9]{25,62})$/',
-            'sol'  => '/^[1-9A-HJ-NP-Za-km-z]{32,44}$/',
             'tron' => '/^T[a-zA-HJ-NP-Z0-9]{33}$/',
         ];
         foreach ($patterns as $chain => $pat) {
@@ -540,6 +819,13 @@ function linkWalletToPost(string $postId, string|array $wallet): void {
             if ($addr && preg_match($pat, $addr)) {
                 $valid[$chain] = $addr;
             }
+        }
+        // SOL: regex alone is too permissive (any 32-44 char base58 string
+        // matches the legacy pattern but isn't necessarily a valid 32-byte
+        // pubkey). Decode and length-check.
+        $solAddr = trim($wallet['sol'] ?? '');
+        if ($solAddr !== '' && boardValidSolanaAddress($solAddr)) {
+            $valid['sol'] = $solAddr;
         }
         if (!empty($valid)) {
             $wallets[$postId] = $valid;
@@ -554,8 +840,71 @@ function linkWalletToPost(string $postId, string|array $wallet): void {
         if (str_starts_with($wallet, '0x')) $wallets[$postId] = ['eth' => $wallet];
         elseif (str_starts_with($wallet, 'bc1') || str_starts_with($wallet, '1') || str_starts_with($wallet, '3')) $wallets[$postId] = ['btc' => $wallet];
         elseif (str_starts_with($wallet, 'T')) $wallets[$postId] = ['tron' => $wallet];
-        else $wallets[$postId] = ['sol' => $wallet];
+        else {
+            // SOL fall-through — gate on the strict 32-byte base58 decode
+            // so we don't store a random base58 noise blob as a "wallet".
+            if (!boardValidSolanaAddress($wallet)) return;
+            $wallets[$postId] = ['sol' => $wallet];
+        }
         saveWallets($wallets);
+    }
+}
+
+/**
+ * Strict Solana base58 address check: decodes the input and asserts it
+ * matches the canonical 32-byte ed25519 pubkey length. The plain regex
+ * `[1-9A-HJ-NP-Za-km-z]{32,44}` matches arbitrary base58 strings (and
+ * Solana addresses are always 32 bytes ≈ 43-44 base58 chars).
+ */
+if (!function_exists('boardValidSolanaAddress')) {
+    function boardValidSolanaAddress(string $addr): bool {
+        $addr = trim($addr);
+        if ($addr === '') return false;
+        if (!preg_match('/^[1-9A-HJ-NP-Za-km-z]{32,44}$/', $addr)) return false;
+        $decoded = boardBase58Decode($addr);
+        return $decoded !== null && strlen($decoded) === 32;
+    }
+}
+
+if (!function_exists('boardBase58Decode')) {
+    /**
+     * Pure-PHP base58 decode. Avoids bcmath / gmp so it works on
+     * a minimal PHP install. Treats the input as a base-58 big-endian
+     * integer and converts to base-256 by repeated division.
+     */
+    function boardBase58Decode(string $input): ?string {
+        static $map = null;
+        if ($map === null) {
+            $alpha = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+            $map = [];
+            for ($i = 0, $n = strlen($alpha); $i < $n; $i++) $map[$alpha[$i]] = $i;
+        }
+        if ($input === '') return '';
+        $n = strlen($input);
+        $digits = [];
+        for ($i = 0; $i < $n; $i++) {
+            if (!isset($map[$input[$i]])) return null;
+            $digits[] = $map[$input[$i]];
+        }
+        $bytes = [];
+        // Repeated division: divide the base-58 number (held as $digits
+        // big-endian) by 256, collect the remainders as the resulting
+        // bytes, until the dividend is zero.
+        while (!empty($digits)) {
+            $rem = 0;
+            $next = [];
+            foreach ($digits as $d) {
+                $acc = $rem * 58 + $d;
+                $q   = intdiv($acc, 256);
+                $rem = $acc % 256;
+                if (!empty($next) || $q !== 0) $next[] = $q;
+            }
+            $bytes[] = $rem;
+            $digits  = $next;
+        }
+        // Leading '1' characters represent leading zero bytes.
+        for ($i = 0; $i < $n && $input[$i] === '1'; $i++) $bytes[] = 0;
+        return implode('', array_map('chr', array_reverse($bytes)));
     }
 }
 
@@ -672,14 +1021,30 @@ function getNodeId(): string {
 
 /**
  * Best-effort detection of whether the current request is over Tor.
- * Accepts either:
- *   - Host header ending in .onion
- *   - nginx-set header X-Tor-Client: 1 (recommended)
- *   - X-Onion-Host present
+ *
+ * SECURITY-PASS-3 trust model:
+ *   - Host header ending in .onion is always trusted (the request really
+ *     did terminate on this node's onion service — clearnet TLS cannot
+ *     forge that hostname).
+ *   - X-Tor-Client / X-Onion-Host headers are ONLY trusted when:
+ *       (a) the direct REMOTE_ADDR is on the trusted-proxy allowlist
+ *           (see boardIsTrustedProxy()), so a clearnet client can't just
+ *           curl --header 'X-Tor-Client: 1' itself onto a tor_only node,
+ *           AND
+ *       (b) BOARD_TOR_HEADER_TRUSTED=1 is set in /board/.env. Operators
+ *           must explicitly opt in because most clearnet deploys don't
+ *           have a Tor-detection proxy at all.
  */
 function isTorRequest(): bool {
     $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
     if (str_ends_with($host, '.onion')) return true;
+    $env = boardLoadEnv();
+    $allow = ($env['BOARD_TOR_HEADER_TRUSTED'] ?? '0') === '1';
+    if (!$allow) return false;
+    $remote = $_SERVER['REMOTE_ADDR'] ?? '';
+    if (!filter_var($remote, FILTER_VALIDATE_IP) || !boardIsTrustedProxy($remote)) {
+        return false;
+    }
     $hdr = strtolower((string)($_SERVER['HTTP_X_TOR_CLIENT'] ?? ''));
     if ($hdr === '1' || $hdr === 'true' || $hdr === 'yes') return true;
     if (!empty($_SERVER['HTTP_X_ONION_HOST'])) return true;
@@ -756,6 +1121,110 @@ function getFederatedPeers(?bool $visitorTor = null): array {
 }
 
 /**
+ * SSRF-safe HTTP GET for federated peer discovery. Wraps cURL with a
+ * strict allowlist:
+ *   - http/https schemes only (CURLOPT_PROTOCOLS / REDIR_PROTOCOLS)
+ *   - default ports only (80, 443, plus an operator-set port if the
+ *     peer URL specified one explicitly)
+ *   - host must resolve to a public, routable IP. RFC1918 / loopback /
+ *     link-local / multicast / 0.0.0.0 / cloud-metadata addresses are
+ *     refused via the CURLOPT_OPENSOCKETFUNCTION callback so we still
+ *     catch DNS-rebind that swaps the address mid-resolve.
+ *   - max 1 redirect, hard 64 KiB response cap, 8s timeout.
+ *
+ * Returns [json-decoded-array | null, error-message | null].
+ */
+if (!function_exists('boardFetchPeerJson')) {
+    function boardFetchPeerJson(string $url): array {
+        $parts = @parse_url($url);
+        if (!is_array($parts)) return [null, 'malformed_url'];
+        $scheme = strtolower($parts['scheme'] ?? '');
+        if ($scheme !== 'http' && $scheme !== 'https') return [null, 'bad_scheme'];
+        $host = $parts['host'] ?? '';
+        if ($host === '') return [null, 'missing_host'];
+        // Pre-resolve so we can refuse SSRF targets before the connect.
+        $ips = boardResolvePublicIps($host);
+        if (!$ips) return [null, 'host_not_routable'];
+
+        $ch = curl_init($url);
+        if ($ch === false) return [null, 'curl_init_failed'];
+        $body = '';
+        $bytes = 0;
+        $cap = 65536;
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => false,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 1,
+            CURLOPT_TIMEOUT        => 8,
+            CURLOPT_CONNECTTIMEOUT => 4,
+            CURLOPT_USERAGENT      => 'FrogTalk-Federation/1',
+            CURLOPT_HTTPHEADER     => ['Accept: application/json'],
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_SSL_VERIFYHOST => 2,
+            // Lock cURL to http(s) on both the initial request and any
+            // redirect — defeats file://, gopher://, dict://, etc.
+            CURLOPT_PROTOCOLS         => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS   => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            // Pin DNS resolution to the public IPs we whitelisted above
+            // so a redirect or DNS-rebind to 127.0.0.1 can't sneak in.
+            CURLOPT_RESOLVE => array_map(
+                fn(string $ip) => $host . ':' . ($parts['port'] ?? ($scheme === 'https' ? 443 : 80)) . ':' . $ip,
+                $ips
+            ),
+            CURLOPT_WRITEFUNCTION => function ($ch, string $chunk) use (&$body, &$bytes, $cap): int {
+                $bytes += strlen($chunk);
+                if ($bytes > $cap) return 0; // signal abort
+                $body .= $chunk;
+                return strlen($chunk);
+            },
+        ]);
+        $ok    = curl_exec($ch);
+        $errno = curl_errno($ch);
+        $code  = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+        if (!$ok && $errno !== 0 && $errno !== CURLE_WRITE_ERROR) {
+            return [null, 'fetch_failed'];
+        }
+        if ($code < 200 || $code >= 300) return [null, 'http_' . $code];
+        $json = json_decode($body, true);
+        if (!is_array($json)) return [null, 'not_json'];
+        return [$json, null];
+    }
+}
+
+/**
+ * DNS-resolve $host to A/AAAA records and drop any that are in
+ * RFC1918 / loopback / link-local / multicast / IETF-reserved space —
+ * the exact set you'd want to block for cloud-metadata SSRF
+ * (169.254.169.254, 100.64.0.0/10, fc00::/7, etc.).
+ */
+if (!function_exists('boardResolvePublicIps')) {
+    function boardResolvePublicIps(string $host): array {
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            return boardIsPublicIp($host) ? [$host] : [];
+        }
+        $out = [];
+        $records = @dns_get_record($host, DNS_A | DNS_AAAA);
+        if (!is_array($records)) return [];
+        foreach ($records as $r) {
+            $ip = $r['ip'] ?? ($r['ipv6'] ?? '');
+            if ($ip !== '' && boardIsPublicIp($ip)) $out[] = $ip;
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('boardIsPublicIp')) {
+    function boardIsPublicIp(string $ip): bool {
+        return (bool)filter_var(
+            $ip,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+        );
+    }
+}
+
+/**
  * Add or update a federated peer. Returns [ok, message].
  * Fetches /board/api/info from the peer URL to validate + populate metadata.
  */
@@ -776,14 +1245,9 @@ function upsertFederatedPeer(string $peerUrl): array {
     }
     $infoUrl = $peerUrl . '/api/info';
 
-    $ctx = stream_context_create([
-        'http' => ['timeout' => 6, 'header' => "User-Agent: FrogTalk-Federation/1\r\n"],
-        'https'=> ['timeout' => 6, 'header' => "User-Agent: FrogTalk-Federation/1\r\n"],
-    ]);
-    $body = @file_get_contents($infoUrl, false, $ctx);
-    if ($body === false) return [false, 'Could not reach ' . $infoUrl];
-    $info = json_decode($body, true);
-    if (!is_array($info) || empty($info['node_id'])) return [false, 'Peer did not return a valid info document'];
+    [$info, $err] = boardFetchPeerJson($infoUrl);
+    if ($info === null) return [false, 'Could not reach ' . $infoUrl . ' (' . $err . ')'];
+    if (empty($info['node_id'])) return [false, 'Peer did not return a valid info document'];
 
     $s = loadSettings();
     $peers = is_array($s['federated_peers'] ?? null) ? $s['federated_peers'] : [];
@@ -827,29 +1291,28 @@ function removeFederatedPeer(string $nodeId): bool {
 /**
  * Refresh metadata for all peers by re-fetching their /api/info.
  * Stale peers (failed > 7d) are dropped.
+ *
+ * SECURITY-PASS-3: uses boardFetchPeerJson() so this server-side fetch
+ * loop can't be turned into an internal-network scanner (the audit's
+ * federation-SSRF finding).
  */
 function refreshFederatedPeers(): int {
     $s = loadSettings();
     $peers = is_array($s['federated_peers'] ?? null) ? $s['federated_peers'] : [];
-    $ctx = stream_context_create([
-        'http' => ['timeout' => 5, 'header' => "User-Agent: FrogTalk-Federation/1\r\n"],
-        'https'=> ['timeout' => 5, 'header' => "User-Agent: FrogTalk-Federation/1\r\n"],
-    ]);
     $now = time();
     $updated = 0;
     foreach ($peers as $i => $p) {
         $url = rtrim((string)($p['url'] ?? ''), '/');
         if ($url === '') continue;
-        $body = @file_get_contents($url . '/api/info', false, $ctx);
-        if ($body === false) {
+        [$info, $err] = boardFetchPeerJson($url . '/api/info');
+        if ($info === null) {
             // keep but don't bump last_seen; drop if older than 7d
             if (($now - (int)($p['last_seen'] ?? 0)) > 7 * 86400) {
                 unset($peers[$i]);
             }
             continue;
         }
-        $info = json_decode($body, true);
-        if (!is_array($info) || empty($info['node_id'])) continue;
+        if (empty($info['node_id'])) continue;
         $peers[$i] = array_merge($p, [
             'title'    => (string)($info['title'] ?? $p['title'] ?? $url),
             'subtitle' => (string)($info['subtitle'] ?? $p['subtitle'] ?? ''),

@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'temp_u
     $tempDir = UPLOAD_DIR . '/temp';
     if (!is_dir($tempDir)) mkdir($tempDir, 0755, true);
     foreach (glob($tempDir . '/*') ?: [] as $tf) {
-        if (is_file($tf) && filemtime($tf) < time() - 3600) @unlink($tf);
+        if (is_file($tf) && filemtime($tf) < time() - 600) @unlink($tf);
     }
     if (empty($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
         echo json_encode(['error' => 'Upload error']);
@@ -110,7 +110,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_GET['action'] ?? '') === 'temp_u
     finfo_close($finfo);
     $allowed = array_merge(MEDIA_ALLOWED_TYPES, ALLOWED_TYPES);
     if (!in_array($mime, $allowed)) { echo json_encode(['error' => 'Unsupported type']); exit; }
-    $ext  = preg_replace('/[^a-z0-9]/i', '', pathinfo($tf['name'] ?? 'file', PATHINFO_EXTENSION)) ?: 'bin';
+    // SECURITY-PASS-2: derive the extension from the SERVER-CONFIRMED MIME
+    // rather than from the attacker-supplied filename. Even with the
+    // upload-dir .htaccess + nginx block, a `.phtml` / `.phar` ending on
+    // disk is a footgun the operator should never have to think about.
+    $allowedMimeExt = [
+        'image/jpeg' => 'jpg', 'image/png' => 'png', 'image/gif' => 'gif', 'image/webp' => 'webp',
+        'audio/webm' => 'webm', 'audio/ogg' => 'ogg', 'audio/mpeg' => 'mp3',
+        'audio/mp4' => 'm4a', 'audio/wav' => 'wav', 'audio/x-wav' => 'wav',
+        'video/webm' => 'webm', 'video/mp4' => 'mp4',
+        'video/quicktime' => 'mov', 'video/x-matroska' => 'mkv',
+    ];
+    $ext = $allowedMimeExt[$mime] ?? 'bin';
+    if ($ext === 'bin') { echo json_encode(['error' => 'Unsupported type']); exit; }
     $name = 'tmp_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
     if (!move_uploaded_file($tf['tmp_name'], $tempDir . '/' . $name)) {
         echo json_encode(['error' => 'Save failed']);
@@ -444,12 +456,23 @@ function boostClass(float $goyimTips): string {
 /**
  * Check if a Solana wallet holds $GOYIM tokens via Solana mainnet RPC.
  * Returns ['holder' => bool, 'balance' => float].
+ *
+ * SECURITY-PASS-3: results are cached per-wallet for 60s so the
+ * unauthenticated AJAX endpoint can't be turned into a free Solana RPC
+ * proxy / holder enumerator. The cache is keyed by wallet so a real
+ * holder's `connect` UX still feels instant after the first call.
  */
 function checkGoyimHolder(string $wallet): array {
     if (!BOARD_GOYIM_CA || !$wallet) return ['holder' => false, 'balance' => 0];
-    // Basic Solana address sanity check
-    if (!preg_match('/^[1-9A-HJ-NP-Za-km-z]{32,44}$/', $wallet)) {
+    if (!boardValidSolanaAddress($wallet)) {
         return ['holder' => false, 'balance' => 0];
+    }
+    $cacheFile = DATA_DIR . '/goyim_holder_cache.json';
+    $now       = time();
+    $cache     = is_file($cacheFile) ? (json_decode((string)@file_get_contents($cacheFile), true) ?: []) : [];
+    if (!is_array($cache)) $cache = [];
+    if (isset($cache[$wallet]) && is_array($cache[$wallet]) && ($now - (int)($cache[$wallet]['t'] ?? 0)) < 60) {
+        return ['holder' => (bool)$cache[$wallet]['h'], 'balance' => (float)$cache[$wallet]['b']];
     }
     $rpc = 'https://api.mainnet-beta.solana.com';
     $payload = json_encode([
@@ -468,6 +491,8 @@ function checkGoyimHolder(string $wallet): array {
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
         CURLOPT_TIMEOUT        => 8,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS,
     ]);
     $res = curl_exec($ch);
     curl_close($ch);
@@ -478,7 +503,139 @@ function checkGoyimHolder(string $wallet): array {
         $balance += (float)($acct['account']['data']['parsed']['info']['tokenAmount']['uiAmount'] ?? 0);
     }
     $minTokens = defined('BOARD_GOYIM_MIN_TOKENS') ? (float)BOARD_GOYIM_MIN_TOKENS : 1.0;
-    return ['holder' => $balance >= $minTokens, 'balance' => $balance];
+    $holder    = $balance >= $minTokens;
+    // Refresh cache (keep last 500 wallets to bound the file).
+    $cache[$wallet] = ['t' => $now, 'h' => $holder, 'b' => $balance];
+    if (count($cache) > 500) {
+        uasort($cache, fn(array $a, array $b): int => (int)($b['t'] ?? 0) <=> (int)($a['t'] ?? 0));
+        $cache = array_slice($cache, 0, 500, true);
+    }
+    @file_put_contents($cacheFile, json_encode($cache), LOCK_EX);
+    return ['holder' => $holder, 'balance' => $balance];
+}
+
+/**
+ * Verify that a Solana transaction actually transferred at least
+ * $expectedAmount of $GOYIM from $wallet to the configured treasury.
+ *
+ * Returns ['ok' => bool, 'reason' => string, 'transferred' => float].
+ *
+ * SECURITY-PASS-3: closes the audit's "free GOYIM boost" CRITICAL —
+ * before this, the server incremented goyim_tips off a client-supplied
+ * amount with no on-chain check, so a curl POST could trivially top
+ * any thread for free. We now hit Solana RPC's getTransaction with
+ * encoding=jsonParsed, scan {pre,post}TokenBalances for an entry
+ * whose mint is BOARD_GOYIM_CA and whose owner is BOARD_GOYIM_TREASURY,
+ * and assert the delta is at least the requested amount. We also
+ * require $wallet to appear as a signer on the tx so an attacker who
+ * sniffs a real tx hash can't replay it from a different wallet.
+ */
+function verifyGoyimSplTransfer(string $txHash, string $wallet, float $expectedAmount): array {
+    if ($txHash === '' || !preg_match('/^[1-9A-HJ-NP-Za-km-z]{40,100}$/', $txHash)) {
+        return ['ok' => false, 'reason' => 'bad_tx_format', 'transferred' => 0.0];
+    }
+    if (!BOARD_GOYIM_CA || !BOARD_GOYIM_TREASURY) {
+        return ['ok' => false, 'reason' => 'verify_disabled', 'transferred' => 0.0];
+    }
+    if (!boardValidSolanaAddress($wallet)) {
+        return ['ok' => false, 'reason' => 'bad_wallet', 'transferred' => 0.0];
+    }
+    if ($expectedAmount <= 0) {
+        return ['ok' => false, 'reason' => 'bad_amount', 'transferred' => 0.0];
+    }
+    $payload = json_encode([
+        'jsonrpc' => '2.0', 'id' => 1,
+        'method'  => 'getTransaction',
+        'params'  => [
+            $txHash,
+            ['encoding' => 'jsonParsed', 'maxSupportedTransactionVersion' => 0, 'commitment' => 'confirmed']
+        ],
+    ]);
+    $ch = curl_init('https://api.mainnet-beta.solana.com');
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $payload,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_PROTOCOLS      => CURLPROTO_HTTPS,
+    ]);
+    $body = curl_exec($ch);
+    curl_close($ch);
+    if ($body === false) return ['ok' => false, 'reason' => 'rpc_failed', 'transferred' => 0.0];
+    $resp = json_decode((string)$body, true);
+    $tx   = $resp['result'] ?? null;
+    if (!is_array($tx)) return ['ok' => false, 'reason' => 'tx_not_found', 'transferred' => 0.0];
+    if (!empty($tx['meta']['err'])) return ['ok' => false, 'reason' => 'tx_failed', 'transferred' => 0.0];
+
+    // Signer check: $wallet must appear as a signer on the transaction.
+    $signers = [];
+    foreach (($tx['transaction']['message']['accountKeys'] ?? []) as $key) {
+        if (is_array($key) && !empty($key['signer'])) {
+            $signers[] = (string)($key['pubkey'] ?? '');
+        } elseif (is_string($key)) {
+            // Legacy / non-jsonParsed account key — treat all leading
+            // numRequiredSignatures entries as signers. Header is at
+            // transaction.message.header.numRequiredSignatures.
+            $signers[] = $key;
+        }
+    }
+    if (!in_array($wallet, $signers, true)) {
+        return ['ok' => false, 'reason' => 'wallet_not_signer', 'transferred' => 0.0];
+    }
+
+    // Sum the delta on any treasury-owned token account for our mint.
+    $pre  = $tx['meta']['preTokenBalances']  ?? [];
+    $post = $tx['meta']['postTokenBalances'] ?? [];
+    $treasuryPre  = 0.0;
+    $treasuryPost = 0.0;
+    foreach ($pre as $b) {
+        if (($b['mint'] ?? '') === BOARD_GOYIM_CA && ($b['owner'] ?? '') === BOARD_GOYIM_TREASURY) {
+            $treasuryPre += (float)($b['uiTokenAmount']['uiAmount'] ?? 0);
+        }
+    }
+    foreach ($post as $b) {
+        if (($b['mint'] ?? '') === BOARD_GOYIM_CA && ($b['owner'] ?? '') === BOARD_GOYIM_TREASURY) {
+            $treasuryPost += (float)($b['uiTokenAmount']['uiAmount'] ?? 0);
+        }
+    }
+    $delta = $treasuryPost - $treasuryPre;
+    // Allow a 0.5% slack for SPL decimal rounding on huge tips.
+    $needed = $expectedAmount * 0.995;
+    if ($delta < $needed) {
+        return ['ok' => false, 'reason' => 'insufficient_transfer', 'transferred' => $delta];
+    }
+    return ['ok' => true, 'reason' => 'ok', 'transferred' => $delta];
+}
+
+/**
+ * Append a tx hash to the dedup ledger and refuse if it's already
+ * been credited to a bump. Returns true if the hash was new and the
+ * caller may proceed. Ledger is capped to the most recent 5000 entries.
+ */
+function recordGoyimBumpTx(string $txHash, string $threadId, float $amount, string $wallet): bool {
+    if ($txHash === '') return false;
+    $accepted = false;
+    boardWithJsonLock(DATA_DIR . '/goyim_bumps_ledger.json', function (array $ledger) use ($txHash, $threadId, $amount, $wallet, &$accepted): array {
+        if (isset($ledger[$txHash])) {
+            $accepted = false;
+            return $ledger;
+        }
+        $ledger[$txHash] = [
+            'thread' => $threadId,
+            'amount' => $amount,
+            'wallet' => $wallet,
+            'time'   => time(),
+        ];
+        if (count($ledger) > 5000) {
+            uasort($ledger, fn(array $a, array $b): int => (int)($b['time'] ?? 0) <=> (int)($a['time'] ?? 0));
+            $ledger = array_slice($ledger, 0, 5000, true);
+        }
+        $accepted = true;
+        return $ledger;
+    });
+    return $accepted;
 }
 
 /** Render the live boost badge span (replaces static ::before pseudo badge) */
@@ -634,6 +791,14 @@ $pageThreads = array_slice($threads, ($currentPage - 1) * $threadsPerPage, $thre
 // Handle AJAX like toggle
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'like') {
     header('Content-Type: application/json');
+    // SECURITY-PASS-3: CSRF on every state-mutating POST. The like
+    // endpoint is hit by AJAX so the JS now passes the page's
+    // <meta name="csrf-token"> value through formData.
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid session']);
+        exit;
+    }
     if (!checkAjaxRateLimit('like', 1)) {
         echo json_encode(['error' => 'Too fast']);
         exit;
@@ -641,7 +806,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'like'
     $postId = $_POST['post_id'] ?? '';
     if (!$isBanned && !empty($postId)) {
         $result = toggleLike($postId);
-        // If liking a thread OP (not a reply), bump the thread
+        // If liking a thread OP (not a reply), bump the thread — only
+        // when transitioning to liked (not on unlike) so toggle spam
+        // doesn't keep refreshing the bump timestamp.
         if ($result['liked']) {
             $bumpThreads = loadThreads();
             foreach ($bumpThreads as &$bt) {
@@ -663,6 +830,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'like'
 // Handle wallet link AJAX
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'link_wallet') {
     header('Content-Type: application/json');
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid session']);
+        exit;
+    }
     if (!checkAjaxRateLimit('wallet', 3)) {
         echo json_encode(['error' => 'Too fast']);
         exit;
@@ -689,20 +861,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'get_wal
 }
 
 // ═══ GOYIM BUMP ACTION ═══
+//
+// SECURITY-PASS-3: this endpoint used to credit the thread with whatever
+// amount the client claimed, with no on-chain check. A trivial curl POST
+// could permanently top any thread. We now:
+//   - require CSRF
+//   - require the wallet to be a real Solana pubkey
+//   - require the supplied tx_hash to actually transfer that amount of
+//     $GOYIM from $wallet to BOARD_GOYIM_TREASURY (verifyGoyimSplTransfer)
+//   - dedupe tx_hash via a JSON ledger so the same tx can't be replayed
+//   - re-check holder status server-side (don't trust client claim)
+//   - fall back to admin-only when verify-mode is incomplete (no treasury)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'goyim_bump') {
     header('Content-Type: application/json');
+    if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Invalid session']);
+        exit;
+    }
     if ($isBanned) { echo json_encode(['error' => 'Banned']); exit; }
     if (!checkAjaxRateLimit('goyim_bump', 10)) { echo json_encode(['error' => 'Too fast']); exit; }
-    // Pre-launch: only admin (session or admin wallet) can boost until $GOYIM token is live
     $isAdminForBump = isAdminLoggedIn();
     $bumperWallet   = trim($_POST['wallet'] ?? '');
+    $txHash         = trim((string)($_POST['tx_hash'] ?? ''));
     $isAdminWallet  = BOARD_GOYIM_ADMIN_WALLET && $bumperWallet === BOARD_GOYIM_ADMIN_WALLET;
-    if (!BOARD_GOYIM_CA && !$isAdminForBump && !$isAdminWallet) {
-        echo json_encode(['error' => 'Boost goes live when $GOYIM launches — admin only for now']); exit;
-    }
+
     $threadId = trim($_POST['thread_id'] ?? '');
     $amount   = max(0, (float)($_POST['amount'] ?? 0));
     if (empty($threadId) || $amount <= 0) { echo json_encode(['error' => 'Invalid request']); exit; }
+    // Per-user-per-thread cooldown so even a holder can't bump-spam
+    // beyond what they pay for. tx-dedupe blocks replay; this throttles
+    // submission volume.
+    if (!checkAjaxRateLimit('goyim_bump_' . substr(md5($bumperWallet . '|' . $threadId), 0, 8), 30)) {
+        echo json_encode(['error' => 'Slow down — wait a moment before bumping this thread again']);
+        exit;
+    }
+
+    if ($isAdminForBump || $isAdminWallet) {
+        // Admin bypass — no on-chain verification, but log it.
+        error_log('GOYIM bump (admin) thread=' . $threadId . ' amount=' . $amount);
+    } else {
+        // Non-admin: $GOYIM must be live, treasury must be configured,
+        // and a real on-chain transfer must back this bump.
+        if (!BOARD_GOYIM_CA) {
+            echo json_encode(['error' => 'Boost goes live when $GOYIM launches — admin only for now']); exit;
+        }
+        if (!BOARD_GOYIM_TREASURY) {
+            echo json_encode(['error' => 'Boost in verify-only mode — admin only until a treasury is configured']); exit;
+        }
+        if ($bumperWallet === '' || !boardValidSolanaAddress($bumperWallet)) {
+            echo json_encode(['error' => 'Connect a real Phantom wallet to boost']); exit;
+        }
+        if ($txHash === '' || str_starts_with($txHash, 'phantom-')) {
+            echo json_encode(['error' => 'Missing on-chain transaction signature']); exit;
+        }
+        $verify = verifyGoyimSplTransfer($txHash, $bumperWallet, $amount);
+        if (!$verify['ok']) {
+            error_log('GOYIM bump rejected: ' . $verify['reason'] . ' tx=' . $txHash . ' wallet=' . $bumperWallet . ' amount=' . $amount);
+            echo json_encode(['error' => 'On-chain verification failed (' . $verify['reason'] . ')']);
+            exit;
+        }
+        // Use the verified on-chain transfer amount, not the
+        // client-claimed amount — credit is capped at what actually
+        // moved (within the 0.5% decimal slack already applied).
+        $amount = min($amount, max($amount, $verify['transferred']));
+        if (!recordGoyimBumpTx($txHash, $threadId, $amount, $bumperWallet)) {
+            echo json_encode(['error' => 'This transaction has already been credited']); exit;
+        }
+        // Re-confirm holder status server-side so a flash-purchase+dump
+        // attack can't bump while the wallet shows zero balance.
+        $holder = checkGoyimHolder($bumperWallet);
+        if (!$holder['holder']) {
+            echo json_encode(['error' => 'Wallet must currently hold $GOYIM to boost']);
+            exit;
+        }
+    }
+
     $ts = loadThreads();
     $found = false; $newTips = 0;
     foreach ($ts as &$t) {
@@ -724,11 +958,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'goyim
 }
 
 // ═══ CHECK GOYIM HOLDER (AJAX) ═══
+// SECURITY-PASS-3: was unauthenticated + un-rate-limited, which made it
+// a free Solana RPC proxy and a holder enumerator. Cache lives in
+// checkGoyimHolder(); we additionally cap call frequency per session
+// and skip the RPC entirely when the wallet looks bogus.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'check_goyim_holder') {
     header('Content-Type: application/json');
+    if (!checkAjaxRateLimit('check_goyim_holder', 3)) {
+        echo json_encode(['holder' => false, 'balance' => 0, 'error' => 'Slow down']);
+        exit;
+    }
     $wallet = trim($_POST['wallet'] ?? '');
-    if (!$wallet) {
-        echo json_encode(['holder' => false, 'balance' => 0, 'error' => 'No wallet provided']);
+    if (!$wallet || !boardValidSolanaAddress($wallet)) {
+        echo json_encode(['holder' => false, 'balance' => 0, 'error' => 'Invalid wallet']);
         exit;
     }
     $result = checkGoyimHolder($wallet);
@@ -1868,39 +2110,6 @@ if ($singleThread) {
         body[data-theme="read"] .board-pagination .page-btn.disabled { color: #b0a090 !important; border-color: rgba(92,61,14,0.08) !important; }
         body[data-theme="read"] .board-pagination .page-ellipsis { color: #9a8060 !important; }
         body[data-theme="read"] .board-pagination .page-info { color: #9a8060 !important; }
-        /* ── Read mode: katsa result cards (if embedded) ── */
-        body[data-theme="read"] .katsa-result-card { background: #fff8ee !important; border-color: #d8c8ae !important; }
-        body[data-theme="read"] .katsa-result-header { background: rgba(92,61,14,0.06) !important; border-bottom-color: #d8c8ae !important; }
-        body[data-theme="read"] .katsa-result-title { color: #5c2e08 !important; text-shadow: none !important; }
-        body[data-theme="read"] .katsa-result-badge { background: rgba(92,61,14,0.1) !important; color: #7a3a10 !important; border-color: rgba(92,61,14,0.25) !important; }
-        body[data-theme="read"] .katsa-result-body { color: #2c2010 !important; }
-        body[data-theme="read"] .katsa-results { background: transparent !important; }
-        /* ── Read mode: katsa inline widget ── */
-        body[data-theme="read"] .katsa-inline-widget { background: #f4ede0 !important; border-color: #d8c8ae !important; font-family: Georgia, 'Times New Roman', serif !important; }
-        body[data-theme="read"] .katsa-inline-header { background: rgba(92,61,14,0.06) !important; border-bottom-color: #d8c8ae !important; }
-        body[data-theme="read"] .katsa-inline-label { color: #6a5030 !important; }
-        body[data-theme="read"] .katsa-inline-label strong { color: #5c2e08 !important; text-shadow: none !important; }
-        body[data-theme="read"] .katsa-inline-icon { filter: sepia(0.6) saturate(0.5) !important; }
-        body[data-theme="read"] .katsa-inline-run { background: rgba(92,61,14,0.08) !important; border-color: rgba(92,61,14,0.3) !important; color: #5c2e08 !important; box-shadow: none !important; filter: none !important; }
-        body[data-theme="read"] .katsa-inline-run:hover { background: rgba(92,61,14,0.15) !important; box-shadow: none !important; }
-        body[data-theme="read"] .katsa-inline-toggle { color: #9a8060 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-status { color: #7a6040 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-site { background: rgba(92,61,14,0.06) !important; border-color: rgba(92,61,14,0.18) !important; color: #7a3a10 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-site:hover { background: rgba(92,61,14,0.14) !important; border-color: rgba(92,61,14,0.35) !important; color: #5c2008 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-summary { color: #7a6040 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-summary strong { color: #5c2e08 !important; }
-        body[data-theme="read"] .katsa-inline-results a { color: #7a3a10 !important; }
-        /* Override all inline-style colors and backgrounds inside katsa results for read mode */
-        body[data-theme="read"] .katsa-inline-results * { color: #5c3010 !important; }
-        body[data-theme="read"] .katsa-inline-results > div[style] { background: rgba(92,61,14,0.04) !important; border-color: rgba(92,61,14,0.15) !important; }
-        body[data-theme="read"] .katsa-inline-results div[style*="background"] { background: rgba(92,61,14,0.04) !important; border-color: rgba(92,61,14,0.15) !important; }
-        body[data-theme="read"] .katsa-inline-results strong { color: #3a1e08 !important; }
-        body[data-theme="read"] .katsa-inline-results details { background: rgba(92,61,14,0.04) !important; border-color: rgba(92,61,14,0.18) !important; }
-        body[data-theme="read"] .katsa-inline-results summary { color: #7a4820 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-summary { color: #7a6040 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-summary strong { color: #3a1e08 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-site { background: rgba(92,61,14,0.06) !important; border-color: rgba(92,61,14,0.18) !important; color: #7a3a10 !important; }
-        body[data-theme="read"] .katsa-inline-results .katsa-il-site:hover { background: rgba(92,61,14,0.14) !important; border-color: rgba(92,61,14,0.35) !important; color: #5c2008 !important; }
         /* ── Read mode: boost/tip badges ── */
         body[data-theme="read"] .boost-badge { opacity: 0.8 !important; }
         /* ── Read mode: boost $GOYIM modal ── */
@@ -2715,122 +2924,7 @@ if ($singleThread) {
         /* Collapsible details chevron */
         details summary::-webkit-details-marker { display: none; }
         details[open] summary .tool-chevron { transform: rotate(90deg); }
-        
-        /* Katsa inline widget in posts */
-        .katsa-inline-widget {
-            margin: 10px 0;
-            border: 1px solid rgba(0,255,65,0.2);
-            border-radius: 6px;
-            background: rgba(0,20,0,0.5);
-            overflow: hidden;
-            font-family: 'Courier New', monospace;
-        }
-        .katsa-inline-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            background: rgba(0,255,65,0.06);
-            border-bottom: 1px solid rgba(0,255,65,0.1);
-            flex-wrap: wrap;
-        }
-        .katsa-inline-icon { font-size: 16px; }
-        .katsa-inline-label {
-            color: #4a8f4a;
-            font-size: 12px;
-            letter-spacing: 0.5px;
-            flex: 1;
-        }
-        .katsa-inline-label strong { color: #00ff41; }
-        .katsa-inline-run {
-            padding: 4px 12px;
-            background: rgba(0,255,65,0.1);
-            border: 1px solid rgba(0,255,65,0.3);
-            color: #00ff41;
-            font-family: 'Courier New', monospace;
-            font-size: 11px;
-            cursor: pointer;
-            border-radius: 3px;
-            transition: all 0.2s;
-        }
-        .katsa-inline-run:hover {
-            background: rgba(0,255,65,0.2);
-            box-shadow: 0 0 8px rgba(0,255,65,0.2);
-        }
-        .katsa-inline-run:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .katsa-inline-results {
-            padding: 0;
-        }
-        .katsa-inline-results.has-results {
-            padding: 10px 12px;
-        }
-        .katsa-inline-results .katsa-il-status {
-            color: #4a8f4a;
-            font-size: 11px;
-            padding: 8px 12px;
-        }
-        .katsa-inline-results .katsa-il-sites {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 4px;
-        }
-        .katsa-inline-results .katsa-il-site {
-            display: inline-block;
-            padding: 3px 8px;
-            background: rgba(0,255,65,0.06);
-            border: 1px solid rgba(0,255,65,0.1);
-            border-radius: 3px;
-            color: #5fffaf;
-            font-size: 10px;
-            text-decoration: none;
-            transition: all 0.15s;
-        }
-        .katsa-inline-results .katsa-il-site:hover {
-            background: rgba(0,255,65,0.15);
-            border-color: rgba(0,255,65,0.3);
-            color: #00ff41;
-        }
-        .katsa-inline-results .katsa-il-summary {
-            margin-top: 6px;
-            font-size: 11px;
-            color: #4a8f4a;
-        }
-        .katsa-inline-results .katsa-il-summary strong {
-            color: #00ff41;
-        }
-        .katsa-inline-results a {
-            text-decoration: none;
-        }
-        .katsa-inline-toggle {
-            color: #4a8f4a;
-            font-size: 10px;
-            margin-left: 4px;
-            transition: transform 0.2s ease;
-            user-select: none;
-        }
-        .katsa-inline-widget.collapsed .katsa-inline-results {
-            display: none;
-        }
-        .katsa-inline-widget.collapsed .katsa-inline-toggle {
-            transform: rotate(-90deg);
-        }
-        .katsa-inline-widget.collapsed .katsa-inline-header {
-            border-bottom: none;
-        }
-        /* Mobile fixes for katsa widget */
-        @media (max-width: 768px) {
-            .katsa-inline-widget { margin: 6px 0; }
-            .katsa-inline-header { padding: 6px 8px; gap: 4px; }
-            .katsa-inline-label { font-size: 10px; min-width: 0; word-break: break-word; }
-            .katsa-inline-run { padding: 3px 8px; font-size: 10px; white-space: nowrap; }
-            .katsa-inline-results.has-results { padding: 6px 8px; }
-            .katsa-inline-results .katsa-il-site { font-size: 9px; padding: 2px 5px; max-width: calc(50vw - 30px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .katsa-inline-results .katsa-il-sites { gap: 3px; }
-            .katsa-inline-results details summary { font-size: 8px !important; }
-        }
+
         /* Prevent horizontal scrolling globally */
         html, body { max-width: 100vw; overflow-x: hidden; }
         .post, .thread, .reply { max-width: 100%; overflow-wrap: break-word; word-wrap: break-word; word-break: break-word; }
@@ -3071,7 +3165,7 @@ if ($singleThread) {
                     <div class="thread-op clearfix <?= !empty($singleThread['is_holder']) ? 'holder-post' : '' ?>" id="p<?= $singleThread['id'] ?>">
                         <div class="post-header">
                             <?php if ($singleThread['subject']): ?>
-                                <span class="post-subject"><?= $singleThread['subject'] ?></span>
+                                <span class="post-subject"><?= htmlspecialchars($singleThread['subject'], ENT_QUOTES, 'UTF-8') ?></span>
                             <?php endif; ?>
                             <?php if ($singleThread['sticky'] ?? false): ?><span class="post-badge badge-sticky">📌 STICKY</span><?php endif; ?>
                             <?php if ($singleThread['locked'] ?? false): ?><span class="post-badge badge-locked">🔒 LOCKED</span><?php endif; ?>
@@ -3083,7 +3177,7 @@ if ($singleThread) {
                             <span class="post-anon-id">ID: <?= $singleThread['anonId'] ?></span>
                             <?php $opWallets = getPostWallets($singleThread['id']); if ($opWallets): ?>
                                 <?php foreach ($opWallets as $chain => $addr): ?>
-                                    <span class="post-wallet" onclick="copyWallet('<?= $addr ?>')" title="<?= strtoupper($chain) ?>: <?= $addr ?>"><?= walletIcon($addr) ?> <?= substr($addr, 0, 6) ?>...<?= substr($addr, -4) ?></span>
+                                    <span class="post-wallet" onclick="copyWallet('<?= htmlspecialchars($addr, ENT_QUOTES, 'UTF-8') ?>')" title="<?= strtoupper($chain) ?>: <?= htmlspecialchars($addr, ENT_QUOTES, 'UTF-8') ?>"><?= walletIcon($addr) ?> <?= htmlspecialchars(substr($addr, 0, 6), ENT_QUOTES, 'UTF-8') ?>...<?= htmlspecialchars(substr($addr, -4), ENT_QUOTES, 'UTF-8') ?></span>
                                 <?php endforeach; ?>
                             <?php endif; ?>
                             <?php if (!empty($singleThread['is_holder'])): ?><span class="goyim-holder-badge">&#x1F525; HOLDER<?php if (($singleThread['goyim_balance'] ?? 0) >= 1): ?><span class="gbadge-bal"> <?= number_format((float)$singleThread['goyim_balance'], 0) ?>G</span><?php endif; ?></span><?php endif; ?>
@@ -3163,7 +3257,7 @@ if ($singleThread) {
                                 <span class="post-anon-id">ID: <?= $reply['anonId'] ?></span>
                                 <?php $replyWallets = getPostWallets($reply['id']); if ($replyWallets): ?>
                                     <?php foreach ($replyWallets as $chain => $addr): ?>
-                                        <span class="post-wallet" onclick="copyWallet('<?= $addr ?>')" title="<?= strtoupper($chain) ?>: <?= $addr ?>"><?= walletIcon($addr) ?> <?= substr($addr, 0, 6) ?>...<?= substr($addr, -4) ?></span>
+                                        <span class="post-wallet" onclick="copyWallet('<?= htmlspecialchars($addr, ENT_QUOTES, 'UTF-8') ?>')" title="<?= strtoupper($chain) ?>: <?= htmlspecialchars($addr, ENT_QUOTES, 'UTF-8') ?>"><?= walletIcon($addr) ?> <?= htmlspecialchars(substr($addr, 0, 6), ENT_QUOTES, 'UTF-8') ?>...<?= htmlspecialchars(substr($addr, -4), ENT_QUOTES, 'UTF-8') ?></span>
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                                 <?php if (!empty($reply['is_holder'])): ?><span class="goyim-holder-badge">&#x1F525; HOLDER<?php if (($reply['goyim_balance'] ?? 0) >= 1): ?><span class="gbadge-bal"> <?= number_format((float)$reply['goyim_balance'], 0) ?>G</span><?php endif; ?></span><?php endif; ?>
@@ -3506,7 +3600,7 @@ if ($singleThread) {
                             <div class="thread-op clearfix <?= !empty($thread['is_holder']) ? 'holder-post' : '' ?>">
                                 <div class="post-header">
                                     <?php if ($thread['subject']): ?>
-                                        <a href="/board?thread=<?= $thread['id'] ?>" class="post-subject"><?= $thread['subject'] ?></a>
+                                        <a href="/board?thread=<?= $thread['id'] ?>" class="post-subject"><?= htmlspecialchars($thread['subject'], ENT_QUOTES, 'UTF-8') ?></a>
                                     <?php endif; ?>
                                     <?php if ($thread['sticky'] ?? false): ?><span class="post-badge badge-sticky">📌</span><?php endif; ?>
                                     <?php if ($thread['locked'] ?? false): ?><span class="post-badge badge-locked">🔒</span><?php endif; ?>
@@ -4126,6 +4220,9 @@ if ($singleThread) {
             const formData = new FormData();
             formData.append('action', 'like');
             formData.append('post_id', postId);
+            // SECURITY-PASS-3: CSRF on the AJAX like POST.
+            const _csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            if (_csrf) formData.append('csrf_token', _csrf);
             const res = await fetch('/board', { method: 'POST', body: formData });
             const data = await res.json();
             if (data.error) return;
@@ -5274,6 +5371,8 @@ if ($singleThread) {
             var fd = new FormData();
             fd.append('action', 'check_goyim_holder');
             fd.append('wallet', _gbumpPhantomPubkey);
+            var _csrfChk = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            if (_csrfChk) fd.append('csrf_token', _csrfChk);
             var r = await fetch('/board', { method: 'POST', body: fd });
             var result = await r.json();
             _gbumpHolderVerified = result.holder || false;
@@ -5463,6 +5562,8 @@ if ($singleThread) {
             fd.append('amount',    amount);
             fd.append('tx_hash',   txHash);
             fd.append('wallet',    _gbumpPhantomPubkey || '');
+            var _csrfGb = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            if (_csrfGb) fd.append('csrf_token', _csrfGb);
             var resp = await fetch('/board', { method: 'POST', body: fd });
             var result = await resp.json();
             if (result.ok) {
@@ -6506,7 +6607,9 @@ if ($singleThread) {
                     }
                     let walletHtml = '';
                     if (r.wallet) {
-                        walletHtml = '<span class="post-wallet" onclick="copyWallet(\'' + r.wallet + '\')" title="Click to copy">🦊 ' + r.wallet.slice(0,6) + '...' + r.wallet.slice(-4) + '</span>';
+                        const walletAddr = String(r.wallet);
+                        const walletJs = walletAddr.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                        walletHtml = '<span class="post-wallet" onclick="copyWallet(\'' + walletJs + '\')" title="Click to copy">🦊 ' + escapeHtml(walletAddr.slice(0,6)) + '...' + escapeHtml(walletAddr.slice(-4)) + '</span>';
                     }
                     let mediaHtml = '';
                     if (r.mediaUrl) {
@@ -6860,419 +6963,6 @@ if ($singleThread) {
         setInterval(spawnSymbol, 6000);
     })();
     
-    // ── Inline Katsa OSINT Widget (Multi-Field) ──
-    async function runInlineKatsa(widgetId) {
-        var widget = document.getElementById(widgetId);
-        var btn = document.querySelector('#' + widgetId + ' .katsa-inline-run');
-        var resultsDiv = document.getElementById(widgetId + '_results');
-        if (!btn || !resultsDiv || !widget) return;
-        
-        var username = widget.getAttribute('data-username') || '';
-        var email = widget.getAttribute('data-email') || '';
-        var phone = widget.getAttribute('data-phone') || '';
-        var nsfw = widget.getAttribute('data-nsfw') === '1';
-        
-        if (!username && !email && !phone) {
-            resultsDiv.innerHTML = '<div class="katsa-il-status" style="color:#ff4444;">❌ No search targets specified</div>';
-            return;
-        }
-        
-        btn.disabled = true;
-        btn.textContent = '⏳ SCANNING...';
-        
-        // Build status message
-        var targets = [];
-        if (username) targets.push('👤 @' + username);
-        if (email) targets.push('📧 ' + email);
-        if (phone) targets.push('📱 ' + phone);
-        resultsDiv.innerHTML = '<div class="katsa-il-status">🔍 Multi-scan: ' + targets.join(' · ') + '...</div>';
-        resultsDiv.className = 'katsa-inline-results has-results';
-        
-        var totalSearches = (username ? 1 : 0) + (email ? 2 : 0) + (phone ? 1 : 0);
-        var completedSearches = 0;
-        var allHtml = '';
-        var anyError = false;
-        var reportUrl = '';
-        var reportFileUrl = '';
-        
-        function updateProgress() {
-            completedSearches++;
-            if (completedSearches < totalSearches) {
-                btn.textContent = '⏳ ' + completedSearches + '/' + totalSearches + '...';
-            }
-        }
-        
-        function renderFinal() {
-            if (completedSearches < totalSearches) return;
-            if (!allHtml) {
-                allHtml = '<div class="katsa-il-status">No results found across all searches.</div>';
-            }
-            // Link to generated report file or share URL
-            var linkTarget = reportFileUrl || reportUrl || '/katsa';
-            // Append #results anchor for file pages so it scrolls past the header
-            if (reportFileUrl && reportFileUrl.indexOf('#') === -1) linkTarget = reportFileUrl + '?from=board#intel-summary';
-            var linkLabel = (reportFileUrl || reportUrl) ? '📂 view full report →' : '🔎 scan on katsa →';
-            allHtml += '<div style="margin-top:6px;text-align:right;"><a href="' + linkTarget + '" target="_blank" style="color:#4a6a4a;font-size:8px;font-family:monospace;text-decoration:none;letter-spacing:0.5px;">' + linkLabel + '</a></div>';
-            resultsDiv.innerHTML = allHtml;
-            btn.textContent = '✅ DONE';
-            btn.style.borderColor = 'rgba(0,255,65,0.3)';
-            btn.style.color = '#00ff41';
-            btn.disabled = true;
-            // Persist scan results in localStorage
-            try { localStorage.setItem('katsa_scan_' + widgetId, JSON.stringify({ html: allHtml, ts: Date.now() })); } catch(e) {}
-            // Don't auto-collapse on first scan — user needs to see the results
-            // Only auto-collapse when restored from cache (see restore logic below)
-        }
-        
-        // ── Username scan (board_scan API — async with polling) ──
-        if (username) {
-            (async function() {
-                try {
-                    var formData = new FormData();
-                    formData.append('api_action', 'board_scan');
-                    formData.append('username', username);
-                    if (nsfw) formData.append('nsfw', '1');
-                    var resp = await fetch('/katsa', { method: 'POST', body: formData });
-                    var data = await resp.json();
-                    
-                    // If server returned immediately with scanning status, poll for results
-                    if (data.status === 'scanning') {
-                        var phaseLabels = { 'starting': 'launching...', 'sherlock': 'sherlock scan...', 'verifying': 'verifying URLs...', 'secondary': 'deep scan...', 'merging': 'merging results...' };
-                        btn.textContent = '🔍 ' + (phaseLabels[data.phase] || 'scanning...');
-                        
-                        // Poll board_scan_status every 3 seconds
-                        var pollCount = 0;
-                        var maxPolls = 80; // 80 * 3s = 4 min max
-                        data = await new Promise(function(resolve, reject) {
-                            var pollTimer = setInterval(async function() {
-                                pollCount++;
-                                if (pollCount > maxPolls) {
-                                    clearInterval(pollTimer);
-                                    resolve({ error: 'Scan timed out' });
-                                    return;
-                                }
-                                try {
-                                    var pf = new FormData();
-                                    pf.append('api_action', 'board_scan_status');
-                                    pf.append('username', username);
-                                    var pr = await fetch('/katsa', { method: 'POST', body: pf });
-                                    var pd = await pr.json();
-                                    
-                                    if (pd.status === 'scanning') {
-                                        // Update progress indicator
-                                        var label = phaseLabels[pd.phase] || 'scanning...';
-                                        if (pd.sherlock_count) label = pd.sherlock_count + ' found, ' + label;
-                                        btn.textContent = '🔍 ' + label;
-                                    } else if (pd.status === 'error') {
-                                        clearInterval(pollTimer);
-                                        resolve({ error: pd.error || 'Scan failed' });
-                                    } else if (pd.success || pd.verified_count !== undefined) {
-                                        // Got full results
-                                        clearInterval(pollTimer);
-                                        resolve(pd);
-                                    } else if (pd.status === 'not_found') {
-                                        clearInterval(pollTimer);
-                                        resolve({ error: 'Scan lost' });
-                                    }
-                                } catch(pe) {
-                                    // Network glitch — keep polling
-                                }
-                            }, 3000);
-                        });
-                    }
-                    
-                    if (!data.error) {
-                        if (data.share_url) reportUrl = data.share_url;
-                        if (data.file_url) reportFileUrl = data.file_url;
-                        var vCount = data.verified_count || 0;
-                        var uCount = data.uncertain_count || 0;
-                        var html = '';
-                        // Header
-                        html += '<div style="margin-top:6px;padding:6px 8px;background:rgba(0,255,65,0.04);border:1px solid rgba(0,255,65,0.15);border-radius:3px;">';
-                        html += '<div style="color:#00ff41;font-size:9px;font-family:monospace;letter-spacing:1px;margin-bottom:4px;">👤 USERNAME: @' + username + '</div>';
-                        if (data.cached) {
-                            var ageText = data.cache_age < 60 ? 'just now' : data.cache_age < 3600 ? Math.floor(data.cache_age/60) + 'm ago' : Math.floor(data.cache_age/3600) + 'h ago';
-                            html += '<div style="font-size:8px;color:#00c8ff;margin-bottom:3px;">⚡ cached ' + ageText + '</div>';
-                        }
-                        html += '<div class="katsa-il-summary"><strong>' + vCount + '</strong> confirmed';
-                        if (uCount > 0) html += ', <span style="color:#ffd700;">' + uCount + ' not found</span>';
-                        html += '</div>';
-                        if (data.results && data.results.length > 0) {
-                            var mainResults = data.results.filter(function(r) { return r.status === 'verified' && !r.nsfw; });
-                            var nsfwResults = nsfw ? data.results.filter(function(r) { return r.status === 'verified' && r.nsfw; }) : [];
-                            if (mainResults.length > 0) {
-                                html += '<details style="margin:3px 0;"><summary style="cursor:pointer;color:#00ff41;font-size:9px;font-family:monospace;list-style:none;display:flex;align-items:center;gap:4px;user-select:none;padding:2px 0;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:8px;">▶</span> ✅ ' + mainResults.length + ' confirmed</summary>';
-                                html += '<div class="katsa-il-sites" style="margin-top:3px;">';
-                                mainResults.forEach(function(r) {
-                                    var srcTag = r.source === 'linkook' ? ' <span style="color:#00c8ff;font-size:7px;">🔗</span>' : '';
-                                    html += '<a href="' + r.url.replace(/"/g, '&quot;') + '" target="_blank" class="katsa-il-site">' + r.site + srcTag + ' ✅</a>';
-                                });
-                                html += '</div></details>';
-                            }
-                            if (nsfwResults.length > 0) {
-                                html += '<details style="margin-top:4px;"><summary style="color:#ff6496;font-size:9px;cursor:pointer;">🔞 ' + nsfwResults.length + ' adult accounts</summary>';
-                                html += '<div class="katsa-il-sites" style="margin-top:3px;">';
-                                nsfwResults.forEach(function(r) {
-                                    html += '<a href="' + r.url.replace(/"/g, '&quot;') + '" target="_blank" class="katsa-il-site" style="border-color:rgba(255,100,150,0.2);color:#ff6496;">' + r.site + ' 🔞</a>';
-                                });
-                                html += '</div></details>';
-                            }
-                        }
-                        // Linkook intel
-                        if (data.linkook) {
-                            var lk = data.linkook;
-                            if ((lk.related_usernames && lk.related_usernames.length > 0) || (lk.emails && lk.emails.length > 0)) {
-                                var lkCnt = (lk.related_usernames ? lk.related_usernames.length : 0) + (lk.emails ? lk.emails.length : 0);
-                                html += '<details style="margin-top:4px;border:1px solid rgba(0,200,255,0.15);border-radius:3px;background:rgba(0,200,255,0.04);"><summary style="padding:3px 6px;cursor:pointer;color:#00c8ff;font-size:8px;font-family:monospace;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 🔗 LINKOOK — ' + lkCnt + ' items</summary><div style="padding:3px 6px;">';
-                                if (lk.related_usernames && lk.related_usernames.length > 0) {
-                                    html += '<div style="font-size:8px;color:#4a8a8a;">Aliases: <strong style="color:#00c8ff;">' + lk.related_usernames.join('</strong>, <strong style="color:#00c8ff;">') + '</strong></div>';
-                                }
-                                if (lk.emails && lk.emails.length > 0) {
-                                    lk.emails.forEach(function(e) {
-                                        html += '<div style="font-size:8px;color:#4a8a8a;">📧 ' + e.email + (e.breached ? ' <span style="color:#ff4444;font-size:7px;">⚠ BREACHED</span>' : '') + '</div>';
-                                    });
-                                }
-                                html += '</div></details>';
-                            }
-                        }
-                        // Maigret results (included in board_scan response)
-                        if (data.maigret && data.maigret.found_count > 0) {
-                            var mData = data.maigret;
-                            html += '<details style="margin-top:4px;border:1px solid rgba(148,0,255,0.15);border-radius:3px;background:rgba(148,0,255,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#9400ff;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 🕵️ MAIGRET — ' + mData.found_count + ' accounts</summary><div style="padding:3px 6px;">';
-                            if (mData.results && mData.results.length > 0) {
-                                html += '<div class="katsa-il-sites" style="margin-top:4px;">';
-                                mData.results.slice(0, 20).forEach(function(r) {
-                                    var name = r.site_name || r.site || 'Unknown';
-                                    html += '<a href="' + (r.url || '#').replace(/"/g, '&quot;') + '" target="_blank" class="katsa-il-site" style="border-color:rgba(148,0,255,0.2);color:#9400ff;">' + name + ' ✅</a>';
-                                });
-                                if (mData.results.length > 20) html += '<span style="color:#9400ff;font-size:8px;">+' + (mData.results.length - 20) + ' more</span>';
-                                html += '</div>';
-                            }
-                            html += '</div></details>';
-                        }
-                        // WhatsMyName results (included in board_scan response)
-                        if (data.whatsmyname && data.whatsmyname.found_count > 0) {
-                            var wData = data.whatsmyname;
-                            html += '<details style="margin-top:4px;border:1px solid rgba(0,200,100,0.15);border-radius:3px;background:rgba(0,200,100,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#00c864;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 🌐 WMN — ' + wData.found_count + ' accounts</summary><div style="padding:3px 6px;">';
-                            if (wData.results && wData.results.length > 0) {
-                                html += '<div class="katsa-il-sites" style="margin-top:4px;">';
-                                wData.results.slice(0, 15).forEach(function(r) {
-                                    var name = r.site || 'Unknown';
-                                    html += '<a href="' + (r.url || '#').replace(/"/g, '&quot;') + '" target="_blank" class="katsa-il-site" style="border-color:rgba(0,200,100,0.2);color:#00c864;">' + name + ' ✅</a>';
-                                });
-                                if (wData.results.length > 15) html += '<span style="color:#00c864;font-size:8px;">+' + (wData.results.length - 15) + ' more</span>';
-                                html += '</div>';
-                            }
-                            html += '</div></details>';
-                        }
-                        html += '</div>';
-                        allHtml += html;
-                    }
-                } catch(err) { anyError = true; }
-                updateProgress();
-                renderFinal();
-            })();
-        }
-        
-                // ── Email scan (email_search API) ──
-        if (email) {
-            (async function() {
-                try {
-                    var formData = new FormData();
-                    formData.append('api_action', 'email_search');
-                    formData.append('email', email);
-                    var resp = await fetch('/katsa', { method: 'POST', body: formData });
-                    var data = await resp.json();
-                    if (!data.error) {
-                        var found = data.accounts_found || 0;
-                        var results = data.results || [];
-                        var html = '<details style="margin-top:4px;border:1px solid rgba(255,200,0,0.15);border-radius:3px;background:rgba(255,200,0,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#ffd700;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 📧 EMAIL — ' + found + ' sites</summary><div style="padding:3px 6px;">';
-                        if (data.cached) html += '<div style="font-size:8px;color:#00c8ff;margin-bottom:3px;">⚡ cached</div>';
-                        html += '<div class="katsa-il-summary">Registered on <strong>' + found + '</strong> sites</div>';
-                        if (found > 0) {
-                            html += '<div class="katsa-il-sites" style="margin-top:4px;">';
-                            results.forEach(function(r) {
-                                var site = r.site || r.name || 'Unknown';
-                                html += '<span class="katsa-il-site" style="border-color:rgba(255,200,0,0.2);color:#ffd700;">' + site + ' ✅</span>';
-                            });
-                            html += '</div>';
-                        }
-                        html += '</div></details>';
-                        allHtml += html;
-                    }
-                } catch(err) { anyError = true; }
-                updateProgress();
-                renderFinal();
-            })();
-        }
-        
-        // ── GHunt scan (email) ──
-        if (email) {
-            (async function() {
-                try {
-                    var formData = new FormData();
-                    formData.append('api_action', 'ghunt_scan');
-                    formData.append('email', email);
-                    var resp = await fetch('/katsa', { method: 'POST', body: formData });
-                    var data = await resp.json();
-                    if (!data.error && data.found && !data.needs_setup) {
-                        var gid = data.google_id || '';
-                        var html = '<details style="margin-top:4px;border:1px solid rgba(66,133,244,0.15);border-radius:3px;background:rgba(66,133,244,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#4285f4;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 🔍 GHUNT — ' + (data.google_name || 'Google Intel') + '</summary><div style="padding:3px 6px;">';
-                        if (data.cached) html += '<div style="font-size:8px;color:#00c8ff;margin-bottom:3px;">⚡ cached</div>';
-                        if (data.profile_photos && data.profile_photos.length > 0) { html += '<div style="margin-bottom:3px;">'; data.profile_photos.forEach(function(url) { html += '<img src="' + url + '" style="width:36px;height:36px;border-radius:50%;border:1px solid rgba(66,133,244,0.3);object-fit:cover;" />'; }); html += '</div>'; }
-                        if (data.google_name) html += '<div style="font-size:9px;color:#e8e8e8;">Name: <strong style="color:#4285f4;">' + data.google_name + '</strong></div>';
-                        if (data.google_id) html += '<div style="font-size:8px;color:#6a8a8a;">Gaia ID: <span style="user-select:all;">' + data.google_id + '</span></div>';
-                        if (data.last_edit) html += '<div style="font-size:8px;color:#6a8a8a;">Last edit: ' + data.last_edit + '</div>';
-                        if (data.entity_type) html += '<div style="font-size:8px;color:#6a8a8a;">Entity: ' + data.entity_type + '</div>';
-                        if (data.flathash) html += '<div style="font-size:8px;color:#6a8a8a;">Flathash: <code style="color:#4285f4;">' + data.flathash + '</code></div>';
-                        if (data.activated_services && data.activated_services.length > 0) {
-                            var svcLinks = { 'Maps': gid ? 'https://www.google.com/maps/contrib/' + gid : null, 'Photos': gid ? 'https://get.google.com/albumarchive/' + gid : null };
-                            html += '<div style="font-size:8px;color:#6a8a8a;margin-top:2px;">Services: ';
-                            data.activated_services.forEach(function(s) {
-                                var sl = svcLinks[s] || null;
-                                if (sl) html += '<a href="' + sl + '" target="_blank" style="color:#4285f4;font-size:8px;text-decoration:none;background:rgba(66,133,244,0.1);padding:0 4px;border-radius:2px;margin:0 1px;">' + s + ' ↗</a>';
-                                else html += '<span style="color:#4285f4;font-size:8px;margin:0 1px;">' + s + '</span>';
-                            });
-                            html += '</div>';
-                        }
-                        if (data.youtube_channel) html += '<div style="font-size:8px;"><a href="' + data.youtube_channel + '" target="_blank" style="color:#ff0000;">▶ YouTube ↗</a></div>';
-                        if (data.google_maps_url || data.google_maps) html += '<div style="font-size:8px;"><a href="' + (data.google_maps_url || data.google_maps) + '" target="_blank" style="color:#34a853;">🗺 Maps ↗</a></div>';
-                        if (data.maps_reviews) html += '<div style="font-size:8px;color:#6a8a8a;">Reviews: ' + data.maps_reviews + '</div>';
-                        html += '</div></details>';
-                        allHtml += html;
-                    }
-                } catch(err) {}
-                updateProgress();
-                renderFinal();
-            })();
-        }
-        
-                // ── Phone scan (phone_search API) ──
-        if (phone) {
-            (async function() {
-                try {
-                    // Parse country code from phone
-                    var cleanPhone = phone.replace(/^\+/, '');
-                    var countryCode = '+1';
-                    var phoneNum = cleanPhone;
-                    if (cleanPhone.length >= 11) {
-                        if (cleanPhone.startsWith('1') && cleanPhone.length === 11) { countryCode = '+1'; phoneNum = cleanPhone.substring(1); }
-                        else if (cleanPhone.startsWith('44')) { countryCode = '+44'; phoneNum = cleanPhone.substring(2); }
-                        else if (cleanPhone.startsWith('61')) { countryCode = '+61'; phoneNum = cleanPhone.substring(2); }
-                        else if (cleanPhone.startsWith('64')) { countryCode = '+64'; phoneNum = cleanPhone.substring(2); }
-                        else if (cleanPhone.startsWith('353')) { countryCode = '+353'; phoneNum = cleanPhone.substring(3); }
-                        else { countryCode = '+' + cleanPhone.substring(0,1); phoneNum = cleanPhone.substring(1); }
-                    }
-                    var formData = new FormData();
-                    formData.append('api_action', 'phone_search');
-                    formData.append('phone', phoneNum);
-                    formData.append('country_code', countryCode);
-                    var resp = await fetch('/katsa', { method: 'POST', body: formData });
-                    var data = await resp.json();
-                    if (!data.error) {
-                        var found = data.accounts_found || 0;
-                        var results = data.results || [];
-                        var html = '<details style="margin-top:4px;border:1px solid rgba(0,255,150,0.15);border-radius:3px;background:rgba(0,255,150,0.04);"><summary style="padding:4px 8px;cursor:pointer;color:#00ff96;font-size:9px;font-family:monospace;letter-spacing:1px;list-style:none;display:flex;align-items:center;gap:3px;user-select:none;"><span class="tool-chevron" style="display:inline-block;transition:transform 0.2s;font-size:7px;">▶</span> 📱 PHONE — ' + found + ' sites</summary><div style="padding:3px 6px;">';
-                        if (data.cached) html += '<div style="font-size:8px;color:#00c8ff;margin-bottom:3px;">⚡ cached</div>';
-                        html += '<div class="katsa-il-summary">Registered on <strong>' + found + '</strong> sites</div>';
-                        if (found > 0) {
-                            html += '<div class="katsa-il-sites" style="margin-top:4px;">';
-                            results.forEach(function(r) {
-                                var site = r.site || 'Unknown';
-                                html += '<span class="katsa-il-site" style="border-color:rgba(0,255,150,0.2);color:#00ff96;">' + site + ' ✅</span>';
-                            });
-                            html += '</div>';
-                        }
-                        html += '</div></details>';
-                        allHtml += html;
-                    }
-                } catch(err) { anyError = true; }
-                updateProgress();
-                renderFinal();
-            })();
-        }
-    }
-
-    // ── Toggle collapse/expand katsa widget ──
-    function toggleKatsaWidget(widgetId, event) {
-        // Don't toggle if clicking the RUN SCAN button
-        if (event && event.target.closest('.katsa-inline-run')) return;
-        var widget = document.getElementById(widgetId);
-        if (!widget) return;
-        widget.classList.toggle('collapsed');
-        try {
-            localStorage.setItem('katsa_collapse_' + widgetId, widget.classList.contains('collapsed') ? '1' : '0');
-        } catch(e) {}
-    }
-
-    // ── Restore cached scan results + collapse state from localStorage ──
-    document.addEventListener('DOMContentLoaded', function() {
-        document.querySelectorAll('.katsa-inline-widget').forEach(function(widget) {
-            var wid = widget.id;
-            try {
-                var saved = localStorage.getItem('katsa_scan_' + wid);
-                if (saved) {
-                    var data = JSON.parse(saved);
-                    // Only restore if less than 24h old
-                    if (data.html && data.ts && (Date.now() - data.ts) < 86400000) {
-                        var resultsDiv = document.getElementById(wid + '_results');
-                        if (resultsDiv) {
-                            resultsDiv.innerHTML = data.html;
-                            resultsDiv.className = 'katsa-inline-results has-results';
-                        }
-                        var btn = widget.querySelector('.katsa-inline-run');
-                        if (btn) {
-                            btn.textContent = '✅ DONE';
-                            btn.style.borderColor = 'rgba(0,255,65,0.3)';
-                            btn.style.color = '#00ff41';
-                            btn.disabled = true;
-                        }
-                    } else {
-                        // Expired — clean up
-                        localStorage.removeItem('katsa_scan_' + wid);
-                        localStorage.removeItem('katsa_collapse_' + wid);
-                    }
-                }
-                // Restore collapse state independently — always respect user's last toggle
-                var collapseState = localStorage.getItem('katsa_collapse_' + wid);
-                if (collapseState === '1') {
-                    widget.classList.add('collapsed');
-                } else if (collapseState === '0') {
-                    widget.classList.remove('collapsed');
-                }
-            } catch(e) {}
-        });
-    });
-
-    // ── Katsa scan queue: only 1 widget scans at a time to prevent lag ──
-    var katsaScanQueue = [];
-    var katsaScanRunning = false;
-
-    function queueInlineKatsa(widgetId) {
-        var btn = document.querySelector('#' + widgetId + ' .katsa-inline-run');
-        if (btn && btn.disabled) return; // already running or done
-        if (btn) {
-            btn.textContent = '⏳ QUEUED...';
-            btn.disabled = true;
-        }
-        katsaScanQueue.push(widgetId);
-        processKatsaQueue();
-    }
-
-    async function processKatsaQueue() {
-        if (katsaScanRunning || katsaScanQueue.length === 0) return;
-        katsaScanRunning = true;
-        var widgetId = katsaScanQueue.shift();
-        try {
-            await runInlineKatsa(widgetId);
-        } catch(e) {}
-        katsaScanRunning = false;
-        // Process next in queue after a short delay
-        if (katsaScanQueue.length > 0) {
-            setTimeout(processKatsaQueue, 300);
-        }
-    }
-
     // ════ BOOST BADGE LIVE COUNTDOWN & DECAY ════
 
     function _boostFmtTime(secs) {

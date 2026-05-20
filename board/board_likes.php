@@ -22,6 +22,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $postId = $_POST['post_id'] ?? '';
     
     if ($action === 'toggle' && !empty($postId)) {
+        if (!verifyCsrfToken($_POST['csrf_token'] ?? null)) {
+            http_response_code(403);
+            echo json_encode(['error' => 'Invalid session']);
+            exit;
+        }
         // Rate limit: 1 like action per second
         $key = 'last_like_time';
         if (isset($_SESSION[$key]) && (time() - $_SESSION[$key]) < 1) {

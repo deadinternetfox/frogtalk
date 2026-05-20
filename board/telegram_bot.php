@@ -12,6 +12,7 @@
  *      TELEGRAM_BOT_TOKEN=your_bot_token_here
  *      TELEGRAM_CHAT_ID=your_chat_id_here
  */
+require_once __DIR__ . '/board_config.php';
 
 class PeasantHuntTelegramBot {
     private string $botToken;
@@ -23,19 +24,11 @@ class PeasantHuntTelegramBot {
     }
     
     private function loadConfig(): void {
-        $envFile = __DIR__ . '/.env';
         $this->botToken = '';
         $this->chatId = '';
-        
-        if (file_exists($envFile)) {
-            $content = file_get_contents($envFile);
-            if (preg_match('/TELEGRAM_BOT_TOKEN=(.+)/', $content, $m)) {
-                $this->botToken = trim($m[1]);
-            }
-            if (preg_match('/TELEGRAM_CHAT_ID=(.+)/', $content, $m)) {
-                $this->chatId = trim($m[1]);
-            }
-        }
+        $env = boardLoadEnv();
+        $this->botToken = trim((string)($env['TELEGRAM_BOT_TOKEN'] ?? ''));
+        $this->chatId = trim((string)($env['TELEGRAM_CHAT_ID'] ?? ''));
         
         // Fallback: check if polling bot saved the group chat ID
         if (empty($this->chatId) && !empty($this->botToken)) {
