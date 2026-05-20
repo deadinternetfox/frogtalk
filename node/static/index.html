@@ -3976,6 +3976,17 @@ body:is([data-theme="dark"],[data-theme="frog"],:not([data-theme])) #modal-add-e
   font-size:14px;font-weight:700;color:var(--text-color);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25;
 }
+.chat-share-embed-author{
+  cursor:pointer;transition:color .15s;
+}
+.chat-share-embed-author:hover{
+  color:var(--accent-color);
+  text-decoration:underline;text-underline-offset:2px;
+}
+.profile-embed-handle.chat-share-embed-author{
+  display:inline-block;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
 .chat-share-embed-logo{
   font-size:18px;flex-shrink:0;opacity:.7;line-height:1;
 }

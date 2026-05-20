@@ -294,7 +294,12 @@ async function _loadDMSocialPostCard(msgId, postId) {
       _dmScrollIfNearBottom();
       return;
     }
-    const nick = esc(p.nickname || 'frog');
+    const rawNick = String(p.nickname || 'frog').replace(/^@+/, '').trim() || 'frog';
+    const nick = esc(rawNick);
+    const authorHandle =
+      `<span class="share-card-name chat-share-embed-author" role="button" tabindex="0"` +
+      ` onclick="event.stopPropagation();event.preventDefault();` +
+      `(window.Messages&&Messages.openSocialProfile?Messages.openSocialProfile('${nick}'):void 0)">@${nick}</span>`;
     const privacy = String(p.privacy || 'public').toLowerCase();
     const label = privacy === 'public' ? 'Frog Social Post' : (privacy === 'followers' ? 'Followers Post' : 'Private Post');
     let preview = String(p.content || '').trim();
@@ -310,7 +315,7 @@ async function _loadDMSocialPostCard(msgId, postId) {
         `<div style="flex-shrink:0">${UI.avatarEl(p.avatar || null, p.nickname || 'frog', 42)}</div>` +
         `<div class="share-card-info">` +
           `<div class="share-card-label">${esc(label)}</div>` +
-          `<div class="share-card-name">@${nick}</div>` +
+          `${authorHandle}` +
           `<div class="share-card-bio">${safePreview}</div>` +
         `</div>` +
       `</div>`;
@@ -340,7 +345,12 @@ async function _loadDMSocialReelCard(msgId, postId) {
       _dmScrollIfNearBottom();
       return;
     }
-    const nick = esc(p.nickname || 'frog');
+    const rawNick = String(p.nickname || 'frog').replace(/^@+/, '').trim() || 'frog';
+    const nick = esc(rawNick);
+    const authorHandle =
+      `<span class="share-card-name chat-share-embed-author" role="button" tabindex="0"` +
+      ` onclick="event.stopPropagation();event.preventDefault();` +
+      `(window.Messages&&Messages.openSocialProfile?Messages.openSocialProfile('${nick}'):void 0)">@${nick}</span>`;
     let preview = String(p.content || '').trim();
     if (!preview) preview = '🎬 Watch this reel in Frog Social';
     const safePreview = esc(preview.substring(0, 90));
@@ -350,7 +360,7 @@ async function _loadDMSocialReelCard(msgId, postId) {
         `<div style="flex-shrink:0">${UI.avatarEl(p.avatar || null, p.nickname || 'frog', 42)}</div>` +
         `<div class="share-card-info">` +
           `<div class="share-card-label">Frog Social Reel</div>` +
-          `<div class="share-card-name">@${nick}</div>` +
+          `${authorHandle}` +
           `<div class="share-card-bio">${safePreview}</div>` +
         `</div>` +
       `</div>`;

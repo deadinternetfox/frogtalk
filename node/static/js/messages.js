@@ -725,7 +725,7 @@ const Messages = (() => {
         `<div class="share-card-info profile-embed-info">` +
           `<div class="share-card-label">Frog Social Profile</div>` +
           `<div class="share-card-name profile-embed-name">${display}</div>` +
-          `<div class="profile-embed-handle">@${nick}</div>` +
+          `${_embedSocialAuthorHandleHtml(rawNick, 'profile-embed-handle')}` +
         `</div>` +
       `</div>` +
       (subtitle ? `<div class="share-card-bio profile-embed-bio">${subtitle}</div>` : '') +
@@ -854,8 +854,15 @@ const Messages = (() => {
     return null;
   }
 
+  function _embedSocialAuthorHandleHtml(rawNickname, extraClass) {
+    const raw = String(rawNickname || '').replace(/^@+/, '').trim() || 'frog';
+    const safe = UI.escHtml(raw);
+    const cls = extraClass ? `${extraClass} chat-share-embed-author` : 'chat-share-embed-name chat-share-embed-author';
+    return `<span class="${cls}" role="button" tabindex="0"` +
+      ` onclick="event.stopPropagation();event.preventDefault();Messages.openSocialProfile('${safe}')">@${safe}</span>`;
+  }
+
   function _renderRichShareEmbed(p, kind, postId, embedUrl) {
-    const nick = UI.escHtml(p.nickname || 'frog');
     const mediaType = String(p.media_type || '').toLowerCase();
     const isVideo = mediaType.startsWith('video/');
     const isImage = mediaType.startsWith('image/');
@@ -981,7 +988,7 @@ const Messages = (() => {
             `<div class="chat-share-embed-label">` +
               (isMusic ? `<span class="chat-share-embed-music-ico" aria-hidden="true">🎵</span>` : '') +
               `${UI.escHtml(label)}</div>` +
-            `<div class="chat-share-embed-name">@${nick}</div>` +
+            `${_embedSocialAuthorHandleHtml(p.nickname || 'frog')}` +
           `</div>` +
         `</div>` +
         (caption ? `<div class="chat-share-embed-caption">${safeCap}</div>` : '') +
