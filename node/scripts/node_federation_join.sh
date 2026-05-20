@@ -16,26 +16,13 @@
 set -u
 set -o pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/cli.sh
+source "$SCRIPT_DIR/lib/cli.sh"
+
 INSTALL_DIR_DEFAULT="/opt/frogtalk"
 OFFICIAL_DIRECTORY_DEFAULT="https://frogtalk.xyz/api/network/servers"
 ENV_FILE_NAME=".env"
-# ── Colors (disabled when not a TTY or NO_COLOR set) ─────────────────────────
-if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
-  C_RESET=$'\033[0m'
-  C_BOLD=$'\033[1m'
-  C_DIM=$'\033[2m'
-  C_GREEN=$'\033[32m'
-  C_YELLOW=$'\033[33m'
-  C_BLUE=$'\033[34m'
-  C_MAGENTA=$'\033[35m'
-  C_CYAN=$'\033[36m'
-  C_RED=$'\033[31m'
-  C_WHITE=$'\033[97m'
-  C_BG_GREEN=$'\033[42m'
-  C_BG_BLUE=$'\033[44m'
-else
-  C_RESET= C_BOLD= C_DIM= C_GREEN= C_YELLOW= C_BLUE= C_MAGENTA= C_CYAN= C_RED= C_WHITE= C_BG_GREEN= C_BG_BLUE=
-fi
 
 INSTALL_DIR=""
 ASSUME_YES=0
@@ -45,44 +32,22 @@ SKIP_RESTART=0
 PUBLIC_URL_OVERRIDE=""
 ONION_URL_OVERRIDE=""
 
-# ── UI helpers ───────────────────────────────────────────────────────────────
-say()     { printf "%b\n" "$*"; }
-blank()   { say ""; }
-
-banner() {
-  blank
-  say "${C_CYAN}${C_BOLD}  ╔═══════════════════════════════════════════════════════════╗${C_RESET}"
-  say "${C_CYAN}${C_BOLD}  ║${C_RESET}  ${C_GREEN}🐸 FrogTalk${C_RESET} ${C_WHITE}Federation Join${C_RESET}                              ${C_CYAN}${C_BOLD}║${C_RESET}"
-  say "${C_CYAN}${C_BOLD}  ║${C_RESET}  ${C_DIM}Connect your node to the mesh — chat + board nav${C_RESET}         ${C_CYAN}${C_BOLD}║${C_RESET}"
-  say "${C_CYAN}${C_BOLD}  ╚═══════════════════════════════════════════════════════════╝${C_RESET}"
-  blank
-}
-
-step_head() {
-  local n="$1" title="$2"
-  say "${C_MAGENTA}${C_BOLD}  ▸ Step ${n}${C_RESET} ${C_BOLD}${title}${C_RESET}"
-  say "${C_DIM}  ─────────────────────────────────────────────────────────${C_RESET}"
-}
-
-info()  { say "    ${C_BLUE}ℹ${C_RESET}  $*"; }
-ok()    { say "    ${C_GREEN}✔${C_RESET}  $*"; }
-warn()  { say "    ${C_YELLOW}⚠${C_RESET}  $*"; }
-err()   { say "    ${C_RED}✖${C_RESET}  $*"; }
-die()   { err "$*"; exit 1; }
-skip()  { say "    ${C_DIM}○  $*${C_RESET}"; }
-detail(){ say "       ${C_DIM}$*${C_RESET}"; }
-badge() { say "    ${C_BG_BLUE}${C_WHITE} $* ${C_RESET}"; }
-success_banner() {
-  blank
-  say "${C_GREEN}${C_BOLD}  ╭─────────────────────────────────────────────────────────╮${C_RESET}"
-  say "${C_GREEN}${C_BOLD}  │${C_RESET}  ${C_BG_GREEN}${C_WHITE} DONE ${C_RESET}  Node is wired into the FrogTalk federation.   ${C_GREEN}${C_BOLD}│${C_RESET}"
-  say "${C_GREEN}${C_BOLD}  ╰─────────────────────────────────────────────────────────╯${C_RESET}"
-  blank
-}
-
-spinner_msg() {
-  say "    ${C_CYAN}…${C_RESET}  $*"
-}
+say()            { ft_say "$@"; }
+blank()          { ft_blank; }
+banner()         { ft_banner "Federation Join" "Chat mesh + board nav pills"; }
+step_head()      { ft_step "Step $1 — $2"; }
+info()           { ft_info "$@"; }
+ok()             { ft_ok "$@"; }
+warn()           { ft_warn "$@"; }
+err()            { ft_err "$@"; }
+die()            { ft_die "$@"; }
+skip()           { ft_skip "$@"; }
+detail()         { ft_detail "$@"; }
+badge()          { ft_badge "$@"; }
+success_banner() { ft_success_banner "Node is wired into the FrogTalk federation."; }
+spinner_msg()    { ft_say "    ${C_CYAN}…${C_RESET}  $*"; }
+require_cmd()    { ft_require_cmd "$@"; }
+load_env_file()  { ft_load_env_file "$@"; }
 
 usage() {
   cat <<EOF
@@ -103,7 +68,7 @@ ${C_DIM}Options:${C_RESET}
   -h, --help           This help
 
 ${C_DIM}Examples:${C_RESET}
-  bash node/scripts/node_federation_join.sh
+  bash node/scripts/install.sh federation -y
   bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
   PUBLIC_URL=https://chat.example.com bash node/scripts/node_federation_join.sh -y
 EOF
@@ -128,64 +93,18 @@ parse_args() {
 }
 
 ask() {
-  local prompt="$1" default="${2:-}"
-  if [[ "$ASSUME_YES" -eq 1 ]]; then
-    printf "%s" "${default}"
-    return 0
-  fi
-  local answer=""
-  if [[ -n "$default" ]]; then
-    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt} [${C_DIM}${default}${C_RESET}]: " answer
-    printf "%s" "${answer:-$default}"
-  else
-    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt}: " answer
-    printf "%s" "$answer"
-  fi
+  [[ "$ASSUME_YES" -eq 1 ]] && export FT_ASSUME_YES=1 || export FT_ASSUME_YES=0
+  ft_ask "$1" "${2:-}"
 }
 
 ask_yes_no() {
-  local prompt="$1" default="${2:-y}"
-  if [[ "$ASSUME_YES" -eq 1 ]]; then
-    [[ "$default" =~ ^[Yy]$ ]]
-    return
-  fi
-  local answer
-  if [[ "$default" == "y" ]]; then
-    answer="$(ask "$prompt (Y/n)" "y")"
-  else
-    answer="$(ask "$prompt (y/N)" "n")"
-  fi
-  [[ "$answer" =~ ^[Yy]$ ]]
-}
-
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1"
+  [[ "$ASSUME_YES" -eq 1 ]] && export FT_ASSUME_YES=1 || export FT_ASSUME_YES=0
+  ft_ask_yes_no "$1" "${2:-y}"
 }
 
 set_env_value() {
-  local file="$1" key="$2" value="$3"
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    detail "[dry-run] ${key}=${value}"
-    return 0
-  fi
-  if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
-  else
-    printf "\n%s=%s\n" "$key" "$value" >>"$file"
-  fi
-}
-
-load_env_file() {
-  local f="$1"
-  [[ -f "$f" ]] || return 0
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    [[ -z "$line" ]] && continue
-    [[ "$line" != *=* ]] && continue
-    export "$line" 2>/dev/null || true
-  done <"$f"
+  [[ "$DRY_RUN" -eq 1 ]] && export FT_DRY_RUN=1 || export FT_DRY_RUN=0
+  ft_set_env_value "$@"
 }
 
 run_py() {

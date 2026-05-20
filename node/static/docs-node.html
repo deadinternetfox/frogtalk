@@ -137,13 +137,14 @@
       <p class="hint">Use the built-in CLI helpers for first-time setup and safe updates on self-hosted nodes.</p>
       <pre><code>git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
-bash node/scripts/node_setup_wizard.sh
 
-# later, check for updates
-bash node/scripts/node_update_check.sh
+# Interactive installer (setup · federation · updates · systemd)
+bash node/scripts/install.sh
 
-# apply update safely (fast-forward only)
-bash node/scripts/node_update_check.sh --apply</code></pre>
+# Or direct commands:
+bash node/scripts/install.sh setup -y
+bash node/scripts/install.sh federation -y
+bash node/scripts/install.sh update-apply</code></pre>
       <p class="hint">The wizard configures <code>.env</code>, installs dependencies, wires the runtime symlinks (<code>node/data</code>, <code>node/.env</code>, <code>node/secrets</code>), and handles common edge cases without aborting the whole flow.</p>
     </section>
 

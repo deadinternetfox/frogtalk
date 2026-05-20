@@ -16,11 +16,12 @@ This folder ships production templates the setup wizard copies or references:
 git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
 
-# 1) Wizard: venv, .env, runtime symlinks
-bash node/scripts/node_setup_wizard.sh
+# Recommended: interactive installer
+bash node/scripts/install.sh
 
-# 2) Federation mesh + official directory + board peer nav
-bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
+# Or step-by-step:
+bash node/scripts/install.sh setup -y
+bash node/scripts/install.sh federation -y
 
 # 3) systemd (production)
 sudo cp node/deploy/frogtalk.service /etc/systemd/system/frogtalk.service

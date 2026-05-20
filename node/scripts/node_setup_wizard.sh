@@ -1,88 +1,58 @@
 #!/usr/bin/env bash
-# Interactive FrogTalk node setup wizard.
+# FrogTalk Node — first-time setup wizard
 #
-# Goals:
-# - fast first-time self-host setup
-# - defensive defaults
-# - non-fatal fallbacks for common edge cases
-#
-# Run:
 #   bash node/scripts/node_setup_wizard.sh
-
+#   bash node/scripts/node_setup_wizard.sh --install-dir /opt/frogtalk -y
+#
 set -u
 set -o pipefail
 umask 077
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/cli.sh
+source "$SCRIPT_DIR/lib/cli.sh"
+
 PROJECT_REPO_DEFAULT="https://github.com/deadinternetfox/frogtalk.git"
 INSTALL_DIR_DEFAULT="/opt/frogtalk"
-# Paths are resolved relative to $install_dir/node after clone.
 ENV_TEMPLATE="node/deploy/env.example"
 ENV_FILE=".env"
+ASSUME_YES=0
+INSTALL_DIR_ARG=""
 
-C_RESET=$'\033[0m'
-C_GREEN=$'\033[32m'
-C_YELLOW=$'\033[33m'
-C_BLUE=$'\033[34m'
-C_RED=$'\033[31m'
+usage() {
+  ft_banner "Setup wizard" "venv · .env · federation-ready defaults"
+  cat <<EOF
+${C_BOLD}Usage:${C_RESET} bash node/scripts/node_setup_wizard.sh [options]
 
-say()  { printf "%s\n" "$*"; }
-info() { printf "%s[info]%s %s\n" "$C_BLUE" "$C_RESET" "$*"; }
-ok()   { printf "%s[ok]%s %s\n" "$C_GREEN" "$C_RESET" "$*"; }
-warn() { printf "%s[warn]%s %s\n" "$C_YELLOW" "$C_RESET" "$*"; }
-err()  { printf "%s[err]%s %s\n" "$C_RED" "$C_RESET" "$*"; }
+  --install-dir PATH   Target install root (default: ${INSTALL_DIR_DEFAULT})
+  -y, --yes             Accept defaults (including federation join)
+  -h, --help            This help
 
-require_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    err "Missing required command: $1"
-    return 1
-  fi
-  return 0
+${C_BOLD}Or use the menu:${C_RESET} bash node/scripts/install.sh
+EOF
 }
 
-ask() {
-  local prompt="$1"
-  local default="${2:-}"
-  local answer=""
-  if [[ -n "$default" ]]; then
-    read -r -p "$prompt [$default]: " answer
-    printf "%s" "${answer:-$default}"
-  else
-    read -r -p "$prompt: " answer
-    printf "%s" "$answer"
-  fi
-}
-
-ask_yes_no() {
-  local prompt="$1"
-  local default="${2:-y}"
-  local answer
-  if [[ "$default" == "y" ]]; then
-    answer="$(ask "$prompt (Y/n)" "y")"
-  else
-    answer="$(ask "$prompt (y/N)" "n")"
-  fi
-  [[ "$answer" =~ ^[Yy]$ ]]
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      -y|--yes) ASSUME_YES=1; export FT_ASSUME_YES=1; shift ;;
+      --install-dir) INSTALL_DIR_ARG="${2:-}"; shift 2 ;;
+      *) ft_die "Unknown option: $1" ;;
+    esac
+  done
 }
 
 safe_run() {
   local desc="$1"
   shift
-  info "$desc"
+  ft_info "$desc"
   if "$@"; then
-    ok "$desc"
+    ft_ok "$desc"
     return 0
   fi
-  warn "$desc failed, skipping."
+  ft_warn "$desc failed — continuing."
   return 1
-}
-
-set_env_value() {
-  local file="$1" key="$2" value="$3"
-  if grep -qE "^${key}=" "$file"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
-  else
-    printf "\n%s=%s\n" "$key" "$value" >>"$file"
-  fi
 }
 
 gen_password() {
@@ -93,151 +63,126 @@ PY
 }
 
 main() {
-  clear || true
-  say "==============================================="
-  say "  FrogTalk Node Setup Wizard"
-  say "==============================================="
-  say
+  parse_args "$@"
+  clear 2>/dev/null || true
+  ft_banner "Node Setup Wizard" "First-time self-host install"
 
   local missing=0
-  require_cmd git || missing=1
-  require_cmd python3 || missing=1
-  require_cmd sed || missing=1
-  if [[ "$missing" -ne 0 ]]; then
-    err "Install missing dependencies and run again."
-    exit 1
-  fi
+  ft_require_cmd git || missing=1
+  ft_require_cmd python3 || missing=1
+  ft_require_cmd sed || missing=1
+  [[ "$missing" -eq 0 ]] || ft_die "Install git, python3, sed and re-run."
 
   local repo_url install_dir public_url admin_password
-  repo_url="$(ask "Git repository URL" "$PROJECT_REPO_DEFAULT")"
-  install_dir="$(ask "Install directory" "$INSTALL_DIR_DEFAULT")"
-  public_url="$(ask "Public URL (https://... or http://...)" "http://localhost:8080")"
-  admin_password="$(ask "Admin password (leave blank to auto-generate)" "")"
-  if [[ -z "$admin_password" ]]; then
-    admin_password="$(gen_password)"
-    info "Generated strong admin password."
+  repo_url="$(ft_ask "Git repository URL" "$PROJECT_REPO_DEFAULT")"
+  if [[ -n "$INSTALL_DIR_ARG" ]]; then
+    install_dir="$INSTALL_DIR_ARG"
+  else
+    install_dir="$(ft_ask "Install directory" "$INSTALL_DIR_DEFAULT")"
   fi
 
   if [[ -d "$install_dir/.git" ]]; then
-    info "Existing git repo found in $install_dir"
-    if ask_yes_no "Pull latest changes in existing repo?" "y"; then
-      safe_run "Pulling latest code" git -C "$install_dir" pull --ff-only
+    ft_info "Existing repo at $install_dir"
+    if ft_ask_yes_no "Pull latest (fast-forward only)?" "y"; then
+      safe_run "git pull" git -C "$install_dir" pull --ff-only
     fi
   else
-    safe_run "Cloning repository" git clone "$repo_url" "$install_dir" || {
-      err "Clone failed. Exiting."
-      exit 1
-    }
+    safe_run "git clone" git clone "$repo_url" "$install_dir" || ft_die "Clone failed."
   fi
 
-  cd "$install_dir" || {
-    err "Cannot enter install directory: $install_dir"
-    exit 1
-  }
+  cd "$install_dir" || ft_die "Cannot enter $install_dir"
 
-  safe_run "Creating Python virtualenv" python3 -m venv venv
+  safe_run "python3 -m venv venv" python3 -m venv venv
   # shellcheck disable=SC1091
-  if [[ -f venv/bin/activate ]]; then
-    # shellcheck source=/dev/null
-    source venv/bin/activate
-    ok "Virtualenv activated"
-  else
-    warn "Virtualenv activation script missing; pip steps may fail."
-  fi
+  [[ -f venv/bin/activate ]] && source venv/bin/activate
 
-  safe_run "Upgrading pip" python3 -m pip install --upgrade pip
-  if [[ -f node/requirements.txt ]]; then
-    safe_run "Installing Python dependencies" python3 -m pip install -r node/requirements.txt
-  else
-    warn "node/requirements.txt not found; skipping dependency install."
-  fi
+  safe_run "pip upgrade" python3 -m pip install --upgrade pip -q
+  [[ -f node/requirements.txt ]] \
+    && safe_run "pip install -r node/requirements.txt" python3 -m pip install -r node/requirements.txt -q \
+    || ft_warn "node/requirements.txt missing — skipped deps."
 
-  # Symlinks so runtime data/, secrets/, .env live at $install_dir root
-  # but the node process (cwd=$install_dir/node) can still reach them.
+  ft_step "Runtime symlinks"
   mkdir -p data
   if [[ -d node/data && ! -L node/data ]]; then
-    warn "node/data is a real directory (not a symlink). Move it aside and link to $install_dir/data or the app will use an empty DB."
-    if ask_yes_no "Replace node/data with symlink to $install_dir/data now?" "y"; then
+    ft_warn "node/data is a real directory — app may use an empty DB."
+    if ft_ask_yes_no "Replace with symlink to $install_dir/data?" "y"; then
       ts="$(date +%Y%m%d-%H%M%S)"
       mv node/data "node/data.misplaced-${ts}"
-      ok "Moved node/data -> node/data.misplaced-${ts}"
+      ft_ok "Moved aside → node/data.misplaced-${ts}"
     fi
   fi
-  ln -sfn "$install_dir/data"    node/data
-  ln -sfn "$install_dir/.env"    node/.env 2>/dev/null || true
+  ln -sfn "$install_dir/data" node/data
+  [[ -f "$ENV_FILE" ]] || true
+  ln -sfn "$install_dir/$ENV_FILE" node/.env 2>/dev/null || true
   [[ -d secrets ]] && ln -sfn "$install_dir/secrets" node/secrets
+  ft_ok "node/data · node/.env · node/secrets"
 
-  # board_data must be writable by php-fpm (usually www-data).
-  if [[ -d node/board/board_data ]]; then
-    if id www-data >/dev/null 2>&1; then
-      chown -R www-data:www-data node/board/board_data node/board/board_uploads node/board/board_previews 2>/dev/null || true
-    fi
+  if [[ -d node/board/board_data ]] && id www-data >/dev/null 2>&1; then
+    chown -R www-data:www-data node/board/board_data node/board/board_uploads node/board/board_previews 2>/dev/null || true
+    ft_ok "board_data owned by www-data (php-fpm)"
   fi
 
+  ft_step "Environment (.env)"
   if [[ ! -f "$ENV_FILE" ]]; then
     if [[ -f "$ENV_TEMPLATE" ]]; then
-      safe_run "Creating .env from template" cp "$ENV_TEMPLATE" "$ENV_FILE"
+      cp "$ENV_TEMPLATE" "$ENV_FILE"
+      ft_ok "Created .env from template"
     else
-      warn "Env template not found; creating blank .env"
       : >"$ENV_FILE"
+      ft_warn "No template — blank .env"
     fi
   fi
 
-  set_env_value "$ENV_FILE" "ADMIN_PASSWORD" "$admin_password"
-  set_env_value "$ENV_FILE" "PUBLIC_URL" "$public_url"
-  set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_ENABLED" "1"
-  set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_REQUIRE_SIGS" "1"
-  set_env_value "$ENV_FILE" "FROGTALK_AUTO_UPDATE_ENABLED" "0"
-  set_env_value "$ENV_FILE" "FROGTALK_UPDATE_CHECK_INTERVAL_SEC" "300"
-  set_env_value "$ENV_FILE" "FROGTALK_UPDATE_FEED_URL" "https://frogtalk.xyz/api/network/updates/latest"
+  public_url="$(ft_ask "Public URL (https://… or http://localhost:8080)" "http://localhost:8080")"
+  public_url="${public_url%/}"
+  admin_password="$(ft_ask "Admin password (blank = auto-generate)" "")"
+  [[ -n "$admin_password" ]] || admin_password="$(gen_password)" && ft_info "Generated admin password (saved in .env)."
 
-  if ask_yes_no "Enable onion/Tor mode now?" "n"; then
+  ft_set_env_value "$ENV_FILE" "ADMIN_PASSWORD" "$admin_password"
+  ft_set_env_value "$ENV_FILE" "PUBLIC_URL" "$public_url"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_BASE_URL" "$public_url"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_ENABLED" "1"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_REQUIRE_SIGS" "1"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_OFFICIAL_DIRECTORY_URL" "https://frogtalk.xyz/api/network/servers"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_AUTO_UPDATE_ENABLED" "0"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_UPDATE_CHECK_INTERVAL_SEC" "300"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_UPDATE_FEED_URL" "https://frogtalk.xyz/api/network/updates/latest"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_TOR_SOCKS_PROXY" "socks5h://127.0.0.1:9050"
+
+  if ft_ask_yes_no "Enable Tor / onion mode?" "n"; then
     local onion_url
-    onion_url="$(ask "Onion URL (http://xxxxxxxx.onion)" "")"
+    onion_url="$(ft_ask "Onion URL (http://….onion)" "")"
     if [[ -n "$onion_url" ]]; then
-      set_env_value "$ENV_FILE" "FROGTALK_TOR_ENABLED" "1"
-      set_env_value "$ENV_FILE" "FROGTALK_ONION_URL" "$onion_url"
-      ok "Tor mode configured in .env"
-    else
-      warn "No onion URL entered; Tor mode skipped."
+      onion_url="${onion_url%/}"
+      ft_set_env_value "$ENV_FILE" "FROGTALK_TOR_ENABLED" "1"
+      ft_set_env_value "$ENV_FILE" "FROGTALK_ONION_URL" "$onion_url"
+      ft_ok "Tor mode configured"
     fi
   fi
 
-  if ask_yes_no "Join the FrogTalk federation mesh now (chat + board nav)?" "y"; then
-    info "Running federation join CLI…"
-  if bash "$install_dir/node/scripts/node_federation_join.sh" --install-dir "$install_dir" -y --skip-restart; then
-      ok "Federation join finished"
+  if ft_ask_yes_no "Join FrogTalk federation mesh now? (recommended)" "y"; then
+    ft_info "Running federation join…"
+    if bash "$install_dir/node/scripts/node_federation_join.sh" --install-dir "$install_dir" -y --skip-restart; then
+      ft_ok "Federation mesh linked"
     else
-      warn "Federation join had issues — re-run: bash node/scripts/node_federation_join.sh"
+      ft_warn "Federation join had issues — retry: bash node/scripts/install.sh federation"
     fi
   fi
 
-  cat <<EOF
+  if ft_ask_yes_no "Install systemd unit (frogtalk.service)?" "n"; then
+    if bash "$install_dir/node/scripts/install.sh" systemd --install-dir "$install_dir" -y; then
+      ft_ok "systemd configured"
+    else
+      ft_warn "systemd step skipped or failed"
+    fi
+  fi
 
-===============================================
-Setup complete.
-===============================================
-Install dir: $install_dir
-Env file:    $install_dir/$ENV_FILE
-Runtime:     $install_dir/node/
-
-Start manually:
-  cd "$install_dir"
-  source venv/bin/activate
-  cd node && python main.py
-
-Join federation (chat directory + board pills):
-  bash node/scripts/node_federation_join.sh --install-dir "$install_dir" -y
-
-Optional systemd:
-  sudo cp node/deploy/frogtalk.service /etc/systemd/system/frogtalk.service
-  sudo systemctl daemon-reload
-  sudo systemctl enable --now frogtalk
-
-Node updates:
-  bash node/scripts/node_update_check.sh
-===============================================
-EOF
+  ft_success_banner "Setup complete."
+  ft_say "  ${C_BOLD}Install:${C_RESET}  ${install_dir}"
+  ft_say "  ${C_BOLD}Config:${C_RESET}   ${install_dir}/${ENV_FILE}"
+  ft_say "  ${C_BOLD}Run dev:${C_RESET}   cd ${install_dir} && source venv/bin/activate && cd node && python main.py"
+  ft_say "  ${C_BOLD}Menu:${C_RESET}     bash node/scripts/install.sh --install-dir ${install_dir}"
+  ft_blank
 }
 
 main "$@"

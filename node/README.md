@@ -10,15 +10,13 @@ starts here.
 git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
 
-# 1) Wizard: venv, .env, symlinks (node/data → ../data)
-bash node/scripts/node_setup_wizard.sh
+# Interactive installer (setup · federation · updates · systemd · status)
+bash node/scripts/install.sh
 
-# 2) Join federation: official directory + board peer nav
-bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
-
-# 3) systemd (production)
-sudo cp node/deploy/frogtalk.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now frogtalk
+# Or run steps directly:
+bash node/scripts/install.sh setup -y
+bash node/scripts/install.sh federation -y
+bash node/scripts/install.sh systemd -y
 journalctl -u frogtalk -f
 ```
 
@@ -48,6 +46,8 @@ node/
 ├── board/                 # Frog Channel imageboard → /board/
 ├── deploy/                # systemd, nginx, env.example
 ├── scripts/
+│   ├── install.sh               # unified menu (recommended entry)
+│   ├── lib/cli.sh               # shared colored CLI helpers
 │   ├── node_setup_wizard.sh
 │   ├── node_federation_join.sh
 │   ├── node_update_check.sh
@@ -92,9 +92,10 @@ node/
 
 | Script | Purpose |
 |--------|---------|
-| `node_setup_wizard.sh` | First-time venv, `.env`, symlinks |
-| `node_federation_join.sh` | Mesh join: directory sync (retries), pubkey pin, board nav, resilient fallback |
-| `node_update_check.sh` | Signed update check / `--apply` |
+| **`install.sh`** | **Menu:** setup, federation, update, systemd, status |
+| `node_setup_wizard.sh` | First-time venv, `.env`, symlinks (also via `install.sh setup`) |
+| `node_federation_join.sh` | Mesh join: directory sync, pubkey pin, board nav |
+| `node_update_check.sh` | Git update check / `--apply` |
 | `deploy_nodes.sh` | Maintainer SCP to production peers (see `deploy/README.md`) |
 | `deploy.sh` | Full rsync deploy to one server |
 | `deploy_board.sh` | Board PHP-only hotfix |

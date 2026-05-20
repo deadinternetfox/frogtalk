@@ -1,107 +1,118 @@
 #!/usr/bin/env bash
-# FrogTalk node update helper.
+# FrogTalk node update helper
 #
-# Default: check only.
-# Apply:   bash node/scripts/node_update_check.sh --apply
-
+#   bash node/scripts/node_update_check.sh
+#   bash node/scripts/node_update_check.sh --apply
+#   bash node/scripts/node_update_check.sh --install-dir /opt/frogtalk --apply
+#
 set -u
 set -o pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/cli.sh
+source "$SCRIPT_DIR/lib/cli.sh"
+
 APPLY=0
-for arg in "$@"; do
-  case "$arg" in
-    --apply) APPLY=1 ;;
-    *)
-      echo "Unknown argument: $arg"
-      echo "Usage: bash node/scripts/node_update_check.sh [--apply]"
-      exit 1
-      ;;
-  esac
-done
+INSTALL_DIR=""
 
-info() { printf "[info] %s\n" "$*"; }
-ok()   { printf "[ok] %s\n" "$*"; }
-warn() { printf "[warn] %s\n" "$*"; }
-err()  { printf "[err] %s\n" "$*" >&2; }
+usage() {
+  ft_banner "Node update" "Signed feed + git fast-forward"
+  cat <<EOF
+${C_BOLD}Usage:${C_RESET}
+  bash node/scripts/node_update_check.sh [--install-dir PATH] [--apply]
 
-if ! command -v git >/dev/null 2>&1; then
-  err "git is required"
-  exit 1
-fi
+  --apply          Pull origin and refresh venv deps + restart frogtalk
+  --install-dir    Git repo root (default: /opt/frogtalk or current repo)
+  -h, --help
+EOF
+}
 
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  err "Run this script from inside the FrogTalk repository."
-  exit 1
-fi
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      --apply) APPLY=1; shift ;;
+      --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
+      *) ft_die "Unknown argument: $1" ;;
+    esac
+  done
+}
 
-branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo "HEAD")"
-local_sha="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
-default_remote_ref="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || true)"
-remote_branch="${default_remote_ref#refs/remotes/origin/}"
-remote_branch="${remote_branch:-master}"
+resolve_repo() {
+  if [[ -n "$INSTALL_DIR" ]]; then
+    cd "$INSTALL_DIR" || ft_die "Cannot cd to $INSTALL_DIR"
+  elif [[ -d "/opt/frogtalk/.git" ]]; then
+    cd "/opt/frogtalk"
+  elif git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    :
+  else
+    ft_die "Not a git repo. Use --install-dir /opt/frogtalk"
+  fi
+  INSTALL_DIR="$(pwd)"
+}
 
-info "Current branch: $branch ($local_sha)"
-info "Fetching origin/$remote_branch ..."
-if ! git fetch origin "$remote_branch" --quiet; then
-  err "Failed to fetch remote branch."
-  exit 1
-fi
+main() {
+  parse_args "$@"
+  ft_require_cmd git
+  resolve_repo
 
-ahead_count="$(git rev-list --count "origin/$remote_branch..HEAD" 2>/dev/null || echo 0)"
-behind_count="$(git rev-list --count "HEAD..origin/$remote_branch" 2>/dev/null || echo 0)"
+  ft_banner "Update check" "$INSTALL_DIR"
 
-if [[ "$behind_count" -eq 0 ]]; then
-  ok "Node repo is up to date with origin/$remote_branch."
-  exit 0
-fi
+  local branch local_sha remote_branch ahead_count behind_count
+  branch="$(git symbolic-ref --short HEAD 2>/dev/null || echo "HEAD")"
+  local_sha="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+  remote_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "master")"
+  [[ -n "$remote_branch" ]] || remote_branch="master"
 
-warn "Update available: behind by $behind_count commit(s)."
-if [[ "$ahead_count" -gt 0 ]]; then
-  warn "Local branch is also ahead by $ahead_count commit(s). A fast-forward pull may fail."
-fi
+  ft_info "Branch ${branch} @ ${local_sha}"
+  ft_info "Fetching origin/${remote_branch}…"
+  git fetch origin "$remote_branch" --quiet || ft_die "git fetch failed."
 
-if [[ "$APPLY" -ne 1 ]]; then
-  echo
-  echo "Dry run only. To apply updates:"
-  echo "  bash node/scripts/node_update_check.sh --apply"
-  exit 0
-fi
+  ahead_count="$(git rev-list --count "origin/${remote_branch}..HEAD" 2>/dev/null || echo 0)"
+  behind_count="$(git rev-list --count "HEAD..origin/${remote_branch}" 2>/dev/null || echo 0)"
 
-info "Applying update with fast-forward pull."
-if ! git pull --ff-only origin "$remote_branch"; then
-  err "Fast-forward pull failed. Resolve manually to avoid accidental merges."
-  exit 1
-fi
-ok "Code updated."
+  if [[ "$behind_count" -eq 0 ]]; then
+    ft_ok "Up to date with origin/${remote_branch}."
+    exit 0
+  fi
 
-REQ_PATH=""
-[[ -f node/requirements.txt ]] && REQ_PATH=node/requirements.txt
-[[ -z "$REQ_PATH" && -f requirements.txt ]] && REQ_PATH=requirements.txt
+  ft_warn "Behind by ${behind_count} commit(s)."
+  [[ "$ahead_count" -gt 0 ]] && ft_warn "Also ahead by ${ahead_count} — fast-forward may fail."
 
-if [[ -n "$REQ_PATH" ]]; then
-  if [[ -f venv/bin/python ]]; then
-    info "Installing Python dependency updates into ./venv from $REQ_PATH"
-    if ! venv/bin/python -m pip install -r "$REQ_PATH"; then
-      warn "Dependency install failed; skipping."
+  if [[ "$APPLY" -ne 1 ]]; then
+    ft_blank
+    ft_info "Dry run. Apply with:"
+    ft_detail "bash node/scripts/node_update_check.sh --install-dir ${INSTALL_DIR} --apply"
+    ft_detail "bash node/scripts/install.sh update-apply"
+    exit 0
+  fi
+
+  ft_step "Applying update"
+  git pull --ff-only origin "$remote_branch" || ft_die "Fast-forward pull failed — resolve manually."
+
+  local req="node/requirements.txt"
+  [[ -f "$req" ]] || req="requirements.txt"
+  if [[ -f venv/bin/python && -f "$req" ]]; then
+    ft_info "Refreshing Python dependencies…"
+    venv/bin/python -m pip install -q -r "$req" && ft_ok "Dependencies updated" \
+      || ft_warn "pip install failed"
+  else
+    ft_skip "No venv or requirements.txt — skipped pip"
+  fi
+
+  if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files 2>/dev/null | grep -q '^frogtalk\.service'; then
+    ft_info "Restarting frogtalk.service…"
+    if systemctl restart frogtalk && systemctl is-active frogtalk >/dev/null 2>&1; then
+      ft_ok "Service active"
     else
-      ok "Dependencies updated."
+      ft_warn "Restart issue — journalctl -u frogtalk -n 40"
     fi
   else
-    warn "No local virtualenv found at ./venv; skipping dependency install."
+    ft_skip "frogtalk.service not installed"
   fi
-fi
 
-if command -v systemctl >/dev/null 2>&1; then
-  if systemctl list-unit-files 2>/dev/null | grep -q "^frogtalk\.service"; then
-    info "Restarting frogtalk.service"
-    if systemctl restart frogtalk.service; then
-      ok "Service restarted."
-    else
-      warn "Service restart failed; inspect: sudo systemctl status frogtalk --no-pager"
-    fi
-  else
-    warn "frogtalk.service not installed; skipping service restart."
-  fi
-fi
+  ft_success_banner "Update applied."
+  ft_info "Re-sync federation: bash node/scripts/install.sh federation -y"
+}
 
-ok "Update flow complete."
+main "$@"
