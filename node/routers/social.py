@@ -104,6 +104,13 @@ async def follow_user(request: Request, nickname: str, current_user: dict = Depe
             )
         except Exception:
             pass
+        try:
+            from routers.federation import _notify_wall_rewrap_for_new_follower
+            await _notify_wall_rewrap_for_new_follower(
+                int(target["id"]), int(current_user["id"]),
+            )
+        except Exception:
+            pass
         # Notify the target that they have a new follower.
         try:
             notif_id = db.add_social_notification(

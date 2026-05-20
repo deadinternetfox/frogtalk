@@ -89,7 +89,12 @@ def _normalize_base_url(url: str) -> str:
     return (url or "").strip().rstrip("/")
 
 
-def enqueue_server_event(event_type: str, payload: dict) -> dict:
+def enqueue_server_event(
+    event_type: str,
+    payload: dict,
+    *,
+    target_server_ids: list[str] | None = None,
+) -> dict:
     local = db.get_or_create_local_server_identity()
     # Random suffix prevents same-millisecond collisions when multiple
     # events are enqueued in quick succession (e.g. burst of bot upserts
@@ -120,9 +125,21 @@ def enqueue_server_event(event_type: str, payload: dict) -> dict:
         crypto_fed.sign_event(event)
     except Exception:
         _log.exception("failed to sign outbox event %s", event_id)
-    if db.insert_federation_outbox_event(event):
+    if db.insert_federation_outbox_event(event, target_server_ids=target_server_ids):
         return {"ok": True, "event_id": event_id}
     return {"ok": False, "error": "enqueue_failed"}
+
+
+def _encrypted_post_push_targets(wrapped_keys: list[dict]) -> list[str]:
+    """Peer server_ids that should receive an encrypted wall event."""
+    gids = []
+    for w in wrapped_keys or []:
+        if not isinstance(w, dict):
+            continue
+        gid = str(w.get("recipient_global_user_id") or "").strip()
+        if gid:
+            gids.append(gid)
+    return db.resolve_federation_push_targets_for_recipient_gids(gids)
 
 
 def enqueue_dm_message_created(
@@ -304,6 +321,25 @@ def enqueue_social_post_created_encrypted(
             "track_room": track_room,
             "track_mood": track_mood,
         },
+        target_server_ids=_encrypted_post_push_targets(wrapped_keys),
+    )
+
+
+def enqueue_social_post_keys_extended(
+    user: dict,
+    *,
+    global_post_id: str,
+    wrapped_keys: list[dict],
+) -> dict:
+    """Federate additional wraps when audience grows (e.g. new cross-node follower)."""
+    return enqueue_server_event(
+        "social.post.keys.extended",
+        {
+            "global_post_id": str(global_post_id or "").strip(),
+            **_social_user_fields(user),
+            "wrapped_keys": wrapped_keys,
+        },
+        target_server_ids=_encrypted_post_push_targets(wrapped_keys),
     )
 
 
@@ -2061,6 +2097,35 @@ def _fed_sanitize_social_payload(event_type: str, payload: dict) -> dict | None:
         p.pop("story_id", None)
         return p
 
+    if et == "social.post.keys.extended":
+        gpid = _gid("global_post_id")
+        if not gpid:
+            return None
+        p["global_post_id"] = gpid
+        nick = _fed_nickname(p.get("nickname"))
+        agid = _fed_global_id(p.get("author_global_user_id"))
+        if not nick or not agid:
+            return None
+        p["nickname"] = nick
+        p["author_global_user_id"] = agid
+        wraps = []
+        for w in (p.get("wrapped_keys") or [])[:64]:
+            if not isinstance(w, dict):
+                continue
+            rgid = _fed_global_id(w.get("recipient_global_user_id"))
+            wb = str(w.get("wrapped_b64") or "").strip()
+            if not rgid or not wb or len(wb) > 8192:
+                continue
+            wraps.append({
+                "recipient_global_user_id": rgid,
+                "recipient_nickname": _fed_nickname(w.get("recipient_nickname")) or "",
+                "wrapped_b64": wb,
+            })
+        if not wraps:
+            return None
+        p["wrapped_keys"] = wraps
+        return p
+
     if et == "social.follow.changed":
         action = str(p.get("action") or "").strip().lower()
         if action not in ("follow", "unfollow"):
@@ -2478,8 +2543,8 @@ async def federation_inbox_processor() -> int:
     return processed
 
 
-def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
-    """Gather (local_server_id, peer_targets, pending_events) in one thread hop."""
+def _outbox_collect_targets_sync() -> tuple[str, dict[str, str], list[dict]]:
+    """Gather (local_server_id, peer_server_id→base_url, pending_events) in one hop."""
     local = db.get_or_create_local_server_identity()
     local_server_id = str(local.get("server_id") or "")
     # Use only this node's advertised identity for loop detection.
@@ -2505,17 +2570,17 @@ def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
             pass
 
     peers = db.list_federation_servers(official_only=False)
-    targets: list[str] = []
-    seen_targets: set[str] = set()
+    peer_urls: dict[str, str] = {}
+    seen_urls: set[str] = set()
     block_tor = bool(db.get_federation_policy_settings().get("block_tor_peers"))
     for srv in peers:
         if not srv.get("enabled"):
             continue
         if block_tor and peer_uses_tor_route(srv):
             continue
-        if str(srv.get("server_id") or "") == local_server_id:
+        peer_sid = str(srv.get("server_id") or "").strip()
+        if not peer_sid or peer_sid == local_server_id:
             continue
-        # transport_preference is on the row already; no extra query.
         target = _select_peer_target(srv)
         if not target:
             continue
@@ -2533,16 +2598,16 @@ def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
         if target_host in own_hosts:
             continue
 
-        if t_lower in seen_targets:
+        if t_lower in seen_urls:
             continue
-        seen_targets.add(t_lower)
-        _try_pin_peer_pubkey_from_status_sync(str(srv.get("server_id") or ""), normalized_target)
-        targets.append(normalized_target)
+        seen_urls.add(t_lower)
+        _try_pin_peer_pubkey_from_status_sync(peer_sid, normalized_target)
+        peer_urls[peer_sid] = normalized_target
 
-    if not targets:
-        return local_server_id, targets, []
+    if not peer_urls:
+        return local_server_id, peer_urls, []
     events = db.list_federation_outbox_events(status="pending", limit=50)
-    return local_server_id, targets, events
+    return local_server_id, peer_urls, events
 
 
 def _try_pin_peer_pubkey_from_status_sync(server_id: str, base_url: str) -> None:
@@ -2592,28 +2657,32 @@ async def federation_outbox_processor() -> int:
         return 0
 
     try:
-        local_server_id, targets, events = await asyncio.to_thread(_outbox_collect_targets_sync)
+        local_server_id, peer_urls, events = await asyncio.to_thread(_outbox_collect_targets_sync)
     except Exception:
         _log.exception("Outbox collect error")
         return 0
 
-    if not targets or not events:
+    if not peer_urls or not events:
         return 0
 
-    BATCH_SIZE = 25
-    batch = events[:BATCH_SIZE]
-    envelopes: list[dict] = []
-    for row in batch:
-        event_id = str(row.get("event_id") or "")
-        if not event_id:
-            continue
-        payload: dict = {}
+    _ENCRYPTED_PEER_SCOPED = frozenset({
+        "social.post.created.encrypted",
+        "social.post.keys.extended",
+    })
+
+    def _row_payload(row: dict) -> dict:
         raw_payload = row.get("payload_json")
         if isinstance(raw_payload, str) and raw_payload.strip():
             try:
-                payload = json.loads(raw_payload)
+                return json.loads(raw_payload)
             except Exception:
-                payload = {}
+                pass
+        return {}
+
+    def _wire_envelope(row: dict, payload: dict) -> dict | None:
+        event_id = str(row.get("event_id") or "")
+        if not event_id:
+            return None
         origin_time = str(row.get("origin_time") or "").strip()
         if not origin_time:
             origin_time = datetime.utcnow().isoformat() + "Z"
@@ -2624,15 +2693,14 @@ async def federation_outbox_processor() -> int:
             "origin_time": origin_time,
             "event_version": 1,
             "actor_global_user_id": "server-admin",
-            "signature": str(row.get("signature") or ""),
+            "signature": "",
             "payload": payload,
         }
-        if not envelope["signature"]:
-            try:
-                crypto_fed.sign_event(envelope)
-            except Exception:
-                _log.exception("federation: failed to sign outbox event %s", event_id)
-        envelopes.append({
+        try:
+            crypto_fed.sign_event(envelope)
+        except Exception:
+            _log.exception("federation: failed to sign outbox event %s", event_id)
+        return {
             "event_id": event_id,
             "event_type": envelope["event_type"],
             "origin_server_id": local_server_id,
@@ -2642,42 +2710,64 @@ async def federation_outbox_processor() -> int:
                 envelope.get("signer_pubkey_fingerprint") or ""
             ),
             "payload": payload,
-        })
+        }
 
-    if not envelopes:
-        return 0
+    BATCH_SIZE = 25
+    batch = events[:BATCH_SIZE]
+    broadcast_rows: list[dict] = []
+    targeted_rows: dict[str, list[dict]] = {}
+    for row in batch:
+        tgt = str(row.get("target_server_id") or "").strip()
+        if tgt:
+            targeted_rows.setdefault(tgt, []).append(row)
+        else:
+            broadcast_rows.append(row)
 
-    body = json.dumps({"events": envelopes}).encode("utf-8")
-    headers = {
+    base_headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "User-Agent": "FrogTalk-FederationPush/1.0",
     }
     if fed_token:
-        headers["x-federation-token"] = fed_token
-    # SECURITY-PASS-2: attach Ed25519 per-request signature headers so
-    # peers running on FROGTALK_FEDERATION_AUTH_MODE=signed will accept
-    # this push without the shared bearer. The local server's own
-    # server_id (= local_server_id) is the "peer id" the receiver looks
-    # up in its federation_servers table to find our public key. Adding
-    # these headers is harmless to peers still on legacy mode — they
-    # just ignore them and validate the bearer instead.
-    try:
-        signed = crypto_fed.sign_request_headers(
-            "POST", "/api/federation/events/inbox", body, str(local_server_id or "")
-        )
-        headers.update(signed)
-    except Exception:
-        _log.exception("federation: outbox signed-header attach failed")
+        base_headers["x-federation-token"] = fed_token
 
-    async def _push(base: str) -> tuple[bool, bool]:
-        """Returns (delivered, payload_too_large).
+    async def _push_peer(
+        peer_sid: str,
+        base: str,
+        rows: list[dict],
+    ) -> tuple[list[tuple[str, str]], bool, bool]:
+        """Returns (deliveries, delivered, payload_too_large)."""
+        envelopes: list[dict] = []
+        deliveries: list[tuple[str, str]] = []
+        for row in rows:
+            event_id = str(row.get("event_id") or "")
+            if not event_id:
+                continue
+            payload = _row_payload(row)
+            ev_type = str(row.get("event_type") or "")
+            row_tgt = str(row.get("target_server_id") or "").strip()
+            if ev_type in _ENCRYPTED_PEER_SCOPED and row_tgt:
+                scoped = db.filter_encrypted_wraps_for_peer(payload, row_tgt)
+                if not scoped:
+                    continue
+                payload = scoped
+            wire = _wire_envelope(row, payload)
+            if wire:
+                envelopes.append(wire)
+                deliveries.append((event_id, row_tgt))
+        if not envelopes:
+            return [], False, False
 
-        ``payload_too_large`` lets the caller mark the batch as ``failed``
-        in the outbox so we stop infinitely retrying media-bloated events
-        that no peer will ever accept. (Page cache thrash from those
-        retries was the dominant cause of social slowness.)
-        """
+        body = json.dumps({"events": envelopes}).encode("utf-8")
+        headers = dict(base_headers)
+        try:
+            signed = crypto_fed.sign_request_headers(
+                "POST", "/api/federation/events/inbox", body, str(local_server_id or "")
+            )
+            headers.update(signed)
+        except Exception:
+            _log.exception("federation: outbox signed-header attach failed")
+
         try:
             raw = await asyncio.to_thread(
                 _fetch_url_bytes,
@@ -2687,51 +2777,58 @@ async def federation_outbox_processor() -> int:
                 data=body,
                 headers=headers,
             )
-            # Any successful HTTP exchange means the peer has the batch
-            # (newly-accepted OR rejected as duplicate — both are final).
             try:
                 json.loads(raw.decode("utf-8", errors="replace") or "{}")
             except Exception:
                 pass
-            return True, False
-        except httpx.HTTPStatusError as e:  # Tor path
+            return deliveries, True, False
+        except httpx.HTTPStatusError as e:
             status = getattr(e.response, "status_code", 0)
-            return False, status == 413
-        except urllib.error.HTTPError as e:  # clearnet path
-            return False, getattr(e, "code", 0) == 413
+            return deliveries, False, status == 413
+        except urllib.error.HTTPError as e:
+            return deliveries, False, getattr(e, "code", 0) == 413
         except Exception:
-            return False, False
+            return deliveries, False, False
 
-    results = await asyncio.gather(*[_push(t) for t in targets])
-    delivered_anywhere = any(ok for ok, _ in results)
-    too_large_everywhere = bool(results) and all(too_big for _, too_big in results)
+    push_jobs = []
+    for peer_sid, base in peer_urls.items():
+        rows = list(broadcast_rows) + list(targeted_rows.get(peer_sid, []))
+        if rows:
+            push_jobs.append(_push_peer(peer_sid, base, rows))
 
-    event_ids = [e["event_id"] for e in envelopes]
+    if not push_jobs:
+        return 0
 
-    if too_large_everywhere and not delivered_anywhere:
-        # Every peer rejected this batch as too large. Stop retrying it
-        # forever — mark the batch failed so it stops thrashing the DB.
+    results = await asyncio.gather(*push_jobs)
+    all_deliveries: list[tuple[str, str]] = []
+    delivered_anywhere = False
+    too_large_streak = 0
+    for deliveries, ok, too_big in results:
+        if ok:
+            delivered_anywhere = True
+            all_deliveries.extend(deliveries)
+        if too_big:
+            too_large_streak += 1
+
+    if too_large_streak == len(results) and not delivered_anywhere:
+        event_ids = list({
+            str(r.get("event_id") or "") for r in batch if r.get("event_id")
+        })
         try:
             await asyncio.to_thread(db.mark_outbox_events_failed, event_ids)
-            _log.warning(
-                "Outbox batch (%d events) marked failed: all peers returned 413.",
-                len(event_ids),
-            )
         except Exception:
             _log.exception("mark_outbox_events_failed error")
         return 0
 
     if not delivered_anywhere:
-        # Every peer is unreachable — leave events pending; outer loop's
-        # idle_sleep throttles retries automatically.
         return 0
 
     try:
-        await asyncio.to_thread(db.bulk_mark_outbox_events_sent, event_ids)
+        marked = await asyncio.to_thread(db.mark_outbox_deliveries, all_deliveries)
     except Exception:
-        _log.exception("Bulk mark outbox sent error")
+        _log.exception("mark_outbox_deliveries error")
         return 0
-    return len(event_ids)
+    return marked
 
 
 async def _handle_message_event(event: dict) -> None:
@@ -3650,6 +3747,8 @@ async def _handle_friend_event(event: dict) -> None:
 
     if event_type == "friend.accepted":
         db.accept_friend_request(from_user["id"], to_user["id"])
+        await _notify_wall_rewrap_for_new_follower(int(from_user["id"]), int(to_user["id"]))
+        await _notify_wall_rewrap_for_new_follower(int(to_user["id"]), int(from_user["id"]))
         try:
             from ws_manager import manager
             await manager.send_to_user(from_user["id"], {
@@ -3785,6 +3884,32 @@ async def _federated_social_notify(
         _log.debug("federated social notify failed kind=%s", kind, exc_info=True)
 
 
+async def _notify_wall_rewrap_for_new_follower(
+    author_user_id: int,
+    follower_user_id: int,
+) -> None:
+    """Tell the post author their encrypted followers posts need new wraps."""
+    try:
+        post_ids = await asyncio.to_thread(
+            db.get_encrypted_posts_missing_wrap_for_follower,
+            int(author_user_id),
+            int(follower_user_id),
+        )
+    except Exception:
+        return
+    if not post_ids:
+        return
+    try:
+        from ws_manager import manager
+        await manager.send_to_user(int(author_user_id), {
+            "type": "wall_rewrap_needed",
+            "follower_user_id": int(follower_user_id),
+            "post_ids": post_ids[:50],
+        })
+    except Exception:
+        _log.debug("wall_rewrap_needed notify failed", exc_info=True)
+
+
 async def _handle_social_event(event: dict) -> None:
     """Handle incoming FrogSocial / wall federation events."""
     event_type = str(event.get("event_type") or "")
@@ -3800,6 +3925,10 @@ async def _handle_social_event(event: dict) -> None:
 
     if event_type == "social.post.created.encrypted":
         await asyncio.to_thread(db.apply_federated_wall_post_encrypted, payload, origin)
+        return
+
+    if event_type == "social.post.keys.extended":
+        await asyncio.to_thread(db.apply_federated_wall_post_keys_extended, payload, origin)
         return
 
     if event_type == "social.post.updated":
@@ -3933,6 +4062,9 @@ async def _handle_social_event(event: dict) -> None:
             return
         if action == "follow":
             db.follow_user(follower["id"], following["id"])
+            await _notify_wall_rewrap_for_new_follower(
+                int(following["id"]), int(follower["id"]),
+            )
         elif action == "unfollow":
             db.unfollow_user(follower["id"], following["id"])
 

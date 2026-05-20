@@ -9607,47 +9607,141 @@ def _strip_media_from_outbox_payload(payload: dict) -> dict:
     return out
 
 
-def insert_federation_outbox_event(event: dict) -> bool:
+def resolve_global_user_home_server_id(global_user_id: str) -> str:
+    """Return the federation server_id that owns a user identity."""
+    gid = (global_user_id or "").strip()
+    if not gid:
+        return ""
+    ident = get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    origin = get_federation_profile_origin(gid)
+    if origin:
+        return origin
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+                (gid,),
+            ).fetchone()
+        if row:
+            return local_sid
+    except Exception:
+        pass
+    return ""
+
+
+def resolve_federation_push_targets_for_recipient_gids(
+    recipient_global_user_ids: list[str],
+) -> list[str]:
+    """Peer server_ids that must receive an encrypted-audience event."""
+    ident = get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    if not local_sid:
+        return []
+    targets: set[str] = set()
+    for raw in recipient_global_user_ids or []:
+        gid = str(raw or "").strip()
+        if not gid:
+            continue
+        home = resolve_global_user_home_server_id(gid)
+        if home and home != local_sid:
+            targets.add(home)
+    return sorted(targets)
+
+
+def filter_encrypted_wraps_for_peer(payload: dict, peer_server_id: str) -> dict | None:
+    """Copy of an encrypted post payload containing only wraps for one peer."""
+    peer = (peer_server_id or "").strip()
+    if not peer or not isinstance(payload, dict):
+        return None
+    scoped = []
+    for w in payload.get("wrapped_keys") or []:
+        if not isinstance(w, dict):
+            continue
+        rgid = str(w.get("recipient_global_user_id") or "").strip()
+        if rgid and resolve_global_user_home_server_id(rgid) == peer:
+            scoped.append(dict(w))
+    if not scoped:
+        return None
+    out = dict(payload)
+    out["wrapped_keys"] = scoped
+    return out
+
+
+def insert_federation_outbox_event(
+    event: dict,
+    *,
+    target_server_ids: list[str] | None = None,
+) -> bool:
     """Add event to federation outbox for delivery to peers.
 
-    Enforces a hard payload-size cap. If the serialized payload exceeds
-    ``_FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES`` we first try stripping
-    ``media_data`` and re-serializing; if still too large, we skip the
-    event entirely (return False) rather than enqueue an event that
-    will infinitely 413-loop and trash the page cache.
+    ``target_server_ids``: ``None`` = broadcast; ``[]`` = local-only (no row);
+    non-empty = one pending row per peer server_id.
     """
+    if target_server_ids is not None and len(target_server_ids) == 0:
+        return True
+
+    event = dict(event or {})
     payload = event.get("payload") or {}
     payload_json = json.dumps(payload)
     if len(payload_json) > _FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES:
         stripped = _strip_media_from_outbox_payload(payload)
         payload_json = json.dumps(stripped)
         if len(payload_json) > _FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES:
-            # Even with media stripped this event is too big — drop it.
             return False
+        event["payload"] = stripped
+
+    targets: list[str] = []
+    if target_server_ids is not None:
+        targets = sorted({
+            str(t or "").strip() for t in target_server_ids if str(t or "").strip()
+        })
+
+    base_eid = str(event.get("event_id") or "").strip()
+    rows: list[tuple] = []
+    if targets:
+        for sid in targets:
+            # Per-peer event_id so inbox dedup does not drop scoped encrypted
+            # deliveries that share the same logical publish.
+            row_eid = f"{base_eid}@{sid}" if base_eid else base_eid
+            rows.append((
+                row_eid,
+                sid,
+                event.get("event_type"),
+                payload_json,
+                str(event.get("origin_time") or ""),
+                str(event.get("signature") or ""),
+            ))
+    else:
+        rows.append((
+            event.get("event_id"),
+            "",
+            event.get("event_type"),
+            payload_json,
+            str(event.get("origin_time") or ""),
+            str(event.get("signature") or ""),
+        ))
+
     try:
         with _conn() as con:
-            # Idempotent column-add for legacy databases (pre-origin_time/signature).
             for _ddl in (
                 "ALTER TABLE federation_outbox_events ADD COLUMN origin_time TEXT DEFAULT ''",
                 "ALTER TABLE federation_outbox_events ADD COLUMN signature  TEXT DEFAULT ''",
             ):
-                try: con.execute(_ddl)
-                except Exception: pass
-            con.execute(
-                """
-                INSERT INTO federation_outbox_events
-                (event_id, target_server_id, event_type, payload_json, created_at, status, origin_time, signature)
-                VALUES (?, ?, ?, ?, datetime('now'), 'pending', ?, ?)
-                """,
-                (
-                    event.get("event_id"),
-                    "",  # Broadcast to all servers
-                    event.get("event_type"),
-                    payload_json,
-                    str(event.get("origin_time") or ""),
-                    str(event.get("signature") or ""),
-                ),
-            )
+                try:
+                    con.execute(_ddl)
+                except Exception:
+                    pass
+            for row in rows:
+                con.execute(
+                    """
+                    INSERT INTO federation_outbox_events
+                    (event_id, target_server_id, event_type, payload_json,
+                     created_at, status, origin_time, signature)
+                    VALUES (?, ?, ?, ?, datetime('now'), 'pending', ?, ?)
+                    """,
+                    row,
+                )
             con.commit()
         return True
     except sqlite3.IntegrityError:
@@ -9781,6 +9875,44 @@ def mark_outbox_event_sent(event_id: str, target_server_id: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def mark_outbox_deliveries(deliveries: list[tuple[str, str]]) -> int:
+    """Mark specific (event_id, target_server_id) outbox rows as sent."""
+    if not deliveries:
+        return 0
+    total = 0
+    try:
+        with _conn() as con:
+            for event_id, target in deliveries:
+                eid = str(event_id or "").strip()
+                if not eid:
+                    continue
+                tgt = str(target or "").strip()
+                if tgt:
+                    cur = con.execute(
+                        """
+                        UPDATE federation_outbox_events
+                        SET status='sent'
+                        WHERE event_id=? AND target_server_id=? AND status='pending'
+                        """,
+                        (eid, tgt),
+                    )
+                else:
+                    cur = con.execute(
+                        """
+                        UPDATE federation_outbox_events
+                        SET status='sent'
+                        WHERE event_id=? AND (target_server_id='' OR target_server_id IS NULL)
+                          AND status='pending'
+                        """,
+                        (eid,),
+                    )
+                total += int(cur.rowcount or 0)
+            con.commit()
+        return total
+    except Exception:
+        return 0
 
 
 def bulk_mark_outbox_events_sent(event_ids: list[str]) -> int:
@@ -10247,6 +10379,102 @@ def apply_federated_wall_reaction_changed(payload: Dict, origin_server_id: str) 
     active = bool(payload.get("active"))
     set_wall_reaction(int(local_post), int(actor["id"]), emoji, active)
     return True
+
+
+def get_encrypted_posts_missing_wrap_for_follower(
+    author_user_id: int,
+    follower_user_id: int,
+    *,
+    limit: int = 50,
+) -> list[int]:
+    """Encrypted followers-audience posts where ``follower`` lacks a wrap row."""
+    try:
+        aid = int(author_user_id)
+        fid = int(follower_user_id)
+    except Exception:
+        return []
+    if aid <= 0 or fid <= 0 or aid == fid:
+        return []
+    cap = max(1, min(int(limit or 50), 200))
+    with _conn() as con:
+        rows = con.execute(
+            """
+            SELECT wp.id
+            FROM wall_posts wp
+            WHERE wp.user_id=?
+              AND wp.enc_v=2
+              AND LOWER(COALESCE(wp.audience, '')) IN ('followers', 'friends')
+              AND NOT EXISTS (
+                  SELECT 1 FROM wall_post_keys wpk
+                  WHERE wpk.post_id=wp.id AND wpk.recipient_id=?
+              )
+            ORDER BY wp.id DESC
+            LIMIT ?
+            """,
+            (aid, fid, cap),
+        ).fetchall()
+    out = []
+    for r in rows:
+        try:
+            out.append(int(r["id"]))
+        except Exception:
+            pass
+    return out
+
+
+def apply_federated_wall_post_keys_extended(
+    payload: Dict,
+    origin_server_id: str,
+) -> bool:
+    """Append recipient wraps to an existing federated encrypted post."""
+    import base64 as _b64
+
+    origin = (origin_server_id or "").strip()
+    gid = str(payload.get("global_post_id") or "").strip()
+    if not origin or not gid:
+        return False
+    local_post = resolve_federation_wall_local_id(origin, "post", gid)
+    if not local_post:
+        return False
+    author = _federated_wall_actor(
+        payload, origin,
+        gid_key="author_global_user_id",
+        nick_key="nickname",
+        require_global_id=True,
+    )
+    if not author or not _federated_wall_post_owned_by(int(local_post), int(author["id"])):
+        return False
+
+    wraps_in = payload.get("wrapped_keys") or []
+    if not isinstance(wraps_in, list) or len(wraps_in) > 64:
+        return False
+    decoded = []
+    for w in wraps_in:
+        if not isinstance(w, dict):
+            continue
+        rgid = str(w.get("recipient_global_user_id") or "").strip()
+        rnick = str(w.get("recipient_nickname") or "").strip()
+        wb = str(w.get("wrapped_b64") or "").strip()
+        if not rgid or not wb:
+            continue
+        recip = ensure_federated_dm_local_user(rgid, rnick, origin_server_id=origin)
+        if not recip:
+            continue
+        rid = int(recip["id"])
+        if rid == int(author["id"]):
+            continue
+        try:
+            blob = _b64.b64decode(wb, validate=True)
+        except Exception:
+            continue
+        if blob and len(blob) <= 4096:
+            decoded.append((rid, blob))
+    if not decoded:
+        return False
+    try:
+        return wall_post_keys_add(int(local_post), decoded) > 0
+    except ValueError:
+        return False
 
 
 def apply_federated_wall_repost_created(payload: Dict, origin_server_id: str) -> bool:

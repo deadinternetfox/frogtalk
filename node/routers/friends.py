@@ -222,6 +222,12 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
         "from_nickname": profile["nickname"],
         "to_nickname": current_user["nickname"],
     })
+    try:
+        from routers.federation import _notify_wall_rewrap_for_new_follower
+        await _notify_wall_rewrap_for_new_follower(int(profile["id"]), int(current_user["id"]))
+        await _notify_wall_rewrap_for_new_follower(int(current_user["id"]), int(profile["id"]))
+    except Exception:
+        pass
     return {"ok": True}
 
 

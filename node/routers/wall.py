@@ -71,6 +71,10 @@ class WrappedKeyEntry(BaseModel):
     wrapped_b64: str = Field(min_length=1, max_length=8192)
 
 
+class ExtendWrappedKeysRequest(BaseModel):
+    wrapped_keys: list[WrappedKeyEntry] = Field(default_factory=list, max_length=64)
+
+
 class CreateEncryptedPostRequest(BaseModel):
     # 'followers' | 'friends' | 'list:<id>'   (public posts stay plaintext)
     audience: str = Field(min_length=1, max_length=64)
@@ -288,7 +292,12 @@ async def audience_recipients(request: Request,
         rid = r.get("id") or r.get("user_id")
         nick = r.get("nickname")
         if rid and nick and int(rid) != uid:
-            out.append({"user_id": int(rid), "nickname": nick})
+            prof = db.get_user_by_id(int(rid)) or {}
+            gid = str(prof.get("global_user_id") or "").strip()
+            entry = {"user_id": int(rid), "nickname": nick}
+            if gid:
+                entry["global_user_id"] = gid
+            out.append(entry)
     return {"audience": aud, "recipients": out, "count": len(out)}
 
 
@@ -430,6 +439,103 @@ async def create_wall_post_encrypted(request: Request,
         "recipients": len(wraps_decoded),
         "created_at": "just now",
     }
+
+
+@router.post("/posts/{post_id}/wrapped-keys")
+@limiter.limit("60/hour")
+async def extend_wall_post_wrapped_keys(
+    request: Request,
+    post_id: int,
+    body: ExtendWrappedKeysRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Append wrapped payload keys when audience grows (new follower, cross-node)."""
+    import base64 as _b64
+
+    post = db.get_wall_post_meta(post_id)
+    if not post or int(post.get("user_id") or 0) != int(current_user["id"]):
+        return JSONResponse(status_code=404, content={"error": "Post not found or not yours"})
+    if int(post.get("enc_v") or 0) != 2:
+        return JSONResponse(status_code=400, content={"error": "Not an encrypted post"})
+
+    aud = str(post.get("audience") or "followers").strip().lower()
+    author_id = int(current_user["id"])
+    if not body.wrapped_keys:
+        return JSONResponse(status_code=400, content={"error": "No recipients"})
+
+    wraps_decoded = []
+    seen: set[int] = set()
+    for w in body.wrapped_keys:
+        rid = int(w.recipient_id or 0)
+        if rid <= 0 or rid in seen or rid == author_id:
+            continue
+        seen.add(rid)
+        try:
+            blob = _b64.b64decode(w.wrapped_b64, validate=True)
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "Bad wrap encoding"})
+        if not blob or len(blob) > 4096:
+            return JSONResponse(status_code=400, content={"error": "Wrap out of bounds"})
+        wraps_decoded.append((rid, blob))
+    if not wraps_decoded:
+        return JSONResponse(status_code=400, content={"error": "No valid recipients"})
+
+    if aud == "followers":
+        allowed_ids = {r["follower_id"] for r in db._conn().execute(
+            "SELECT follower_id FROM followers WHERE following_id=?", (author_id,)
+        ).fetchall()}
+    elif aud == "friends":
+        rows = db._conn().execute(
+            "SELECT user_id, friend_id FROM friends "
+            "WHERE (user_id=? OR friend_id=?) AND status='accepted'",
+            (author_id, author_id),
+        ).fetchall()
+        allowed_ids = set()
+        for r in rows:
+            allowed_ids.add(r["user_id"] if r["user_id"] != author_id else r["friend_id"])
+    else:
+        rows = db._conn().execute(
+            "SELECT follower_id AS uid FROM followers WHERE following_id=? "
+            "UNION SELECT user_id FROM friends WHERE friend_id=? AND status='accepted' "
+            "UNION SELECT friend_id FROM friends WHERE user_id=? AND status='accepted'",
+            (author_id, author_id, author_id),
+        ).fetchall()
+        allowed_ids = {int(r["uid"]) for r in rows}
+
+    bad = [rid for rid, _ in wraps_decoded if rid not in allowed_ids]
+    if bad:
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Recipient not in audience", "recipient_ids": bad[:10]},
+        )
+
+    try:
+        added = db.wall_post_keys_add(int(post_id), wraps_decoded)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+    if added > 0:
+        try:
+            from routers import federation as federation_mod
+            gpid, _ = db.ensure_federation_wall_post_global_id(int(post_id))
+            if gpid:
+                fed_wraps = []
+                for rid, blob in wraps_decoded:
+                    recip = db.get_user_by_id(int(rid)) or {}
+                    fed_wraps.append({
+                        "recipient_global_user_id": str(recip.get("global_user_id") or "").strip(),
+                        "recipient_nickname": str(recip.get("nickname") or "").strip(),
+                        "wrapped_b64": _b64.b64encode(blob).decode("ascii"),
+                    })
+                federation_mod.enqueue_social_post_keys_extended(
+                    current_user,
+                    global_post_id=gpid,
+                    wrapped_keys=fed_wraps,
+                )
+        except Exception:
+            pass
+
+    return {"ok": True, "added": added}
 
 
 @router.get("/posts/{post_id}")
