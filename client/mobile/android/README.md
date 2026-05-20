@@ -72,7 +72,7 @@ style), native Firebase Cloud Messaging is required. The full change set:
 4. On boot / first login, grab the FCM token (`FirebaseMessaging.getInstance()
    .token`) and `POST /api/push/fcm-subscribe` with `{token, platform:"android"}`.
    Store it server-side alongside the existing WebPush subscriptions.
-5. In `routers/ws.py`'s `_push_always()` call path, if the recipient has an
+5. In `node/routers/ws.py`'s `_push_always()` call path, if the recipient has an
    Android FCM token registered, also send an HTTP v1 FCM message with
    `android.priority=HIGH`, `data={kind:"call", call_id, from_nickname,
    from_avatar, call_type}` and **no `notification` field** (so the data

@@ -33,8 +33,8 @@
 
 ### Sanity checks
 
-- [ ] `node --check static/js/<file>.js` passes for every JS file I touched
-- [ ] `python -m py_compile <file>.py` passes for every Python file I touched
+- [ ] `node --check node/static/js/<file>.js` passes for every JS file I touched
+- [ ] `python -m py_compile node/<file>.py` passes for every Python file I touched
 - [ ] I ran the app locally and exercised the changed code path
 - [ ] No new secrets, tokens, or service-account JSON in the diff
 - [ ] No new dependencies — or if there are, I've justified them in the description and checked the package isn't a typosquat

@@ -57,7 +57,7 @@ xcodebuild -exportArchive -archivePath build/FrogTalk.xcarchive \
 
 VoIP push (cold-launch incoming calls) does **not** go through FCM. The
 backend sends VoIP pushes directly to APNs HTTP/2 with `apns-push-type: voip`.
-See [routers/push.py](../routers/push.py) `_send_apns_voip()`.
+See [node/routers/push.py](../../../node/routers/push.py) `_send_apns_voip()`.
 
 ## Distribution
 

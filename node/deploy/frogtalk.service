@@ -1,0 +1,20 @@
+[Unit]
+Description=FrogTalk federated chat / social node
+After=network.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/frogtalk/node
+EnvironmentFile=/opt/frogtalk/.env
+# data/, secrets/, and .env live at /opt/frogtalk root and are reached
+# via symlinks (data, secrets) inside /opt/frogtalk/node — keeps existing
+# operator state in place across the 2026-05 restructure.
+ExecStart=/opt/frogtalk/venv/bin/python main.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

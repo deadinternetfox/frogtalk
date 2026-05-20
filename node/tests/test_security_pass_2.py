@@ -26,6 +26,16 @@ os.environ["FROGTALK_MEDIA_OFFLOAD_ENABLED"] = "1"
 os.environ.setdefault("FROGTALK_CSRF_SECRET", "test-csrf-secret-do-not-use-in-prod")
 # Run federation auth tests in dual mode so signed + legacy both exercised.
 os.environ.setdefault("FROGTALK_FEDERATION_AUTH_MODE", "dual")
+# Point the DB at an isolated temp file so the federation/CSRF helpers can
+# read/write a fully-migrated schema regardless of cwd (the suite used to
+# rely on an artifact left under ./data by manual runs — flaky after the
+# 2026-05 restructure moved the runtime under node/).
+_TMP_DB_FD, _TMP_DB_PATH = tempfile.mkstemp(prefix="ft-sec2-db-", suffix=".db")
+os.close(_TMP_DB_FD)
+os.environ["DB_PATH"] = _TMP_DB_PATH
+
+import database as _db  # noqa: E402  (env vars must be set first)
+_db.init_db()
 
 
 class MediaStorageTests(unittest.TestCase):

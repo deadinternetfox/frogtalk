@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Deploy board PHP + .htaccess to both FrogTalk production nodes.
-# Usage (from repo root):  bash scripts/deploy_board.sh
+# Usage (from repo root):  bash node/scripts/deploy_board.sh
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$REPO_ROOT"
 
 HOSTS=("161.97.182.73:2222" "31.220.92.120:22")
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new

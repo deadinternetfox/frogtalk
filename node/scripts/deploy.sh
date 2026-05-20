@@ -9,6 +9,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NODE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -28,10 +29,10 @@ echo "🚀  Deploying FrogChat to ${REMOTE}:${REMOTE_DIR}"
 echo "────────────────────────────────────────────────────────"
 
 # ── 0. Quick pre-flight summary ────────────────────────────────
-APK_COUNT=$(ls -1 "$SCRIPT_DIR/static/"frogtalk-v*.apk 2>/dev/null | wc -l || echo 0)
-LATEST_APK=$(ls -1 "$SCRIPT_DIR/static/"frogtalk-v*.apk 2>/dev/null | sort | tail -n1 || true)
-JS_COUNT=$(find "$SCRIPT_DIR/static/js" -name '*.js' 2>/dev/null | wc -l)
-PY_COUNT=$(find "$SCRIPT_DIR" -maxdepth 2 -name '*.py' -not -path '*/.venv/*' -not -path '*/venv/*' 2>/dev/null | wc -l)
+APK_COUNT=$(ls -1 "$NODE_DIR/static/"frogtalk-v*.apk 2>/dev/null | wc -l || echo 0)
+LATEST_APK=$(ls -1 "$NODE_DIR/static/"frogtalk-v*.apk 2>/dev/null | sort | tail -n1 || true)
+JS_COUNT=$(find "$NODE_DIR/static/js" -name '*.js' 2>/dev/null | wc -l)
+PY_COUNT=$(find "$NODE_DIR" -maxdepth 2 -name '*.py' -not -path '*/.venv/*' -not -path '*/venv/*' 2>/dev/null | wc -l)
 echo "📊  Local snapshot:"
 echo "    • Python files  : ${PY_COUNT}"
 echo "    • JS modules    : ${JS_COUNT}"
@@ -44,16 +45,15 @@ rsync -avz --delete --human-readable --stats \
   -e "ssh ${SSH_OPTS[*]}" \
   --exclude='.env' \
   --exclude='data/' \
+  --exclude='secrets/' \
   --exclude='venv/' \
   --exclude='.venv/' \
   --exclude='__pycache__/' \
   --exclude='*.pyc' \
-  --exclude='.git/' \
-  --exclude='.github/' \
-  --exclude='node_modules/' \
-  --exclude='client/' \
-  "$SCRIPT_DIR/" \
-  "${REMOTE}:${REMOTE_DIR}/" | awk '
+  --exclude='scripts/.env' \
+  --exclude='scripts/deploy_nodes.sh' \
+  "$NODE_DIR/" \
+  "${REMOTE}:${REMOTE_DIR}/node/" | awk '
     /^sending incremental/ { print "    " $0; next }
     /^Number of files:/    { print "    📂 " $0; next }
     /^Number of regular files transferred:/ { print "    ✨ " $0; next }
@@ -89,12 +89,15 @@ source venv/bin/activate
 echo "    ⬆️  Upgrading pip…"
 pip install --quiet --upgrade pip
 echo "    📥 Installing/updating Python dependencies…"
-pip install --quiet -r requirements.txt
+pip install --quiet -r node/requirements.txt
 PKG_COUNT=\$(pip list --format=freeze 2>/dev/null | wc -l)
 echo "    ✅ Dependencies up to date (\$PKG_COUNT packages)"
 
-# Ensure data directory exists
+# Ensure data + runtime symlinks (post-2026-05 restructure)
 mkdir -p data
+[ -L node/data ]    || ln -sfn /opt/frogtalk/data    node/data
+[ -L node/.env ]    || ln -sfn /opt/frogtalk/.env    node/.env
+[ -d secrets ] && { [ -L node/secrets ] || ln -sfn /opt/frogtalk/secrets node/secrets; } || true
 
 # Reload / start service
 echo ""

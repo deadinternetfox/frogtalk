@@ -48,10 +48,10 @@ For mass-account creation, DoS, or other high-impact tests, run a **local instan
 ```bash
 git clone https://github.com/deadinternetfox/frogtalk.git
 cd frogtalk
-cp deploy/env.example .env   # set ADMIN_PASSWORD, etc.
+cp node/deploy/env.example .env   # set ADMIN_PASSWORD, etc.
 python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-python main.py               # → http://localhost:8080
+pip install -r node/requirements.txt
+cd node && python main.py         # → http://localhost:8080
 ```
 
 Or use Docker — see the README.

@@ -74,10 +74,14 @@ if ! git pull --ff-only origin "$remote_branch"; then
 fi
 ok "Code updated."
 
-if [[ -f requirements.txt ]]; then
+REQ_PATH=""
+[[ -f node/requirements.txt ]] && REQ_PATH=node/requirements.txt
+[[ -z "$REQ_PATH" && -f requirements.txt ]] && REQ_PATH=requirements.txt
+
+if [[ -n "$REQ_PATH" ]]; then
   if [[ -f venv/bin/python ]]; then
-    info "Installing Python dependency updates into ./venv"
-    if ! venv/bin/python -m pip install -r requirements.txt; then
+    info "Installing Python dependency updates into ./venv from $REQ_PATH"
+    if ! venv/bin/python -m pip install -r "$REQ_PATH"; then
       warn "Dependency install failed; skipping."
     else
       ok "Dependencies updated."
@@ -88,7 +92,7 @@ if [[ -f requirements.txt ]]; then
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-  if systemctl list-unit-files | rg -n "^frogtalk\.service" >/dev/null 2>&1; then
+  if systemctl list-unit-files 2>/dev/null | grep -q "^frogtalk\.service"; then
     info "Restarting frogtalk.service"
     if systemctl restart frogtalk.service; then
       ok "Service restarted."

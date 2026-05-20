@@ -97,8 +97,8 @@ Please don't run destructive exploits against the live production server. Spin u
 1. **Fork** the repo and **branch from `main`**. One PR = one concern.
 2. **If it's vibe-coded, say so.** Add the `vibe-coded` label, or just write `[vibe-coded]` in the PR title. We'd rather know upfront than discover it during review.
 3. **Run the sanity checks** before pushing — see [the checklist](#what-deslopped-actually-means-the-review-checklist). At a minimum:
-   - `node --check static/js/<file>.js` for any JS you touched. Silent parse errors break every onclick on the page.
-   - `python -m py_compile <file>.py` for any Python you touched. The FastAPI app imports the whole tree at startup.
+   - `node --check node/static/js/<file>.js` for any JS you touched. Silent parse errors break every onclick on the page.
+   - `python -m py_compile node/<file>.py` for any Python you touched. The FastAPI app imports the whole tree at startup.
 4. **Write a clear PR description** with:
    - What problem this solves (link the issue if there is one).
    - How you solved it (one paragraph is fine).
@@ -124,9 +124,9 @@ A PR is **deslopped** when a human reviewer has gone through this list and eithe
 
 ### Security
 
-- [ ] **All user-controlled values that hit the DOM are escaped** with `esc()` — and if they're going into a JS-string-in-an-HTML-attribute, with `jsStr()` instead. See [`static/js/state.js`](static/js/state.js) and the notes in `/memories/` for why `esc()` alone is unsafe inside `onclick="foo('${...}')"`.
+- [ ] **All user-controlled values that hit the DOM are escaped** with `esc()` — and if they're going into a JS-string-in-an-HTML-attribute, with `jsStr()` instead. See [`node/static/js/state.js`](node/static/js/state.js) and the notes in `/memories/` for why `esc()` alone is unsafe inside `onclick="foo('${...}')"`.
 - [ ] **All SQL uses parameterised queries.** No f-strings into `cursor.execute`.
-- [ ] **All admin / state-changing endpoints check auth AND CSRF.** See the `_require_auth` pattern in [`routers/server_admin.py`](routers/server_admin.py).
+- [ ] **All admin / state-changing endpoints check auth AND CSRF.** See the `_require_auth` pattern in [`node/routers/server_admin.py`](node/routers/server_admin.py).
 - [ ] **All new endpoints validate input length and type.** Trust nothing from the wire.
 - [ ] **No new secrets in the repo.** `git diff` against `.gitignore`d patterns; check for `.env`, service-account JSON, hardcoded tokens.
 - [ ] **No new dependencies without a quick supply-chain check.** Look at the package's downloads, maintainer, last update, and whether the import name matches the package name (typosquat check).

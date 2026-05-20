@@ -460,15 +460,15 @@
     <h2>What we shipped in the 2026-05 hardening pass</h2>
     <p>
       A focused security pass against the platform landed in May 2026. Notes here are intentionally
-      blunt so you can see what changed and where to look. Full plan with file references:
-      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/SECURITY_HARDENING_PLAN.md" target="_blank" rel="noopener">docs/SECURITY_HARDENING_PLAN.md</a>.
+      blunt so you can see what changed and where to look.       Full model and crypto boundaries:
+      <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/SECURITY_MODEL.md" target="_blank" rel="noopener">docs/SECURITY_MODEL.md</a>.
     </p>
     <ul>
       <li><strong>CRIT-1 — Discord bridge token "discord" removed.</strong> Per-bridge <code>secrets.token_urlsafe(32)</code> minted on create. Existing rows with the literal token <code>"discord"</code> auto-rotate on boot. Inbound auth still goes through the constant-time bridge-token check.</li>
       <li><strong>CRIT-2 — Federation events require signatures by default.</strong> <code>FROGTALK_FEDERATION_REQUIRE_SIGS=1</code> by default; events from origins without a pinned <code>server_pubkey</code> are rejected. Inbox idempotency moved to a composite <code>(origin_server_id, event_id)</code> key.</li>
       <li><strong>CRIT-3 — Auto-update OFF by default + signed release manifests.</strong> <code>FROGTALK_AUTO_UPDATE_ENABLED=0</code> default. Apply path verifies an Ed25519 signature from <code>FROGTALK_RELEASE_SIGNERS</code> over the manifest before any rsync/restart. Version monotonicity enforced.</li>
       <li><strong>CRIT-4 — Federation no longer auto-creates users/rooms.</strong> Events that reference an unknown local nick or room are dropped instead of creating a shadow user or system-owned room.</li>
-      <li><strong>HIGH-1 — Admin PIN gate now server-side.</strong> A new <code>admin_pin_gate</code> dependency guards <code>routers/admin.py</code> and the server-admin mount; client-side gate is no longer the only check.</li>
+      <li><strong>HIGH-1 — Admin PIN gate now server-side.</strong> A new <code>admin_pin_gate</code> dependency guards <code>node/routers/admin.py</code> and the server-admin mount; client-side gate is no longer the only check.</li>
       <li><strong>HIGH-3 — External API scoped to membership.</strong> Bot keys must be installed in the channel (<code>bot_in_channel</code>); user keys go through <code>user_can_access_room</code>. Bot DMs honor user blocks.</li>
       <li><strong>HIGH-5 — Auth hygiene.</strong> Per-account login lockout (<code>locked_until</code>), bcrypt against a dummy hash on missing user (kills timing oracle), recovery keys stored under bcrypt, rate limit added to <code>/api/server-admin/login</code>, default <code>ADMIN_PASSWORD</code> shipped empty (random bootstrap path runs).</li>
       <li><strong>HIGH-6 — WebRTC signaling bound to call participants.</strong> <code>ice_candidate</code>, <code>call_offer</code>, and <code>call_answer</code> validate <code>call_id</code>, sender is caller/callee, and the call is open.</li>

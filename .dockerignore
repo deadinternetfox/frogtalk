@@ -27,7 +27,7 @@ secrets/
 .env
 .env.*
 !.env.example
-deploy/env.example
+node/deploy/env.example
 firebase-service-account*.json
 google-services.json
 apns*.p8
@@ -53,22 +53,18 @@ venv/
 .venv/
 
 # ── Frontend bundles + heavy desktop / android artifacts ───────────
-client/desktop/app/dist/
-client/desktop/app/out/
-client/desktop/app/node_modules/
-client/desktop/builds/
-client/mobile/android/build/
-client/mobile/android/app/build/
-client/mobile/android/.gradle/
+client/
 node_modules/
-static/*.apk
-static/*.AppImage
-static/*.deb
-static/*.exe
-static/*.zip
-static/*.dmg
-static/*.snap
-static/*.tar.gz
+node/static/*.apk
+node/static/*.AppImage
+node/static/*.deb
+node/static/*.exe
+node/static/*.zip
+node/static/*.dmg
+node/static/*.snap
+node/static/*.tar.gz
+node/static/uploads/
+node/builds/
 
 # ── Logs & temp ─────────────────────────────────────────────────────
 *.log

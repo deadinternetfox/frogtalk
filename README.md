@@ -85,25 +85,30 @@ No company in the middle. Messages stay private. Built in the open.
 ```bash
 git clone https://github.com/deadinternetfox/frogtalk.git
 cd frogtalk
-cp deploy/env.example .env       # set ADMIN_PASSWORD, PORT, ALLOWED_ORIGINS
+cp node/deploy/env.example .env        # set ADMIN_PASSWORD, PORT, ALLOWED_ORIGINS
 python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-python main.py                   # → http://localhost:8080
+pip install -r node/requirements.txt
+cd node && python main.py              # → http://localhost:8080
 ```
 
 Default admin login: `admin` / the value of `ADMIN_PASSWORD` in your `.env`.
+
+> All node code lives under `node/`. The runtime expects `data/`, `secrets/`, and `.env`
+> at the project root and reaches them via in-place symlinks (`node/data`, `node/secrets`,
+> `node/.env`) so operator state stays at `/opt/frogtalk/` while source lives at
+> `/opt/frogtalk/node/`. The setup wizard creates those symlinks for you.
 
 ### Guided setup + update scripts
 
 ```bash
 # interactive self-host wizard (safe defaults + edge-case handling)
-bash scripts/node_setup_wizard.sh
+bash node/scripts/node_setup_wizard.sh
 
 # check for upstream updates
-bash scripts/node_update_check.sh
+bash node/scripts/node_update_check.sh
 
 # apply updates safely (fast-forward only)
-bash scripts/node_update_check.sh --apply
+bash node/scripts/node_update_check.sh --apply
 ```
 
 ### Server Web Admin (node management)
@@ -148,8 +153,9 @@ Onion-capable nodes display a `🧅 ONION` badge in the server list, and the nod
 ### Production (systemd)
 
 ```bash
-sudo cp deploy/frogtalk.service /etc/systemd/system/frogtalk.service
-# edit WorkingDirectory and User in the service file as needed
+sudo cp node/deploy/frogtalk.service /etc/systemd/system/frogtalk.service
+# Defaults: WorkingDirectory=/opt/frogtalk/node, EnvironmentFile=/opt/frogtalk/.env
+# edit User if you're not deploying as `deploy`
 sudo systemctl daemon-reload
 sudo systemctl enable --now frogtalk
 sudo systemctl status frogtalk
@@ -160,7 +166,8 @@ Logs: `journalctl -u frogtalk -f`
 ### Docker
 
 ```bash
-docker build -t frogtalk .
+# Build from the repo root, pointed at node/Dockerfile.
+docker build -f node/Dockerfile -t frogtalk .
 docker run -d -p 8080:8080 \
   -e ADMIN_PASSWORD=your_password \
   -v $(pwd)/data:/app/data \
@@ -250,31 +257,48 @@ for a DM, or the channel's encryption mode for a room.
 
 ```
 frogtalk/
-├── client/                       # client surfaces (desktop + mobile + builds)
-│   ├── desktop/
-│   │   ├── app/                  # Electron source
+├── client/                       # everything end-users install
+│   ├── desktop/                  # Electron source + builds
+│   │   ├── app/                  # Electron source (main.js / preload.js / renderer)
 │   │   └── builds/               # Electron output artifacts (gitignored)
 │   └── mobile/
-│       ├── android/              # Android app source
-│       └── ios/                  # iOS app source / docs
-├── backend/README.md             # backend boundary docs (API/runtime)
-├── node/README.md                # node-operator boundary docs
-├── static/                       # web client + marketing pages
-├── routers/                      # FastAPI route modules
-├── deploy/                       # systemd/nginx/env templates
-├── scripts/
-│   ├── node_setup_wizard.sh      # guided node setup
-│   ├── node_update_check.sh      # update check / safe apply
-│   └── deploy_nodes.sh           # operator multi-node deploy (gitignored)
+│       ├── android/              # Android Studio project (Capacitor + native shell)
+│       └── ios/                  # iOS Xcode project
+├── node/                         # the federated server (everything ops cares about)
+│   ├── main.py                   # FastAPI app entrypoint
+│   ├── database.py               # SQLite schema + migrations
+│   ├── routers/                  # FastAPI route modules
+│   ├── static/                   # web client + marketing pages served by the node
+│   ├── deploy/                   # systemd / nginx / env.example
+│   ├── scripts/
+│   │   ├── node_setup_wizard.sh  # guided self-host setup
+│   │   ├── node_update_check.sh  # safe update check / apply
+│   │   ├── deploy.sh             # operator rsync deploy
+│   │   ├── build_server_release.sh
+│   │   └── migrations/           # one-shot historical migrations
+│   ├── tests/                    # pytest suite (sanitizers, proxy, security)
+│   ├── requirements.txt
+│   ├── Dockerfile                # docker build -f node/Dockerfile -t frogtalk .
+│   └── builds/                   # release tarballs (gitignored)
 ├── bot-examples/                 # standalone reference bots
+├── board/                        # standalone PHP imageboard mirror (legacy)
+├── flatpak/                      # flatpak manifest for the desktop client
+├── github-build-mirror/          # release binaries published to GitHub
 ├── docs/
-│   ├── PROJECT_STRUCTURE.md      # current structure + migration rules
+│   ├── PROJECT_STRUCTURE.md
 │   ├── SECURITY_MODEL.md
 │   ├── SECURITY_HARDENING_PLAN.md
 │   └── SECURITY_SCAN_2026_05_18.md
+├── README.md / SECURITY.md / CONTRIBUTING.md / CONTRIBUTORS.md / LICENSE
+└── .gitignore / .dockerignore / .fallowrc.json
 ```
 
-Detailed structure: [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md)
+On a running node, operator state (`.env`, `data/`, `secrets/`, `venv/`) lives at
+`/opt/frogtalk/` and the runtime source at `/opt/frogtalk/node/`. The setup wizard
+wires symlinks (`node/data`, `node/.env`, `node/secrets`) so the FastAPI process
+can stay with cwd=`node/` without copying operator secrets into the source tree.
+
+Detailed structure + migration rules: [`node/README.md`](node/README.md) · security model: [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md)
 
 ---
 
@@ -330,7 +354,7 @@ deslopper. Quick start:
 
 1. Fork the repo and branch from `main`.
 2. If your PR is AI-drafted, label it `vibe-coded` — we'll deslop it together.
-3. Run `node --check static/js/<file>.js` for any JS you touched — silent parse
+3. Run `node --check node/static/js/<file>.js` for any JS you touched — silent parse
    errors break every onclick on the page.
 4. Run `python -m py_compile <file>.py` for any Python you touched.
 5. Open a PR with the template filled in. For security fixes, include a PoC.

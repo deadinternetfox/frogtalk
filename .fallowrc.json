@@ -1,16 +1,16 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "entry": [
-    "static/index.html",
-    "static/server_admin.html",
+    "node/static/index.html",
+    "node/static/server_admin.html",
+    "node/static/sw.js",
+    "node/static/vendor/qr/jsQR.js",
+    "node/static/vendor/qr/qrcode.min.js",
     "client/desktop/app/main.js",
-    "client/desktop/app/preload.js",
-    "static/sw.js",
-    "static/vendor/qr/jsQR.js",
-    "static/vendor/qr/qrcode.min.js"
+    "client/desktop/app/preload.js"
   ],
   "ignorePatterns": [
-    "static/vendor/**",
+    "node/static/vendor/**",
     "**/*.min.js"
   ],
   "ignoreDependencies": ["electron", "electron-builder"],

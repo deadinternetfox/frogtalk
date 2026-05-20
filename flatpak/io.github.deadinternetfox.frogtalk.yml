@@ -53,5 +53,5 @@ modules:
       - install -Dm755 run.sh /app/bin/frogtalk
       - install -Dm644 io.github.deadinternetfox.frogtalk.desktop /app/share/applications/io.github.deadinternetfox.frogtalk.desktop
       - install -Dm644 io.github.deadinternetfox.frogtalk.metainfo.xml /app/share/metainfo/io.github.deadinternetfox.frogtalk.metainfo.xml
-      - install -Dm644 source/static/icons/icon-512.png /app/share/icons/hicolor/512x512/apps/io.github.deadinternetfox.frogtalk.png
-      - install -Dm644 source/static/icons/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.deadinternetfox.frogtalk.svg
+      - install -Dm644 source/node/static/icons/icon-512.png /app/share/icons/hicolor/512x512/apps/io.github.deadinternetfox.frogtalk.png
+      - install -Dm644 source/node/static/icons/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.deadinternetfox.frogtalk.svg

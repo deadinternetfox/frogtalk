@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DIST_DIR="$ROOT_DIR/dist"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+NODE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$NODE_DIR/.." && pwd)"
+DIST_DIR="$REPO_ROOT/node/builds"
 VERSION="$(date +%Y%m%d-%H%M%S)"
 NAME="frogtalk-server-${VERSION}"
 OUT_DIR="$DIST_DIR/$NAME"
@@ -12,6 +14,7 @@ mkdir -p "$DIST_DIR"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
+# Bundle only the node runtime: everything in node/ minus dev junk.
 rsync -a \
   --exclude '.git' \
   --exclude '.venv' \
@@ -19,16 +22,13 @@ rsync -a \
   --exclude '__pycache__' \
   --exclude '*.pyc' \
   --exclude 'data' \
-  --exclude 'dist' \
-  --exclude 'client/mobile/android/app/build' \
-  --exclude 'client/mobile/android/.gradle' \
-  --exclude 'client/mobile/android/build' \
-  --exclude 'client/mobile/android/local.properties' \
-  --exclude 'client/mobile/android/signing.properties' \
-  --exclude 'client/desktop/app/node_modules' \
-  --exclude 'client/desktop/builds' \
+  --exclude 'secrets' \
+  --exclude '.env' \
+  --exclude 'builds' \
+  --exclude 'scripts/.env' \
+  --exclude 'scripts/deploy_nodes.sh' \
   --exclude '.DS_Store' \
-  "$ROOT_DIR/" "$OUT_DIR/"
+  "$NODE_DIR/" "$OUT_DIR/"
 
 (
   cd "$DIST_DIR"

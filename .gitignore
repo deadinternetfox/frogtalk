@@ -1,6 +1,10 @@
 # ── Secrets & runtime data ─────────────────────────────────────
 .env
 data/
+secrets/
+node/data/
+node/.env
+node/secrets/
 *.db
 *.sqlite
 *.sqlite3
@@ -28,14 +32,19 @@ build/
 *.log
 deploy.tar.gz
 *.tar.gz
+node/builds/
 
 # ── Release binaries (served at runtime, not stored in git) ────
-static/*.AppImage
-static/*.deb
-static/*.apk
-static/frogtalk-v*.apk
-static/frogtalk_*.deb
-static/FrogTalk-*.AppImage
+node/static/*.AppImage
+node/static/*.deb
+node/static/*.apk
+node/static/*.exe
+node/static/*.zip
+node/static/frogtalk-v*.apk
+node/static/frogtalk_*.deb
+node/static/FrogTalk-*.AppImage
+node/static/FrogTalk-*-win-x64.zip
+node/static/uploads/
 
 # ── IDE & OS ───────────────────────────────────────────────────
 .DS_Store
@@ -55,12 +64,11 @@ desktop.ini
 imageboard/board_uploads/
 imageboard/board_data/
 imageboard/board_previews/
-static/imageboard-standalone/board_uploads/
-static/imageboard-standalone/board_data/
-static/imageboard-standalone/board_previews/
+node/static/imageboard-standalone/board_uploads/
+node/static/imageboard-standalone/board_data/
+node/static/imageboard-standalone/board_previews/
 
-# ── Frogtalk runtime ───────────────────────────────────────────
-static/uploads/
+# ── FrogTalk runtime ───────────────────────────────────────────
 uvicorn.log
 frogtalk.log
 /logs/
@@ -74,6 +82,7 @@ client/mobile/android/.gradle/
 client/mobile/android/local.properties
 client/mobile/android/signing.properties
 client/mobile/android/app/google-services.json
+client/mobile/android/frogtalk.keystore
 *.apk
 *.aab
 
@@ -84,20 +93,14 @@ client/mobile/android/app/google-services.json
 !github-build-mirror/*.exe
 !github-build-mirror/*.zip
 
-# Release binaries — keep static outputs out of git; mirror artifacts are allowed above.
-static/*.AppImage
-static/*.exe
-secrets/
-
-# Generated desktop release artifacts (too large for git)
-static/FrogTalk-*-win-x64.zip
+# ── Desktop release artifacts (too large for git) ──────────────
 client/desktop/builds/*.AppImage
 client/desktop/builds/*.deb
 client/desktop/builds/*.exe
 client/desktop/builds/*.zip
 
-# tmp deploy / ship scripts and logs (not part of repo)
+# ── tmp deploy / ship scripts and logs (not part of repo) ──────
 .tmp_*.sh
 .tmp_*.log
-scripts/deploy_nodes.sh
-client/mobile/android/frogtalk.keystore
+node/scripts/deploy_nodes.sh
+node/scripts/.env

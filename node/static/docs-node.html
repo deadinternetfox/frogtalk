@@ -137,14 +137,14 @@
       <p class="hint">Use the built-in CLI helpers for first-time setup and safe updates on self-hosted nodes.</p>
       <pre><code>git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
-bash scripts/node_setup_wizard.sh
+bash node/scripts/node_setup_wizard.sh
 
 # later, check for updates
-bash scripts/node_update_check.sh
+bash node/scripts/node_update_check.sh
 
 # apply update safely (fast-forward only)
-bash scripts/node_update_check.sh --apply</code></pre>
-      <p class="hint">The wizard configures `.env`, installs dependencies, and handles common edge cases without aborting the whole flow.</p>
+bash node/scripts/node_update_check.sh --apply</code></pre>
+      <p class="hint">The wizard configures <code>.env</code>, installs dependencies, wires the runtime symlinks (<code>node/data</code>, <code>node/.env</code>, <code>node/secrets</code>), and handles common edge cases without aborting the whole flow.</p>
     </section>
 
     <section class="step">
@@ -154,8 +154,8 @@ bash scripts/node_update_check.sh --apply</code></pre>
 cd /opt/frogtalk
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
-cp deploy/env.example .env
+pip install -r node/requirements.txt
+cp node/deploy/env.example .env
 $EDITOR .env   # set ADMIN_PASSWORD, PORT, ALLOWED_ORIGINS, PUBLIC_URL</code></pre>
     </section>
 
@@ -205,8 +205,9 @@ FROGTALK_BASE_URL=
 
     <section class="step">
       <h2>3) Start Service</h2>
-      <pre><code>sudo cp deploy/frogtalk.service /etc/systemd/system/frogtalk.service
-# edit WorkingDirectory and User in the unit file if needed
+      <pre><code>sudo cp node/deploy/frogtalk.service /etc/systemd/system/frogtalk.service
+# Defaults: WorkingDirectory=/opt/frogtalk/node, EnvironmentFile=/opt/frogtalk/.env
+# Edit only the User if you're not running as `deploy`.
 sudo systemctl daemon-reload
 sudo systemctl enable frogtalk
 sudo systemctl restart frogtalk
@@ -252,34 +253,23 @@ curl -s https://your-node.example/api/network/update/status</code></pre>
     </section>
 
     <section class="step">
-      <h2>7) Repo structure for operators</h2>
-      <p class="hint">As of the 2026-05 restructure, client surfaces live under <code>client/</code> so node operators have a cleaner picture of what they're shipping:</p>
-      <pre><code>client/
-├── desktop/app/        # Electron source
-├── desktop/builds/     # Electron build outputs (gitignored)
-└── mobile/
-    ├── android/        # Android source
-    └── ios/            # iOS source
-
-backend/                # API/runtime boundary docs
-node/                   # node-operator boundary docs
-deploy/                 # systemd/nginx/env templates
-scripts/                # node_setup_wizard.sh, node_update_check.sh</code></pre>
-      <p class="hint">Build entrypoints: <code>client/desktop/app/package.json</code> (Electron), <code>client/mobile/android/build.gradle.kts</code>, and <code>client/mobile/ios/FrogTalk.xcodeproj</code>.</p>
-    </section>
-
-    <section class="step">
-      <h2>7) Project structure (2026 layout)</h2>
-      <p class="hint">Current repository structure separates operator, backend, and client surfaces:</p>
+      <h2>7) Project structure (post 2026-05 restructure)</h2>
+      <p class="hint">The repo now splits cleanly into <code>client/</code> (what end-users install) and <code>node/</code> (the federated server you run):</p>
       <pre><code>frogtalk/
-├── node/                    # operator docs/workflows
-├── backend/                 # backend boundary docs
-├── client/                  # desktop/mobile surfaces
-│   ├── desktop/app
+├── client/                       # everything end-users install
+│   ├── desktop/                  # Electron source + builds
 │   └── mobile/{android,ios}
-├── static/                  # web app + site pages (runtime path)
-└── scripts/                 # setup/update/deploy helpers</code></pre>
-      <p class="hint">Build entrypoints live under <code>client/</code>: <code>client/desktop/app/package.json</code> (Electron), <code>client/mobile/android/build.gradle.kts</code>, and <code>client/mobile/ios/FrogTalk.xcodeproj</code>.</p>
+└── node/                         # the federated server
+    ├── main.py                   # FastAPI entrypoint
+    ├── routers/                  # FastAPI route modules
+    ├── static/                   # web client + marketing pages
+    ├── deploy/                   # systemd / nginx / env.example
+    ├── scripts/                  # setup, update, deploy, build helpers
+    ├── tests/                    # pytest suite
+    ├── requirements.txt
+    └── Dockerfile</code></pre>
+      <p class="hint">On a running node, operator state (<code>.env</code>, <code>data/</code>, <code>secrets/</code>, <code>venv/</code>) stays at <code>/opt/frogtalk/</code> and the runtime source at <code>/opt/frogtalk/node/</code>. The setup wizard wires symlinks so the service can run with <code>WorkingDirectory=/opt/frogtalk/node</code> without copying secrets into the source tree.</p>
+      <p class="hint">Build entrypoints: <code>client/desktop/app/package.json</code> (Electron), <code>client/mobile/android/build.gradle.kts</code>, <code>client/mobile/ios/FrogTalk.xcodeproj</code>, and <code>node/Dockerfile</code> for containerized deploys.</p>
     </section>
 
   </main>

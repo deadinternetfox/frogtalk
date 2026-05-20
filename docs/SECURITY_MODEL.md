@@ -99,8 +99,8 @@ by its own sending chain — by design — which is incompatible with our
 "show your own bubble immediately" UX. The workarounds (per-message
 plaintext caches keyed by ciphertext) created a fragile dance of caches,
 SKDM rekey requests, and own-message diagnostics that pulled in more bugs
-than they solved. See [docs/SECURITY_REFACTOR_PLAN.md](SECURITY_REFACTOR_PLAN.md)
-for the post-mortem.
+than they solved. We kept the simpler AES path rather than re-introducing
+Sender Keys until we can satisfy the own-message decrypt constraint.
 
 The simpler legacy AES path:
 
@@ -177,8 +177,8 @@ badge so members can see this at a glance, and DMs are **never** bridged.
 - **CSS sanitizer.** User-supplied CSS (themes, channel branding) is run
   through an allow-list sanitizer that strips `expression()`,
   `@import`-from-network, `url(javascript:…)` etc. See
-  [routers/_css_inline.py](../routers/_css_inline.py) and the unit tests
-  under [tests/](../tests/).
+  [node/routers/_css_inline.py](../node/routers/_css_inline.py) and the unit tests
+  under [node/tests/](../node/tests/).
 - **Media safety.** Uploads are reprocessed: images stripped of EXIF and
   recompressed, video transcoded to a safe profile, MIME re-detected
   server-side rather than trusted from the client.
@@ -228,9 +228,36 @@ We do **not** protect against:
 
 ---
 
+## 11. Platform hardening (May 2026)
+
+A focused server-side pass shipped alongside the repo restructure (`node/`
+runtime tree). Highlights:
+
+- **Federation:** per-request Ed25519 signing; `FROGTALK_FEDERATION_REQUIRE_SIGS=1`
+  by default; inbox idempotency on `(origin_server_id, event_id)`; no auto-creation
+  of shadow users/rooms from foreign events.
+- **Updates:** `FROGTALK_AUTO_UPDATE_ENABLED=0` by default; release manifests must
+  verify against `FROGTALK_RELEASE_SIGNERS` before apply.
+- **Auth:** per-account login lockout, bcrypt recovery keys, dummy-hash on missing
+  user, server-admin login rate-limited; empty default `ADMIN_PASSWORD` (bootstrap).
+- **Admin:** server-side `admin_pin_gate` on admin + server-admin routes.
+- **Bots / API:** permission allowlist on user keys, 20-key cap, channel membership
+  required for room access; bot DMs respect blocks.
+- **Bridges:** per-bridge random tokens (no shared `"discord"` literal); private
+  rooms cannot be bridged; inbound `data:` URLs capped at 8 MB.
+- **WebRTC:** `ice_candidate` / offer / answer bound to open calls and participants.
+- **Tor:** outbound HTTP via SOCKS when enabled; geoip skipped on onion-only nodes.
+- **Transport:** CSP enforce + nonce middleware; HttpOnly session cookies; CSRF
+  double-submit on state-changing routes.
+
+Live summary also on [frogtalk.xyz/security](https://frogtalk.xyz/security).
+
+---
+
 ## Change history
 
-- **2026-05-20** — Track C (libsignal Sender Keys for rooms) reverted.
+- **2026-05-20** — Repo restructure: server runtime under `node/`; docs trimmed to
+  this file only. Track C (libsignal Sender Keys for rooms) reverted.
   Channels back on legacy per-room AES-256-GCM. Full message/DM data
   wipe on all nodes. All Track-C scaffolding (SKDM relay, sender-key
   IndexedDB store, per-room sender-keys card) removed from the codebase.
@@ -241,5 +268,3 @@ We do **not** protect against:
 - **2026-02-xx** — DM v2 envelope (Signal Protocol) becomes the only
   supported DM crypto path; v1 legacy AES DMs removed.
 
-See [SECURITY_REFACTOR_PLAN.md](SECURITY_REFACTOR_PLAN.md) for the full
-historical track plan and the rationale behind each design decision.

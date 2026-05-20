@@ -14,8 +14,9 @@ set -o pipefail
 umask 077
 
 PROJECT_REPO_DEFAULT="https://github.com/deadinternetfox/frogtalk.git"
-INSTALL_DIR_DEFAULT="$HOME/frogtalk-node"
-ENV_TEMPLATE="deploy/env.example"
+INSTALL_DIR_DEFAULT="/opt/frogtalk"
+# Paths are resolved relative to $install_dir/node after clone.
+ENV_TEMPLATE="node/deploy/env.example"
 ENV_FILE=".env"
 
 C_RESET=$'\033[0m'
@@ -145,11 +146,18 @@ main() {
   fi
 
   safe_run "Upgrading pip" python3 -m pip install --upgrade pip
-  if [[ -f requirements.txt ]]; then
-    safe_run "Installing Python dependencies" python3 -m pip install -r requirements.txt
+  if [[ -f node/requirements.txt ]]; then
+    safe_run "Installing Python dependencies" python3 -m pip install -r node/requirements.txt
   else
-    warn "requirements.txt not found; skipping dependency install."
+    warn "node/requirements.txt not found; skipping dependency install."
   fi
+
+  # Symlinks so runtime data/, secrets/, .env live at $install_dir root
+  # but the node process (cwd=$install_dir/node) can still reach them.
+  mkdir -p data
+  ln -sfn "$install_dir/data"    node/data
+  ln -sfn "$install_dir/.env"    node/.env 2>/dev/null || true
+  [[ -d secrets ]] && ln -sfn "$install_dir/secrets" node/secrets
 
   if [[ ! -f "$ENV_FILE" ]]; then
     if [[ -f "$ENV_TEMPLATE" ]]; then
@@ -163,7 +171,8 @@ main() {
   set_env_value "$ENV_FILE" "ADMIN_PASSWORD" "$admin_password"
   set_env_value "$ENV_FILE" "PUBLIC_URL" "$public_url"
   set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_ENABLED" "1"
-  set_env_value "$ENV_FILE" "FROGTALK_AUTO_UPDATE_ENABLED" "1"
+  set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_REQUIRE_SIGS" "1"
+  set_env_value "$ENV_FILE" "FROGTALK_AUTO_UPDATE_ENABLED" "0"
   set_env_value "$ENV_FILE" "FROGTALK_UPDATE_CHECK_INTERVAL_SEC" "300"
   set_env_value "$ENV_FILE" "FROGTALK_UPDATE_FEED_URL" "https://frogtalk.xyz/api/network/updates/latest"
 
@@ -186,19 +195,20 @@ Setup complete.
 ===============================================
 Install dir: $install_dir
 Env file:    $install_dir/$ENV_FILE
+Runtime:     $install_dir/node/
 
 Start manually:
   cd "$install_dir"
   source venv/bin/activate
-  python main.py
+  cd node && python main.py
 
 Optional systemd:
-  sudo cp deploy/frogtalk.service /etc/systemd/system/frogtalk.service
+  sudo cp node/deploy/frogtalk.service /etc/systemd/system/frogtalk.service
   sudo systemctl daemon-reload
   sudo systemctl enable --now frogtalk
 
 Node updates:
-  bash scripts/node_update_check.sh
+  bash node/scripts/node_update_check.sh
 ===============================================
 EOF
 }
