@@ -652,7 +652,7 @@ const Messages = (() => {
       );
       let iconHtml;
       if (isImg) {
-        iconHtml = `<img class="invite-card-icon-img" src="${UI.escHtml(rawIconStr)}" alt="" width="40" height="40" loading="lazy">`;
+        iconHtml = `<img class="invite-card-icon-img" src="${UI.escHtml(rawIconStr)}" alt="" width="40" height="40" loading="lazy" style="width:40px!important;height:40px!important;min-width:40px!important;min-height:40px!important;max-width:40px!important;max-height:40px!important;object-fit:cover!important;display:block!important;border-radius:50%!important;">`;
       } else {
         let glyph = rawIconStr || '💬';
         try { glyph = Array.from(glyph)[0] || '💬'; } catch { glyph = glyph.charAt(0) || '💬'; }
@@ -672,14 +672,19 @@ const Messages = (() => {
         : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join Channel</button>`;
       if (!placeholder.parentNode) return;
       placeholder.outerHTML = `
-        <div class="invite-card">
+        <div class="invite-card ft-invite-hard"
+             style="display:inline-block!important;vertical-align:top!important;width:min(100%,300px)!important;max-width:300px!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:hidden!important;">
           <div class="invite-card-header">You've been invited to join a channel</div>
-          <div class="invite-card-main">
+          <div class="invite-card-main"
+               style="display:block!important;padding:8px 10px 6px!important;height:auto!important;min-height:0!important;max-height:none!important;">
             <div class="invite-card-name">#${name}</div>
-            <div class="invite-card-row">
-              <div class="invite-card-icon">${iconHtml}</div>
-              <div class="invite-card-row-desc">${descText || 'No channel description'}</div>
-              <div class="invite-card-action">${btnHtml}</div>
+            <div class="invite-card-row"
+                 style="display:flex!important;align-items:flex-start!important;gap:8px!important;height:auto!important;min-height:0!important;max-height:none!important;">
+              <div class="invite-card-icon"
+                   style="flex:0 0 40px!important;width:40px!important;height:40px!important;min-width:40px!important;max-width:40px!important;min-height:40px!important;max-height:40px!important;overflow:hidden!important;">${iconHtml}</div>
+              <div class="invite-card-row-desc"
+                   style="flex:1 1 auto!important;min-width:0!important;height:auto!important;min-height:0!important;max-height:none!important;">${descText || 'No channel description'}</div>
+              <div class="invite-card-action" style="flex:0 0 auto!important;height:auto!important;min-height:0!important;max-height:none!important;">${btnHtml}</div>
             </div>
             ${footer}
           </div>
