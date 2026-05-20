@@ -191,6 +191,7 @@ load_env_file() {
 run_py() {
   load_env_file "$INSTALL_DIR/$ENV_FILE_NAME"
   export FT_INSTALL_DIR="$INSTALL_DIR"
+  export FT_NODE_DIR="$INSTALL_DIR/node"
   # shellcheck disable=SC1091
   if [[ -f "$INSTALL_DIR/venv/bin/activate" ]]; then
     # shellcheck source=/dev/null
@@ -336,7 +337,15 @@ sync_chat_federation() {
   py_out="$(run_py - <<'PY'
 import asyncio, json, os, sys
 
-sys.path.insert(0, ".")
+# node/signal.py shadows stdlib signal — preload stdlib before node on sys.path.
+_node_dir = os.path.abspath(os.environ.get("FT_NODE_DIR", "."))
+_sys_path = [p for p in sys.path if os.path.abspath(p or ".") != _node_dir]
+sys.path[:] = _sys_path
+import signal as _stdlib_signal  # noqa: F401
+sys.modules["signal"] = _stdlib_signal
+if _node_dir not in sys.path:
+    sys.path.insert(0, _node_dir)
+
 import database as db
 from database import init_db
 from routers import federation as fed
