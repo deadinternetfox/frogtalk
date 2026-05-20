@@ -93,19 +93,37 @@
     return null;
   }
 
+  function _readCsrfCookie () {
+    try {
+      const v = ('; ' + (document.cookie || '')).split('; ft_csrf=');
+      if (v.length === 2) return decodeURIComponent(v.pop().split(';').shift());
+    } catch {}
+    return '';
+  }
+
   async function _api (path, method, body) {
     // Reuse the project's authenticated fetch so errors surface in the
     // same connection-error overlay as everything else.
     const fn = (typeof apiFetch === 'function') ? apiFetch : fetch;
-    const opts = (fn === fetch)
-      ? { method: method || 'GET',
-          credentials: 'include',
-          cache: 'no-store',
-          headers: { 'X-Session-Token': (window.State && State.token) || '',
-                     'Content-Type': 'application/json' },
-          body: body ? JSON.stringify(body) : undefined }
-      : null;
-    return (fn === fetch) ? fetch(path, opts) : fn(path, method || 'GET', body || null);
+    if (fn !== fetch) {
+      return fn(path, method || 'GET', body || null);
+    }
+    const verb = String(method || 'GET').toUpperCase();
+    const headers = {
+      'X-Session-Token': (window.State && State.token) || '',
+      'Content-Type': 'application/json',
+    };
+    if (verb !== 'GET' && verb !== 'HEAD' && verb !== 'OPTIONS') {
+      const csrf = _readCsrfCookie();
+      if (csrf) headers['X-CSRF-Token'] = csrf;
+    }
+    return fetch(path, {
+      method: verb,
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
   }
 
   // ── Server roundtrips ───────────────────────────────────────────────
@@ -346,26 +364,65 @@
     } catch { return false; }
   }
 
+  // Map app theme tokens onto a node (for /server, /board/admin, etc.).
+  function _applyLockThemeVars (el) {
+    if (!el) return;
+    const html = document.documentElement;
+    const cs = getComputedStyle(html);
+    const pick = (canonical, aliases, fallback) => {
+      for (const name of [canonical].concat(aliases || [])) {
+        const v = (cs.getPropertyValue(name) || '').trim();
+        if (v) {
+          el.style.setProperty(canonical, v);
+          return;
+        }
+      }
+      el.style.setProperty(canonical, fallback);
+    };
+    pick('--bg-color', ['--bg'], '#08110b');
+    pick('--surface-color', ['--surface'], '#13261a');
+    pick('--text-color', ['--text'], '#e8f2eb');
+    pick('--text-muted', ['--muted'], '#93ab9a');
+    pick('--border-color', ['--line'], '#284635');
+    pick('--accent-color', ['--accent'], '#4caf50');
+  }
+
   // Inject themed lock-screen CSS exactly once. Uses theme variables
   // so the lock automatically reskins with the rest of the app when
   // the user switches between dark / light / cyberpunk / etc.
   function _ensureLockStyles () {
     if (document.getElementById('pin-lock-styles')) return;
     const css = ''
-      // pin-dot indicators (no CSS for these existed before — they were
-      // invisible). Hollow ring by default, accent-filled when typed.
+      + '#lock-screen{'
+      +   'font-family:"Space Grotesk","IBM Plex Sans","Segoe UI",system-ui,sans-serif}'
+      + '#lock-screen .lock-card{'
+      +   'background:color-mix(in srgb,var(--surface-color) 92%,var(--accent-color));'
+      +   'border:1px solid color-mix(in srgb,var(--accent-color) 22%,var(--border-color));'
+      +   'border-radius:16px;padding:28px 24px;max-width:360px;width:100%;'
+      +   'text-align:center;box-shadow:0 12px 48px rgba(0,0,0,.55)}'
+      + '#lock-numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}'
+      + '#lock-numpad button{'
+      +   'min-height:52px;font-family:inherit;font-size:18px;font-weight:600;'
+      +   'background:color-mix(in srgb,var(--accent-color) 10%,var(--surface-color));'
+      +   'color:var(--text-color);'
+      +   'border:1px solid color-mix(in srgb,var(--accent-color) 28%,var(--border-color));'
+      +   'cursor:pointer;-webkit-tap-highlight-color:transparent;'
+      +   'transition:background .12s,transform .08s,border-color .12s}'
+      + '#lock-numpad button:active{'
+      +   'transform:scale(.97);'
+      +   'background:color-mix(in srgb,var(--accent-color) 26%,var(--surface-color))}'
+      + '#lock-numpad #lock-submit{color:var(--accent-color);font-size:20px}'
       + '.pin-dot{width:12px;height:12px;border-radius:50%;'
-      +   'border:1.5px solid color-mix(in srgb,var(--accent-color) 55%, transparent);'
+      +   'border:1.5px solid color-mix(in srgb,var(--accent-color) 55%,transparent);'
       +   'background:transparent;transition:background .12s,transform .12s,box-shadow .12s}'
       + '.pin-dot-on{background:var(--accent-color);'
-      +   'box-shadow:0 0 8px color-mix(in srgb,var(--accent-color) 55%, transparent);'
+      +   'box-shadow:0 0 8px color-mix(in srgb,var(--accent-color) 55%,transparent);'
       +   'transform:scale(1.05)}'
-      // Numpad disabled state during lockout countdown.
+      + '#lock-pin-dots{display:flex;gap:10px;justify-content:center;margin-bottom:18px}'
       + '#lock-numpad.pin-numpad-disabled{opacity:.45;pointer-events:none;filter:grayscale(.4)}'
-      // Sidebar quick-lock icon: matches existing .server-icon, accent tint.
-      + '#quick-lock-icon{background:color-mix(in srgb,var(--accent-color) 14%, var(--bg-color));'
+      + '#quick-lock-icon{background:color-mix(in srgb,var(--accent-color) 14%,var(--bg-color));'
       +   'color:var(--accent-color)}'
-      + '#quick-lock-icon:hover{background:color-mix(in srgb,var(--accent-color) 28%, var(--bg-color))}';
+      + '#quick-lock-icon:hover{background:color-mix(in srgb,var(--accent-color) 28%,var(--bg-color))}';
     const st = document.createElement('style');
     st.id = 'pin-lock-styles';
     st.textContent = css;
@@ -480,10 +537,15 @@
   }
 
   function _ensureLockScreen () {
-    if ($('lock-screen')) return;
+    const existing = $('lock-screen');
+    if (existing) {
+      _applyLockThemeVars(existing);
+      return;
+    }
     _ensureLockStyles();
     const root = document.createElement('div');
     root.id = 'lock-screen';
+    _applyLockThemeVars(root);
     // Note: no `.hidden` class — we toggle visibility via inline
     // `style.display` only. `.modal-overlay.hidden{display:none}` is
     // not !important, and our inline `display:flex` would beat it,
@@ -505,11 +567,8 @@
                           'var(--bg-color);' +
                         '-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)';
     const card = document.createElement('div');
-    card.style.cssText = 'background:color-mix(in srgb, var(--surface-color) 92%, var(--accent-color));' +
-                        'border:1px solid color-mix(in srgb, var(--accent-color) 22%, var(--border-color));' +
-                        'border-radius:16px;' +
-                        'padding:28px 24px;max-width:360px;width:100%;text-align:center;' +
-                        'box-shadow:0 12px 48px rgba(0,0,0,.55), 0 0 0 1px color-mix(in srgb,var(--accent-color) 8%, transparent) inset';
+    card.className = 'lock-card';
+    card.style.cssText = 'max-width:360px;width:100%;text-align:center';
 
     const logo = document.createElement('div');
     logo.textContent = '🐸';
@@ -539,7 +598,6 @@
 
     const numpad = document.createElement('div');
     numpad.id = 'lock-numpad';
-    numpad.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px';
     _renderNumpadKeys(numpad);
     card.appendChild(numpad);
 

@@ -16,6 +16,17 @@
   --warn: #ffb347;
   --danger: #ff6a6a;
   --line: #284635;
+  /* pin.js lock screen (same tokens as main /app theme) */
+  --bg-color: var(--bg);
+  --surface-color: var(--surface);
+  --text-color: var(--text);
+  --text-muted: var(--muted);
+  --border-color: var(--line);
+  --accent-color: var(--accent);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 * { box-sizing: border-box; }
 /* Themed scrollbars (FrogTalk green-on-dark). Cover html, body, and
@@ -1284,7 +1295,7 @@ input, select {
     </div>
   </div>
 
-<script src="/static/js/pin.js?v=12"></script>
+<script src="/static/js/pin.js?v=14"></script>
 <script src="/static/js/server_admin.js?v=__SERVER_ADMIN_ASSET_VERSION__"></script>
 </body>
 </html>

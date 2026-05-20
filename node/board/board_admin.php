@@ -1602,6 +1602,20 @@ function showFrogtalkAdminGatePage(array $gate, string $error = ''): void {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Frog Board Admin — Sign in</title>
     <style>
+        :root {
+            --bg: #0a0e0a;
+            --surface: #121a12;
+            --text: #b0ffb0;
+            --muted: #3a6f3a;
+            --accent: #00ff41;
+            --line: rgba(0,255,65,0.25);
+            --bg-color: var(--bg);
+            --surface-color: var(--surface);
+            --text-color: var(--text);
+            --text-muted: var(--muted);
+            --border-color: var(--line);
+            --accent-color: var(--accent);
+        }
         body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
                background:#0a0e0a; color:#b0ffb0; font-family:'Courier New',monospace; }
         .box { border:1px solid rgba(0,255,65,0.25); border-radius:10px; padding:32px; width:min(420px,92vw); text-align:center; }
@@ -1633,7 +1647,7 @@ function showFrogtalkAdminGatePage(array $gate, string $error = ''): void {
         <p style="margin-top:16px"><a href="/board" style="color:#4a8f4a;font-size:12px">← Back to board</a></p>
     </div>
     <?php if ($authenticated && $isAdmin && $pinRequired): ?>
-    <script src="/static/js/pin.js?v=12"></script>
+    <script src="/static/js/pin.js?v=14"></script>
     <script>
     (async function () {
       try {
