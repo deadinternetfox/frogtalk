@@ -672,11 +672,11 @@ const Messages = (() => {
         : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join Channel</button>`;
       if (!placeholder.parentNode) return;
       placeholder.outerHTML = `
-        <div class="invite-card">
+        <div class="invite-card" style="width:fit-content;max-width:340px">
           <div class="invite-card-header">You've been invited to join a channel</div>
-          <div class="invite-card-body">
-            <div class="invite-card-icon">${iconHtml}</div>
-            <div class="invite-card-info">
+          <div class="invite-card-body" style="padding:10px 12px;gap:10px">
+            <div class="invite-card-icon" style="width:40px;height:40px;font-size:22px;flex:0 0 40px">${iconHtml}</div>
+            <div class="invite-card-info" style="min-width:0">
               <div class="invite-card-name">#${name}</div>
               ${desc}
               ${by}
