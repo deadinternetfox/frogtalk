@@ -30,14 +30,6 @@ What this module does
   so user-supplied data can never escape the storage root.
 - The storage root is created with mode 0700, never world-readable.
 
-Migration / backfill
---------------------
-The companion script ``scripts/migrate_media_to_disk.py`` walks the
-existing ``messages`` / ``dm_messages`` / ``wall_posts`` tables, moves
-each oversized inline blob onto disk, and rewrites the column to the
-ref. It is idempotent and safe to run incrementally during a window
-when writes can be paused (or with the WAL checkpoint flag).
-
 Environment toggles
 -------------------
 ``FROGTALK_MEDIA_DIR``

@@ -14,9 +14,8 @@ hardened /board_uploads/ location.
 
 Authorization
 -------------
-The current minimal cut grants read to ANY authenticated user. Once
-the message-side migration lands (see ``scripts/migrate_media_to_disk.py``),
-this endpoint will be extended to verify that the caller is a
+The current minimal cut grants read to ANY authenticated user. This
+endpoint may later be extended to verify that the caller is a
 participant of the room/DM/wall post referencing this ref. The
 ``ref:<sha256>`` value is content-addressed and not enumerable, so
 the gap until then only matters if a token is stolen.
