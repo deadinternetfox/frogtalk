@@ -108,7 +108,12 @@ if (!function_exists('boardTorSocksProxy')) {
     /** SOCKS URL for outbound .onion peer fetches (clearnet hub → Tor mirror). */
     function boardTorSocksProxy(): string {
         $env = boardLoadEnv();
-        return trim((string)($env['FROGTALK_TOR_SOCKS_PROXY'] ?? 'socks5://127.0.0.1:9050'));
+        $proxy = trim((string)($env['FROGTALK_TOR_SOCKS_PROXY'] ?? 'socks5h://127.0.0.1:9050'));
+        // Hostname resolution through Tor requires socks5h (PHP: SOCKS5_HOSTNAME type).
+        if (str_starts_with($proxy, 'socks5://') && !str_starts_with($proxy, 'socks5h://')) {
+            $proxy = 'socks5h://' . substr($proxy, strlen('socks5://'));
+        }
+        return $proxy;
     }
 }
 
@@ -1240,7 +1245,8 @@ if (!function_exists('boardFetchPeerJson')) {
         $code  = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_close($ch);
         if (!$ok && $errno !== 0 && $errno !== CURLE_WRITE_ERROR) {
-            return [null, 'fetch_failed'];
+            $cerr = curl_error($ch);
+            return [null, $cerr !== '' ? 'fetch_failed: ' . $cerr : 'fetch_failed'];
         }
         if ($code < 200 || $code >= 300) return [null, 'http_' . $code];
         $json = json_decode($body, true);
