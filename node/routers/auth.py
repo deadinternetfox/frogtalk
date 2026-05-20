@@ -1248,6 +1248,9 @@ class PinSetRequest(BaseModel):
 
 class PinVerifyRequest(BaseModel):
     pin: str = Field(min_length=1, max_length=16)
+    # True when unlocking /server, /board/admin, or other operator panels —
+    # not for idle-lock / resume gates in the main app.
+    admin_gate: bool = False
 
 
 class PinDisableRequest(BaseModel):
@@ -1342,9 +1345,10 @@ async def pin_verify(request: Request, body: PinVerifyRequest,
     token = session_token_from_request(request) or (x_session_token or "").strip()
     try:
         pin_mark_unlocked(token)
-        # HIGH-1: typing the PIN is also what satisfies the admin grace
-        # window, so refresh it here.
-        admin_pin_mark_unlocked(token)
+        # Admin grace only when the client explicitly requested an admin
+        # gate unlock — app idle/resume PIN must not satisfy /server.
+        if body.admin_gate:
+            admin_pin_mark_unlocked(token)
     except Exception:
         pass
     return res

@@ -262,7 +262,10 @@
     const btn = $('lock-submit');
     if (btn) btn.disabled = true;
     try {
-      const res = await _api('/api/auth/pin/verify', 'POST', { pin });
+      const res = await _api('/api/auth/pin/verify', 'POST', {
+        pin,
+        admin_gate: !!_adminGatePending,
+      });
       const j = await res.json().catch(() => ({}));
       if (res.ok && j.ok) {
         _pinBuffer = '';
@@ -704,8 +707,10 @@
   // Invoked by `apiFetch` when the server returns 423 {pin_required:true}
   // — the user's session needs a fresh PIN before sensitive routers will
   // answer. Resolves once unlock completes so the caller can retry.
-  function gateRequest () {
+  function gateRequest (opts) {
     return new Promise((resolve) => {
+      const forAdmin = !!(opts && opts.admin);
+      if (forAdmin) _adminGatePending = true;
       // Server is the source of truth: if it sent 423 {pin_required},
       // the account has a PIN. Trust that signal even if our local
       // `_cfg` hasn't yet been populated (e.g. just after a manual

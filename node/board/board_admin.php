@@ -1647,7 +1647,7 @@ function showFrogtalkAdminGatePage(array $gate, string $error = ''): void {
         <p style="margin-top:16px"><a href="/board" style="color:#4a8f4a;font-size:12px">← Back to board</a></p>
     </div>
     <?php if ($authenticated && $isAdmin && $pinRequired): ?>
-    <script src="/static/js/pin.js?v=14"></script>
+    <script src="/static/js/pin.js?v=15"></script>
     <script>
     (async function () {
       try {

@@ -403,7 +403,7 @@ async function apiFetch (url, method = 'GET', body = null) {
       try { bodyJson = await res.clone().json(); } catch {}
       if (bodyJson && bodyJson.pin_required) {
         if (timer) { clearTimeout(timer); timer = null; }
-        try { await Pin.gateRequest(); } catch {}
+        try { await Pin.gateRequest({ admin: !!bodyJson.admin }); } catch {}
         // Rebuild the opts object so the retry gets a fresh
         // AbortController + clean headers, and tag it so we don't
         // recurse on a second 423.
