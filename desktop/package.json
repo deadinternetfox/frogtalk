@@ -18,6 +18,10 @@
     "url": "https://frogtalk.xyz"
   },
   "license": "MIT",
+  "overrides": {
+    "tar": "^7.5.11",
+    "@tootallnate/once": "^3.0.1"
+  },
   "devDependencies": {
     "electron": "^41.2.1",
     "electron-builder": "^24.9.0"
