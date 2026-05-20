@@ -9578,13 +9578,14 @@ _FEDERATION_OUTBOX_MAX_PAYLOAD_BYTES = 256 * 1024  # 256 KB
 
 
 def _strip_media_from_outbox_payload(payload: dict) -> dict:
-    """Drop heavy media_data fields. Leave a flag so peers know to refetch."""
+    """Drop heavy blobs from federation payloads. Peers keep prior values via COALESCE."""
     if not isinstance(payload, dict):
         return payload or {}
     out = dict(payload)
-    if "media_data" in out and out.get("media_data"):
-        out["media_data"] = None
-        out["media_omitted"] = True
+    for key in ("media_data", "avatar", "banner"):
+        if key in out and out.get(key):
+            out[key] = None
+            out[f"{key}_omitted"] = True
     return out
 
 

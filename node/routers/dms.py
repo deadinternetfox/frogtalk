@@ -363,31 +363,25 @@ async def send_message(request: Request, channel_id: int, body: DMMessageBody,
     except Exception:
         pass
 
-    # Federation phase-2: replicate DM envelopes so cross-node switch keeps history.
+    # Federation: replicate DM so cross-node sessions keep history.
     try:
-        peer_nick = ""
-        if peer_id:
-            peer = db.get_user_by_id(peer_id) or {}
-            peer_nick = str(peer.get("nickname") or "").strip()
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "dm.message.created",
-            "payload": {
-                "channel_id": channel_id,
-                "sender_nickname": current_user["nickname"],
-                "peer_nickname": peer_nick,
-                "content": body.content or "",
-                "media_data": body.media_data,
-                "media_type": body.media_type,
-                "media_name": body.media_name,
-                "reply_to": body.reply_to,
-                "media_blur": int(body.media_blur or 0),
-                "view_once": int(body.view_once or 0),
-                "created_at": datetime.utcnow().isoformat() + "Z",
-            },
-        })
+        from routers import federation as federation_mod
+        peer = db.get_user_by_id(peer_id) or {} if peer_id else {}
+        federation_mod.enqueue_dm_message_created(
+            current_user,
+            peer,
+            channel_id=channel_id,
+            content=body.content or "",
+            media_data=body.media_data,
+            media_type=body.media_type,
+            media_name=body.media_name,
+            reply_to=body.reply_to,
+            media_blur=int(body.media_blur or 0),
+            view_once=int(body.view_once or 0),
+            created_at=dm_broadcast["created_at"],
+        )
     except Exception:
-        pass
+        _log.exception("federation: failed to enqueue DM message")
 
     return {"id": msg_id, "ok": True, **dm_broadcast}
 

@@ -1192,6 +1192,15 @@ async def change_display_name(
         })
     except Exception:
         pass
+    try:
+        from routers import federation as federation_mod
+        ident = db.get_user_by_id(current_user["id"]) or current_user
+        federation_mod.enqueue_user_profile_updated(
+            ident,
+            extra={"display_name": cleaned or ""},
+        )
+    except Exception:
+        _log.exception("federation: failed to enqueue display_name sync")
     return {"ok": True, "display_name": cleaned or None}
 
 
@@ -1472,25 +1481,6 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
                                 (body.presence, current_user["id"]))
             con.commit()
 
-    try:
-        ident = db.get_user_by_id(current_user["id"]) or {}
-        db.insert_federation_outbox_event({
-            "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
-            "event_type": "user.profile.updated",
-            "payload": {
-                "global_user_id": ident.get("global_user_id") or "",
-                "nickname": ident.get("nickname") or current_user.get("nickname") or "",
-                "display_name": ident.get("display_name") or "",
-                "avatar": ident.get("avatar") or "",
-                "bio": ident.get("bio") or "",
-                "status_msg": ident.get("status_msg") or "",
-                "presence": ident.get("presence") or "online",
-                "mood": ident.get("mood") or "",
-                "identity_pubkey": ident.get("identity_pubkey") or "",
-            },
-        })
-    except Exception:
-        pass
     if body.profile_public is not None or body.allow_friend_requests is not None:
         profile_public = body.profile_public if body.profile_public is not None else True
         allow_fr = body.allow_friend_requests if body.allow_friend_requests is not None else True
@@ -1565,6 +1555,16 @@ async def update_profile(request: Request, body: ProfileUpdateRequest, current_u
             invalidate_token_cache(current_token)
     except Exception:
         pass
+    # Federation: push profile after every local field is committed so peers
+    # (and channel member lists) get avatar / display name / status in sync.
+    try:
+        from routers import federation as federation_mod
+        ident = db.get_user_by_id(current_user["id"]) or {}
+        prof = db.get_user_profile(ident.get("nickname") or "") or {}
+        merged = {**ident, **{k: prof[k] for k in ("status_msg", "presence", "mood", "banner") if k in prof}}
+        federation_mod.enqueue_user_profile_updated(merged)
+    except Exception:
+        _log.exception("federation: failed to enqueue user.profile.updated")
     return {"ok": True}
 
 

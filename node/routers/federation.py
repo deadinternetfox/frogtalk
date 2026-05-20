@@ -125,6 +125,80 @@ def enqueue_server_event(event_type: str, payload: dict) -> dict:
     return {"ok": False, "error": "enqueue_failed"}
 
 
+def enqueue_dm_message_created(
+    sender: dict,
+    peer: dict,
+    *,
+    channel_id: int = 0,
+    content: str = "",
+    media_data: str | None = None,
+    media_type: str | None = None,
+    media_name: str | None = None,
+    reply_to: int | None = None,
+    media_blur: int = 0,
+    view_once: int = 0,
+    created_at: str | None = None,
+) -> dict:
+    """Enqueue a signed ``dm.message.created`` for peer nodes.
+
+    Includes ``global_user_id`` for both parties so receivers can match
+    federated accounts even when nicknames differ between nodes.
+    """
+    ts = created_at or (datetime.utcnow().isoformat() + "Z")
+    return enqueue_server_event(
+        "dm.message.created",
+        {
+            "channel_id": int(channel_id or 0),
+            "sender_nickname": str(sender.get("nickname") or "").strip(),
+            "peer_nickname": str(peer.get("nickname") or "").strip(),
+            "sender_global_user_id": str(sender.get("global_user_id") or "").strip(),
+            "peer_global_user_id": str(peer.get("global_user_id") or "").strip(),
+            "content": content or "",
+            "media_data": media_data,
+            "media_type": media_type,
+            "media_name": media_name,
+            "reply_to": reply_to,
+            "media_blur": int(media_blur or 0),
+            "view_once": int(view_once or 0),
+            "created_at": ts,
+        },
+    )
+
+
+# Keep profile events under the 256 KiB outbox cap (avatar data URLs can be MBs).
+_PROFILE_FED_FIELD_MAX_CHARS = 200_000
+
+
+def enqueue_user_profile_updated(user: dict, *, extra: dict | None = None) -> dict:
+    """Enqueue a signed ``user.profile.updated`` for peer nodes."""
+    if not user:
+        return {"ok": False, "error": "no_user"}
+    gid = str(user.get("global_user_id") or "").strip()
+    if not gid:
+        return {"ok": False, "error": "no_global_user_id"}
+    payload = {
+        "global_user_id": gid,
+        "nickname": str(user.get("nickname") or "").strip(),
+        "display_name": str(user.get("display_name") or ""),
+        "avatar": str(user.get("avatar") or ""),
+        "bio": str(user.get("bio") or ""),
+        "status_msg": str(user.get("status_msg") or ""),
+        "presence": str(user.get("presence") or "online"),
+        "mood": str(user.get("mood") or ""),
+        "identity_pubkey": str(user.get("identity_pubkey") or ""),
+    }
+    if extra:
+        for k, v in extra.items():
+            if v is not None:
+                payload[k] = v
+    for key in ("avatar", "banner"):
+        val = str(payload.get(key) or "")
+        if len(val) > _PROFILE_FED_FIELD_MAX_CHARS:
+            payload[key] = ""
+            payload[f"{key}_omitted"] = True
+    return enqueue_server_event("user.profile.updated", payload)
+
+
 def _tor_proxy_url() -> str:
     return (os.getenv("FROGTALK_TOR_SOCKS_PROXY") or "socks5://127.0.0.1:9050").strip()
 
@@ -1484,6 +1558,31 @@ def _fed_nickname(s) -> str | None:
     return raw if _FED_NAME_RE.match(raw) else None
 
 
+def _fed_resolve_user_for_dm(nickname: str | None, global_user_id: str | None) -> dict | None:
+    """Map a federated DM party to a local ``users`` row.
+
+    Prefer ``global_user_id`` (stable across nodes); fall back to nickname
+    only when the account already exists locally (no auto-create).
+    """
+    gid = str(global_user_id or "").strip()
+    if gid:
+        try:
+            with db._conn() as con:
+                row = con.execute(
+                    """
+                    SELECT id, nickname, display_name, avatar, bio, is_admin,
+                           global_user_id, identity_pubkey
+                    FROM users WHERE global_user_id=? LIMIT 1
+                    """,
+                    (gid,),
+                ).fetchone()
+            if row:
+                return dict(row)
+        except Exception:
+            pass
+    return _ensure_local_user_by_nickname(_fed_nickname(nickname))
+
+
 def _fed_room_name(s) -> str | None:
     raw = str(s or "").strip()
     return raw if _FED_ROOM_RE.match(raw) else None
@@ -2810,9 +2909,22 @@ async def _handle_dm_event(event: dict) -> None:
     peer_nick = _fed_nickname(payload.get("peer_nickname"))
     if not sender_nick or not peer_nick:
         return
-    sender = _ensure_local_user_by_nickname(sender_nick)
-    peer = _ensure_local_user_by_nickname(peer_nick)
+    sender = _fed_resolve_user_for_dm(
+        sender_nick,
+        payload.get("sender_global_user_id"),
+    )
+    peer = _fed_resolve_user_for_dm(
+        peer_nick,
+        payload.get("peer_global_user_id"),
+    )
     if not sender or not peer:
+        _log.info(
+            "federation: drop dm.message.created — local user missing "
+            "(sender=%s peer=%s origin=%s)",
+            sender_nick,
+            peer_nick,
+            event.get("origin_server_id"),
+        )
         return
     content = _fed_clip(payload.get("content"), _FED_CONTENT_MAX)
     mt = _fed_media_type(payload.get("media_type"))
