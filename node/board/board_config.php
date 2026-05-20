@@ -1287,7 +1287,7 @@ if (!function_exists('boardIsPublicIp')) {
  */
 function upsertFederatedPeer(string $peerUrl): array {
     $peerUrl = trim($peerUrl);
-    if (!preg_match('#^https?://[^\s/$.?#].[^\s]*$#i', $peerUrl)) {
+    if (!preg_match('~^https?://[^\s/$.?#][^\s]*$~i', $peerUrl)) {
         return [false, 'Invalid URL'];
     }
     // Normalise: must end with /board/ (or be the api endpoint root)
