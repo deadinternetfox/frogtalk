@@ -409,8 +409,10 @@ def _select_peer_target(server: dict) -> str:
         return onion_url
     if transport == "clearnet" and base_url:
         return base_url
-    if transport == "auto" and tor_enabled and onion_url:
+    if transport == "auto" and tor_enabled and onion_url and not base_url:
         return onion_url
+    if transport == "auto" and tor_enabled and base_url:
+        return base_url
     return base_url or onion_url
 
 
@@ -1993,17 +1995,20 @@ def _outbox_collect_targets_sync() -> tuple[str, list[str], list[dict]]:
     """Gather (local_server_id, peer_targets, pending_events) in one thread hop."""
     local = db.get_or_create_local_server_identity()
     local_server_id = str(local.get("server_id") or "")
-    local_base = _normalize_base_url(
-        (os.getenv("FROGTALK_BASE_URL") or os.getenv("PUBLIC_URL") or local.get("base_url") or "")
-    ).lower()
+    # Use only this node's advertised identity for loop detection.
+    # Tor mirrors often set PUBLIC_URL=https://frogtalk.xyz for UI links;
+    # treating that as "local" made targets=[] so outbound federation never
+    # pushed (clubog ping/pong only flowed main → tor, not tor → main).
+    local_base = _normalize_base_url(str(local.get("base_url") or "")).lower()
     local_onion = _normalize_base_url(str(local.get("onion_url") or "")).lower()
+    env_base = _normalize_base_url((os.getenv("FROGTALK_BASE_URL") or "")).strip().lower()
+    if env_base and env_base == local_base:
+        local_base = env_base
 
     own_hosts = {"localhost", "127.0.0.1", "::1"}
     for raw in (
         local_base,
         local_onion,
-        _normalize_base_url(os.getenv("FROGTALK_PUBLIC_BASE_URL", "")),
-        _normalize_base_url(os.getenv("FROGTALK_BASE_URL", "")),
     ):
         try:
             host = (urllib.parse.urlparse(raw).hostname or "").strip().lower()

@@ -216,8 +216,9 @@ const WS = (() => {
         break;
       }
       case 'message': {
-        const dm = await decryptMsg(data, room);
-        Messages.appendMessage(room, dm);
+        const msgRoom = data.room || room;
+        const dm = await decryptMsg(data, msgRoom);
+        Messages.appendMessage(msgRoom, dm);
         const myNick = State.user?.nickname || '';
         // Use a word-boundary mention check so e.g. @frog doesn't also match
         // inside @frogai (substring fired a self-notif when our bot was
@@ -225,7 +226,7 @@ const WS = (() => {
         const isMention = !!(myNick && _isMentionOf(dm.content, myNick));
         // Skip sounds / desktop notifications for muted users or muted rooms.
         const mutedAuthor = typeof Mute !== 'undefined' && Mute.isUserMuted(dm.nickname);
-        const mutedRoom = typeof Mute !== 'undefined' && Mute.isRoomMuted(room);
+        const mutedRoom = typeof Mute !== 'undefined' && Mute.isRoomMuted(msgRoom);
         if (mutedAuthor || mutedRoom) break;
         if (document.hidden || isMention) Notifications.notify(dm);
         break;
