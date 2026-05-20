@@ -253,10 +253,39 @@
     _persistAuthorKeys();
   }
 
+  // Best-effort: re-wrap encrypted posts for a newly-added follower / friend.
+  // Server sends `wall_rewrap_needed` (post_ids, follower_user_id) over WS
+  // after a follow.changed or friend.accepted is applied locally. The author
+  // needs the original payload key cached locally; if it's evicted (e.g. new
+  // browser session), the post stays inaccessible to the new follower — that
+  // matches Track D's "no server-side key escrow" guarantee.
+  async function extendWrapsForRecipient(recipientUserId, postIds) {
+    const rid = Number(recipientUserId || 0);
+    if (rid <= 0 || !Array.isArray(postIds) || postIds.length === 0) return;
+    if (!window.Signal || typeof Signal.isReady !== 'function' || !Signal.isReady()) return;
+    for (const pid of postIds.slice(0, 50)) {
+      const pidNum = Number(pid);
+      if (!pidNum) continue;
+      const cached = _authorKeyCache.get(pidNum);
+      if (!cached) continue;       // No local key — silently skip.
+      try {
+        const env = await Signal.encryptDM(rid, cached);
+        const wrapBytes = _wrapEnvelopeToBytes(env);
+        const body = {
+          wrapped_keys: [{ recipient_id: rid, wrapped_b64: _b64encode(wrapBytes) }],
+        };
+        await apiFetch(`/api/wall/posts/${pidNum}/wrapped-keys`, 'POST', body);
+      } catch {
+        // Best-effort — try the next post.
+      }
+    }
+  }
+
   window.WallCrypto = {
     publish,
     decryptInline,
     decryptList,
     rememberAuthorKey,
+    extendWrapsForRecipient,
   };
 })();

@@ -484,8 +484,20 @@ def enqueue_social_story_deleted(user: dict, *, global_story_id: str) -> dict:
     )
 
 
-def _fed_resolve_social_user(payload: dict, origin_server_id: str = "") -> dict | None:
-    """Map a federated social actor to a local users row (signed global_user_id only)."""
+def _fed_resolve_social_user(
+    payload: dict,
+    origin_server_id: str = "",
+    *,
+    strict_origin: bool = True,
+) -> dict | None:
+    """Map a federated social actor to a local users row.
+
+    ``strict_origin=True`` (default) requires the gid's home server to match
+    the event ``origin_server_id`` — guards against a peer impersonating users
+    homed elsewhere. Pass ``False`` only for counterparty lookups (e.g. the
+    "following" side of a follow event, where their home is by definition
+    different from the follower's home).
+    """
     nick = _fed_nickname(
         payload.get("nickname")
         or payload.get("actor_nickname")
@@ -500,9 +512,14 @@ def _fed_resolve_social_user(payload: dict, origin_server_id: str = "") -> dict 
         or payload.get("follower_global_user_id")
         or payload.get("following_global_user_id")
     )
+    origin = (origin_server_id or "").strip()
     if gid:
+        if strict_origin:
+            home = db.resolve_global_user_home_server_id(gid)
+            if home and origin and home != origin:
+                return None
         return db.ensure_federated_dm_local_user(
-            gid, nick or "", origin_server_id=origin_server_id or "",
+            gid, nick or "", origin_server_id=origin,
         )
     if nick:
         return _ensure_local_user_by_nickname(nick)
@@ -2731,6 +2748,8 @@ async def federation_outbox_processor() -> int:
     if fed_token:
         base_headers["x-federation-token"] = fed_token
 
+    drop_event_ids: set[str] = set()
+
     async def _push_peer(
         peer_sid: str,
         base: str,
@@ -2749,6 +2768,9 @@ async def federation_outbox_processor() -> int:
             if ev_type in _ENCRYPTED_PEER_SCOPED and row_tgt:
                 scoped = db.filter_encrypted_wraps_for_peer(payload, row_tgt)
                 if not scoped:
+                    # Recipients no longer home here. Drop the row so it doesn't
+                    # stay pending forever; we never push an empty wrap set.
+                    drop_event_ids.add(event_id)
                     continue
                 payload = scoped
             wire = _wire_envelope(row, payload)
@@ -2828,6 +2850,11 @@ async def federation_outbox_processor() -> int:
     except Exception:
         _log.exception("mark_outbox_deliveries error")
         return 0
+    if drop_event_ids:
+        try:
+            await asyncio.to_thread(db.mark_outbox_events_failed, list(drop_event_ids))
+        except Exception:
+            _log.exception("mark_outbox_events_failed (empty-wraps) error")
     return marked
 
 
@@ -4057,6 +4084,7 @@ async def _handle_social_event(event: dict) -> None:
                 "following_global_user_id": payload.get("following_global_user_id"),
             },
             origin,
+            strict_origin=False,
         )
         if not follower or not following:
             return

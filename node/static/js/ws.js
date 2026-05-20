@@ -529,6 +529,18 @@ const WS = (() => {
         } catch {}
         break;
       }
+      // ── Encrypted wall re-wrap needed (new follower / accepted friend) ──
+      case 'wall_rewrap_needed': {
+        try {
+          if (window.WallCrypto && typeof window.WallCrypto.extendWrapsForRecipient === 'function') {
+            window.WallCrypto.extendWrapsForRecipient(
+              Number(data.follower_user_id || 0),
+              Array.isArray(data.post_ids) ? data.post_ids.map(Number).filter(Boolean) : []
+            );
+          }
+        } catch {}
+        break;
+      }
       // ── Story posted by anyone — refresh chat-avatar story rings live ──
       case 'story_posted': {
         try {

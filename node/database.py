@@ -10004,11 +10004,22 @@ def _federated_wall_actor(
     nick_key: str,
     require_global_id: bool = False,
 ) -> Optional[Dict]:
-    """Resolve a federated wall actor. Materialize only when ``global_user_id`` is set."""
+    """Resolve a federated wall actor.
+
+    Hardening: only accept events about ``global_user_id`` X when the event's
+    ``origin_server_id`` matches X's home server. Unknown gids (no row anywhere)
+    are accepted so the FIRST event from a user's home can materialize them.
+    Rejects:
+      * Peer B claiming actions by a user homed on peer A.
+      * Any remote peer claiming actions by a native local account.
+    """
     gid = str(payload.get(gid_key) or "").strip()
     nick = str(payload.get(nick_key) or "").strip()
     origin = (origin_server_id or "").strip()
     if gid:
+        home = resolve_global_user_home_server_id(gid)
+        if home and origin and home != origin:
+            return None
         return ensure_federated_dm_local_user(gid, nick, origin_server_id=origin)
     if require_global_id:
         return None
@@ -10199,6 +10210,22 @@ def apply_federated_wall_post_created(payload: Dict, origin_server_id: str) -> O
     return int(local_id)
 
 
+def _lookup_local_user_by_gid(gid: str) -> Optional[Dict]:
+    """Find an existing local users row by global_user_id. Never creates."""
+    g = (gid or "").strip()
+    if not g:
+        return None
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT id, nickname FROM users WHERE global_user_id=? LIMIT 1",
+                (g,),
+            ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
 def apply_federated_wall_post_encrypted(payload: Dict, origin_server_id: str) -> Optional[int]:
     """Idempotently apply an encrypted federated wall post + recipient wraps."""
     import base64 as _b64
@@ -10240,13 +10267,13 @@ def apply_federated_wall_post_encrypted(payload: Dict, origin_server_id: str) ->
         if not isinstance(w, dict):
             continue
         rgid = str(w.get("recipient_global_user_id") or "").strip()
-        rnick = str(w.get("recipient_nickname") or "").strip()
         wb = str(w.get("wrapped_b64") or "").strip()
         if not rgid or not wb:
             continue
-        local_recipient = ensure_federated_dm_local_user(
-            rgid, rnick, origin_server_id=origin,
-        )
+        # Recipients MUST already exist (via signed DM/friend.accepted). We do
+        # not materialize new mirrors from a wrap payload — that would let a
+        # hostile peer pollute the local user namespace via fake recipients.
+        local_recipient = _lookup_local_user_by_gid(rgid)
         if not local_recipient:
             continue
         rid = int(local_recipient["id"])
@@ -10453,11 +10480,13 @@ def apply_federated_wall_post_keys_extended(
         if not isinstance(w, dict):
             continue
         rgid = str(w.get("recipient_global_user_id") or "").strip()
-        rnick = str(w.get("recipient_nickname") or "").strip()
         wb = str(w.get("wrapped_b64") or "").strip()
         if not rgid or not wb:
             continue
-        recip = ensure_federated_dm_local_user(rgid, rnick, origin_server_id=origin)
+        # Only extend wraps to users that already exist locally. New mirror
+        # accounts must arrive via signed DM/friend events, never via a
+        # wrap-extension payload.
+        recip = _lookup_local_user_by_gid(rgid)
         if not recip:
             continue
         rid = int(recip["id"])
