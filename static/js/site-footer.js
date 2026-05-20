@@ -11,7 +11,7 @@
   'use strict';
 
   const MOUNT_ID = 'ft-site-footer-mount';
-  const VER = '1';
+  const VER = '2';
 
   function assetUrl(path) {
     const base = path + '?v=' + VER;
@@ -51,7 +51,7 @@
       '<span class="ft-footer-brand-name">FrogTalk</span>' +
       '<span class="ft-footer-tagline">Chat, Post, Vibe Together</span>' +
       '</div>' +
-      '<p class="ft-footer-copy">© 2026 FrogTalk. Your chat, your privacy.</p>' +
+      '<p class="ft-footer-copy"><span class="ft-copyleft" title="Copyleft — open source">©</span> 2026 FrogTalk. Your chat, your privacy.</p>' +
       '</footer>'
     );
   }

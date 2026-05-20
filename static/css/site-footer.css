@@ -60,6 +60,14 @@
   color: var(--text-muted, var(--muted, #7d8590));
 }
 
+/* Mirrored © = copyleft (open source) */
+.ft-copyleft {
+  display: inline-block;
+  transform: scaleX(-1);
+  margin-right: 0.15em;
+  vertical-align: -0.05em;
+}
+
 @media (max-width: 640px) {
   .ft-site-footer {
     flex-direction: column;
