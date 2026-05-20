@@ -53,10 +53,13 @@ venv/
 .venv/
 
 # ── Frontend bundles + heavy desktop / android artifacts ───────────
-desktop/dist/
-desktop/out/
-android/build/
-android/app/build/
+client/desktop/app/dist/
+client/desktop/app/out/
+client/desktop/app/node_modules/
+client/desktop/builds/
+client/mobile/android/build/
+client/mobile/android/app/build/
+client/mobile/android/.gradle/
 node_modules/
 static/*.apk
 static/*.AppImage

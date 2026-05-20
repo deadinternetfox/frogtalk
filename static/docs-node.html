@@ -255,17 +255,17 @@ curl -s https://your-node.example/api/network/update/status</code></pre>
       <h2>7) Repo structure for operators</h2>
       <p class="hint">As of the 2026-05 restructure, client surfaces live under <code>client/</code> so node operators have a cleaner picture of what they're shipping:</p>
       <pre><code>client/
-├── desktop/app/        # Electron source (legacy: desktop/)
+├── desktop/app/        # Electron source
 ├── desktop/builds/     # Electron build outputs (gitignored)
 └── mobile/
-    ├── android/        # Android source (legacy: android/)
-    └── ios/            # iOS source (legacy: ios/)
+    ├── android/        # Android source
+    └── ios/            # iOS source
 
 backend/                # API/runtime boundary docs
 node/                   # node-operator boundary docs
 deploy/                 # systemd/nginx/env templates
 scripts/                # node_setup_wizard.sh, node_update_check.sh</code></pre>
-      <p class="hint">Legacy top-level <code>desktop/</code>, <code>android/</code>, <code>ios/</code> are now compatibility symlinks pointing into <code>client/</code>, so any existing scripts you have keep working.</p>
+      <p class="hint">Build entrypoints: <code>client/desktop/app/package.json</code> (Electron), <code>client/mobile/android/build.gradle.kts</code>, and <code>client/mobile/ios/FrogTalk.xcodeproj</code>.</p>
     </section>
 
     <section class="step">
@@ -279,7 +279,7 @@ scripts/                # node_setup_wizard.sh, node_update_check.sh</code></pre
 │   └── mobile/{android,ios}
 ├── static/                  # web app + site pages (runtime path)
 └── scripts/                 # setup/update/deploy helpers</code></pre>
-      <p class="hint">Legacy root paths (`desktop`, `android`, `ios`) are compatibility symlinks so older tooling keeps working while migration finishes.</p>
+      <p class="hint">Build entrypoints live under <code>client/</code>: <code>client/desktop/app/package.json</code> (Electron), <code>client/mobile/android/build.gradle.kts</code>, and <code>client/mobile/ios/FrogTalk.xcodeproj</code>.</p>
     </section>
 
   </main>

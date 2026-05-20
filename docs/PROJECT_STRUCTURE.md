@@ -26,10 +26,7 @@ frogtalk/
 │   ├── node_update_check.sh       # update check / safe apply (fast-forward only)
 │   └── deploy_nodes.sh            # operator multi-node deploy
 ├── bot-examples/                  # standalone reference bots + bot dev docs
-├── docs/                          # design / security / structure docs
-├── desktop -> client/desktop/app  # compatibility symlink (existing tools)
-├── android -> client/mobile/android
-└── ios    -> client/mobile/ios
+└── docs/                          # design / security / structure docs
 ```
 
 ## Why this split
@@ -56,7 +53,3 @@ frogtalk/
 - `scripts/node_setup_wizard.sh` — interactive self-host setup with safe defaults (`FROGTALK_AUTO_UPDATE_ENABLED=0`, `FROGTALK_FEDERATION_REQUIRE_SIGS=1`).
 - `scripts/node_update_check.sh` — checks the official feed and, with `--apply`, fast-forwards only if the signed manifest verifies against `FROGTALK_RELEASE_SIGNERS`.
 - `scripts/deploy_nodes.sh` — operator-side multi-node deploy (lives outside the repo's gitignored shape).
-
-## Compatibility
-
-The three root symlinks (`desktop/`, `android/`, `ios/`) preserve existing tooling and external scripts that expected the old layout. New code should reference the canonical paths under `client/`.

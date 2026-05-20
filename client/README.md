@@ -2,20 +2,20 @@
 
 This folder documents the frontend/client boundary for FrogTalk.
 
-Current source-of-truth paths:
+## Source-of-truth paths
 
-- `client/desktop/app/` - Electron desktop shell (moved from root `desktop/`)
-- `client/desktop/builds/` - desktop artifact output folder
-- `client/mobile/android/` - Android app source (moved from root `android/`)
-- `client/mobile/ios/` - iOS app source/docs (moved from root `ios/`)
-- `static/` - web client app and marketing pages (kept stable for backend runtime)
+- `client/desktop/app/` — Electron desktop shell (source)
+- `client/desktop/builds/` — desktop artifact output folder (gitignored binaries)
+- `client/mobile/android/` — Android app source
+- `client/mobile/ios/` — iOS app source / docs
+- `static/` — web client app and marketing pages (kept at root so the backend runtime path stays stable)
 
-Compatibility links (for existing tooling):
+## Build entrypoints
 
-- `desktop -> client/desktop/app`
-- `android -> client/mobile/android`
-- `ios -> client/mobile/ios`
+- Desktop (Electron): `client/desktop/app/package.json`
+- Android: `client/mobile/android/build.gradle.kts`
+- iOS: `client/mobile/ios/FrogTalk.xcodeproj`
 
-Migration rule:
+## Migration rule
 
 - Keep backend/runtime entry paths stable while we progressively move remaining web assets in smaller PRs.

@@ -272,9 +272,6 @@ frogtalk/
 │   ├── SECURITY_MODEL.md
 │   ├── SECURITY_HARDENING_PLAN.md
 │   └── SECURITY_SCAN_2026_05_18.md
-├── desktop -> client/desktop/app # compatibility symlink
-├── android -> client/mobile/android
-└── ios    -> client/mobile/ios
 ```
 
 Detailed structure: [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md)
