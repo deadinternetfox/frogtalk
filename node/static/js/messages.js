@@ -623,6 +623,70 @@ const Messages = (() => {
     });
   }
 
+  // Append a late style guard so broad channel custom CSS selectors
+  // cannot stretch system invite embeds.
+  function _ensureSystemEmbedStyleGuard() {
+    try {
+      const id = 'ft-system-embed-guard';
+      let el = document.getElementById(id);
+      if (!el) {
+        el = document.createElement('style');
+        el.id = id;
+      }
+      el.textContent = `
+#main .ft-embed-invite, #main .ft-embed-invite * {
+  min-height: 0 !important;
+  max-height: none !important;
+}
+#main .ft-embed-invite {
+  display: inline-block !important;
+  vertical-align: top !important;
+  width: min(100%, 300px) !important;
+  max-width: 300px !important;
+  height: auto !important;
+  overflow: hidden !important;
+}
+#main .ft-embed-invite-main { display: block !important; height: auto !important; }
+#main .ft-embed-invite-row {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 8px !important;
+  height: auto !important;
+}
+#main .ft-embed-invite-icon {
+  flex: 0 0 40px !important;
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
+  max-width: 40px !important;
+  max-height: 40px !important;
+  overflow: hidden !important;
+}
+#main .ft-embed-invite-icon-img {
+  width: 40px !important;
+  height: 40px !important;
+  min-width: 40px !important;
+  min-height: 40px !important;
+  max-width: 40px !important;
+  max-height: 40px !important;
+  object-fit: cover !important;
+  border-radius: 50% !important;
+  display: block !important;
+}
+#main .ft-embed-invite-desc {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+#main .ft-embed-invite-action { flex: 0 0 auto !important; }
+`;
+      document.head.appendChild(el);
+    } catch {}
+  }
+
   // Fetch invite info and render a join card
   async function _loadInviteCard(msgId, code) {
     const msgEl = document.getElementById(`msg-${msgId}`);
@@ -652,7 +716,7 @@ const Messages = (() => {
       );
       let iconHtml;
       if (isImg) {
-        iconHtml = `<img class="invite-card-icon-img" src="${UI.escHtml(rawIconStr)}" alt="" width="40" height="40" loading="lazy" style="width:40px!important;height:40px!important;min-width:40px!important;min-height:40px!important;max-width:40px!important;max-height:40px!important;object-fit:cover!important;display:block!important;border-radius:50%!important;">`;
+        iconHtml = `<img class="ft-embed-invite-icon-img" src="${UI.escHtml(rawIconStr)}" alt="" width="40" height="40" loading="lazy">`;
       } else {
         let glyph = rawIconStr || '💬';
         try { glyph = Array.from(glyph)[0] || '💬'; } catch { glyph = glyph.charAt(0) || '💬'; }
@@ -664,27 +728,23 @@ const Messages = (() => {
       const byNick = _rawByNick;
       const createdBy = _rawByNick ? `@${_rawByNick}` : '';
       const footer = createdBy
-        ? `<div class="invite-card-footer">Invited by <strong class="invite-card-by-nick"${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" tabindex="0" role="button"` : ''}>${UI.escHtml(createdBy)}</strong></div>`
+        ? `<div class="invite-card-footer ft-embed-invite-footer">Invited by <strong class="invite-card-by-nick"${byNick ? ` onclick="event.stopPropagation();Messages.openSocialProfile('${UI.escHtml(byNick)}')" tabindex="0" role="button"` : ''}>${UI.escHtml(createdBy)}</strong></div>`
         : '';
       const alreadyJoined = (State.rooms || []).some(r => r.name === data.room_name && r.joined);
       const btnHtml = alreadyJoined
         ? `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${name}')">Open Channel</button>`
         : `<button class="invite-join-btn" onclick="Messages.joinViaInvite('${UI.escHtml(code)}',this)">Join Channel</button>`;
+      _ensureSystemEmbedStyleGuard();
       if (!placeholder.parentNode) return;
       placeholder.outerHTML = `
-        <div class="invite-card ft-invite-hard"
-             style="display:inline-block!important;vertical-align:top!important;width:min(100%,300px)!important;max-width:300px!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:hidden!important;">
-          <div class="invite-card-header">You've been invited to join a channel</div>
-          <div class="invite-card-main"
-               style="display:block!important;padding:8px 10px 6px!important;height:auto!important;min-height:0!important;max-height:none!important;">
-            <div class="invite-card-name">#${name}</div>
-            <div class="invite-card-row"
-                 style="display:flex!important;align-items:flex-start!important;gap:8px!important;height:auto!important;min-height:0!important;max-height:none!important;">
-              <div class="invite-card-icon"
-                   style="flex:0 0 40px!important;width:40px!important;height:40px!important;min-width:40px!important;max-width:40px!important;min-height:40px!important;max-height:40px!important;overflow:hidden!important;">${iconHtml}</div>
-              <div class="invite-card-row-desc"
-                   style="flex:1 1 auto!important;min-width:0!important;height:auto!important;min-height:0!important;max-height:none!important;">${descText || 'No channel description'}</div>
-              <div class="invite-card-action" style="flex:0 0 auto!important;height:auto!important;min-height:0!important;max-height:none!important;">${btnHtml}</div>
+        <div class="invite-card ft-embed-invite">
+          <div class="invite-card-header ft-embed-invite-header">You've been invited to join a channel</div>
+          <div class="invite-card-main ft-embed-invite-main">
+            <div class="invite-card-name ft-embed-invite-name">#${name}</div>
+            <div class="invite-card-row ft-embed-invite-row">
+              <div class="invite-card-icon ft-embed-invite-icon">${iconHtml}</div>
+              <div class="invite-card-row-desc ft-embed-invite-desc">${descText || 'No channel description'}</div>
+              <div class="invite-card-action ft-embed-invite-action">${btnHtml}</div>
             </div>
             ${footer}
           </div>
