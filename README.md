@@ -269,6 +269,7 @@ frogtalk/
 │   ├── database.py               # SQLite schema + migrations
 │   ├── routers/                  # FastAPI route modules
 │   ├── static/                   # web client + marketing pages served by the node
+│   ├── board/                    # Frog Channel PHP imageboard → public /board/
 │   ├── deploy/                   # systemd / nginx / env.example
 │   ├── scripts/
 │   │   ├── node_setup_wizard.sh  # guided self-host setup
@@ -281,7 +282,6 @@ frogtalk/
 │   ├── Dockerfile                # docker build -f node/Dockerfile -t frogtalk .
 │   └── builds/                   # release tarballs (gitignored)
 ├── bot-examples/                 # standalone reference bots
-├── board/                        # standalone PHP imageboard mirror (legacy)
 ├── github-build-mirror/          # release binaries published to GitHub
 ├── docs/
 │   └── SECURITY_MODEL.md         # encryption + threat model

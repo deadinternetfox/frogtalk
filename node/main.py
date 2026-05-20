@@ -2331,7 +2331,7 @@ def _sitemap_url(loc: str, lastmod: str = "", changefreq: str = "weekly", priori
 # Path to the imageboard's threads.json; configurable via env so dev/prod can differ
 BOARD_DATA_PATH = os.getenv(
     "FROGTALK_BOARD_DATA_PATH",
-    "/opt/frogtalk/board/board_data/threads.json",
+    "/opt/frogtalk/node/board/board_data/threads.json",
 )
 
 

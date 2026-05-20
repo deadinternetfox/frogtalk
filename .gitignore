@@ -63,13 +63,11 @@ desktop.ini
 .mypy_cache/
 .ruff_cache/
 
-# ── Imageboard runtime data ────────────────────────────────────
-imageboard/board_uploads/
-imageboard/board_data/
-imageboard/board_previews/
-node/static/imageboard-standalone/board_uploads/
-node/static/imageboard-standalone/board_data/
-node/static/imageboard-standalone/board_previews/
+# ── Frog Channel board runtime data (node/board/) ────────────────
+node/board/board_uploads/
+node/board/board_data/
+node/board/board_previews/
+node/board/.env
 
 # ── FrogTalk runtime ───────────────────────────────────────────
 uvicorn.log

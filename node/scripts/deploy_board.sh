@@ -17,16 +17,16 @@ SSH_OPTS=(-o StrictHostKeyChecking=accept-new
           -i "${HOME}/.ssh/id_ed25519")
 
 FILES=(
-  board/board.php
-  board/board_config.php
-  board/board_admin.php
-  board/board_chat.php
-  board/board_likes.php
-  board/telegram_bot.php
-  board/.htaccess
-  board/board_data/.htaccess
-  board/board_previews/.htaccess
-  board/board_uploads/.htaccess
+  node/board/board.php
+  node/board/board_config.php
+  node/board/board_admin.php
+  node/board/board_chat.php
+  node/board/board_likes.php
+  node/board/telegram_bot.php
+  node/board/.htaccess
+  node/board/board_data/.htaccess
+  node/board/board_previews/.htaccess
+  node/board/board_uploads/.htaccess
 )
 
 scp_with_retry() {
@@ -49,7 +49,7 @@ deploy_node() {
   echo "=== Deploy board -> ${host}:${port} ==="
   local f remote rdir
   for f in "${FILES[@]}"; do
-    remote="/opt/frogtalk/${f}"
+    remote="/opt/frogtalk/node/${f#node/}"
     rdir="$(dirname "$remote")"
     ssh -p "$port" "${SSH_OPTS[@]}" "root@${host}" "mkdir -p '${rdir}'" || return 1
     scp_with_retry "$port" "$host" "$f" "$remote" || return 1
@@ -58,7 +58,7 @@ deploy_node() {
   echo "=== PHP lint on ${host} ==="
   ssh -p "$port" "${SSH_OPTS[@]}" "root@${host}" bash <<'REMOTE'
 set -euo pipefail
-cd /opt/frogtalk/board
+cd /opt/frogtalk/node/board
 for f in board.php board_config.php board_admin.php board_chat.php board_likes.php telegram_bot.php; do
   echo -n "$f: "
   php -l "$f"

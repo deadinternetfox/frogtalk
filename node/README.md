@@ -31,6 +31,7 @@ node/
 ├── database.py            # SQLite schema + migrations (DB_PATH respected)
 ├── routers/               # one module per surface (auth, dms, ws, federation…)
 ├── static/                # web client + marketing pages
+├── board/                 # Frog Channel PHP imageboard (public URL /board/)
 ├── deploy/
 │   ├── frogtalk.service   # systemd unit (WorkingDirectory=/opt/frogtalk/node)
 │   ├── nginx.conf
