@@ -174,8 +174,8 @@ async def official_directory_sync_task():
 
 async def federation_inbox_processor_task():
     """Background task to process incoming federation events with idempotency."""
-    idle_sleep = 30
-    busy_sleep = 5
+    idle_sleep = max(2, int(os.getenv("FROGTALK_FEDERATION_INBOX_IDLE_SEC", "8")))
+    busy_sleep = max(1, int(os.getenv("FROGTALK_FEDERATION_INBOX_BUSY_SEC", "2")))
     delay = busy_sleep
     while True:
         await asyncio.sleep(delay)
@@ -191,8 +191,8 @@ async def federation_inbox_processor_task():
 
 async def federation_outbox_processor_task():
     """Background task to push local federation outbox events to peers."""
-    idle_sleep = 30
-    busy_sleep = 5
+    idle_sleep = max(2, int(os.getenv("FROGTALK_FEDERATION_OUTBOX_IDLE_SEC", "8")))
+    busy_sleep = max(1, int(os.getenv("FROGTALK_FEDERATION_OUTBOX_BUSY_SEC", "2")))
     delay = busy_sleep
     while True:
         await asyncio.sleep(delay)

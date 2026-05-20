@@ -40,6 +40,16 @@ _cached_priv: Optional[Ed25519PrivateKey] = None
 _cached_pub_pem: Optional[str] = None
 
 
+def _normalize_pubkey_pem(pem: str) -> str:
+    """Canonical PEM text for fingerprints and storage.
+
+    Older installs persisted pubkeys with trailing newlines; TOFU pins
+    strip whitespace from JSON. Fingerprints must use the same form on
+    both sides or inbox verification rejects valid signatures.
+    """
+    return str(pem or "").strip()
+
+
 def _load_or_create_local_keypair() -> Tuple[Ed25519PrivateKey, str]:
     """Return (private key, PEM-encoded public key).
 
@@ -73,6 +83,10 @@ def _load_or_create_local_keypair() -> Tuple[Ed25519PrivateKey, str]:
         if not isinstance(priv, Ed25519PrivateKey):
             raise RuntimeError("Stored federation signing key is not Ed25519")
 
+    pub_pem = _normalize_pubkey_pem(pub_pem)
+    if pub_pem != db.get_config(_PUB_KEY_CFG):
+        db.set_config(_PUB_KEY_CFG, pub_pem)
+
     _cached_priv = priv
     _cached_pub_pem = pub_pem
     return priv, pub_pem
@@ -85,7 +99,7 @@ def get_local_public_key_pem() -> str:
     private key never leaves this process.
     """
     _, pub_pem = _load_or_create_local_keypair()
-    return pub_pem
+    return _normalize_pubkey_pem(pub_pem)
 
 
 def get_local_public_key_fingerprint() -> str:
@@ -94,8 +108,7 @@ def get_local_public_key_fingerprint() -> str:
     Useful as a short identifier in signature metadata so verifiers
     can fast-reject a wrong-key signature without parsing the full PEM.
     """
-    _, pub_pem = _load_or_create_local_keypair()
-    return hashlib.sha256(pub_pem.encode("ascii")).hexdigest()[:32]
+    return fingerprint_for_pem(get_local_public_key_pem())
 
 
 def fingerprint_for_pem(pem: str) -> str:
@@ -106,7 +119,7 @@ def fingerprint_for_pem(pem: str) -> str:
     we even attempt the Ed25519 verification. Catches accidental key
     rotation as well as deliberate cross-peer signature replay.
     """
-    return hashlib.sha256(pem.encode("ascii")).hexdigest()[:32]
+    return hashlib.sha256(_normalize_pubkey_pem(pem).encode("ascii")).hexdigest()[:32]
 
 
 def canonical_event_bytes(event: dict) -> bytes:

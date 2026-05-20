@@ -1292,6 +1292,12 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
         imported += 1
 
     tor_disabled = apply_tor_peer_blocks_if_enabled()
+    try:
+        pinned = await asyncio.to_thread(ensure_peer_pubkeys_pinned)
+        if pinned:
+            _log.info("federation: directory sync pinned %s peer pubkey(s)", pinned)
+    except Exception:
+        _log.exception("federation: ensure_peer_pubkeys_pinned after directory sync")
     db.set_config("federation.official_directory_last_sync", str(int(time.time())))
     return {
         "ok": True,
@@ -1885,7 +1891,9 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         # ---- Ed25519 verification (when peer pubkey pinned) ----
         ev_type = str(ev.get("event_type") or "")
         sensitive = ev_type.startswith(_SENSITIVE_PREFIXES) or ev_type in _SENSITIVE_TYPES
-        pubkey_pem = db.get_federation_server_pubkey(origin)
+        pubkey_pem = crypto_fed._normalize_pubkey_pem(
+            db.get_federation_server_pubkey(origin) or ""
+        )
         if pubkey_pem:
             # Fingerprint pinning: refuse the event if the signer
             # advertises a different key than the one we have on file
@@ -1894,15 +1902,24 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
             # replay where an attacker copies a valid signed event
             # from peer A and re-submits it claiming to come from
             # peer B.
+            if not crypto_fed.verify_event(ev, pubkey_pem):
+                rejected += 1
+                continue
             claimed_fp = str(ev.get("signer_pubkey_fingerprint") or "").strip().lower()
             if claimed_fp:
                 expected_fp = crypto_fed.fingerprint_for_pem(pubkey_pem).lower()
                 if claimed_fp != expected_fp:
-                    rejected += 1
-                    continue
-            if not crypto_fed.verify_event(ev, pubkey_pem):
-                rejected += 1
-                continue
+                    # Pre-2026-05-21 nodes hashed the config PEM including a
+                    # trailing newline while TOFU pins strip whitespace.
+                    legacy_fp = hashlib.sha256(
+                        (pubkey_pem + "\n").encode("ascii")
+                    ).hexdigest()[:32].lower()
+                    if claimed_fp != legacy_fp:
+                        _log.info(
+                            "federation: signature ok but fingerprint drift "
+                            "origin=%s type=%s",
+                            origin, ev_type,
+                        )
         elif sensitive:
             # Unsigned user/dm/friend/social events are NEVER trusted,
             # even in soak mode. A peer that only holds the shared
@@ -2387,7 +2404,18 @@ async def federation_inbox(
     # Run all SQLite writes on a worker thread so the event loop stays
     # responsive to user requests even when peers spam events.
     accepted, rejected = await asyncio.to_thread(_insert_inbox_events_sync, filtered)
-    return {"accepted": accepted, "rejected": rejected + rejected_rate}
+    total_rejected = rejected + rejected_rate
+    if total_rejected and accepted == 0:
+        _log.warning(
+            "federation inbox: rejected all %s events (rate_limited=%s verify=%s)",
+            len(body.events), rejected_rate, rejected,
+        )
+    elif total_rejected:
+        _log.info(
+            "federation inbox: accepted=%s rejected=%s (rate_limited=%s)",
+            accepted, total_rejected, rejected_rate,
+        )
+    return {"accepted": accepted, "rejected": total_rejected}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -2714,11 +2742,40 @@ def _try_pin_peer_pubkey_from_status_sync(server_id: str, base_url: str) -> None
             timeout_s=6.0,
         )
         data = json.loads(raw.decode("utf-8", errors="replace") or "{}")
-        pem = str((data.get("server") or {}).get("federation_pubkey_pem") or "").strip()
+        pem = crypto_fed._normalize_pubkey_pem(
+            str((data.get("server") or {}).get("federation_pubkey_pem") or "")
+        )
         if pem:
             db.pin_federation_server_pubkey(sid, pem)
     except Exception:
         pass
+
+
+def ensure_peer_pubkeys_pinned() -> int:
+    """Pin Ed25519 pubkeys for every enabled peer that lacks one.
+
+    The official directory listing does not ship ``federation_pubkey_pem``,
+    so a node that only ever *receives* from a peer (never pushes to it)
+    would reject signed ``dm.*`` / ``message.*`` events until an outbox
+    round-trip happened to run TOFU. Proactive pinning fixes one-way chat
+    gaps between the clearnet hub and the Tor mirror.
+    """
+    local_id = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
+    pinned = 0
+    for srv in db.list_federation_servers(official_only=False):
+        sid = str(srv.get("server_id") or "").strip()
+        if not sid or sid == local_id or not srv.get("enabled"):
+            continue
+        if db.get_federation_server_pubkey(sid):
+            continue
+        target = _select_peer_target(srv)
+        if not target:
+            continue
+        _try_pin_peer_pubkey_from_status_sync(sid, target)
+        if db.get_federation_server_pubkey(sid):
+            pinned += 1
+            _log.info("federation: pinned pubkey for peer %s via %s", sid, target)
+    return pinned
 
 
 async def federation_outbox_processor() -> int:
@@ -2747,6 +2804,11 @@ async def federation_outbox_processor() -> int:
         return 0
     if not fed_token and not can_sign_push:
         return 0
+
+    try:
+        await asyncio.to_thread(ensure_peer_pubkeys_pinned)
+    except Exception:
+        _log.exception("federation: ensure_peer_pubkeys_pinned before outbox push")
 
     try:
         local_server_id, peer_urls, events = await asyncio.to_thread(_outbox_collect_targets_sync)

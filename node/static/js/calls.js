@@ -32,6 +32,65 @@ const ICE_SERVERS = [
 
 let _iceConfigCache = { at: 0, key: '', servers: null };
 
+/** Cached probe: Brave Tor / strict private tabs block RTCPeerConnection by design. */
+let _webrtcCapCache = null;
+
+function _webrtcCapability() {
+  if (_webrtcCapCache) return _webrtcCapCache;
+  const cap = { ok: false, reason: 'missing' };
+  if (typeof RTCPeerConnection === 'undefined') {
+    _webrtcCapCache = cap;
+    return cap;
+  }
+  try {
+    const probe = new RTCPeerConnection({ iceServers: [] });
+    probe.close();
+    cap.ok = true;
+    cap.reason = '';
+  } catch (e) {
+    const msg = String(e?.message || e || '').toLowerCase();
+    if (msg.includes('not allowed') || msg.includes('disabled') || msg.includes('blocked')) {
+      cap.reason = 'browser_blocked';
+    } else {
+      cap.reason = 'error';
+    }
+  }
+  _webrtcCapCache = cap;
+  return cap;
+}
+
+/** User-facing explanation when WebRTC is unavailable (not a server fault). */
+function _webrtcBlockedMessage() {
+  const cap = _webrtcCapability();
+  if (cap.ok) return '';
+  if (cap.reason === 'browser_blocked') {
+    return (
+      'Voice and video calls cannot run in this tab. Brave Tor (and some strict ' +
+      'private modes) block WebRTC so your real IP cannot leak. Use a normal ' +
+      'browser window (not Tor), or the FrogTalk mobile app.'
+    );
+  }
+  if (cap.reason === 'missing') {
+    return 'This browser does not support WebRTC calls. Try Chrome, Firefox, or the FrogTalk app.';
+  }
+  return 'WebRTC is unavailable in this browser context.';
+}
+
+function _requireWebRtc() {
+  const cap = _webrtcCapability();
+  if (cap.ok) return true;
+  toast(_webrtcBlockedMessage(), 'error');
+  return false;
+}
+
+function _formatCallSetupError(e) {
+  const msg = String(e?.message || e || '');
+  if (/RTCPeerConnection/i.test(msg) && /not allowed|disabled|blocked/i.test(msg)) {
+    return _webrtcBlockedMessage();
+  }
+  return 'Call setup failed: ' + (msg || 'unknown error');
+}
+
 /** Per-node TURN from GET /api/network/ice-config (local + optional peer home). */
 async function buildIceServers(peerServerId) {
   const key = String(peerServerId || '');
@@ -352,6 +411,7 @@ function _clearPersistedIncomingCall() {
 /* ── Initiate call ─────────────────────────────────────────────────────────── */
 async function startCall (type, nick, uid) {
   if (_callState !== 'idle') { toast('Already in a call', 'error'); return; }
+  if (!_requireWebRtc()) return;
   // If WS is mid-reconnect, give it a brief window to come back so the
   // call_offer rides a live socket. Don't abort if it's still not open —
   // _sendCallSignal() buffers into _outboundCallQueue and ws:open flushes,
@@ -440,7 +500,7 @@ async function startCall (type, nick, uid) {
   } catch (e) {
     // Any WebRTC / signaling failure should NOT crash the whole app.
     console.error('startCall setup failed', e);
-    toast('Call setup failed: ' + (e?.message || 'unknown error'), 'error');
+    toast(_formatCallSetupError(e), 'error');
     endCall();
   }
 }
@@ -564,6 +624,7 @@ async function acceptCall () {
     _autoAcceptPending = true;
     return;
   }
+  if (!_requireWebRtc()) return;
   _acceptInFlight = true;
   // Snapshot so a concurrent reset/finally can't null it out from under
   // the awaits below.
@@ -627,7 +688,7 @@ async function acceptCall () {
     }
   } catch (e) {
     console.error('acceptCall setup failed', e);
-    toast('Call setup failed: ' + (e?.message || 'unknown error'), 'error');
+    toast(_formatCallSetupError(e), 'error');
     endCall(true, { wasConnected: false });
     return;
   } finally {
@@ -1581,6 +1642,7 @@ async function joinVoiceChannel() {
       return;
     }
   }
+  if (!_requireWebRtc()) return;
 
   try {
     _voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
