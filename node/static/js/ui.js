@@ -2929,10 +2929,28 @@ function _renderNetworkServersList() {
     const isOfficialCopy = !!(trust && trust.remote_official);
     const trustError = trust && trust.error;
 
-    // Styling via CSS classes only — green highlight is for selected (and subtle connected).
+    // Card accent: selected wins, then green for connected, purple-green tint for onion.
     const rowClasses = ['network-server-row'];
     if (selected) rowClasses.push('is-selected');
     else if (isConnected) rowClasses.push('is-connected');
+    else if (isOnion) rowClasses.push('is-onion');
+
+    let cardBorder = '1px solid rgba(255,255,255,.055)';
+    let cardBg = 'rgba(18,20,19,.5)';
+    let cardShadow = 'none';
+    if (selected) {
+      cardBorder = '1px solid transparent';
+      cardBg = '';
+      cardShadow = '';
+    } else if (isConnected) {
+      cardBorder = '1px solid rgba(62,207,101,.35)';
+      cardBg = 'linear-gradient(135deg,rgba(23,52,39,.7) 0%,rgba(15,27,20,.85) 100%)';
+      cardShadow = '0 2px 16px rgba(62,207,101,.08)';
+    } else if (isOnion) {
+      cardBorder = '1px solid rgba(133,215,160,.18)';
+      cardBg = 'linear-gradient(135deg,rgba(20,38,29,.65) 0%,rgba(13,19,16,.85) 100%)';
+      cardShadow = '0 2px 12px rgba(133,215,160,.05)';
+    }
 
     const chips = [];
     if (isConnected) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(62,207,101,.15);border:1px solid rgba(62,207,101,.3);color:#88e7a4;font-size:10px;font-weight:700;letter-spacing:.03em">CONNECTED</span>');
@@ -2954,10 +2972,25 @@ function _renderNetworkServersList() {
 
     const latencyColor = s.latency_ms == null ? '#555' : s.latency_ms < 200 ? '#4caf50' : s.latency_ms < 600 ? '#f0c040' : '#f07060';
 
+    const rowStyle = [
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'gap:10px',
+      'padding:12px 14px',
+      'border-bottom:1px solid rgba(255,255,255,.04)',
+      'cursor:pointer',
+      'transition:background .15s',
+      'border-radius:12px',
+      'margin:4px 0',
+    ];
+    if (cardBg) rowStyle.push(`background:${cardBg}`);
+    if (cardBorder) rowStyle.push(`border:${cardBorder}`);
+    if (cardShadow && cardShadow !== 'none') rowStyle.push(`box-shadow:${cardShadow}`);
+
     return `
       <label class="${rowClasses.join(' ')}"
-        style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;
-               border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;margin:4px 0;">
+        style="${rowStyle.join(';')};">
         <div style="display:flex;align-items:center;gap:10px;min-width:0">
           <input type="radio" name="network-server-choice" ${selected ? 'checked' : ''}
             style="accent-color:#3ecf65;width:15px;height:15px;flex-shrink:0"
