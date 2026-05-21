@@ -1370,6 +1370,10 @@ input, select {
         <div class="panel">
           <div class="section-title">Federation Nodes</div>
           <div class="sub" style="margin-bottom:12px;">The current node is marked in-line. Its probe uses a local self-check instead of routing back through the public federation endpoint.</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+            <button class="btn" id="node-stale-preview-btn" type="button">Detect Stale Nodes</button>
+            <button class="btn danger" id="node-stale-purge-btn" type="button">Auto Purge Stale Nodes</button>
+          </div>
           <div id="nodes-body" class="nodes-list"></div>
         </div>
         <div class="panel">

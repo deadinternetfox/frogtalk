@@ -9,6 +9,8 @@
   const onlineUsersBody = document.getElementById('online-users-body');
   const nodesBody = document.getElementById('nodes-body');
   const nodeMsg = document.getElementById('node-msg');
+  const nodeStalePreviewBtn = document.getElementById('node-stale-preview-btn');
+  const nodeStalePurgeBtn = document.getElementById('node-stale-purge-btn');
   const latencyBadge = document.getElementById('latency-badge');
   const privacyBadge = document.getElementById('privacy-badge');
   const federationBadge = document.getElementById('federation-badge');
@@ -1287,11 +1289,12 @@
     const blocked = list.length - enabled;
     const tor = list.filter((n) => n.route_mode === 'tor').length;
     const official = list.filter((n) => n.official).length;
+    const stale = list.filter((n) => n.stale_candidate).length;
     nodeSummaryGrid.innerHTML = [
       summaryCard('Reachable Set', enabled, `${blocked} blocked or disabled`, enabled ? 'success' : 'warn'),
       summaryCard('Tor Routes', tor, `${Math.max(list.length - tor, 0)} direct routes`, tor ? 'success' : 'warn'),
       summaryCard('Official Peers', official, `${Math.max(list.length - official, 0)} community peers`),
-      summaryCard('Registry Size', list.length, 'Known federation nodes'),
+      summaryCard('Registry Size', list.length, `${stale} stale candidate(s)`),
     ].join('');
   }
 
@@ -1367,11 +1370,13 @@
               ${n.onion_available ? '<span class="mini-badge">onion</span>' : ''}
               ${n.policy_tor_blocked ? '<span class="mini-badge" style="border-color:#7a4a2a;color:#ffb347;">tor policy</span>' : ''}
               ${n.policy_http_blocked ? '<span class="mini-badge" style="border-color:#7a4a2a;color:#ffb347;">http policy</span>' : ''}
+              ${n.stale_candidate ? '<span class="mini-badge danger" title="Detected duplicate or stale listing">stale</span>' : ''}
               ${n.tls_insecure ? '<span class="mini-badge danger">HTTP only</span>' : ''}
               ${n.tls_secure && n.route_mode === 'clearnet' ? '<span class="mini-badge success">HTTPS</span>' : ''}
             </div>
             <div class="node-endpoint">${escHtml(n.display_endpoint || 'hidden endpoint')}</div>
             <div class="node-meta">${escHtml(n.transport_label || 'Route unknown')} · ${escHtml(n.privacy_label || 'Privacy unknown')} · ${escHtml(n.region || 'Unknown region')} · ${caps} cap${caps === 1 ? '' : 's'} · ${escHtml(lastSeen)}</div>
+            ${n.stale_candidate && n.stale_reason ? `<div class="node-meta" style="color:#ffb074;">${escHtml(n.stale_reason)}</div>` : ''}
             <div class="node-id-row"><span class="node-id-label">ID</span><code class="node-id">${escHtml(n.server_id || 'missing-id')}</code></div>
           </div>
           <div class="node-card-sidebar">
@@ -1434,6 +1439,35 @@
     }
   }
 
+  async function runPurgeStale(dryRun = false) {
+    if (!dryRun) {
+      const ok = window.confirm('Auto purge stale/duplicate node listings now?\n\nThis removes locally detected stale rows from this node only.');
+      if (!ok) return;
+    }
+    setNodeMessage(dryRun ? 'Detecting stale node candidates...' : 'Purging stale node candidates...');
+    try {
+      const data = await api('/api/server-admin/nodes/purge-stale', {
+        method: 'POST',
+        body: JSON.stringify({ dry_run: !!dryRun }),
+      });
+      const candidates = Array.isArray(data.candidates) ? data.candidates : [];
+      if (dryRun) {
+        if (!candidates.length) {
+          setNodeMessage('No stale node candidates detected.');
+        } else {
+          const preview = candidates.slice(0, 6).map((c) => c.server_id).join(', ');
+          const more = candidates.length > 6 ? ` (+${candidates.length - 6} more)` : '';
+          setNodeMessage(`Detected ${candidates.length} stale candidate(s): ${preview}${more}`);
+        }
+      } else {
+        setNodeMessage(`Purged ${Number(data.deleted_count || 0)} stale node listing(s).`);
+      }
+      await refreshNodes();
+    } catch (e) {
+      setNodeMessage(e.message, true);
+    }
+  }
+
   async function runNodeProbe(serverId) {
     if (!serverId) return;
     setNodeMessage(`Probing ${serverId}...`);
@@ -1446,7 +1480,8 @@
           setNodeMessage(`${serverId} healthy (${data.latency_ms ?? '--'} ms) over ${data.transport_label || 'network route'} via ${data.display_target || 'hidden endpoint'}`);
         }
       } else {
-        setNodeMessage(`${serverId} probe failed over ${data.transport_label || 'network route'}: ${data.error || 'unknown error'}`, true);
+        const staleHint = data.stale_hint ? ` ${data.stale_hint}` : '';
+        setNodeMessage(`${serverId} probe failed over ${data.transport_label || 'network route'}: ${data.error || 'unknown error'}${staleHint}`, true);
       }
     } catch (e) {
       setNodeMessage(e.message, true);
@@ -1945,6 +1980,8 @@
   document.getElementById('logout-btn').addEventListener('click', logout);
   document.getElementById('refresh-btn').addEventListener('click', () => refreshDashboard().catch((e) => setActionMessage(e.message, true)));
   document.getElementById('sync-dir-btn').addEventListener('click', () => runAction('sync'));
+  nodeStalePreviewBtn?.addEventListener('click', () => runPurgeStale(true));
+  nodeStalePurgeBtn?.addEventListener('click', () => runPurgeStale(false));
   saveChannelRetentionBtn?.addEventListener('click', () => {
     saveChannelRetention().catch(() => {});
   });

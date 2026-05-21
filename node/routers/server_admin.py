@@ -306,6 +306,74 @@ def _normalize_federation_server_id(server_id: str) -> tuple[str | None, JSONRes
     return sid, None
 
 
+def _parse_last_seen_ts(value) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
+def _clearnet_host_key(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    try:
+        p = urllib.parse.urlparse(raw)
+    except Exception:
+        return ""
+    if (p.scheme or "").lower() not in ("http", "https"):
+        return ""
+    host = (p.hostname or "").strip().lower()
+    if not host or host.endswith(".onion"):
+        return ""
+    return host
+
+
+def _node_canonical_score(node: dict) -> tuple[int, int, int, int, int]:
+    """Higher tuple wins as the canonical row for duplicate host entries."""
+    base = str((node or {}).get("base_url") or "").strip().lower()
+    trust = str((node or {}).get("trust_tier") or "").strip().lower()
+    return (
+        1 if base.startswith("https://") else 0,
+        1 if bool((node or {}).get("official")) else 0,
+        1 if bool((node or {}).get("enabled", True)) else 0,
+        2 if trust == "official" else (1 if trust == "community" else 0),
+        _parse_last_seen_ts((node or {}).get("last_seen")),
+    )
+
+
+def _stale_node_reasons(rows: list[dict], local_sid: str) -> dict[str, str]:
+    """Detect likely stale/duplicate rows that operators can safely purge."""
+    host_groups: dict[str, list[dict]] = {}
+    for row in rows or []:
+        sid = str((row or {}).get("server_id") or "").strip()
+        if not sid or (local_sid and sid == local_sid):
+            continue
+        key = _clearnet_host_key((row or {}).get("base_url") or "")
+        if not key:
+            continue
+        host_groups.setdefault(key, []).append(row)
+
+    out: dict[str, str] = {}
+    for _host, group in host_groups.items():
+        if len(group) <= 1:
+            continue
+        ordered = sorted(group, key=_node_canonical_score, reverse=True)
+        keep = ordered[0]
+        keep_sid = str((keep or {}).get("server_id") or "").strip()
+        keep_base = str((keep or {}).get("base_url") or "").strip()
+        for cand in ordered[1:]:
+            sid = str((cand or {}).get("server_id") or "").strip()
+            if not sid:
+                continue
+            base = str((cand or {}).get("base_url") or "").strip()
+            reason = f"Duplicate endpoint; preferred row is {keep_sid} ({keep_base or 'no base_url'})"
+            if base.lower().startswith("http://") and keep_base.lower().startswith("https://"):
+                reason = f"HTTP duplicate; canonical HTTPS row is {keep_sid} ({keep_base})"
+            out[sid] = reason
+    return out
+
+
 def _cleanup_sessions() -> None:
     now = time.time()
     dead = [token for token, entry in _SESSIONS.items() if entry[0] <= now]
@@ -484,6 +552,10 @@ class FederationPolicyBody(BaseModel):
     block_tor_peers: bool = False
     block_http_only_peers: bool = False
     redact_clearnet_ips: bool = False
+
+
+class PurgeStaleNodesBody(BaseModel):
+    dry_run: bool = False
 
 
 def _cfg_easter_enabled() -> bool:
@@ -1159,12 +1231,17 @@ async def server_admin_nodes(request: Request, include_disabled: int = 1):
         return auth
 
     local_sid = _local_server_id()
+    raw_nodes = db.list_federation_servers_admin(include_disabled=bool(include_disabled))
+    stale_reasons = _stale_node_reasons(raw_nodes, local_sid)
     nodes = []
-    for node in db.list_federation_servers_admin(include_disabled=bool(include_disabled)):
+    for node in raw_nodes:
         view = _admin_node_view(node)
+        sid = str(view.get("server_id") or "").strip()
         view["is_local"] = bool(local_sid and (view.get("server_id") or "") == local_sid)
+        view["stale_candidate"] = sid in stale_reasons
+        view["stale_reason"] = stale_reasons.get(sid, "")
         nodes.append(view)
-    return {"nodes": nodes, "count": len(nodes)}
+    return {"nodes": nodes, "count": len(nodes), "stale_candidates": len(stale_reasons)}
 
 
 @router.get("/api/server-admin/nodes/{server_id}/probe")
@@ -1203,6 +1280,10 @@ async def server_admin_probe_node(server_id: str, request: Request):
     result = federation_router._probe_url(target, timeout_s=1.6)
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
     _redact_ips = False
+    err = str(result.get("error") or "")
+    stale_hint = ""
+    if "redirects not allowed" in err and "301 -> https://" in err and route_mode == "clearnet":
+        stale_hint = "HTTP listing redirects to HTTPS; this is usually a stale duplicate row."
     return {
         "ok": True,
         "server_id": sid,
@@ -1212,6 +1293,7 @@ async def server_admin_probe_node(server_id: str, request: Request):
         "healthy": bool(result.get("ok")),
         "latency_ms": result.get("latency_ms"),
         "error": result.get("error"),
+        "stale_hint": stale_hint,
         "is_local": False,
     }
 
@@ -1283,6 +1365,40 @@ async def server_admin_delete_node(request: Request, server_id: str):
     if not ok:
         return JSONResponse(status_code=404, content={"error": "Node not found"})
     return {"ok": True, "server_id": sid, "deleted": True}
+
+
+@router.post("/api/server-admin/nodes/purge-stale")
+@limiter.limit("6/minute")
+async def server_admin_purge_stale_nodes(body: PurgeStaleNodesBody, request: Request):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+
+    local_sid = _local_server_id()
+    rows = db.list_federation_servers_admin(include_disabled=True)
+    stale = _stale_node_reasons(rows, local_sid)
+    candidates = [{"server_id": sid, "reason": reason} for sid, reason in sorted(stale.items())]
+    if body.dry_run:
+        return {"ok": True, "dry_run": True, "candidates": candidates, "deleted_count": 0}
+
+    deleted: list[str] = []
+    for sid in stale.keys():
+        try:
+            if db.delete_federation_server(sid):
+                deleted.append(sid)
+        except Exception:
+            continue
+    return {
+        "ok": True,
+        "dry_run": False,
+        "candidates": candidates,
+        "deleted": deleted,
+        "deleted_count": len(deleted),
+    }
 
 
 # ---------------------------------------------------------------------------
