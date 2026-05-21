@@ -23,7 +23,7 @@ Checksums: [SHA256SUMS-v232.txt](./SHA256SUMS-v232.txt)
 
 ### GitHub Releases
 
-Upload the same files to [github.com/deadinternetfox/frogtalk/releases](https://github.com/deadinternetfox/frogtalk/releases) tag `v1.6.27` (or attach to `latest`).
+**Release:** [v1.6.27 on GitHub](https://github.com/deadinternetfox/frogtalk/releases/tag/v1.6.27) (APK + AAB attached).
 
 ## Website download endpoints
 

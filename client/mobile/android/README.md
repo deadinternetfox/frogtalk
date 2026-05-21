@@ -22,7 +22,16 @@ cd client/mobile/android
 ./gradlew assembleRelease
 ```
 
-APK will be at: `app/build/outputs/apk/release/app-release-unsigned.apk`
+Signed APK: `app/build/outputs/apk/release/app-release.apk`  
+Play bundle: `app/build/outputs/bundle/release/app-release.aab`
+
+Copy to the fleet:
+
+```bash
+cp app/build/outputs/apk/release/app-release.apk ../../../node/static/frogtalk-v232.apk
+cp app/build/outputs/apk/release/app-release.apk ../../../github-build-mirror/frogtalk-v232.apk
+cp app/build/outputs/bundle/release/app-release.aab ../../../github-build-mirror/frogtalk-v232.aab
+```
 
 ### Signing for Release
 Create a keystore:
