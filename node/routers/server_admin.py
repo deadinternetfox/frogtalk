@@ -1257,7 +1257,7 @@ async def server_admin_unblock_node(server_id: str, request: Request):
 
 
 @router.delete("/api/server-admin/nodes/{server_id}")
-@limiter.limit("20/minute")
+@limiter.limit("10/minute")
 async def server_admin_delete_node(request: Request, server_id: str):
     disabled = _require_enabled()
     if disabled:
@@ -1270,6 +1270,10 @@ async def server_admin_delete_node(request: Request, server_id: str):
     sid, sid_err = _normalize_federation_server_id(server_id)
     if sid_err:
         return sid_err
+
+    node = next((n for n in db.list_federation_servers_admin(include_disabled=True) if (n.get("server_id") or "") == sid), None)
+    if not node:
+        return JSONResponse(status_code=404, content={"error": "Node not found"})
 
     local_sid = _local_server_id()
     if local_sid and sid == local_sid:
