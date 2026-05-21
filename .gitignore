@@ -110,5 +110,6 @@ client/desktop/builds/linux-unpacked/
 .tmp_*.sh
 .tmp_*.log
 node/scripts/.env
+node/scripts/deploy_nodes.local.sh
 node/scripts/pin_federation_peer_keys.sh
 node/scripts/sync_tor_mirror_from_main.sh

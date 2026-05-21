@@ -26,33 +26,73 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
-# FrogTalk Main (clearnet), Tor/EU mirror, AUS clearnet test node.
-HOSTS=("161.97.182.73" "31.220.92.120" "46.250.244.184")
+# Production fleet — Main first, then clearnet STUN/TURN host, then AUS.
+#   31.220.92.120  Main (frogtalk.xyz / EU clearnet)     SSH 22
+#   161.97.182.73  Clearnet / STUN-TURN                   SSH 2222
+#   46.250.244.184 AUS                                   SSH 22
+#
+# AUS may be keyless: set FT_AUS_SSH_PASS (or source deploy_nodes.local.sh).
+# Never commit passwords. Requires: apt install sshpass (password hosts only).
+[[ -f "$SCRIPT_DIR/deploy_nodes.local.sh" ]] && source "$SCRIPT_DIR/deploy_nodes.local.sh"
+
+HOSTS=("31.220.92.120" "161.97.182.73" "46.250.244.184")
 declare -A HOST_LABEL=(
-  ["161.97.182.73"]="FrogTalk Main"
-  ["31.220.92.120"]="FrogTalk Tor / EU"
+  ["31.220.92.120"]="FrogTalk Main"
+  ["161.97.182.73"]="FrogTalk Clearnet"
   ["46.250.244.184"]="FrogTalk AUS"
 )
-# Per-host SSH ports. Probes CANDIDATE_PORTS only when a host is not listed here.
 declare -A HOST_PORT=(
-  ["161.97.182.73"]=2222
   ["31.220.92.120"]=22
+  ["161.97.182.73"]=2222
   ["46.250.244.184"]=22
+)
+# Password auth only when env/local sets it (BatchMode breaks password login).
+declare -A HOST_SSH_PASS=(
+  ["46.250.244.184"]="${FT_AUS_SSH_PASS:-}"
 )
 CANDIDATE_PORTS=(22 2222)
 SSH_USER=root
 REMOTE_BASE=/opt/frogtalk
 SSH_KEY="${HOME}/.ssh/id_ed25519"
-# LOW-G6: `StrictHostKeyChecking=accept-new` records the host key the
-# first time we see it and refuses to connect afterwards if the server's
-# key changes (the actual MITM signal). `no` would silently accept *any*
-# new key on every connect, defeating the protection entirely.
-SSH_OPTS=(-o StrictHostKeyChecking=accept-new
-          -o UserKnownHostsFile="${HOME}/.ssh/known_hosts"
-          -o ConnectTimeout=5
-          -o ServerAliveInterval=10
-          -o BatchMode=yes
-          -i "$SSH_KEY")
+SSH_BASE_OPTS=(-o StrictHostKeyChecking=accept-new
+              -o UserKnownHostsFile="${HOME}/.ssh/known_hosts"
+              -o ConnectTimeout=5
+              -o ServerAliveInterval=10)
+SSH_OPTS=("${SSH_BASE_OPTS[@]}" -o BatchMode=yes -i "$SSH_KEY")
+
+host_uses_password() {
+  [[ -n "${HOST_SSH_PASS[$1]:-}" ]]
+}
+
+require_sshpass() {
+  command -v sshpass >/dev/null 2>&1 || {
+    echo "sshpass required for password SSH (e.g. FrogTalk AUS). Install: apt install sshpass" >&2
+    return 1
+  }
+}
+
+remote_ssh() {
+  local host="$1" port="$2"
+  shift 2
+  if host_uses_password "$host"; then
+    require_sshpass || return 1
+    SSHPASS="${HOST_SSH_PASS[$host]}" sshpass -e ssh -p "$port" "${SSH_BASE_OPTS[@]}" \
+      "${SSH_USER}@${host}" "$@"
+  else
+    ssh -p "$port" "${SSH_OPTS[@]}" "${SSH_USER}@${host}" "$@"
+  fi
+}
+
+remote_scp() {
+  local host="$1" port="$2" src="$3" dest="$4"
+  if host_uses_password "$host"; then
+    require_sshpass || return 1
+    SSHPASS="${HOST_SSH_PASS[$host]}" sshpass -e scp -q -P "$port" "${SSH_BASE_OPTS[@]}" \
+      "$src" "${SSH_USER}@${host}:${dest}"
+  else
+    scp -q -P "$port" "${SSH_OPTS[@]}" "$src" "${SSH_USER}@${host}:${dest}"
+  fi
+}
 
 # Default file set if caller passed nothing. Each entry is
 #   "<local_path>:<remote_path>"
@@ -120,9 +160,7 @@ fi
 
 probe_port() {
   local host="$1" port="$2"
-  # Quick handshake check — `ssh -G` doesn't connect, so use a real probe
-  # that exits non-zero on connection failure but succeeds on auth too.
-  ssh -p "$port" "${SSH_OPTS[@]}" "${SSH_USER}@${host}" true 2>/dev/null
+  remote_ssh "$host" "$port" true 2>/dev/null
 }
 
 detect_port() {
@@ -161,10 +199,10 @@ deploy_to() {
       continue
     fi
     remote_dir="${REMOTE_BASE}/$(dirname "$remote_path")"
-    ssh -p "$port" "${SSH_OPTS[@]}" "${SSH_USER}@${host}" "mkdir -p '${remote_dir}'" 2>/dev/null || true
-    if scp -q -P "$port" "${SSH_OPTS[@]}" \
+    remote_ssh "$host" "$port" "mkdir -p '${remote_dir}'" 2>/dev/null || true
+    if remote_scp "$host" "$port" \
         "$local_path" \
-        "${SSH_USER}@${host}:${REMOTE_BASE}/${remote_path}"; then
+        "${REMOTE_BASE}/${remote_path}"; then
       uploaded=$((uploaded + 1))
       echo "[$host:$port] uploaded $local_path"
     else
@@ -179,7 +217,7 @@ deploy_to() {
   fi
 
   echo "[$host:$port] restarting frogtalk.service ($uploaded files synced)"
-  if ssh -p "$port" "${SSH_OPTS[@]}" "${SSH_USER}@${host}" \
+  if remote_ssh "$host" "$port" \
       'systemctl restart frogtalk && systemctl is-active frogtalk'; then
     echo "=== [$host:$port] OK ==="
     return 0

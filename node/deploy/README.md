@@ -230,11 +230,13 @@ Paths under `node/` map to `/opt/frogtalk/node/` on the server. Bare `static/…
 
 | Label | Host | SSH port |
 |-------|------|----------|
-| FrogTalk Main | `161.97.182.73` | `2222` |
-| FrogTalk Tor / EU | `31.220.92.120` | `22` |
+| FrogTalk Main | `31.220.92.120` | `22` |
+| FrogTalk Clearnet | `161.97.182.73` | `2222` |
 | FrogTalk AUS | `46.250.244.184` | `22` |
 
 Edit `HOSTS`, `HOST_PORT`, and `HOST_LABEL` in `node/scripts/deploy_nodes.sh` (and `deploy_board.sh`) when the fleet changes.
+
+AUS password SSH: copy `node/scripts/deploy_nodes.local.example.sh` → `deploy_nodes.local.sh` (gitignored) or export `FT_AUS_SSH_PASS` before running. Requires `sshpass`.
 
 Does **not** replace `git pull` for schema migrations; use `node_update_check.sh --apply` or a full `deploy.sh` when `database.py` migrations change.
 
