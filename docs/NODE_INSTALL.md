@@ -477,13 +477,13 @@ In the app: **Settings → Network** — probe peers, compare build hash with [f
 
 ### Public URL, TLS, and Server Admin warnings
 
-When `PUBLIC_URL` is a bare IP or plain `http://`, **Server Admin** (`/server`) shows a **dismissable top banner** with fix steps (domain + TLS, `install.sh ssl`, restart). Dismiss is remembered per `PUBLIC_URL` until you change host or TLS — then the banner returns.
+When `PUBLIC_URL` is a bare IP or plain `http://`, **Server Admin** (`/server`) shows a top warning banner with direct fix steps (domain + TLS, `install.sh ssl`, restart). Use **Hide until fixed** to dismiss for the current page session; it re-appears on the next `/server` load until `PUBLIC_URL` is corrected.
 
 The same nodes show warnings on **`/board/`** for visitors (IP in the address bar; HTTP-only clearnet).
 
 | UI | What it means |
 |----|----------------|
-| `no TLS` badge | Peer or this node’s clearnet `base_url` is `http://` |
+| `HTTP only` badge | Peer or this node’s clearnet `base_url` is `http://` |
 | `HTTPS` badge | Clearnet `base_url` uses `https://` |
 | `Direct clearnet route` | Federation uses `base_url`, not Tor |
 | `Clearnet address redacted` | Optional mask `46.250.*.*` in this panel only |
@@ -492,8 +492,8 @@ The same nodes show warnings on **`/board/`** for visitors (IP in the address ba
 **Federation Directory** policies (defaults **off**):
 
 - **Block Tor federation peers** — disables `.onion` routes when enabled.
-- **Block HTTP-only federation peers** — disables peers whose clearnet URL is `http://` (no TLS).
-- **Redact clearnet peer IPs** (default **off**) — masks VPS IPs in Server Admin only; does **not** change the browser bar or `/board/` links while `PUBLIC_URL` is still an IP.
+- **Auto-block non-SSL federation peers (HTTP)** — disables peers whose clearnet URL is `http://` (no TLS).
+- **Mask peer IPs in this panel only** (default **off**) — admin UI redaction only. If this node uses a raw-IP `PUBLIC_URL`, the toggle is unavailable because browsers/federation still expose that IP until a real domain + HTTPS is configured.
 
 Federation probes and **Settings → Network** always use the real stored `base_url`.
 

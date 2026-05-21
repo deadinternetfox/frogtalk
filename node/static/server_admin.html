@@ -1040,6 +1040,49 @@ input, select {
 }
 .operator-url-banner--warn .operator-url-banner-copy strong { color: #ffe2b8; }
 .operator-url-banner--warn .operator-url-banner-copy p { color: #e8d4a8; }
+.operator-url-banner--info {
+  border-color: rgba(118, 201, 255, 0.45);
+  background: linear-gradient(135deg, rgba(18, 39, 56, 0.9) 0%, rgba(12, 27, 38, 0.95) 100%);
+}
+.operator-url-banner--info .operator-url-banner-icon {
+  background: rgba(118, 201, 255, 0.14);
+  border-color: rgba(118, 201, 255, 0.4);
+}
+.operator-url-banner--info .operator-url-banner-copy strong { color: #d8f1ff; }
+.operator-url-banner--info .operator-url-banner-copy p { color: #b8dcf0; }
+.onboarding-alerts {
+  display: grid;
+  gap: 10px;
+}
+.onboarding-alert {
+  border: 1px solid #284635;
+  border-radius: 12px;
+  background: rgba(10, 22, 14, 0.78);
+  padding: 10px 12px;
+}
+.onboarding-alert strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 13px;
+}
+.onboarding-alert p {
+  margin: 0;
+  color: #c7dfce;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.onboarding-alert.danger {
+  border-color: rgba(255, 106, 106, 0.5);
+  background: rgba(63, 23, 24, 0.6);
+}
+.onboarding-alert.warn {
+  border-color: rgba(255, 179, 71, 0.5);
+  background: rgba(64, 42, 18, 0.55);
+}
+.onboarding-alert.success {
+  border-color: rgba(86, 209, 109, 0.55);
+  background: rgba(19, 53, 26, 0.6);
+}
 </style>
 </head>
 <body>
@@ -1073,7 +1116,17 @@ input, select {
             <ol id="operator-url-banner-steps" class="operator-url-banner-steps"></ol>
             <div id="operator-url-banner-actions" class="operator-url-banner-actions"></div>
           </div>
-          <button type="button" class="operator-url-banner-dismiss" id="operator-url-banner-dismiss" title="Hide until PUBLIC_URL or TLS changes">Dismiss</button>
+          <button type="button" class="operator-url-banner-dismiss" id="operator-url-banner-dismiss" title="Hide until next page load">Hide until fixed</button>
+        </div>
+      </div>
+      <div id="operator-domain-banner" class="operator-url-banner operator-url-banner--info hidden" role="status" aria-live="polite">
+        <div class="operator-url-banner-inner">
+          <div class="operator-url-banner-icon" aria-hidden="true">i</div>
+          <div class="operator-url-banner-copy">
+            <strong id="operator-domain-banner-title">Set PUBLIC_URL to a real domain</strong>
+            <p id="operator-domain-banner-body"></p>
+          </div>
+          <button type="button" class="operator-url-banner-dismiss" id="operator-domain-banner-dismiss" title="Hide this reminder">Dismiss</button>
         </div>
       </div>
 
@@ -1109,6 +1162,12 @@ input, select {
       <div class="panel" style="margin-top:12px;">
         <div class="section-title">Federation Overview</div>
         <div class="grid-mini" id="node-summary-grid"></div>
+      </div>
+
+      <div class="panel" style="margin-top:12px;">
+        <div class="section-title">Node Onboarding Checklist</div>
+        <p class="section-sub">Quick operator health checks: HTTPS status, IP exposure, and federation safety defaults for this node.</p>
+        <div id="node-onboarding-alerts" class="onboarding-alerts"></div>
       </div>
 
       <div class="panel" id="imageboard-panel" style="margin-top:12px;">
@@ -1238,15 +1297,15 @@ input, select {
               <label class="policy-toggle" for="block-http-only-peers" style="margin-top:10px;">
                 <input type="checkbox" id="block-http-only-peers" autocomplete="off">
                 <span class="policy-toggle-copy">
-                  <strong>Block HTTP-only federation peers automatically</strong>
-                  <span class="field-hint">When enabled, peers whose clearnet <code>base_url</code> is <code>http://</code> (no TLS) are disabled for sync, inbox, and push — same idea as Tor auto-block. Does not re-enable when turned off. Default: off.</span>
+                  <strong>Auto-block non-SSL federation peers (HTTP)</strong>
+                  <span class="field-hint">When enabled, clearnet peers using <code>http://</code> (no TLS/SSL) are automatically disabled for sync, inbox, and push. Same behavior pattern as Tor auto-block. Turning this off does not auto-unblock previously blocked peers. Default: off.</span>
                 </span>
               </label>
               <label class="policy-toggle" for="redact-clearnet-ips" style="margin-top:10px;">
                 <input type="checkbox" id="redact-clearnet-ips" autocomplete="off">
                 <span class="policy-toggle-copy">
-                  <strong>Redact clearnet peer IPs in this panel</strong>
-                  <span class="field-hint" id="redact-clearnet-hint">When enabled, VPS IPs show as <code>46.250.*.*</code> here only — visitors still see the real IP in the browser and on <code>/board/</code> until you use a domain. Domains stay visible. Default: off.</span>
+                  <strong>Mask peer IPs in this panel only (UI redaction)</strong>
+                  <span class="field-hint" id="redact-clearnet-hint">Display-only masking for operator UI clarity. It does <b>not</b> hide your real IP from visitors, browsers, federation peers, or <code>/board/</code>. Use a real domain + trusted HTTPS to hide VPS IP exposure. Default: off.</span>
                 </span>
               </label>
               <div class="retention-actions" style="margin-top:10px;">

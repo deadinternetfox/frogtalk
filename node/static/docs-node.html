@@ -201,7 +201,7 @@ curl -sS "$PUBLIC_URL/api/ping"
 curl -sS "$PUBLIC_URL/api/network/status" | python3 -m json.tool
 journalctl -u frogtalk -n 40 --no-pager</code></pre>
       <p class="hint">Open <code>$PUBLIC_URL/app</code>, register a test user. In <strong>Settings → Network</strong>, probe peers.</p>
-      <p class="hint"><strong>Server Admin</strong> shows a dismissable banner when <code>PUBLIC_URL</code> has no domain or no HTTPS, with steps to fix TLS. Optional “Redact clearnet IPs” masks IPs in the admin UI only — visitors still see the real IP in the browser and on <code>/board/</code> until you use a domain.</p>
+      <p class="hint"><strong>Server Admin</strong> shows a warning banner when <code>PUBLIC_URL</code> has no domain or no HTTPS, with fix steps. Use “Hide until fixed” to dismiss for the current page session; it returns on next load until corrected. “Mask peer IPs in this panel only” is UI redaction and is unavailable when <code>PUBLIC_URL</code> is still a raw IP, because visitors and federation still see that IP until a domain + HTTPS is configured.</p>
     </section>
 
     <section class="step" id="trouble">

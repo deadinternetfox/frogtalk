@@ -40,6 +40,11 @@
   const redactClearnetHint = document.getElementById('redact-clearnet-hint');
   const saveFederationPolicyBtn = document.getElementById('save-federation-policy-btn');
   const federationPolicyStatus = document.getElementById('federation-policy-status');
+  const onboardingAlerts = document.getElementById('node-onboarding-alerts');
+  const operatorDomainBanner = document.getElementById('operator-domain-banner');
+  const operatorDomainBannerTitle = document.getElementById('operator-domain-banner-title');
+  const operatorDomainBannerBody = document.getElementById('operator-domain-banner-body');
+  const operatorDomainBannerDismiss = document.getElementById('operator-domain-banner-dismiss');
   let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
   let easterEggLoaded = false;
   let easterEggDirty = false;
@@ -48,12 +53,16 @@
   let retentionBaseline = '';
   let federationPolicyBaseline = '';
   let lastPublicUrlMeta = null;
+  let lastFederationPolicy = {};
+  let lastNodes = [];
+  let lastImageboardAvailable = null;
   const operatorUrlBanner = document.getElementById('operator-url-banner');
   const operatorUrlBannerTitle = document.getElementById('operator-url-banner-title');
   const operatorUrlBannerBody = document.getElementById('operator-url-banner-body');
   const operatorUrlBannerSteps = document.getElementById('operator-url-banner-steps');
   const operatorUrlBannerActions = document.getElementById('operator-url-banner-actions');
   const operatorUrlBannerDismiss = document.getElementById('operator-url-banner-dismiss');
+  const REDACT_HINT_DEFAULT = 'Display-only masking for operator UI clarity. It does not hide your real IP from visitors, browsers, federation peers, or /board/. Use a real domain + trusted HTTPS to hide VPS IP exposure. Default: off.';
 
   function retentionSig() {
     const d = Math.max(1, Number(channelActiveDays?.value || 30) || 30);
@@ -103,8 +112,14 @@
     if (blockTorPeers) blockTorPeers.checked = block;
     if (blockHttpOnlyPeers) blockHttpOnlyPeers.checked = blockHttp;
     if (redactClearnetIps) redactClearnetIps.checked = redact;
+    lastFederationPolicy = {
+      block_tor_peers: block,
+      block_http_only_peers: blockHttp,
+      redact_clearnet_ips: redact,
+    };
     federationPolicyBaseline = federationPolicySig();
     setFederationPolicyStatus('saved', 'Loaded from this node');
+    renderOnboardingAlerts();
   }
 
   async function saveFederationPolicy() {
@@ -746,6 +761,7 @@
 
   function buildOperatorUrlBannerContent(meta) {
     if (!meta || meta.is_onion) return null;
+    const boardAvailable = lastImageboardAvailable === true;
     const host = escHtml(meta.host || 'this host');
     const pub = escHtml(meta.public_url || `http://${meta.host || ''}`);
     const issues = [];
@@ -760,20 +776,23 @@
     if (!issues.length) return null;
 
     let severity = 'alert';
-    let title = 'Fix your node’s public URL';
+    let title = 'Fix your node public URL';
     let body = '';
     const steps = [];
     const actions = [];
+    const boardSuffix = boardAvailable
+      ? ' Visitors, federation peers, and /board/ links also expose this address.'
+      : ' Visitors and federation peers still see this address.';
 
     if (issues.includes('ip') && issues.includes('no-tls')) {
-      title = 'No domain and no HTTPS';
-      body = `This node is advertised as <code>${pub}</code>. Visitors, federation peers, and <code>/board/</code> all show a bare IP over plain HTTP. Other nodes may auto-block HTTP-only peers.`;
+      title = 'Public URL is a bare IP and this node is not using HTTPS';
+      body = `This node is advertised as <code>${pub}</code>.${boardSuffix} Other nodes may auto-block HTTP-only peers.`;
       steps.push('Point DNS at this VPS and set <code>PUBLIC_URL=https://your.domain</code> in <code>/opt/frogtalk/.env</code>.');
       steps.push('Run <code>sudo bash /opt/frogtalk/node/scripts/install.sh ssl</code> (Let’s Encrypt) or terminate TLS at Cloudflare (orange cloud).');
       steps.push('Restart: <code>sudo systemctl restart frogtalk-node</code> and re-sync the federation directory from this panel.');
       actions.push({ label: 'Open install docs', href: '/docs/node#ssl', external: false });
     } else if (issues.includes('no-tls')) {
-      title = 'HTTPS not enabled on clearnet';
+      title = 'This node is not using HTTPS';
       body = `Clearnet traffic uses <code>http://${host}</code>. Browsers and federation treat this as insecure; enable TLS on <code>${host}</code>.`;
       steps.push('Run <code>sudo bash /opt/frogtalk/node/scripts/install.sh ssl</code> on the server (Certbot or self-signed).');
       steps.push('Set <code>PUBLIC_URL=https://…</code> in <code>/opt/frogtalk/.env</code> and restart <code>frogtalk-node</code>.');
@@ -786,8 +805,8 @@
       steps.push('Self-signed HTTPS on an IP is only for testing — not for production federation.');
     } else if (issues.includes('ip')) {
       severity = 'warn';
-      title = 'No domain — visitors see your server IP';
-      body = `The browser address bar and board links use <code>${host}</code>. “Redact clearnet IPs” in Federation Directory only masks IPs in this admin panel — it does not change what users see.`;
+      title = 'Public URL is a bare IP';
+      body = `The browser address bar uses <code>${host}</code>. “Mask peer IPs in this panel” only changes this admin UI — it does not change what users or federation peers see.`;
       steps.push('Add a DNS name, set <code>PUBLIC_URL=https://your.domain</code>, and run the SSL installer.');
       steps.push('Re-announce to the hub after <code>PUBLIC_URL</code> changes.');
     }
@@ -807,7 +826,7 @@
     }
     const key = operatorUrlBannerStorageKey(meta);
     try {
-      const stored = JSON.parse(localStorage.getItem(key) || '{}');
+      const stored = JSON.parse(sessionStorage.getItem(key) || '{}');
       if (stored.fingerprint === content.fingerprint && stored.dismissed) {
         operatorUrlBanner.classList.add('hidden');
         return;
@@ -851,7 +870,7 @@
     if (!operatorUrlBanner || !lastPublicUrlMeta) return;
     const key = operatorUrlBannerStorageKey(lastPublicUrlMeta);
     try {
-      localStorage.setItem(key, JSON.stringify({
+      sessionStorage.setItem(key, JSON.stringify({
         dismissed: true,
         fingerprint: operatorUrlBanner.dataset.fingerprint || operatorUrlBannerFingerprint(lastPublicUrlMeta),
         at: Date.now(),
@@ -860,20 +879,76 @@
     operatorUrlBanner.classList.add('hidden');
   }
 
+  function operatorDomainBannerStorageKey(meta) {
+    const url = String(meta?.public_url || meta?.host || 'unknown');
+    return `frogtalk.serverAdmin.domainBanner.${url}`;
+  }
+
+  function dismissOperatorDomainBanner() {
+    if (!operatorDomainBanner || !lastPublicUrlMeta) return;
+    const key = operatorDomainBannerStorageKey(lastPublicUrlMeta);
+    try {
+      localStorage.setItem(key, JSON.stringify({
+        dismissed: true,
+        fingerprint: operatorUrlBannerFingerprint(lastPublicUrlMeta),
+        at: Date.now(),
+      }));
+    } catch (_) { /* ignore */ }
+    operatorDomainBanner.classList.add('hidden');
+  }
+
+  function renderOperatorDomainBanner(meta) {
+    if (!operatorDomainBanner || !meta || meta.is_onion) return;
+    const needsDomainHelp = lastImageboardAvailable === false && (meta.is_ip_host || meta.is_http_only_clearnet || !meta.is_https);
+    if (!needsDomainHelp) {
+      operatorDomainBanner.classList.add('hidden');
+      return;
+    }
+    const key = operatorDomainBannerStorageKey(meta);
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || '{}');
+      if (stored.dismissed && stored.fingerprint === operatorUrlBannerFingerprint(meta)) {
+        operatorDomainBanner.classList.add('hidden');
+        return;
+      }
+    } catch (_) { /* ignore */ }
+    operatorDomainBanner.classList.remove('hidden');
+    if (operatorDomainBannerTitle) operatorDomainBannerTitle.textContent = 'Set PUBLIC_URL to https://your.domain';
+    if (operatorDomainBannerBody) {
+      operatorDomainBannerBody.textContent = 'Imageboard is not enabled on this node right now. Before onboarding users or federation peers, configure a real domain and trusted HTTPS so your raw server IP is not the public identity.';
+    }
+  }
+
   function applyPublicUrlMeta(meta) {
     if (!meta || typeof meta !== 'object') return;
+    lastPublicUrlMeta = meta;
     renderOperatorUrlBanner(meta);
+    renderOperatorDomainBanner(meta);
+    const ipPublicUrl = !!meta.is_ip_host && !meta.is_onion;
+    if (redactClearnetIps) {
+      redactClearnetIps.disabled = ipPublicUrl;
+      if (ipPublicUrl) redactClearnetIps.checked = false;
+    }
+    if (redactClearnetHint) {
+      if (ipPublicUrl) {
+        redactClearnetHint.textContent = 'Unavailable while PUBLIC_URL is a raw IP. Visitors and federation peers still see this address. Use a domain + trusted HTTPS.';
+      } else if (meta.recommend_redact_clearnet_ips && !redactClearnetIps?.checked) {
+        redactClearnetHint.textContent = 'Optional: mask VPS IPs in this panel only. Does not change the address bar or /board/ while PUBLIC_URL is an IP.';
+      } else {
+        redactClearnetHint.textContent = REDACT_HINT_DEFAULT;
+      }
+    }
     const warnEl = document.getElementById('imageboard-url-warnings');
     if (warnEl) {
       const bits = [];
-      if (meta.is_ip_host) {
+      if (meta.is_ip_host && lastImageboardAvailable === true) {
         bits.push('<span class="mini-badge danger">IP in URL</span> See banner above — visitors still see <code>' + escHtml(meta.host || 'this IP') + '</code>.');
       }
       if (meta.is_http_only_clearnet) {
         bits.push('<span class="mini-badge danger">HTTP only</span> Enable HTTPS (banner above).');
       }
-      if (meta.recommend_redact_clearnet_ips && redactClearnetHint && !redactClearnetIps?.checked) {
-        redactClearnetHint.textContent = 'Optional: mask VPS IPs in this panel only. Does not change the address bar or /board/ while PUBLIC_URL is an IP.';
+      if (lastImageboardAvailable === false && (meta.is_ip_host || meta.is_http_only_clearnet || !meta.is_https)) {
+        bits.push('<span class="mini-badge">Info</span> Imageboard is not enabled. Set <code>PUBLIC_URL=https://your.domain</code> before onboarding federation peers.');
       }
       if (bits.length) {
         warnEl.style.display = 'block';
@@ -884,6 +959,76 @@
         warnEl.innerHTML = '';
       }
     }
+    renderOnboardingAlerts();
+  }
+
+  function renderOnboardingAlerts() {
+    if (!onboardingAlerts) return;
+    const alerts = [];
+    const meta = lastPublicUrlMeta || {};
+    const policy = lastFederationPolicy || {};
+    const nodes = Array.isArray(lastNodes) ? lastNodes : [];
+    const insecurePeers = nodes.filter((n) => !n.is_local && n.route_mode === 'clearnet' && n.tls_insecure);
+    const torPeers = nodes.filter((n) => !n.is_local && n.route_mode === 'tor');
+
+    if (meta && meta.public_url) {
+      if (meta.is_http_only_clearnet) {
+        alerts.push({
+          tone: 'danger',
+          title: 'HTTPS is missing on this node public URL',
+          body: 'Your node is advertising HTTP without SSL/TLS. New admins should fix this first because browsers and federation peers treat this as insecure.',
+        });
+      } else if (meta.is_ip_host) {
+        alerts.push({
+          tone: 'warn',
+          title: 'Public URL is still an IP address',
+          body: 'Masking IPs in this panel is cosmetic only. To actually stop exposing your VPS IP to users, switch PUBLIC_URL to a domain with trusted HTTPS.',
+        });
+      } else if (meta.is_https) {
+        alerts.push({
+          tone: 'success',
+          title: 'Public URL looks production-ready',
+          body: 'Domain + HTTPS detected. This is the recommended setup for onboarding users and federation peers.',
+        });
+      }
+    }
+
+    if (insecurePeers.length && !policy.block_http_only_peers) {
+      alerts.push({
+        tone: 'warn',
+        title: `Non-SSL federation peers detected (${insecurePeers.length})`,
+        body: 'Enable "Auto-block non-SSL federation peers (HTTP)" in Federation Directory to prevent accidental sync with HTTP-only nodes.',
+      });
+    } else if (policy.block_http_only_peers) {
+      alerts.push({
+        tone: 'success',
+        title: 'Non-SSL peer auto-block is enabled',
+        body: 'HTTP-only clearnet peers are automatically blocked after directory sync.',
+      });
+    }
+
+    if (torPeers.length && !policy.block_tor_peers) {
+      alerts.push({
+        tone: 'warn',
+        title: `Tor peers available (${torPeers.length})`,
+        body: 'If your moderation policy avoids onion federation routes, enable the Tor auto-block toggle next to the non-SSL option.',
+      });
+    }
+
+    if (!alerts.length) {
+      alerts.push({
+        tone: 'success',
+        title: 'No onboarding warnings right now',
+        body: 'This node currently has no obvious SSL/IP/federation policy blockers for first-time operators.',
+      });
+    }
+
+    onboardingAlerts.innerHTML = alerts.map((a) => `
+      <article class="onboarding-alert ${a.tone}">
+        <strong>${escHtml(a.title)}</strong>
+        <p>${escHtml(a.body)}</p>
+      </article>
+    `).join('');
   }
 
   function renderImageboardSection(payload) {
@@ -892,6 +1037,7 @@
     const msg = document.getElementById('imageboard-msg');
     const peersEl = document.getElementById('imageboard-peers');
     if (!grid || !idEl) return;
+    lastImageboardAvailable = !!payload?.available;
     if (payload?.public_url_meta) applyPublicUrlMeta(payload.public_url_meta);
     if (!payload || !payload.available) {
       grid.innerHTML = '';
@@ -939,7 +1085,7 @@
       } else {
         peersEl.innerHTML = peers.map((p) => {
           const tor = p.tor_only ? '<span style="color:#ffaa33;">🧅 </span>' : '';
-          const tlsBadge = p.tls_insecure ? '<span class="mini-badge danger" style="font-size:10px;">no TLS</span> ' : (p.tls_secure ? '<span class="mini-badge success" style="font-size:10px;">HTTPS</span> ' : '');
+          const tlsBadge = p.tls_insecure ? '<span class="mini-badge danger" style="font-size:10px;">HTTP only</span> ' : (p.tls_secure ? '<span class="mini-badge success" style="font-size:10px;">HTTPS</span> ' : '');
           const t = p.topic ? `<span style="color:#6baf6b;"> #${escHtml(p.topic)}</span>` : '';
           const seen = p.last_seen ? ` · seen ${escHtml(fmtRelative(p.last_seen))}` : '';
           const isBlocked = !!p.blocked;
@@ -1243,7 +1389,7 @@
               ${n.onion_available ? '<span class="mini-badge">onion</span>' : ''}
               ${n.policy_tor_blocked ? '<span class="mini-badge" style="border-color:#7a4a2a;color:#ffb347;">tor policy</span>' : ''}
               ${n.policy_http_blocked ? '<span class="mini-badge" style="border-color:#7a4a2a;color:#ffb347;">http policy</span>' : ''}
-              ${n.tls_insecure ? '<span class="mini-badge danger">no TLS</span>' : ''}
+              ${n.tls_insecure ? '<span class="mini-badge danger">HTTP only</span>' : ''}
               ${n.tls_secure && n.route_mode === 'clearnet' ? '<span class="mini-badge success">HTTPS</span>' : ''}
             </div>
             <div class="node-endpoint">${escHtml(n.display_endpoint || 'hidden endpoint')}</div>
@@ -1281,7 +1427,10 @@
 
   async function refreshNodes() {
     const data = await api('/api/server-admin/nodes?include_disabled=1');
-    renderNodes(data.nodes || []);
+    lastNodes = Array.isArray(data.nodes) ? data.nodes : [];
+    renderNodes(lastNodes);
+    renderOnboardingAlerts();
+    return lastNodes;
   }
 
   async function runNodeAction(serverId, action) {
@@ -1814,6 +1963,7 @@
     saveFederationPolicy().catch(() => {});
   });
   operatorUrlBannerDismiss?.addEventListener('click', dismissOperatorUrlBanner);
+  operatorDomainBannerDismiss?.addEventListener('click', dismissOperatorDomainBanner);
   blockTorPeers?.addEventListener('change', refreshFederationPolicyDirtyUi);
   blockHttpOnlyPeers?.addEventListener('change', refreshFederationPolicyDirtyUi);
   redactClearnetIps?.addEventListener('change', refreshFederationPolicyDirtyUi);
