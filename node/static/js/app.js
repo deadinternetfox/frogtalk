@@ -455,8 +455,9 @@ const App = {
     // or replaced by showEmptyOnboarding() if the user truly has no rooms.
     App.showChannelLoading();
 
-    // Request notification permission
-    Notifications.requestPermission();
+    // Browser notification prompt is useful on web/desktop; Android app uses
+    // the native permission wizard to avoid stacked startup popups.
+    if (!window.Android) Notifications.requestPermission();
 
     // Android native push: register/sync FCM token against this account.
     try {
@@ -465,13 +466,11 @@ const App = {
       }
     } catch {}
 
-    // Recover pending incoming call as early as possible so reloads don't hide
-    // the ring UI behind rooms/sidebar loading.
+    // Recover pending incoming call as early as possible, but only after the
+    // signaling socket is ready so Accept won't race a disconnected WS.
     if (this.pendingIncomingCall) {
-      const restored = await this.recoverIncomingCall(this.pendingIncomingCall);
-      if (restored) {
-        this.pendingIncomingCall = null;
-      }
+      const restored = await this.ensureIncomingCallPipeline(this.pendingIncomingCall);
+      if (restored) this.pendingIncomingCall = null;
     } else {
       await this.recoverLatestIncomingCall();
     }
@@ -480,10 +479,8 @@ const App = {
     await Rooms.loadRooms();
 
     if (this.pendingIncomingCall) {
-      const restored = await this.recoverIncomingCall(this.pendingIncomingCall);
-      if (restored) {
-        this.pendingIncomingCall = null;
-      }
+      const restored = await this.ensureIncomingCallPipeline(this.pendingIncomingCall);
+      if (restored) this.pendingIncomingCall = null;
     }
 
     // Process pending invite / share link
@@ -729,37 +726,61 @@ const App = {
       return false;
     }
     try {
-      try { document.body.classList.remove('in-welcome'); } catch {}
-      if (typeof ensureIncomingCallSurfaceVisible === 'function' && ensureIncomingCallSurfaceVisible()) {
-        if (peerNick && typeof openDMWithNick === 'function') {
-          try { await openDMWithNick(peerNick); } catch {}
-        }
-        return true;
-      }
-      if (peerNick && typeof openDMWithNick === 'function') {
-        try { await openDMWithNick(peerNick); } catch {}
-      }
       const payload = { callId, peerNick, action: '' };
       this.setPendingIncomingCall(payload);
-      let ok = false;
-      if (callId) ok = await this.recoverIncomingCall(payload);
-      if (!ok && typeof this.recoverLatestIncomingCall === 'function') {
-        ok = await this.recoverLatestIncomingCall({ silent: true, peerNick });
-      }
-      if (!ok && typeof ensureIncomingCallSurfaceVisible === 'function') {
-        ok = ensureIncomingCallSurfaceVisible();
-      }
-      return ok;
+      return await this.ensureIncomingCallPipeline(payload);
     } catch (e) {
       console.warn('[App] recoverIncomingCallFromNative failed', e);
       return false;
     }
   },
 
-  async recoverIncomingCall(pending) {
+  async ensureIncomingCallPipeline(pending) {
+    const callId = String(pending?.callId || '').trim().replace(/\D/g, '');
+    const peerNick = String(pending?.peerNick || '').trim().slice(0, 64);
+    if (!callId && !peerNick) return false;
+    if (!State.token) {
+      this.setPendingIncomingCall({ callId, peerNick, action: '' });
+      return false;
+    }
+    try { document.body.classList.remove('in-welcome'); } catch {}
+    try {
+      if (typeof ensureCallSignalingReady === 'function') {
+        const wsReady = await ensureCallSignalingReady({ timeoutMs: 15000 });
+        if (!wsReady) return false;
+      }
+      if (typeof ensureIncomingCallSurfaceVisible === 'function' &&
+          ensureIncomingCallSurfaceVisible()) {
+        if (typeof isCallSignalingReady === 'function' && !isCallSignalingReady()) {
+          return false;
+        }
+        if (peerNick && typeof openDMWithNick === 'function') {
+          try { await openDMWithNick(peerNick); } catch {}
+        }
+        return true;
+      }
+      let ok = false;
+      if (callId) ok = await this.recoverIncomingCall({ callId, peerNick, action: '' }, { skipSignalReady: true });
+      if (!ok) ok = await this.recoverLatestIncomingCall({ silent: true, peerNick, skipSignalReady: true });
+      if (!ok && typeof ensureIncomingCallSurfaceVisible === 'function') {
+        ok = ensureIncomingCallSurfaceVisible();
+        if (ok && typeof isCallSignalingReady === 'function' && !isCallSignalingReady()) ok = false;
+      }
+      return ok;
+    } catch (e) {
+      console.warn('[App] ensureIncomingCallPipeline failed', e);
+      return false;
+    }
+  },
+
+  async recoverIncomingCall(pending, opts) {
     const callId = String(pending?.callId || '').trim();
     if (!callId || !State.token) return false;
     try {
+      if (opts?.requireSignalReady && typeof ensureCallSignalingReady === 'function') {
+        const wsReady = await ensureCallSignalingReady({ timeoutMs: 15000 });
+        if (!wsReady) return false;
+      }
       const peerNick = String(pending?.peerNick || '').trim();
       if (peerNick && typeof openDMWithNick === 'function') {
         try { await openDMWithNick(peerNick); } catch {}
@@ -794,6 +815,10 @@ const App = {
   async recoverLatestIncomingCall(opts) {
     if (!State.token) return false;
     try {
+      if (opts?.requireSignalReady && typeof ensureCallSignalingReady === 'function') {
+        const wsReady = await ensureCallSignalingReady({ timeoutMs: 15000 });
+        if (!wsReady) return false;
+      }
       if (typeof ensureIncomingCallSurfaceVisible === 'function' && ensureIncomingCallSurfaceVisible()) {
         return true;
       }

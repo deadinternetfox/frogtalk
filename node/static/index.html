@@ -3133,10 +3133,48 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 #channel-listing-editor{z-index:10050 !important}
 
 /* ─── Call Overlays ─────────────────────────────────────────── */
-#call-overlay{display:flex}
+#call-overlay{
+  position:fixed;
+  inset:0;
+  z-index:900;
+  display:flex;
+  flex-direction:column;
+  background:#111;
+  height:var(--vvh, 100dvh);
+  max-height:var(--vvh, 100dvh);
+  box-sizing:border-box;
+}
 #call-overlay.hidden{display:none!important}
 #incoming-call.hidden{display:none!important}
 body.ft-incoming-call-active #incoming-call{z-index:20000}
+#call-top-bar{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  flex-shrink:0;
+  padding:calc(10px + var(--safe-top)) calc(12px + var(--safe-right)) 10px calc(12px + var(--safe-left));
+  background:rgba(0,0,0,.4);
+}
+#call-participants{
+  flex:1;
+  min-height:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:16px;
+  padding:14px 12px;
+  overflow:auto;
+  flex-wrap:wrap;
+}
+#call-controls{
+  display:flex;
+  gap:10px;
+  justify-content:center;
+  flex-shrink:0;
+  padding:12px calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left));
+  background:rgba(0,0,0,.4);
+  flex-wrap:wrap;
+}
 #incoming-call{
   position:fixed;inset:0;z-index:12000;
   display:flex;align-items:center;justify-content:center;
@@ -3193,6 +3231,11 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 }
 #incoming-call .incoming-call-btn:hover{transform:translateY(-1px);filter:brightness(1.06)}
 #incoming-call .incoming-call-btn:active{transform:scale(.98)}
+#incoming-call .incoming-call-btn:disabled{
+  opacity:.62;
+  cursor:not-allowed;
+  filter:grayscale(.2);
+}
 #incoming-call .incoming-call-btn.accept{
   background:linear-gradient(135deg,#6ddd77,#49bf56);
   color:#0a120a;box-shadow:0 6px 16px rgba(76,175,80,.35);
@@ -3335,8 +3378,12 @@ body.ft-incoming-call-active #incoming-call{z-index:20000}
 .call-ctl-btn.call-ctl-end{width:56px;height:56px;background:#f85149;font-size:1.4rem}
 .call-ctl-btn.call-ctl-end:hover{background:#ff6b63}
 @media(max-width:640px){
-  .call-tile{width:160px;height:160px}
+  #call-participants{gap:10px;padding:10px}
+  #call-controls{gap:8px;padding-top:10px}
+  .call-tile{width:min(42vw,150px);height:min(42vw,150px)}
   .call-tile-avatar{width:64px;height:64px;font-size:2rem}
+  .call-ctl-btn{width:44px;height:44px;font-size:1.1rem}
+  .call-ctl-btn.call-ctl-end{width:50px;height:50px;font-size:1.2rem}
 }
 
 /* ─── Voice Channel Bar ─────────────────────────────────────── */
@@ -10723,9 +10770,9 @@ window.ConnErr = (function(){
 </div>
 
 <!-- ═══════════ CALL OVERLAY ══════════════════════════════════════════════════ -->
-<div id="call-overlay" class="hidden" style="position:fixed;inset:0;background:#111;z-index:900;display:flex;flex-direction:column">
+<div id="call-overlay" class="hidden">
   <!-- Top bar -->
-  <div id="call-top-bar" style="display:flex;align-items:center;padding:12px 20px;background:rgba(0,0,0,.4);gap:12px;flex-shrink:0">
+  <div id="call-top-bar">
     <div style="flex:1;min-width:0">
       <div id="call-peer-name" style="font-size:16px;font-weight:700;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Calling…</div>
       <div style="display:flex;align-items:center;gap:8px">
@@ -10737,7 +10784,7 @@ window.ConnErr = (function(){
   </div>
 
   <!-- Participant tiles area -->
-  <div id="call-participants" style="flex:1;display:flex;align-items:center;justify-content:center;gap:24px;padding:20px;flex-wrap:wrap;overflow:auto">
+  <div id="call-participants">
     <!-- Remote participant tile -->
     <div id="call-tile-remote" class="call-tile">
       <video id="remote-video" autoplay playsinline style="width:100%;height:100%;object-fit:cover;border-radius:12px;display:none"></video>
@@ -10760,7 +10807,7 @@ window.ConnErr = (function(){
   </div>
 
   <!-- Bottom controls -->
-  <div id="call-controls" style="display:flex;gap:12px;justify-content:center;padding:16px 20px;background:rgba(0,0,0,.4);flex-shrink:0">
+  <div id="call-controls">
     <button id="btn-call-mute" onclick="toggleCallMute()" class="call-ctl-btn" title="Mute">🎤</button>
     <button id="btn-call-cam" onclick="toggleCallCamera()" class="call-ctl-btn" title="Camera">📷</button>
     <button id="btn-call-screen" onclick="toggleScreenShare()" class="call-ctl-btn" title="Screen Share">🖥️</button>

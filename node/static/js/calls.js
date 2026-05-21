@@ -215,6 +215,40 @@ function _waitForWsOpen(timeoutMs) {
     const t = setTimeout(() => finish(_wsLooksOpen()), Math.max(250, timeoutMs | 0));
   });
 }
+
+function _pickCallBootstrapRoom() {
+  try {
+    if (State?.currentRoom && State.currentRoomType !== 'dm') return String(State.currentRoom);
+  } catch {}
+  try {
+    const lastRaw = localStorage.getItem('fc_last_room');
+    if (lastRaw) {
+      const last = JSON.parse(lastRaw);
+      const lastName = String(last?.name || '').trim();
+      if (lastName) return lastName;
+    }
+  } catch {}
+  try {
+    const joined = Array.isArray(State?.rooms)
+      ? State.rooms.find(r => r && r.joined && r.type !== 'dm')
+      : null;
+    if (joined?.name) return String(joined.name);
+  } catch {}
+  return 'general';
+}
+
+async function ensureCallSignalingReady(opts) {
+  const timeoutMs = Math.max(1000, Number(opts?.timeoutMs || 15000) || 15000);
+  if (_wsLooksOpen()) return true;
+  try {
+    const room = String(opts?.room || _pickCallBootstrapRoom()).trim();
+    if (room && typeof WS !== 'undefined' && typeof WS.connect === 'function') {
+      WS.connect(room);
+    }
+  } catch {}
+  try { await _waitForWsOpen(timeoutMs); } catch {}
+  return _wsLooksOpen();
+}
 try {
   window.addEventListener('ws:open', () => {
     // Tiny delay so wsSend() sees readyState=OPEN.
@@ -408,6 +442,21 @@ function _clearPersistedIncomingCall() {
   try { localStorage.removeItem('ft_pending_incoming_call'); } catch {}
 }
 
+let _incomingMediaPrewarmAt = 0;
+async function _prewarmIncomingMediaPermission(callType) {
+  const now = Date.now();
+  if (now - _incomingMediaPrewarmAt < 30000) return;
+  _incomingMediaPrewarmAt = now;
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    const constraints = callType === 'video'
+      ? { audio: true, video: true }
+      : { audio: true };
+    const s = await navigator.mediaDevices.getUserMedia(constraints);
+    try { s.getTracks().forEach(t => t.stop()); } catch {}
+  } catch {}
+}
+
 /* ── Initiate call ─────────────────────────────────────────────────────────── */
 async function startCall (type, nick, uid) {
   if (_callState !== 'idle') { toast('Already in a call', 'error'); return; }
@@ -564,6 +613,7 @@ async function handleCallOffer (data) {
   // gets Accept/Decline even while Signal verification runs in the background.
   _persistIncomingCall(data);
   showIncomingCall(data.from_nickname, data.call_type, data.from_avatar || null);
+  void _prewarmIncomingMediaPermission(data.call_type || 'voice');
   try { Notifications.startRinging(data.from_nickname); } catch {}
   try {
     if (window.desktopApp?.showNotification) {
@@ -650,6 +700,12 @@ async function acceptCall () {
       }
     }
   } catch {}
+  const wsReady = await ensureCallSignalingReady({ timeoutMs: 15000 });
+  if (!wsReady) {
+    toast('Could not connect to signaling — please try again', 'error');
+    endCall(true, { wasConnected: false });
+    return;
+  }
   await _ensureCallPeerAvatar();
   showCallOverlay(_callType, _callPeerNick, 'Connecting…', _callPeerAvatar);
   _callState = 'calling';
@@ -976,17 +1032,28 @@ function endCall (notifyPeer = true, opts) {
 function _sendCallAnswerReliable (payload) {
   clearTimeout(_pendingAnswerRetryTimer);
   _pendingAnswerSend = payload;
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 20_000;
+  let lastReconnectAt = 0;
   const attempt = () => {
     if (!_pendingAnswerSend) return;
     const open = (typeof WS !== 'undefined' && typeof WS.isOpen === 'function')
       ? WS.isOpen() : true;
     if (open) {
       try { wsSend(_pendingAnswerSend); _pendingAnswerSend = null; return; } catch {}
+    } else {
+      const now = Date.now();
+      if (now - lastReconnectAt > 2000) {
+        lastReconnectAt = now;
+        try {
+          if (typeof WS !== 'undefined' && typeof WS.connect === 'function') {
+            WS.connect(_pickCallBootstrapRoom());
+          }
+        } catch {}
+      }
     }
     if (Date.now() >= deadline) {
       _pendingAnswerSend = null;
-      console.warn('[calls] could not deliver call_answer within 10 s — giving up');
+      console.warn('[calls] could not deliver call_answer within 20 s — giving up');
       toast('Could not connect — please try again', 'error');
       endCall();
       return;
@@ -1456,6 +1523,7 @@ function showIncomingCall (nick, type, avatar) {
     avatarEl.textContent = safeNick.charAt(0).toUpperCase();
   }
   if (card) card.classList.remove('hidden');
+  _refreshIncomingAcceptAvailability();
   // Primary ringtone engine lives in notifications.js; this fallback only runs
   // if that module isn't available for any reason.
   if (!window.Notifications?.startRinging) {
@@ -1494,6 +1562,17 @@ function showIncomingCall (nick, type, avatar) {
   }
 }
 
+function _refreshIncomingAcceptAvailability() {
+  try {
+    const btn = document.querySelector('#incoming-call .incoming-call-btn.accept');
+    if (!btn) return;
+    const ready = !!_pendingOffer?.sdp && _wsLooksOpen();
+    btn.disabled = !ready;
+    btn.setAttribute('aria-disabled', ready ? 'false' : 'true');
+    btn.title = ready ? 'Accept call' : 'Preparing call signaling…';
+  } catch {}
+}
+
 function isIncomingCallActive () {
   try {
     const card = document.getElementById('incoming-call');
@@ -1517,6 +1596,7 @@ function ensureIncomingCallSurfaceVisible() {
       showIncomingCall(nick, _callType, _callPeerAvatar);
       try { Notifications.startRinging(nick); } catch {}
     }
+    _refreshIncomingAcceptAvailability();
     return true;
   } catch {
     return false;
@@ -2292,6 +2372,8 @@ try {
   window.rejectCall = rejectCall;
   window.showIncomingCall = showIncomingCall;
   window.hideIncomingCall = hideIncomingCall;
+  window.ensureCallSignalingReady = ensureCallSignalingReady;
+  window.isCallSignalingReady = () => _wsLooksOpen();
 } catch {}
 
 function _maybeRecoverPendingIncomingCall () {
@@ -2306,6 +2388,9 @@ function _maybeRecoverPendingIncomingCall () {
 
 try {
   window.addEventListener('ws:open', _maybeRecoverPendingIncomingCall);
+  window.addEventListener('ws:open', () => {
+    setTimeout(() => _refreshIncomingAcceptAvailability(), 0);
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') _maybeRecoverPendingIncomingCall();
   });
