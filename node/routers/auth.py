@@ -119,6 +119,13 @@ def _login_clear_failures(nick_key: str) -> None:
 
 MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB in base64
 FED_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FrogTalkFederation/1.0"
+_ROOM_NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
+_GID_RE = re.compile(r"^[A-Za-z0-9._:\-]{6,128}$")
+_SYNC_EXPORT_ROOM_LIMIT = 400
+_SYNC_EXPORT_DM_LIMIT = 400
+
+_sync_state_lock = _threading.Lock()
+_federation_sync_state: dict[int, dict] = {}
 
 
 def _norm_base(url: str) -> str:
@@ -272,6 +279,300 @@ def _get_json(url: str, headers: dict | None = None, timeout: float = 3.5):
     return json.loads(raw)
 
 
+def _fed_token_ok(token: str | None) -> bool:
+    expected = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
+    if not expected:
+        return False
+    return hmac.compare_digest((token or "").strip(), expected)
+
+
+def _sync_state_set(user_id: int, patch: dict) -> None:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    now = int(time.time())
+    with _sync_state_lock:
+        cur = dict(_federation_sync_state.get(uid) or {})
+        cur.update(patch or {})
+        cur["updated_at"] = now
+        if "started_at" not in cur:
+            cur["started_at"] = now
+        _federation_sync_state[uid] = cur
+
+
+def _sync_state_get(user_id: int) -> dict:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {"in_progress": False, "done": False}
+    with _sync_state_lock:
+        cur = dict(_federation_sync_state.get(uid) or {})
+    if not cur:
+        return {"in_progress": False, "done": False}
+    return cur
+
+
+def _build_sync_export_for_user(user_id: int) -> dict:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {"rooms": [], "dm_peers": [], "source_server_id": ""}
+    joined_ids = db.get_user_joined_room_ids(uid)
+    rooms: list[str] = []
+    for room in db.list_rooms():
+        if room.get("id") not in joined_ids:
+            continue
+        name = str(room.get("name") or "").strip().lower()
+        if not _ROOM_NAME_RE.match(name):
+            continue
+        rooms.append(name)
+        if len(rooms) >= _SYNC_EXPORT_ROOM_LIMIT:
+            break
+
+    dm_peers: list[dict] = []
+    for ch in db.get_dm_channels(uid):
+        other_id = int(ch.get("other_id") or 0)
+        if other_id <= 0:
+            continue
+        peer = db.get_user_by_id(other_id) or {}
+        nick = str(peer.get("nickname") or "").strip()
+        gid = str(peer.get("global_user_id") or "").strip()
+        if not nick or not _GID_RE.match(gid):
+            continue
+        dm_peers.append({
+            "nickname": nick,
+            "global_user_id": gid,
+            "avatar": peer.get("avatar") or "",
+        })
+        if len(dm_peers) >= _SYNC_EXPORT_DM_LIMIT:
+            break
+
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        source_server_id = str(ident.get("server_id") or "").strip()
+    except Exception:
+        source_server_id = ""
+
+    following: list[dict] = []
+    for row in db.get_following_list(uid, limit=_SYNC_EXPORT_DM_LIMIT):
+        raw_id = int((row or {}).get("id") or 0)
+        profile = db.get_user_by_id(raw_id) if raw_id > 0 else {}
+        gid = str((profile or {}).get("global_user_id") or "").strip()
+        nick = str((profile or {}).get("nickname") or (row or {}).get("nickname") or "").strip()
+        if not nick or not _GID_RE.match(gid):
+            continue
+        following.append({
+            "nickname": nick,
+            "global_user_id": gid,
+            "avatar": (profile or {}).get("avatar") or (row or {}).get("avatar") or "",
+        })
+
+    friends: list[dict] = []
+    for row in db.get_friends(uid):
+        raw_id = int((row or {}).get("id") or 0)
+        profile = db.get_user_by_id(raw_id) if raw_id > 0 else {}
+        gid = str((profile or {}).get("global_user_id") or "").strip()
+        nick = str((profile or {}).get("nickname") or (row or {}).get("nickname") or "").strip()
+        if not nick or not _GID_RE.match(gid):
+            continue
+        friends.append({
+            "nickname": nick,
+            "global_user_id": gid,
+            "avatar": (profile or {}).get("avatar") or (row or {}).get("avatar") or "",
+        })
+        if len(friends) >= _SYNC_EXPORT_DM_LIMIT:
+            break
+
+    me = db.get_user_by_id(uid) or {}
+    self_profile = {
+        "display_name": str(me.get("display_name") or "")[:64],
+        "avatar": me.get("avatar") or "",
+        "bio": str(me.get("bio") or "")[:4000],
+        "status_msg": str(me.get("status_msg") or "")[:200],
+        "presence": str(me.get("presence") or "online")[:32],
+        "wall_enabled": 1 if int(me.get("wall_enabled") or 0) else 0,
+        "wall_comments_enabled": 1 if int(me.get("wall_comments_enabled") or 0) else 0,
+        "profile_public": 1 if int(me.get("profile_public") or 0) else 0,
+        "allow_friend_requests": 1 if int(me.get("allow_friend_requests") or 0) else 0,
+    }
+
+    return {
+        "rooms": rooms,
+        "dm_peers": dm_peers,
+        "following": following,
+        "friends": friends,
+        "self_profile": self_profile,
+        "source_server_id": source_server_id,
+        "exported_at": int(time.time()),
+    }
+
+
+def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {"rooms_joined": 0, "rooms_missing": 0, "dm_linked": 0}
+
+    payload = export if isinstance(export, dict) else {}
+    source_server_id = str(payload.get("source_server_id") or "").strip()
+    rooms_in = payload.get("rooms")
+    dm_in = payload.get("dm_peers")
+    following_in = payload.get("following")
+    friends_in = payload.get("friends")
+    self_profile = payload.get("self_profile")
+    rooms = rooms_in if isinstance(rooms_in, list) else []
+    dm_peers = dm_in if isinstance(dm_in, list) else []
+    following = following_in if isinstance(following_in, list) else []
+    friends = friends_in if isinstance(friends_in, list) else []
+
+    rooms_joined = 0
+    rooms_missing = 0
+    dm_linked = 0
+    following_linked = 0
+    friends_linked = 0
+    me = db.get_user_by_id(uid) or {}
+    my_gid = str(me.get("global_user_id") or "").strip()
+
+    for raw in rooms[:_SYNC_EXPORT_ROOM_LIMIT]:
+        name = str(raw or "").strip().lower()
+        if not _ROOM_NAME_RE.match(name):
+            continue
+        room = db.get_room_by_name(name)
+        if not room:
+            rooms_missing += 1
+            continue
+        try:
+            db.join_room(uid, int(room["id"]))
+            rooms_joined += 1
+        except Exception:
+            continue
+
+    for item in dm_peers[:_SYNC_EXPORT_DM_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("global_user_id") or "").strip()
+        nick = str(item.get("nickname") or "").strip()
+        if not nick or not _GID_RE.match(gid) or (my_gid and gid == my_gid):
+            continue
+        try:
+            peer = db.ensure_federated_dm_local_user(
+                gid,
+                nick,
+                origin_server_id=source_server_id,
+                avatar=(item.get("avatar") or ""),
+            )
+            if not peer:
+                continue
+            peer_id = int(peer.get("id") or 0)
+            if peer_id <= 0 or peer_id == uid:
+                continue
+            db.get_or_create_dm(uid, peer_id)
+            dm_linked += 1
+        except Exception:
+            continue
+
+    for item in following[:_SYNC_EXPORT_DM_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("global_user_id") or "").strip()
+        nick = str(item.get("nickname") or "").strip()
+        if not nick or not _GID_RE.match(gid) or (my_gid and gid == my_gid):
+            continue
+        try:
+            peer = db.ensure_federated_dm_local_user(
+                gid,
+                nick,
+                origin_server_id=source_server_id,
+                avatar=(item.get("avatar") or ""),
+            )
+            if not peer:
+                continue
+            peer_id = int(peer.get("id") or 0)
+            if peer_id <= 0 or peer_id == uid:
+                continue
+            if db.follow_user(uid, peer_id):
+                following_linked += 1
+        except Exception:
+            continue
+
+    for item in friends[:_SYNC_EXPORT_DM_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("global_user_id") or "").strip()
+        nick = str(item.get("nickname") or "").strip()
+        if not nick or not _GID_RE.match(gid) or (my_gid and gid == my_gid):
+            continue
+        try:
+            peer = db.ensure_federated_dm_local_user(
+                gid,
+                nick,
+                origin_server_id=source_server_id,
+                avatar=(item.get("avatar") or ""),
+            )
+            if not peer:
+                continue
+            peer_id = int(peer.get("id") or 0)
+            if peer_id <= 0 or peer_id == uid:
+                continue
+            # Rebuild accepted-friends graph idempotently.
+            db.send_friend_request(uid, peer_id)
+            if db.accept_friend_request(uid, peer_id):
+                friends_linked += 1
+            db.get_or_create_dm(uid, peer_id)
+        except Exception:
+            continue
+
+    if isinstance(self_profile, dict):
+        try:
+            display_name = str(self_profile.get("display_name") or "")[:64]
+            avatar = self_profile.get("avatar") or ""
+            bio = str(self_profile.get("bio") or "")[:4000]
+            status_msg = str(self_profile.get("status_msg") or "")[:200]
+            presence = str(self_profile.get("presence") or "online").strip().lower()
+            if presence not in ("online", "away", "dnd", "invisible"):
+                presence = "online"
+            wall_enabled = 1 if int(self_profile.get("wall_enabled") or 0) else 0
+            wall_comments_enabled = 1 if int(self_profile.get("wall_comments_enabled") or 0) else 0
+            profile_public = 1 if int(self_profile.get("profile_public") or 0) else 0
+            allow_friend_requests = 1 if int(self_profile.get("allow_friend_requests") or 0) else 0
+            with db._conn() as con:
+                con.execute(
+                    """
+                    UPDATE users
+                    SET display_name=?,
+                        avatar=?,
+                        bio=?,
+                        status_msg=?,
+                        presence=?,
+                        wall_enabled=?,
+                        wall_comments_enabled=?,
+                        profile_public=?,
+                        allow_friend_requests=?
+                    WHERE id=?
+                    """,
+                    (
+                        display_name,
+                        avatar,
+                        bio,
+                        status_msg,
+                        presence,
+                        wall_enabled,
+                        wall_comments_enabled,
+                        profile_public,
+                        allow_friend_requests,
+                        uid,
+                    ),
+                )
+                con.commit()
+        except Exception:
+            pass
+
+    return {
+        "rooms_joined": rooms_joined,
+        "rooms_missing": rooms_missing,
+        "dm_linked": dm_linked,
+        "following_linked": following_linked,
+        "friends_linked": friends_linked,
+    }
+
+
 def _provision_local_user_from_remote(nickname: str, password: str, remote_login: dict, remote_ident: dict | None = None):
     user_id = db.create_user(nickname, password)
     if user_id is None:
@@ -320,6 +621,24 @@ def _federation_legacy_plaintext_enabled() -> bool:
     """Rollback flag: when 0 (default), federated-login-bootstrap is disabled
     so plaintext passwords never leave this node during /auth/login."""
     return (os.getenv("FEDERATION_LEGACY_PLAINTEXT", "0") or "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _federated_login_bootstrap_enabled() -> bool:
+    """Allow password login to import account from a peer when missing locally.
+
+    This verifies credentials against known federation peers over HTTPS and
+    provisions the local account. Disable with FROGTALK_FEDERATED_LOGIN_BOOTSTRAP=0.
+    """
+    if not _federated_login_enabled():
+        return False
+    if _federation_legacy_plaintext_enabled():
+        return True
+    return (os.getenv("FROGTALK_FEDERATED_LOGIN_BOOTSTRAP", "1") or "1").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def _tor_mode_enabled() -> bool:
@@ -475,6 +794,110 @@ def _login_against_peer(base_url: str, nickname: str, password: str):
     return login, ident
 
 
+def _fetch_sync_export_via_session(base_url: str, token: str) -> dict | None:
+    tok = str(token or "").strip()
+    if not tok:
+        return None
+    try:
+        data = _get_json(f"{base_url}/api/auth/federation-sync-export", headers={"X-Session-Token": tok}, timeout=5.5)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _fetch_sync_export_via_ticket(base_url: str, ticket: str) -> dict | None:
+    fed = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
+    if not fed:
+        return None
+    raw_ticket = str(ticket or "").strip()
+    if not raw_ticket:
+        return None
+    try:
+        data = _post_json(
+            f"{base_url}/api/auth/federation-sync-export-ticket",
+            {"ticket": raw_ticket},
+            headers={"X-Federation-Token": fed},
+            timeout=5.5,
+        )
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+async def _sync_user_from_peer_session(user_id: int, source_base: str, remote_token: str) -> None:
+    uid = int(user_id or 0)
+    source = _norm_base(source_base)
+    tok = str(remote_token or "").strip()
+    if uid <= 0 or not source or not tok:
+        return
+    _sync_state_set(uid, {
+        "source_base": source,
+        "in_progress": True,
+        "done": False,
+        "error": "",
+        "hint": "Syncing channels and DMs from your home node…",
+    })
+    try:
+        export = await asyncio.to_thread(_fetch_sync_export_via_session, source, tok)
+        if not isinstance(export, dict):
+            raise ValueError("export_unavailable")
+        applied = await asyncio.to_thread(_apply_sync_export_to_user, uid, export)
+        _sync_state_set(uid, {
+            "in_progress": False,
+            "done": True,
+            "error": "",
+            "finished_at": int(time.time()),
+            **(applied or {}),
+        })
+    except Exception as e:
+        _sync_state_set(uid, {
+            "in_progress": False,
+            "done": True,
+            "error": str(e)[:200],
+            "finished_at": int(time.time()),
+            "rooms_joined": 0,
+            "rooms_missing": 0,
+            "dm_linked": 0,
+        })
+
+
+async def _sync_user_from_peer_ticket(user_id: int, source_base: str, ticket: str) -> None:
+    uid = int(user_id or 0)
+    source = _norm_base(source_base)
+    raw_ticket = str(ticket or "").strip()
+    if uid <= 0 or not source or not raw_ticket:
+        return
+    _sync_state_set(uid, {
+        "source_base": source,
+        "in_progress": True,
+        "done": False,
+        "error": "",
+        "hint": "Syncing channels and DMs from your home node…",
+    })
+    try:
+        export = await asyncio.to_thread(_fetch_sync_export_via_ticket, source, raw_ticket)
+        if not isinstance(export, dict):
+            raise ValueError("export_unavailable")
+        applied = await asyncio.to_thread(_apply_sync_export_to_user, uid, export)
+        _sync_state_set(uid, {
+            "in_progress": False,
+            "done": True,
+            "error": "",
+            "finished_at": int(time.time()),
+            **(applied or {}),
+        })
+    except Exception as e:
+        _sync_state_set(uid, {
+            "in_progress": False,
+            "done": True,
+            "error": str(e)[:200],
+            "finished_at": int(time.time()),
+            "rooms_joined": 0,
+            "rooms_missing": 0,
+            "dm_linked": 0,
+        })
+
+
 async def _try_federated_login_bootstrap(request: Request, nickname: str, password: str):
     if not _federated_login_enabled():
         return None
@@ -502,6 +925,7 @@ async def _try_federated_login_bootstrap(request: Request, nickname: str, passwo
             return {
                 "user": local_user,
                 "remote_base": base,
+                "remote_token": str(remote_login.get("token") or "").strip(),
             }
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, OSError):
             continue
@@ -530,6 +954,10 @@ class FederationTicketRequest(BaseModel):
 
 
 class FederationTicketLoginRequest(BaseModel):
+    ticket: str = Field(min_length=1, max_length=8192)
+
+
+class FederationSyncExportTicketRequest(BaseModel):
     ticket: str = Field(min_length=1, max_length=8192)
 
 
@@ -629,6 +1057,41 @@ def _verify_federation_login_ticket(ticket: str, this_base_url: str) -> dict | N
         return None
     nick = str(payload.get("nickname") or "").strip()
     if not nick:
+        return None
+    return payload
+
+
+def _verify_federation_login_ticket_for_source(ticket: str, this_base_url: str) -> dict | None:
+    """Validate a switch ticket on its source node for state export."""
+    secret = _fed_session_secret()
+    if not secret:
+        return None
+    raw = str(ticket or "").strip()
+    if "." not in raw:
+        return None
+    p_b64, s_b64 = raw.split(".", 1)
+    try:
+        payload_bytes = _b64url_decode(p_b64)
+        sig = _b64url_decode(s_b64)
+    except Exception:
+        return None
+    if not payload_bytes or not sig:
+        return None
+    expect = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).digest()
+    if not hmac.compare_digest(expect, sig):
+        return None
+    try:
+        payload = json.loads(payload_bytes.decode("utf-8"))
+    except Exception:
+        return None
+    now = int(time.time())
+    if int(payload.get("exp") or 0) < now:
+        return None
+    src = _norm_base(str(payload.get("src") or ""))
+    me = _norm_base(this_base_url)
+    if src and me and src != me:
+        return None
+    if not str(payload.get("nickname") or "").strip():
         return None
     return payload
 
@@ -759,19 +1222,26 @@ async def login(request: Request, body: LoginRequest):
     # like the server was "hanging" right after page load. Push it into a
     # worker thread so other requests keep flowing while bcrypt runs.
     user = await asyncio.to_thread(db.verify_user, body.nickname, body.password)
+    boot = None
     if not user:
         if nick_key:
             _login_record_failure(nick_key)
-        # Optional federated bootstrap: if credentials are valid on a known
-        # peer server, create the local account/profile so server switches feel
-        # seamless while each node keeps independent encrypted storage.
-        # Disabled by default (FEDERATION_LEGACY_PLAINTEXT=0) to avoid
-        # forwarding plaintext passwords across the federation network.
-        boot = None
-        if _federation_legacy_plaintext_enabled():
+        # Federated bootstrap: if credentials are valid on a known peer,
+        # provision the local account so first login on a new node works.
+        if _federated_login_bootstrap_enabled():
             boot = await _try_federated_login_bootstrap(request, body.nickname, body.password)
         if not boot:
-            return JSONResponse(status_code=401, content={"error": "Invalid nickname or password"})
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "Invalid nickname or password for this node.",
+                    "code": "account_not_on_node",
+                    "hint": (
+                        "Accounts are per-node unless provisioned. Register here, "
+                        "or log in on your home node and use Settings → Network to switch."
+                    ),
+                },
+            )
         user = boot["user"]
     # Node-level ban check: reject the login with a polished, informative
     # payload so the client can render a proper "banned from this node"
@@ -796,16 +1266,37 @@ async def login(request: Request, body: LoginRequest):
     if nick_key:
         _login_clear_failures(nick_key)
     token = _create_session_with_meta(request, user["id"])
-    payload = _auth_session_response(user["id"], token)
+    sync_meta = None
+    if isinstance(boot, dict):
+        source_base = _norm_base(str(boot.get("remote_base") or ""))
+        remote_token = str(boot.get("remote_token") or "").strip()
+        if source_base and remote_token:
+            _sync_state_set(user["id"], {
+                "source_base": source_base,
+                "in_progress": True,
+                "done": False,
+                "error": "",
+                "hint": "Syncing channels and DMs from your home node…",
+            })
+            try:
+                asyncio.create_task(_sync_user_from_peer_session(user["id"], source_base, remote_token))
+            except Exception:
+                _log.exception("federation sync: failed to start peer-session task")
+            sync_meta = {
+                "in_progress": True,
+                "source_base": source_base,
+                "hint": "Syncing channels and DMs from your home node…",
+            }
+    payload = _auth_session_response(user["id"], token, sync_meta=sync_meta)
     resp = JSONResponse(content=payload)
     _attach_session_cookies(resp, request, token)
     return resp
 
 
-def _auth_session_response(user_id: int, token: str) -> dict:
+def _auth_session_response(user_id: int, token: str, sync_meta: dict | None = None) -> dict:
     """Login/ticket payload — always include server-stored presence + status."""
     ident = db.get_user_by_id(user_id) or {}
-    return {
+    out = {
         # NOTE: token is still echoed in the JSON body for back-compat with
         #   * existing native/Electron/Android clients that store it
         #   * bots / API consumers
@@ -825,6 +1316,9 @@ def _auth_session_response(user_id: int, token: str) -> dict:
         "presence": ident.get("presence") or "online",
         "status_msg": ident.get("status_msg") or "",
     }
+    if isinstance(sync_meta, dict) and sync_meta:
+        out["federation_sync"] = sync_meta
+    return out
 
 
 # ── HIGH-2: HttpOnly session cookie helpers ─────────────────────────────────
@@ -974,10 +1468,65 @@ async def login_with_federation_ticket(
         })
 
     token = _create_session_with_meta(request, user["id"])
-    payload_out = _auth_session_response(user["id"], token)
+    sync_meta = None
+    source_base = _norm_base(str(payload.get("src") or ""))
+    here = _norm_base(str(request.base_url))
+    if source_base and source_base != here:
+        _sync_state_set(user["id"], {
+            "source_base": source_base,
+            "in_progress": True,
+            "done": False,
+            "error": "",
+            "hint": "Syncing channels and DMs from your home node…",
+        })
+        try:
+            asyncio.create_task(_sync_user_from_peer_ticket(user["id"], source_base, body.ticket))
+        except Exception:
+            _log.exception("federation sync: failed to start peer-ticket task")
+        sync_meta = {
+            "in_progress": True,
+            "source_base": source_base,
+            "hint": "Syncing channels and DMs from your home node…",
+        }
+    payload_out = _auth_session_response(user["id"], token, sync_meta=sync_meta)
     resp = JSONResponse(content=payload_out)
     _attach_session_cookies(resp, request, token)
     return resp
+
+
+@router.get("/federation-sync-status")
+async def federation_sync_status(current_user: dict = Depends(get_current_user)):
+    return _sync_state_get(int(current_user["id"]))
+
+
+@router.get("/federation-sync-export")
+async def federation_sync_export(current_user: dict = Depends(get_current_user)):
+    return _build_sync_export_for_user(int(current_user["id"]))
+
+
+@router.post("/federation-sync-export-ticket")
+@limiter.limit("120/hour")
+async def federation_sync_export_ticket(
+    request: Request,
+    body: FederationSyncExportTicketRequest,
+    x_federation_token: str | None = Header(default=None),
+):
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
+    payload = _verify_federation_login_ticket_for_source(body.ticket, str(request.base_url))
+    if not payload:
+        return JSONResponse(status_code=401, content={"error": "Invalid or expired ticket"})
+    nick = str(payload.get("nickname") or "").strip()
+    if not nick:
+        return JSONResponse(status_code=400, content={"error": "Missing nickname"})
+    user = db.get_user_by_nick(nick)
+    if not user:
+        return JSONResponse(status_code=404, content={"error": "Account not found on source node"})
+    claim_gid = str(payload.get("global_user_id") or "").strip()
+    user_gid = str((user or {}).get("global_user_id") or "").strip()
+    if claim_gid and user_gid and claim_gid != user_gid:
+        return JSONResponse(status_code=409, content={"error": "Ticket identity mismatch"})
+    return _build_sync_export_for_user(int(user["id"]))
 
 
 class FederationProvisionRequest(BaseModel):

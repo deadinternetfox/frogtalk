@@ -2287,6 +2287,11 @@ async function doAuth() {
       status_msg: ('status_msg' in data) ? (data.status_msg ?? '') : '',
     };
     State.save();
+    try {
+      if (window.App && typeof App === 'object') {
+        App.federationSyncHint = String(data?.federation_sync?.hint || '').trim();
+      }
+    } catch {}
     // Brand-new accounts: force the user through the recovery-key
     // download flow before we launch the app. We don't store email, so
     // this is the only safety net if they lose their password — making
@@ -2917,6 +2922,7 @@ function _renderNetworkServersList() {
     const torPreferred = _isTorPreferred();
     const isOnion = _isOnionNetworkUrl(publicAddr) || !!s.onion_url;
     const healthy = !!s.healthy;
+    const probeStatus = String(s.probe_status || '').toLowerCase();
     const probeError = String(s.probe_error || '');
     const probeErrorLower = probeError.toLowerCase();
     const advertisedBase = String(s.base_url || '').trim().toLowerCase();
@@ -2926,13 +2932,11 @@ function _renderNetworkServersList() {
     let statusColor = healthy ? '#4caf50' : '#f44336';
     let statusDot = healthy ? '#3ecf65' : '#f44336';
     let statusText = healthy ? 'healthy' : 'down';
-    if (!healthy && isOnion) {
-      // Onion probes from non-Tor environments are expected to fail.
-      // Show an actionable state instead of a misleading hard "down".
+    if (probeStatus === 'tor_required' || (!healthy && (isOnion || /\.onion(?=\/|$)/i.test(String(s.probe_target || ''))))) {
       statusText = 'tor req';
       statusColor = '#d7c477';
       statusDot = '#d7c477';
-    } else if (!healthy && probeErrorLower.includes('301')) {
+    } else if (probeStatus === 'redirect' || (!healthy && probeErrorLower.includes('301'))) {
       statusText = 'redirect';
       statusColor = '#f0c040';
       statusDot = '#f0c040';
@@ -3200,9 +3204,12 @@ async function connectToSelectedServer() {
     State.clear();
   } catch {}
   try {
+    localStorage.setItem('ft_just_switched_node', '1');
+    localStorage.removeItem('fc_last_room');
+  } catch {}
+  try {
     const next = new URL('/app', target);
     next.searchParams.set('switched', '1');
-    next.searchParams.set('register', '1');
     if (_isOnionNetworkUrl(target)) next.searchParams.set('tor', '1');
     if (window.location?.origin) next.searchParams.set('from', window.location.origin);
     window.location.href = next.toString();

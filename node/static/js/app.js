@@ -70,6 +70,7 @@ const App = {
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
+  federationSyncHint: '',
 
   async ensureFreshAssets() {
     try {
@@ -172,6 +173,18 @@ const App = {
         status_msg: ('status_msg' in data) ? (data.status_msg ?? '') : '',
       };
       State.save();
+      this.federationSyncHint = String(data?.federation_sync?.hint || '').trim();
+      try { localStorage.setItem('ft_just_switched_node', '1'); } catch {}
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  consumeJustSwitchedNodeFlag() {
+    try {
+      if (localStorage.getItem('ft_just_switched_node') !== '1') return false;
+      localStorage.removeItem('ft_just_switched_node');
       return true;
     } catch {
       return false;
@@ -461,7 +474,18 @@ const App = {
     } catch {}
 
     // Rooms must load before call recovery or signaling bootstrap (joined-room WS).
-    await Rooms.loadRooms();
+    const justSwitchedNode = this.consumeJustSwitchedNodeFlag()
+      || (new URLSearchParams(window.location.search).get('switched') === '1');
+    try {
+      await Rooms.loadRooms();
+    } catch (e) {
+      console.warn('[App] loadRooms failed', e);
+      try { State.rooms = []; } catch {}
+    }
+    const syncApplied = await this.waitForFederationSyncIfNeeded();
+    if (syncApplied) {
+      try { await Rooms.loadRooms(); } catch {}
+    }
 
     // Cold-boot from FCM: recover the offer before the permissions wizard can block Accept.
     if (this.pendingIncomingCall) {
@@ -604,6 +628,26 @@ const App = {
       tryOpen(16);
     } else {
       await App.openFirstAvailableRoomWhenIdle();
+    }
+
+    if (justSwitchedNode) {
+      const joined = (State.rooms || []).filter(r => r.joined);
+      const dmPending = typeof loadDMChannels === 'function';
+      if (joined.length === 0) {
+        try { App.showNodeSwitchOnboarding(); } catch {}
+      }
+      try {
+        UI.showToast(
+          joined.length
+            ? 'Connected to this node — federation sync finished for your account.'
+            : 'Connected to this node. If this is your first hop, federation sync may still be importing your channels and DMs.',
+          'info',
+          9000
+        );
+      } catch {}
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
     }
 
     // Load DM channels sidebar
@@ -905,6 +949,61 @@ const App = {
     this.openFirstAvailableRoom();
   },
 
+  _setLoadingSyncHint(text) {
+    const el = document.getElementById('ch-loading-sync-hint');
+    if (!el) return;
+    const msg = String(text || '').trim();
+    if (!msg) {
+      el.textContent = '';
+      el.style.display = 'none';
+      return;
+    }
+    el.textContent = msg;
+    el.style.display = '';
+  },
+
+  async waitForFederationSyncIfNeeded(maxWaitMs = 22000) {
+    if (!State.token) return false;
+    const started = Date.now();
+    let sawInProgress = false;
+    let applied = false;
+    while ((Date.now() - started) < maxWaitMs) {
+      try {
+        const res = await fetch('/api/auth/federation-sync-status', {
+          headers: { 'X-Session-Token': State.token },
+        });
+        if (!res.ok) break;
+        const data = await res.json().catch(() => ({}));
+        const inProgress = !!data.in_progress;
+        const done = !!data.done;
+        const hint = String(data.hint || this.federationSyncHint || '').trim();
+        if (inProgress) {
+          sawInProgress = true;
+          this._setLoadingSyncHint(hint || 'Syncing channels and DMs from your home node…');
+          await new Promise((r) => setTimeout(r, 900));
+          continue;
+        }
+        this._setLoadingSyncHint('');
+        if (done) {
+          const joined = Number(data.rooms_joined || 0);
+          const dms = Number(data.dm_linked || 0);
+          applied = joined > 0 || dms > 0;
+          if (sawInProgress && applied && typeof UI !== 'undefined' && UI.showToast) {
+            const parts = [];
+            if (joined > 0) parts.push(`${joined} channels`);
+            if (dms > 0) parts.push(`${dms} DMs`);
+            UI.showToast(`Synced ${parts.join(' and ')} from federation`, 'info', 3600);
+          }
+        }
+        break;
+      } catch {
+        break;
+      }
+    }
+    this._setLoadingSyncHint('');
+    return applied;
+  },
+
   openFirstAvailableRoom() {
     try {
       const rooms = (typeof State !== 'undefined' && Array.isArray(State.rooms)) ? State.rooms : [];
@@ -945,6 +1044,7 @@ const App = {
         <div class="ch-loading-state">
           <div class="ch-spin" aria-hidden="true"></div>
           <div>Loading your channels…</div>
+          <div id="ch-loading-sync-hint" style="display:none;color:#8da59b;font-size:12px;margin-top:6px"></div>
         </div>`;
     }
     const titleEl = document.getElementById('ch-title');
