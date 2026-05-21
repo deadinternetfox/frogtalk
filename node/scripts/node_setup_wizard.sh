@@ -133,6 +133,24 @@ main() {
     ft_ok "board_data owned by www-data (php-fpm)"
   fi
 
+  ft_step "Frog Channel (imageboard)"
+  local board_nginx_ok=0
+  if [[ "$(id -u)" -eq 0 ]] && command -v nginx >/dev/null 2>&1; then
+    if [[ "$ASSUME_YES" -eq 1 ]] || ft_ask_yes_no "Configure nginx + PHP for /board/ (Frog Channel)?" "y"; then
+      if command -v apt-get >/dev/null 2>&1; then
+        safe_run "apt install php-fpm php-curl nginx" \
+          apt-get install -y -qq php-fpm php-curl nginx 2>/dev/null
+      fi
+      if bash "$install_dir/node/scripts/install_board_nginx.sh" --install-dir "$install_dir"; then
+        board_nginx_ok=1
+      fi
+    fi
+  elif [[ "$ASSUME_YES" -eq 1 ]]; then
+    ft_warn "Board HTTP needs root once: sudo apt install nginx php-fpm php-curl && sudo bash node/scripts/install_board_nginx.sh --install-dir $install_dir"
+  else
+    ft_info "Optional: sudo bash node/scripts/install_board_nginx.sh --install-dir $install_dir (nginx + PHP for /board/)"
+  fi
+
   ft_step "Environment (.env)"
   if [[ ! -f "$ENV_FILE" ]]; then
     if [[ -f "$ENV_TEMPLATE" ]]; then
@@ -197,9 +215,16 @@ main() {
 
   ft_ensure_deploy_ownership "$install_dir"
 
+  if [[ -f "$install_dir/node/board/board_data/settings.json" ]]; then
+    FT_INSTALL_DIR="$install_dir" bash "$install_dir/node/scripts/configure_board_identity.sh" --install-dir "$install_dir" \
+      && ft_ok "Board title synced from node name" \
+      || ft_warn "Board identity step skipped"
+  fi
+
   if ft_ask_yes_no "Join FrogTalk federation mesh now? (recommended)" "y"; then
     ft_info "Running federation join…"
-    local fed_args=(--install-dir "$install_dir" -y --skip-restart --public-url "$public_url")
+    local fed_args=(--install-dir "$install_dir" -y --public-url "$public_url")
+    [[ "$board_nginx_ok" -eq 0 ]] && fed_args+=(--skip-restart)
     if bash "$install_dir/node/scripts/node_federation_join.sh" "${fed_args[@]}"; then
       ft_ok "Federation mesh linked"
     else

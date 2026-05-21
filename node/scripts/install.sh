@@ -32,6 +32,7 @@ ${C_BOLD}Usage:${C_RESET}
 ${C_BOLD}Commands:${C_RESET}
   setup          First-time install (venv, .env, symlinks)
   federation     Join official mesh (chat + board nav)
+  board-nginx    nginx + PHP for /board/ (also in setup wizard)
   update         Check for git updates
   update-apply   Pull latest + deps + restart
   systemd        Install/enable frogtalk.service
@@ -55,7 +56,7 @@ parse_global_args() {
       --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
       --public-url) PUBLIC_URL_ARG="${2:-}"; shift 2 ;;
       --onion-url) ONION_URL_ARG="${2:-}"; shift 2 ;;
-      setup|federation|update|update-apply|systemd|status|help|menu)
+      setup|federation|board-nginx|update|update-apply|systemd|status|help|menu)
         [[ -n "$CMD" ]] && ft_die "Multiple commands: $CMD and $1"
         CMD="$1"; shift ;;
       *)
@@ -93,6 +94,14 @@ run_federation() {
   [[ -n "$PUBLIC_URL_ARG" ]] && args+=(--public-url "$PUBLIC_URL_ARG")
   [[ -n "$ONION_URL_ARG" ]] && args+=(--onion-url "$ONION_URL_ARG")
   exec bash "$SCRIPT_DIR/node_federation_join.sh" "${args[@]}"
+}
+
+run_board_nginx() {
+  resolve_install
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    ft_die "board-nginx requires root (sudo bash node/scripts/install.sh board-nginx)"
+  fi
+  exec bash "$SCRIPT_DIR/install_board_nginx.sh" --install-dir "$INSTALL_DIR"
 }
 
 run_update() {
@@ -204,6 +213,9 @@ main() {
     federation)
       resolve_install
       run_federation "$@"
+      ;;
+    board-nginx)
+      run_board_nginx
       ;;
     update|update-apply)
       resolve_install

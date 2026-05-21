@@ -64,35 +64,23 @@ export PUBLIC_URL="http://<YOUR_VPS_IP>"
 export FROGTALK_SERVER_NAME="My FrogTalk Node"
 
 # 5) Install wizard + mesh + systemd (non-interactive -y)
-#    Export FROGTALK_FEDERATION_TOKEN (same as Main) before setup for hub auto-listing.
+#    Set your node name and hub token (same value as on frogtalk.xyz Main).
+export FROGTALK_SERVER_NAME="My FrogTalk Node"
 export FROGTALK_FEDERATION_TOKEN="<same-as-main>"
-bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
-bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
+# Optional board branding (wizard also sets from server name):
+# export FROGTALK_BOARD_TITLE="🐸 FrogTalk Australia"
+# export FROGTALK_BOARD_SUBTITLE="G'day — Australian FrogTalk node"
+
+sudo apt install -y git python3 python3-venv python3-pip curl nginx php-fpm php-curl ufw sqlite3
+sudo bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
+sudo bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
 
-# 6) nginx reverse proxy (uvicorn stays on 127.0.0.1:8080)
-sudo tee /etc/nginx/sites-available/frogtalk >/dev/null <<'EOF'
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-EOF
-sudo ln -sf /etc/nginx/sites-available/frogtalk /etc/nginx/sites-enabled/frogtalk
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t && sudo systemctl reload nginx
+# Setup -y on a root shell configures nginx + PHP for /board/ automatically.
+# Verify Frog Channel:
+curl -sS http://127.0.0.1/board/api/info | python3 -m json.tool
 
-# 7) Firewall
+# 6) Firewall
 sudo ufw allow OpenSSH
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp

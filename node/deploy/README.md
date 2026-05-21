@@ -218,9 +218,10 @@ Restart if the script did not: `sudo systemctl restart frogtalk`.
 
 | Script | Use when |
 |--------|----------|
-| `node/scripts/deploy_nodes.sh` | FrogTalk production fleet (3 nodes) — SCP selected files, restart `frogtalk` |
 | `node/scripts/deploy.sh` | Single host — full `rsync` of `node/` (reads `node/scripts/.env`: `SSH_HOST`, `REMOTE_DIR`, …) |
-| `node/scripts/deploy_board.sh` | PHP imageboard hotfix only (`board.php`, `.htaccess`, …) |
+| `node/scripts/deploy_fleet.local.sh` | **Local only (gitignored)** — your SSH fleet for hot deploy |
+| `node/scripts/deploy_nodes.sh` | **Local only (gitignored)** — SCP Python/static hotfix to `FLEET_HOSTS` |
+| `node/scripts/deploy_board.sh` | PHP board hotfix to hosts in `deploy_fleet.local.sh` (no default IPs in repo) |
 
 **Fleet hot deploy** (repo root):
 
@@ -230,15 +231,9 @@ node/scripts/deploy_nodes.sh node/routers/federation.py node/static/js/calls.js
 
 Paths under `node/` map to `/opt/frogtalk/node/` on the server. Bare `static/…` or `routers/…` args are rewritten to `node/…`. With no args, a curated client bundle is synced (includes `calls.js`, `ws.js`, core UI JS).
 
-| Label | Host | SSH port |
-|-------|------|----------|
-| FrogTalk Main | `31.220.92.120` | `22` |
-| FrogTalk Tor Mirror | `161.97.182.73` | `2222` |
-| FrogTalk AUS | `46.250.244.184` | `22` |
+Copy `node/scripts/deploy_fleet.local.example.sh` → `deploy_fleet.local.sh` and set `FLEET_HOSTS=( "your.vps:22" … )`. Never commit IPs or passwords.
 
-Edit `HOSTS`, `HOST_PORT`, and `HOST_LABEL` in `node/scripts/deploy_nodes.sh` (and `deploy_board.sh`) when the fleet changes.
-
-AUS password SSH: copy `node/scripts/deploy_nodes.local.example.sh` → `deploy_nodes.local.sh` (gitignored) or export `FT_AUS_SSH_PASS` before running. Requires `sshpass`.
+Normal operators use `bash node/scripts/install.sh setup` (wizard installs board nginx + identity) — not fleet deploy scripts.
 
 Does **not** replace `git pull` for schema migrations; use `node_update_check.sh --apply` or a full `deploy.sh` when `database.py` migrations change.
 
