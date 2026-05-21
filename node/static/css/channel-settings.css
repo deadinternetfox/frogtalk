@@ -9,6 +9,16 @@
 #modal-channel-settings .ch-settings-panel.is-active {
   overflow-x: hidden;
   padding-bottom: 4px;
+  max-width: 100%;
+}
+
+#modal-channel-settings .modal--channel-settings {
+  overflow-x: hidden;
+}
+
+#modal-channel-settings .ch-panel-invites,
+#modal-channel-settings #ch-panel-invites {
+  max-width: 100%;
 }
 
 #modal-channel-settings .ch-settings-panel {
@@ -173,12 +183,12 @@
 }
 
 .ch-invite-create-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  align-items: end;
   margin-bottom: 16px;
   width: 100%;
+  max-width: 100%;
   box-sizing: border-box;
 }
 
@@ -186,29 +196,58 @@
   display: none !important;
 }
 
+.ch-invite-create-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
 .ch-invite-field {
   min-width: 0;
   width: 100%;
 }
 
-.ch-invite-create-btn {
-  grid-column: 1 / -1;
-  margin: 0;
-  padding: 10px 16px;
+.ch-invite-field .ch-select--compact,
+.ch-invite-field .modal-input {
   width: 100%;
+  max-width: 100%;
   box-sizing: border-box;
-  white-space: nowrap;
 }
 
-@media (min-width: 420px) {
-  .ch-invite-create-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+.ch-invite-create-btn {
+  margin: 0;
+  padding: 11px 16px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Wider channel settings modal: inline create button beside dropdowns */
+@media (min-width: 520px) {
+  #modal-channel-settings .ch-invite-create-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-end;
   }
 
-  .ch-invite-create-btn {
-    grid-column: auto;
+  #modal-channel-settings .ch-invite-create-fields {
+    flex: 1 1 240px;
+    max-width: calc(100% - 8.5rem);
+  }
+
+  #modal-channel-settings .ch-invite-create-btn {
+    flex: 0 0 auto;
     width: auto;
-    min-width: 7.5rem;
+    min-width: 8.25rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .ch-invite-create-fields {
+    grid-template-columns: 1fr;
   }
 }
 

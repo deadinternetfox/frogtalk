@@ -4143,7 +4143,7 @@ const Messages = (() => {
     if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
     try {
       const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}/join`, 'POST');
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
         if (btn) {
           const card = btn.closest('.invite-card');
@@ -4161,7 +4161,11 @@ const Messages = (() => {
         }
       } else {
         if (btn) { btn.disabled = false; btn.textContent = 'Join Channel'; }
-        UI.toast(data.error || 'Could not join channel');
+        if (data && data.code === 'room_banned' && typeof window.showRoomBannedScreen === 'function') {
+          window.showRoomBannedScreen(data);
+        } else {
+          UI.toast(data.error || 'Could not join channel');
+        }
       }
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Join Channel'; }

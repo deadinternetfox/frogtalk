@@ -9154,28 +9154,30 @@ window.ConnErr = (function(){
       <p id="ch-invites-section-label" class="ch-invites-section-label">Active invite links</p>
 
       <div id="ch-invite-create-row" class="ch-invite-create-row">
-        <div class="ch-invite-field">
-          <label class="ch-field-label--sm" for="ch-invite-max-uses">Max Uses</label>
-          <select class="modal-input ch-select--compact" id="ch-invite-max-uses">
-            <option value="0" id="ch-invite-opt-unlimited">Unlimited</option>
-            <option value="1">1 use</option>
-            <option value="5">5 uses</option>
-            <option value="10">10 uses</option>
-            <option value="25">25 uses</option>
-            <option value="50">50 uses</option>
-            <option value="100">100 uses</option>
-          </select>
-        </div>
-        <div class="ch-invite-field">
-          <label class="ch-field-label--sm" for="ch-invite-expires">Expires After</label>
-          <select class="modal-input ch-select--compact" id="ch-invite-expires">
-            <option value="">Never</option>
-            <option value="1">1 hour</option>
-            <option value="6">6 hours</option>
-            <option value="24">1 day</option>
-            <option value="168">7 days</option>
-            <option value="720">30 days</option>
-          </select>
+        <div class="ch-invite-create-fields">
+          <div class="ch-invite-field">
+            <label class="ch-field-label--sm" for="ch-invite-max-uses">Max Uses</label>
+            <select class="modal-input ch-select--compact" id="ch-invite-max-uses">
+              <option value="0" id="ch-invite-opt-unlimited">Unlimited</option>
+              <option value="1">1 use</option>
+              <option value="5">5 uses</option>
+              <option value="10">10 uses</option>
+              <option value="25">25 uses</option>
+              <option value="50">50 uses</option>
+              <option value="100">100 uses</option>
+            </select>
+          </div>
+          <div class="ch-invite-field">
+            <label class="ch-field-label--sm" for="ch-invite-expires">Expires After</label>
+            <select class="modal-input ch-select--compact" id="ch-invite-expires">
+              <option value="">Never</option>
+              <option value="1">1 hour</option>
+              <option value="6">6 hours</option>
+              <option value="24">1 day</option>
+              <option value="168">7 days</option>
+              <option value="720">30 days</option>
+            </select>
+          </div>
         </div>
         <button type="button" class="modal-btn primary ch-invite-create-btn" onclick="Rooms.createInvite()">Create Link</button>
       </div>

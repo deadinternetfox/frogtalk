@@ -3,18 +3,23 @@ import re
 import secrets
 import time
 import uuid
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from urllib.parse import quote as _url_quote
+from slowapi import Limiter
 
 import database as db
-from deps import get_current_user
+from deps import get_current_user, client_ip
 from routers.rooms import request_private_room_rekey
 from ws_manager import manager
 
 router = APIRouter(prefix="/invites", tags=["invites"])
+limiter = Limiter(key_func=client_ip)
+
+MAX_INVITES_PER_CHANNEL = 50
+MAX_INVITES_PER_USER_PER_ROOM_HOUR = 15
 
 _PUBLIC_HTML_NO_CACHE = {
     "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -108,12 +113,40 @@ def validate_vanity_slug(slug: str) -> Optional[str]:
 
 
 class CreateInviteRequest(BaseModel):
-    max_uses: int = 0  # 0 = unlimited
-    expires_hours: Optional[int] = None  # None = never expires
+    max_uses: int = Field(default=0, ge=0, le=100)  # 0 = unlimited (public only)
+    expires_hours: Optional[int] = Field(default=None, ge=1, le=8760)  # None = never
+
+    @field_validator('expires_hours')
+    @classmethod
+    def _expires_positive(cls, v):
+        if v is not None and v < 1:
+            raise ValueError('expires_hours must be at least 1')
+        return v
+
+
+def _user_may_create_invite(room: dict, current_user: dict) -> bool:
+    """Policy + must be a member (owner/mod/admin exempt from membership)."""
+    if not _user_can_create_invite(room, current_user):
+        return False
+    uid = current_user['id']
+    rid = room['id']
+    if current_user.get('is_admin'):
+        return True
+    if room['owner_id'] == uid:
+        return True
+    if db.is_room_moderator(room['name'], uid):
+        return True
+    return db.is_room_member(uid, rid)
 
 
 @router.post("/channels/{room_name}")
-async def create_invite(room_name: str, body: CreateInviteRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit("60/hour")
+async def create_invite(
+    request: Request,
+    room_name: str,
+    body: CreateInviteRequest,
+    current_user: dict = Depends(get_current_user),
+):
     """Create an invite link for a channel."""
     room = db.get_room_by_name(room_name)
     if not room:
@@ -132,20 +165,28 @@ async def create_invite(room_name: str, body: CreateInviteRequest, current_user:
         return JSONResponse(status_code=403, content={"error": "Only the channel owner can create invites"})
     elif who == "mods" and not is_owner and not is_mod and not is_admin:
         return JSONResponse(status_code=403, content={"error": "Only moderators and the owner can create invites"})
-    # 'everyone' — any authenticated member can create invites (not on private rooms;
-    # private channels coerce who_can_invite away from 'everyone' at create/patch).
+    elif not _user_may_create_invite(room, current_user):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You must be a member of this channel to create invite links"},
+        )
 
-    if room_type == "private":
-        if body.max_uses == 0:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "Private channels require invite links with a use limit (not unlimited)"},
-            )
-        if body.max_uses > 100:
-            return JSONResponse(
-                status_code=400,
-                content={"error": "Private channel invite links are limited to 100 uses maximum"},
-            )
+    if db.count_channel_invites(room["id"]) >= MAX_INVITES_PER_CHANNEL:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"This channel already has the maximum of {MAX_INVITES_PER_CHANNEL} invite links. Revoke unused links first."},
+        )
+    if db.count_recent_invites_by_user(room["id"], current_user["id"]) >= MAX_INVITES_PER_USER_PER_ROOM_HOUR:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "Too many invite links created recently. Wait a while and try again."},
+        )
+
+    if room_type == "private" and body.max_uses < 1:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Private channels require invite links with a use limit (1–100)"},
+        )
 
     code = generate_invite_code()
     if db.create_invite(room["id"], current_user["id"], code, body.max_uses, body.expires_hours):

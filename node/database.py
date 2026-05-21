@@ -2362,6 +2362,10 @@ def _migrate():
             "CREATE INDEX IF NOT EXISTS idx_invite_redemptions_invite "
             "ON channel_invite_redemptions(invite_id)"
         )
+        con.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_invite_redemption_user_unique "
+            "ON channel_invite_redemptions(invite_id, user_id)"
+        )
         
         # Room directory columns
         if "is_public" not in room_cols:
@@ -6851,36 +6855,74 @@ def use_invite(code: str, user_id: Optional[int] = None) -> Optional[int]:
 def consume_invite(code: str, user_id: int) -> Optional[int]:
     """Atomically validate, optionally consume, and log invite redemption."""
     with _conn() as con:
-        invite = con.execute("""
-            SELECT id, room_id, max_uses, use_count, expires_at
-            FROM channel_invites WHERE LOWER(code) = LOWER(?)
-        """, (code,)).fetchone()
-        if not invite:
-            return None
-        room_id = invite['room_id']
-        already = con.execute(
-            "SELECT 1 FROM room_members WHERE room_id=? AND user_id=?",
-            (room_id, user_id),
-        ).fetchone()
-        if already:
-            return room_id
-        if invite['expires_at']:
-            expired = con.execute(
-                "SELECT datetime('now') > ?", (invite['expires_at'],)
-            ).fetchone()[0]
-            if expired:
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            invite = con.execute("""
+                SELECT id, room_id, max_uses, use_count, expires_at
+                FROM channel_invites WHERE LOWER(code) = LOWER(?)
+            """, (code,)).fetchone()
+            if not invite:
+                con.execute("ROLLBACK")
                 return None
-        if invite['max_uses'] > 0 and invite['use_count'] >= invite['max_uses']:
-            return None
-        con.execute(
-            "UPDATE channel_invites SET use_count = use_count + 1 WHERE id=?",
-            (invite['id'],)
-        )
-        con.execute(
-            "INSERT INTO channel_invite_redemptions (invite_id, user_id) VALUES (?, ?)",
-            (invite['id'], user_id),
-        )
-        return room_id
+            room_id = invite['room_id']
+            already = con.execute(
+                "SELECT 1 FROM room_members WHERE room_id=? AND user_id=?",
+                (room_id, user_id),
+            ).fetchone()
+            if already:
+                con.execute("COMMIT")
+                return room_id
+            if invite['expires_at']:
+                expired = con.execute(
+                    "SELECT datetime('now') > ?", (invite['expires_at'],)
+                ).fetchone()[0]
+                if expired:
+                    con.execute("ROLLBACK")
+                    return None
+            cur = con.execute("""
+                UPDATE channel_invites
+                SET use_count = use_count + 1
+                WHERE id = ?
+                  AND (max_uses = 0 OR use_count < max_uses)
+            """, (invite['id'],))
+            if cur.rowcount != 1:
+                con.execute("ROLLBACK")
+                return None
+            con.execute(
+                """INSERT OR IGNORE INTO channel_invite_redemptions
+                   (invite_id, user_id) VALUES (?, ?)""",
+                (invite['id'], user_id),
+            )
+            con.execute("COMMIT")
+            return room_id
+        except Exception:
+            try:
+                con.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+
+
+def count_channel_invites(room_id: int) -> int:
+    """Active invite rows for a channel (used for per-room cap)."""
+    with _conn() as con:
+        row = con.execute(
+            "SELECT COUNT(*) AS n FROM channel_invites WHERE room_id=?",
+            (room_id,),
+        ).fetchone()
+    return int(row['n']) if row else 0
+
+
+def count_recent_invites_by_user(room_id: int, user_id: int, *, hours: int = 1) -> int:
+    """Invites created by this user for this room in the last N hours."""
+    with _conn() as con:
+        row = con.execute(
+            """SELECT COUNT(*) AS n FROM channel_invites
+               WHERE room_id=? AND created_by=?
+                 AND datetime(created_at) > datetime('now', ?)""",
+            (room_id, user_id, f'-{int(hours)} hours'),
+        ).fetchone()
+    return int(row['n']) if row else 0
 
 
 def get_invite_redemptions(invite_ids: List[int]) -> Dict[int, List[Dict]]:

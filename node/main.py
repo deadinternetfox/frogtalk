@@ -2101,7 +2101,7 @@ async def og_room_image(room_name: str):
     from fastapi.responses import Response
     import database as db
     room = db.get_room_by_name(room_name)
-    if not room or room.get("is_private"):
+    if not room or (room.get("type") or "public").lower() == "private":
         return _fallback_og_image()
     icon = room.get("icon") or ""
     raw, mime = _decode_data_url_to_bytes(icon)
