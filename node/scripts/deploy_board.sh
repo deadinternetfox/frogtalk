@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy board PHP + .htaccess to both FrogTalk production nodes.
+# Deploy board PHP + .htaccess to the FrogTalk production fleet (3 nodes).
 # Usage (from repo root):  bash node/scripts/deploy_board.sh
 #
 # App/Python hot deploy: node/scripts/deploy_nodes.sh
@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
-HOSTS=("161.97.182.73:2222" "31.220.92.120:22")
+HOSTS=("161.97.182.73:2222" "31.220.92.120:22" "46.250.244.184:22")
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new
           -o UserKnownHostsFile="${HOME}/.ssh/known_hosts"
           -o ConnectTimeout=30

@@ -1,0 +1,161 @@
+/* FrogTalk — /docs/node operator guide */
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --panel: #111723;
+  --line: #30363d;
+  --text: #e6edf3;
+  --muted: #7d8590;
+  --green: #4ade80;
+  --blue: #58a6ff;
+  --amber: #fbbf24;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(900px 560px at 50% -10%, rgba(74, 222, 128, 0.1), transparent 70%),
+    radial-gradient(560px 420px at 14% 75%, rgba(88, 166, 255, 0.07), transparent 65%),
+    var(--bg);
+  line-height: 1.55;
+}
+
+body.ft-has-site-nav .wrap {
+  padding-top: 5.2rem;
+}
+
+.wrap {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1.2rem 1rem 3rem;
+}
+
+.hero {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.2rem;
+  background: linear-gradient(150deg, rgba(22, 27, 34, 0.94), rgba(17, 23, 31, 0.94));
+  margin-bottom: 1rem;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+}
+
+.hero-meta {
+  margin-top: 0.75rem;
+}
+
+h1 {
+  margin: 0 0 0.35rem;
+  font-size: clamp(1.4rem, 3.5vw, 2rem);
+}
+
+.sub {
+  margin: 0;
+  color: var(--muted);
+}
+
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.8rem;
+}
+
+.toc a {
+  color: var(--muted);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.28rem 0.62rem;
+  font-size: 0.76rem;
+}
+
+.toc a:hover {
+  color: var(--text);
+  border-color: #3f566f;
+}
+
+.step {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 1rem;
+  background: linear-gradient(180deg, rgba(22, 27, 34, 0.9), rgba(17, 23, 31, 0.92));
+  margin-bottom: 0.9rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+}
+
+.step h2 {
+  margin: 0 0 0.45rem;
+  font-size: 1.08rem;
+}
+
+pre {
+  margin: 0.6rem 0 0;
+  background: #0a121b;
+  border: 1px solid #28313b;
+  border-radius: 10px;
+  padding: 0.72rem;
+  overflow: auto;
+  font-size: 0.82rem;
+  line-height: 1.44;
+}
+
+code {
+  font-family: "Consolas", "SFMono-Regular", monospace;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.callout {
+  border: 1px solid #2d5a3a;
+  border-radius: 12px;
+  background: rgba(74, 222, 128, 0.08);
+  padding: 0.72rem;
+  color: #d9f99d;
+  margin-top: 0.6rem;
+}
+
+.warn-box {
+  border: 1px solid #5a4a2d;
+  border-radius: 12px;
+  background: rgba(251, 191, 36, 0.08);
+  padding: 0.72rem;
+  color: #fde68a;
+  margin-top: 0.6rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  margin-top: 0.5rem;
+}
+
+th,
+td {
+  border: 1px solid var(--line);
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+}
+
+th {
+  color: var(--green);
+  background: rgba(74, 222, 128, 0.06);
+}
+
+ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.2rem;
+}
+
+a {
+  color: var(--blue);
+}

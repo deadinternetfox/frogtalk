@@ -6,7 +6,7 @@
 # Reads SSH_HOST, SSH_PORT, SSH_USER, SSH_KEY_PATH, REMOTE_DIR
 # from node/scripts/.env (copy from deploy/env.example SSH section).
 #
-# Fleet hot deploy (two production nodes): node/scripts/deploy_nodes.sh
+# Fleet hot deploy (3 production nodes): node/scripts/deploy_nodes.sh
 # Board PHP only: node/scripts/deploy_board.sh
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail

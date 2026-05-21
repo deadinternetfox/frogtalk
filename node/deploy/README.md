@@ -216,7 +216,7 @@ Restart if the script did not: `sudo systemctl restart frogtalk`.
 
 | Script | Use when |
 |--------|----------|
-| `node/scripts/deploy_nodes.sh` | FrogTalk production fleet — SCP selected files to both nodes, restart `frogtalk` |
+| `node/scripts/deploy_nodes.sh` | FrogTalk production fleet (3 nodes) — SCP selected files, restart `frogtalk` |
 | `node/scripts/deploy.sh` | Single host — full `rsync` of `node/` (reads `node/scripts/.env`: `SSH_HOST`, `REMOTE_DIR`, …) |
 | `node/scripts/deploy_board.sh` | PHP imageboard hotfix only (`board.php`, `.htaccess`, …) |
 
@@ -226,7 +226,15 @@ Restart if the script did not: `sudo systemctl restart frogtalk`.
 node/scripts/deploy_nodes.sh node/routers/federation.py node/static/js/calls.js
 ```
 
-Paths under `node/` map to `/opt/frogtalk/node/` on the server. Hosts and SSH ports are in the script (`HOSTS`, `HOST_PORT`). Bare `static/…` or `routers/…` args are rewritten to `node/…`. With no args, a curated client bundle is synced (includes `calls.js`, `ws.js`, core UI JS).
+Paths under `node/` map to `/opt/frogtalk/node/` on the server. Bare `static/…` or `routers/…` args are rewritten to `node/…`. With no args, a curated client bundle is synced (includes `calls.js`, `ws.js`, core UI JS).
+
+| Label | Host | SSH port |
+|-------|------|----------|
+| FrogTalk Main | `161.97.182.73` | `2222` |
+| FrogTalk Tor / EU | `31.220.92.120` | `22` |
+| FrogTalk AUS | `46.250.244.184` | `22` |
+
+Edit `HOSTS`, `HOST_PORT`, and `HOST_LABEL` in `node/scripts/deploy_nodes.sh` (and `deploy_board.sh`) when the fleet changes.
 
 Does **not** replace `git pull` for schema migrations; use `node_update_check.sh --apply` or a full `deploy.sh` when `database.py` migrations change.
 
