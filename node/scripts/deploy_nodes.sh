@@ -40,7 +40,15 @@ for spec in "${FLEET_HOSTS[@]:-}"; do
   if [[ -n "${FLEET_SSH_PASS["$host"]:-}" ]]; then
     HOST_SSH_PASS["$host"]="${FLEET_SSH_PASS["$host"]}"
   fi
-  HOST_LABEL["$host"]="${FLEET_HOST_LABEL["$host"]:-$host}"
+  HOST_LABEL["$host"]="$host"
+  if declare -p FLEET_HOST_LABEL &>/dev/null; then
+    for _lk in "${!FLEET_HOST_LABEL[@]}"; do
+      if [[ "$_lk" == "$host" ]]; then
+        HOST_LABEL["$host"]="${FLEET_HOST_LABEL[$_lk]}"
+        break
+      fi
+    done
+  fi
 done
 [[ ${#HOSTS[@]} -gt 0 ]] || { echo "FLEET_HOSTS is empty in deploy_fleet.local.sh" >&2; exit 1; }
 
