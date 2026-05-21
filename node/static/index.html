@@ -73,8 +73,11 @@
 .ch-is-hidden{display:none!important}
 .ch-invite-private-block{display:none}
 .ch-invite-private-block.is-visible{display:block}
+#ch-vanity-section{display:none}
+#ch-vanity-section:not(.ch-is-hidden){display:block}
 .ch-vanity-card{display:none}
 .ch-vanity-card.is-visible{display:block}
+#ch-invite-public-block.ch-is-hidden{display:none!important}
 /* ─── Reset & Base ──────────────────────────────────────────── */
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 *::-webkit-scrollbar{width:6px;height:6px}
@@ -9109,34 +9112,36 @@ window.ConnErr = (function(){
       <p id="ch-invite-no-permission" class="ch-invite-no-permission">Only the channel owner, moderators, or admins can create invite links for this channel. Ask them for a direct invite link to join.</p>
 
       <div id="ch-invite-public-block">
-      <div id="ch-vanity-card" class="ch-vanity-card">
-        <div class="ch-vanity-card__head">
-          <span aria-hidden="true">🔗</span>
-          <span>Custom URL</span>
-          <span class="ch-vanity-card__badge">Owner</span>
-        </div>
-        <p class="ch-vanity-card__desc">
-          Claim a memorable short link for your channel. Anyone visiting
-          <code class="ch-vanity-card__code">frogtalk.xyz/i/&lt;name&gt;</code>
-          will land on a join page.
-        </p>
-        <div id="ch-vanity-row" class="ch-vanity-row">
-          <div class="ch-vanity-input-wrap">
-            <span class="ch-vanity-input-prefix">frogtalk.xyz/i/</span>
-            <input id="ch-vanity-input" class="ch-vanity-input" type="text" maxlength="32" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="frogs">
+        <p id="ch-invite-public-intro" class="ch-invite-intro">Create invite links to share this channel. Links can have usage limits and expiration.</p>
+      </div><!-- /ch-invite-public-block -->
+
+      <div id="ch-vanity-section" class="ch-vanity-section ch-is-hidden" aria-hidden="true">
+        <div id="ch-vanity-card" class="ch-vanity-card">
+          <div class="ch-vanity-card__head">
+            <span aria-hidden="true">🔗</span>
+            <span>Custom URL</span>
+            <span class="ch-vanity-card__badge">Owner</span>
           </div>
-          <button id="ch-vanity-save-btn" type="button" class="ch-vanity-save-btn" onclick="Rooms.saveVanity()" disabled>Save</button>
-          <button id="ch-vanity-clear-btn" type="button" class="ch-vanity-clear-btn ch-is-hidden" onclick="Rooms.clearVanity()" title="Remove vanity URL">Clear</button>
-        </div>
-        <div id="ch-vanity-status" class="ch-vanity-status">Letters, digits, hyphen and underscore. 2–32 characters.</div>
-        <div id="ch-vanity-current" class="ch-vanity-current">
-          Currently live at <a id="ch-vanity-current-link" class="ch-vanity-current-link" href="#" target="_blank" rel="noopener noreferrer">—</a>
-          · <button type="button" class="ch-vanity-copy-btn" onclick="Rooms.copyVanityLink()">Copy</button>
+          <p class="ch-vanity-card__desc">
+            Claim a memorable short link for your channel. Anyone visiting
+            <code class="ch-vanity-card__code">frogtalk.xyz/i/&lt;name&gt;</code>
+            will land on a join page.
+          </p>
+          <div id="ch-vanity-row" class="ch-vanity-row">
+            <div class="ch-vanity-input-wrap">
+              <span class="ch-vanity-input-prefix">frogtalk.xyz/i/</span>
+              <input id="ch-vanity-input" class="ch-vanity-input" type="text" maxlength="32" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="frogs">
+            </div>
+            <button id="ch-vanity-save-btn" type="button" class="ch-vanity-save-btn" onclick="Rooms.saveVanity()" disabled>Save</button>
+            <button id="ch-vanity-clear-btn" type="button" class="ch-vanity-clear-btn ch-is-hidden" onclick="Rooms.clearVanity()" title="Remove vanity URL">Clear</button>
+          </div>
+          <div id="ch-vanity-status" class="ch-vanity-status">Letters, digits, hyphen and underscore. 2–32 characters.</div>
+          <div id="ch-vanity-current" class="ch-vanity-current">
+            Currently live at <a id="ch-vanity-current-link" class="ch-vanity-current-link" href="#" target="_blank" rel="noopener noreferrer">—</a>
+            · <button type="button" class="ch-vanity-copy-btn" onclick="Rooms.copyVanityLink()">Copy</button>
+          </div>
         </div>
       </div>
-
-      <p id="ch-invite-public-intro" class="ch-invite-intro">Create invite links to share this channel. Links can have usage limits and expiration.</p>
-      </div><!-- /ch-invite-public-block -->
 
       <div id="ch-invite-private-block" class="ch-invite-private-block">
         <div class="modal-card ch-modal-card--private-intro">

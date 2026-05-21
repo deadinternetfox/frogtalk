@@ -1739,11 +1739,23 @@ const Rooms = (() => {
     return true;
   }
 
+  function _setVanitySectionVisible(show) {
+    const section = document.getElementById('ch-vanity-section');
+    const card = document.getElementById('ch-vanity-card');
+    const hide = !show;
+    if (section) {
+      section.classList.toggle('ch-is-hidden', hide);
+      section.setAttribute('aria-hidden', hide ? 'true' : 'false');
+    }
+    if (card) card.classList.remove('is-visible');
+  }
+
   function _applyPrivateInvitePolicies(isPrivate) {
     const publicBlock = document.getElementById('ch-invite-public-block');
     const privateBlock = document.getElementById('ch-invite-private-block');
     if (publicBlock) publicBlock.classList.toggle('ch-is-hidden', isPrivate);
     if (privateBlock) privateBlock.classList.toggle('is-visible', isPrivate);
+    if (isPrivate) _setVanitySectionVisible(false);
 
     const unlimitedOpt = document.getElementById('ch-invite-opt-unlimited');
     const maxUsesEl = document.getElementById('ch-invite-max-uses');
@@ -2641,10 +2653,12 @@ const Rooms = (() => {
   function _renderVanityCard(isOwner, currentVanity) {
     const card = document.getElementById('ch-vanity-card');
     if (!card) return;
-    if (_currentRoomData?.room?.type === 'private' || !isOwner) {
-      card.classList.remove('is-visible');
+    const isPrivate = (_currentRoomData?.room?.type || 'public') === 'private';
+    if (isPrivate || !isOwner) {
+      _setVanitySectionVisible(false);
       return;
     }
+    _setVanitySectionVisible(true);
     card.classList.add('is-visible');
     _vanityCurrent = currentVanity || null;
 

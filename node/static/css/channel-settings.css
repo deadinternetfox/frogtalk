@@ -2,6 +2,13 @@
 
 #modal-channel-settings .modal--channel-settings {
   max-width: 480px;
+  width: min(480px, calc(100vw - 24px));
+  box-sizing: border-box;
+}
+
+#modal-channel-settings .ch-settings-panel.is-active {
+  overflow-x: hidden;
+  padding-bottom: 4px;
 }
 
 #modal-channel-settings .ch-settings-panel {
@@ -166,11 +173,13 @@
 }
 
 .ch-invite-create-row {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
   align-items: end;
   margin-bottom: 16px;
-  flex-wrap: wrap;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .ch-invite-create-row.ch-is-hidden {
@@ -178,14 +187,29 @@
 }
 
 .ch-invite-field {
-  flex: 1;
-  min-width: 120px;
+  min-width: 0;
+  width: 100%;
 }
 
 .ch-invite-create-btn {
+  grid-column: 1 / -1;
   margin: 0;
-  padding: 8px 16px;
+  padding: 10px 16px;
+  width: 100%;
+  box-sizing: border-box;
   white-space: nowrap;
+}
+
+@media (min-width: 420px) {
+  .ch-invite-create-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .ch-invite-create-btn {
+    grid-column: auto;
+    width: auto;
+    min-width: 7.5rem;
+  }
 }
 
 .ch-invites-list {
@@ -220,7 +244,15 @@
   font-size: 11.5px;
 }
 
-/* Vanity URL card (public channels, owner only) */
+/* Vanity URL (public channels, owner only — section hidden on private) */
+.ch-vanity-section {
+  display: none;
+}
+
+.ch-vanity-section:not(.ch-is-hidden) {
+  display: block;
+}
+
 .ch-vanity-card {
   display: none;
   background: linear-gradient(180deg, #13211a 0%, #101a14 100%);
@@ -270,8 +302,21 @@
 
 .ch-vanity-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: stretch;
+}
+
+@media (max-width: 419px) {
+  .ch-vanity-row {
+    flex-direction: column;
+  }
+
+  .ch-vanity-save-btn,
+  .ch-vanity-clear-btn {
+    width: 100%;
+    min-height: 40px;
+  }
 }
 
 .ch-vanity-input-wrap {
@@ -397,6 +442,23 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 419px) {
+  .ch-invite-item__row {
+    align-items: stretch;
+  }
+
+  .ch-invite-item__meta {
+    flex: 1 1 100%;
+  }
+
+  .ch-invite-item__copy,
+  .ch-invite-item__revoke {
+    flex: 1 1 calc(50% - 5px);
+    min-height: 40px;
+  }
 }
 
 .ch-invite-item__meta {
