@@ -42,10 +42,11 @@ class MainActivity : AppCompatActivity() {
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
         /** Pre-filled in the first-run setup wizard. */
         private const val OFFICIAL_SERVER_INPUT = "frogtalk.xyz"
-        private const val WEB_CACHE_REV = "20260521-wizard-v237"
+        private const val WEB_CACHE_REV = "20260521-setup-v238"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_PERMISSIONS_WIZARD_DONE = "permissions_wizard_done"
+        private const val PREF_ANDROID_SETUP_DONE = "android_setup_done"
         private const val PREF_BATTERY_PROMPTED = "battery_prompted"
         private const val PREF_BATTERY_PROMPTED_AT = "battery_prompted_at"
         // 10.5: anti-screenshot. Default true so a fresh install gets
@@ -197,8 +198,36 @@ class MainActivity : AppCompatActivity() {
         onReady()
     }
 
+    private fun isAndroidSetupDone(): Boolean {
+        return try {
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(PREF_ANDROID_SETUP_DONE, false)
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    fun markAndroidSetupDone() {
+        try {
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_ANDROID_SETUP_DONE, true)
+                .apply()
+        } catch (_: Throwable) {}
+    }
+
+    /** Existing installs already have a server URL — skip the combined setup WebView. */
+    private fun migrateAndroidSetupPref() {
+        try {
+            if (!isAndroidSetupDone() && normalizeServerBaseUrl(getServerBaseUrl()) != null) {
+                markAndroidSetupDone()
+            }
+        } catch (_: Throwable) {}
+    }
+
     private fun initialWebEntryUrl(): String {
-        return if (normalizeServerBaseUrl(getServerBaseUrl()) != null) {
+        val hasServer = normalizeServerBaseUrl(getServerBaseUrl()) != null
+        return if (hasServer && isAndroidSetupDone()) {
             getConfiguredAppEntryUrl()
         } else {
             SETUP_ASSET_URL
@@ -395,6 +424,8 @@ class MainActivity : AppCompatActivity() {
         // Always set the layout — even if WebView fails, the user sees something
         setContentView(R.layout.activity_main)
 
+        migrateAndroidSetupPref()
+
         // Prompt for a server URL on first launch, then initialise WebView.
         ensureServerConfigured {
             if (webViewInitialized) return@ensureServerConfigured
@@ -484,8 +515,12 @@ class MainActivity : AppCompatActivity() {
         wv.post {
             try {
                 wv.evaluateJavascript(
-                    "try{if(window.MobileWizard&&typeof MobileWizard._onNativeStepDone==='function')" +
-                        "MobileWizard._onNativeStepDone('$safe');}catch(e){}",
+                    "try{" +
+                        "if(window.MobileSetupWizard&&typeof MobileSetupWizard.onNativeStepDone==='function')" +
+                        "MobileSetupWizard.onNativeStepDone('$safe');" +
+                        "else if(window.MobileWizard&&typeof MobileWizard._onNativeStepDone==='function')" +
+                        "MobileWizard._onNativeStepDone('$safe');" +
+                        "}catch(e){}",
                     null
                 )
             } catch (e: Throwable) {
@@ -1180,6 +1215,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
+                activity.markAndroidSetupDone()
+                activity.markPermissionWizardDone()
                 activity.runOnUiThread {
                     activity.showLoadingScreen("Opening FrogTalk…")
                     activity.reloadAppAfterServerConfigured()
@@ -1406,6 +1443,11 @@ class MainActivity : AppCompatActivity() {
         @android.webkit.JavascriptInterface
         fun requestWizardBattery() {
             activity.requestWizardBattery()
+        }
+
+        @android.webkit.JavascriptInterface
+        fun markAndroidSetupDone() {
+            activity.markAndroidSetupDone()
         }
 
         @android.webkit.JavascriptInterface

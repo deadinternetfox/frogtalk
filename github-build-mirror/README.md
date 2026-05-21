@@ -1,29 +1,29 @@
 # FrogTalk Build Mirror
 
-Mirrored release artifacts for FrogTalk **v1.6.28** (Android `versionCode` **233**).
+Mirrored release artifacts for FrogTalk **v1.6.32** (Android `versionCode` **237**).
 
 ## Download Artifacts
 
-### Android (v1.6.28 / 233)
+### Android (v1.6.32 / 237)
 
 | Artifact | File | Use |
 |----------|------|-----|
-| **APK (sideload)** | [frogtalk-v233.apk](./frogtalk-v233.apk) | Direct install, `/download/android` on nodes |
-| **AAB (Play Store)** | [frogtalk-v233.aab](./frogtalk-v233.aab) | Google Play Console upload |
+| **APK (sideload)** | [frogtalk-v237.apk](./frogtalk-v237.apk) | Direct install, `/download/android` on nodes |
+| **AAB (Play Store)** | [FrogTalk-1.6.32-237.aab](./FrogTalk-1.6.32-237.aab) | Google Play Console upload |
 
-**This build:** polished in-app node setup wizard (replaces old AlertDialog), incoming-call recovery when the app is foregrounded, WebView cache bust for latest call UI JS.
+**This build:** cold-boot incoming-call answer fixes (WS bootstrap, launch order), in-app HTML permissions wizard (replaces native AlertDialogs), WebView cache rev `wizard-v237`.
 
 ### Verify integrity
 
 ```bash
-sha256sum -c SHA256SUMS-v233.txt
+sha256sum -c SHA256SUMS-v237.txt
 ```
 
-Checksums: [SHA256SUMS-v233.txt](./SHA256SUMS-v233.txt)
+Checksums: [SHA256SUMS-v237.txt](./SHA256SUMS-v237.txt)
 
 ### GitHub Releases
 
-**Release:** [v1.6.28 on GitHub](https://github.com/deadinternetfox/frogtalk/releases/tag/v1.6.28) (APK + AAB attached).
+**Release:** [v1.6.32 on GitHub](https://github.com/deadinternetfox/frogtalk/releases/tag/v1.6.32) (APK + AAB attached).
 
 ## Website download endpoints
 

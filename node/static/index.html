@@ -5918,60 +5918,6 @@ button:focus-visible{outline:2px solid #4caf50;outline-offset:2px;border-radius:
   .welcome-title{font-size:24px}
   .welcome-actions{grid-template-columns:1fr}
 }
-/* ── Android in-app startup / permissions wizard (unified with FrogTalk theme) ── */
-#ft-mobile-setup-wizard{
-  position:fixed;inset:0;z-index:10080;display:flex;align-items:center;justify-content:center;
-  padding:max(16px,env(safe-area-inset-top)) 16px max(20px,env(safe-area-inset-bottom));
-  background:radial-gradient(ellipse 120% 70% at 50% -15%,rgba(76,175,80,.28),transparent 52%),
-    linear-gradient(165deg,rgba(6,10,8,.97),rgba(4,6,5,.98));
-  backdrop-filter:blur(6px);
-}
-#ft-mobile-setup-wizard.hidden{display:none !important}
-body.ft-msw-active{overflow:hidden}
-.ft-msw-card{
-  width:min(420px,100%);max-height:min(92dvh,720px);overflow:auto;
-  background:linear-gradient(165deg,rgba(16,25,21,.98),rgba(10,14,12,.98));
-  border:1px solid #234532;border-radius:20px;padding:22px 20px 20px;
-  box-shadow:0 22px 56px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.04);
-}
-.ft-msw-logo{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-.ft-msw-logo-ic{
-  width:48px;height:48px;border-radius:14px;font-size:26px;
-  display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,#1b4329,#0c170f);border:1px solid #2a4a34;
-}
-.ft-msw-logo h2{margin:0;font-size:1.15rem;font-weight:800;color:#e8f5ea}
-.ft-msw-logo p{margin:3px 0 0;font-size:.78rem;color:#8aa894}
-.ft-msw-steps{display:flex;gap:5px;margin-bottom:16px}
-.ft-msw-step-dot{flex:1;height:4px;border-radius:99px;background:rgba(76,175,80,.16);transition:background .25s}
-.ft-msw-step-dot.on{background:linear-gradient(90deg,#4caf50,#7ecb8e)}
-.ft-msw-panel{display:none;animation:ft-msw-fade .28s ease}
-.ft-msw-panel.active{display:block}
-@keyframes ft-msw-fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.ft-msw-panel h3{margin:0 0 8px;font-size:1.02rem;font-weight:700;color:#e8f5ea}
-.ft-msw-hint{margin:0 0 14px;font-size:.86rem;line-height:1.5;color:#8aa894}
-.ft-msw-note{
-  margin:0 0 14px;padding:11px 13px;border-radius:12px;font-size:.8rem;line-height:1.45;
-  background:rgba(26,58,26,.55);border:1px solid #2a5a2a;color:#9bd6ab;
-}
-.ft-msw-status{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;min-height:26px}
-.ft-msw-chip{
-  font-size:.72rem;font-weight:600;padding:5px 10px;border-radius:999px;
-  border:1px solid #2f594a;background:#10231b;color:#7a9a82;
-}
-.ft-msw-chip.on{border-color:#3d7a44;color:#b8e6c4;background:rgba(30,60,34,.7)}
-.ft-msw-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}
-.ft-msw-btn{
-  flex:1;min-width:120px;padding:13px 16px;border-radius:12px;border:none;
-  font-size:.92rem;font-weight:700;cursor:pointer;
-}
-.ft-msw-btn:active{transform:scale(.98)}
-.ft-msw-btn.primary{
-  background:linear-gradient(180deg,#4caf50,#3e9f45);color:#081008;
-  box-shadow:0 2px 0 rgba(255,255,255,.1) inset;
-}
-.ft-msw-btn.ghost{background:transparent;border:1px solid #2a4a34;color:#9ecaa2}
-.ft-msw-btn.text{flex:0 1 auto;min-width:0;background:transparent;color:#6a8a72;font-size:.82rem}
 /* Hide chat-room chrome on the welcome/empty-state screen — it's an info
    page, not a real channel, so composer/members/etc. would be misleading. */
 body.in-welcome #input-area,
@@ -8441,80 +8387,18 @@ body.mini-embedded .auth-tabs { margin-bottom:14px; }
 <style>
 @keyframes bsplash-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.08);opacity:.85}}
 #boot-splash.fading{opacity:0;pointer-events:none}
-
-<!-- ═══════════ Android startup / permissions wizard (in-app, on-theme) ═══════ -->
-<div id="ft-mobile-setup-wizard" class="hidden" aria-hidden="true">
-  <div class="ft-msw-card" role="dialog" aria-labelledby="ft-msw-title">
-    <div class="ft-msw-logo">
-      <div class="ft-msw-logo-ic" aria-hidden="true">🐸</div>
-      <div>
-        <h2 id="ft-msw-title">Welcome to FrogTalk</h2>
-        <p>Quick setup for reliable calls &amp; alerts</p>
-      </div>
-    </div>
-    <div class="ft-msw-steps" aria-hidden="true">
-      <div class="ft-msw-step-dot on" id="ft-msw-dot-intro"></div>
-      <div class="ft-msw-step-dot" id="ft-msw-dot-notifications"></div>
-      <div class="ft-msw-step-dot" id="ft-msw-dot-media"></div>
-      <div class="ft-msw-step-dot" id="ft-msw-dot-battery"></div>
-      <div class="ft-msw-step-dot" id="ft-msw-dot-done"></div>
-    </div>
-    <div id="ft-msw-status-chips" class="ft-msw-status" aria-live="polite"></div>
-
-    <div class="ft-msw-panel active" id="ft-msw-panel-intro">
-      <h3>Set up your device</h3>
-      <p class="ft-msw-hint">A short walkthrough helps incoming calls ring reliably and avoids surprise permission prompts when you answer.</p>
-      <p class="ft-msw-note"><strong>You stay in control.</strong> Each step explains why we need access; you can skip anything and change settings later.</p>
-      <div class="ft-msw-actions">
-        <button type="button" class="ft-msw-btn primary" data-ft-msw="continue">Get started</button>
-        <button type="button" class="ft-msw-btn text" data-ft-msw="not-now">Not now</button>
-      </div>
-    </div>
-
-    <div class="ft-msw-panel" id="ft-msw-panel-notifications">
-      <h3>Notifications</h3>
-      <p class="ft-msw-hint">Allow alerts so incoming calls can wake the app when it is in the background or after a cold start.</p>
-      <div class="ft-msw-actions">
-        <button type="button" class="ft-msw-btn primary" data-ft-msw="allow-notifications">Allow notifications</button>
-        <button type="button" class="ft-msw-btn ghost" data-ft-msw="skip-step">Skip</button>
-      </div>
-    </div>
-
-    <div class="ft-msw-panel" id="ft-msw-panel-media">
-      <h3>Microphone &amp; camera</h3>
-      <p class="ft-msw-hint">Grant mic (and camera for video) now so answering a call does not interrupt you with extra system dialogs.</p>
-      <div class="ft-msw-actions">
-        <button type="button" class="ft-msw-btn primary" data-ft-msw="allow-media">Allow mic &amp; camera</button>
-        <button type="button" class="ft-msw-btn ghost" data-ft-msw="skip-step">Skip</button>
-      </div>
-    </div>
-
-    <div class="ft-msw-panel" id="ft-msw-panel-battery">
-      <h3>Battery optimization</h3>
-      <p class="ft-msw-hint">Some phones limit background apps aggressively. Exempting FrogTalk helps push-wake and call recovery work on those devices.</p>
-      <div class="ft-msw-actions">
-        <button type="button" class="ft-msw-btn primary" data-ft-msw="allow-battery">Open battery settings</button>
-        <button type="button" class="ft-msw-btn ghost" data-ft-msw="skip-step">Skip</button>
-      </div>
-    </div>
-
-    <div class="ft-msw-panel" id="ft-msw-panel-done">
-      <h3>You&apos;re all set</h3>
-      <p class="ft-msw-hint">You can revisit permissions anytime in Android Settings. Enjoy FrogTalk!</p>
-      <div class="ft-msw-actions">
-        <button type="button" class="ft-msw-btn primary" data-ft-msw="done">Continue to FrogTalk</button>
-      </div>
-    </div>
-  </div>
-</div>
 /* Connection error overlay (Discord-style) */
 #conn-error-overlay{
   position:fixed;inset:0;display:none;flex-direction:column;align-items:center;
   justify-content:center;gap:14px;padding:24px;
   background:radial-gradient(circle at 50% 35%,#1a0a0a 0%,#0a0a0a 70%);
-  z-index:10050;text-align:center;color:#e0e0e0
+  z-index:10050;text-align:center;color:#e0e0e0;
+  pointer-events:none
 }
-#conn-error-overlay.visible{display:flex;animation:cerr-fade .2s ease-out}
+#conn-error-overlay.visible{
+  display:flex;animation:cerr-fade .2s ease-out;
+  pointer-events:auto
+}
 @keyframes cerr-fade{from{opacity:0}to{opacity:1}}
 #conn-error-overlay .cerr-icon{font-size:64px;line-height:1;animation:cerr-shake 2.4s ease-in-out infinite}
 @keyframes cerr-shake{0%,100%{transform:translateX(0) rotate(0)}20%{transform:translateX(-4px) rotate(-3deg)}40%{transform:translateX(4px) rotate(3deg)}60%{transform:translateX(-3px) rotate(-2deg)}80%{transform:translateX(3px) rotate(2deg)}}
@@ -8693,12 +8577,22 @@ window.ConnErr = (function(){
     netFails = 0;
     if (visible && wsFails === 0) hide();
   }
+  function armBootGrace(ms){
+    graceUntil = Date.now() + Math.max(3000, Number(ms) || 12000);
+    wsFails = 0;
+    netFails = 0;
+    hide();
+  }
+
   function onWsFail(delayMs){
-    // Grace window after waking from background: a WS close is expected, so
-    // don't flash the "connection lost" overlay unless it keeps failing.
-    if (Date.now() < graceUntil) {
-      return;
-    }
+    if (Date.now() < graceUntil) return;
+    // Do not blanket the UI while launch() has not opened a channel yet.
+    try {
+      if (!State?.currentRoom && !(typeof isCallSessionBusy === 'function' && isCallSessionBusy())) {
+        wsFails++;
+        if (wsFails < 4) return;
+      }
+    } catch {}
     wsFails++;
     if (wsFails >= 2){
       show(navigator.onLine ? 'server' : 'offline');
@@ -8737,7 +8631,7 @@ window.ConnErr = (function(){
     if (visible) retry(true);
   });
 
-  return { show, hide, retry, onNetFail, onNetOk, onWsFail, onWsOk };
+  return { show, hide, retry, armBootGrace, onNetFail, onNetOk, onWsFail, onWsOk };
 })();
 
 /* Global click ripple — adds a subtle ripple to .modal-btn, .icon-btn, .cerr-btn, .filter-btn, .radio-option */
@@ -11519,8 +11413,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeFrogBoa
 <script src="/static/js/emoji.js?v=193"></script>
 <script src="/static/js/friends.js?v=422"></script>
 <script src="/static/js/dms.js?v=465"></script>
-<script src="/static/js/mobile_wizard.js?v=1"></script>
-<script src="/static/js/calls.js?v=237"></script>
+<script src="/static/js/calls.js?v=238"></script>
 <script src="/static/js/media.js?v=423"></script>
 <script src="/static/js/gifs.js?v=205"></script>
 <script src="/static/js/media-player.js?v=191"></script>

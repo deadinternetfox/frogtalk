@@ -454,6 +454,11 @@ const App = {
     // last channel has a chance to open. This is cleared by switchToRoom()
     // or replaced by showEmptyOnboarding() if the user truly has no rooms.
     App.showChannelLoading();
+    try {
+      if (typeof ConnErr !== 'undefined' && ConnErr.armBootGrace) {
+        ConnErr.armBootGrace(18000);
+      }
+    } catch {}
 
     // Rooms must load before call recovery or signaling bootstrap (joined-room WS).
     await Rooms.loadRooms();
@@ -466,13 +471,8 @@ const App = {
       await this.recoverLatestIncomingCall();
     }
 
-    const incomingActive = (typeof isIncomingCallActive === 'function' && isIncomingCallActive())
-      || (typeof isCallSessionBusy === 'function' && isCallSessionBusy());
-    if (!incomingActive && typeof MobileWizard !== 'undefined' && MobileWizard.shouldShow()) {
-      await MobileWizard.run();
-    }
-
     // Browser notification prompt is useful on web/desktop only.
+    // (Android first-run setup + permissions live in mobile_node_setup.html.)
     if (!window.Android) Notifications.requestPermission();
 
     // Android native push: register/sync FCM token against this account.
