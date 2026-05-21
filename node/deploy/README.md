@@ -195,7 +195,9 @@ Full reference: `node/deploy/nginx.conf` (CSP is emitted by FastAPI; do not dupl
 bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
 ```
 
-The CLI fixes common footguns (`node/data` / `node/secrets` symlinks, board permissions), enables federation in `.env`, syncs the [official directory](https://frogtalk.xyz/api/network/servers) (retries + built-in fallback to **FrogTalk Main** + **Tor Mirror** if HTTP fails), TOFU-pins peer Ed25519 keys from `/api/network/status`, and links imageboard peer nav pills (`.onion` boards via `FROGTALK_TOR_SOCKS_PROXY`).
+The CLI fixes common footguns (`node/data` / `node/secrets` symlinks, board permissions), enables federation in `.env`, syncs the [official directory](https://frogtalk.xyz/api/network/servers) (retries + built-in fallback to **FrogTalk Main** + **Tor Mirror** if HTTP fails), **announces this node on the hub** (`POST /api/network/servers/register` when `FROGTALK_FEDERATION_TOKEN` matches Main), TOFU-pins peer Ed25519 keys from `/api/network/status`, and links imageboard peer nav pills (`.onion` boards via `FROGTALK_TOR_SOCKS_PROXY`).
+
+**Hub listing:** set the same `FROGTALK_FEDERATION_TOKEN` on FrogTalk Main and on the community node (`openssl rand -hex 32` on Main; distribute securely). Optional override: `FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL` (default derived from `FROGTALK_OFFICIAL_DIRECTORY_URL` + `/register`). Verify with `curl -sS https://frogtalk.xyz/api/network/servers` — your node’s own `/api/network/servers` always includes local identity and is not proof of global listing.
 
 | Flag | Effect |
 |------|--------|

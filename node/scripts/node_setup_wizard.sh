@@ -169,6 +169,16 @@ main() {
   ft_set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_ENABLED" "1"
   ft_set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_REQUIRE_SIGS" "1"
   ft_set_env_value "$ENV_FILE" "FROGTALK_OFFICIAL_DIRECTORY_URL" "https://frogtalk.xyz/api/network/servers"
+  local fed_token="${FROGTALK_FEDERATION_TOKEN:-}"
+  if [[ -z "$fed_token" ]] && [[ "$ASSUME_YES" -eq 0 ]]; then
+    ft_info "Hub listing: set the same token on FrogTalk Main and this node (openssl rand -hex 32)."
+    fed_token="$(ft_ask "FROGTALK_FEDERATION_TOKEN (blank = skip auto-list on frogtalk.xyz)" "")"
+  fi
+  if [[ -n "$fed_token" ]]; then
+    ft_set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_TOKEN" "$fed_token"
+  elif [[ "$ASSUME_YES" -eq 1 ]]; then
+    ft_warn "FROGTALK_FEDERATION_TOKEN unset — peers sync locally but this node won't appear on frogtalk.xyz until the token matches Main and you re-run: bash node/scripts/install.sh federation -y"
+  fi
   ft_set_env_value "$ENV_FILE" "FROGTALK_AUTO_UPDATE_ENABLED" "0"
   ft_set_env_value "$ENV_FILE" "FROGTALK_UPDATE_CHECK_INTERVAL_SEC" "300"
   ft_set_env_value "$ENV_FILE" "FROGTALK_UPDATE_FEED_URL" "https://frogtalk.xyz/api/network/updates/latest"

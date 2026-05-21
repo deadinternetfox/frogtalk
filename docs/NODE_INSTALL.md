@@ -278,15 +278,17 @@ nano /opt/frogtalk/.env
 | `FROGTALK_FEDERATION_REQUIRE_SIGS=1` | Reject unsigned inbox events (recommended) |
 | `FROGTALK_TOR_ENABLED=0` | Clearnet node (set `1` + `FROGTALK_ONION_URL` for Tor-only) |
 | `FROGTALK_OFFICIAL_DIRECTORY_URL` | Default `https://frogtalk.xyz/api/network/servers` |
+| `FROGTALK_FEDERATION_TOKEN` | Same value on **Main** and community nodes — hub register + signed push |
+| `FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL` | Optional override (default: directory URL + `/register`) |
 | `FROGTALK_AUTO_UPDATE_ENABLED=0` | Opt-in updates only |
 
-Generate a federation shared secret for nodes you control:
+Generate a federation shared secret once on FrogTalk Main, then distribute to operators (never commit):
 
 ```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+openssl rand -hex 32
 ```
 
-Set `FROGTALK_FEDERATION_TOKEN` only when pairing trusted peers — see [`node/deploy/README.md`](../node/deploy/README.md).
+Set `FROGTALK_FEDERATION_TOKEN` in `/opt/frogtalk/.env` on Main and on each community node. Without it, federation join still imports peers but **does not** POST your node to the global directory.
 
 ---
 
@@ -309,8 +311,9 @@ This script:
 1. Ensures `node/data` is a **symlink** (not an empty real folder)
 2. Enables federation keys in `.env`
 3. Pulls the [official directory](https://frogtalk.xyz/api/network/servers)
-4. **TOFU-pins** peer Ed25519 keys from each peer’s `GET /api/network/status` (after the service is running)
-5. Links Frog Channel peer nav pills (unless `--skip-board` or `php` is not installed)
+4. **Announces** this node on the hub (`POST …/servers/register` with `X-Federation-Token`) when `FROGTALK_FEDERATION_TOKEN` matches Main
+5. **TOFU-pins** peer Ed25519 keys from each peer’s `GET /api/network/status` (after the service is running)
+6. Links Frog Channel peer nav pills (unless `--skip-board` or `php` is not installed)
 
 If the directory is unreachable, a built-in fallback seeds two **verified production** peers:
 
@@ -336,6 +339,53 @@ sqlite3 /opt/frogtalk/data/frogtalk.db \
 ```
 
 Re-run federation after the service is up if peer `pubkey` lengths are still zero.
+
+### List on the official directory
+
+The authoritative mesh list is **Main’s** database, exposed at:
+
+```bash
+curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
+```
+
+**On FrogTalk Main** (once per fleet): add the same token to `/opt/frogtalk/.env`:
+
+```bash
+# on Main only — generate once, share securely with node operators
+FROGTALK_FEDERATION_TOKEN=<paste-openssl-rand-hex-32>
+sudo systemctl restart frogtalk
+```
+
+**On each community node:** set the same token, set `PUBLIC_URL` / `FROGTALK_SERVER_NAME`, then re-run federation join. The join script registers with the hub and verifies your `server_id` appears in the directory feed.
+
+```mermaid
+sequenceDiagram
+  participant Node as Community node
+  participant Main as frogtalk.xyz (Main)
+
+  Node->>Main: GET /api/network/servers (import peers)
+  Node->>Main: POST /api/network/servers/register
+  Note over Node,Main: X-Federation-Token + community tier
+  Node->>Main: GET /api/network/servers (verify listed)
+```
+
+**Verify global listing** (not your local API):
+
+```bash
+curl -sS https://frogtalk.xyz/api/network/servers \
+  | python3 -c "import sys,json; print([s.get('display_name') for s in json.load(sys.stdin).get('servers',[])])"
+```
+
+**Important:** `GET /api/network/servers` on **your own** node injects the local server into the JSON even when you are **not** on Main — that is not proof of global listing. Always check `frogtalk.xyz`.
+
+**Troubleshooting — “peers see me only locally”**
+
+| Symptom | Fix |
+|---------|-----|
+| Join OK but absent on `frogtalk.xyz` | Set matching `FROGTALK_FEDERATION_TOKEN` on Main and node; re-run `federation -y` |
+| Register returns 403 | Token mismatch or missing on Main |
+| Skipped with `no_public_base_url` | Set `PUBLIC_URL` to a reachable clearnet URL (onion-only needs manual hub listing) |
+| `register_http_4xx` | Check `PUBLIC_URL` is not `localhost`; hub host must match directory URL |
 
 ---
 
@@ -456,6 +506,7 @@ Hot SCP deploy (`node/scripts/deploy_nodes.sh`) does **not** run DB migrations �
 | API works on `:8080` but not via domain | nginx upstream port mismatch | Match `PORT` in `.env` and `proxy_pass` |
 | `nginx -t` fails on `proxy_set_header` | Config pasted with mangled `$host` | Use the heredoc in quick install (`<<'EOF'`) so `$` is literal |
 | Federation peers, no delivery | Missing pubkey pin | Start frogtalk, then re-run `federation -y` |
+| Listed locally, not on frogtalk.xyz | No hub register | Set `FROGTALK_FEDERATION_TOKEN` on Main + node; re-run `federation -y`; verify curl to `frogtalk.xyz` |
 | Directory sync fails | Outbound firewall / DNS | Check `curl` to `frogtalk.xyz`; fallback peers still seed mesh |
 | CORS errors in browser | `ALLOWED_ORIGINS` | Add your public URL |
 | Board step fails on `curl_init` | Missing PHP curl extension | `sudo apt install php-curl` and re-run federation |

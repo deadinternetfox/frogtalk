@@ -173,7 +173,7 @@ one-time generated value in `journalctl` if left empty (rotate after login).
 |-------|----------------|
 | `bash node/scripts/install.sh` | Interactive menu |
 | `bash node/scripts/install.sh setup` | `node_setup_wizard.sh` — venv, `.env`, symlinks |
-| `bash node/scripts/install.sh federation` | Directory sync, pubkey pin, board peer pills |
+| `bash node/scripts/install.sh federation` | Directory sync, hub announce, pubkey pin, board peer pills |
 | `bash node/scripts/install.sh systemd` | Install `frogtalk.service` |
 | `bash node/scripts/install.sh status` | `/api/ping` + federation peer list |
 
@@ -187,6 +187,7 @@ bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
 ```
 
 - Directory feed (default): `https://frogtalk.xyz/api/network/servers`
+- **Hub announce:** with the same `FROGTALK_FEDERATION_TOKEN` on Main and your node, federation join POSTs to `…/servers/register` so you appear on [frogtalk.xyz](https://frogtalk.xyz/api/network/servers) (verify with curl to Main, not only your local `/api/network/servers`)
 - Peer **Ed25519 keys** are pinned from each peer’s `/api/network/status`
 - Re-run after changing `PUBLIC_URL`, onion URL, or major upgrades
 

@@ -1281,6 +1281,208 @@ def _coerce_server_row(item: dict) -> dict | None:
     }
 
 
+def official_directory_register_url(directory_url: str) -> str:
+    """Derive hub register endpoint from the official directory feed URL."""
+    url = (directory_url or "").strip().rstrip("/")
+    if not url:
+        return ""
+    if url.endswith("/servers/register"):
+        return url
+    if url.endswith("/servers"):
+        return f"{url}/register"
+    return f"{url}/register"
+
+
+def _url_hostname(url: str) -> str:
+    try:
+        return (urllib.parse.urlparse(url).hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def _register_urls_same_hub(register_url: str, directory_url: str) -> bool:
+    """SSRF guard: register target must match the configured directory host."""
+    try:
+        reg = urllib.parse.urlparse(register_url)
+        direc = urllib.parse.urlparse(directory_url)
+    except Exception:
+        return False
+    if (reg.scheme or "").lower() != (direc.scheme or "").lower():
+        return False
+    return _url_hostname(register_url) == _url_hostname(directory_url) and bool(_url_hostname(register_url))
+
+
+def _is_public_register_base_url(base_url: str) -> bool:
+    """Clearnet URL suitable for listing on the official directory."""
+    base = _normalize_base_url(base_url)
+    if not base.startswith(("http://", "https://")):
+        return False
+    host = _url_hostname(base)
+    if not host or host in ("localhost", "127.0.0.1", "::1"):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback or ip.is_private or ip.is_link_local:
+            return False
+    except ValueError:
+        pass
+    return True
+
+
+def _local_register_payload() -> dict | None:
+    local = db.get_or_create_local_server_identity()
+    server_id = (local.get("server_id") or "").strip()
+    if not server_id:
+        return None
+    base_url = _normalize_base_url(
+        os.getenv("PUBLIC_URL")
+        or os.getenv("FROGTALK_BASE_URL")
+        or local.get("base_url")
+        or ""
+    )
+    onion_url = (
+        os.getenv("FROGTALK_ONION_URL")
+        or local.get("onion_url")
+        or db.get_config("federation.onion_url")
+        or ""
+    ).strip().rstrip("/")
+    display_name = (
+        os.getenv("FROGTALK_SERVER_NAME", "").strip()
+        or local.get("display_name")
+        or db.get_config("federation.display_name")
+        or "FrogTalk Node"
+    ).strip()
+    pubkey = (
+        db.get_federation_server_pubkey(server_id)
+        or (db.get_config("federation.signing.pubkey_pem") or "").strip()
+    )
+    region = (os.getenv("FROGTALK_SERVER_REGION") or "").strip()
+    return {
+        "server_id": server_id,
+        "display_name": display_name[:120] or server_id,
+        "base_url": base_url,
+        "onion_url": onion_url if onion_url.startswith("http") else "",
+        "region": region[:64],
+        "official": False,
+        "trust_tier": "community",
+        "server_pubkey": pubkey,
+        "capabilities": ["federation-v1"],
+        "turn_urls": [],
+        "turn_username": "",
+        "turn_credential": "",
+    }
+
+
+def _directory_lists_server_id(directory_url: str, server_id: str, timeout_s: float = 12.0) -> bool:
+    try:
+        entries = _load_directory_entries(directory_url, timeout_s=timeout_s, retries=2)
+    except Exception:
+        return False
+    want = (server_id or "").strip()
+    for item in entries:
+        sid = str(item.get("server_id") or item.get("id") or "").strip()
+        if sid == want:
+            return True
+    return False
+
+
+def announce_local_server_to_hub(
+    register_url: str | None = None,
+    federation_token: str | None = None,
+    directory_url: str | None = None,
+    *,
+    verify_listing: bool = True,
+    timeout_s: float = 15.0,
+) -> dict:
+    """POST this node's identity to the official hub directory (frogtalk.xyz by default).
+
+    Called from ``node_federation_join.sh`` after local directory import. Requires
+    the same ``FROGTALK_FEDERATION_TOKEN`` on this node and on the hub.
+    """
+    direc = (directory_url or os.getenv("FROGTALK_OFFICIAL_DIRECTORY_URL", "")).strip().rstrip("/")
+    reg = (register_url or os.getenv("FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL", "")).strip().rstrip("/")
+    if not reg and direc:
+        reg = official_directory_register_url(direc)
+    token = (federation_token if federation_token is not None else os.getenv("FROGTALK_FEDERATION_TOKEN", "")).strip()
+
+    if not direc or not reg:
+        return {"ok": False, "skipped": True, "registered": False, "verified": False, "error": "directory_url_not_set"}
+    if not _register_urls_same_hub(reg, direc):
+        return {"ok": False, "skipped": False, "registered": False, "verified": False, "error": "register_url_host_mismatch"}
+    if not token:
+        return {"ok": False, "skipped": True, "registered": False, "verified": False, "error": "federation_token_not_set"}
+
+    payload = _local_register_payload()
+    if not payload:
+        return {"ok": False, "skipped": False, "registered": False, "verified": False, "error": "local_identity_missing"}
+
+    base_url = payload.get("base_url") or ""
+    if not _is_public_register_base_url(base_url):
+        if (payload.get("onion_url") or "").startswith("http"):
+            return {
+                "ok": False,
+                "skipped": True,
+                "registered": False,
+                "verified": False,
+                "error": "no_public_base_url",
+            }
+        return {"ok": False, "skipped": False, "registered": False, "verified": False, "error": "invalid_public_url"}
+
+    hub_host = _url_hostname(reg)
+    local_host = _url_hostname(base_url)
+    if hub_host and local_host and hub_host == local_host:
+        return {
+            "ok": True,
+            "skipped": True,
+            "registered": False,
+            "verified": True,
+            "error": "",
+            "reason": "this_node_is_hub",
+        }
+
+    body = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "FrogTalk-DirectoryAnnounce/1.0",
+        "X-Federation-Token": token,
+    }
+    try:
+        raw = _fetch_url_bytes(reg, timeout_s=timeout_s, method="POST", headers=headers, data=body)
+        resp = json.loads(raw.decode("utf-8", errors="replace"))
+        if not isinstance(resp, dict) or not resp.get("ok"):
+            err = "register_rejected"
+            if isinstance(resp, dict) and resp.get("error"):
+                err = str(resp.get("error"))[:200]
+            return {"ok": False, "skipped": False, "registered": False, "verified": False, "error": err}
+    except urllib.error.HTTPError as e:
+        return {
+            "ok": False,
+            "skipped": False,
+            "registered": False,
+            "verified": False,
+            "error": f"register_http_{e.code}",
+        }
+    except Exception:
+        _log.exception("federation: hub register failed")
+        return {"ok": False, "skipped": False, "registered": False, "verified": False, "error": "register_failed"}
+
+    verified = False
+    if verify_listing:
+        verified = _directory_lists_server_id(direc, payload["server_id"], timeout_s=timeout_s)
+
+    return {
+        "ok": True,
+        "skipped": False,
+        "registered": True,
+        "verified": verified,
+        "error": "" if verified else "register_ok_verify_pending",
+        "register_url": reg,
+        "server_id": payload["server_id"],
+        "display_name": payload["display_name"],
+    }
+
+
 async def sync_official_directory_once(directory_url: str | None = None) -> dict:
     url = (directory_url or os.getenv("FROGTALK_OFFICIAL_DIRECTORY_URL", "")).strip()
     if not url:

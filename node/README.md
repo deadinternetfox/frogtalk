@@ -107,7 +107,7 @@ node/
 |--------|---------|
 | **`install.sh`** | **Menu:** setup, federation, update, systemd, status |
 | `node_setup_wizard.sh` | First-time venv, `.env`, symlinks (also via `install.sh setup`) |
-| `node_federation_join.sh` | Mesh join: directory sync, pubkey pin, board nav |
+| `node_federation_join.sh` | Mesh join: directory sync, hub announce, pubkey pin, board nav |
 | `node_update_check.sh` | Git update check / `--apply` (commits preview, symlinks, pip, restart) |
 | `deploy_nodes.sh` | Maintainer SCP to production peers (see `deploy/README.md`) |
 | `deploy.sh` | Full rsync deploy to one server |

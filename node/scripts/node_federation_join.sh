@@ -6,6 +6,7 @@
 #    • Fix common deploy footguns (data symlink, board_data perms)
 #    • Enable chat federation + official directory sync in .env
 #    • Pull known servers from the official directory into SQLite
+#    • Announce this node on the official hub (POST register + verify)
 #    • Discover peer imageboards (/board/api/info) and link nav pills
 #
 #  Run (from repo root or anywhere):
@@ -34,7 +35,7 @@ ONION_URL_OVERRIDE=""
 
 say()            { ft_say "$@"; }
 blank()          { ft_blank; }
-banner()         { ft_banner "Federation Join" "Chat mesh + board nav pills"; }
+banner()         { ft_banner "Federation Join" "Directory sync + hub announce + board pills"; }
 step_head()      { ft_step "Step $1 — $2"; }
 info()           { ft_info "$@"; }
 ok()             { ft_ok "$@"; }
@@ -434,8 +435,117 @@ for p in json.load(sys.stdin).get('peers', []):
   CHAT_TOTAL="$total"
 }
 
+announce_hub_listing() {
+  step_head "4" "Official directory — announce this node"
+  load_env_file "$INSTALL_DIR/$ENV_FILE_NAME"
+
+  local token="${FROGTALK_FEDERATION_TOKEN:-}"
+  local dir_url="${FROGTALK_OFFICIAL_DIRECTORY_URL:-$OFFICIAL_DIRECTORY_DEFAULT}"
+  local reg_url="${FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL:-}"
+
+  if [[ -z "$token" ]]; then
+    HUB_ANNOUNCE_OK=0
+    HUB_ANNOUNCE_VERIFIED=0
+    HUB_ANNOUNCE_MSG="not configured"
+    warn "FROGTALK_FEDERATION_TOKEN is empty — this node will not appear on frogtalk.xyz until the same token is set here and on FrogTalk Main, then federation join is re-run."
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    skip "[dry-run] would POST hub register (token set, not shown)"
+    HUB_ANNOUNCE_MSG="dry-run"
+    return 0
+  fi
+
+  spinner_msg "Registering on official directory (hub)…"
+
+  local ann_out ann_json
+  ann_out="$(run_py - 2>/dev/null <<'PY'
+import json, os, sys
+
+_node_dir = os.path.abspath(os.environ.get("FT_NODE_DIR", ""))
+if not _node_dir or not os.path.isdir(_node_dir):
+    raise SystemExit("FT_NODE_DIR missing or not a directory")
+sys.path.insert(0, _node_dir)
+os.chdir(_node_dir)
+
+from database import init_db
+from routers import federation as fed
+
+init_db()
+
+reg = (os.getenv("FROGTALK_OFFICIAL_DIRECTORY_REGISTER_URL") or "").strip()
+direc = (os.getenv("FROGTALK_OFFICIAL_DIRECTORY_URL") or "").strip()
+token = (os.getenv("FROGTALK_FEDERATION_TOKEN") or "").strip()
+result = fed.announce_local_server_to_hub(
+    register_url=reg or None,
+    federation_token=token or None,
+    directory_url=direc or None,
+)
+print(json.dumps(result))
+PY
+)" || {
+    HUB_ANNOUNCE_OK=0
+    HUB_ANNOUNCE_VERIFIED=0
+    HUB_ANNOUNCE_MSG="python failed"
+    warn "Hub announce step failed (check venv and federation router)."
+    return 0
+  }
+
+  ann_json="$(printf '%s\n' "$ann_out" | awk 'NF' | tail -n1)"
+  local ann_ok ann_reg ann_ver ann_err ann_skip ann_reason
+  ann_ok="$(printf '%s' "$ann_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('ok') else '0')" 2>/dev/null || echo 0)"
+  ann_reg="$(printf '%s' "$ann_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('registered') else '0')" 2>/dev/null || echo 0)"
+  ann_ver="$(printf '%s' "$ann_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('verified') else '0')" 2>/dev/null || echo 0)"
+  ann_err="$(printf '%s' "$ann_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error',''))" 2>/dev/null || echo "")"
+  ann_skip="$(printf '%s' "$ann_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('skipped') else '0')" 2>/dev/null || echo 0)"
+  ann_reason="$(printf '%s' "$ann_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('reason',''))" 2>/dev/null || echo "")"
+
+  if [[ "$ann_skip" == "1" && "$ann_reason" == "this_node_is_hub" ]]; then
+    HUB_ANNOUNCE_OK=1
+    HUB_ANNOUNCE_VERIFIED=1
+    HUB_ANNOUNCE_MSG="hub (this node is Main)"
+    ok "This install is the directory hub — no remote register needed"
+    return 0
+  fi
+
+  if [[ "$ann_skip" == "1" && "$ann_err" == "no_public_base_url" ]]; then
+    HUB_ANNOUNCE_OK=0
+    HUB_ANNOUNCE_VERIFIED=0
+    HUB_ANNOUNCE_MSG="onion-only (no PUBLIC_URL)"
+    warn "No public clearnet PUBLIC_URL — skipped hub clearnet register (onion-only nodes need manual listing or a public URL)."
+    return 0
+  fi
+
+  if [[ "$ann_ok" == "1" && "$ann_reg" == "1" && "$ann_ver" == "1" ]]; then
+    HUB_ANNOUNCE_OK=1
+    HUB_ANNOUNCE_VERIFIED=1
+    HUB_ANNOUNCE_MSG="registered on frogtalk.xyz"
+    ok "Hub listing: registered on frogtalk.xyz (verified in directory feed)"
+    local disp
+    disp="$(printf '%s' "$ann_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('display_name',''))" 2>/dev/null || echo "")"
+    [[ -n "$disp" ]] && detail "Listed as: ${C_DIM}${disp}${C_RESET}"
+    return 0
+  fi
+
+  if [[ "$ann_ok" == "1" && "$ann_reg" == "1" ]]; then
+    HUB_ANNOUNCE_OK=1
+    HUB_ANNOUNCE_VERIFIED=0
+    HUB_ANNOUNCE_MSG="registered (verify pending)"
+    warn "Hub register accepted but directory verify did not confirm listing yet — re-run join or check Main token / network."
+    return 0
+  fi
+
+  HUB_ANNOUNCE_OK=0
+  HUB_ANNOUNCE_VERIFIED=0
+  HUB_ANNOUNCE_MSG="${ann_err:-failed}"
+  warn "Hub announce failed: ${ann_err:-unknown} (check FROGTALK_FEDERATION_TOKEN matches Main and PUBLIC_URL is reachable)"
+  detail "Directory: ${C_DIM}${dir_url}${C_RESET}"
+  [[ -n "$reg_url" ]] && detail "Register URL override: ${C_DIM}${reg_url}${C_RESET}"
+}
+
 sync_board_peers() {
-  step_head "4" "Board mesh — nav pills"
+  step_head "5" "Board mesh — nav pills"
   if [[ "$SKIP_BOARD" -eq 1 ]]; then
     skip "Board peer linking skipped (--skip-board)"
     BOARD_ADDED=0
@@ -523,7 +633,7 @@ PHP
 }
 
 verify_and_restart() {
-  step_head "5" "Verify & apply"
+  step_head "6" "Verify & apply"
   if [[ "$DRY_RUN" -eq 1 ]]; then
     skip "[dry-run] would restart frogtalk + curl /api/network/status"
     return 0
@@ -597,6 +707,13 @@ print_summary() {
   success_banner
   say "  ${C_BOLD}Summary${C_RESET}"
   say "    ${C_GREEN}Chat${C_RESET}   directory import: ${CHAT_IMPORTED:-0} / ${CHAT_TOTAL:-0} servers"
+  if [[ "${HUB_ANNOUNCE_VERIFIED:-0}" -eq 1 ]]; then
+    say "    ${C_GREEN}Hub${C_RESET}    listing: ${HUB_ANNOUNCE_MSG:-registered on frogtalk.xyz}"
+  elif [[ -n "${HUB_ANNOUNCE_MSG:-}" ]]; then
+    say "    ${C_YELLOW}Hub${C_RESET}    listing: ${HUB_ANNOUNCE_MSG}"
+  else
+    say "    ${C_YELLOW}Hub${C_RESET}    listing: not announced (set FROGTALK_FEDERATION_TOKEN)"
+  fi
   say "    ${C_GREEN}Board${C_RESET}  peer pills linked:  ${BOARD_ADDED:-0}  (${BOARD_FAILED:-0} failed)"
   say ""
   say "  ${C_BOLD}Next steps${C_RESET}"
@@ -620,6 +737,9 @@ main() {
   BOARD_PEER_URLS='[]'
   CHAT_IMPORTED=0
   CHAT_TOTAL=0
+  HUB_ANNOUNCE_OK=0
+  HUB_ANNOUNCE_VERIFIED=0
+  HUB_ANNOUNCE_MSG=""
   BOARD_ADDED=0
   BOARD_FAILED=0
 
@@ -647,6 +767,8 @@ main() {
   configure_env
   blank
   sync_chat_federation
+  blank
+  announce_hub_listing
   blank
   sync_board_peers
   blank

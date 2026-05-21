@@ -151,7 +151,13 @@ sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk</code><
 # Or directly:
 bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
   --public-url "$PUBLIC_URL"</code></pre>
-      <p class="hint">Pulls the <a href="https://frogtalk.xyz/api/network/servers">official directory</a>, imports peers, and pins Ed25519 keys from each peer’s <code>/api/network/status</code> (run after <code>frogtalk</code> is up).</p>
+      <p class="hint">Pulls the <a href="https://frogtalk.xyz/api/network/servers">official directory</a>, <strong>announces this node on the hub</strong> (<code>POST …/servers/register</code>), imports peers, and pins Ed25519 keys from each peer’s <code>/api/network/status</code> (run after <code>frogtalk</code> is up).</p>
+      <p class="hint"><strong>Token:</strong> set the same <code>FROGTALK_FEDERATION_TOKEN</code> on FrogTalk Main and on this node (<code>openssl rand -hex 32</code> on Main; never commit). Without it, join warns and you won’t appear on frogtalk.xyz until you set the token and re-run federation.</p>
+      <pre><code># Verify global listing (authoritative feed on Main):
+curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
+
+# Your own node's /api/network/servers always includes local identity —
+# that is NOT proof you are listed on frogtalk.xyz.</code></pre>
       <table>
         <tr><th>Name</th><th>Role</th></tr>
         <tr><td>FrogTalk Main</td><td><code>https://frogtalk.xyz</code></td></tr>
@@ -159,6 +165,7 @@ bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
       </table>
       <pre><code>FROGTALK_FEDERATION_ENABLED=1
 FROGTALK_FEDERATION_REQUIRE_SIGS=1
+FROGTALK_FEDERATION_TOKEN=
 FROGTALK_TOR_ENABLED=0
 PUBLIC_URL=https://chat.&lt;YOUR_DOMAIN&gt;
 FROGTALK_SERVER_NAME=My FrogTalk Node
@@ -206,6 +213,7 @@ journalctl -u frogtalk -n 40 --no-pager</code></pre>
         <tr><td>Works on :8080, not on domain</td><td>Align <code>PORT</code> and nginx <code>proxy_pass</code></td></tr>
         <tr><td><code>federation -y</code> ignored flags</td><td>Use current <code>install.sh</code> — flags must follow the subcommand: <code>federation -y --public-url …</code></td></tr>
         <tr><td>Peers listed, no sync</td><td>Re-run <code>federation -y</code> after service is running</td></tr>
+        <tr><td>Not on frogtalk.xyz directory</td><td>Match <code>FROGTALK_FEDERATION_TOKEN</code> on Main + node; re-run <code>federation -y</code></td></tr>
         <tr><td>CORS errors</td><td>Add your URL to <code>ALLOWED_ORIGINS</code></td></tr>
         <tr><td>Board pills / <code>curl_init</code></td><td><code>sudo apt install php-cli php-curl</code>; re-run federation</td></tr>
         <tr><td><code>systemd</code> permission denied</td><td><code>sudo bash node/scripts/install.sh systemd -y</code></td></tr>
