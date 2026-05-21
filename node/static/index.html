@@ -8887,7 +8887,7 @@ window.ConnErr = (function(){
       </div>
       <label class="modal-label" style="margin-top:8px">Hint (optional)</label>
       <input class="modal-input" id="new-room-secret-hint" placeholder="Shown to invited members when they join">
-      <div style="font-size:11px;color:#888;margin-top:8px">Everyone in this private channel must use the same shared secret.</div>
+      <div style="font-size:11px;color:#888;margin-top:8px">Members need an invite link and this same shared secret to join.</div>
     </div>
     <div id="new-room-directory-section" class="modal-card">
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px">
@@ -8930,9 +8930,10 @@ window.ConnErr = (function(){
   <div class="modal" style="max-width:460px;background:linear-gradient(180deg,#171b17,#111311);border:1px solid #2d4f2f;box-shadow:0 18px 44px rgba(0,0,0,.45)">
     <div class="modal-title" style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
       <span style="display:inline-flex;width:34px;height:34px;align-items:center;justify-content:center;border-radius:10px;background:#1e2f20;border:1px solid #355a38">🔐</span>
-      <span>Enter Shared Secret</span>
+      <span>Secret required to join</span>
     </div>
     <div id="room-secret-room-name" style="font-size:13px;color:#98a39a;margin-bottom:6px"></div>
+    <p id="room-secret-intro" style="font-size:12px;color:#9ecaa2;line-height:1.45;margin-bottom:10px">Private channels need the shared secret from the owner or a member. Without it you cannot enter the channel, even with an invite link.</p>
     <div id="room-secret-hint" style="display:none;font-size:12px;color:#9ecaa2;background:#1a2a1d;border:1px solid #2f4d34;border-radius:10px;padding:10px 12px;margin-bottom:10px"></div>
     <label class="modal-label" style="margin-bottom:6px">Shared secret</label>
     <div style="position:relative">
@@ -8948,7 +8949,7 @@ window.ConnErr = (function(){
     </div>
     <div class="modal-actions" style="margin-top:14px">
       <button class="modal-btn secondary" onclick="Rooms.cancelPrivateSecretPrompt()">Cancel</button>
-      <button class="modal-btn primary" onclick="Rooms.submitPrivateSecretPrompt()">Unlock</button>
+      <button class="modal-btn primary" onclick="Rooms.submitPrivateSecretPrompt()">Join channel</button>
     </div>
   </div>
 </div>
@@ -9045,7 +9046,7 @@ window.ConnErr = (function(){
       
       <div id="ch-invite-only-private-note" class="modal-card ch-notice--private">
         <p class="ch-notice__body">
-          🔒 Private channels are <strong>invite-only</strong> — new members need a direct invite link from the owner or moderators (per policy below). The shared encryption secret is for <strong>decrypting messages after</strong> they have joined, not for gaining access.
+          🔒 Private channels require <strong>both</strong> a direct invite link (owner or moderators, per policy below) <strong>and</strong> the shared encryption secret. Members need the invite to be added and the secret to enter the channel.
         </p>
       </div>
       
@@ -9146,7 +9147,7 @@ window.ConnErr = (function(){
       <div id="ch-invite-private-block" class="ch-invite-private-block">
         <div class="modal-card ch-modal-card--private-intro">
           <p class="ch-notice__body ch-notice__body--relaxed">
-            Share an <code class="ch-inline-code">/i/…</code> invite with people you trust. Send the room secret after they join.
+            Share the <code class="ch-inline-code">/i/…</code> invite link <strong>and</strong> the room secret. New members need both to join.
           </p>
         </div>
       </div>

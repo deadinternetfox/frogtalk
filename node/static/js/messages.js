@@ -4145,17 +4145,25 @@ const Messages = (() => {
       const res = await apiFetch(`/api/invites/${encodeURIComponent(code)}/join`, 'POST');
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.ok) {
+        await Rooms.loadRooms?.();
+        const joined = (State.rooms || []).find(r => r.name === data.room);
+        const roomType = joined?.type || data.room_type || 'public';
+        const chType = joined?.channel_type || 'text';
+        if (roomType === 'private') {
+          const ok = await Rooms.ensurePrivateRoomSecret?.(data.room);
+          if (!ok) {
+            if (btn) { btn.disabled = false; btn.textContent = 'Join Channel'; }
+            return;
+          }
+        }
         if (btn) {
           const card = btn.closest('.invite-card');
           if (card) {
             btn.outerHTML = `<button class="invite-join-btn invite-join-btn--already" onclick="Rooms.openChannelLink('${UI.escHtml(data.room)}')">Open Channel</button>`;
           }
         }
-        await Rooms.loadRooms?.();
-        const joined = (State.rooms || []).find(r => r.name === data.room);
-        const roomType = joined?.type || data.room_type || 'public';
         if (joined?.joined) {
-          Rooms.switchToRoom(data.room, roomType, null, joined.channel_type || 'text');
+          Rooms.switchToRoom(data.room, roomType, null, chType);
         } else {
           Rooms.openChannelLink(data.room);
         }

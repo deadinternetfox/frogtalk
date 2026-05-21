@@ -778,12 +778,19 @@ const App = {
       const res = await apiFetch(`/api/invites/${code}/join`, 'POST');
       if (res.ok) {
         const data = await res.json();
-        UI.showToast(`Joined #${data.room}!`, 'success');
-        // Reload rooms and switch to the new room
         await Rooms.loadRooms();
         const joined = (State.rooms || []).find(r => r.name === data.room);
         const roomType = joined?.type || data.room_type || 'public';
-        Rooms.switchToRoom(data.room, roomType);
+        const chType = joined?.channel_type || 'text';
+        if (roomType === 'private') {
+          const ok = await Rooms.ensurePrivateRoomSecret(data.room);
+          if (!ok) {
+            App.openFirstAvailableRoom();
+            return;
+          }
+        }
+        UI.showToast(`Joined #${data.room}!`, 'success');
+        Rooms.switchToRoom(data.room, roomType, null, chType);
       } else {
         const err = await res.json().catch(() => ({}));
         // Banned-from-channel: render the dedicated ban screen so the

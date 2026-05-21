@@ -242,6 +242,24 @@ const Rooms = (() => {
     return Crypto.getRoomKey(name, secret);
   }
 
+  /** After API join: private rooms still need the shared secret or membership is rolled back. */
+  async function ensurePrivateRoomSecret(roomName) {
+    const key = await _resolvePrivateRoomKey(roomName);
+    if (key !== undefined) return true;
+    try {
+      await fetch(`/api/rooms/${encodeURIComponent(roomName)}/leave`, {
+        method: 'POST',
+        headers: { 'X-Session-Token': State.token },
+      });
+      await loadRooms();
+    } catch {}
+    UI.showToast(
+      'Private channels need the shared secret to join — ask the owner for the invite link and secret',
+      'warning',
+    );
+    return false;
+  }
+
   // ─── Key rotation (Phase 2 #3, #4) ───────────────────────────────────
   // AAD bound to room_id + key_version so a ciphertext from one version can
   // never be replayed under another. Public rooms aren't E2EE — caller
@@ -1513,7 +1531,13 @@ const Rooms = (() => {
     if (res.ok) {
       await loadRooms();
       const room = (State.rooms || []).find(r => r.name === name);
-      switchToRoom(name, room?.type || 'public', null, room?.channel_type || 'text');
+      const roomType = room?.type || 'public';
+      const chType = room?.channel_type || 'text';
+      if (roomType === 'private') {
+        const ok = await ensurePrivateRoomSecret(name);
+        if (!ok) return;
+      }
+      switchToRoom(name, roomType, null, chType);
       return;
     }
     // Banned-from-channel: dedicated screen with reason + duration.
@@ -1770,7 +1794,7 @@ const Rooms = (() => {
     const whoHint = document.getElementById('ch-who-can-invite-hint');
     if (whoHint) {
       whoHint.textContent = isPrivate
-        ? 'Private channels cannot allow all members to create invites. Choose Owner or Moderators & Owner.'
+        ? 'Invite links plus the shared secret are both required to join. Controls who can create invite links.'
         : 'Controls who can generate invite links for this channel';
     }
 
@@ -3057,6 +3081,7 @@ const Rooms = (() => {
     saveVanity, clearVanity, copyVanityLink,
     renderMuteState, renderRooms, openChannelLink,
     cancelPrivateSecretPrompt, submitPrivateSecretPrompt,
+    ensurePrivateRoomSecret,
     toggleSecretVisibility,
     openTransferOwnershipModal, onTransferOwnershipInput, confirmTransferOwnership,
     _userCanCreateInviteForRoom,
