@@ -191,8 +191,9 @@ _SYNC_EXPORT_ROOM_LIMIT = 400
 _SYNC_EXPORT_DM_LIMIT = 400
 _SYNC_EXPORT_BLOCKED_LIMIT = 400
 _SYNC_EXPORT_PUBLIC_ROOM_LIMIT = 800
-_SYNC_EXPORT_SOCIAL_POST_LIMIT = 160
-_SYNC_EXPORT_SOCIAL_MEDIA_MAX = 1_500_000
+_SYNC_EXPORT_SOCIAL_POST_LIMIT = 300
+_SYNC_EXPORT_SOCIAL_MEDIA_MAX = 4_000_000
+_SYNC_EXPORT_ROOM_ICON_MAX = 400_000
 
 _sync_state_lock = _threading.Lock()
 _federation_sync_state: dict[int, dict] = {}
@@ -252,6 +253,27 @@ def _sanitize_room_order_json(raw: str) -> str:
     if not cleaned:
         return ""
     return json.dumps(cleaned, separators=(",", ":"))
+
+
+def _sanitize_sync_room_icon(icon) -> str | None:
+    raw = str(icon or "").strip()
+    if not raw:
+        return None
+    if len(raw) > _SYNC_EXPORT_ROOM_ICON_MAX:
+        return None
+    if raw.startswith("data:"):
+        if not re.match(
+            r"^data:image/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\n\r]+$",
+            raw,
+            re.IGNORECASE,
+        ):
+            return None
+        return raw
+    if raw.startswith("http://") or raw.startswith("https://") or raw.startswith("/"):
+        return raw[:512]
+    if len(raw) <= 32:
+        return raw
+    return None
 
 
 def _sanitize_sync_media(media_data, media_type) -> tuple[str | None, str]:
@@ -542,6 +564,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             "type": rtype,
             "channel_type": ctype,
             "description": str(room.get("description") or "")[:200],
+            "icon": _sanitize_sync_room_icon(room.get("icon")),
         }
         if rtype == "public" and len(public_rooms) < _SYNC_EXPORT_PUBLIC_ROOM_LIMIT:
             public_rooms.append(room_payload)
@@ -670,11 +693,58 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             break
 
     social_posts: list[dict] = []
+    seen_post_gids: set[str] = set()
+    try:
+        with db._conn() as con:
+            own_rows = con.execute(
+                """
+                SELECT wp.id FROM wall_posts wp
+                WHERE wp.user_id=?
+                ORDER BY wp.created_at DESC
+                LIMIT ?
+                """,
+                (uid, _SYNC_EXPORT_SOCIAL_POST_LIMIT),
+            ).fetchall()
+        own_ids = [int(r["id"]) for r in own_rows if r and r["id"]]
+    except Exception:
+        own_ids = []
     try:
         feed_rows = db.get_feed_posts(uid, limit=_SYNC_EXPORT_SOCIAL_POST_LIMIT, offset=0, mood="", lite=False)
     except Exception:
         feed_rows = []
-    for post in feed_rows[:_SYNC_EXPORT_SOCIAL_POST_LIMIT]:
+    post_ids: list[int] = []
+    for row in feed_rows[:_SYNC_EXPORT_SOCIAL_POST_LIMIT]:
+        try:
+            pid = int(row.get("id") or 0)
+        except Exception:
+            pid = 0
+        if pid > 0 and pid not in post_ids:
+            post_ids.append(pid)
+    for pid in own_ids:
+        if pid not in post_ids and len(post_ids) < _SYNC_EXPORT_SOCIAL_POST_LIMIT:
+            post_ids.append(pid)
+    for post_id in post_ids:
+        try:
+            post = db.get_wall_post_by_id(post_id) if hasattr(db, "get_wall_post_by_id") else None
+        except Exception:
+            post = None
+        if not post:
+            try:
+                with db._conn() as con:
+                    row = con.execute(
+                        """
+                        SELECT wp.*, u.nickname, u.avatar
+                        FROM wall_posts wp
+                        JOIN users u ON u.id = wp.user_id
+                        WHERE wp.id=?
+                        """,
+                        (post_id,),
+                    ).fetchone()
+                post = dict(row) if row else None
+            except Exception:
+                post = None
+        if not post:
+            continue
         try:
             post_id = int(post.get("id") or 0)
         except Exception:
@@ -691,8 +761,9 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             continue
         post_gid, post_origin = db.register_local_wall_post_global_id(post_id)
         post_gid = str(post_gid or "").strip()
-        if not post_gid:
+        if not post_gid or post_gid in seen_post_gids:
             continue
+        seen_post_gids.add(post_gid)
         privacy = str(post.get("privacy") or "public").strip().lower()
         if privacy not in ("public", "followers", "friends"):
             privacy = "public"
@@ -764,6 +835,40 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     me = db.get_user_by_id(uid) or {}
     my_gid = str(me.get("global_user_id") or "").strip()
 
+    keep_room_names: set[str] = set()
+    for raw in rooms[:_SYNC_EXPORT_ROOM_LIMIT]:
+        if isinstance(raw, dict):
+            nm = str(raw.get("name") or "").strip().lower()
+        else:
+            nm = str(raw or "").strip().lower()
+        if nm and _ROOM_NAME_RE.match(nm):
+            keep_room_names.add(nm)
+
+    rooms_pruned = 0
+    try:
+        with db._conn() as con:
+            member_rows = con.execute(
+                """
+                SELECT r.id, r.name FROM rooms r
+                JOIN room_members rm ON rm.room_id = r.id
+                WHERE rm.user_id=?
+                """,
+                (uid,),
+            ).fetchall()
+        for row in member_rows:
+            rid = int(row["id"] or 0)
+            nm = str(row["name"] or "").strip().lower()
+            if rid <= 0 or not nm:
+                continue
+            if nm not in keep_room_names:
+                try:
+                    db.leave_room(uid, rid)
+                    rooms_pruned += 1
+                except Exception:
+                    continue
+    except Exception:
+        rooms_pruned = 0
+
     n_rooms = len(rooms[:_SYNC_EXPORT_ROOM_LIMIT])
     n_public = len(public_rooms[:_SYNC_EXPORT_PUBLIC_ROOM_LIMIT])
     n_dms = len(dm_peers[:_SYNC_EXPORT_DM_LIMIT])
@@ -799,10 +904,14 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             name = str(raw.get("name") or "").strip().lower()
             room_type = str(raw.get("type") or "public").strip().lower()
             channel_type = str(raw.get("channel_type") or "text").strip().lower()
+            icon = _sanitize_sync_room_icon(raw.get("icon"))
+            desc = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("description") or ""))[:200]
         else:
             name = str(raw or "").strip().lower()
             room_type = "public"
             channel_type = "text"
+            icon = None
+            desc = ""
         if not _ROOM_NAME_RE.match(name):
             continue
         if room_type not in ("public", "private"):
@@ -817,13 +926,21 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             if room_type == "public":
                 try:
                     owner = db.get_or_create_federation_system_user()
-                    db.create_room(name, "", "public", owner, None, channel_type=channel_type)
+                    db.create_room(
+                        name, desc, "public", owner, None,
+                        icon=icon, channel_type=channel_type,
+                    )
                     room = db.get_room_by_name(name)
                 except Exception:
                     room = None
             if not room:
                 rooms_missing += 1
                 continue
+        elif icon:
+            try:
+                db.update_room_settings(name, icon=icon)
+            except Exception:
+                pass
         try:
             db.join_room(uid, int(room["id"]))
             rooms_joined += 1
@@ -843,6 +960,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         room_type = str(raw.get("type") or "public").strip().lower()
         channel_type = str(raw.get("channel_type") or "text").strip().lower()
         desc = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("description") or ""))[:200]
+        icon = _sanitize_sync_room_icon(raw.get("icon"))
         if room_type != "public":
             continue
         if not _ROOM_NAME_RE.match(name):
@@ -853,16 +971,32 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         if not existing:
             try:
                 owner = db.get_or_create_federation_system_user()
-                db.create_room(name, desc, "public", owner, None, channel_type=channel_type)
+                db.create_room(
+                    name, desc, "public", owner, None,
+                    icon=icon, channel_type=channel_type,
+                )
                 existing = db.get_room_by_name(name)
             except Exception:
                 existing = None
+        elif icon or desc:
+            try:
+                patch = {}
+                if icon:
+                    patch["icon"] = icon
+                if desc:
+                    patch["description"] = desc
+                if patch:
+                    db.update_room_settings(name, **patch)
+            except Exception:
+                pass
         if not existing:
             continue
-        try:
-            db.join_room(uid, int(existing["id"]))
-        except Exception:
-            continue
+        # Directory rows mirror metadata only — do NOT auto-join every public room.
+        if name in keep_room_names:
+            try:
+                db.join_room(uid, int(existing["id"]))
+            except Exception:
+                pass
         with _sync_state_lock:
             cur = dict(_federation_sync_state.get(uid) or {})
             ctr = dict(cur.get("counters") or {})
@@ -1149,6 +1283,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
 
     return {
         "rooms_joined": rooms_joined,
+        "rooms_pruned": rooms_pruned,
         "rooms_missing": rooms_missing,
         "dm_linked": dm_linked,
         "following_linked": following_linked,
@@ -2048,6 +2183,11 @@ async def _start_federation_sync_for_user(
     cur = _sync_state_get(uid)
     if cur.get("in_progress"):
         return cur
+    if cur.get("done") and not str(cur.get("error") or "").strip():
+        if int(cur.get("rooms_joined") or 0) > 0 or int(cur.get("social_posts_imported") or 0) > 0:
+            return cur
+    with _sync_state_lock:
+        _federation_sync_state.pop(uid, None)
     source = _norm_base(source_base)
     raw_ticket = str(ticket or "").strip()
     gid = str(global_user_id or "").strip()

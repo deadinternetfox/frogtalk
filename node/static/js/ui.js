@@ -3404,7 +3404,11 @@ async function connectToSelectedServer() {
   try {
     localStorage.setItem('ft_just_switched_node', '1');
     sessionStorage.setItem('ft_just_switched', '1');
-    if (window.location?.origin) sessionStorage.setItem('ft_switch_from', window.location.origin);
+    if (window.location?.origin) {
+      const origin = window.location.origin;
+      sessionStorage.setItem('ft_switch_from', origin);
+      try { localStorage.setItem('ft_sync_source_base', origin); } catch {}
+    }
     localStorage.removeItem('fc_last_room');
   } catch {}
   try {
