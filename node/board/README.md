@@ -64,7 +64,9 @@ php -r "echo password_hash('your-password', PASSWORD_BCRYPT);"
         └── board_data/      # threads, bans, settings (JSON, gitignored)
 ```
 
-Deploy board PHP with the rest of the node tree (`bash node/scripts/deploy_board.sh` for PHP-only hotfixes, or rsync the full `node/` directory). Restart `frogtalk` after Python changes; PHP is picked up on the next request.
+**First install:** the setup wizard runs `install_board_nginx.sh` (clearnet proxy + `/board/` PHP) and `configure_board_identity.sh`. Re-apply nginx with `sudo bash node/scripts/install.sh board-nginx --install-dir /opt/frogtalk`.
+
+**Updates:** deploy board PHP with the rest of the node tree, or `bash node/scripts/deploy_board.sh` for PHP-only hotfixes (maintainers: `deploy_fleet.local.sh`, never commit host IPs). Restart `frogtalk` after Python changes; PHP is picked up on the next request.
 
 The FastAPI app reads `board_data/threads.json` for SEO sitemaps. Default path:
 

@@ -64,9 +64,11 @@ node/
 │   ├── node_setup_wizard.sh
 │   ├── node_federation_join.sh
 │   ├── node_update_check.sh
-│   ├── deploy_nodes.sh          # SCP hot deploy to production fleet
+│   ├── deploy_nodes.sh          # maintainer SCP hotfix (deploy_fleet.local.sh)
 │   ├── deploy.sh                # rsync full node/ to one host (.env in scripts/)
-│   ├── deploy_board.sh          # imageboard PHP hotfix
+│   ├── deploy_board.sh          # maintainer board PHP hotfix
+│   ├── install_board_nginx.sh   # nginx + php-fpm for /board/ (wizard calls this)
+│   ├── configure_board_identity.sh
 │   └── migrations/
 ├── tests/
 ├── requirements.txt
@@ -109,9 +111,11 @@ node/
 | `node_setup_wizard.sh` | First-time venv, `.env`, symlinks (also via `install.sh setup`) |
 | `node_federation_join.sh` | Mesh join: directory sync, hub announce, pubkey pin, board nav |
 | `node_update_check.sh` | Git update check / `--apply` (commits preview, symlinks, pip, restart) |
-| `deploy_nodes.sh` | Maintainer SCP to production peers (see `deploy/README.md`) |
+| `install_board_nginx.sh` | nginx + php-fpm routes for `/board/` (`install.sh board-nginx`) |
+| `configure_board_identity.sh` | Board title/subtitle from server name / env |
+| `deploy_nodes.sh` | Maintainer hot SCP (copy `deploy_fleet.local.example.sh` → `deploy_fleet.local.sh`) |
 | `deploy.sh` | Full rsync deploy to one server |
-| `deploy_board.sh` | Board PHP-only hotfix |
+| `deploy_board.sh` | Board PHP-only hotfix to fleet |
 
 - **Idempotent** — safe to re-run; missing symlinks are created.
 - **Non-fatal skips** — edge cases are reported, not rolled back silently.

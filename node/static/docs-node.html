@@ -31,6 +31,7 @@
         <a href="#vps">VPS bootstrap</a>
         <a href="#wizard">Setup wizard</a>
         <a href="#federation">Federation</a>
+        <a href="#board">Frog Channel</a>
         <a href="#https">nginx / HTTPS</a>
         <a href="#verify">Verify</a>
         <a href="#trouble">Troubleshooting</a>
@@ -48,7 +49,7 @@
       <h2>Quick install (copy-paste)</h2>
       <p class="hint">Run on a <strong>fresh Ubuntu/Debian VPS</strong> as a user with <code>sudo</code>. Replace <code>&lt;YOUR_VPS_IP&gt;</code> (or use <code>https://chat.&lt;YOUR_DOMAIN&gt;</code> once DNS works).</p>
       <pre><code>sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip curl nginx ufw sqlite3
+sudo apt install -y git python3 python3-venv python3-pip curl nginx php-fpm php-curl ufw sqlite3
 
 sudo adduser --disabled-password --gecos "" deploy
 sudo mkdir -p /opt/frogtalk && sudo chown deploy:deploy /opt/frogtalk
@@ -58,38 +59,21 @@ cd /opt/frogtalk
 
 export PUBLIC_URL="http://&lt;YOUR_VPS_IP&gt;"
 export FROGTALK_SERVER_NAME="My FrogTalk Node"
+# Same token as on FrogTalk Main (frogtalk.xyz) — generate once on Main:
+export FROGTALK_FEDERATION_TOKEN="&lt;openssl-rand-hex-32-on-main&gt;"
 
-bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
+sudo bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
-
-# nginx → uvicorn on 127.0.0.1:8080
-sudo tee /etc/nginx/sites-available/frogtalk <<'EOF'
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-EOF
-sudo ln -sf /etc/nginx/sites-available/frogtalk /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t && sudo systemctl reload nginx
 
 sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
 sudo ufw --force enable
 
 curl -sS "$PUBLIC_URL/api/ping"
+curl -sS http://127.0.0.1/board/api/info | python3 -m json.tool
+curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
 grep ADMIN_PASSWORD /opt/frogtalk/.env</code></pre>
+      <p class="hint"><code>setup -y</code> with <code>sudo</code> installs nginx for the app <strong>and</strong> PHP routes for <code>/board/</code> (see <a href="#board">Frog Channel</a>).</p>
       <p class="hint">Open <code>$PUBLIC_URL/app</code>, log in as <code>admin</code> (password in <code>.env</code>), rotate the password.</p>
     </section>
 
@@ -193,11 +177,20 @@ FROGTALK_AUTO_UPDATE_ENABLED=0</code></pre>
 sudo ln -sf /etc/nginx/sites-available/frogtalk /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d chat.&lt;YOUR_DOMAIN&gt;</code></pre>
-      <p class="hint">Reference: <code>node/deploy/nginx.conf</code>. Match <code>PORT</code> in <code>.env</code> with <code>proxy_pass</code>.</p>
+      <p class="hint">Reference: <code>node/deploy/nginx.conf</code> (wizard: <code>install_board_nginx.sh</code>). Match <code>PORT</code> in <code>.env</code> with <code>proxy_pass</code>.</p>
+    </section>
+
+    <section class="step" id="board">
+      <h2>Frog Channel (<code>/board/</code>)</h2>
+      <p class="hint">PHP imageboard on the same origin. <code>sudo … setup -y</code> installs nginx + php-fpm for <code>/board/</code> and sets title from <code>FROGTALK_SERVER_NAME</code>.</p>
+      <pre><code>sudo bash node/scripts/install.sh board-nginx --install-dir /opt/frogtalk
+curl -sS http://127.0.0.1/board/api/info | python3 -m json.tool
+bash node/scripts/install.sh federation -y --public-url "$PUBLIC_URL"</code></pre>
+      <p class="hint">Peer board links appear after federation when <code>php-curl</code> is installed. Operators edit identity in <strong>Server Admin</strong> or <code>/board/admin</code>.</p>
     </section>
 
     <section class="step" id="verify">
-      <h2>5) Verify</h2>
+      <h2>6) Verify</h2>
       <pre><code>bash node/scripts/install.sh status --install-dir /opt/frogtalk
 curl -sS "$PUBLIC_URL/api/ping"
 curl -sS "$PUBLIC_URL/api/network/status" | python3 -m json.tool
@@ -215,8 +208,9 @@ journalctl -u frogtalk -n 40 --no-pager</code></pre>
         <tr><td>Peers listed, no sync</td><td>Re-run <code>federation -y</code> after service is running</td></tr>
         <tr><td>Not on frogtalk.xyz directory</td><td>Match <code>FROGTALK_FEDERATION_TOKEN</code> on Main + node; re-run <code>federation -y</code></td></tr>
         <tr><td>CORS errors</td><td>Add your URL to <code>ALLOWED_ORIGINS</code></td></tr>
+        <tr><td><code>/board/</code> 404</td><td>Re-run <code>sudo bash node/scripts/install.sh board-nginx</code>; check php-fpm + nginx test</td></tr>
         <tr><td>Board pills / <code>curl_init</code></td><td><code>sudo apt install php-cli php-curl</code>; re-run federation</td></tr>
-        <tr><td><code>systemd</code> permission denied</td><td><code>sudo bash node/scripts/install.sh systemd -y</code></td></tr>
+        <tr><td><code>systemd</code> permission denied</td><td><code>sudo chown -R deploy:deploy /opt/frogtalk</code>; <code>sudo bash node/scripts/install.sh systemd -y</code></td></tr>
       </table>
       <p class="hint">Security reports: <a href="/security">frogtalk.xyz/security</a></p>
     </section>

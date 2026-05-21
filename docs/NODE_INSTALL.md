@@ -59,14 +59,12 @@ sudo chown deploy:deploy /opt/frogtalk
 sudo -u deploy git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
 
-# 4) Your public URL and node name (clearnet / non-Tor example)
+# 4) Public URL, display name, hub token (generate token on FrogTalk Main only)
 export PUBLIC_URL="http://<YOUR_VPS_IP>"
 export FROGTALK_SERVER_NAME="My FrogTalk Node"
+export FROGTALK_FEDERATION_TOKEN="<same-as-main-on-frogtalk.xyz>"
 
 # 5) Install wizard + mesh + systemd (non-interactive -y)
-#    Set your node name and hub token (same value as on frogtalk.xyz Main).
-export FROGTALK_SERVER_NAME="My FrogTalk Node"
-export FROGTALK_FEDERATION_TOKEN="<same-as-main>"
 # Optional board branding (wizard also sets from server name):
 # export FROGTALK_BOARD_TITLE="🐸 FrogTalk Australia"
 # export FROGTALK_BOARD_SUBTITLE="G'day — Australian FrogTalk node"
@@ -203,7 +201,8 @@ Menu commands:
 
 | Command | Purpose |
 |---------|---------|
-| `setup` | First-time: `venv`, `.env`, runtime symlinks |
+| `setup` | First-time: `venv`, `.env`, symlinks, board nginx (with sudo) |
+| `board-nginx` | Re-apply nginx + php-fpm for `/board/` |
 | `federation` | Join mesh: directory sync, pubkey pin, board nav |
 | `systemd` | Install `frogtalk.service` |
 | `update` / `update-apply` | Git fast-forward + pip + restart |
@@ -226,6 +225,8 @@ sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
 - Copies `node/deploy/env.example` → `.env` (if missing)
 - Sets `PUBLIC_URL`, `ADMIN_PASSWORD`, `HOST=127.0.0.1`, `PORT=8080`, federation defaults
 - Symlinks `node/data` → `../data`, `node/.env` → `../.env`, `node/secrets` → `../secrets`
+- When run with `sudo`, installs nginx + php-fpm for `/board/` and applies board identity from `FROGTALK_SERVER_NAME`
+- Prompts for `FROGTALK_FEDERATION_TOKEN` (must match FrogTalk Main at `frogtalk.xyz`)
 - Optionally runs `node_federation_join.sh` (passes your `--public-url`)
 
 In **`-y` mode**, git pull during setup is skipped (use `install.sh update-apply -y` later). Scripts also avoid reading stdin when not attached to a TTY, so piping a multi-line shell script into `setup -y` is safe.
@@ -431,19 +432,29 @@ Reference: [`node/deploy/nginx.conf`](../node/deploy/nginx.conf), [`node/deploy/
 
 ---
 
-## 8) Optional: Frog Channel (PHP)
+## 8) Frog Channel (`/board/`)
 
-If you serve `/board/` via php-fpm:
+The setup wizard (run as **root** or with `sudo`) installs **nginx + php-fpm** for `/board/` using `node/scripts/install_board_nginx.sh` (from `node/deploy/nginx.conf`, aligned with `PORT` in `.env`). It also runs `configure_board_identity.sh` so board title/subtitle match `FROGTALK_SERVER_NAME` (optional env: `FROGTALK_BOARD_TITLE`, `FROGTALK_BOARD_SUBTITLE`).
 
 ```bash
-sudo apt install -y php-fpm php-cli php-curl
+# Re-apply nginx board routing only:
+sudo bash node/scripts/install.sh board-nginx --install-dir /opt/frogtalk
+
+# Or directly:
+sudo bash node/scripts/install_board_nginx.sh --install-dir /opt/frogtalk
+
+curl -sS http://127.0.0.1/board/api/info | python3 -m json.tool
+```
+
+Federation join links peer nav pills on the board when `php` + `php-curl` are installed (`bash node/scripts/install.sh federation -y`). Writable dirs:
+
+```bash
 sudo chown -R www-data:www-data /opt/frogtalk/node/board/board_data \
   /opt/frogtalk/node/board/board_uploads \
   /opt/frogtalk/node/board/board_previews
-bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk
 ```
 
-Configure nginx to pass `*.php` under `/board/` to php-fpm (see board README).
+Details: [`node/board/README.md`](../node/board/README.md). Main operators see linked boards under **Server Admin** after federation discovers peers.
 
 ---
 
@@ -483,7 +494,7 @@ bash node/scripts/install.sh update-apply -y # pull, pip, restart
 bash node/scripts/install.sh federation -y     # refresh peers after major releases
 ```
 
-Hot SCP deploy (`node/scripts/deploy_nodes.sh`) does **not** run DB migrations — prefer `update-apply` when `database.py` changes.
+Maintainer hot SCP (`node/scripts/deploy_nodes.sh` + local `deploy_fleet.local.sh`) does **not** run DB migrations — prefer `update-apply` when `database.py` changes. Community operators use `update-apply`, not fleet deploy scripts.
 
 ---
 

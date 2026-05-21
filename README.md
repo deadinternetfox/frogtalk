@@ -403,8 +403,8 @@ frogtalk/
 │   │   ├── node_setup_wizard.sh  # guided self-host setup
 │   │   ├── node_update_check.sh  # safe update check / apply
 │   │   ├── deploy.sh             # rsync node/ to one host
-│   │   ├── deploy_nodes.sh       # SCP hot deploy to production fleet
-│   │   ├── deploy_board.sh       # imageboard PHP hotfix
+│   │   ├── deploy_nodes.sh       # maintainer SCP hotfix (needs deploy_fleet.local.sh)
+│   │   ├── deploy_board.sh       # maintainer board PHP hotfix (same fleet config)
 │   │   ├── build_server_release.sh
 │   │   └── migrations/           # one-shot historical migrations
 │   ├── tests/                    # pytest suite (sanitizers, proxy, security)
