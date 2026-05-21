@@ -24,7 +24,16 @@ object FcmBridge {
         } catch (_: Throwable) {
             ""
         }
-        return (custom.ifBlank { DEFAULT_API }).trimEnd('/')
+        val raw = (custom.ifBlank { DEFAULT_API }).trimEnd('/')
+        return try {
+            val uri = java.net.URI(raw)
+            when (uri.scheme?.lowercase()) {
+                "https", "http" -> raw
+                else -> DEFAULT_API
+            }
+        } catch (_: Throwable) {
+            DEFAULT_API
+        }
     }
 
     fun rememberSessionToken(context: Context, sessionToken: String?) {

@@ -39,47 +39,20 @@ zipalign -v 4 app-release-unsigned.apk frogtalk.apk
 
 Or use Android Studio's Build > Generate Signed APK.
 
-## Incoming calls when the app is closed (FCM required)
+## Incoming calls (FCM + in-app Accept/Decline)
 
-The current build is a plain `WebView` wrapper. Web-push notifications only
-wake the embedded service worker while the app process is alive — once
-Android kills the process, **no SW can run** and the phone will not ring
-for an incoming call. This is a hard Android/WebView limit.
+The APK ships `FrogTalkFirebaseMessagingService` (data-only `kind=call` pushes)
+and `FcmBridge` (token sync + notification Decline). **Tapping the notification
+opens the app** — Accept/Decline live only in the web `#incoming-call` overlay
+(not on the tray). Warm taps run `App.recoverIncomingCallFromNative()` via
+`MainActivity` without reloading the WebView (avoids tearing down WebRTC).
 
-To make the phone ring while the app is fully closed (Snapchat/WhatsApp
-style), native Firebase Cloud Messaging is required. The full change set:
+After changing Kotlin under `app/src/main/java/`, rebuild and reinstall the APK.
+Web-only deploys (`node/static/js/app.js`, `calls.js`) help cold-start URL
+recovery but **warm notification taps require a new APK**.
 
-1. Create a Firebase project at <https://console.firebase.google.com> and
-   add an Android app with package `xyz.frogtalk.app`. Download
-   `google-services.json` into `client/mobile/android/app/`.
-2. Add to `client/mobile/android/build.gradle.kts`:
-   ```kotlin
-   plugins { id("com.google.gms.google-services") version "4.4.2" apply false }
-   ```
-   And in `client/mobile/android/app/build.gradle.kts`:
-   ```kotlin
-   plugins { id("com.google.gms.google-services") }
-   dependencies {
-       implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
-       implementation("com.google.firebase:firebase-messaging-ktx")
-   }
-   ```
-3. Add a `FirebaseMessagingService` subclass that, on receipt of a
-   data-only message with `kind=call`, launches `CallService` with
-   `FLAG_RECEIVER_FOREGROUND` and builds a high-priority notification
-   with `setFullScreenIntent(..., true)` on a "Calls" channel of
-   `IMPORTANCE_HIGH` + `CATEGORY_CALL`. This is what bypasses Doze.
-4. On boot / first login, grab the FCM token (`FirebaseMessaging.getInstance()
-   .token`) and `POST /api/push/fcm-subscribe` with `{token, platform:"android"}`.
-   Store it server-side alongside the existing WebPush subscriptions.
-5. In `node/routers/ws.py`'s `_push_always()` call path, if the recipient has an
-   Android FCM token registered, also send an HTTP v1 FCM message with
-   `android.priority=HIGH`, `data={kind:"call", call_id, from_nickname,
-   from_avatar, call_type}` and **no `notification` field** (so the data
-   handler runs even when the app is killed).
-
-Until these steps are done, incoming-call notifications only fire while
-the app is at least in the background, not force-closed.
+Requirements: `google-services.json`, Firebase Messaging dependency, and server
+`FIREBASE_SERVICE_ACCOUNT_JSON` (see `node/deploy/env.example`).
 
 ## Icon Generation
 

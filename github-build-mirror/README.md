@@ -1,65 +1,37 @@
 # FrogTalk Build Mirror
 
-This folder mirrors FrogTalk desktop and Android builds for v1.4.1.
+Mirrored release artifacts for FrogTalk **v1.6.27** (Android `versionCode` **232**).
 
 ## Download Artifacts
 
-### Desktop Builds
+### Android (v1.6.27 / 232)
 
-| Platform | File | Download | Size |
-|----------|------|----------|------|
-| **Linux** (AppImage) | FrogTalk-1.4.1.AppImage | [Download](https://github.com/deadinternetfox/frogtalk/releases/download/v1.4.1/FrogTalk-1.4.1.AppImage) | 114MB |
-| **Linux** (Debian/Ubuntu) | frogtalk_1.4.1_amd64.deb | [Download](https://github.com/deadinternetfox/frogtalk/releases/download/v1.4.1/frogtalk_1.4.1_amd64.deb) | 79MB |
-| **Windows** (Portable EXE) | FrogTalk-1.4.1-win-x64-portable.exe | [Download](https://github.com/deadinternetfox/frogtalk/releases/download/v1.4.1/FrogTalk-1.4.1-win-x64-portable.exe) | 87MB |
-| **Windows** (Portable ZIP) | FrogTalk-1.4.1-win-x64.zip | [Download](https://github.com/deadinternetfox/frogtalk/releases/download/v1.4.1/FrogTalk-1.4.1-win-x64.zip) | 132MB |
+| Artifact | File | Use |
+|----------|------|-----|
+| **APK (sideload)** | [frogtalk-v232.apk](./frogtalk-v232.apk) | Direct install, `/download/android` on nodes |
+| **AAB (Play Store)** | [frogtalk-v232.aab](./frogtalk-v232.aab) | Google Play Console upload |
 
-### Mobile Build
+**Call/FCM fixes in this build:** warm notification tap recovers Accept/Decline UI without WebView reload; FCM uses configured server URL; background ring dedupe. See [docs/ANDROID_CALLS_SECURITY.md](../docs/ANDROID_CALLS_SECURITY.md).
 
-| Platform | File | Download | Version |
-|----------|------|----------|---------|
-| **Android** | frogtalk-v223.apk | [Download](https://github.com/deadinternetfox/frogtalk/releases/download/v1.4.1/frogtalk-v223.apk) | v1.6.19 (versionCode 223) |
+### Verify integrity
 
-## Installation Instructions
-
-### Linux (AppImage)
 ```bash
-wget https://github.com/deadinternetfox/frogtalk/releases/download/v1.4.1/FrogTalk-1.4.1.AppImage
-chmod +x FrogTalk-1.4.1.AppImage
-./FrogTalk-1.4.1.AppImage
+sha256sum -c SHA256SUMS-v232.txt
 ```
 
-### Linux (Debian/Ubuntu)
-```bash
-wget https://github.com/deadinternetfox/frogtalk/releases/download/v1.4.1/frogtalk_1.4.1_amd64.deb
-sudo dpkg -i frogtalk_1.4.1_amd64.deb
-frogtalk
-```
+Checksums: [SHA256SUMS-v232.txt](./SHA256SUMS-v232.txt)
 
-### Windows (Portable EXE)
-Download `FrogTalk-1.4.1-win-x64-portable.exe` and run it directly — no installation needed.
+### GitHub Releases
 
-### Windows (ZIP Archive)
-Download and extract `FrogTalk-1.4.1-win-x64.zip`, then run `FrogTalk.exe` from the extracted folder.
+Upload the same files to [github.com/deadinternetfox/frogtalk/releases](https://github.com/deadinternetfox/frogtalk/releases) tag `v1.6.27` (or attach to `latest`).
 
-### Android
-Download `frogtalk-v223.apk` to your Android device and open it to install.
+## Website download endpoints
 
-## Verify Integrity
+Each node serves the newest `node/static/frogtalk-v*.apk` automatically:
 
-All artifacts are checksummed with SHA256. Verify downloads with:
-```bash
-sha256sum -c SHA256SUMS.txt
-```
+- https://frogtalk.xyz/download/android
+- Your self-hosted node: `https://<your-host>/download/android`
 
-Checksums are available in [SHA256SUMS.txt](./SHA256SUMS.txt).
+## Older desktop builds
 
-## Website Download Endpoints
-
-The main FrogTalk website serves latest builds via dynamic endpoints:
-- `/download/android`
-- `/download/linux` (AppImage)
-- `/download/deb`
-- `/download/windows` (portable EXE)
-- `/download/windows-zip`
-
-These endpoints automatically pull the latest matching artifact from the server's `static/` directory.
+See git history for v1.4.1 desktop mirror entries (AppImage, deb, Windows portable).

@@ -93,6 +93,7 @@ client/mobile/android/frogtalk.keystore
 
 # ── Build mirror (binaries published to GitHub) ────────────────
 !github-build-mirror/*.apk
+!github-build-mirror/*.aab
 !github-build-mirror/*.AppImage
 !github-build-mirror/*.deb
 !github-build-mirror/*.exe

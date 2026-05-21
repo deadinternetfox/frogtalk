@@ -8,6 +8,8 @@ please open a PR.
 
 ---
 
+**Android calls / FCM:** see [ANDROID_CALLS_SECURITY.md](./ANDROID_CALLS_SECURITY.md).
+
 ## TL;DR
 
 | Surface | Crypto | Server can read? | Federates to peers? |

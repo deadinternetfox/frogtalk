@@ -69,7 +69,8 @@ No company in the middle. Messages stay private. Built in the open.
 | Platform | Latest | Notes |
 |----------|--------|-------|
 | 🌐 **Web** | [Open in browser](https://frogtalk.xyz) | No install needed |
-| 🤖 **Android** | [Latest APK](https://frogtalk.xyz/download/android) | Sideload — enable "Unknown Sources" |
+| 🤖 **Android** | [Latest APK](https://frogtalk.xyz/download/android) | v1.6.27 (232) — sideload; FCM incoming calls |
+| 📦 **Android (Play)** | [AAB in build mirror](github-build-mirror/frogtalk-v232.aab) | Google Play upload bundle |
 | 🐧 **Linux AppImage** | [Latest AppImage](https://frogtalk.xyz/download/linux) | `chmod +x` then run |
 | 📦 **Linux .deb** | [Latest .deb](https://frogtalk.xyz/download/deb) | `sudo dpkg -i <downloaded_file>.deb` |
 | 🪟 **Windows (Portable .exe)** | [Latest portable .exe](https://frogtalk.xyz/download/windows) | Portable single-file — just run |

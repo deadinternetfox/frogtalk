@@ -721,8 +721,8 @@ const App = {
    * Fetches pending offer via REST, opens the DM thread, shows #incoming-call.
    */
   async recoverIncomingCallFromNative(pending) {
-    const callId = String(pending?.callId || '').trim();
-    const peerNick = String(pending?.peerNick || '').trim();
+    const callId = String(pending?.callId || '').trim().replace(/\D/g, '');
+    const peerNick = String(pending?.peerNick || '').trim().slice(0, 64);
     if (!callId && !peerNick) return false;
     if (!State.token) {
       this.setPendingIncomingCall({ callId, peerNick, action: '' });

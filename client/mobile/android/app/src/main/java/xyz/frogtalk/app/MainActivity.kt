@@ -889,8 +889,13 @@ class MainActivity : AppCompatActivity() {
         val peerNick = pendingIncomingCallPeer.orEmpty()
         if (callId.isBlank() && peerNick.isBlank()) return
         val wv = webView ?: return
-        val cidJs = callId.replace("\\", "\\\\").replace("'", "\\'")
-        val nickJs = peerNick.replace("\\", "\\\\").replace("'", "\\'")
+        val safeCallId = callId.filter { it.isDigit() }
+        if (safeCallId.isBlank() && peerNick.isBlank()) return
+        val cidJs = safeCallId.replace("\\", "\\\\").replace("'", "\\'")
+        val nickJs = peerNick.filter { it.code in 32..126 && it != '\'' && it != '\\' }
+            .take(64)
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
         val js = """
             try{
               if(window.App&&typeof App.recoverIncomingCallFromNative==='function'){
