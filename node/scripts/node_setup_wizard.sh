@@ -216,9 +216,16 @@ main() {
   ft_ensure_deploy_ownership "$install_dir"
 
   if [[ "$board_nginx_ok" -eq 1 ]] && [[ "$(id -u)" -eq 0 ]] && [[ "$public_url" == http://* ]]; then
-    if [[ "$ASSUME_YES" -eq 1 ]] || ft_ask_yes_no "Enable HTTPS (self-signed for IP; Let's Encrypt if you use a domain)?" "y"; then
+    local _do_ssl=0
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+      _do_ssl=1
+    elif ft_ask_yes_no "Enable HTTPS (self-signed for IP; Let's Encrypt if you use a domain)?" "y"; then
+      _do_ssl=1
+    fi
+    if [[ "$_do_ssl" -eq 1 ]]; then
       bash "$install_dir/node/scripts/install_node_ssl.sh" --install-dir "$install_dir" -y \
         && public_url="$(grep -E '^PUBLIC_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")" \
+        && ft_set_env_value "$ENV_FILE" "FROGTALK_BASE_URL" "$public_url" \
         && ft_ok "HTTPS configured → ${public_url}" \
         || ft_warn "SSL step failed — retry: sudo bash node/scripts/install.sh ssl -y"
     fi

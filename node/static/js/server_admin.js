@@ -135,16 +135,27 @@
       .replaceAll("'", '&#39;');
   }
 
-  /** While > 0, suppress red error flashes during PIN sync / session catch-up. */
-  let _authSettling = 0;
+  /** Suppress red login errors while /server auth is still settling. */
+  let _gateBusy = 0;
+  let _ensureAuthInFlight = null;
 
   function setLoginMessage(msg, isError = false) {
     if (!loginMsg) return;
-    if (_authSettling > 0 && isError) {
+    if (_gateBusy > 0 && isError) {
       return;
     }
     loginMsg.textContent = msg || '';
     loginMsg.style.color = isError ? '#ff9f9f' : '#93ab9a';
+    loginMsg.style.visibility = msg ? 'visible' : 'hidden';
+  }
+
+  function _beginGateBusy(hint) {
+    _gateBusy += 1;
+    setLoginMessage(hint || 'Opening server panel…', false);
+  }
+
+  function _endGateBusy() {
+    _gateBusy = Math.max(0, _gateBusy - 1);
   }
 
   function _sleep(ms) {
@@ -197,22 +208,16 @@
   }
 
   async function _openAdminDashboard() {
-    _authSettling += 1;
-    setLoginMessage('Opening server panel…', false);
-    try {
-      const gate = await _waitForAdminGateOpen();
-      if (!gate.ok) {
-        throw new Error('PIN accepted but session is not cleared for admin access. Hard-refresh and try again.');
-      }
-      await _confirmAdminMe();
-      setLoginMessage('');
-      loginScreen.classList.add('hidden');
-      app.classList.remove('hidden');
-      await refreshDashboard();
-      return true;
-    } finally {
-      _authSettling = Math.max(0, _authSettling - 1);
+    const gate = await _waitForAdminGateOpen();
+    if (!gate.ok) {
+      throw new Error('PIN accepted but session is not cleared for admin access. Hard-refresh and try again.');
     }
+    await _confirmAdminMe();
+    setLoginMessage('');
+    loginScreen.classList.add('hidden');
+    app.classList.remove('hidden');
+    await refreshDashboard();
+    return true;
   }
 
   function setActionMessage(msg, isError = false) {
@@ -1450,6 +1455,7 @@
     } catch {}
     const ok = await Pin.gateAdmin();
     if (!ok) {
+      _endGateBusy();
       setLoginMessage('PIN required to open the server panel.', true);
       return false;
     }
@@ -1458,6 +1464,16 @@
   }
 
   async function ensureAuth() {
+    if (_ensureAuthInFlight) return _ensureAuthInFlight;
+    _ensureAuthInFlight = _ensureAuthInner();
+    try {
+      return await _ensureAuthInFlight;
+    } finally {
+      _ensureAuthInFlight = null;
+    }
+  }
+
+  async function _ensureAuthInner() {
     loginScreen.classList.remove('hidden');
     app.classList.add('hidden');
     setLoginMessage('');
@@ -1475,23 +1491,30 @@
     const legacyBox = document.getElementById('gate-legacy');
     if (legacyBox) legacyBox.classList.toggle('hidden', !gate.legacy_webui_login);
     if (!gate.authenticated) {
-      setLoginMessage('Sign in with a FrogTalk account that has node admin rights.');
+      setLoginMessage('Sign in with a FrogTalk account that has node admin rights.', false);
       return false;
     }
     if (!gate.is_admin) {
-      setLoginMessage('This account is not a node admin. Use an admin account or ask the operator.');
+      setLoginMessage('This account is not a node admin. Use an admin account or ask the operator.', false);
       return false;
     }
-    if (gate.pin_required) {
-      setLoginMessage('');
-      const pinOk = await _runAdminPinGate();
-      if (!pinOk) return false;
-    }
+
+    _beginGateBusy('Opening server panel…');
     try {
+      if (gate.pin_required) {
+        const pinOk = await _runAdminPinGate();
+        if (!pinOk) {
+          _endGateBusy();
+          return false;
+        }
+      }
       return await _openAdminDashboard();
     } catch (e) {
+      _endGateBusy();
       setLoginMessage(e.message || 'Could not load server panel.', true);
       return false;
+    } finally {
+      _endGateBusy();
     }
   }
 
@@ -1616,8 +1639,15 @@
     btn.addEventListener('click', () => runAction(btn.getAttribute('data-action')));
   });
 
-  ensureAuth().catch(() => {
+  ensureAuth().catch((e) => {
+    _endGateBusy();
+    console.error('[server-admin] ensureAuth failed', e);
     setLoginMessage('WebUI unavailable or disabled.', true);
+  });
+
+  window.addEventListener('pageshow', (ev) => {
+    if (!ev.persisted) return;
+    ensureAuth().catch(() => {});
   });
 
   setInterval(() => {

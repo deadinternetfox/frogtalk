@@ -70,29 +70,27 @@ export FROGTALK_FEDERATION_TOKEN="<same-as-main-on-frogtalk.xyz>"
 # export FROGTALK_BOARD_SUBTITLE="G'day — Australian FrogTalk node"
 
 sudo apt install -y git python3 python3-venv python3-pip curl nginx php-fpm php-curl ufw sqlite3
+# setup -y (root): venv, .env, board nginx, auto HTTPS for http:// IPs, optional federation
 sudo bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
-sudo bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
 
-# Setup -y on a root shell configures nginx + PHP for /board/ automatically.
-# Verify Frog Channel:
+set -a && source /opt/frogtalk/.env && set +a
 curl -sS http://127.0.0.1/board/api/info | python3 -m json.tool
+curl -sk "$PUBLIC_URL/api/ping" | python3 -m json.tool
 
-# 6) HTTPS (IP nodes: self-signed; domain: Let's Encrypt)
-sudo bash node/scripts/install.sh ssl -y --install-dir /opt/frogtalk
-# Opens https://YOUR_IP/ (browser asks once to trust self-signed cert)
-# For a green padlock without warnings, use a DNS name + certbot (wizard does this automatically)
+bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 
-# 7) Firewall
+# 6) Firewall
 sudo ufw allow OpenSSH
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
 sudo ufw --force enable
 
-# 8) Verify
+# 7) Verify
 bash node/scripts/install.sh status --install-dir /opt/frogtalk
-curl -sS "$PUBLIC_URL/api/ping"
-curl -sS "$PUBLIC_URL/api/network/status" | python3 -m json.tool
+curl -sk "$PUBLIC_URL/api/ping"
+curl -sk "$PUBLIC_URL/api/network/status" | python3 -m json.tool
+curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
 ```
 
 Open **`$PUBLIC_URL/app`**, log in as user **`admin`** (password in `/opt/frogtalk/.env` → `ADMIN_PASSWORD`), and rotate the password.

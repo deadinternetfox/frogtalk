@@ -63,17 +63,19 @@ export FROGTALK_SERVER_NAME="My FrogTalk Node"
 export FROGTALK_FEDERATION_TOKEN="&lt;openssl-rand-hex-32-on-main&gt;"
 
 sudo bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
-bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
 
-sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+set -a &amp;&amp; source /opt/frogtalk/.env &amp;&amp; set +a
+curl -sk "$PUBLIC_URL/api/ping" | python3 -m json.tool
+curl -sS http://127.0.0.1/board/api/info | python3 -m json.tool
+bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
+
+sudo ufw allow OpenSSH &amp;&amp; sudo ufw allow 80/tcp &amp;&amp; sudo ufw allow 443/tcp
 sudo ufw --force enable
 
-curl -sS "$PUBLIC_URL/api/ping"
-curl -sS http://127.0.0.1/board/api/info | python3 -m json.tool
 curl -sS https://frogtalk.xyz/api/network/servers | python3 -m json.tool
 grep ADMIN_PASSWORD /opt/frogtalk/.env</code></pre>
-      <p class="hint"><code>setup -y</code> with <code>sudo</code> installs nginx for the app <strong>and</strong> PHP routes for <code>/board/</code> (see <a href="#board">Frog Channel</a>).</p>
+      <p class="hint"><code>setup -y</code> (root) installs board nginx, <strong>auto HTTPS</strong> for <code>http://</code> IPs (self-signed), then updates <code>PUBLIC_URL</code> to <code>https://</code>. See <a href="#https">HTTPS</a>.</p>
       <p class="hint">Open <code>$PUBLIC_URL/app</code>, log in as <code>admin</code> (password in <code>.env</code>), rotate the password.</p>
     </section>
 

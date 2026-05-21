@@ -112,6 +112,15 @@
     return false;
   }
 
+  async function _syncAdminGateWithRetry (maxTries) {
+    const tries = maxTries == null ? 6 : maxTries;
+    for (let i = 0; i < tries; i++) {
+      if (await _syncAdminGateToServer()) return true;
+      await new Promise((r) => setTimeout(r, 40 + i * 45));
+    }
+    return false;
+  }
+
   function _readCsrfCookie () {
     try {
       const v = ('; ' + (document.cookie || '')).split('; ft_csrf=');
@@ -717,7 +726,13 @@
       // intentionally does not count — that's the whole point of the
       // "Require PIN for admin areas" toggle.
       if (_wasAdminUnlockedRecently(_ADMIN_GRACE_MS)) {
-        _syncAdminGateToServer().then((ok) => resolve(!!ok));
+        _syncAdminGateWithRetry().then((ok) => {
+          if (ok) { resolve(true); return; }
+          // Grace expired server-side — show PIN instead of failing open.
+          _adminGatePending = true;
+          _unlockResolvers.push(resolve);
+          lockNow();
+        });
         return;
       }
       _adminGatePending = true;
