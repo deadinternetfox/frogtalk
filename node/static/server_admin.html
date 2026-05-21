@@ -948,6 +948,98 @@ input, select {
   color: #bcd4c1;
 }
 .bug-stat-pill b { color: #6ee79c; }
+.operator-url-banner {
+  margin-bottom: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 120, 90, 0.45);
+  background: linear-gradient(135deg, rgba(80, 24, 16, 0.92) 0%, rgba(40, 18, 12, 0.96) 100%);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.operator-url-banner.hidden { display: none !important; }
+.operator-url-banner-inner {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 14px 16px;
+}
+.operator-url-banner-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  background: rgba(255, 106, 106, 0.15);
+  border: 1px solid rgba(255, 140, 120, 0.35);
+}
+.operator-url-banner-copy { flex: 1 1 auto; min-width: 0; }
+.operator-url-banner-copy strong {
+  display: block;
+  font-size: 15px;
+  color: #ffd4cc;
+  margin-bottom: 6px;
+}
+.operator-url-banner-copy p {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #f0b8ae;
+}
+.operator-url-banner-copy code {
+  font-size: 12px;
+  color: #ffe8e4;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.operator-url-banner-steps {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #e8c4bc;
+}
+.operator-url-banner-steps li { margin-bottom: 4px; }
+.operator-url-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.operator-url-banner-actions .btn {
+  font-size: 12px;
+  padding: 6px 12px;
+}
+.operator-url-banner-dismiss {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid rgba(255, 160, 140, 0.35);
+  color: #f0c4bc;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+.operator-url-banner-dismiss:hover {
+  color: #fff;
+  border-color: rgba(255, 180, 160, 0.6);
+  background: rgba(255, 255, 255, 0.04);
+}
+.operator-url-banner--warn {
+  border-color: rgba(255, 179, 71, 0.4);
+  background: linear-gradient(135deg, rgba(60, 40, 12, 0.92) 0%, rgba(32, 24, 10, 0.96) 100%);
+}
+.operator-url-banner--warn .operator-url-banner-icon {
+  background: rgba(255, 179, 71, 0.12);
+  border-color: rgba(255, 179, 71, 0.35);
+}
+.operator-url-banner--warn .operator-url-banner-copy strong { color: #ffe2b8; }
+.operator-url-banner--warn .operator-url-banner-copy p { color: #e8d4a8; }
 </style>
 </head>
 <body>
@@ -972,6 +1064,19 @@ input, select {
 
   <div id="app" class="hidden">
     <div class="wrap">
+      <div id="operator-url-banner" class="operator-url-banner hidden" role="alert" aria-live="polite">
+        <div class="operator-url-banner-inner">
+          <div class="operator-url-banner-icon" aria-hidden="true">⚠</div>
+          <div class="operator-url-banner-copy">
+            <strong id="operator-url-banner-title">Public URL needs attention</strong>
+            <p id="operator-url-banner-body"></p>
+            <ol id="operator-url-banner-steps" class="operator-url-banner-steps"></ol>
+            <div id="operator-url-banner-actions" class="operator-url-banner-actions"></div>
+          </div>
+          <button type="button" class="operator-url-banner-dismiss" id="operator-url-banner-dismiss" title="Hide until PUBLIC_URL or TLS changes">Dismiss</button>
+        </div>
+      </div>
+
       <div class="header">
         <div class="header-main">
           <div class="title-row">
@@ -1010,6 +1115,7 @@ input, select {
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
           <div>
             <div class="section-title" style="margin-bottom:2px;">Image Board</div>
+            <div id="imageboard-url-warnings" class="section-sub" style="display:none;font-size:12px;margin-bottom:6px;"></div>
             <div class="section-sub" id="imageboard-identity" style="font-size:12px;color:var(--muted);">Loading board identity…</div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -1129,11 +1235,18 @@ input, select {
                   <span class="field-hint">When enabled, peers reached via .onion are disabled for sync, inbox delivery, and outbound push. Does not re-enable peers when turned off. Default: off.</span>
                 </span>
               </label>
+              <label class="policy-toggle" for="block-http-only-peers" style="margin-top:10px;">
+                <input type="checkbox" id="block-http-only-peers" autocomplete="off">
+                <span class="policy-toggle-copy">
+                  <strong>Block HTTP-only federation peers automatically</strong>
+                  <span class="field-hint">When enabled, peers whose clearnet <code>base_url</code> is <code>http://</code> (no TLS) are disabled for sync, inbox, and push — same idea as Tor auto-block. Does not re-enable when turned off. Default: off.</span>
+                </span>
+              </label>
               <label class="policy-toggle" for="redact-clearnet-ips" style="margin-top:10px;">
-                <input type="checkbox" id="redact-clearnet-ips" autocomplete="off" checked>
+                <input type="checkbox" id="redact-clearnet-ips" autocomplete="off">
                 <span class="policy-toggle-copy">
                   <strong>Redact clearnet peer IPs in this panel</strong>
-                  <span class="field-hint">When enabled, VPS IPs show as <code>46.250.*.*</code> in Server Admin only (federation still uses the real URL). Domains stay visible. Default: on.</span>
+                  <span class="field-hint" id="redact-clearnet-hint">When enabled, VPS IPs show as <code>46.250.*.*</code> here only — visitors still see the real IP in the browser and on <code>/board/</code> until you use a domain. Domains stay visible. Default: off.</span>
                 </span>
               </label>
               <div class="retention-actions" style="margin-top:10px;">
@@ -1141,7 +1254,7 @@ input, select {
                 <span id="federation-policy-status" class="status-pill state-saved">No local changes</span>
               </div>
               <button class="btn" id="sync-dir-btn" style="width:100%;margin-top:10px;">Sync Official Directory</button>
-              <div class="inline-note">Pulls latest official node metadata and trust state from the directory source. Tor auto-block runs after sync when the policy above is enabled.</div>
+              <div class="inline-note">Pulls latest official node metadata and trust state from the directory source. Tor and HTTP-only auto-blocks run after sync when those policies are enabled.</div>
             </div>
 
             <div class="control-group">

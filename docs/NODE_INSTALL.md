@@ -475,20 +475,29 @@ Open `$PUBLIC_URL/app` — register a test user, join a room, confirm WebSocket 
 
 In the app: **Settings → Network** — probe peers, compare build hash with [frogtalk.xyz](https://frogtalk.xyz) when federating.
 
-### “Clearnet address redacted” in Server Admin
+### Public URL, TLS, and Server Admin warnings
 
-**Server Admin → Federation nodes** masks clearnet **IP addresses** in the UI (e.g. `46.250.*.*`) so operator screenshots do not leak peer VPS IPs. This is **display-only**:
+When `PUBLIC_URL` is a bare IP or plain `http://`, **Server Admin** (`/server`) shows a **dismissable top banner** with fix steps (domain + TLS, `install.sh ssl`, restart). Dismiss is remembered per `PUBLIC_URL` until you change host or TLS — then the banner returns.
+
+The same nodes show warnings on **`/board/`** for visitors (IP in the address bar; HTTP-only clearnet).
 
 | UI | What it means |
 |----|----------------|
-| `Direct clearnet route` | Federation uses the normal `base_url` (HTTP/HTTPS), not Tor |
-| `Clearnet address redacted` | The host is an IP; the admin panel hides the last octets |
-| `IP hidden (Tor)` | Traffic is aimed at an `.onion` hidden service |
-| `Public host` | A DNS name is shown (e.g. `frogtalk.xyz`), or full IP when redaction is off |
+| `no TLS` badge | Peer or this node’s clearnet `base_url` is `http://` |
+| `HTTPS` badge | Clearnet `base_url` uses `https://` |
+| `Direct clearnet route` | Federation uses `base_url`, not Tor |
+| `Clearnet address redacted` | Optional mask `46.250.*.*` in this panel only |
+| `IP hidden (Tor)` | Traffic uses `.onion` |
 
-Federation, probes, and **Settings → Network** still use the real `base_url` stored in the database. Only the Server Admin card redacts bare IPs (optional).
+**Federation Directory** policies (defaults **off**):
 
-**Server Admin → Federation Directory → Redact clearnet peer IPs** (default **on**): masks VPS IPs as `46.250.*.*` in this panel only. Turn off to show full IPs to operators on trusted machines.
+- **Block Tor federation peers** — disables `.onion` routes when enabled.
+- **Block HTTP-only federation peers** — disables peers whose clearnet URL is `http://` (no TLS).
+- **Redact clearnet peer IPs** (default **off**) — masks VPS IPs in Server Admin only; does **not** change the browser bar or `/board/` links while `PUBLIC_URL` is still an IP.
+
+Federation probes and **Settings → Network** always use the real stored `base_url`.
+
+**Trusted TLS:** use a DNS name + Let’s Encrypt (`install.sh ssl`) or Cloudflare in front of origin. Self-signed HTTPS on an IP removes browser warnings only after users accept an untrusted cert — production federation should use a domain.
 
 ---
 

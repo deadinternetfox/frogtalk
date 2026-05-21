@@ -35,7 +35,9 @@
   const channelRetentionStatus = document.getElementById('channel-retention-status');
   const channelRetentionLastSaved = document.getElementById('channel-retention-last-saved');
   const blockTorPeers = document.getElementById('block-tor-peers');
+  const blockHttpOnlyPeers = document.getElementById('block-http-only-peers');
   const redactClearnetIps = document.getElementById('redact-clearnet-ips');
+  const redactClearnetHint = document.getElementById('redact-clearnet-hint');
   const saveFederationPolicyBtn = document.getElementById('save-federation-policy-btn');
   const federationPolicyStatus = document.getElementById('federation-policy-status');
   let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
@@ -45,6 +47,13 @@
   let frogTapTimer = null;
   let retentionBaseline = '';
   let federationPolicyBaseline = '';
+  let lastPublicUrlMeta = null;
+  const operatorUrlBanner = document.getElementById('operator-url-banner');
+  const operatorUrlBannerTitle = document.getElementById('operator-url-banner-title');
+  const operatorUrlBannerBody = document.getElementById('operator-url-banner-body');
+  const operatorUrlBannerSteps = document.getElementById('operator-url-banner-steps');
+  const operatorUrlBannerActions = document.getElementById('operator-url-banner-actions');
+  const operatorUrlBannerDismiss = document.getElementById('operator-url-banner-dismiss');
 
   function retentionSig() {
     const d = Math.max(1, Number(channelActiveDays?.value || 30) || 30);
@@ -67,8 +76,9 @@
 
   function federationPolicySig() {
     const tor = blockTorPeers?.checked ? '1' : '0';
+    const http = blockHttpOnlyPeers?.checked ? '1' : '0';
     const redact = redactClearnetIps?.checked ? '1' : '0';
-    return `${tor}|${redact}`;
+    return `${tor}|${http}|${redact}`;
   }
 
   function setFederationPolicyStatus(state, text) {
@@ -88,8 +98,10 @@
 
   function syncFederationPolicy(policy) {
     const block = !!(policy && policy.block_tor_peers);
-    const redact = policy?.redact_clearnet_ips !== false;
+    const blockHttp = !!(policy && policy.block_http_only_peers);
+    const redact = !!(policy && policy.redact_clearnet_ips);
     if (blockTorPeers) blockTorPeers.checked = block;
+    if (blockHttpOnlyPeers) blockHttpOnlyPeers.checked = blockHttp;
     if (redactClearnetIps) redactClearnetIps.checked = redact;
     federationPolicyBaseline = federationPolicySig();
     setFederationPolicyStatus('saved', 'Loaded from this node');
@@ -106,14 +118,22 @@
         method: 'PUT',
         body: JSON.stringify({
           block_tor_peers: !!blockTorPeers?.checked,
+          block_http_only_peers: !!blockHttpOnlyPeers?.checked,
           redact_clearnet_ips: !!redactClearnetIps?.checked,
         }),
       });
       syncFederationPolicy(payload.federation_policy || {});
-      const n = Number(payload.tor_peers_disabled || 0);
-      const extra = n > 0 ? ` Disabled ${n} Tor peer${n === 1 ? '' : 's'}.` : '';
+      const torN = Number(payload.tor_peers_disabled || 0);
+      const httpN = Number(payload.http_peers_disabled || 0);
+      const parts = [];
+      if (torN > 0) parts.push(`${torN} Tor`);
+      if (httpN > 0) parts.push(`${httpN} HTTP-only`);
+      const extra = parts.length ? ` Disabled ${parts.join(' and ')} peer(s).` : '';
+      const notes = Array.isArray(payload.policy_notes) ? payload.policy_notes : [];
+      const note = notes[0] || '';
       setFederationPolicyStatus('saved', 'Saved on this node');
-      setActionMessage(`Federation policy saved.${extra}`);
+      setActionMessage([note, `Federation policy saved.${extra}`].filter(Boolean).join(' '));
+      if (payload.public_url_meta) applyPublicUrlMeta(payload.public_url_meta);
       await refreshNodes();
     } catch (e) {
       setFederationPolicyStatus('error', 'Save failed');
@@ -571,11 +591,24 @@
 
   function renderServerMeta(payload) {
     const server = payload.server || {};
-    const privacyText = server.privacy_mode === 'tor'
+    const meta = server.public_url_meta || lastPublicUrlMeta;
+    let privacyText = server.privacy_mode === 'tor'
       ? `Privacy: Tor-routed · ${server.public_endpoint || 'hidden onion endpoint'}`
       : `Privacy: Direct route · ${server.public_endpoint || 'hidden endpoint'}`;
+    let privacyClass = server.privacy_mode === 'tor' ? 'success' : 'warn';
+    if (meta && !meta.is_onion) {
+      if (meta.is_http_only_clearnet) {
+        privacyText += ' · ⚠ HTTP only';
+        privacyClass = 'warn';
+      } else if (meta.is_ip_host) {
+        privacyText += meta.is_https ? ' · ⚠ IP + untrusted TLS' : ' · ⚠ IP in URL';
+        privacyClass = 'warn';
+      } else if (meta.is_https) {
+        privacyClass = 'success';
+      }
+    }
     privacyBadge.textContent = privacyText;
-    privacyBadge.className = `badge ${server.privacy_mode === 'tor' ? 'success' : 'warn'}`;
+    privacyBadge.className = `badge ${privacyClass}`;
     federationBadge.textContent = `Node: ${server.display_name || 'FrogTalk Node'} · ${server.server_id || 'local'}`;
     const lastSync = server.directory_last_sync ? `Directory sync ${fmtWhen(server.directory_last_sync)}` : 'Directory sync pending';
     updatedBadge.textContent = `Updated ${fmtWhen(payload.timestamp)} · ${lastSync}`;
@@ -696,12 +729,170 @@
     return `${Math.floor(diff / 86400)}d ago`;
   }
 
+  function operatorUrlBannerStorageKey(meta) {
+    const url = String(meta?.public_url || meta?.host || 'unknown');
+    return `frogtalk.serverAdmin.urlBanner.${url}`;
+  }
+
+  function operatorUrlBannerFingerprint(meta) {
+    if (!meta || typeof meta !== 'object') return '';
+    return [
+      meta.public_url || '',
+      meta.is_ip_host ? 'ip' : '',
+      meta.is_https ? 'https' : 'http',
+      meta.is_http_only_clearnet ? 'http-only' : '',
+    ].join('|');
+  }
+
+  function buildOperatorUrlBannerContent(meta) {
+    if (!meta || meta.is_onion) return null;
+    const host = escHtml(meta.host || 'this host');
+    const pub = escHtml(meta.public_url || `http://${meta.host || ''}`);
+    const issues = [];
+    if (meta.is_ip_host) {
+      issues.push('ip');
+    }
+    if (meta.is_http_only_clearnet || (!meta.is_https && meta.host)) {
+      issues.push('no-tls');
+    } else if (meta.is_ip_host && meta.is_https) {
+      issues.push('ip-tls-untrusted');
+    }
+    if (!issues.length) return null;
+
+    let severity = 'alert';
+    let title = 'Fix your node’s public URL';
+    let body = '';
+    const steps = [];
+    const actions = [];
+
+    if (issues.includes('ip') && issues.includes('no-tls')) {
+      title = 'No domain and no HTTPS';
+      body = `This node is advertised as <code>${pub}</code>. Visitors, federation peers, and <code>/board/</code> all show a bare IP over plain HTTP. Other nodes may auto-block HTTP-only peers.`;
+      steps.push('Point DNS at this VPS and set <code>PUBLIC_URL=https://your.domain</code> in <code>/opt/frogtalk/.env</code>.');
+      steps.push('Run <code>sudo bash /opt/frogtalk/node/scripts/install.sh ssl</code> (Let’s Encrypt) or terminate TLS at Cloudflare (orange cloud).');
+      steps.push('Restart: <code>sudo systemctl restart frogtalk-node</code> and re-sync the federation directory from this panel.');
+      actions.push({ label: 'Open install docs', href: '/docs/node#ssl', external: false });
+    } else if (issues.includes('no-tls')) {
+      title = 'HTTPS not enabled on clearnet';
+      body = `Clearnet traffic uses <code>http://${host}</code>. Browsers and federation treat this as insecure; enable TLS on <code>${host}</code>.`;
+      steps.push('Run <code>sudo bash /opt/frogtalk/node/scripts/install.sh ssl</code> on the server (Certbot or self-signed).');
+      steps.push('Set <code>PUBLIC_URL=https://…</code> in <code>/opt/frogtalk/.env</code> and restart <code>frogtalk-node</code>.');
+      steps.push('If you use Cloudflare, proxy the hostname and use Full (strict) to origin.');
+    } else if (issues.includes('ip-tls-untrusted')) {
+      severity = 'warn';
+      title = 'IP address with untrusted certificate';
+      body = `TLS is on, but the URL is still <code>${pub}</code>. Browsers show <code>NET::ERR_CERT_AUTHORITY_INVALID</code> for self-signed IP certs; the address bar still exposes your VPS IP.`;
+      steps.push('Use a real domain in <code>PUBLIC_URL</code> and issue Let’s Encrypt or Cloudflare origin TLS.');
+      steps.push('Self-signed HTTPS on an IP is only for testing — not for production federation.');
+    } else if (issues.includes('ip')) {
+      severity = 'warn';
+      title = 'No domain — visitors see your server IP';
+      body = `The browser address bar and board links use <code>${host}</code>. “Redact clearnet IPs” in Federation Directory only masks IPs in this admin panel — it does not change what users see.`;
+      steps.push('Add a DNS name, set <code>PUBLIC_URL=https://your.domain</code>, and run the SSL installer.');
+      steps.push('Re-announce to the hub after <code>PUBLIC_URL</code> changes.');
+    }
+
+    actions.push({ label: 'Copy PUBLIC_URL fix', action: 'copy-env', value: meta.is_https && meta.host ? `PUBLIC_URL=https://${meta.host}` : `PUBLIC_URL=https://your.domain` });
+
+    return { severity, title, body, steps, actions, fingerprint: operatorUrlBannerFingerprint(meta) };
+  }
+
+  function renderOperatorUrlBanner(meta) {
+    lastPublicUrlMeta = meta || null;
+    if (!operatorUrlBanner) return;
+    const content = buildOperatorUrlBannerContent(meta);
+    if (!content) {
+      operatorUrlBanner.classList.add('hidden');
+      return;
+    }
+    const key = operatorUrlBannerStorageKey(meta);
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || '{}');
+      if (stored.fingerprint === content.fingerprint && stored.dismissed) {
+        operatorUrlBanner.classList.add('hidden');
+        return;
+      }
+    } catch (_) { /* ignore */ }
+
+    operatorUrlBanner.classList.remove('hidden');
+    operatorUrlBanner.classList.toggle('operator-url-banner--warn', content.severity === 'warn');
+    if (operatorUrlBannerTitle) operatorUrlBannerTitle.textContent = content.title;
+    if (operatorUrlBannerBody) operatorUrlBannerBody.innerHTML = content.body;
+    if (operatorUrlBannerSteps) {
+      operatorUrlBannerSteps.innerHTML = content.steps.map((s) => `<li>${s}</li>`).join('');
+      operatorUrlBannerSteps.style.display = content.steps.length ? '' : 'none';
+    }
+    if (operatorUrlBannerActions) {
+      operatorUrlBannerActions.innerHTML = content.actions.map((a, i) => {
+        if (a.href) {
+          return `<a class="btn" href="${escHtml(a.href)}"${a.external ? ' target="_blank" rel="noopener"' : ''}>${escHtml(a.label)}</a>`;
+        }
+        return `<button type="button" class="btn" data-banner-action="${i}">${escHtml(a.label)}</button>`;
+      }).join('');
+      operatorUrlBannerActions.querySelectorAll('[data-banner-action]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const idx = Number(btn.getAttribute('data-banner-action'));
+          const act = content.actions[idx];
+          if (act?.action === 'copy-env' && act.value) {
+            try {
+              await navigator.clipboard.writeText(act.value);
+              setActionMessage(`Copied: ${act.value}`);
+            } catch (e) {
+              setActionMessage('Could not copy to clipboard', true);
+            }
+          }
+        });
+      });
+    }
+    operatorUrlBanner.dataset.fingerprint = content.fingerprint;
+  }
+
+  function dismissOperatorUrlBanner() {
+    if (!operatorUrlBanner || !lastPublicUrlMeta) return;
+    const key = operatorUrlBannerStorageKey(lastPublicUrlMeta);
+    try {
+      localStorage.setItem(key, JSON.stringify({
+        dismissed: true,
+        fingerprint: operatorUrlBanner.dataset.fingerprint || operatorUrlBannerFingerprint(lastPublicUrlMeta),
+        at: Date.now(),
+      }));
+    } catch (_) { /* ignore */ }
+    operatorUrlBanner.classList.add('hidden');
+  }
+
+  function applyPublicUrlMeta(meta) {
+    if (!meta || typeof meta !== 'object') return;
+    renderOperatorUrlBanner(meta);
+    const warnEl = document.getElementById('imageboard-url-warnings');
+    if (warnEl) {
+      const bits = [];
+      if (meta.is_ip_host) {
+        bits.push('<span class="mini-badge danger">IP in URL</span> See banner above — visitors still see <code>' + escHtml(meta.host || 'this IP') + '</code>.');
+      }
+      if (meta.is_http_only_clearnet) {
+        bits.push('<span class="mini-badge danger">HTTP only</span> Enable HTTPS (banner above).');
+      }
+      if (meta.recommend_redact_clearnet_ips && redactClearnetHint && !redactClearnetIps?.checked) {
+        redactClearnetHint.textContent = 'Optional: mask VPS IPs in this panel only. Does not change the address bar or /board/ while PUBLIC_URL is an IP.';
+      }
+      if (bits.length) {
+        warnEl.style.display = 'block';
+        warnEl.style.color = '#ffb0a8';
+        warnEl.innerHTML = bits.join(' ');
+      } else {
+        warnEl.style.display = 'none';
+        warnEl.innerHTML = '';
+      }
+    }
+  }
+
   function renderImageboardSection(payload) {
     const grid = document.getElementById('imageboard-stats-grid');
     const idEl = document.getElementById('imageboard-identity');
     const msg = document.getElementById('imageboard-msg');
     const peersEl = document.getElementById('imageboard-peers');
     if (!grid || !idEl) return;
+    if (payload?.public_url_meta) applyPublicUrlMeta(payload.public_url_meta);
     if (!payload || !payload.available) {
       grid.innerHTML = '';
       idEl.textContent = 'Imageboard data not found on this node.';
@@ -748,12 +939,13 @@
       } else {
         peersEl.innerHTML = peers.map((p) => {
           const tor = p.tor_only ? '<span style="color:#ffaa33;">🧅 </span>' : '';
+          const tlsBadge = p.tls_insecure ? '<span class="mini-badge danger" style="font-size:10px;">no TLS</span> ' : (p.tls_secure ? '<span class="mini-badge success" style="font-size:10px;">HTTPS</span> ' : '');
           const t = p.topic ? `<span style="color:#6baf6b;"> #${escHtml(p.topic)}</span>` : '';
           const seen = p.last_seen ? ` · seen ${escHtml(fmtRelative(p.last_seen))}` : '';
           const isBlocked = !!p.blocked;
           const wrapStyle = `display:inline-flex;gap:6px;align-items:center;padding:4px 4px 4px 10px;border:1px solid ${isBlocked ? '#7a3a3a' : 'var(--border,#333)'};border-radius:999px;background:${isBlocked ? 'rgba(180,60,60,.08)' : 'rgba(255,255,255,.02)'};font-size:12px;${isBlocked ? 'opacity:.6;' : ''}`;
           const blockBtn = `<button type="button" data-peer-block="${escHtml(p.node_id || '')}" data-blocked="${isBlocked ? '1' : '0'}" title="${isBlocked ? 'Unblock — show in nav' : 'Block — hide from /board/ nav'}" style="margin-left:4px;padding:3px 8px;border:1px solid ${isBlocked ? '#7a3a3a' : '#3a5544'};background:${isBlocked ? 'rgba(180,60,60,.18)' : 'rgba(127,210,167,.08)'};color:${isBlocked ? '#ff9b9b' : '#7fd2a7'};border-radius:999px;font-size:11px;cursor:pointer;">${isBlocked ? 'Unblock' : 'Block'}</button>`;
-          const link = `<a href="${escHtml(p.url || '#')}" target="_blank" rel="noopener" style="display:inline-flex;gap:6px;align-items:center;text-decoration:none;color:var(--text,#eee);">${tor}<b>${escHtml(p.title || p.url || 'peer')}</b><span style="color:var(--muted);">@${escHtml(p.node_id || '?')}</span>${t}<span style="color:var(--muted);font-size:11px;">${seen}</span>${isBlocked ? '<span style="color:#ff9b9b;font-size:11px;"> · blocked</span>' : ''}</a>`;
+          const link = `<a href="${escHtml(p.url || '#')}" target="_blank" rel="noopener" style="display:inline-flex;gap:6px;align-items:center;text-decoration:none;color:var(--text,#eee);">${tor}${tlsBadge}<b>${escHtml(p.title || p.url || 'peer')}</b><span style="color:var(--muted);">@${escHtml(p.node_id || '?')}</span>${t}<span style="color:var(--muted);font-size:11px;">${seen}</span>${isBlocked ? '<span style="color:#ff9b9b;font-size:11px;"> · blocked</span>' : ''}</a>`;
           return `<span style="${wrapStyle}">${link}${blockBtn}</span>`;
         }).join('');
       }
@@ -1050,6 +1242,9 @@
               ${n.official ? '<span class="mini-badge success">official</span>' : ''}
               ${n.onion_available ? '<span class="mini-badge">onion</span>' : ''}
               ${n.policy_tor_blocked ? '<span class="mini-badge" style="border-color:#7a4a2a;color:#ffb347;">tor policy</span>' : ''}
+              ${n.policy_http_blocked ? '<span class="mini-badge" style="border-color:#7a4a2a;color:#ffb347;">http policy</span>' : ''}
+              ${n.tls_insecure ? '<span class="mini-badge danger">no TLS</span>' : ''}
+              ${n.tls_secure && n.route_mode === 'clearnet' ? '<span class="mini-badge success">HTTPS</span>' : ''}
             </div>
             <div class="node-endpoint">${escHtml(n.display_endpoint || 'hidden endpoint')}</div>
             <div class="node-meta">${escHtml(n.transport_label || 'Route unknown')} · ${escHtml(n.privacy_label || 'Privacy unknown')} · ${escHtml(n.region || 'Unknown region')} · ${caps} cap${caps === 1 ? '' : 's'} · ${escHtml(lastSeen)}</div>
@@ -1434,6 +1629,8 @@
     latencyBadge.textContent = `Latency: ${pingMs} ms`;
     syncChannelRetention(config.channel_retention || {});
     syncFederationPolicy(config.federation_policy || {});
+    if (config.public_url_meta) applyPublicUrlMeta(config.public_url_meta);
+    else if (stats?.server?.public_url_meta) applyPublicUrlMeta(stats.server.public_url_meta);
     renderServerMeta(stats);
     renderStats(stats, pingMs);
     renderResources(stats);
@@ -1616,7 +1813,9 @@
   saveFederationPolicyBtn?.addEventListener('click', () => {
     saveFederationPolicy().catch(() => {});
   });
+  operatorUrlBannerDismiss?.addEventListener('click', dismissOperatorUrlBanner);
   blockTorPeers?.addEventListener('change', refreshFederationPolicyDirtyUi);
+  blockHttpOnlyPeers?.addEventListener('change', refreshFederationPolicyDirtyUi);
   redactClearnetIps?.addEventListener('change', refreshFederationPolicyDirtyUi);
   channelActiveDays?.addEventListener('input', refreshRetentionDirtyUi);
   channelAutoDeleteDays?.addEventListener('input', refreshRetentionDirtyUi);

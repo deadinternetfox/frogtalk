@@ -3501,19 +3501,22 @@ def get_channel_auto_delete_days() -> int:
 
 
 FEDERATION_BLOCK_TOR_PEERS_KEY = "federation.block_tor_peers"
+FEDERATION_BLOCK_HTTP_ONLY_PEERS_KEY = "federation.block_http_only_peers"
 FEDERATION_REDACT_CLEARNET_IPS_KEY = "federation.redact_clearnet_ips"
 
 
 def get_federation_policy_settings() -> Dict[str, object]:
     """Operator federation policy stored in node_config."""
     raw_tor = (get_config(FEDERATION_BLOCK_TOR_PEERS_KEY) or "0").strip().lower()
+    raw_http = (get_config(FEDERATION_BLOCK_HTTP_ONLY_PEERS_KEY) or "0").strip().lower()
     raw_redact = get_config(FEDERATION_REDACT_CLEARNET_IPS_KEY)
     if raw_redact is None or str(raw_redact).strip() == "":
-        redact_clearnet_ips = True
+        redact_clearnet_ips = False
     else:
         redact_clearnet_ips = str(raw_redact).strip().lower() in ("1", "true", "yes", "on")
     return {
         "block_tor_peers": raw_tor in ("1", "true", "yes", "on"),
+        "block_http_only_peers": raw_http in ("1", "true", "yes", "on"),
         "redact_clearnet_ips": redact_clearnet_ips,
     }
 
@@ -3521,9 +3524,12 @@ def get_federation_policy_settings() -> Dict[str, object]:
 def set_federation_policy_settings(
     block_tor_peers: bool,
     *,
+    block_http_only_peers: bool | None = None,
     redact_clearnet_ips: bool | None = None,
 ) -> Dict[str, object]:
     set_config(FEDERATION_BLOCK_TOR_PEERS_KEY, "1" if block_tor_peers else "0")
+    if block_http_only_peers is not None:
+        set_config(FEDERATION_BLOCK_HTTP_ONLY_PEERS_KEY, "1" if block_http_only_peers else "0")
     if redact_clearnet_ips is not None:
         set_config(FEDERATION_REDACT_CLEARNET_IPS_KEY, "1" if redact_clearnet_ips else "0")
     return get_federation_policy_settings()

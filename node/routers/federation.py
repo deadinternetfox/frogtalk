@@ -683,6 +683,16 @@ def peer_uses_tor_route(server: dict) -> bool:
         return _url_uses_tor(onion or base)
 
 
+def peer_uses_http_only_clearnet(server: dict) -> bool:
+    """True when the peer's advertised clearnet base_url is plain http://."""
+    from public_url_policy import url_is_http_only_clearnet
+
+    base = _normalize_base_url(str((server or {}).get("base_url") or ""))
+    if not base:
+        return False
+    return url_is_http_only_clearnet(base)
+
+
 def apply_tor_peer_blocks_if_enabled() -> int:
     """Disable federation peers that route over Tor when policy is on.
 
@@ -701,6 +711,23 @@ def apply_tor_peer_blocks_if_enabled() -> int:
         if not peer.get("enabled"):
             continue
         if peer_uses_tor_route(peer) and db.set_federation_server_enabled(sid, False):
+            disabled += 1
+    return disabled
+
+
+def apply_http_only_peer_blocks_if_enabled() -> int:
+    """Disable federation peers whose clearnet URL is http:// when policy is on."""
+    if not db.get_federation_policy_settings().get("block_http_only_peers"):
+        return 0
+    local_id = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
+    disabled = 0
+    for peer in db.list_federation_servers_admin(include_disabled=True):
+        sid = str(peer.get("server_id") or "").strip()
+        if not sid or sid == local_id:
+            continue
+        if not peer.get("enabled"):
+            continue
+        if peer_uses_http_only_clearnet(peer) and db.set_federation_server_enabled(sid, False):
             disabled += 1
     return disabled
 
@@ -1598,6 +1625,7 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
         imported += 1
 
     tor_disabled = apply_tor_peer_blocks_if_enabled()
+    http_disabled = apply_http_only_peer_blocks_if_enabled()
     try:
         pinned = await asyncio.to_thread(ensure_peer_pubkeys_pinned)
         if pinned:
@@ -1613,6 +1641,7 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
         "skipped": skipped,
         "total": len(entries),
         "tor_peers_disabled": tor_disabled,
+        "http_peers_disabled": http_disabled,
         "duplicates_pruned": pruned,
     }
 
@@ -2143,11 +2172,16 @@ def _insert_inbox_events_sync(events: list[dict]) -> tuple[int, int]:
         if not origin:
             rejected += 1
             continue
-        if db.get_federation_policy_settings().get("block_tor_peers"):
+        _fed_policy = db.get_federation_policy_settings()
+        if _fed_policy.get("block_tor_peers") or _fed_policy.get("block_http_only_peers"):
             origin_row = db.get_federation_server_row(origin)
-            if origin_row and peer_uses_tor_route(origin_row):
-                rejected += 1
-                continue
+            if origin_row:
+                if _fed_policy.get("block_tor_peers") and peer_uses_tor_route(origin_row):
+                    rejected += 1
+                    continue
+                if _fed_policy.get("block_http_only_peers") and peer_uses_http_only_clearnet(origin_row):
+                    rejected += 1
+                    continue
         # SECURITY-PASS-2: when the transport auth was per-peer signed
         # (request-level), bind the event to that peer. A peer that
         # signs the HTTP request must not be able to ship events
@@ -3007,11 +3041,15 @@ def _outbox_collect_targets_sync() -> tuple[str, dict[str, str], list[dict]]:
     peers = db.list_federation_servers(official_only=False)
     peer_urls: dict[str, str] = {}
     seen_urls: set[str] = set()
-    block_tor = bool(db.get_federation_policy_settings().get("block_tor_peers"))
+    _fed_policy = db.get_federation_policy_settings()
+    block_tor = bool(_fed_policy.get("block_tor_peers"))
+    block_http = bool(_fed_policy.get("block_http_only_peers"))
     for srv in peers:
         if not srv.get("enabled"):
             continue
         if block_tor and peer_uses_tor_route(srv):
+            continue
+        if block_http and peer_uses_http_only_clearnet(srv):
             continue
         peer_sid = str(srv.get("server_id") or "").strip()
         if not peer_sid or peer_sid == local_server_id:

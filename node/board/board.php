@@ -1347,6 +1347,9 @@ if ($singleThread) {
         /* Announcement */
         .board-announcement { background: rgba(255,140,0,0.08); border: 1px solid rgba(255,140,0,0.3); border-radius: 6px; padding: 10px 15px; margin-bottom: 15px; color: #ffaa33; font-size: 13px; }
         .board-announcement strong { color: #ff8c00; }
+        .board-url-warning { background: rgba(255,80,80,0.1); border-color: rgba(255,100,100,0.45); color: #ffb0a8; }
+        .board-url-warning strong { color: #ff7070; }
+        .board-url-warning code { color: #ffd4cc; font-size: 12px; }
         
         /* Tip dropbox disclaimer */
         .tip-disclaimer { background: rgba(0,255,65,0.04); border: 1px solid rgba(0,255,65,0.15); border-radius: 6px; padding: 12px 16px; margin-bottom: 15px; display: flex; align-items: flex-start; gap: 12px; }
@@ -3111,6 +3114,22 @@ if ($singleThread) {
                     <?php endforeach; ?>
                 </div>
             </nav>
+            <?php endif; ?>
+
+            <?php $_boardUrlWarn = boardPublicUrlWarnings(); ?>
+            <?php if (!empty($_boardUrlWarn['show_ip_warning'])): ?>
+                <div class="board-announcement board-url-warning" role="status">
+                    <strong>⚠️ No domain configured.</strong>
+                    Visitors see this board at <code><?= htmlspecialchars($_boardUrlWarn['host'] ?: 'your server IP') ?></code> in the browser address bar and in federation links.
+                    Server Admin can mask IPs in the operator panel only — that does not change what users see.
+                    Point <code>PUBLIC_URL</code> at a domain with trusted TLS (Let's Encrypt or Cloudflare) for a normal URL.
+                </div>
+            <?php elseif (!empty($_boardUrlWarn['show_http_warning'])): ?>
+                <div class="board-announcement board-url-warning" role="status">
+                    <strong>⚠️ No TLS on clearnet.</strong>
+                    This board is served over plain <code>http://</code>. Federation peers and browsers may warn or refuse HTTP-only nodes.
+                    Run <code>sudo bash node/scripts/install.sh ssl</code> (self-signed on IP) or use a domain with Let's Encrypt / Cloudflare for trusted HTTPS.
+                </div>
             <?php endif; ?>
 
             <div class="board-header">

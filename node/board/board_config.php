@@ -1111,6 +1111,65 @@ function shouldShowTorGateway(): bool {
     return (bool)($s['tor_only'] ?? false) && !isTorRequest();
 }
 
+/** Read PUBLIC_URL from the node install .env (best-effort). */
+function boardReadPublicUrl(): string {
+    static $cached = null;
+    if ($cached !== null) {
+        return $cached;
+    }
+    $cached = '';
+    foreach ([__DIR__ . '/../.env', __DIR__ . '/../../.env'] as $envFile) {
+        if (!is_readable($envFile)) {
+            continue;
+        }
+        foreach (file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+            if (!str_starts_with($line, 'PUBLIC_URL=')) {
+                continue;
+            }
+            $cached = rtrim(trim(substr($line, strlen('PUBLIC_URL=')), " \t\"'"), '/');
+            break 2;
+        }
+    }
+    return $cached;
+}
+
+function boardHostIsIp(string $host): bool {
+    $host = strtolower(trim($host));
+    if ($host === '') {
+        return false;
+    }
+    return filter_var($host, FILTER_VALIDATE_IP) !== false;
+}
+
+/** Warnings for operators when the board runs on a bare IP or without TLS. */
+function boardPublicUrlWarnings(): array {
+    $publicUrl = boardReadPublicUrl();
+    $host = '';
+    if ($publicUrl !== '') {
+        $parts = parse_url($publicUrl);
+        $host = strtolower((string)($parts['host'] ?? ''));
+    }
+    if ($host === '') {
+        $host = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
+    }
+    $isOnion = str_contains($host, '.onion');
+    $isIp = boardHostIsIp($host);
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || str_starts_with(strtolower($publicUrl), 'https://');
+    return [
+        'public_url' => $publicUrl,
+        'host' => $host,
+        'is_ip_host' => $isIp && !$isOnion,
+        'is_https' => $isHttps,
+        'show_ip_warning' => $isIp && !$isOnion,
+        'show_http_warning' => !$isHttps && !$isOnion && $host !== '',
+    ];
+}
+
 /**
  * Public-facing board info (used by /board/api/info and federated discovery).
  */
@@ -1118,6 +1177,7 @@ function getBoardInfo(): array {
     $s = loadSettings();
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $warnings = boardPublicUrlWarnings();
     return [
         'node_id'      => getNodeId(),
         'title'        => (string)($s['board_title'] ?? '/board/'),
@@ -1127,6 +1187,7 @@ function getBoardInfo(): array {
         'tor_only'     => (bool)($s['tor_only'] ?? false),
         'tor_onion_url'=> (string)($s['tor_onion_url'] ?? ''),
         'version'      => 1,
+        'public_url_warnings' => $warnings,
     ];
 }
 

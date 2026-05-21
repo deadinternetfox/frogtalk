@@ -40,14 +40,16 @@ class TorModeTests(unittest.TestCase):
         self.assertEqual(row["base_url"], "")
         self.assertEqual(row["onion_url"], "http://examplehiddenservice.onion")
 
+    @mock.patch("routers.server_admin.federation_router._tor_mode_enabled", return_value=True)
     @mock.patch.dict(os.environ, {"FROGTALK_TOR_ENABLED": "1"}, clear=False)
     @mock.patch("database.get_federation_server_transport", return_value="auto")
-    def test_admin_node_view_prefers_tor_safe_endpoint(self, _transport_mock):
+    def test_admin_node_view_prefers_tor_safe_endpoint(self, _transport_mock, _tor_mock):
         view = server_admin._admin_node_view({
             "server_id": "srv_test",
             "display_name": "Test",
             "base_url": "http://31.220.92.120",
             "onion_url": "http://examplehiddenserviceabcdefghijklmnop.onion",
+            "transport_preference": "onion",
             "trust_tier": "community",
             "enabled": 1,
             "official": 0,
@@ -56,9 +58,10 @@ class TorModeTests(unittest.TestCase):
         self.assertEqual(view["route_mode"], "tor")
         self.assertTrue(view["onion_available"])
         self.assertIn("onion", view["display_endpoint"])
-        self.assertEqual(view["privacy_label"], "IP hidden")
+        self.assertEqual(view["privacy_label"], "IP hidden (Tor)")
 
-    def test_admin_node_view_redacts_clearnet_ip(self):
+    @mock.patch("database.get_federation_policy_settings", return_value={"block_tor_peers": False, "block_http_only_peers": False, "redact_clearnet_ips": True})
+    def test_admin_node_view_redacts_clearnet_ip(self, _policy_mock):
         view = server_admin._admin_node_view({
             "server_id": "srv_test",
             "display_name": "Test",
@@ -73,7 +76,7 @@ class TorModeTests(unittest.TestCase):
         self.assertEqual(view["display_endpoint"], "31.220.*.*")
         self.assertEqual(view["privacy_label"], "Clearnet address redacted")
 
-    @mock.patch("database.get_federation_policy_settings", return_value={"block_tor_peers": False, "redact_clearnet_ips": False})
+    @mock.patch("database.get_federation_policy_settings", return_value={"block_tor_peers": False, "block_http_only_peers": False, "redact_clearnet_ips": False})
     def test_admin_node_view_shows_clearnet_ip_when_redact_off(self, _policy_mock):
         view = server_admin._admin_node_view({
             "server_id": "srv_test",
@@ -119,6 +122,31 @@ class TorModeTests(unittest.TestCase):
             "transport_preference": "auto",
         }
         self.assertEqual(auth._peer_target(row), "https://example.com")
+
+    def test_peer_uses_http_only_clearnet(self):
+        self.assertTrue(federation.peer_uses_http_only_clearnet({"base_url": "http://31.220.92.120"}))
+        self.assertFalse(federation.peer_uses_http_only_clearnet({"base_url": "https://frogtalk.xyz"}))
+        self.assertFalse(federation.peer_uses_http_only_clearnet({"base_url": "http://abcdefghijklmnop.onion"}))
+
+    @mock.patch("database.get_federation_policy_settings", return_value={"block_tor_peers": False, "block_http_only_peers": False, "redact_clearnet_ips": False})
+    def test_admin_node_view_flags_http_only_tls(self, _policy_mock):
+        view = server_admin._admin_node_view({
+            "server_id": "srv_http",
+            "display_name": "HTTP Node",
+            "base_url": "http://10.0.0.5",
+            "onion_url": "",
+            "trust_tier": "community",
+            "enabled": 1,
+            "official": 0,
+            "capabilities": [],
+        })
+        self.assertTrue(view["tls_insecure"])
+        self.assertFalse(view["tls_secure"])
+
+    def test_federation_policy_redact_defaults_off(self):
+        with mock.patch("database.get_config", return_value=None):
+            pol = __import__("database").get_federation_policy_settings()
+        self.assertFalse(pol["redact_clearnet_ips"])
 
 
 if __name__ == "__main__":

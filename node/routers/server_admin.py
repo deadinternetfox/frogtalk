@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 import database as db
+from public_url_policy import analyze_public_url, url_is_http_only_clearnet, url_is_https
 from ws_manager import manager
 from routers import federation as federation_router
 from deps import (
@@ -188,7 +189,7 @@ def _resource_snapshot() -> dict:
     }
 
 
-def _safe_host_label(url: str, *, redact_clearnet_ips: bool = True) -> str:
+def _safe_host_label(url: str, *, redact_clearnet_ips: bool = False) -> str:
     target = (url or "").strip()
     if not target:
         return ""
@@ -228,7 +229,8 @@ def _admin_node_view(node: dict) -> dict:
         target = str(raw.get("onion_url") or raw.get("base_url") or "").strip()
     onion_url = str(raw.get("onion_url") or "").strip()
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
-    _redact_ips = bool(db.get_federation_policy_settings().get("redact_clearnet_ips", True))
+    _policy = db.get_federation_policy_settings()
+    _redact_ips = bool(_policy.get("redact_clearnet_ips", False))
     display_endpoint = _safe_host_label(
         onion_url if route_mode == "tor" and onion_url else target,
         redact_clearnet_ips=_redact_ips,
@@ -242,12 +244,14 @@ def _admin_node_view(node: dict) -> dict:
         except Exception:
             _clearnet_ip_redacted = False
     transport_preference = str(raw.get("transport_preference") or "auto").strip().lower() or "auto"
-    tor_policy = bool(db.get_federation_policy_settings().get("block_tor_peers"))
-    policy_tor_blocked = (
-        tor_policy
-        and route_mode == "tor"
-        and not bool(raw.get("enabled", True))
-    )
+    base_url = str(raw.get("base_url") or "").strip()
+    tls_insecure = bool(base_url) and url_is_http_only_clearnet(base_url)
+    tls_secure = bool(base_url) and url_is_https(base_url)
+    tor_policy = bool(_policy.get("block_tor_peers"))
+    http_policy = bool(_policy.get("block_http_only_peers"))
+    enabled = bool(raw.get("enabled", True))
+    policy_tor_blocked = tor_policy and route_mode == "tor" and not enabled
+    policy_http_blocked = http_policy and tls_insecure and not enabled
     return {
         "server_id": raw.get("server_id"),
         "display_name": raw.get("display_name"),
@@ -268,6 +272,9 @@ def _admin_node_view(node: dict) -> dict:
             else ("Clearnet address redacted" if _clearnet_ip_redacted else "Public host")
         ),
         "policy_tor_blocked": policy_tor_blocked,
+        "policy_http_blocked": policy_http_blocked,
+        "tls_insecure": tls_insecure,
+        "tls_secure": tls_secure,
     }
 
 
@@ -276,16 +283,16 @@ def _local_admin_server_view() -> dict:
     public = federation_router._public_server_view(local, onion_only=federation_router._tor_mode_enabled())
     endpoint = federation_router._public_server_target(public)
     tor_enabled = bool(federation_router._tor_mode_enabled())
+    url_meta = analyze_public_url()
+    _redact = bool(db.get_federation_policy_settings().get("redact_clearnet_ips", False))
     return {
         "server_id": public.get("server_id") or "",
         "display_name": public.get("display_name") or "FrogTalk Node",
         "tor_enabled": tor_enabled,
-        "public_endpoint": _safe_host_label(
-            endpoint,
-            redact_clearnet_ips=bool(db.get_federation_policy_settings().get("redact_clearnet_ips", True)),
-        ),
+        "public_endpoint": _safe_host_label(endpoint, redact_clearnet_ips=_redact),
         "privacy_mode": "tor" if tor_enabled else "standard",
         "directory_last_sync": db.get_config("federation.official_directory_last_sync") or "",
+        "public_url_meta": url_meta,
     }
 
 
@@ -470,7 +477,8 @@ class ChannelRetentionBody(BaseModel):
 
 class FederationPolicyBody(BaseModel):
     block_tor_peers: bool = False
-    redact_clearnet_ips: bool = True
+    block_http_only_peers: bool = False
+    redact_clearnet_ips: bool = False
 
 
 def _cfg_easter_enabled() -> bool:
@@ -573,6 +581,7 @@ async def server_webui_config(request: Request):
         "gate": gate,
         "channel_retention": db.get_channel_retention_settings(),
         "federation_policy": db.get_federation_policy_settings(),
+        "public_url_meta": analyze_public_url(),
         "easter_egg": _current_easter_egg_payload(),
     }
 
@@ -605,15 +614,28 @@ async def server_admin_put_federation_policy(body: FederationPolicyBody, request
 
     policy = db.set_federation_policy_settings(
         bool(body.block_tor_peers),
+        block_http_only_peers=bool(body.block_http_only_peers),
         redact_clearnet_ips=bool(body.redact_clearnet_ips),
     )
     tor_disabled = 0
+    http_disabled = 0
     if policy.get("block_tor_peers"):
         tor_disabled = federation_router.apply_tor_peer_blocks_if_enabled()
+    if policy.get("block_http_only_peers"):
+        http_disabled = federation_router.apply_http_only_peer_blocks_if_enabled()
+    url_meta = analyze_public_url()
+    policy_notes: list[str] = []
+    if bool(body.redact_clearnet_ips) and url_meta.get("is_ip_host"):
+        policy_notes.append(
+            "Redact clearnet IPs only masks addresses in Server Admin. Visitors still see this node's IP in the browser bar and on /board/ until you use a domain with trusted TLS."
+        )
     return {
         "ok": True,
         "federation_policy": policy,
         "tor_peers_disabled": tor_disabled,
+        "http_peers_disabled": http_disabled,
+        "policy_notes": policy_notes,
+        "public_url_meta": url_meta,
     }
 
 
@@ -936,21 +958,26 @@ async def server_admin_imageboard_stats(request: Request):
         for p in raw_peers:
             if not isinstance(p, dict): continue
             nid = str(p.get("node_id") or "")
+            peer_url = str(p.get("url") or "")
             peers.append({
                 "node_id":       nid,
                 "title":         str(p.get("title") or ""),
                 "subtitle":      str(p.get("subtitle") or ""),
                 "topic":         str(p.get("topic") or ""),
-                "url":           str(p.get("url") or ""),
+                "url":           peer_url,
                 "tor_only":      bool(p.get("tor_only") or False),
                 "tor_onion_url": str(p.get("tor_onion_url") or ""),
                 "last_seen":     int(p.get("last_seen") or 0),
                 "blocked":       bool(nid and nid in blocked_set),
+                "tls_insecure":  url_is_http_only_clearnet(peer_url),
+                "tls_secure":    url_is_https(peer_url) if peer_url else False,
             })
 
+    url_meta = analyze_public_url()
     return {
         "available": available,
         "data_dir": root,
+        "public_url_meta": url_meta,
         "identity": {
             "title": settings.get("board_title") or "/board/",
             "subtitle": settings.get("board_subtitle") or "",
@@ -1170,7 +1197,7 @@ async def server_admin_probe_node(server_id: str, request: Request):
     target = federation_router._select_peer_target(node)
     result = federation_router._probe_url(target, timeout_s=1.6)
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
-    _redact_ips = bool(db.get_federation_policy_settings().get("redact_clearnet_ips", True))
+    _redact_ips = bool(db.get_federation_policy_settings().get("redact_clearnet_ips", False))
     return {
         "ok": True,
         "server_id": sid,
@@ -1308,8 +1335,12 @@ async def server_admin_sync_official_directory(request: Request):
         return auth
 
     result = await federation_router.sync_official_directory_once()
-    if result.get("ok") and db.get_federation_policy_settings().get("block_tor_peers"):
-        result["tor_peers_disabled"] = federation_router.apply_tor_peer_blocks_if_enabled()
+    if result.get("ok"):
+        _pol = db.get_federation_policy_settings()
+        if _pol.get("block_tor_peers"):
+            result["tor_peers_disabled"] = federation_router.apply_tor_peer_blocks_if_enabled()
+        if _pol.get("block_http_only_peers"):
+            result["http_peers_disabled"] = federation_router.apply_http_only_peer_blocks_if_enabled()
     if not result.get("ok"):
         return JSONResponse(status_code=400, content=result)
     return result
