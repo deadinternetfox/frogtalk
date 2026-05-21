@@ -42,7 +42,7 @@ class MainActivity : AppCompatActivity() {
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
         /** Pre-filled in the first-run setup wizard. */
         private const val OFFICIAL_SERVER_INPUT = "frogtalk.xyz"
-        private const val WEB_CACHE_REV = "20260521-setup-v238"
+        private const val WEB_CACHE_REV = "20260521-setup-v239"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_PERMISSIONS_WIZARD_DONE = "permissions_wizard_done"

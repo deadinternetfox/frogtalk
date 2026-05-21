@@ -17,15 +17,23 @@
     * { box-sizing: border-box; }
     a, a:link, a:visited { color: var(--link); font-weight: 600; }
     html, body {
-      margin: 0; min-height: 100%;
+      margin: 0; min-height: 100%; height: 100%;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       background: radial-gradient(ellipse 120% 80% at 50% -20%, rgba(76,175,80,.22), transparent 55%),
                   linear-gradient(180deg, #0a120e 0%, var(--bg) 42%);
       color: var(--text);
     }
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100dvh;
+      padding: max(16px, env(safe-area-inset-top)) 20px max(16px, env(safe-area-inset-bottom));
+    }
     .wrap {
-      max-width: 420px; margin: 0 auto;
-      padding: max(28px, env(safe-area-inset-top)) 20px max(32px, env(safe-area-inset-bottom));
+      width: 100%;
+      max-width: 420px;
+      margin: 0 auto;
     }
     .logo { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
     .logo-icon {
