@@ -2350,6 +2350,18 @@ def _migrate():
             FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
             FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
         )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS channel_invite_redemptions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            invite_id   INTEGER NOT NULL,
+            user_id     INTEGER NOT NULL,
+            redeemed_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (invite_id) REFERENCES channel_invites(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )""")
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_invite_redemptions_invite "
+            "ON channel_invite_redemptions(invite_id)"
+        )
         
         # Room directory columns
         if "is_public" not in room_cols:
@@ -2387,6 +2399,10 @@ def _migrate():
         con.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_vanity_lower "
             "ON rooms(LOWER(vanity)) WHERE vanity IS NOT NULL"
+        )
+        # Private channels must not retain vanity slugs (join is invite-only).
+        con.execute(
+            "UPDATE rooms SET vanity = NULL WHERE type = 'private' AND vanity IS NOT NULL"
         )
         # Forwarded-from metadata for room messages: JSON blob
         # {nick, source_label, kind:'room'|'dm', original_id?}.
@@ -6797,31 +6813,34 @@ def get_invite(code: str) -> Optional[Dict]:
             FROM channel_invites ci
             JOIN rooms r ON ci.room_id = r.id
             JOIN users u ON ci.created_by = u.id
-            WHERE ci.code=?
+            WHERE LOWER(ci.code) = LOWER(?)
         """, (code,)).fetchone()
     return dict(row) if row else None
 
 
-def use_invite(code: str) -> Optional[int]:
-    """Use an invite, return room_id if valid."""
+def use_invite(code: str, user_id: Optional[int] = None) -> Optional[int]:
+    """Consume an invite and return room_id if valid.
+
+    When ``user_id`` is provided, records a redemption row and skips
+    consumption if the user is already a room member (idempotent re-join).
+    """
+    if user_id is not None:
+        return consume_invite(code, user_id)
     with _conn() as con:
         invite = con.execute("""
             SELECT id, room_id, max_uses, use_count, expires_at
-            FROM channel_invites WHERE code=?
+            FROM channel_invites WHERE LOWER(code) = LOWER(?)
         """, (code,)).fetchone()
         if not invite:
             return None
-        # Check expiry
         if invite['expires_at']:
             expired = con.execute(
                 "SELECT datetime('now') > ?", (invite['expires_at'],)
             ).fetchone()[0]
             if expired:
                 return None
-        # Check max uses
         if invite['max_uses'] > 0 and invite['use_count'] >= invite['max_uses']:
             return None
-        # Increment use count
         con.execute(
             "UPDATE channel_invites SET use_count = use_count + 1 WHERE id=?",
             (invite['id'],)
@@ -6829,7 +6848,66 @@ def use_invite(code: str) -> Optional[int]:
         return invite['room_id']
 
 
-def get_channel_invites(room_id: int) -> List[Dict]:
+def consume_invite(code: str, user_id: int) -> Optional[int]:
+    """Atomically validate, optionally consume, and log invite redemption."""
+    with _conn() as con:
+        invite = con.execute("""
+            SELECT id, room_id, max_uses, use_count, expires_at
+            FROM channel_invites WHERE LOWER(code) = LOWER(?)
+        """, (code,)).fetchone()
+        if not invite:
+            return None
+        room_id = invite['room_id']
+        already = con.execute(
+            "SELECT 1 FROM room_members WHERE room_id=? AND user_id=?",
+            (room_id, user_id),
+        ).fetchone()
+        if already:
+            return room_id
+        if invite['expires_at']:
+            expired = con.execute(
+                "SELECT datetime('now') > ?", (invite['expires_at'],)
+            ).fetchone()[0]
+            if expired:
+                return None
+        if invite['max_uses'] > 0 and invite['use_count'] >= invite['max_uses']:
+            return None
+        con.execute(
+            "UPDATE channel_invites SET use_count = use_count + 1 WHERE id=?",
+            (invite['id'],)
+        )
+        con.execute(
+            "INSERT INTO channel_invite_redemptions (invite_id, user_id) VALUES (?, ?)",
+            (invite['id'], user_id),
+        )
+        return room_id
+
+
+def get_invite_redemptions(invite_ids: List[int]) -> Dict[int, List[Dict]]:
+    """Map invite_id -> list of {user_id, nickname, redeemed_at}."""
+    if not invite_ids:
+        return {}
+    placeholders = ",".join("?" * len(invite_ids))
+    with _conn() as con:
+        rows = con.execute(f"""
+            SELECT cir.invite_id, cir.user_id, cir.redeemed_at, u.nickname
+            FROM channel_invite_redemptions cir
+            JOIN users u ON cir.user_id = u.id
+            WHERE cir.invite_id IN ({placeholders})
+            ORDER BY cir.redeemed_at DESC
+        """, invite_ids).fetchall()
+    out: Dict[int, List[Dict]] = {}
+    for r in rows:
+        iid = r['invite_id']
+        out.setdefault(iid, []).append({
+            'user_id': r['user_id'],
+            'nickname': r['nickname'],
+            'redeemed_at': r['redeemed_at'],
+        })
+    return out
+
+
+def get_channel_invites(room_id: int, *, include_redemptions: bool = False) -> List[Dict]:
     """Get all invites for a channel."""
     with _conn() as con:
         rows = con.execute("""
@@ -6839,14 +6917,20 @@ def get_channel_invites(room_id: int) -> List[Dict]:
             WHERE ci.room_id=?
             ORDER BY ci.created_at DESC
         """, (room_id,)).fetchall()
-    return [dict(r) for r in rows]
+    invites = [dict(r) for r in rows]
+    if include_redemptions and invites:
+        ids = [inv['id'] for inv in invites]
+        redemptions_by_id = get_invite_redemptions(ids)
+        for inv in invites:
+            inv['redemptions'] = redemptions_by_id.get(inv['id'], [])
+    return invites
 
 
 def delete_invite(code: str, room_id: int) -> bool:
     """Delete an invite."""
     with _conn() as con:
         cur = con.execute(
-            "DELETE FROM channel_invites WHERE code=? AND room_id=?",
+            "DELETE FROM channel_invites WHERE LOWER(code)=LOWER(?) AND room_id=?",
             (code, room_id)
         )
         return cur.rowcount > 0

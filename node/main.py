@@ -1327,7 +1327,8 @@ async def serve_channel_landing(room_name: str):
     """
     import database as db
     room = db.get_room_by_name(room_name)
-    is_public = bool(room) and not bool(room.get("is_private"))
+    is_private = bool(room) and (room.get("type") or "public").lower() == "private"
+    is_public = bool(room) and not is_private
     if not room:
         html = (
             "<!DOCTYPE html><html><head><title>Channel not found — FrogTalk</title>"
@@ -1363,6 +1364,13 @@ async def serve_channel_landing(room_name: str):
         if is_img_icon else f'<div class=\"icon\">{_og_escape(icon)}</div>'
     )
     member_count = int(room.get("member_count") or 0)
+    room_name_esc = _og_escape(room_name)
+    if is_private:
+        primary_btn = '<a href="/app" class="btn btn-primary">Sign in — ask for an invite link</a>'
+        auto_redirect = ""
+    else:
+        primary_btn = f'<a href="/app?room={room_name_esc}" class="btn btn-primary">Open channel</a>'
+        auto_redirect = f"window.location.replace('/app?room={room_name_esc}');"
 
     html = f"""<!DOCTYPE html>
 <html><head>
@@ -1413,13 +1421,13 @@ h1{{color:#4caf50;margin:0 0 6px;font-size:24px;word-break:break-word}}
   <h1>#{_og_escape(room_name)}</h1>
   <div class=\"meta\">{('🌐 Public · ' + str(member_count) + ' member' + ('s' if member_count != 1 else '')) if is_public else '🔒 Private channel'}</div>
   <div class=\"desc\">{_og_escape(desc)}</div>
-  <a href=\"/app?room={_og_escape(room_name)}\" class=\"btn btn-primary\">Open channel</a>
+  {primary_btn}
   <a href=\"/app\" class=\"btn btn-secondary\">Sign in to FrogTalk</a>
 </div>
 <script>
 try {{
   if (localStorage.getItem('token')) {{
-    window.location.replace('/app?room={_og_escape(room_name)}');
+    {auto_redirect}
   }}
 }} catch (e) {{}}
 </script>

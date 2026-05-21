@@ -1951,7 +1951,12 @@ function openChatMoreMenu() {
   items.push({ icon: 'ℹ️', label: 'Channel info',       onclick: () => (typeof Rooms !== 'undefined') && Rooms.showChannelAbout(room) });
   items.push({ icon: '🔍', label: 'Search messages',    onclick: () => showSearchModal() });
   items.push({ icon: '📌', label: 'Pinned messages',    onclick: () => showPinnedMessages() });
-  items.push({ icon: '🔗', label: 'Copy invite link',   onclick: () => (typeof quickShareChannel === 'function') && quickShareChannel() });
+  const _roomMeta = (typeof State !== 'undefined' && State.rooms && room)
+    ? State.rooms.find(r => r.name === room) : null;
+  if (_roomMeta && typeof Rooms !== 'undefined' && Rooms._userCanCreateInviteForRoom
+      && Rooms._userCanCreateInviteForRoom(_roomMeta)) {
+    items.push({ icon: '🔗', label: 'Copy invite link', onclick: () => (typeof quickShareChannel === 'function') && quickShareChannel(room) });
+  }
   items.push({ icon: '👥', label: 'Toggle members',     onclick: () => toggleUsersPanel() });
   showActionSheet(room ? `#${room}` : 'Channel', items);
 }

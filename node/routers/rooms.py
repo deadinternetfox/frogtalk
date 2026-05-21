@@ -617,6 +617,8 @@ async def create_room(request: Request, body: CreateRoomRequest,
     needs_invite_only = bool(body.invite_only) or body.type == "private"
     if needs_invite_only:
         db.update_room_settings(body.name, invite_only=1)
+    if body.type == "private":
+        db.update_room_settings(body.name, who_can_invite="owner")
     # Auto-join creator
     db.join_room(current_user["id"], room_id)
     try:
@@ -722,6 +724,12 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
     if body.who_can_invite is not None and body.who_can_invite not in ("everyone", "mods", "owner"):
         return JSONResponse(status_code=400, content={"error": "who_can_invite must be everyone, mods, or owner"})
 
+    _existing_room = db.get_room_by_name(room_name)
+    _room_type = (_existing_room or {}).get("type") or "public"
+    effective_who_can_invite = body.who_can_invite
+    if _room_type == "private" and effective_who_can_invite == "everyone":
+        effective_who_can_invite = "mods"
+
     icon: Optional[str] = None
     if body.icon is not None:
         try:
@@ -735,12 +743,6 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
 
-    # Look up the current room so the theme sanitizer can apply the
-    # private-channel CSS/bgImage gate. If the row vanished mid-request
-    # we fall back to public (existing 404 returned later by
-    # update_room_settings).
-    _existing_room = db.get_room_by_name(room_name)
-    _room_type = (_existing_room or {}).get("type") or "public"
     try:
         sanitized_theme = _sanitize_channel_theme(body.channel_theme, room_type=_room_type)
     except ValueError as e:
@@ -762,7 +764,7 @@ async def update_room(room_name: str, body: UpdateRoomRequest,
         channel_type=body.channel_type,
         channel_theme=sanitized_theme,
         invite_only=body.invite_only,
-        who_can_invite=body.who_can_invite,
+        who_can_invite=effective_who_can_invite if body.who_can_invite is not None else None,
         banner=banner,
         about=clean_about,
         forwarding_disabled=body.forwarding_disabled,

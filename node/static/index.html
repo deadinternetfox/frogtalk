@@ -9037,17 +9037,17 @@ window.ConnErr = (function(){
       
       <div id="ch-invite-only-private-note" class="modal-card" style="display:none;margin-bottom:16px;background:rgba(76,175,80,.06);border-color:rgba(76,175,80,.25)">
         <div style="font-size:12px;color:#9bd0ad;line-height:1.5">
-          🔒 Private channels are <strong>invite-only by default</strong> — only members with an invite link or the shared secret can join.
+          🔒 Private channels are <strong>invite-only</strong> — new members need a direct invite link from the owner or moderators (per policy below). The shared encryption secret is for <strong>decrypting messages after</strong> they have joined, not for gaining access.
         </div>
       </div>
       
       <label class="modal-label">Who Can Create Invites</label>
       <select class="modal-input" id="ch-who-can-invite">
-        <option value="everyone">Everyone</option>
+        <option value="everyone" id="ch-who-can-invite-everyone">Everyone</option>
         <option value="mods">Moderators & Owner</option>
         <option value="owner">Owner Only</option>
       </select>
-      <div style="font-size:11px;color:#666;margin-top:4px">Controls who can generate invite links for this channel</div>
+      <div id="ch-who-can-invite-hint" style="font-size:11px;color:#666;margin-top:4px">Controls who can generate invite links for this channel</div>
 
       <label class="modal-label" style="margin-top:16px">Message Forwarding</label>
       <div class="modal-card">
@@ -9105,8 +9105,13 @@ window.ConnErr = (function(){
 
     <!-- Invites tab -->
     <div id="ch-panel-invites" style="display:none">
+      <div id="ch-invite-no-permission" style="display:none;font-size:13px;color:#9bd0ad;background:rgba(76,175,80,.06);border:1px solid rgba(76,175,80,.25);border-radius:10px;padding:14px 16px;margin-bottom:12px;line-height:1.5">
+        Only the channel owner, moderators, or admins can create invite links for this channel. Ask them for a direct invite link to join.
+      </div>
+
+      <div id="ch-invite-public-block">
       <!-- Owner-only: Vanity URL. rooms.js toggles display based on
-           whether the current user owns this channel. -->
+           whether the current user owns this channel (public channels only). -->
       <div id="ch-vanity-card" style="display:none;background:linear-gradient(180deg,#13211a 0%,#101a14 100%);border:1px solid #2e4a3a;border-radius:12px;padding:14px 14px 12px;margin-bottom:16px">
         <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#bff0d0;font-size:13px;margin-bottom:4px">
           <span aria-hidden="true">🔗</span>
@@ -9140,14 +9145,29 @@ window.ConnErr = (function(){
         </div>
       </div>
 
-      <div style="font-size:13px;color:#888;margin-bottom:12px">
+      <div id="ch-invite-public-intro" style="font-size:13px;color:#888;margin-bottom:12px">
         Create invite links to share this channel. Links can have usage limits and expiration.
       </div>
-      <div style="display:flex;gap:8px;align-items:end;margin-bottom:16px;flex-wrap:wrap">
+      </div><!-- /ch-invite-public-block -->
+
+      <div id="ch-invite-private-block" style="display:none">
+        <div class="modal-card" style="margin-bottom:14px;background:rgba(76,175,80,.06);border-color:rgba(76,175,80,.25)">
+          <div style="font-size:12px;color:#9bd0ad;line-height:1.55">
+            <strong>Private channel invites</strong> — no custom vanity URLs. Share a direct invite link only with people you trust. After they join, send them the room encryption secret separately so they can read messages.
+          </div>
+        </div>
+        <div id="ch-invite-private-intro" style="font-size:13px;color:#888;margin-bottom:12px">
+          Create bounded invite links (use limits required). Share only <code style="background:#0a1410;padding:1px 5px;border-radius:4px;color:#9bd0ad;font-size:11.5px">frogtalk.xyz/i/&lt;code&gt;</code> URLs — not <code style="background:#0a1410;padding:1px 5px;border-radius:4px;color:#9bd0ad;font-size:11.5px">/c/channel</code> links.
+        </div>
+      </div>
+
+      <div id="ch-invites-section-label" style="display:none;font-size:11px;color:#7a9c8d;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Active invite links</div>
+
+      <div id="ch-invite-create-row" style="display:flex;gap:8px;align-items:end;margin-bottom:16px;flex-wrap:wrap">
         <div style="flex:1;min-width:120px">
           <label style="font-size:11px;color:#666;display:block;margin-bottom:4px">Max Uses</label>
           <select class="modal-input" id="ch-invite-max-uses" style="color:#e0e0e0;background:#0d0d0d;margin:0">
-            <option value="0">Unlimited</option>
+            <option value="0" id="ch-invite-opt-unlimited">Unlimited</option>
             <option value="1">1 use</option>
             <option value="5">5 uses</option>
             <option value="10">10 uses</option>
@@ -9169,8 +9189,8 @@ window.ConnErr = (function(){
         </div>
         <button class="modal-btn primary" onclick="Rooms.createInvite()" style="margin:0;padding:8px 16px;white-space:nowrap">Create Link</button>
       </div>
-      <div id="ch-invites-list" style="max-height:240px;overflow-y:auto"></div>
-      <div id="ch-no-invites" style="color:#666;text-align:center;padding:20px">No invite links yet</div>
+      <div id="ch-invites-list" style="max-height:320px;overflow-y:auto"></div>
+      <div id="ch-no-invites" style="color:#666;text-align:center;padding:20px;line-height:1.45">No invite links yet. Create one above to share this channel.</div>
     </div>
     
     <!-- Moderators tab -->

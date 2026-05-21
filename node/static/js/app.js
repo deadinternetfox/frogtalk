@@ -491,14 +491,48 @@ const App = {
       await this.handleInvite(this.pendingInvite);
       this.pendingInvite = null;
     } else if (this.pendingRoom) {
-      // Share link: /c/{room} -> try to switch into that room
-      const r = (State.rooms || []).find(x => x.name === this.pendingRoom);
-      if (r && typeof Rooms !== 'undefined' && Rooms.switchToRoom) {
-        Rooms.switchToRoom(r.name, r.channel_type || 'public');
-      } else {
-        App.openFirstAvailableRoom();
-      }
+      // Share link: /c/{room} — public rooms can open/join; private needs /i/<invite>.
+      const roomName = this.pendingRoom;
       this.pendingRoom = null;
+      let listed = (State.rooms || []).find(x => x.name === roomName);
+      let roomType = listed?.type;
+      let chType = listed?.channel_type || 'text';
+      if (!listed) {
+        try {
+          const metaRes = await apiFetch(`/api/rooms/${encodeURIComponent(roomName)}`);
+          if (metaRes.ok) {
+            const meta = await metaRes.json();
+            roomType = meta.room?.type || 'public';
+            chType = meta.room?.channel_type || 'text';
+          } else if (metaRes.status === 404) {
+            UI.showToast(`#${roomName} was not found`, 'error');
+            App.openFirstAvailableRoom();
+            return;
+          }
+        } catch {}
+      }
+      roomType = roomType || 'public';
+      if (listed?.joined) {
+        Rooms.switchToRoom(roomName, roomType, null, chType);
+      } else if (roomType === 'private') {
+        UI.showToast(`#${roomName} is private — ask the owner for an invite link (/i/…)`, 'warning');
+        App.openFirstAvailableRoom();
+      } else {
+        try {
+          const jr = await apiFetch(`/api/rooms/${encodeURIComponent(roomName)}/join`, 'POST');
+          if (jr.ok) {
+            await Rooms.loadRooms();
+            const fresh = (State.rooms || []).find(x => x.name === roomName);
+            Rooms.switchToRoom(roomName, fresh?.type || 'public', null, fresh?.channel_type || chType);
+          } else {
+            const err = await jr.json().catch(() => ({}));
+            UI.showToast(err.error || `Couldn't join #${roomName}`, 'error');
+            App.openFirstAvailableRoom();
+          }
+        } catch {
+          App.openFirstAvailableRoom();
+        }
+      }
     } else if (this.pendingDM && String(this.pendingDM).trim()) {
       // Share link: /u/{nick} "Send a message" -> open DM with that user
       if (typeof openDMWithNick === 'function') {
@@ -747,7 +781,9 @@ const App = {
         UI.showToast(`Joined #${data.room}!`, 'success');
         // Reload rooms and switch to the new room
         await Rooms.loadRooms();
-        Rooms.switchToRoom(data.room, 'public');
+        const joined = (State.rooms || []).find(r => r.name === data.room);
+        const roomType = joined?.type || data.room_type || 'public';
+        Rooms.switchToRoom(data.room, roomType);
       } else {
         const err = await res.json().catch(() => ({}));
         // Banned-from-channel: render the dedicated ban screen so the

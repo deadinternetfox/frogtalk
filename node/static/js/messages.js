@@ -4152,7 +4152,13 @@ const Messages = (() => {
           }
         }
         await Rooms.loadRooms?.();
-        Rooms.openChannelLink(data.room);
+        const joined = (State.rooms || []).find(r => r.name === data.room);
+        const roomType = joined?.type || data.room_type || 'public';
+        if (joined?.joined) {
+          Rooms.switchToRoom(data.room, roomType, null, joined.channel_type || 'text');
+        } else {
+          Rooms.openChannelLink(data.room);
+        }
       } else {
         if (btn) { btn.disabled = false; btn.textContent = 'Join Channel'; }
         UI.toast(data.error || 'Could not join channel');

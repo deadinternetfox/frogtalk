@@ -43,8 +43,24 @@ _LANDING_SESSION_HEAD = """<script>
 
 
 def generate_invite_code() -> str:
-    """Generate a short readable invite code."""
-    return secrets.token_urlsafe(8).replace('-', '').replace('_', '')[:8]
+    """Generate a short readable invite code (lowercase for stable /i/ URLs)."""
+    return secrets.token_urlsafe(8).replace('-', '').replace('_', '')[:8].lower()
+
+
+def _user_can_create_invite(room: dict, current_user: dict) -> bool:
+    """True if the user may create invite links for this channel."""
+    is_owner = room["owner_id"] == current_user["id"]
+    is_admin = bool(current_user.get("is_admin"))
+    if is_admin:
+        return True
+    who = room.get("who_can_invite", "everyone")
+    if (room.get("type") or "public").lower() == "private" and who == "everyone":
+        who = "mods"
+    if who == "owner":
+        return is_owner
+    if who == "mods":
+        return is_owner or db.is_room_moderator(room["name"], current_user["id"])
+    return True
 
 
 # ─── Vanity slug rules ──────────────────────────────────────────────────
@@ -107,14 +123,30 @@ async def create_invite(room_name: str, body: CreateInviteRequest, current_user:
     is_owner = room["owner_id"] == current_user["id"]
     is_mod = db.is_room_moderator(room_name, current_user["id"])
     is_admin = bool(current_user.get("is_admin"))
+    room_type = (room.get("type") or "public").lower()
     who = room.get("who_can_invite", "everyone")
-    
+    if room_type == "private" and who == "everyone":
+        who = "mods"
+
     if who == "owner" and not is_owner and not is_admin:
         return JSONResponse(status_code=403, content={"error": "Only the channel owner can create invites"})
     elif who == "mods" and not is_owner and not is_mod and not is_admin:
         return JSONResponse(status_code=403, content={"error": "Only moderators and the owner can create invites"})
-    # 'everyone' — any authenticated user can create invites
-    
+    # 'everyone' — any authenticated member can create invites (not on private rooms;
+    # private channels coerce who_can_invite away from 'everyone' at create/patch).
+
+    if room_type == "private":
+        if body.max_uses == 0:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Private channels require invite links with a use limit (not unlimited)"},
+            )
+        if body.max_uses > 100:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Private channel invite links are limited to 100 uses maximum"},
+            )
+
     code = generate_invite_code()
     if db.create_invite(room["id"], current_user["id"], code, body.max_uses, body.expires_hours):
         return {
@@ -153,6 +185,11 @@ async def vanity_check(slug: str = "", room: str = "", current_user: dict = Depe
         return JSONResponse(status_code=404, content={"error": "Channel not found"})
     if target_room["owner_id"] != current_user["id"] and not current_user.get("is_admin"):
         return JSONResponse(status_code=403, content={"error": "Only the channel owner can manage vanity URLs"})
+    if (target_room.get("type") or "public").lower() == "private":
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Private channels cannot use vanity URLs — use direct invite links"},
+        )
 
     normalized = (slug or "").strip().lower()
     err = validate_vanity_slug(normalized)
@@ -181,6 +218,11 @@ async def set_channel_vanity(
     is_owner = room["owner_id"] == current_user["id"]
     if not is_owner and not current_user.get("is_admin"):
         return JSONResponse(status_code=403, content={"error": "Only the channel owner can manage vanity URLs"})
+    if (room.get("type") or "public").lower() == "private":
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Private channels cannot use vanity URLs — use direct invite links"},
+        )
 
     raw = (body.vanity or "").strip()
     if raw == "":
@@ -221,10 +263,14 @@ async def list_channel_invites(room_name: str, current_user: dict = Depends(get_
     if not is_owner and not is_mod and not current_user.get("is_admin"):
         return JSONResponse(status_code=403, content={"error": "Not authorized"})
     
-    invites = db.get_channel_invites(room["id"])
+    invites = db.get_channel_invites(room["id"], include_redemptions=True)
+    room_type = (room.get("type") or "public").lower()
     return {
         "invites": invites,
-        "vanity": room.get("vanity"),
+        "vanity": room.get("vanity") if room_type != "private" else None,
+        "room_type": room_type,
+        "who_can_invite": room.get("who_can_invite", "everyone"),
+        "can_create_invite": _user_can_create_invite(room, current_user),
         # Platform admins (the "frog" account) see all owner-only UI
         # affordances — including the vanity URL card — on every channel.
         "is_owner": is_owner or bool(current_user.get("is_admin")),
@@ -286,6 +332,12 @@ async def get_invite_info(code: str):
     if not room:
         return JSONResponse(status_code=404, content={"error": "Invite not found or expired"})
 
+    if int(room.get("invite_only") or 0) or (room.get("type") or "public").lower() == "private":
+        return JSONResponse(
+            status_code=404,
+            content={"error": "Invite not found or expired"},
+        )
+
     return {
         "code": (room.get("vanity") or code).lower(),
         "room_name": room["name"],
@@ -314,7 +366,7 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
         room = db.get_room_by_vanity(code)
         if not room:
             return JSONResponse(status_code=410, content={"error": "Invite invalid or expired"})
-        if int(room.get("invite_only") or 0):
+        if int(room.get("invite_only") or 0) or (room.get("type") or "public").lower() == "private":
             return JSONResponse(
                 status_code=403,
                 content={"error": "This channel is invite-only. Ask the owner for a direct invite link."},
@@ -353,7 +405,7 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
 
     # Only now consume the invite (if this was a real code, not a vanity).
     if invite_row:
-        consumed = db.use_invite(code)
+        consumed = db.consume_invite(code, current_user["id"])
         if not consumed:
             return JSONResponse(status_code=410, content={"error": "Invite invalid or expired"})
 
@@ -397,9 +449,11 @@ async def join_via_invite(code: str, current_user: dict = Depends(get_current_us
     except Exception:
         pass
 
+    full_room = db.get_room_by_name(room["name"]) or {}
     return {
         "ok": True,
         "room": room["name"],
+        "room_type": (full_room.get("type") or "public"),
         "via_vanity": via_vanity,
         "message": f"Successfully joined #{room['name']}"
     }
@@ -418,15 +472,17 @@ async def invite_landing_page(code: str):
     if not invite:
         room = db.get_room_by_vanity(code)
         if room:
-            invite = {
-                "room_name": room["name"],
-                "room_desc": room.get("description", "") or "",
-                "room_icon": room.get("icon", "💬") or "💬",
-                "created_by_name": room.get("owner_nickname"),
-                "_is_vanity": True,
-            }
-            # Use the canonical (lowercased) slug as the join token in URLs.
-            code = (room.get("vanity") or code).lower()
+            if int(room.get("invite_only") or 0) or (room.get("type") or "public").lower() == "private":
+                room = None
+            else:
+                invite = {
+                    "room_name": room["name"],
+                    "room_desc": room.get("description", "") or "",
+                    "room_icon": room.get("icon", "💬") or "💬",
+                    "created_by_name": room.get("owner_nickname"),
+                    "_is_vanity": True,
+                }
+                code = (room.get("vanity") or code).lower()
     if not invite:
         html = """<!DOCTYPE html>
 <html><head><title>Invalid Invite - FrogTalk</title>

@@ -1005,8 +1005,8 @@ const Rooms = (() => {
             { icon: 'ℹ️', label: 'Channel info', onclick: () => showChannelAbout(room.name) },
           ];
           if (canEdit) items.push({ icon: '⚙️', label: 'Settings', onclick: () => openChannelSettings(room.name) });
-          if (room.joined) {
-            items.push({ icon: '🔗', label: 'Copy invite link', onclick: () => quickShareChannel() });
+          if (room.joined && Rooms._userCanCreateInviteForRoom(room)) {
+            items.push({ icon: '🔗', label: 'Copy invite link', onclick: () => quickShareChannel(room.name) });
             if (typeof Mute !== 'undefined') {
               const muted = Mute.isRoomMuted(room.name);
               items.push({ icon: muted ? '🔔' : '🔕', label: muted ? 'Unmute channel' : 'Mute channel', onclick: () => Mute.toggleRoom(room.name) });
@@ -1717,6 +1717,194 @@ const Rooms = (() => {
 
     const inviteNote = document.getElementById('ch-invite-only-private-note');
     if (inviteNote) inviteNote.style.display = isPrivate ? '' : 'none';
+
+    _applyPrivateInvitePolicies(isPrivate);
+  }
+
+  function _userCanCreateInviteForRoom(room, opts) {
+    if (!room || !State.user) return false;
+    if (State.user.is_admin) return true;
+    const policy = opts?.whoCanInvite || room.who_can_invite || 'everyone';
+    let who = policy;
+    if ((room.type || 'public') === 'private' && who === 'everyone') who = 'mods';
+    const myNick = State.user.nickname;
+    const ownerNick = room.owner_nickname;
+    if (who === 'owner') return !!(myNick && ownerNick && myNick === ownerNick);
+    if (who === 'mods') {
+      if (myNick && ownerNick && myNick === ownerNick) return true;
+      return Array.isArray(State.currentRoomMods) &&
+        State.currentRoomMods.includes(myNick) &&
+        State.currentRoom === room.name;
+    }
+    return true;
+  }
+
+  function _applyPrivateInvitePolicies(isPrivate) {
+    const publicBlock = document.getElementById('ch-invite-public-block');
+    const privateBlock = document.getElementById('ch-invite-private-block');
+    if (publicBlock) publicBlock.style.display = isPrivate ? 'none' : '';
+    if (privateBlock) privateBlock.style.display = isPrivate ? '' : 'none';
+
+    const unlimitedOpt = document.getElementById('ch-invite-opt-unlimited');
+    const maxUsesEl = document.getElementById('ch-invite-max-uses');
+    if (unlimitedOpt) unlimitedOpt.hidden = isPrivate;
+    if (isPrivate && maxUsesEl && maxUsesEl.value === '0') maxUsesEl.value = '1';
+
+    const everyoneOpt = document.getElementById('ch-who-can-invite-everyone');
+    if (everyoneOpt) everyoneOpt.hidden = isPrivate;
+    const whoEl = document.getElementById('ch-who-can-invite');
+    if (isPrivate && whoEl && whoEl.value === 'everyone') whoEl.value = 'mods';
+
+    const whoHint = document.getElementById('ch-who-can-invite-hint');
+    if (whoHint) {
+      whoHint.textContent = isPrivate
+        ? 'Private channels cannot allow all members to create invites. Choose Owner or Moderators & Owner.'
+        : 'Controls who can generate invite links for this channel';
+    }
+
+    const noInv = document.getElementById('ch-no-invites');
+    if (noInv) {
+      noInv.textContent = isPrivate
+        ? 'No invite links yet. Create a bounded link above — only /i/… URLs work for private channels.'
+        : 'No invite links yet. Create one above to share this channel.';
+    }
+
+    const expiresEl = document.getElementById('ch-invite-expires');
+    if (isPrivate && expiresEl && expiresEl.value === '') expiresEl.value = '168';
+  }
+
+  function _applyInviteTabPermissions(data) {
+    const canCreate = !!(data && data.can_create_invite);
+    const noPerm = document.getElementById('ch-invite-no-permission');
+    const createRow = document.getElementById('ch-invite-create-row');
+    const sectionLabel = document.getElementById('ch-invites-section-label');
+    if (noPerm) noPerm.style.display = canCreate ? 'none' : '';
+    if (createRow) createRow.style.display = canCreate ? 'flex' : 'none';
+    if (sectionLabel) sectionLabel.style.display = canCreate ? '' : 'none';
+  }
+
+  const _INVITE_CODE_RE = /^[a-z0-9]{2,32}$/;
+
+  function _safeInviteCode(code) {
+    const c = String(code || '').trim().toLowerCase();
+    return _INVITE_CODE_RE.test(c) ? c : '';
+  }
+
+  let _invitesListWired = false;
+
+  function _wireInvitesListActions() {
+    const container = document.getElementById('ch-invites-list');
+    if (!container || _invitesListWired) return;
+    _invitesListWired = true;
+    container.addEventListener('click', (e) => {
+      const copyBtn = e.target.closest('[data-invite-copy]');
+      if (copyBtn) {
+        const url = copyBtn.getAttribute('data-invite-url') || '';
+        if (!url.startsWith('https://frogtalk.xyz/i/')) return;
+        UI.copy(url).then(ok => UI.showToast(ok ? 'Copied!' : 'Could not copy', ok ? 'success' : 'error'));
+        return;
+      }
+      const revokeBtn = e.target.closest('[data-invite-revoke]');
+      if (revokeBtn) {
+        const code = _safeInviteCode(revokeBtn.getAttribute('data-invite-code'));
+        if (code) revokeInvite(code);
+        return;
+      }
+      const toggleBtn = e.target.closest('[data-invite-toggle-redemp]');
+      if (toggleBtn) {
+        const panel = toggleBtn.parentElement?.querySelector('[data-invite-redemp-panel]');
+        if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+      }
+    });
+  }
+
+  function _renderInviteListEntry(inv) {
+    const code = _safeInviteCode(inv.code);
+    if (!code) return null;
+
+    const card = document.createElement('div');
+    card.className = 'modal-card';
+    card.style.cssText = 'padding:10px 12px;margin-bottom:8px';
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px';
+
+    const meta = document.createElement('div');
+    meta.style.cssText = 'flex:1;min-width:0';
+
+    const url = `https://frogtalk.xyz/i/${code}`;
+    const urlEl = document.createElement('div');
+    urlEl.style.cssText = 'font-size:13px;font-weight:700;color:#7fd2a7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    urlEl.textContent = url;
+
+    const sub = document.createElement('div');
+    sub.style.cssText = 'font-size:11px;color:#7a9c8d;margin-top:2px';
+    const maxUses = parseInt(inv.max_uses, 10) || 0;
+    const useCount = parseInt(inv.use_count, 10) || 0;
+    const uses = maxUses > 0 ? `${useCount}/${maxUses} uses` : `${useCount} uses`;
+    const expires = inv.expires_at
+      ? `Expires ${new Date(inv.expires_at).toLocaleDateString()}`
+      : 'Never expires';
+    const by = inv.created_by_name ? `@${String(inv.created_by_name).replace(/^@+/, '')}` : '?';
+    sub.textContent = `${uses} · ${expires} · by ${by}`;
+
+    meta.appendChild(urlEl);
+    meta.appendChild(sub);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'icon-btn';
+    copyBtn.title = 'Copy link';
+    copyBtn.setAttribute('data-invite-copy', '1');
+    copyBtn.setAttribute('data-invite-url', url);
+    copyBtn.style.fontSize = '16px';
+    copyBtn.textContent = '📋';
+
+    const revokeBtn = document.createElement('button');
+    revokeBtn.type = 'button';
+    revokeBtn.className = 'icon-btn';
+    revokeBtn.title = 'Revoke link';
+    revokeBtn.setAttribute('data-invite-revoke', '1');
+    revokeBtn.setAttribute('data-invite-code', code);
+    revokeBtn.style.cssText = 'font-size:16px;color:#f85149';
+    revokeBtn.textContent = '🗑';
+
+    row.appendChild(meta);
+    row.appendChild(copyBtn);
+    row.appendChild(revokeBtn);
+    card.appendChild(row);
+
+    const redemptions = Array.isArray(inv.redemptions) ? inv.redemptions : [];
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'modal-btn';
+    toggleBtn.setAttribute('data-invite-toggle-redemp', '1');
+    toggleBtn.style.cssText = 'margin-top:8px;width:100%;font-size:12px;padding:6px 10px;background:#1a2a22;color:#9bd0ad;border:1px solid #2e4a3a';
+    toggleBtn.textContent = `Joined via this link (${redemptions.length})`;
+
+    const panel = document.createElement('div');
+    panel.setAttribute('data-invite-redemp-panel', '1');
+    panel.style.cssText = 'display:none;margin-top:8px;max-height:120px;overflow-y:auto';
+
+    if (redemptions.length) {
+      redemptions.forEach((r) => {
+        const line = document.createElement('div');
+        line.style.cssText = 'font-size:11px;color:#9bd0ad;padding:4px 0;border-bottom:1px solid rgba(127,210,167,.12)';
+        const nick = String(r.nickname || '?').replace(/^@+/, '');
+        const when = r.redeemed_at ? new Date(r.redeemed_at).toLocaleString() : '';
+        line.textContent = `@${nick} · ${when}`;
+        panel.appendChild(line);
+      });
+    } else {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'font-size:11px;color:#7a9c8d;padding:4px 0';
+      empty.textContent = 'No joins recorded yet';
+      panel.appendChild(empty);
+    }
+
+    card.appendChild(toggleBtn);
+    card.appendChild(panel);
+    return card;
   }
 
   async function openChannelSettings(roomName) {
@@ -2260,7 +2448,12 @@ const Rooms = (() => {
       body: JSON.stringify({ icon, name, description: desc, slowmode, channel_type: _settingsChannelType,
         banner, about,
         invite_only: _currentRoomData?.room?.type === 'private' ? 1 : 0,
-        who_can_invite: document.getElementById('ch-who-can-invite')?.value || 'everyone',
+        who_can_invite: (() => {
+          const el = document.getElementById('ch-who-can-invite');
+          let v = el?.value || 'everyone';
+          if (_currentRoomData?.room?.type === 'private' && v === 'everyone') v = 'mods';
+          return v;
+        })(),
         forwarding_disabled: document.getElementById('ch-forwarding-disabled')?.checked ? 1 : 0,
         channel_theme: JSON.stringify((() => {
           // Private channels are server-rejected if `bgImage` or `css`
@@ -2358,7 +2551,11 @@ const Rooms = (() => {
 
   async function createInvite() {
     if (!_currentSettingsRoom) return;
-    const maxUses = parseInt(document.getElementById('ch-invite-max-uses').value) || 0;
+    const isPrivate = _currentRoomData?.room?.type === 'private';
+    let maxUses = parseInt(document.getElementById('ch-invite-max-uses').value, 10) || 0;
+    if (isPrivate) {
+      if (maxUses === 0) maxUses = 1;
+    }
     const expiresHours = document.getElementById('ch-invite-expires').value;
 
     const res = await fetch(`/api/invites/channels/${encodeURIComponent(_currentSettingsRoom)}`, {
@@ -2386,45 +2583,48 @@ const Rooms = (() => {
   async function fetchInvites(roomName) {
     const container = document.getElementById('ch-invites-list');
     const noInvites = document.getElementById('ch-no-invites');
+    _wireInvitesListActions();
 
     const res = await fetch(`/api/invites/channels/${encodeURIComponent(roomName)}`, {
       headers: { 'X-Session-Token': State.token }
     });
 
     if (!res.ok) {
-      container.innerHTML = '';
-      noInvites.style.display = 'block';
+      container.replaceChildren();
+      if (res.status === 403) {
+        const msg = document.createElement('div');
+        msg.style.cssText = 'color:#9bd0ad;font-size:13px;padding:16px;text-align:center;line-height:1.5';
+        msg.textContent = 'Only the channel owner, moderators, or admins can view invite links for this channel.';
+        container.appendChild(msg);
+      }
+      noInvites.style.display = res.status === 403 ? 'none' : 'block';
       _renderVanityCard(false, null);
+      _applyInviteTabPermissions({ can_create_invite: false });
       return;
     }
 
     const data = await res.json();
     const invites = data.invites || [];
+    const isPrivate = (data.room_type || _currentRoomData?.room?.type) === 'private';
 
-    // Owner-only vanity card. Render before invite list so layout is stable.
-    _renderVanityCard(!!data.is_owner, data.vanity || null);
+    _applyInviteTabPermissions(data);
+    _applyPrivateInvitePolicies(isPrivate);
+
+    _renderVanityCard(!!data.is_owner && !isPrivate, isPrivate ? null : (data.vanity || null));
 
     if (!invites.length) {
-      container.innerHTML = '';
+      container.replaceChildren();
       noInvites.style.display = 'block';
       return;
     }
 
     noInvites.style.display = 'none';
-    container.innerHTML = invites.map(inv => {
-      const url = `https://frogtalk.xyz/i/${inv.code}`;
-      const uses = inv.max_uses > 0 ? `${inv.use_count || 0}/${inv.max_uses} uses` : `${inv.use_count || 0} uses`;
-      const expires = inv.expires_at ? `Expires ${new Date(inv.expires_at).toLocaleDateString()}` : 'Never expires';
-      const by = inv.created_by_name ? `@${inv.created_by_name}` : '?';
-      return `<div class="modal-card" style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:700;color:#7fd2a7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${UI.escHtml(url)}</div>
-          <div style="font-size:11px;color:#7a9c8d;margin-top:2px">${uses} · ${expires} · by ${UI.escHtml(by)}</div>
-        </div>
-        <button class="icon-btn" title="Copy" onclick="UI.copy('${url}').then(ok=>UI.showToast(ok?'Copied!':'Could not copy',ok?'success':'error'))" style="font-size:16px">📋</button>
-        <button class="icon-btn" title="Revoke" onclick="Rooms.revokeInvite('${inv.code}')" style="font-size:16px;color:#f85149">🗑</button>
-      </div>`;
-    }).join('');
+    const frag = document.createDocumentFragment();
+    invites.forEach((inv) => {
+      const el = _renderInviteListEntry(inv);
+      if (el) frag.appendChild(el);
+    });
+    container.replaceChildren(frag);
   }
 
   // ─── Vanity URL (owner-only) ────────────────────────────────────────────
@@ -2443,6 +2643,10 @@ const Rooms = (() => {
   function _renderVanityCard(isOwner, currentVanity) {
     const card = document.getElementById('ch-vanity-card');
     if (!card) return;
+    if (_currentRoomData?.room?.type === 'private') {
+      card.style.display = 'none';
+      return;
+    }
     if (!isOwner) {
       card.style.display = 'none';
       return;
@@ -2645,8 +2849,10 @@ const Rooms = (() => {
   }
 
   async function revokeInvite(code) {
+    const safe = _safeInviteCode(code);
+    if (!safe || !_currentSettingsRoom) return;
     if (!confirm('Revoke this invite link?')) return;
-    const res = await fetch(`/api/invites/channels/${encodeURIComponent(_currentSettingsRoom)}/${code}`, {
+    const res = await fetch(`/api/invites/channels/${encodeURIComponent(_currentSettingsRoom)}/${encodeURIComponent(safe)}`, {
       method: 'DELETE',
       headers: { 'X-Session-Token': State.token }
     });
@@ -2849,6 +3055,7 @@ const Rooms = (() => {
     cancelPrivateSecretPrompt, submitPrivateSecretPrompt,
     toggleSecretVisibility,
     openTransferOwnershipModal, onTransferOwnershipInput, confirmTransferOwnership,
+    _userCanCreateInviteForRoom,
     // Phase 2 key-rotation API used by ws.js + messages.js + settings UI.
     rotateRoomKey, installRotatedKey,
     aadForRoom: _aadForRoom,
@@ -4195,15 +4402,26 @@ function selectServer(s) {
   }
 }
 
-async function quickShareChannel() {
-  const room = State.currentRoom;
+async function quickShareChannel(roomName) {
+  const room = roomName || State.currentRoom;
   if (!room) return;
-  // Create a quick invite (unlimited uses, 7 day expiry)
+  const meta = (State.rooms || []).find(r => r.name === room);
+  if (!meta) {
+    UI.showToast('Channel not found', 'error');
+    return;
+  }
+  if (!Rooms._userCanCreateInviteForRoom(meta)) {
+    UI.showToast('You cannot create invite links for this channel', 'error');
+    return;
+  }
+  const isPrivate = (meta.type || 'public') === 'private';
+  const maxUses = isPrivate ? 1 : 0;
+  const expiresHours = 168;
   try {
     const res = await fetch(`/api/invites/channels/${encodeURIComponent(room)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Session-Token': State.token },
-      body: JSON.stringify({ max_uses: 0, expires_hours: 168 })
+      body: JSON.stringify({ max_uses: maxUses, expires_hours: expiresHours })
     });
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
@@ -4211,10 +4429,12 @@ async function quickShareChannel() {
       return;
     }
     const data = await res.json();
+    const label = isPrivate
+      ? 'Invite link copied! (7 day, 1 use)'
+      : 'Invite link copied! (7 day, unlimited uses)';
     if (await UI.copy(data.url)) {
-      UI.showToast('Invite link copied! (7 day, unlimited uses)');
+      UI.showToast(label);
     } else {
-      // Clipboard blocked — surface the link so the user can copy it manually.
       window.prompt('Copy this invite link:', data.url);
     }
   } catch (e) {
