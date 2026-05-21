@@ -106,7 +106,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'android-calls-setup-v2',
+  ASSET_RESET_VERSION: 'federation-sync-v3',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -191,24 +191,108 @@ const App = {
   },
 
   consumeSwitchTicket() {
+    const ticket = this.peekSwitchTicket();
+    if (ticket) this.clearSwitchTicket();
+    return ticket;
+  },
+
+  peekSwitchTicket() {
     try {
       const raw = String(window.name || '').trim();
       if (!raw) return '';
       const obj = JSON.parse(raw);
       const ticket = String(obj?.ft_switch_ticket || '').trim();
       const ts = Number(obj?.ts || 0);
-      window.name = '';
       if (!ticket) return '';
       if (!Number.isFinite(ts) || (Date.now() - ts) > 2 * 60 * 1000) return '';
       return ticket;
     } catch {
-      try { window.name = ''; } catch {}
       return '';
     }
   },
 
+  clearSwitchTicket() {
+    try { window.name = ''; } catch {}
+  },
+
+  applyFederationSyncMeta(meta) {
+    if (!meta || typeof meta !== 'object') return;
+    const inProgress = !!meta.in_progress;
+    const hint = String(meta.hint || '').trim();
+    if (!inProgress && !hint && !meta.done) return;
+    const payload = {
+      ...meta,
+      in_progress: inProgress,
+      done: !!meta.done,
+      progress_pct: Number.isFinite(Number(meta.progress_pct))
+        ? Math.max(0, Math.min(100, Number(meta.progress_pct)))
+        : (inProgress ? 2 : 0),
+      hint: hint || (inProgress ? 'Syncing from your home node…' : ''),
+      phase: String(meta.phase || ''),
+    };
+    this._applyFederationSyncUiState(payload);
+  },
+
+  async ensureFederationSyncAfterSwitch() {
+    if (!State.token) return false;
+    const params = new URLSearchParams(window.location.search);
+    const switched = params.get('switched') === '1'
+      || (() => { try { return sessionStorage.getItem('ft_just_switched') === '1'; } catch { return false; } })();
+    if (!switched) return false;
+
+    let from = String(params.get('from') || '').trim();
+    try { from = from || String(sessionStorage.getItem('ft_switch_from') || '').trim(); } catch {}
+
+    try {
+      const res = await fetch('/api/auth/federation-sync-status', {
+        headers: { 'X-Session-Token': State.token },
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data.in_progress) {
+          this.applyFederationSyncMeta(data);
+          return true;
+        }
+        const joined = Number(data.rooms_joined || 0);
+        const dms = Number(data.dm_linked || 0);
+        const posts = Number(data.social_posts_imported || 0);
+        if (data.done && !data.error && (joined > 0 || dms > 0 || posts > 0)) {
+          this.applyFederationSyncMeta(data);
+          return true;
+        }
+      }
+    } catch {}
+
+    const ticket = this.peekSwitchTicket();
+    if (!ticket && !from) return false;
+
+    try {
+      const res = await fetch('/api/auth/federation-sync-resume', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': State.token,
+        },
+        body: JSON.stringify({
+          ticket: ticket || undefined,
+          source_base: from || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        this.applyFederationSyncMeta(data);
+        if (ticket) this.clearSwitchTicket();
+        return true;
+      }
+      if (data?.error && typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast(`Could not start sync: ${String(data.error).slice(0, 100)}`, 'error', 5000);
+      }
+    } catch {}
+    return false;
+  },
+
   async tryAutoLoginFromSwitchTicket(ticket = '') {
-    const t = String(ticket || this.consumeSwitchTicket() || '').trim();
+    const t = String(ticket || this.peekSwitchTicket() || '').trim();
     if (!t) return false;
     try {
       const res = await fetch('/api/auth/federation-ticket-login', {
@@ -232,9 +316,15 @@ const App = {
         status_msg: ('status_msg' in data) ? (data.status_msg ?? '') : '',
       };
       State.save();
-      this.federationSyncHint = String(data?.federation_sync?.hint || '').trim();
+      this.applyFederationSyncMeta(data?.federation_sync || {
+        in_progress: true,
+        progress_pct: 2,
+        hint: 'Syncing channels and DMs from your home node…',
+        phase: 'fetch',
+      });
       this.forceAndroidFcmResync(State.token);
       try { localStorage.setItem('ft_just_switched_node', '1'); } catch {}
+      this.clearSwitchTicket();
       return true;
     } catch {
       return false;
@@ -273,6 +363,14 @@ const App = {
 
     // Check for invite link / share link params in URL
     const params = new URLSearchParams(window.location.search);
+    const switchedParam = params.get('switched') === '1';
+    if (switchedParam) {
+      try {
+        const from = String(params.get('from') || '').trim();
+        if (from) sessionStorage.setItem('ft_switch_from', from);
+        sessionStorage.setItem('ft_just_switched', '1');
+      } catch {}
+    }
     const returnTo = (params.get('return') || '').trim();
     if (returnTo && returnTo.startsWith('/') && !returnTo.startsWith('//')) {
       this.pendingReturn = returnTo;
@@ -535,14 +633,26 @@ const App = {
 
     // Rooms must load before call recovery or signaling bootstrap (joined-room WS).
     const justSwitchedNode = this.consumeJustSwitchedNodeFlag()
-      || (new URLSearchParams(window.location.search).get('switched') === '1');
+      || (new URLSearchParams(window.location.search).get('switched') === '1')
+      || (() => { try { return sessionStorage.getItem('ft_just_switched') === '1'; } catch { return false; } })();
+
+    if (justSwitchedNode) {
+      this.applyFederationSyncMeta({
+        in_progress: true,
+        progress_pct: 1,
+        hint: 'Connecting to this node — preparing sync…',
+        phase: 'boot',
+      });
+      await this.ensureFederationSyncAfterSwitch();
+    }
+
     try {
       await Rooms.loadRooms();
     } catch (e) {
       console.warn('[App] loadRooms failed', e);
       try { State.rooms = []; } catch {}
     }
-    const syncApplied = await this.waitForFederationSyncIfNeeded();
+    const syncApplied = await this.waitForFederationSyncIfNeeded(justSwitchedNode ? 45000 : 22000);
     if (syncApplied) {
       try { await Rooms.loadRooms(); } catch {}
     }
@@ -705,6 +815,7 @@ const App = {
       } catch {}
       try {
         window.history.replaceState({}, '', window.location.pathname);
+        sessionStorage.removeItem('ft_just_switched');
       } catch {}
     }
 

@@ -1344,6 +1344,69 @@ def _fetch_sync_export_via_ticket(base_url: str, ticket: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _fetch_sync_export_via_federation_gid(base_url: str, global_user_id: str) -> dict | None:
+    fed = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
+    gid = str(global_user_id or "").strip()
+    if not fed or not gid or not _GID_RE.match(gid):
+        return None
+    source = _norm_base(base_url)
+    if not source:
+        return None
+    try:
+        data = _post_json(
+            f"{source}/api/auth/federation-sync-export-gid",
+            {"global_user_id": gid},
+            headers={"X-Federation-Token": fed},
+            timeout=8.0,
+        )
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+async def _sync_user_from_peer_gid(user_id: int, source_base: str, global_user_id: str) -> None:
+    uid = int(user_id or 0)
+    source = _norm_base(source_base)
+    gid = str(global_user_id or "").strip()
+    if uid <= 0 or not source or not gid:
+        return
+    _sync_state_set(uid, {
+        "source_base": source,
+        "in_progress": True,
+        "done": False,
+        "error": "",
+        "progress_pct": 3,
+        "phase": "fetch",
+        "hint": "Fetching account data from your home node…",
+    })
+    try:
+        export = await asyncio.to_thread(_fetch_sync_export_via_federation_gid, source, gid)
+        if not isinstance(export, dict):
+            raise ValueError("export_unavailable")
+        _sync_progress(uid, 8, "Applying synced data…", "apply")
+        applied = await asyncio.to_thread(_apply_sync_export_to_user, uid, export)
+        _sync_state_set(uid, {
+            "in_progress": False,
+            "done": True,
+            "error": "",
+            "progress_pct": 100,
+            "phase": "done",
+            "hint": "Sync complete",
+            "finished_at": int(time.time()),
+            **(applied or {}),
+        })
+    except Exception as e:
+        _sync_state_set(uid, {
+            "in_progress": False,
+            "done": True,
+            "error": str(e)[:200],
+            "finished_at": int(time.time()),
+            "rooms_joined": 0,
+            "rooms_missing": 0,
+            "dm_linked": 0,
+        })
+
+
 async def _sync_user_from_peer_session(user_id: int, source_base: str, remote_token: str) -> None:
     uid = int(user_id or 0)
     source = _norm_base(source_base)
@@ -1512,6 +1575,15 @@ class FederationTicketLoginRequest(BaseModel):
 
 class FederationSyncExportTicketRequest(BaseModel):
     ticket: str = Field(min_length=1, max_length=8192)
+
+
+class FederationSyncExportGidRequest(BaseModel):
+    global_user_id: str = Field(min_length=1, max_length=128)
+
+
+class FederationSyncResumeRequest(BaseModel):
+    source_base: str | None = Field(default=None, max_length=512)
+    ticket: str | None = Field(default=None, max_length=8192)
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -1875,6 +1947,8 @@ async def login(request: Request, body: LoginRequest):
                 "in_progress": True,
                 "done": False,
                 "error": "",
+                "progress_pct": 2,
+                "phase": "fetch",
                 "hint": "Syncing channels and DMs from your home node…",
             })
             try:
@@ -1884,12 +1958,58 @@ async def login(request: Request, body: LoginRequest):
             sync_meta = {
                 "in_progress": True,
                 "source_base": source_base,
+                "progress_pct": 2,
+                "phase": "fetch",
                 "hint": "Syncing channels and DMs from your home node…",
             }
     payload = _auth_session_response(user["id"], token, sync_meta=sync_meta)
     resp = JSONResponse(content=payload)
     _attach_session_cookies(resp, request, token)
     return resp
+
+
+async def _start_federation_sync_for_user(
+    user_id: int,
+    *,
+    source_base: str = "",
+    ticket: str = "",
+    global_user_id: str = "",
+    here_base: str = "",
+) -> dict:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {"in_progress": False, "done": False, "error": "invalid user"}
+    cur = _sync_state_get(uid)
+    if cur.get("in_progress"):
+        return cur
+    source = _norm_base(source_base)
+    raw_ticket = str(ticket or "").strip()
+    gid = str(global_user_id or "").strip()
+    if not gid:
+        me = db.get_user_by_id(uid) or {}
+        gid = str(me.get("global_user_id") or "").strip()
+    if raw_ticket and not source and here_base:
+        payload = _verify_federation_login_ticket(raw_ticket, here_base)
+        if isinstance(payload, dict):
+            source = _norm_base(str(payload.get("src") or ""))
+    if not source:
+        return {"in_progress": False, "done": False, "error": "missing source node"}
+    here = _norm_base(here_base)
+    if here and source == here:
+        return {"in_progress": False, "done": False, "error": "source is current node"}
+    if raw_ticket:
+        try:
+            asyncio.create_task(_sync_user_from_peer_ticket(uid, source, raw_ticket))
+        except Exception:
+            _log.exception("federation sync: failed to start peer-ticket task")
+    elif gid:
+        try:
+            asyncio.create_task(_sync_user_from_peer_gid(uid, source, gid))
+        except Exception:
+            _log.exception("federation sync: failed to start peer-gid task")
+    else:
+        return {"in_progress": False, "done": False, "error": "missing ticket or global_user_id"}
+    return _sync_state_get(uid)
 
 
 def _auth_session_response(user_id: int, token: str, sync_meta: dict | None = None) -> dict:
@@ -2087,6 +2207,8 @@ async def login_with_federation_ticket(
         sync_meta = {
             "in_progress": True,
             "source_base": source_base,
+            "progress_pct": 2,
+            "phase": "fetch",
             "hint": "Syncing channels and DMs from your home node…",
         }
     payload_out = _auth_session_response(user["id"], token, sync_meta=sync_meta)
@@ -2098,6 +2220,53 @@ async def login_with_federation_ticket(
 @router.get("/federation-sync-status")
 async def federation_sync_status(current_user: dict = Depends(get_current_user)):
     return _sync_state_get(int(current_user["id"]))
+
+
+@router.post("/federation-sync-resume")
+@limiter.limit("30/hour")
+async def federation_sync_resume(
+    request: Request,
+    body: FederationSyncResumeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Kick off (or return) federation import after a node switch.
+
+    Used when the account already exists locally, ticket auto-login failed,
+    or the client loaded stale JS and missed the initial sync kick.
+    """
+    uid = int(current_user["id"])
+    me = db.get_user_by_id(uid) or current_user
+    state = await _start_federation_sync_for_user(
+        uid,
+        source_base=str(body.source_base or ""),
+        ticket=str(body.ticket or ""),
+        global_user_id=str(me.get("global_user_id") or ""),
+        here_base=str(request.base_url),
+    )
+    if state.get("error") and not state.get("in_progress"):
+        return JSONResponse(status_code=400, content=state)
+    return state
+
+
+@router.post("/federation-sync-export-gid")
+@limiter.limit("120/hour")
+async def federation_sync_export_gid(
+    body: FederationSyncExportGidRequest,
+    x_federation_token: str | None = Header(default=None),
+):
+    if not _fed_token_ok(x_federation_token):
+        return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
+    gid = str(body.global_user_id or "").strip()
+    if not _GID_RE.match(gid):
+        return JSONResponse(status_code=400, content={"error": "Invalid global_user_id"})
+    with db._conn() as con:
+        row = con.execute(
+            "SELECT id FROM users WHERE global_user_id=? LIMIT 1",
+            (gid,),
+        ).fetchone()
+    if not row:
+        return JSONResponse(status_code=404, content={"error": "Account not found on this node"})
+    return _build_sync_export_for_user(int(row["id"]))
 
 
 @router.get("/federation-sync-export")

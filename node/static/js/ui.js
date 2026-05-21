@@ -2289,7 +2289,11 @@ async function doAuth() {
     State.save();
     try {
       if (window.App && typeof App === 'object') {
-        App.federationSyncHint = String(data?.federation_sync?.hint || '').trim();
+        if (typeof App.applyFederationSyncMeta === 'function') {
+          App.applyFederationSyncMeta(data?.federation_sync);
+        } else {
+          App.federationSyncHint = String(data?.federation_sync?.hint || '').trim();
+        }
       }
     } catch {}
     // Brand-new accounts: force the user through the recovery-key
@@ -3399,6 +3403,8 @@ async function connectToSelectedServer() {
   } catch {}
   try {
     localStorage.setItem('ft_just_switched_node', '1');
+    sessionStorage.setItem('ft_just_switched', '1');
+    if (window.location?.origin) sessionStorage.setItem('ft_switch_from', window.location.origin);
     localStorage.removeItem('fc_last_room');
   } catch {}
   try {
