@@ -225,23 +225,31 @@
   flex-shrink: 0;
 }
 
-/* Wider channel settings modal: inline create button beside dropdowns */
+/* Desktop / wide modal: three columns — fields align with button on select baseline */
 @media (min-width: 520px) {
   #modal-channel-settings .ch-invite-create-row {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: flex-end;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    align-items: end;
+    column-gap: 10px;
+    row-gap: 10px;
   }
 
   #modal-channel-settings .ch-invite-create-fields {
-    flex: 1 1 240px;
-    max-width: calc(100% - 8.5rem);
+    display: contents;
   }
 
   #modal-channel-settings .ch-invite-create-btn {
-    flex: 0 0 auto;
     width: auto;
     min-width: 8.25rem;
+    align-self: end;
+    /* Match compact select height so baselines line up */
+    min-height: 38px;
+    padding-top: 0;
+    padding-bottom: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
 }
 
