@@ -2542,6 +2542,129 @@ async def serve_sitemap_board():
     return Response(content=body, media_type="application/xml; charset=utf-8")
 
 
+def _downloads_catalog_entries():
+    """Resolve which platform artifacts exist on this node (for the download picker)."""
+    import glob
+    import re
+
+    def _entry(entry_id: str, label: str, fmt: str, icon: str, url: str, path: str,
+               media: str, *, open_in_new_tab: bool = False, always_available: bool = False):
+        ok = always_available or bool(path and os.path.isfile(path))
+        size = os.path.getsize(path) if (path and os.path.isfile(path)) else 0
+        return {
+            "id": entry_id,
+            "label": label,
+            "format": fmt,
+            "icon": icon,
+            "url": url,
+            "available": ok,
+            "size_bytes": size,
+            "filename": os.path.basename(path) if ok else None,
+            "media_type": media,
+            "open_in_new_tab": open_in_new_tab,
+        }
+
+    apk_candidates = glob.glob("static/frogtalk-v*.apk") + glob.glob("static/FrogTalk-v*.apk")
+
+    def _apk_version(path: str) -> int:
+        m = re.search(r"frogtalk-v(\d+)\.apk$", os.path.basename(path), flags=re.IGNORECASE)
+        return int(m.group(1)) if m else -1
+
+    apk_path = max(apk_candidates, key=lambda p: (_apk_version(p), os.path.getmtime(p))) if apk_candidates else ""
+
+    appimage_candidates = glob.glob("static/FrogTalk-*.AppImage")
+
+    def _appimage_version(path: str):
+        name = os.path.basename(path)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)\.AppImage$", name, flags=re.IGNORECASE)
+        if not m:
+            return (-1, -1, -1, os.path.getmtime(path))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
+
+    appimage_path = max(appimage_candidates, key=_appimage_version) if appimage_candidates else ""
+
+    deb_candidates = (
+        glob.glob("static/frogtalk_*_amd64.deb")
+        + glob.glob("static/FrogTalk_*_amd64.deb")
+    )
+
+    def _deb_version(path: str):
+        name = os.path.basename(path)
+        m = re.search(r"frogtalk_(\d+)\.(\d+)\.(\d+)_amd64\.deb$", name, flags=re.IGNORECASE)
+        if not m:
+            return (-1, -1, -1, os.path.getmtime(path))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
+
+    deb_path = max(deb_candidates, key=_deb_version) if deb_candidates else ""
+
+    win_candidates = (
+        glob.glob("static/FrogTalk-*-win-x64-portable.exe")
+        + glob.glob("static/FrogTalk-*-portable.exe")
+        + glob.glob("static/FrogTalk-*-Setup.exe")
+        + glob.glob("static/FrogTalk-*-win-x64.zip")
+        + glob.glob("static/FrogTalk-*-win.zip")
+    )
+
+    def _win_ver(path: str):
+        name = os.path.basename(path)
+        m = re.search(r"FrogTalk-(\d+)\.(\d+)\.(\d+)-", name, flags=re.IGNORECASE)
+        if not m:
+            return (-1, -1, -1, os.path.getmtime(path))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
+
+    portable = [p for p in win_candidates if p.lower().endswith(".exe") and "portable" in p.lower()]
+    setups = [p for p in win_candidates if p.lower().endswith(".exe") and "portable" not in p.lower()]
+    zips = [p for p in win_candidates if p.lower().endswith(".zip")]
+    if portable:
+        win_path = max(portable, key=_win_ver)
+    elif setups:
+        win_path = max(setups, key=_win_ver)
+    elif zips:
+        win_path = max(zips, key=_win_ver)
+    else:
+        win_path = ""
+
+    zip_candidates = (
+        glob.glob("static/FrogTalk-*-win-x64.zip")
+        + glob.glob("static/FrogTalk-*-win.zip")
+    )
+    win_zip_path = max(zip_candidates, key=_win_ver) if zip_candidates else ""
+
+    ios_url = (os.getenv("IOS_DOWNLOAD_URL") or "").strip()
+    ios_has_page = os.path.isfile("static/ios.html")
+    ios_entry = _entry(
+        "ios", "iPhone / iPad", "TestFlight or App Store", "🍎", "/download/ios",
+        "static/ios.html" if (ios_url or ios_has_page) else "",
+        "text/html",
+        open_in_new_tab=bool(ios_url),
+    )
+
+    return [
+        _entry("web", "Web app", "Browser — no install", "🌐", "/app", "", "text/html",
+               always_available=True),
+        _entry("android", "Android", "APK sideload", "📱", "/download/android", apk_path,
+               "application/vnd.android.package-archive"),
+        ios_entry,
+        _entry("linux", "Linux", "AppImage", "🐧", "/download/linux", appimage_path, "application/octet-stream"),
+        _entry("deb", "Debian / Ubuntu", ".deb package", "📦", "/download/deb", deb_path,
+               "application/vnd.debian.binary-package"),
+        _entry("windows", "Windows", "Portable .exe", "🪟", "/download/windows", win_path,
+               "application/vnd.microsoft.portable-executable"),
+        _entry("windows-zip", "Windows", ".zip archive", "🪟", "/download/windows-zip", win_zip_path,
+               "application/zip"),
+    ]
+
+
+@app.get("/api/downloads/catalog")
+async def downloads_catalog():
+    """Public list of install artifacts present on this node (for the download picker UI)."""
+    entries = _downloads_catalog_entries()
+    return {
+        "platforms": entries,
+        "github_releases": "https://github.com/deadinternetfox/frogtalk/releases/latest",
+    }
+
+
 @app.get("/download/android")
 async def download_android():
     """Always serves the latest Android APK with correct MIME + Content-Disposition."""

@@ -1,0 +1,226 @@
+/* FrogTalk download picker — marketing pages */
+
+.ft-downloads-section {
+  padding: 4rem 1.5rem 5rem;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(74, 222, 128, 0.08) 0%, transparent 55%),
+    var(--bg, #0d1117);
+}
+
+.ft-dl-card {
+  position: relative;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.ft-dl-card-glow {
+  position: absolute;
+  inset: -1px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.45), rgba(88, 166, 255, 0.2), rgba(74, 222, 128, 0.25));
+  opacity: 0.55;
+  filter: blur(0.5px);
+  pointer-events: none;
+}
+
+.ft-dl-card-inner {
+  position: relative;
+  border-radius: 18px;
+  border: 1px solid rgba(74, 222, 128, 0.22);
+  background: linear-gradient(165deg, rgba(22, 27, 34, 0.98) 0%, rgba(13, 17, 23, 0.98) 100%);
+  padding: 2rem 2rem 1.75rem;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.ft-dl-kicker {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6fcf8a;
+  margin-bottom: 0.65rem;
+}
+
+.ft-dl-head h2 {
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  color: var(--text, #e6edf3);
+}
+
+.ft-dl-head p {
+  margin: 0 0 1.75rem;
+  color: var(--text-muted, #7d8590);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  max-width: 52ch;
+}
+
+.ft-dl-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ft-dl-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted, #7d8590);
+}
+
+.ft-dl-select-wrap {
+  position: relative;
+}
+
+.ft-dl-select-wrap::after {
+  content: '';
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-right: 2px solid #6fcf8a;
+  border-bottom: 2px solid #6fcf8a;
+  transform: translateY(-65%) rotate(45deg);
+  pointer-events: none;
+}
+
+.ft-dl-select {
+  width: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid rgba(74, 222, 128, 0.28);
+  border-radius: 12px;
+  background: rgba(13, 26, 22, 0.75);
+  color: var(--text, #e6edf3);
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.95rem 2.75rem 0.95rem 1rem;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.ft-dl-select:hover,
+.ft-dl-select:focus {
+  border-color: rgba(74, 222, 128, 0.55);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.12);
+}
+
+.ft-dl-select option {
+  background: #161b22;
+  color: #e6edf3;
+}
+
+.ft-dl-select option:disabled {
+  color: #555;
+}
+
+.ft-dl-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  min-height: 1.25rem;
+  font-size: 0.82rem;
+  color: var(--text-muted, #7d8590);
+}
+
+.ft-dl-meta strong {
+  color: #9ad9a8;
+  font-weight: 600;
+}
+
+.ft-dl-meta .ft-dl-unavailable {
+  color: #f85149;
+}
+
+.ft-dl-go {
+  width: 100%;
+  margin-top: 0.35rem;
+  justify-content: center;
+}
+
+.ft-dl-go:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.ft-dl-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px dashed rgba(125, 133, 144, 0.22);
+}
+
+.ft-dl-foot a {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--green, #4ade80);
+  text-decoration: none;
+}
+
+.ft-dl-foot a:hover {
+  text-decoration: underline;
+}
+
+.ft-dl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.ft-dl-chip {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(74, 222, 128, 0.2);
+  background: rgba(13, 26, 22, 0.5);
+  color: #9ad9a8;
+}
+
+.ft-dl-chip.off {
+  opacity: 0.35;
+  border-color: rgba(125, 133, 144, 0.2);
+  color: #7d8590;
+}
+
+.ft-dl-loading {
+  text-align: center;
+  color: var(--text-muted, #7d8590);
+  padding: 2rem;
+  font-size: 0.9rem;
+}
+
+.ft-dl-error {
+  color: #f85149;
+  font-size: 0.88rem;
+  margin-top: 0.5rem;
+}
+
+@media (max-width: 560px) {
+  .ft-downloads-section {
+    padding: 3rem 1rem 4rem;
+  }
+
+  .ft-dl-card-inner {
+    padding: 1.5rem 1.15rem 1.35rem;
+  }
+
+  .ft-dl-foot {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
