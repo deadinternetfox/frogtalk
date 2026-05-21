@@ -25,166 +25,8 @@
 <meta name="twitter:description" content="Auth, messaging, social, federation, and bot integration endpoints in one complete reference.">
 <meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
 <meta name="twitter:image:alt" content="FrogTalk API Reference page preview">
-<style>
-  :root {
-    --bg: #0d1117;
-    --bg2: #161b22;
-    --bg-soft: #111723;
-    --text: #e6edf3;
-    --muted: #7d8590;
-    --line: #30363d;
-    --green: #4ade80;
-    --blue: #58a6ff;
-    --amber: #fbbf24;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    color: var(--text);
-    background:
-      radial-gradient(900px 560px at 50% -10%, rgba(74,222,128,.10), transparent 70%),
-      radial-gradient(560px 420px at 14% 75%, rgba(88,166,255,.07), transparent 65%),
-      radial-gradient(520px 360px at 86% 18%, rgba(74,222,128,.06), transparent 65%),
-      var(--bg);
-    line-height: 1.55;
-  }
-  body.ft-has-site-nav .wrap { padding-top: 5.3rem; }
-  .top {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    backdrop-filter: blur(10px);
-    background: rgba(13,17,23,.9);
-    border-bottom: 1px solid var(--line);
-  }
-  .top-inner {
-    max-width: 1180px;
-    margin: 0 auto;
-    padding: .8rem 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: .8rem;
-  }
-  .brand { color: var(--green); font-weight: 800; text-decoration: none; }
-  .links { display: flex; gap: .6rem; flex-wrap: wrap; }
-  .links a {
-    text-decoration: none;
-    color: var(--muted);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: .32rem .7rem;
-    font-size: .78rem;
-  }
-  .links a:hover { color: var(--text); border-color: #3f566f; }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 1.3rem 1rem 3rem; }
-  .hero {
-    border: 1px solid var(--border, var(--line));
-    border-radius: 16px;
-    background: linear-gradient(150deg, rgba(22,27,34,.94), rgba(17,23,31,.94));
-    padding: 1.2rem;
-    margin-bottom: 1rem;
-    box-shadow: 0 8px 28px rgba(0,0,0,.25);
-  }
-  h1 { margin: 0 0 .35rem; font-size: clamp(1.4rem, 3.4vw, 2rem); }
-  .sub { color: var(--muted); margin: 0; }
-  .meta { margin-top: .65rem; color: var(--muted); font-size: .86rem; }
 
-  .layout {
-    display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 1rem;
-  }
-  .toc {
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: linear-gradient(180deg, rgba(22,27,34,.9), rgba(17,23,31,.92));
-    padding: .8rem;
-    position: sticky;
-    top: 72px;
-    height: fit-content;
-  }
-  .toc h3 { margin: .1rem 0 .55rem; font-size: .95rem; color: var(--green); }
-  .toc a { display: block; color: var(--muted); text-decoration: none; padding: .18rem 0; font-size: .87rem; border-left: 2px solid transparent; padding-left: .5rem; transition: color .12s, border-color .12s; }
-  .toc a:hover { color: var(--text); border-left-color: var(--green); }
-  .toc .sub { margin: .15rem 0 .35rem .65rem; padding-left: .35rem; border-left: 1px dashed var(--line); }
-  .toc .sub a { font-size: .8rem; color: #8b9bab; padding: .12rem 0 .12rem .55rem; }
-  .toc .sub a:hover { color: var(--text); border-left-color: var(--green); }
-
-  /* Inline content links — soft mint, not browser-default electric blue. */
-  .panel p a,
-  .panel li a,
-  .panel td a,
-  .panel h2 a,
-  .panel h3 a {
-    color: #7ee2a8;
-    text-decoration: none;
-    border-bottom: 1px dotted rgba(126,226,168,.45);
-    transition: color .12s, border-color .12s, background-color .12s;
-    padding: 0 1px;
-    border-radius: 2px;
-  }
-  .panel p a:hover,
-  .panel li a:hover,
-  .panel td a:hover,
-  .panel h2 a:hover,
-  .panel h3 a:hover {
-    color: #c5f5d8;
-    border-bottom-color: #c5f5d8;
-    background: rgba(74,222,128,.08);
-  }
-  .panel a:focus-visible {
-    outline: 2px solid var(--green);
-    outline-offset: 2px;
-    border-radius: 4px;
-  }
-  /* Section anchor target highlight (when arriving via #hash). */
-  .panel:target,
-  .panel h3:target {
-    scroll-margin-top: 88px;
-  }
-  .panel h3 { scroll-margin-top: 88px; }
-
-  .panel {
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: linear-gradient(180deg, rgba(22,27,34,.9), rgba(17,23,31,.92));
-    padding: 1rem;
-    margin-bottom: .9rem;
-    box-shadow: 0 4px 14px rgba(0,0,0,.16);
-  }
-  .panel h2 { margin: 0 0 .4rem; font-size: 1.08rem; }
-  .muted { color: var(--muted); }
-  .tag {
-    display: inline-block;
-    border: 1px solid #2d435b;
-    border-radius: 999px;
-    padding: .16rem .52rem;
-    font-size: .72rem;
-    color: #bfd6ec;
-    background: rgba(125,211,252,.09);
-    margin-right: .35rem;
-  }
-  pre {
-    margin: .6rem 0 0;
-    background: #0a121b;
-    border: 1px solid #28313b;
-    border-radius: 10px;
-    padding: .7rem;
-    overflow: auto;
-    font-size: .82rem;
-    line-height: 1.4;
-  }
-  code { font-family: "Consolas", "SFMono-Regular", monospace; }
-  .ok { color: #86efac; }
-  .warn { color: #fde68a; }
-
-  @media (max-width: 980px) {
-    .layout { grid-template-columns: 1fr; }
-    .toc { position: static; }
-  }
-</style>
+  <link rel="stylesheet" href="/static/css/docs-api.css">
 </head>
 <body>
   <!-- NAV (shared: static/partials/site-nav.html) -->
@@ -436,7 +278,7 @@ GET    /api/invites/{code}
 POST   /api/invites/{code}/join
 GET    /api/invites/{code}/landing</code></pre>
 
-          <h3 style="margin-top:14px">Encrypted wall posts (cross-node friends)</h3>
+          <h3 class="h-mt-14">Encrypted wall posts (cross-node friends)</h3>
           <p class="muted"><strong>Plaintext</strong> <code>POST /api/wall/posts</code> with
           <code>privacy: private</code> or <code>friends</code> is <em>not</em> replicated to peer nodes.
           For friends-only or followers-only content that must sync across the mesh, use
@@ -566,7 +408,7 @@ while True:
           <a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples" target="_blank" rel="noopener noreferrer"><code>bot-examples/</code></a>.
           Clone the repo, drop in your <code>bot_…</code> token, and run.</p>
 
-          <h4 style="margin-top:14px">🤖 runpod-ai-bot &mdash; AI chat bot (Python)</h4>
+          <h4 class="h-mt-14">🤖 runpod-ai-bot &mdash; AI chat bot (Python)</h4>
           <p>A mention-driven AI chat bot powered by a <a href="https://runpod.io" target="_blank" rel="noopener noreferrer">RunPod</a>
           serverless LLM endpoint. Polls public channels, replies when <code>@</code>-mentioned or
           when a user replies to its own message. ~200 lines, no async framework required.
@@ -589,7 +431,7 @@ while True:
             <li><a href="https://github.com/deadinternetfox/frogtalk/blob/master/bot-examples/runpod-ai-bot/frogtalk-runpod-bot.service" target="_blank" rel="noopener noreferrer">🛠️ frogtalk-runpod-bot.service</a> &mdash; systemd unit for production deployment</li>
           </ul>
 
-          <h4 style="margin-top:14px">🚀 Quick start (60 seconds)</h4>
+          <h4 class="h-mt-14">🚀 Quick start (60 seconds)</h4>
 <pre><code class="lang-bash">git clone https://github.com/deadinternetfox/frogtalk.git
 cd frogtalk/bot-examples/runpod-ai-bot
 
@@ -603,7 +445,7 @@ $EDITOR .env   # paste your FROGTALK_BOT_TOKEN and RUNPOD_* values
 # 3. Run
 python bot.py</code></pre>
 
-          <h4 style="margin-top:14px">🧪 Minimal bot in 20 lines</h4>
+          <h4 class="h-mt-14">🧪 Minimal bot in 20 lines</h4>
           <p>Don't want the full example? Here's the smallest useful loop &mdash; reads new messages
           from a channel and replies to mentions:</p>
 <pre><code class="lang-python">import os, time, requests
@@ -628,7 +470,7 @@ while True:
             )
     time.sleep(5)</code></pre>
 
-          <h4 style="margin-top:14px">🟦 TypeScript / Node.js</h4>
+          <h4 class="h-mt-14">🟦 TypeScript / Node.js</h4>
 <pre><code class="lang-typescript">const TOKEN   = process.env.FROGTALK_BOT_TOKEN!;
 const BASE    = "https://frogtalk.xyz/api/external";
 const CHANNEL = "general";
@@ -651,7 +493,7 @@ async function tick() {
 }
 setInterval(tick, 5000);</code></pre>
 
-          <p class="muted" style="margin-top:14px">Want to contribute another reference bot
+          <p class="muted" class="h-mt-14">Want to contribute another reference bot
           (TypeScript, Go, Rust, a Discord-style command bot, an RSS poster…)? Open a PR against
           <a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples" target="_blank" rel="noopener noreferrer">bot-examples/</a>.</p>
         </article>
@@ -730,7 +572,7 @@ POST   /api/federation/events/emit
 GET    /api/federation/events/outbox
 GET    /api/federation/failover/status</code></pre>
 
-          <h3 style="margin-top:14px">Signed update channel (CRIT-3, HIGH-15)</h3>
+          <h3 class="h-mt-14">Signed update channel (CRIT-3, HIGH-15)</h3>
           <p class="muted">Update apply now refuses to run unless the release manifest carries an Ed25519 signature
           from a pubkey listed in <code>FROGTALK_RELEASE_SIGNERS</code>. Auto-apply is off by default
           (<code>FROGTALK_AUTO_UPDATE_ENABLED=0</code>) — operators opt in explicitly.</p>
@@ -748,7 +590,7 @@ GET    /api/federation/failover/status</code></pre>
           checks <code>package_sha256</code>, and enforces version monotonicity before running the apply
           step.</p>
 
-          <h3 style="margin-top:14px">Inbox signing required by default (CRIT-2)</h3>
+          <h3 class="h-mt-14">Inbox signing required by default (CRIT-2)</h3>
           <p class="muted"><code>FROGTALK_FEDERATION_REQUIRE_SIGS</code> defaults to <code>1</code>. Events
           from origins with no pinned <code>server_pubkey</code> are rejected. Inbox idempotency uses a
           composite <code>(origin_server_id, event_id)</code> key so two peers cannot collide.</p>
@@ -760,13 +602,13 @@ GET    /api/federation/failover/status</code></pre>
           <code>FROGTALK_FEDERATION_INBOX_IDLE_SEC</code> / <code>OUTBOX_IDLE_SEC</code> (default 8s when idle,
           2s when busy). Clearnet hubs reach <code>.onion</code> peers via <code>FROGTALK_TOR_SOCKS_PROXY</code>.</p>
 
-          <h3 style="margin-top:14px">No shadow auto-create (CRIT-4)</h3>
+          <h3 class="h-mt-14">No shadow auto-create (CRIT-4)</h3>
           <p class="muted">Federation events referencing an unknown local nickname or room are now
           dropped instead of silently creating a placeholder user or room. Encrypted-post recipient
           wraps only attach to <strong>existing</strong> local <code>users</code> rows (materialized
           earlier via signed <code>dm.*</code> / <code>friend.*</code> events).</p>
 
-          <h3 style="margin-top:14px">Federated calls (<code>call.*</code> / <code>voice.*</code>)</h3>
+          <h3 class="h-mt-14">Federated calls (<code>call.*</code> / <code>voice.*</code>)</h3>
           <p class="muted">Requires <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code> and capability
           <code>federation-calls-v1</code>. Sensitive prefixes — pinned pubkey + signature. Targeted outbox to callee/home servers.</p>
 <pre><code>call.offer / call.answer / call.ice / call.end / call.reject
@@ -776,7 +618,7 @@ GET  /api/network/ice-config?peer_server_id=&lt;uuid&gt;  (session auth required
           <code>docs/FEDERATED_CALLS.md</code> in the repo. Tor Browser and strict privacy tabs block WebRTC
           in-page — clients show a toast; use a normal browser window or the mobile app for calls.</p>
 
-          <h3 style="margin-top:14px">FrogSocial replication (<code>social.*</code>)</h3>
+          <h3 class="h-mt-14">FrogSocial replication (<code>social.*</code>)</h3>
           <p class="muted">Sensitive prefix — requires pinned origin pubkey + valid Ed25519 signature.
           Outbox events are signed at push time; per-peer scoped payloads are re-signed when wraps are
           filtered for targeted delivery.</p>
@@ -799,7 +641,7 @@ social.story.created / social.story.deleted</code></pre>
           <p class="muted">Also signed under sensitive prefixes: <code>user.*</code>, <code>dm.*</code>,
           <code>friend.*</code> (e.g. <code>friend.requested</code>, <code>friend.accepted</code>).</p>
 
-          <h3 style="margin-top:14px">Inbox envelope (peer → peer)</h3>
+          <h3 class="h-mt-14">Inbox envelope (peer → peer)</h3>
 <pre><code>POST /api/federation/events/inbox
 {
   "events": [{

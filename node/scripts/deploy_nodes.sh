@@ -205,13 +205,21 @@ main() {
   done
 
   if (( failures > 0 )); then
-    echo "Aborting: ${failures} host(s) unreachable." >&2
-    exit 2
+    if [[ "${FT_DEPLOY_SKIP_UNREACHABLE:-0}" == "1" ]]; then
+      echo "Warning: ${failures} host(s) unreachable — deploying to reachable hosts only." >&2
+    else
+      echo "Aborting: ${failures} host(s) unreachable (set FT_DEPLOY_SKIP_UNREACHABLE=1 to skip)." >&2
+      exit 2
+    fi
   fi
 
   echo
   echo "--- Deploying (sequential per host, restart at end) ---"
   for host in "${HOSTS[@]}"; do
+    if [[ -z "${PORT_FOR[$host]:-}" ]]; then
+      echo "Skipping $host (unreachable)."
+      continue
+    fi
     port="${PORT_FOR[$host]}"
     if ! deploy_to "$host" "$port"; then
       failures=$((failures + 1))
