@@ -546,14 +546,15 @@
 }
 
 .ch-invite-item__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: 10px;
-  row-gap: 6px;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .ch-invite-item__meta {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
 }
@@ -577,26 +578,32 @@
 .ch-invite-item__actions {
   display: flex;
   flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 12px;
+  flex: 0 0 auto;
   flex-shrink: 0;
-  align-self: center;
+  margin-left: auto;
+  padding-top: 0;
 }
 
 #modal-channel-settings .ch-invite-item__copy,
 #modal-channel-settings .ch-invite-item__revoke {
-  width: 38px;
-  height: 38px;
-  min-width: 38px;
-  min-height: 38px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
   margin: 0;
   padding: 0;
   font-size: 17px;
   border-radius: 8px;
   background: rgba(127, 210, 167, 0.1);
   border: 1px solid rgba(127, 210, 167, 0.22);
+  flex: 0 0 auto;
   flex-shrink: 0;
+  position: relative;
+  touch-action: manipulation;
 }
 
 #modal-channel-settings .ch-invite-item__copy:hover {
