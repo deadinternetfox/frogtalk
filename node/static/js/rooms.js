@@ -1862,6 +1862,10 @@ const Rooms = (() => {
     meta.appendChild(urlEl);
     meta.appendChild(sub);
 
+    const actions = document.createElement('div');
+    actions.className = 'ch-invite-item__actions';
+    actions.setAttribute('aria-label', 'Invite actions');
+
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
     copyBtn.className = 'icon-btn ch-invite-item__copy';
@@ -1878,9 +1882,10 @@ const Rooms = (() => {
     revokeBtn.setAttribute('data-invite-code', code);
     revokeBtn.textContent = '🗑';
 
+    actions.appendChild(copyBtn);
+    actions.appendChild(revokeBtn);
     row.appendChild(meta);
-    row.appendChild(copyBtn);
-    row.appendChild(revokeBtn);
+    row.appendChild(actions);
     card.appendChild(row);
 
     const redemptions = Array.isArray(inv.redemptions) ? inv.redemptions : [];
