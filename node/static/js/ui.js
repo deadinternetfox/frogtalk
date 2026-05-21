@@ -2389,6 +2389,8 @@ let _networkSelectedServer = null;
 let _networkBuildTrustByBase = {};
 let _networkLocalBuildInfo = null;
 let _networkCurrentServerInfo = null;
+let _networkProbeLoading = false;
+let _networkSyncListenerBound = false;
 const _DESKTOP_CLOSE_TO_TRAY_LS_KEY = 'frogtalk-desktop-close-to-tray';
 
 function _isDesktopSettingsRuntime() {
@@ -2539,20 +2541,21 @@ function ensureNetworkPaneContent() {
     </div>
 
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-      <button class="modal-btn secondary" type="button" onclick="refreshNetworkServers()" style="flex:1;min-width:160px">Probe Servers</button>
+      <button class="modal-btn secondary" type="button" onclick="refreshNetworkServers()" style="flex:1;min-width:160px">Probe Nodes</button>
       <button class="modal-btn secondary" type="button" onclick="runAutoNetworkSelect()" style="flex:1;min-width:160px">Auto Select Best</button>
     </div>
 
     <div id="network-current-selection" style="margin-top:10px;font-size:12px;color:#9ec59e"></div>
+    <div id="network-sync-state" style="margin-top:6px;font-size:11px;color:#7fbaa0;display:none"></div>
 
     <div style="margin-top:10px;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px;padding:8px;max-height:220px;overflow-y:auto" id="network-servers-list">
-      <div style="color:#666;font-size:12px;text-align:center;padding:8px">Click "Probe Servers" or "Auto Select Best" to discover available FrogTalk instances with location and ping.</div>
+      <div style="color:#666;font-size:12px;text-align:center;padding:8px">Open this tab to auto-probe nodes, or tap "Probe Nodes" to refresh availability.</div>
     </div>
 
     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-      <button class="modal-btn primary" type="button" onclick="saveNetworkSettings()" style="flex:1;min-width:160px">Save Network Routing</button>
+      <button class="modal-btn primary" type="button" onclick="saveNetworkSettingsAndMaybeSwitch()" style="flex:1;min-width:160px">Save Network Routing</button>
       <button class="modal-btn secondary" type="button" onclick="useOfficialNetworkUrl()" style="flex:1;min-width:140px">Use official</button>
-      <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:160px">Connect To Selected Server</button>
+      <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:160px">Connect To Selected Node</button>
     </div>
     <div style="margin-top:6px;font-size:11px;color:#687d74">This saves only Network tab options. The modal "Save" button still saves your account/profile settings.</div>
   `;
@@ -2909,12 +2912,50 @@ function _renderNetworkSelection() {
   infoEl.textContent = saved ? `Selected: ${_networkAppUrl(saved) || saved}` : 'Selected: current server';
 }
 
+function _renderNetworkSyncState(state) {
+  const el = document.getElementById('network-sync-state');
+  if (!el) return;
+  const st = (state && typeof state === 'object')
+    ? state
+    : ((window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {}));
+  const inProgress = !!st?.in_progress;
+  if (!inProgress) {
+    el.textContent = '';
+    el.style.display = 'none';
+    return;
+  }
+  const hint = String(st?.hint || (window.App && App.federationSyncHint) || 'Syncing node data…').trim();
+  el.textContent = `⏳ ${hint}`;
+  el.style.display = '';
+}
+
 function _renderNetworkServersList() {
   const list = document.getElementById('network-servers-list');
   if (!list) return;
-  if (!_networkProbeResults.length) {
-    list.innerHTML = '<div style="color:#666;font-size:12px;text-align:center;padding:16px 8px">Click "Probe Servers" or "Auto Select Best" to discover available FrogTalk instances</div>';
+  if (_networkProbeLoading) {
+    if (!document.getElementById('ft-network-skeleton-style')) {
+      const st = document.createElement('style');
+      st.id = 'ft-network-skeleton-style';
+      st.textContent = '@keyframes ftSkel {0%{background-position:100% 0}100%{background-position:-100% 0}}';
+      document.head.appendChild(st);
+    }
+    list.innerHTML = `
+      <div style="padding:4px 0">
+        <div style="height:48px;border-radius:10px;margin:6px 0;background:linear-gradient(90deg,rgba(25,29,27,.9) 0%,rgba(35,42,39,.95) 45%,rgba(25,29,27,.9) 100%);background-size:220% 100%;animation:ftSkel 1.15s ease-in-out infinite"></div>
+        <div style="height:48px;border-radius:10px;margin:6px 0;background:linear-gradient(90deg,rgba(25,29,27,.9) 0%,rgba(35,42,39,.95) 45%,rgba(25,29,27,.9) 100%);background-size:220% 100%;animation:ftSkel 1.15s ease-in-out infinite"></div>
+        <div style="height:48px;border-radius:10px;margin:6px 0;background:linear-gradient(90deg,rgba(25,29,27,.9) 0%,rgba(35,42,39,.95) 45%,rgba(25,29,27,.9) 100%);background-size:220% 100%;animation:ftSkel 1.15s ease-in-out infinite"></div>
+      </div>
+    `;
     return;
+  }
+  if (!_networkProbeResults.length) {
+    list.innerHTML = '<div style="color:#666;font-size:12px;text-align:center;padding:16px 8px">Probing nodes... if this takes long, tap "Probe Nodes" to retry.</div>';
+    return;
+  }
+  if (_networkProbeResults.length > 50) {
+    list.style.maxHeight = '320px';
+  } else {
+    list.style.maxHeight = '220px';
   }
   const connectedBase = _getConnectedServerBaseUrl();
   list.innerHTML = _networkProbeResults.map((s) => {
@@ -2938,6 +2979,10 @@ function _renderNetworkServersList() {
       statusDot = '#d7c477';
     } else if (probeStatus === 'redirect' || (!healthy && probeErrorLower.includes('301'))) {
       statusText = 'redirect';
+      statusColor = '#f0c040';
+      statusDot = '#f0c040';
+    } else if (probeStatus === 'edge_error' || probeErrorLower.includes('cloudflare') || probeErrorLower.includes('challenge')) {
+      statusText = 'edge err';
       statusColor = '#f0c040';
       statusDot = '#f0c040';
     }
@@ -3045,6 +3090,8 @@ function selectNetworkServer(serverId) {
 async function refreshNetworkServers() {
   const mode = document.getElementById('network-mode')?.value || 'auto';
   const officialOnly = mode === 'official' ? 1 : 0;
+  _networkProbeLoading = true;
+  _renderNetworkServersList();
   try {
     // Always request onion metadata so capability badges remain accurate even when clearnet is preferred.
     const res = await apiFetch(`/api/network/probe?official_only=${officialOnly}&include_onion=1`);
@@ -3054,6 +3101,12 @@ async function refreshNetworkServers() {
       return;
     }
     _networkProbeResults = data.servers || [];
+    try {
+      localStorage.setItem('ft_network_probe_cache', JSON.stringify({
+        ts: Date.now(),
+        servers: _networkProbeResults,
+      }));
+    } catch {}
     const connectedBase = _getConnectedServerBaseUrl();
     const currentServer = _networkCurrentServerEntry();
     if (connectedBase && currentServer && !_networkProbeResults.some(s => _preferredNetworkUrl(s) === connectedBase)) {
@@ -3066,7 +3119,117 @@ async function refreshNetworkServers() {
     _renderNetworkSelection();
   } catch {
     UI.showToast('Network probe failed', 'error');
+  } finally {
+    _networkProbeLoading = false;
+    _renderNetworkServersList();
   }
+}
+
+function _networkNodeCheckError(raw) {
+  const txt = String(raw || '').trim();
+  if (!txt) return 'unreachable';
+  const low = txt.toLowerCase();
+  if (low.includes('cloudflare') || low.includes('cf-ray') || low.includes('challenge')) return 'edge error page';
+  if (txt.length > 140) return `${txt.slice(0, 137)}...`;
+  return txt;
+}
+
+async function _verifyNodeForSwitch(target) {
+  const base = _normalizeNetworkUrl(target || '');
+  if (!base) return { ok: false, error: 'missing target' };
+  const here = _normalizeNetworkUrl(window.location.origin || '');
+  if (here && base === here) return { ok: true, sameNode: true, serverId: 'current' };
+  try {
+    const statusUrl = new URL('/api/network/status', base);
+    statusUrl.searchParams.set('t', String(Date.now()));
+    const res = await fetch(statusUrl.toString(), { cache: 'no-store' });
+    if (!res.ok) {
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
+    const body = await res.text();
+    const lower = body.toLowerCase();
+    if (body.startsWith('<!doctype') || body.startsWith('<html') || lower.includes('cloudflare') || lower.includes('cf-ray')) {
+      return { ok: false, error: 'edge/html challenge' };
+    }
+    let data = null;
+    try {
+      data = JSON.parse(body);
+    } catch {
+      return { ok: false, error: 'invalid status response' };
+    }
+    const sid = String(data?.server?.server_id || '').trim();
+    if (!sid) return { ok: false, error: 'invalid node status payload' };
+    return { ok: true, serverId: sid, sameNode: false };
+  } catch (e) {
+    return { ok: false, error: _networkNodeCheckError(e?.message || e) };
+  }
+}
+
+function _readCachedProbeNodes(maxAgeMs = 10 * 60 * 1000) {
+  try {
+    const raw = localStorage.getItem('ft_network_probe_cache') || '';
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const ts = Number(parsed?.ts || 0);
+    const nodes = Array.isArray(parsed?.servers) ? parsed.servers : [];
+    if (!Number.isFinite(ts) || !ts || (Date.now() - ts) > maxAgeMs) return [];
+    return nodes;
+  } catch {
+    return [];
+  }
+}
+
+function _pickBestHealthyNode(nodes, excludeBase = '') {
+  const exclude = _normalizeNetworkUrl(excludeBase || '');
+  const safe = Array.isArray(nodes) ? nodes : [];
+  const healthy = safe.filter((n) => {
+    if (!n || !n.healthy) return false;
+    const addr = _normalizeNetworkUrl(_preferredNetworkUrl(n));
+    if (!addr) return false;
+    if (exclude && addr === exclude) return false;
+    return true;
+  });
+  if (!healthy.length) return null;
+  const scored = [...healthy].sort((a, b) => {
+    const la = Number(a.latency_ms || 999999);
+    const lb = Number(b.latency_ms || 999999);
+    const oa = Number(a.official || 0);
+    const ob = Number(b.official || 0);
+    if (la !== lb) return la - lb;
+    return ob - oa;
+  });
+  return scored[0] || null;
+}
+
+async function switchToBestNetworkNode(reason = 'fallback') {
+  const here = _normalizeNetworkUrl(window.location.origin || '');
+  let best = _pickBestHealthyNode(_networkProbeResults || [], here)
+    || _pickBestHealthyNode(_readCachedProbeNodes(), here);
+  if (!best) {
+    try {
+      const mode = document.getElementById('network-mode')?.value || 'auto';
+      const preferOnion = document.getElementById('network-prefer-onion')?.checked ? 1 : 0;
+      const officialOnly = mode === 'official' ? 1 : 0;
+      const res = await apiFetch(`/api/network/auto-select?official_only=${officialOnly}&prefer_tor=${preferOnion}`);
+      const data = await res.json();
+      if (res.ok) {
+        const cands = Array.isArray(data.candidates) ? data.candidates : [];
+        best = _pickBestHealthyNode(cands, here) || data.selected || null;
+        if (cands.length) _networkProbeResults = cands;
+      }
+    } catch {}
+  }
+  if (!best) {
+    UI.showToast('No healthy node available right now', 'error');
+    return false;
+  }
+  _networkSelectedServer = best;
+  _renderNetworkServersList();
+  _renderNetworkSelection();
+  saveNetworkSettings(true);
+  try { localStorage.setItem('ft_network_last_switch_reason', String(reason || 'fallback')); } catch {}
+  await connectToSelectedServer();
+  return true;
 }
 
 async function runAutoNetworkSelect() {
@@ -3089,8 +3252,8 @@ async function runAutoNetworkSelect() {
     _networkSelectedServer = data.selected || _networkSelectedServer;
     _renderNetworkServersList();
     _renderNetworkSelection();
-    if (_networkSelectedServer) UI.showToast('Best server selected', 'success');
-    else UI.showToast('No healthy server found', 'error');
+    if (_networkSelectedServer) UI.showToast('Best node selected', 'success');
+    else UI.showToast('No healthy node found', 'error');
   } catch {
     UI.showToast('Auto selection failed', 'error');
   }
@@ -3136,23 +3299,59 @@ function saveNetworkSettings(silent = false) {
   if (!silent) UI.showToast('Network preferences saved', 'success');
 }
 
-async function connectToSelectedServer() {
+function _resolveSelectedNetworkTarget() {
   const mode = document.getElementById('network-mode')?.value || 'auto';
   const customUrl = _normalizeNetworkUrl(document.getElementById('network-custom-url')?.value || '');
-  let target = '';
+  if (mode === 'custom') return customUrl;
+  if (_networkSelectedServer?.onion_url || _networkSelectedServer?.base_url) {
+    return _preferredNetworkUrl(_networkSelectedServer);
+  }
+  return localStorage.getItem('ft_network_selected') || '';
+}
+
+async function saveNetworkSettingsAndMaybeSwitch(silent = false) {
+  const target = _normalizeNetworkUrl(_resolveSelectedNetworkTarget() || '');
+  const here = _normalizeNetworkUrl(window.location.origin || '');
+  saveNetworkSettings(silent);
+  if (!target || !here || target === here) return false;
+  const verify = await _verifyNodeForSwitch(target);
+  if (!verify.ok) {
+    UI.showToast(`Preferred node is down (${verify.error || 'unreachable'})`, 'error');
+    return false;
+  }
+  await connectToSelectedServer();
+  return true;
+}
+
+async function connectToSelectedServer() {
+  const mode = document.getElementById('network-mode')?.value || 'auto';
+  let target = _normalizeNetworkUrl(_resolveSelectedNetworkTarget() || '');
   if (mode === 'custom') {
-    target = customUrl;
     if (!target) {
-      UI.showToast('Enter a custom server URL first', 'error');
+      UI.showToast('Enter a custom node URL first', 'error');
       return;
     }
-  } else if (_networkSelectedServer?.onion_url || _networkSelectedServer?.base_url) {
-    target = _preferredNetworkUrl(_networkSelectedServer);
-  } else {
-    target = localStorage.getItem('ft_network_selected') || '';
   }
   if (!target) {
-    UI.showToast('No server selected yet', 'error');
+    UI.showToast('No node selected yet', 'error');
+    return;
+  }
+  const verify = await _verifyNodeForSwitch(target);
+  if (!verify.ok) {
+    const useBest = await UI.confirm({
+      title: 'Selected node is unreachable',
+      message: `Could not verify this node before switch (${verify.error || 'unknown error'}).\n\nSwitch to the best healthy node instead?`,
+      confirmLabel: 'Switch to best node',
+      cancelLabel: 'Stay here',
+      danger: false,
+    });
+    if (useBest) {
+      await switchToBestNetworkNode('selected-node-unreachable');
+    }
+    return;
+  }
+  if (verify.sameNode) {
+    UI.showToast('Already connected to this node', 'info');
     return;
   }
   saveNetworkSettings(true);
@@ -3240,17 +3439,21 @@ async function loadNetworkSettings() {
   _networkSelectedServer = _networkProbeResults[0] || null;
   _renderNetworkServersList();
   _renderNetworkSelection();
+  _renderNetworkSyncState();
   _renderNetworkBuildHeader();
-  // Only auto-probe if user previously had saved servers
-  const saved = localStorage.getItem('ft_network_selected') || '';
-  if (saved) {
-    _networkProbeResults = [];
-    _renderNetworkServersList();
-    await refreshNetworkServers();
-    _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved) || _networkSelectedServer;
-    _renderNetworkServersList();
-    _renderNetworkSelection();
+  if (!_networkSyncListenerBound) {
+    window.addEventListener('ft:federation-sync', (ev) => {
+      _renderNetworkSyncState((ev && ev.detail) ? ev.detail : {});
+    });
+    _networkSyncListenerBound = true;
   }
+  const saved = localStorage.getItem('ft_network_selected') || '';
+  _networkProbeResults = [];
+  _renderNetworkServersList();
+  await refreshNetworkServers();
+  _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved) || _networkSelectedServer;
+  _renderNetworkServersList();
+  _renderNetworkSelection();
 }
 
 async function loadBlockedUsers() {
@@ -5353,7 +5556,7 @@ async function saveProfile() {
 
   // Network settings are optional for profile save; never let this block style/profile save.
   try {
-    if (typeof saveNetworkSettings === 'function') saveNetworkSettings(true);
+    if (typeof saveNetworkSettingsAndMaybeSwitch === 'function') await saveNetworkSettingsAndMaybeSwitch(true);
   } catch {}
 
   // Persist CSS first (same backend path as Preview Save) so Main Save always updates profile style.

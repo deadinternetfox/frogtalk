@@ -59,11 +59,17 @@ _LOGIN_LOCKOUT_THRESHOLD = 10
 _LOGIN_LOCKOUT_WINDOW = 15 * 60       # seconds — counter horizon
 _LOGIN_LOCKOUT_DURATION = 15 * 60     # seconds — actual lockout
 _LOGIN_LOCKOUT_MAX = 8192             # cap memory footprint
+_FED_BOOT_LOCKOUT_THRESHOLD = 8
+_FED_BOOT_LOCKOUT_WINDOW = 12 * 60
+_FED_BOOT_LOCKOUT_DURATION = 10 * 60
+_FED_BOOT_LOCKOUT_MAX = 8192
 
 _login_state_lock = threading.Lock() if False else None  # placeholder, replaced below
 import threading as _threading
 _login_state_lock = _threading.Lock()
 _login_state: dict[str, dict] = {}
+_fed_boot_lock = _threading.Lock()
+_fed_boot_state: dict[str, dict] = {}
 
 
 def _login_record_failure(nick_key: str) -> None:
@@ -118,6 +124,64 @@ def _login_clear_failures(nick_key: str) -> None:
     with _login_state_lock:
         _login_state.pop(nick_key, None)
 
+
+def _federated_bootstrap_record_failure(nick_key: str) -> None:
+    """Record explicit bad-credential failures from remote home-node login."""
+    if not nick_key:
+        return
+    now = time.time()
+    with _fed_boot_lock:
+        st = _fed_boot_state.get(nick_key) or {"count": 0, "first": now, "locked_until": 0.0}
+        if (now - st.get("first", now)) > _FED_BOOT_LOCKOUT_WINDOW:
+            st = {"count": 0, "first": now, "locked_until": 0.0}
+        st["count"] = int(st.get("count", 0)) + 1
+        if st["count"] >= _FED_BOOT_LOCKOUT_THRESHOLD:
+            st["locked_until"] = max(st.get("locked_until", 0.0), now + _FED_BOOT_LOCKOUT_DURATION)
+        _fed_boot_state[nick_key] = st
+        if len(_fed_boot_state) > _FED_BOOT_LOCKOUT_MAX:
+            stale = sorted(_fed_boot_state.items(), key=lambda kv: kv[1].get("first", 0))
+            for k, _ in stale[: _FED_BOOT_LOCKOUT_MAX // 2]:
+                _fed_boot_state.pop(k, None)
+
+
+def _federated_bootstrap_locked_until(nick_key: str) -> float:
+    if not nick_key:
+        return 0.0
+    now = time.time()
+    with _fed_boot_lock:
+        st = _fed_boot_state.get(nick_key)
+        if not st:
+            return 0.0
+        if st.get("locked_until", 0.0) <= now:
+            if st.get("locked_until", 0.0):
+                st["locked_until"] = 0.0
+                st["count"] = 0
+                st["first"] = now
+            return 0.0
+        return float(st["locked_until"])
+
+
+def _federated_bootstrap_clear_failures(nick_key: str) -> None:
+    if not nick_key:
+        return
+    with _fed_boot_lock:
+        _fed_boot_state.pop(nick_key, None)
+
+
+def _local_user_exists(nickname: str) -> bool:
+    nick = (nickname or "").strip()
+    if not nick:
+        return False
+    try:
+        with db._conn() as con:
+            row = con.execute(
+                "SELECT 1 AS ok FROM users WHERE nickname=? COLLATE NOCASE LIMIT 1",
+                (nick,),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
 MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB in base64
 FED_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FrogTalkFederation/1.0"
 _ROOM_NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
@@ -125,6 +189,7 @@ _GID_RE = re.compile(r"^[A-Za-z0-9._:\-]{6,128}$")
 _FCM_TOKEN_RE = re.compile(r"^[A-Za-z0-9:_\-.]{16,512}$")
 _SYNC_EXPORT_ROOM_LIMIT = 400
 _SYNC_EXPORT_DM_LIMIT = 400
+_SYNC_EXPORT_BLOCKED_LIMIT = 400
 _SYNC_EXPORT_PUBLIC_ROOM_LIMIT = 800
 _SYNC_EXPORT_SOCIAL_POST_LIMIT = 160
 _SYNC_EXPORT_SOCIAL_MEDIA_MAX = 1_500_000
@@ -520,6 +585,23 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         if len(push_tokens) >= 24:
             break
 
+    blocked_users: list[dict] = []
+    for row in db.get_blocked_users(uid):
+        blocked_id = int((row or {}).get("user_id") or 0)
+        if blocked_id <= 0:
+            continue
+        blocked_profile = db.get_user_by_id(blocked_id) or {}
+        blocked_gid = str(blocked_profile.get("global_user_id") or "").strip()
+        blocked_nick = str(blocked_profile.get("nickname") or (row or {}).get("nickname") or "").strip()
+        if not blocked_nick or not _GID_RE.match(blocked_gid):
+            continue
+        blocked_users.append({
+            "global_user_id": blocked_gid,
+            "nickname": blocked_nick,
+        })
+        if len(blocked_users) >= _SYNC_EXPORT_BLOCKED_LIMIT:
+            break
+
     social_posts: list[dict] = []
     try:
         feed_rows = db.get_feed_posts(uid, limit=_SYNC_EXPORT_SOCIAL_POST_LIMIT, offset=0, mood="", lite=False)
@@ -570,6 +652,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         "dm_peers": dm_peers,
         "following": following,
         "friends": friends,
+        "blocked_users": blocked_users,
         "social_posts": social_posts,
         "self_profile": self_profile,
         "push_tokens": push_tokens,
@@ -590,6 +673,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     dm_in = payload.get("dm_peers")
     following_in = payload.get("following")
     friends_in = payload.get("friends")
+    blocked_in = payload.get("blocked_users")
     social_posts_in = payload.get("social_posts")
     self_profile = payload.get("self_profile")
     push_tokens_in = payload.get("push_tokens")
@@ -598,6 +682,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     dm_peers = dm_in if isinstance(dm_in, list) else []
     following = following_in if isinstance(following_in, list) else []
     friends = friends_in if isinstance(friends_in, list) else []
+    blocked_users = blocked_in if isinstance(blocked_in, list) else []
     social_posts = social_posts_in if isinstance(social_posts_in, list) else []
     push_tokens = push_tokens_in if isinstance(push_tokens_in, list) else []
 
@@ -606,6 +691,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     dm_linked = 0
     following_linked = 0
     friends_linked = 0
+    blocked_linked = 0
     push_tokens_linked = 0
     social_posts_imported = 0
     me = db.get_user_by_id(uid) or {}
@@ -749,6 +835,30 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             if db.accept_friend_request(uid, peer_id):
                 friends_linked += 1
             db.get_or_create_dm(uid, peer_id)
+        except Exception:
+            continue
+
+    for item in blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("global_user_id") or "").strip()
+        nick = str(item.get("nickname") or "").strip()
+        if not nick or not _GID_RE.match(gid) or (my_gid and gid == my_gid):
+            continue
+        try:
+            peer = db.ensure_federated_dm_local_user(
+                gid,
+                nick,
+                origin_server_id=source_server_id,
+                avatar="",
+            )
+            if not peer:
+                continue
+            peer_id = int(peer.get("id") or 0)
+            if peer_id <= 0 or peer_id == uid:
+                continue
+            if db.block_user(uid, peer_id):
+                blocked_linked += 1
         except Exception:
             continue
 
@@ -918,6 +1028,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         "dm_linked": dm_linked,
         "following_linked": following_linked,
         "friends_linked": friends_linked,
+        "blocked_linked": blocked_linked,
         "push_tokens_linked": push_tokens_linked,
         "social_posts_imported": social_posts_imported,
     }
@@ -1264,6 +1375,9 @@ async def _try_federated_login_bootstrap(request: Request, nickname: str, passwo
     # Prefer the current transport mode, then official entries.
     candidates.sort(reverse=True)
 
+    saw_peer_rate_limit = False
+    saw_bad_creds = False
+    saw_transport_error = False
     for _, __, ___, base in candidates[:8]:
         try:
             remote_login, remote_ident = await asyncio.to_thread(_login_against_peer, base, nickname, password)
@@ -1276,11 +1390,29 @@ async def _try_federated_login_bootstrap(request: Request, nickname: str, passwo
                 "user": local_user,
                 "remote_base": base,
                 "remote_token": str(remote_login.get("token") or "").strip(),
+                "status": "ok",
             }
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, OSError):
+        except urllib.error.HTTPError as e:
+            code = int(getattr(e, "code", 0) or 0)
+            if code == 429:
+                saw_peer_rate_limit = True
+            elif code in (400, 401, 403):
+                saw_bad_creds = True
+            else:
+                saw_transport_error = True
+            continue
+        except (urllib.error.URLError, TimeoutError, ValueError, OSError):
+            saw_transport_error = True
             continue
         except Exception:
+            saw_transport_error = True
             continue
+    if saw_peer_rate_limit:
+        return {"status": "rate_limited"}
+    if saw_bad_creds:
+        return {"status": "invalid_credentials"}
+    if saw_transport_error:
+        return {"status": "transport_error"}
     return None
 
 
@@ -1554,14 +1686,27 @@ async def login(request: Request, body: LoginRequest):
     # cooling-off window after _LOGIN_LOCKOUT_THRESHOLD consecutive bad
     # passwords. Successful login clears the counter.
     nick_key = (body.nickname or "").strip().lower()
+    local_exists = _local_user_exists(body.nickname)
     if nick_key:
         locked_until = _login_locked_until(nick_key)
-        if locked_until:
+        if locked_until and local_exists:
             wait = int(max(1, locked_until - time.time()))
             return JSONResponse(
                 status_code=429,
                 content={
                     "error": "Too many failed attempts. Try again later.",
+                    "retry_after_seconds": wait,
+                },
+                headers={"Retry-After": str(wait)},
+            )
+        fed_locked_until = _federated_bootstrap_locked_until(nick_key)
+        if fed_locked_until and not local_exists and _federated_login_bootstrap_enabled():
+            wait = int(max(1, fed_locked_until - time.time()))
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Too many cross-node login attempts. Try again shortly.",
+                    "code": "federation_login_temporarily_locked",
                     "retry_after_seconds": wait,
                 },
                 headers={"Retry-After": str(wait)},
@@ -1574,13 +1719,45 @@ async def login(request: Request, body: LoginRequest):
     user = await asyncio.to_thread(db.verify_user, body.nickname, body.password)
     boot = None
     if not user:
-        if nick_key:
-            _login_record_failure(nick_key)
         # Federated bootstrap: if credentials are valid on a known peer,
         # provision the local account so first login on a new node works.
-        if _federated_login_bootstrap_enabled():
+        if (not local_exists) and _federated_login_bootstrap_enabled():
             boot = await _try_federated_login_bootstrap(request, body.nickname, body.password)
+        status = str((boot or {}).get("status") or "").strip().lower() if isinstance(boot, dict) else ""
+        if status == "rate_limited":
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "Home node is rate limiting login right now. Wait a moment and retry.",
+                    "code": "federation_home_rate_limited",
+                    "hint": "Try again shortly, or sign in directly on your home node and switch back.",
+                    "retry_after_seconds": 60,
+                },
+                headers={"Retry-After": "60"},
+            )
+        if status == "transport_error":
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "error": "Could not reach your home node right now.",
+                    "code": "federation_home_unreachable",
+                    "hint": "Retry in a moment. This does not count as a failed password attempt.",
+                },
+            )
+        if status == "invalid_credentials":
+            if nick_key:
+                _federated_bootstrap_record_failure(nick_key)
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "Invalid nickname or password.",
+                    "code": "invalid_credentials",
+                },
+            )
         if not boot:
+            if nick_key:
+                if local_exists:
+                    _login_record_failure(nick_key)
             return JSONResponse(
                 status_code=401,
                 content={
@@ -1615,6 +1792,7 @@ async def login(request: Request, body: LoginRequest):
         })
     if nick_key:
         _login_clear_failures(nick_key)
+        _federated_bootstrap_clear_failures(nick_key)
     token = _create_session_with_meta(request, user["id"])
     sync_meta = None
     if isinstance(boot, dict):

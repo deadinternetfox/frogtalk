@@ -132,6 +132,18 @@ const App = {
     try { localStorage.removeItem(this.PENDING_CALL_KEY); } catch {}
   },
 
+  forceAndroidFcmResync(sessionToken = '') {
+    const token = String(sessionToken || State.token || '').trim();
+    if (!token) return;
+    try {
+      if (window.Android && typeof window.Android.registerFcmToken === 'function') {
+        window.Android.registerFcmToken(token);
+      }
+    } catch (e) {
+      console.warn('[App] Android FCM resync failed', e);
+    }
+  },
+
   consumeSwitchTicket() {
     try {
       const raw = String(window.name || '').trim();
@@ -175,6 +187,7 @@ const App = {
       };
       State.save();
       this.federationSyncHint = String(data?.federation_sync?.hint || '').trim();
+      this.forceAndroidFcmResync(State.token);
       try { localStorage.setItem('ft_just_switched_node', '1'); } catch {}
       return true;
     } catch {
@@ -502,9 +515,7 @@ const App = {
 
     // Android native push: register/sync FCM token against this account.
     try {
-      if (window.Android && typeof window.Android.registerFcmToken === 'function' && State.token) {
-        window.Android.registerFcmToken(State.token);
-      }
+      this.forceAndroidFcmResync(State.token);
     } catch {}
 
     // Process pending invite / share link

@@ -886,6 +886,8 @@ def _network_probe_status(target: str, result: dict) -> str:
         return "tor_required"
     if "redirects not allowed" in err or "301" in err:
         return "redirect"
+    if "cloudflare" in err or "challenge" in err or "edge/html" in err:
+        return "edge_error"
     return "down"
 
 
@@ -895,12 +897,20 @@ def _probe_url(base_url: str, timeout_s: float = 1.2) -> dict:
     if not target:
         return {"ok": False, "latency_ms": None, "error": "missing_base_url"}
     try:
-        _fetch_url_bytes(
+        raw = _fetch_url_bytes(
             f"{target}/api/network/status",
             timeout_s=timeout_s,
             headers={"User-Agent": "FrogTalk-Probe/1.0"},
             method="GET",
         )
+        text = raw.decode("utf-8", errors="replace")
+        lower = text.lower()
+        if text.startswith("<!doctype") or text.startswith("<html") or "cloudflare" in lower or "cf-ray" in lower:
+            return {"ok": False, "latency_ms": None, "error": "edge/html challenge"}
+        payload = json.loads(text)
+        sid = str(((payload or {}).get("server") or {}).get("server_id") or "").strip()
+        if not sid:
+            return {"ok": False, "latency_ms": None, "error": "invalid status payload"}
         ok = True
         latency_ms = int((time.perf_counter() - start) * 1000)
         return {"ok": ok, "latency_ms": latency_ms, "error": None if ok else "status_not_ok"}

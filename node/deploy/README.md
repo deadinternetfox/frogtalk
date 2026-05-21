@@ -250,6 +250,14 @@ Does **not** replace `git pull` for schema migrations; use `node_update_check.sh
 | `FROGTALK_SERVER_WEBUI_ENABLED=0` | Enable `/server` operator UI only when needed |
 | `ADMIN_PASSWORD=` | Empty → one-time random password logged on first boot |
 
+### Federation + Android push checklist
+
+- All nodes in the same federation mesh should share `FROGTALK_FEDERATION_TOKEN`.
+- Cross-node calls require `FROGTALK_FEDERATION_CALLS_ENABLED=1` on each node.
+- For inter-node Android push token portability, run every node against the same Firebase project (`FIREBASE_SERVICE_ACCOUNT_JSON` / `FIREBASE_PROJECT_ID` matching the Android app's `google-services.json`).
+- If nodes intentionally use different Firebase projects, users must re-register push on each node after switching (open app once on each node).
+- Keep `PUBLIC_URL`/`FROGTALK_BASE_URL` accurate per host so switch tickets and handoff URLs validate correctly.
+
 See `env.example` for GIF (KLIPY), push (APNs/FCM), IndexNow, and federation token notes.
 
 ## See also

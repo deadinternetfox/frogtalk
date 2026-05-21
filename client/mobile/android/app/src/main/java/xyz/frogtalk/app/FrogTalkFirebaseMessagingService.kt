@@ -43,7 +43,7 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
 
         if (kind == "call") {
             val peer = data["from_nickname"].orEmpty()
-            val callId = data["call_id"].orEmpty()
+            val callId = data["call_id"].orEmpty().ifBlank { data["global_call_id"].orEmpty() }
             // Foreground: kick in-app recovery (WS + REST pending) AND still post the
             // heads-up. Tray has no Answer button (tap opens #incoming-call), so this
             // does not race auto-accept — it covers WebView/WS gaps where recovery
@@ -62,6 +62,13 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             } catch (e: Throwable) {
                 Log.w(TAG, "Incoming-call notification failed", e)
             }
+            return
+        }
+        if (kind == "missed_call") {
+            val title = data["title"] ?: "📵 Missed call"
+            val body = data["body"] ?: "You missed a call"
+            val senderName = data["from_nickname"] ?: data["sender_name"] ?: "FrogTalk"
+            showMessageNotification(title, body, senderName, "", "")
             return
         }
 

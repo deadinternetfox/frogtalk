@@ -1250,7 +1250,7 @@ async def websocket_endpoint(
                     db.delete_pending_call_offer(call_id)
                     with db._conn() as con:
                         call_row = con.execute(
-                            "SELECT id, caller_id, callee_id, call_type FROM calls WHERE id=?",
+                            "SELECT id, caller_id, callee_id, call_type, global_call_id FROM calls WHERE id=?",
                             (call_id,)
                         ).fetchone()
                     db.update_call_status(call_id, "rejected",
@@ -1280,6 +1280,19 @@ async def websocket_endpoint(
                     "from_nickname": user["nickname"],
                     "call_id": call_id,
                 }
+                try:
+                    import federation_calls as _fc
+                    peer = db.get_user_by_id(to_id) or {}
+                    if call_row and call_row["global_call_id"] and _fc.user_home_is_remote(peer):
+                        caller_gid = str(peer.get("global_user_id") or "")
+                        if caller_gid:
+                            _fc.enqueue_call_reject(
+                                user,
+                                caller_gid,
+                                global_call_id=str(call_row["global_call_id"]),
+                            )
+                except Exception:
+                    logger.exception("federated call_reject enqueue failed")
                 delivered = await manager.send_to_user(to_id, reject_payload)
                 if not delivered:
                     try:
@@ -1311,13 +1324,13 @@ async def websocket_endpoint(
                 with db._conn() as con:
                     if call_id:
                         call_row = con.execute(
-                            "SELECT id, caller_id, callee_id, call_type, status, started_at FROM calls WHERE id=?",
+                            "SELECT id, caller_id, callee_id, call_type, status, started_at, global_call_id FROM calls WHERE id=?",
                             (call_id,)
                         ).fetchone()
                     if not call_row:
                         call_row = con.execute(
                             """
-                            SELECT id, caller_id, callee_id, call_type, status, started_at
+                            SELECT id, caller_id, callee_id, call_type, status, started_at, global_call_id
                             FROM calls
                             WHERE ((caller_id=? AND callee_id=?) OR (caller_id=? AND callee_id=?))
                             ORDER BY id DESC LIMIT 1
@@ -1327,9 +1340,11 @@ async def websocket_endpoint(
                 if call_row:
                     call_id = int(call_row["id"])
                     status = str(call_row["status"] or "")
+                    federated_end_status = "ended"
                     db.delete_pending_call_offer(call_id)
                     print(f"[CALLDBG] call_end lookup: call_id={call_id} status={status!r} was_connected={was_connected}", flush=True)
                     if status == "ringing" and not was_connected:
+                        federated_end_status = "missed"
                         db.update_call_status(call_id, "missed",
                                               ended_at=datetime.utcnow().isoformat())
                         caller_id = int(call_row["caller_id"])
@@ -1377,6 +1392,20 @@ async def websocket_endpoint(
                         # rejected, ended, or unknown — just mark ended, log already written
                         db.update_call_status(call_id, "ended",
                                               ended_at=datetime.utcnow().isoformat())
+                    try:
+                        import federation_calls as _fc
+                        peer = db.get_user_by_id(to_id) or {}
+                        if call_row["global_call_id"] and _fc.user_home_is_remote(peer):
+                            peer_gid = str(peer.get("global_user_id") or "")
+                            if peer_gid:
+                                _fc.enqueue_call_end(
+                                    user,
+                                    peer_gid,
+                                    global_call_id=str(call_row["global_call_id"]),
+                                    status=federated_end_status,
+                                )
+                    except Exception:
+                        logger.exception("federated call_end enqueue failed")
                 end_payload = {
                     "type": "call_end",
                     "from_id": user["id"],

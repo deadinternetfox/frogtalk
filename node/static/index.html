@@ -8445,6 +8445,7 @@ body.mini-embedded .auth-tabs { margin-bottom:14px; }
   <div class="cerr-sub" id="cerr-sub"></div>
   <div class="cerr-actions">
     <button class="cerr-btn" id="cerr-retry-btn" onclick="ConnErr.retry()">Retry now</button>
+    <button class="cerr-btn secondary" id="cerr-switch-node-btn" onclick="ConnErr.switchNode()">Switch node</button>
     <button class="cerr-btn secondary" onclick="location.reload()">Reload app</button>
   </div>
 </div>
@@ -8579,6 +8580,64 @@ window.ConnErr = (function(){
     if (btn && !visible){ btn.disabled = false; btn.innerHTML = 'Retry now'; }
   }
 
+  async function switchNode(){
+    const btn = $('cerr-switch-node-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Switching…';
+    }
+    try {
+      if (typeof window.switchToBestNetworkNode === 'function') {
+        const ok = await window.switchToBestNetworkNode('disconnect-overlay');
+        if (ok) return;
+      }
+    } catch {}
+    try {
+      const norm = (u) => {
+        const raw = String(u || '').trim();
+        if (!raw) return '';
+        const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+        return withScheme.replace(/\/$/, '');
+      };
+      const here = norm(window.location.origin || '');
+      let candidates = [];
+      try {
+        const cached = JSON.parse(localStorage.getItem('ft_network_probe_cache') || '{}');
+        candidates = Array.isArray(cached.servers) ? cached.servers : [];
+      } catch {}
+      const healthy = candidates
+        .filter((s) => s && s.healthy)
+        .map((s) => {
+          const addr = norm(s.onion_url || s.base_url || '');
+          return { addr, latency: Number(s.latency_ms || 999999), official: Number(s.official || 0) };
+        })
+        .filter((s) => s.addr && s.addr !== here)
+        .sort((a, b) => (a.latency - b.latency) || (b.official - a.official));
+      let target = healthy[0]?.addr || '';
+      if (!target) {
+        const saved = norm(localStorage.getItem('ft_network_selected') || '');
+        if (saved && saved !== here) target = saved;
+      }
+      if (!target) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Switch node';
+        }
+        setSub('No healthy node found yet. Open Network tab when back online.');
+        return;
+      }
+      const next = new URL('/app', target);
+      next.searchParams.set('switched', '1');
+      if (window.location?.origin) next.searchParams.set('from', window.location.origin);
+      window.location.href = next.toString();
+      return;
+    } catch {}
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Switch node';
+    }
+  }
+
   // Public hooks
   function onNetFail(){
     netFails++;
@@ -8642,7 +8701,7 @@ window.ConnErr = (function(){
     if (visible) retry(true);
   });
 
-  return { show, hide, retry, armBootGrace, onNetFail, onNetOk, onWsFail, onWsOk };
+  return { show, hide, retry, switchNode, armBootGrace, onNetFail, onNetOk, onWsFail, onWsOk };
 })();
 
 /* Global click ripple — adds a subtle ripple to .modal-btn, .icon-btn, .cerr-btn, .filter-btn, .radio-option */
@@ -10298,20 +10357,20 @@ window.ConnErr = (function(){
       </div>
 
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-        <button class="modal-btn secondary" type="button" onclick="refreshNetworkServers()" style="flex:1;min-width:160px">Probe Servers</button>
+    <button class="modal-btn secondary" type="button" onclick="refreshNetworkServers()" style="flex:1;min-width:160px">Probe Nodes</button>
         <button class="modal-btn secondary" type="button" onclick="runAutoNetworkSelect()" style="flex:1;min-width:160px">Auto Select Best</button>
       </div>
 
       <div id="network-current-selection" style="margin-top:10px;font-size:12px;color:#9ec59e"></div>
 
       <div style="margin-top:10px;background:#0d0d0d;border:1px solid #1e1e1e;border-radius:8px;padding:8px;max-height:170px;overflow-y:auto" id="network-servers-list">
-        <div style="color:#666;font-size:12px;text-align:center;padding:8px">Click "Probe Servers" or "Auto Select Best" to discover available FrogTalk instances</div>
+        <div style="color:#666;font-size:12px;text-align:center;padding:8px">Open this tab to auto-probe nodes, or tap "Probe Nodes" to refresh availability.</div>
       </div>
 
       <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-        <button class="modal-btn primary" type="button" onclick="saveNetworkSettings()" style="flex:1;min-width:160px">Save Network Preferences</button>
+        <button class="modal-btn primary" type="button" onclick="saveNetworkSettingsAndMaybeSwitch()" style="flex:1;min-width:160px">Save Network Preferences</button>
         <button class="modal-btn secondary" type="button" onclick="useOfficialNetworkUrl()" style="flex:1;min-width:140px">Use official</button>
-        <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:160px">Connect To Selected Server</button>
+        <button class="modal-btn secondary" type="button" onclick="connectToSelectedServer()" style="flex:1;min-width:160px">Connect To Selected Node</button>
       </div>
     </div>
     <!-- Application Tab (desktop-only) -->
