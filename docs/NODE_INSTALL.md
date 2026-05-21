@@ -484,9 +484,11 @@ In the app: **Settings → Network** — probe peers, compare build hash with [f
 | `Direct clearnet route` | Federation uses the normal `base_url` (HTTP/HTTPS), not Tor |
 | `Clearnet address redacted` | The host is an IP; the admin panel hides the last octets |
 | `IP hidden (Tor)` | Traffic is aimed at an `.onion` hidden service |
-| `Public host` | A DNS name is shown (e.g. `frogtalk.xyz`) |
+| `Public host` | A DNS name is shown (e.g. `frogtalk.xyz`), or full IP when redaction is off |
 
-Federation, probes, and **Settings → Network** still use the real `base_url` stored in the database. Only the Server Admin card redacts bare IPs. Nodes with a **domain** in `PUBLIC_URL` show the hostname instead of a masked IP.
+Federation, probes, and **Settings → Network** still use the real `base_url` stored in the database. Only the Server Admin card redacts bare IPs (optional).
+
+**Server Admin → Federation Directory → Redact clearnet peer IPs** (default **on**): masks VPS IPs as `46.250.*.*` in this panel only. Turn off to show full IPs to operators on trusted machines.
 
 ---
 

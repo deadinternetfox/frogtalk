@@ -73,6 +73,21 @@ class TorModeTests(unittest.TestCase):
         self.assertEqual(view["display_endpoint"], "31.220.*.*")
         self.assertEqual(view["privacy_label"], "Clearnet address redacted")
 
+    @mock.patch("database.get_federation_policy_settings", return_value={"block_tor_peers": False, "redact_clearnet_ips": False})
+    def test_admin_node_view_shows_clearnet_ip_when_redact_off(self, _policy_mock):
+        view = server_admin._admin_node_view({
+            "server_id": "srv_test",
+            "display_name": "Test",
+            "base_url": "http://31.220.92.120",
+            "onion_url": "",
+            "trust_tier": "community",
+            "enabled": 1,
+            "official": 0,
+            "capabilities": [],
+        })
+        self.assertEqual(view["display_endpoint"], "31.220.92.120")
+        self.assertEqual(view["privacy_label"], "Public host")
+
     def test_easter_egg_sanitizer_removes_script_and_handlers(self):
         raw = '<div onclick="alert(1)">ok</div><script>alert(2)</script><a href="javascript:alert(3)">x</a>'
         cleaned = server_admin._sanitize_easter_html(raw)

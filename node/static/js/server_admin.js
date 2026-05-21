@@ -35,6 +35,7 @@
   const channelRetentionStatus = document.getElementById('channel-retention-status');
   const channelRetentionLastSaved = document.getElementById('channel-retention-last-saved');
   const blockTorPeers = document.getElementById('block-tor-peers');
+  const redactClearnetIps = document.getElementById('redact-clearnet-ips');
   const saveFederationPolicyBtn = document.getElementById('save-federation-policy-btn');
   const federationPolicyStatus = document.getElementById('federation-policy-status');
   let easterEggConfig = { enabled: false, title: 'Frog signal', html: '', updated_at: '' };
@@ -65,7 +66,9 @@
   }
 
   function federationPolicySig() {
-    return blockTorPeers?.checked ? '1' : '0';
+    const tor = blockTorPeers?.checked ? '1' : '0';
+    const redact = redactClearnetIps?.checked ? '1' : '0';
+    return `${tor}|${redact}`;
   }
 
   function setFederationPolicyStatus(state, text) {
@@ -85,7 +88,9 @@
 
   function syncFederationPolicy(policy) {
     const block = !!(policy && policy.block_tor_peers);
+    const redact = policy?.redact_clearnet_ips !== false;
     if (blockTorPeers) blockTorPeers.checked = block;
+    if (redactClearnetIps) redactClearnetIps.checked = redact;
     federationPolicyBaseline = federationPolicySig();
     setFederationPolicyStatus('saved', 'Loaded from this node');
   }
@@ -99,7 +104,10 @@
     try {
       const payload = await api('/api/server-admin/federation-policy', {
         method: 'PUT',
-        body: JSON.stringify({ block_tor_peers: !!blockTorPeers?.checked }),
+        body: JSON.stringify({
+          block_tor_peers: !!blockTorPeers?.checked,
+          redact_clearnet_ips: !!redactClearnetIps?.checked,
+        }),
       });
       syncFederationPolicy(payload.federation_policy || {});
       const n = Number(payload.tor_peers_disabled || 0);
@@ -1578,7 +1586,10 @@
         body: action === 'sync' ? undefined : JSON.stringify(body),
       });
       if (action === 'sync') {
-        setActionMessage(`Synced directory: imported ${data.imported}, skipped ${data.skipped}.`);
+        const parts = [`imported ${data.imported}`, `skipped ${data.skipped}`];
+        if (data.duplicates_pruned != null) parts.push(`pruned ${data.duplicates_pruned} dupes`);
+        if (data.tor_peers_disabled > 0) parts.push(`Tor blocked ${data.tor_peers_disabled}`);
+        setActionMessage(`Directory sync OK — ${parts.join(', ')}.`);
       } else {
         setActionMessage(`${action} completed successfully.`);
       }
@@ -1606,6 +1617,7 @@
     saveFederationPolicy().catch(() => {});
   });
   blockTorPeers?.addEventListener('change', refreshFederationPolicyDirtyUi);
+  redactClearnetIps?.addEventListener('change', refreshFederationPolicyDirtyUi);
   channelActiveDays?.addEventListener('input', refreshRetentionDirtyUi);
   channelAutoDeleteDays?.addEventListener('input', refreshRetentionDirtyUi);
   frogTrigger?.addEventListener('click', handleFrogTap);

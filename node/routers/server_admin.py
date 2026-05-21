@@ -188,7 +188,7 @@ def _resource_snapshot() -> dict:
     }
 
 
-def _safe_host_label(url: str) -> str:
+def _safe_host_label(url: str, *, redact_clearnet_ips: bool = True) -> str:
     target = (url or "").strip()
     if not target:
         return ""
@@ -204,6 +204,8 @@ def _safe_host_label(url: str) -> str:
         return f"{host[:14]}...{host[-10:]}"
     try:
         ip = ipaddress.ip_address(host)
+        if not redact_clearnet_ips:
+            return host
         if isinstance(ip, ipaddress.IPv4Address):
             octets = str(ip).split(".")
             return f"{octets[0]}.{octets[1]}.*.*"
@@ -226,9 +228,13 @@ def _admin_node_view(node: dict) -> dict:
         target = str(raw.get("onion_url") or raw.get("base_url") or "").strip()
     onion_url = str(raw.get("onion_url") or "").strip()
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
-    display_endpoint = _safe_host_label(onion_url if route_mode == "tor" and onion_url else target)
+    _redact_ips = bool(db.get_federation_policy_settings().get("redact_clearnet_ips", True))
+    display_endpoint = _safe_host_label(
+        onion_url if route_mode == "tor" and onion_url else target,
+        redact_clearnet_ips=_redact_ips,
+    )
     _clearnet_ip_redacted = False
-    if route_mode == "clearnet":
+    if route_mode == "clearnet" and _redact_ips:
         try:
             _h = (urllib.parse.urlparse(target).hostname or "").strip()
             ipaddress.ip_address(_h)
@@ -274,7 +280,10 @@ def _local_admin_server_view() -> dict:
         "server_id": public.get("server_id") or "",
         "display_name": public.get("display_name") or "FrogTalk Node",
         "tor_enabled": tor_enabled,
-        "public_endpoint": _safe_host_label(endpoint),
+        "public_endpoint": _safe_host_label(
+            endpoint,
+            redact_clearnet_ips=bool(db.get_federation_policy_settings().get("redact_clearnet_ips", True)),
+        ),
         "privacy_mode": "tor" if tor_enabled else "standard",
         "directory_last_sync": db.get_config("federation.official_directory_last_sync") or "",
     }
@@ -461,6 +470,7 @@ class ChannelRetentionBody(BaseModel):
 
 class FederationPolicyBody(BaseModel):
     block_tor_peers: bool = False
+    redact_clearnet_ips: bool = True
 
 
 def _cfg_easter_enabled() -> bool:
@@ -593,7 +603,10 @@ async def server_admin_put_federation_policy(body: FederationPolicyBody, request
     if auth:
         return auth
 
-    policy = db.set_federation_policy_settings(bool(body.block_tor_peers))
+    policy = db.set_federation_policy_settings(
+        bool(body.block_tor_peers),
+        redact_clearnet_ips=bool(body.redact_clearnet_ips),
+    )
     tor_disabled = 0
     if policy.get("block_tor_peers"):
         tor_disabled = federation_router.apply_tor_peer_blocks_if_enabled()
@@ -1157,10 +1170,11 @@ async def server_admin_probe_node(server_id: str, request: Request):
     target = federation_router._select_peer_target(node)
     result = federation_router._probe_url(target, timeout_s=1.6)
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
+    _redact_ips = bool(db.get_federation_policy_settings().get("redact_clearnet_ips", True))
     return {
         "ok": True,
         "server_id": sid,
-        "display_target": _safe_host_label(target),
+        "display_target": _safe_host_label(target, redact_clearnet_ips=_redact_ips),
         "route_mode": route_mode,
         "transport_label": "Tor onion route" if route_mode == "tor" else "Direct clearnet route",
         "healthy": bool(result.get("ok")),
