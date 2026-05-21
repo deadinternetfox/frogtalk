@@ -2123,7 +2123,12 @@ const Rooms = (() => {
         panelEl.classList.toggle('modal-tab-pane', t === tab);
       }
     });
-    if (tab === 'invites') fetchInvites(_currentSettingsRoom);
+    if (tab === 'invites') {
+      const isPrivate = (_currentRoomData?.room?.type || 'public') === 'private';
+      _applyPrivateInvitePolicies(isPrivate);
+      _renderVanityCard(false, null);
+      fetchInvites(_currentSettingsRoom);
+    }
     if (tab === 'theme') loadChannelTheme(_currentSettingsRoom);
     if (tab === 'bots' && typeof loadChannelBotsPanel === 'function') loadChannelBotsPanel(_currentSettingsRoom);
     if (tab === 'bridges' && typeof loadChannelBridgesPanel === 'function') loadChannelBridgesPanel(_currentSettingsRoom);

@@ -1054,6 +1054,7 @@ async def _legacy_app_js():
 
 
 _APP_HTML_PATH = "static/index.html"
+_CHANNEL_SETTINGS_CSS_PATH = "static/css/channel-settings.css"
 _APP_JS_PATH = "static/js/app.js"
 _MESSAGES_JS_PATH = "static/js/messages.js"
 _UI_JS_PATH = "static/js/ui.js"
@@ -1080,7 +1081,7 @@ def _shell_asset_paths() -> tuple:
         _FRIENDS_JS_PATH, _DMS_JS_PATH, _MEDIA_JS_PATH,
         _ROOMS_JS_PATH, _STATE_JS_PATH, _WS_JS_PATH,
         _CALLS_JS_PATH, _SOCIAL_JS_PATH, _NOTIFICATIONS_JS_PATH,
-        _MUSIC_JS_PATH,
+        _MUSIC_JS_PATH, _CHANNEL_SETTINGS_CSS_PATH,
     )
 
 
