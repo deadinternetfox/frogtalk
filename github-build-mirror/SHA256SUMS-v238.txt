@@ -1,0 +1,2 @@
+a9d91cfc34628fc2ac870c6bf4561e2ff0b1beb94a54100bf9b7ff4543deff8d  frogtalk-v238.apk
+a6a9e3e4c0292a29b3ce076b23b8fbd691bfe2d0af5bc6d28a14ae78155423a4  FrogTalk-1.6.33-238.aab
