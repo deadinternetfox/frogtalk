@@ -66,7 +66,7 @@
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'android-call-notif-v1',
+  ASSET_RESET_VERSION: 'android-calls-setup-v2',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -791,6 +791,8 @@ const App = {
   async recoverLatestIncomingCall(opts) {
     if (!State.token) return false;
     try {
+      if (typeof isIncomingCallActive === 'function' && isIncomingCallActive()) return false;
+      if (typeof _callState !== 'undefined' && _callState !== 'idle') return false;
       const res = await fetch('/api/calls/pending-latest', {
         headers: { 'X-Session-Token': State.token }
       });

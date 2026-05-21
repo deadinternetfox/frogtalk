@@ -2542,37 +2542,144 @@ async def serve_sitemap_board():
     return Response(content=body, media_type="application/xml; charset=utf-8")
 
 
+_GITHUB_RELEASES_URL = "https://github.com/deadinternetfox/frogtalk/releases/latest"
+_GITHUB_MIRROR_RAW = "https://raw.githubusercontent.com/deadinternetfox/frogtalk/main/github-build-mirror"
+
+
+def _downloads_repo_mirror_dir() -> str:
+    """Repo-root github-build-mirror/ (sibling of node/ when cwd is node/)."""
+    here = os.path.dirname(os.path.abspath(__file__)) or "."
+    return os.path.normpath(os.path.join(here, "..", "github-build-mirror"))
+
+
+def _downloads_glob_candidates(*patterns: str) -> list:
+    import glob
+    seen = set()
+    out = []
+    for pat in patterns:
+        for hit in glob.glob(pat):
+            if hit not in seen:
+                seen.add(hit)
+                out.append(hit)
+    return out
+
+
+def _downloads_pick_best(candidates: list, key_fn) -> str:
+    if not candidates:
+        return ""
+    existing = [p for p in candidates if os.path.isfile(p)]
+    if not existing:
+        return ""
+    return max(existing, key=key_fn)
+
+
+def _downloads_resolve_artifact(
+    route_url: str,
+    node_globs: list,
+    mirror_globs: list,
+    repo_globs: list,
+    key_fn,
+    *,
+    github_glob: str = "",
+) -> dict:
+    """Pick node static → static/github-build-mirror → repo mirror → GitHub releases."""
+    node_only = [g for g in node_globs if "github-build-mirror" not in g]
+    node_path = _downloads_pick_best(_downloads_glob_candidates(*node_only), key_fn)
+    mirror_path = ""
+    if not node_path:
+        mirror_path = _downloads_pick_best(_downloads_glob_candidates(*mirror_globs), key_fn)
+    repo_path = ""
+    if not node_path and not mirror_path:
+        repo_root = _downloads_repo_mirror_dir()
+        repo_patterns = [os.path.join(repo_root, g) for g in repo_globs]
+        for g in mirror_globs:
+            repo_patterns.append(
+                os.path.join(repo_root, g.replace("static/github-build-mirror/", ""))
+            )
+        repo_path = _downloads_pick_best(_downloads_glob_candidates(*repo_patterns), key_fn)
+
+    path = node_path or mirror_path or repo_path
+    source = "node"
+    url = route_url
+    if node_path:
+        source = "node"
+    elif mirror_path:
+        source = "mirror"
+        url = "/static/github-build-mirror/" + os.path.basename(mirror_path)
+    elif repo_path:
+        source = "mirror"
+        url = "/static/github-build-mirror/" + os.path.basename(repo_path)
+
+    github_url = ""
+    if not path and github_glob:
+        import glob as _glob
+        repo_root = _downloads_repo_mirror_dir()
+        gh_hits = _glob.glob(os.path.join(repo_root, github_glob))
+        if gh_hits:
+            name = os.path.basename(max(gh_hits, key=os.path.getmtime))
+            github_url = f"{_GITHUB_RELEASES_URL}/download/{name}"
+            url = github_url
+            source = "github"
+            path = gh_hits[0]
+
+    ok = bool(path and os.path.isfile(path)) or bool(github_url)
+    size = os.path.getsize(path) if (path and os.path.isfile(path)) else 0
+    fname = os.path.basename(path) if path else (
+        os.path.basename(github_url.split("/download/")[-1]) if github_url else None
+    )
+    return {
+        "path": path,
+        "url": url,
+        "source": source,
+        "available": ok,
+        "size_bytes": size,
+        "filename": fname,
+        "github_url": github_url or _GITHUB_RELEASES_URL,
+    }
+
+
+def _downloads_catalog_entry(
+    entry_id: str,
+    label: str,
+    fmt: str,
+    icon: str,
+    route_url: str,
+    resolved: dict,
+    media: str,
+    *,
+    open_in_new_tab: bool = False,
+    always_available: bool = False,
+) -> dict:
+    ok = always_available or resolved.get("available")
+    source = resolved.get("source") or "none"
+    return {
+        "id": entry_id,
+        "label": label,
+        "format": fmt,
+        "icon": icon,
+        "url": resolved.get("url") or route_url,
+        "available": ok,
+        "size_bytes": resolved.get("size_bytes") or 0,
+        "filename": resolved.get("filename"),
+        "media_type": media,
+        "open_in_new_tab": open_in_new_tab,
+        "source": source,
+        "mirror_url": (
+            (resolved.get("github_url") or _GITHUB_RELEASES_URL)
+            if source in ("github", "none") or not ok
+            else ""
+        ),
+        "hosted_on_node": source == "node",
+    }
+
+
 def _downloads_catalog_entries():
     """Resolve which platform artifacts exist on this node (for the download picker)."""
-    import glob
     import re
-
-    def _entry(entry_id: str, label: str, fmt: str, icon: str, url: str, path: str,
-               media: str, *, open_in_new_tab: bool = False, always_available: bool = False):
-        ok = always_available or bool(path and os.path.isfile(path))
-        size = os.path.getsize(path) if (path and os.path.isfile(path)) else 0
-        return {
-            "id": entry_id,
-            "label": label,
-            "format": fmt,
-            "icon": icon,
-            "url": url,
-            "available": ok,
-            "size_bytes": size,
-            "filename": os.path.basename(path) if ok else None,
-            "media_type": media,
-            "open_in_new_tab": open_in_new_tab,
-        }
-
-    apk_candidates = glob.glob("static/frogtalk-v*.apk") + glob.glob("static/FrogTalk-v*.apk")
 
     def _apk_version(path: str) -> int:
         m = re.search(r"frogtalk-v(\d+)\.apk$", os.path.basename(path), flags=re.IGNORECASE)
         return int(m.group(1)) if m else -1
-
-    apk_path = max(apk_candidates, key=lambda p: (_apk_version(p), os.path.getmtime(p))) if apk_candidates else ""
-
-    appimage_candidates = glob.glob("static/FrogTalk-*.AppImage")
 
     def _appimage_version(path: str):
         name = os.path.basename(path)
@@ -2581,29 +2688,12 @@ def _downloads_catalog_entries():
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
 
-    appimage_path = max(appimage_candidates, key=_appimage_version) if appimage_candidates else ""
-
-    deb_candidates = (
-        glob.glob("static/frogtalk_*_amd64.deb")
-        + glob.glob("static/FrogTalk_*_amd64.deb")
-    )
-
     def _deb_version(path: str):
         name = os.path.basename(path)
         m = re.search(r"frogtalk_(\d+)\.(\d+)\.(\d+)_amd64\.deb$", name, flags=re.IGNORECASE)
         if not m:
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
-
-    deb_path = max(deb_candidates, key=_deb_version) if deb_candidates else ""
-
-    win_candidates = (
-        glob.glob("static/FrogTalk-*-win-x64-portable.exe")
-        + glob.glob("static/FrogTalk-*-portable.exe")
-        + glob.glob("static/FrogTalk-*-Setup.exe")
-        + glob.glob("static/FrogTalk-*-win-x64.zip")
-        + glob.glob("static/FrogTalk-*-win.zip")
-    )
 
     def _win_ver(path: str):
         name = os.path.basename(path)
@@ -2612,47 +2702,151 @@ def _downloads_catalog_entries():
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
 
+    apk_res = _downloads_resolve_artifact(
+        "/download/android",
+        ["static/frogtalk-v*.apk", "static/FrogTalk-v*.apk"],
+        ["static/github-build-mirror/frogtalk-v*.apk", "static/github-build-mirror/FrogTalk-v*.apk"],
+        ["frogtalk-v*.apk"],
+        lambda p: (_apk_version(p), os.path.getmtime(p)),
+        github_glob="frogtalk-v*.apk",
+    )
+    appimage_res = _downloads_resolve_artifact(
+        "/download/linux",
+        ["static/FrogTalk-*.AppImage"],
+        ["static/github-build-mirror/FrogTalk-*.AppImage"],
+        ["FrogTalk-*.AppImage"],
+        _appimage_version,
+        github_glob="FrogTalk-*.AppImage",
+    )
+    deb_res = _downloads_resolve_artifact(
+        "/download/deb",
+        ["static/frogtalk_*_amd64.deb", "static/FrogTalk_*_amd64.deb"],
+        [
+            "static/github-build-mirror/frogtalk_*_amd64.deb",
+            "static/github-build-mirror/FrogTalk_*_amd64.deb",
+        ],
+        ["frogtalk_*_amd64.deb", "FrogTalk_*_amd64.deb"],
+        _deb_version,
+        github_glob="frogtalk_*_amd64.deb",
+    )
+    win_globs = [
+        "static/FrogTalk-*-win-x64-portable.exe",
+        "static/FrogTalk-*-portable.exe",
+        "static/FrogTalk-*-Setup.exe",
+        "static/FrogTalk-*-win-x64.zip",
+        "static/FrogTalk-*-win.zip",
+    ]
+    win_mirror = ["static/github-build-mirror/" + os.path.basename(g) for g in win_globs]
+    win_candidates = _downloads_glob_candidates(*win_globs, *win_mirror)
     portable = [p for p in win_candidates if p.lower().endswith(".exe") and "portable" in p.lower()]
     setups = [p for p in win_candidates if p.lower().endswith(".exe") and "portable" not in p.lower()]
     zips = [p for p in win_candidates if p.lower().endswith(".zip")]
+    win_path = ""
     if portable:
         win_path = max(portable, key=_win_ver)
     elif setups:
         win_path = max(setups, key=_win_ver)
     elif zips:
         win_path = max(zips, key=_win_ver)
-    else:
-        win_path = ""
+    win_res = {
+        "path": win_path,
+        "url": "/download/windows" if win_path else _GITHUB_RELEASES_URL,
+        "source": "node" if win_path and "github-build-mirror" not in win_path else (
+            "mirror" if win_path else "none"
+        ),
+        "available": bool(win_path),
+        "size_bytes": os.path.getsize(win_path) if win_path else 0,
+        "filename": os.path.basename(win_path) if win_path else None,
+        "github_url": _GITHUB_RELEASES_URL,
+    }
+    if win_path and "github-build-mirror" in win_path:
+        win_res["url"] = "/static/github-build-mirror/" + os.path.basename(win_path)
+        win_res["source"] = "mirror"
 
-    zip_candidates = (
-        glob.glob("static/FrogTalk-*-win-x64.zip")
-        + glob.glob("static/FrogTalk-*-win.zip")
+    zip_candidates = _downloads_glob_candidates(
+        "static/FrogTalk-*-win-x64.zip",
+        "static/FrogTalk-*-win.zip",
+        "static/github-build-mirror/FrogTalk-*-win-x64.zip",
+        "static/github-build-mirror/FrogTalk-*-win.zip",
     )
     win_zip_path = max(zip_candidates, key=_win_ver) if zip_candidates else ""
+    zip_res = {
+        "path": win_zip_path,
+        "url": "/download/windows-zip" if win_zip_path else _GITHUB_RELEASES_URL,
+        "source": "node" if win_zip_path and "github-build-mirror" not in win_zip_path else (
+            "mirror" if win_zip_path else "none"
+        ),
+        "available": bool(win_zip_path),
+        "size_bytes": os.path.getsize(win_zip_path) if win_zip_path else 0,
+        "filename": os.path.basename(win_zip_path) if win_zip_path else None,
+        "github_url": _GITHUB_RELEASES_URL,
+    }
+    if win_zip_path and "github-build-mirror" in win_zip_path:
+        zip_res["url"] = "/static/github-build-mirror/" + os.path.basename(win_zip_path)
+        zip_res["source"] = "mirror"
 
     ios_url = (os.getenv("IOS_DOWNLOAD_URL") or "").strip()
     ios_has_page = os.path.isfile("static/ios.html")
-    ios_entry = _entry(
-        "ios", "iPhone / iPad", "TestFlight or App Store", "🍎", "/download/ios",
-        "static/ios.html" if (ios_url or ios_has_page) else "",
-        "text/html",
-        open_in_new_tab=bool(ios_url),
-    )
+    ios_res = {
+        "path": "static/ios.html" if (ios_url or ios_has_page) else "",
+        "url": "/download/ios",
+        "source": "node",
+        "available": bool(ios_url or ios_has_page),
+        "size_bytes": 0,
+        "filename": None,
+        "github_url": "",
+    }
 
     return [
-        _entry("web", "Web app", "Browser — no install", "🌐", "/app", "", "text/html",
-               always_available=True),
-        _entry("android", "Android", "APK sideload", "📱", "/download/android", apk_path,
-               "application/vnd.android.package-archive"),
-        ios_entry,
-        _entry("linux", "Linux", "AppImage", "🐧", "/download/linux", appimage_path, "application/octet-stream"),
-        _entry("deb", "Debian / Ubuntu", ".deb package", "📦", "/download/deb", deb_path,
-               "application/vnd.debian.binary-package"),
-        _entry("windows", "Windows", "Portable .exe", "🪟", "/download/windows", win_path,
-               "application/vnd.microsoft.portable-executable"),
-        _entry("windows-zip", "Windows", ".zip archive", "🪟", "/download/windows-zip", win_zip_path,
-               "application/zip"),
+        _downloads_catalog_entry(
+            "web", "Web app", "Browser — no install", "🌐", "/app",
+            {"url": "/app", "available": True, "source": "node", "size_bytes": 0, "filename": None, "github_url": ""},
+            "text/html", always_available=True,
+        ),
+        _downloads_catalog_entry(
+            "android", "Android", "APK sideload", "📱", "/download/android", apk_res,
+            "application/vnd.android.package-archive",
+        ),
+        _downloads_catalog_entry(
+            "ios", "iPhone / iPad", "TestFlight or App Store", "🍎", "/download/ios", ios_res,
+            "text/html", open_in_new_tab=bool(ios_url),
+        ),
+        _downloads_catalog_entry(
+            "linux", "Linux", "AppImage", "🐧", "/download/linux", appimage_res,
+            "application/octet-stream",
+        ),
+        _downloads_catalog_entry(
+            "deb", "Debian / Ubuntu", ".deb package", "📦", "/download/deb", deb_res,
+            "application/vnd.debian.binary-package",
+        ),
+        _downloads_catalog_entry(
+            "windows", "Windows", "Portable .exe", "🪟", "/download/windows", win_res,
+            "application/vnd.microsoft.portable-executable",
+        ),
+        _downloads_catalog_entry(
+            "windows-zip", "Windows", ".zip archive", "🪟", "/download/windows-zip", zip_res,
+            "application/zip",
+        ),
     ]
+
+
+def _downloads_file_response(path: str, media_type: str, filename: str = None):
+    """Serve a local artifact or redirect to GitHub when only the mirror repo has it."""
+    from fastapi.responses import RedirectResponse
+    if path and os.path.isfile(path):
+        size = os.path.getsize(path)
+        return FileResponse(
+            path,
+            media_type=media_type,
+            filename=filename or os.path.basename(path),
+            headers={
+                "Content-Encoding": "identity",
+                "Content-Length": str(size),
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "public, max-age=300, no-transform",
+            },
+        )
+    return RedirectResponse(url=_GITHUB_RELEASES_URL, status_code=302)
 
 
 @app.get("/api/downloads/catalog")
@@ -2661,44 +2855,34 @@ async def downloads_catalog():
     entries = _downloads_catalog_entries()
     return {
         "platforms": entries,
-        "github_releases": "https://github.com/deadinternetfox/frogtalk/releases/latest",
+        "github_releases": _GITHUB_RELEASES_URL,
+        "github_mirror_raw": _GITHUB_MIRROR_RAW,
     }
 
 
 @app.get("/download/android")
 async def download_android():
     """Always serves the latest Android APK with correct MIME + Content-Disposition."""
-    import glob
     import re
 
-    candidates = glob.glob("static/frogtalk-v*.apk") + glob.glob("static/FrogTalk-v*.apk")
-
     def _apk_version(path: str) -> int:
-        name = os.path.basename(path)
-        m = re.search(r"frogtalk-v(\d+)\.apk$", name, flags=re.IGNORECASE)
+        m = re.search(r"frogtalk-v(\d+)\.apk$", os.path.basename(path), flags=re.IGNORECASE)
         return int(m.group(1)) if m else -1
 
-    path = max(candidates, key=lambda p: (_apk_version(p), os.path.getmtime(p))) if candidates else ""
-    if not os.path.exists(path):
-        return JSONResponse(status_code=404, content={"error": "Android APK not available"})
-    size = os.path.getsize(path)
-    # APKs are already zip-compressed; running them through GZipMiddleware
-    # wastes CPU AND switches the response to chunked transfer, which
-    # strips Content-Length so Android's Download Manager / browsers can't
-    # show real progress (they just display the bytes received so far as
-    # the "total"). Setting Content-Encoding: identity makes Starlette's
-    # gzip layer pass the body through unchanged, preserving Content-Length.
-    # Cache-Control: no-transform asks Cloudflare / proxies to do the same.
-    return FileResponse(
-        path,
-        media_type="application/vnd.android.package-archive",
-        filename=os.path.basename(path),
-        headers={
-            "Content-Encoding": "identity",
-            "Content-Length": str(size),
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=300, no-transform",
-        },
+    res = _downloads_resolve_artifact(
+        "/download/android",
+        ["static/frogtalk-v*.apk", "static/FrogTalk-v*.apk"],
+        ["static/github-build-mirror/frogtalk-v*.apk", "static/github-build-mirror/FrogTalk-v*.apk"],
+        ["frogtalk-v*.apk"],
+        lambda p: (_apk_version(p), os.path.getmtime(p)),
+        github_glob="frogtalk-v*.apk",
+    )
+    if res.get("url", "").startswith("http"):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=res["url"], status_code=302)
+    return _downloads_file_response(
+        res.get("path") or "",
+        "application/vnd.android.package-archive",
     )
 
 
@@ -2791,9 +2975,7 @@ async def apple_app_site_association():
 @app.get("/download/linux")
 async def download_linux():
     """Always serves the latest Linux AppImage."""
-    import glob
     import re
-    candidates = glob.glob("static/FrogTalk-*.AppImage")
 
     def _appimage_version(path: str):
         name = os.path.basename(path)
@@ -2802,32 +2984,24 @@ async def download_linux():
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
 
-    path = max(candidates, key=_appimage_version) if candidates else ""
-    if not path or not os.path.exists(path):
-        return JSONResponse(status_code=404, content={"error": "Linux AppImage not available"})
-    size = os.path.getsize(path)
-    return FileResponse(
-        path,
-        media_type="application/octet-stream",
-        filename=os.path.basename(path),
-        headers={
-            "Content-Encoding": "identity",
-            "Content-Length": str(size),
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=300, no-transform",
-        },
+    res = _downloads_resolve_artifact(
+        "/download/linux",
+        ["static/FrogTalk-*.AppImage"],
+        ["static/github-build-mirror/FrogTalk-*.AppImage"],
+        ["FrogTalk-*.AppImage"],
+        _appimage_version,
+        github_glob="FrogTalk-*.AppImage",
     )
+    if res.get("url", "").startswith("http"):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=res["url"], status_code=302)
+    return _downloads_file_response(res.get("path") or "", "application/octet-stream")
 
 
 @app.get("/download/deb")
 async def download_deb():
     """Always serves the latest Debian/Ubuntu .deb package."""
-    import glob
     import re
-    candidates = (
-        glob.glob("static/frogtalk_*_amd64.deb")
-        + glob.glob("static/FrogTalk_*_amd64.deb")
-    )
 
     def _deb_version(path: str):
         name = os.path.basename(path)
@@ -2836,36 +3010,30 @@ async def download_deb():
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
 
-    path = max(candidates, key=_deb_version) if candidates else ""
-    if not path or not os.path.exists(path):
-        return JSONResponse(status_code=404, content={"error": "Debian package not available"})
-    size = os.path.getsize(path)
-    return FileResponse(
-        path,
-        media_type="application/vnd.debian.binary-package",
-        filename=os.path.basename(path),
-        headers={
-            "Content-Encoding": "identity",
-            "Content-Length": str(size),
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=300, no-transform",
-        },
+    res = _downloads_resolve_artifact(
+        "/download/deb",
+        ["static/frogtalk_*_amd64.deb", "static/FrogTalk_*_amd64.deb"],
+        [
+            "static/github-build-mirror/frogtalk_*_amd64.deb",
+            "static/github-build-mirror/FrogTalk_*_amd64.deb",
+        ],
+        ["frogtalk_*_amd64.deb", "FrogTalk_*_amd64.deb"],
+        _deb_version,
+        github_glob="frogtalk_*_amd64.deb",
+    )
+    if res.get("url", "").startswith("http"):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=res["url"], status_code=302)
+    return _downloads_file_response(
+        res.get("path") or "",
+        "application/vnd.debian.binary-package",
     )
 
 
 @app.get("/download/windows")
 async def download_windows():
     """Serves the latest Windows portable .exe (preferred), falling back to .zip."""
-    import glob
     import re
-    # Prefer portable .exe (single-file, just run it). Fall back to zip / installer.
-    candidates = (
-        glob.glob("static/FrogTalk-*-win-x64-portable.exe")
-        + glob.glob("static/FrogTalk-*-portable.exe")
-        + glob.glob("static/FrogTalk-*-Setup.exe")
-        + glob.glob("static/FrogTalk-*-win-x64.zip")
-        + glob.glob("static/FrogTalk-*-win.zip")
-    )
 
     def _win_ver(path: str):
         name = os.path.basename(path)
@@ -2874,47 +3042,44 @@ async def download_windows():
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
 
+    win_globs = [
+        "static/FrogTalk-*-win-x64-portable.exe",
+        "static/FrogTalk-*-portable.exe",
+        "static/FrogTalk-*-Setup.exe",
+        "static/FrogTalk-*-win-x64.zip",
+        "static/FrogTalk-*-win.zip",
+        "static/github-build-mirror/FrogTalk-*-win-x64-portable.exe",
+        "static/github-build-mirror/FrogTalk-*-portable.exe",
+        "static/github-build-mirror/FrogTalk-*-Setup.exe",
+        "static/github-build-mirror/FrogTalk-*-win-x64.zip",
+        "static/github-build-mirror/FrogTalk-*-win.zip",
+    ]
+    candidates = _downloads_glob_candidates(*win_globs)
     portable = [p for p in candidates if p.lower().endswith(".exe") and "portable" in p.lower()]
     setups = [p for p in candidates if p.lower().endswith(".exe") and "portable" not in p.lower()]
     zips = [p for p in candidates if p.lower().endswith(".zip")]
+    path = ""
     if portable:
         path = max(portable, key=_win_ver)
     elif setups:
         path = max(setups, key=_win_ver)
     elif zips:
         path = max(zips, key=_win_ver)
-    else:
-        path = ""
-    if not path or not os.path.exists(path):
-        return JSONResponse(status_code=404, content={"error": "Windows package not available"})
+    if not path:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=_GITHUB_RELEASES_URL, status_code=302)
     media = (
         "application/zip"
         if path.lower().endswith(".zip")
         else "application/vnd.microsoft.portable-executable"
     )
-    size = os.path.getsize(path)
-    return FileResponse(
-        path,
-        media_type=media,
-        filename=os.path.basename(path),
-        headers={
-            "Content-Encoding": "identity",
-            "Content-Length": str(size),
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=300, no-transform",
-        },
-    )
+    return _downloads_file_response(path, media)
 
 
 @app.get("/download/windows-zip")
 async def download_windows_zip():
     """Serves the latest Windows .zip build (extract & run)."""
-    import glob
     import re
-    candidates = (
-        glob.glob("static/FrogTalk-*-win-x64.zip")
-        + glob.glob("static/FrogTalk-*-win.zip")
-    )
 
     def _zip_ver(path: str):
         name = os.path.basename(path)
@@ -2923,21 +3088,21 @@ async def download_windows_zip():
             return (-1, -1, -1, os.path.getmtime(path))
         return (int(m.group(1)), int(m.group(2)), int(m.group(3)), os.path.getmtime(path))
 
-    path = max(candidates, key=_zip_ver) if candidates else ""
-    if not path or not os.path.exists(path):
-        return JSONResponse(status_code=404, content={"error": "Windows ZIP package not available"})
-    size = os.path.getsize(path)
-    return FileResponse(
-        path,
-        media_type="application/zip",
-        filename=os.path.basename(path),
-        headers={
-            "Content-Encoding": "identity",
-            "Content-Length": str(size),
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=300, no-transform",
-        },
+    res = _downloads_resolve_artifact(
+        "/download/windows-zip",
+        ["static/FrogTalk-*-win-x64.zip", "static/FrogTalk-*-win.zip"],
+        [
+            "static/github-build-mirror/FrogTalk-*-win-x64.zip",
+            "static/github-build-mirror/FrogTalk-*-win.zip",
+        ],
+        ["FrogTalk-*-win-x64.zip", "FrogTalk-*-win.zip"],
+        _zip_ver,
+        github_glob="FrogTalk-*-win-x64.zip",
     )
+    if res.get("url", "").startswith("http"):
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=res["url"], status_code=302)
+    return _downloads_file_response(res.get("path") or "", "application/zip")
 
 
 @app.get("/docs/api")

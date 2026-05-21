@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>FrogTalk — Connect</title>
+  <style>
+    :root {
+      --bg: #070b09;
+      --card: #101915;
+      --line: #234532;
+      --green: #4caf50;
+      --green-dim: #2e7d32;
+      --text: #e8f5ea;
+      --muted: #8aa894;
+      --danger: #f85149;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; min-height: 100%;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(ellipse 120% 80% at 50% -20%, rgba(76,175,80,.22), transparent 55%),
+                  linear-gradient(180deg, #0a120e 0%, var(--bg) 42%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 420px; margin: 0 auto;
+      padding: max(28px, env(safe-area-inset-top)) 20px max(32px, env(safe-area-inset-bottom));
+    }
+    .logo {
+      display: flex; align-items: center; gap: 14px; margin-bottom: 28px;
+    }
+    .logo-icon {
+      width: 56px; height: 56px; border-radius: 18px;
+      background: linear-gradient(135deg, #1b4329, #0c170f);
+      border: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    .logo h1 {
+      margin: 0; font-size: 1.35rem; font-weight: 800; letter-spacing: .2px;
+    }
+    .logo p { margin: 4px 0 0; font-size: .82rem; color: var(--muted); }
+    .card {
+      background: linear-gradient(165deg, rgba(16,25,21,.98), rgba(10,14,12,.98));
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 22px 20px;
+      box-shadow: 0 18px 48px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
+    }
+    .steps {
+      display: flex; gap: 6px; margin-bottom: 18px;
+    }
+    .step-dot {
+      flex: 1; height: 4px; border-radius: 99px;
+      background: rgba(76,175,80,.18);
+      transition: background .25s ease;
+    }
+    .step-dot.on { background: linear-gradient(90deg, var(--green), #7ecb8e); }
+    .panel { display: none; animation: fade .28s ease; }
+    .panel.active { display: block; }
+    @keyframes fade {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
+    }
+    h2 { margin: 0 0 8px; font-size: 1.05rem; font-weight: 700; }
+    .hint { margin: 0 0 16px; font-size: .86rem; line-height: 1.5; color: var(--muted); }
+    label { display: block; font-size: .78rem; font-weight: 600; color: #9ecaa2; margin-bottom: 6px; }
+    input[type="text"] {
+      width: 100%; padding: 14px 16px; border-radius: 12px;
+      border: 1px solid #2a4a34; background: #0a100c; color: var(--text);
+      font-size: 1rem; outline: none;
+    }
+    input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(76,175,80,.2); }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+    .chip {
+      padding: 8px 14px; border-radius: 999px; font-size: .8rem; font-weight: 600;
+      border: 1px solid #2f594a; background: #10231b; color: #b8e6c4; cursor: pointer;
+    }
+    .chip:active { transform: scale(.98); }
+    .note {
+      margin-top: 14px; padding: 12px 14px; border-radius: 12px;
+      background: rgba(26,58,26,.55); border: 1px solid #2a5a2a;
+      font-size: .8rem; line-height: 1.45; color: #9bd6ab;
+    }
+    .note strong { color: #cfeedb; }
+    .err {
+      display: none; margin-top: 10px; font-size: .82rem; color: var(--danger);
+    }
+    .err.show { display: block; }
+    .actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+    button {
+      flex: 1; min-width: 120px; padding: 14px 18px; border-radius: 12px;
+      border: none; font-size: .95rem; font-weight: 700; cursor: pointer;
+    }
+    button:active { transform: scale(.98); }
+    .btn-primary {
+      background: linear-gradient(180deg, #4caf50, #3e9f45);
+      color: #081008;
+      box-shadow: 0 2px 0 rgba(255,255,255,.12) inset;
+    }
+    .btn-ghost {
+      background: #141a16; color: #b8d5c8;
+      border: 1px solid #2a4034;
+    }
+    ul.features { margin: 0; padding: 0 0 0 18px; color: var(--muted); font-size: .84rem; line-height: 1.55; }
+    ul.features li { margin-bottom: 6px; }
+    .foot {
+      margin-top: 22px; text-align: center; font-size: .75rem; color: #5a7262;
+    }
+    .foot a { color: var(--green); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="logo">
+      <div class="logo-icon" aria-hidden="true">🐸</div>
+      <div>
+        <h1>FrogTalk</h1>
+        <p>Choose your home node</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="steps" aria-hidden="true">
+        <div class="step-dot on" data-step="0"></div>
+        <div class="step-dot" data-step="1"></div>
+        <div class="step-dot" data-step="2"></div>
+      </div>
+
+      <div class="panel active" id="panel-0">
+        <h2>Welcome</h2>
+        <p class="hint">FrogTalk is a federated chat app. Every account lives on a <strong style="color:#cfeedb">node</strong> — a server you trust. Most people use the official node; you can point the app at your own self-hosted server too.</p>
+        <ul class="features">
+          <li>End-to-end encrypted DMs on every node</li>
+          <li>Voice &amp; video calls with safety numbers</li>
+          <li>Switch nodes anytime in Settings → Network</li>
+        </ul>
+        <div class="actions">
+          <button type="button" class="btn-primary" id="btn-next-0">Continue</button>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-1">
+        <h2>Pick your node</h2>
+        <p class="hint">Official <strong style="color:#cfeedb">frogtalk.xyz</strong> is pre-filled — tap a chip or edit the address for a community or self-hosted node.</p>
+        <label for="server-url">Server address</label>
+        <input type="text" id="server-url" value="frogtalk.xyz" autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="url">
+        <div class="chip-row">
+          <button type="button" class="chip" data-url="frogtalk.xyz">Official</button>
+          <button type="button" class="chip" data-url="">Self-hosted</button>
+        </div>
+        <p class="err" id="url-err">Enter a valid hostname (e.g. frogtalk.xyz or your.node.com).</p>
+        <div class="note">
+          <strong>Self-hosting?</strong> Run the node setup wizard on your server — see <a href="https://frogtalk.xyz/docs/node" target="_blank" rel="noopener">docs/node</a> on desktop, or your operator’s invite link.
+        </div>
+        <div class="actions">
+          <button type="button" class="btn-ghost" id="btn-back-1">Back</button>
+          <button type="button" class="btn-primary" id="btn-official">Use official</button>
+          <button type="button" class="btn-primary" id="btn-connect">Connect</button>
+        </div>
+      </div>
+
+      <div class="panel" id="panel-2">
+        <h2>Almost there</h2>
+        <p class="hint">We’ll open FrogTalk and sign you in on <strong id="preview-host" style="color:#cfeedb">frogtalk.xyz</strong>. Allow notifications next so calls and messages can ring.</p>
+        <div class="actions">
+          <button type="button" class="btn-ghost" id="btn-back-2">Back</button>
+          <button type="button" class="btn-primary" id="btn-finish">Open FrogTalk</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="foot">Open source · <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">GitHub</a></p>
+  </div>
+
+  <script>
+    (function () {
+      var step = 0;
+      var input = document.getElementById('server-url');
+      var err = document.getElementById('url-err');
+      var preview = document.getElementById('preview-host');
+
+      function norm(raw) {
+        var u = String(raw || '').trim();
+        if (!u) return null;
+        if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+        try {
+          var a = document.createElement('a');
+          a.href = u;
+          var host = (a.hostname || '').toLowerCase();
+          if (!host) return null;
+          var port = a.port;
+          var base = a.protocol + '//' + host;
+          if (port && port !== '80' && port !== '443') base += ':' + port;
+          return base.replace(/\/$/, '');
+        } catch (e) { return null; }
+      }
+
+      function showStep(n) {
+        step = n;
+        document.querySelectorAll('.panel').forEach(function (p, i) {
+          p.classList.toggle('active', i === n);
+        });
+        document.querySelectorAll('.step-dot').forEach(function (d, i) {
+          d.classList.toggle('on', i <= n);
+        });
+      }
+
+      function connect(url) {
+        var base = norm(url);
+        if (!base) {
+          err.classList.add('show');
+          return;
+        }
+        err.classList.remove('show');
+        preview.textContent = base.replace(/^https?:\/\//, '');
+        if (window.Android && typeof Android.connectToServer === 'function') {
+          Android.connectToServer(base);
+          return;
+        }
+        alert('Could not reach the app shell. Restart FrogTalk and try again.');
+      }
+
+      document.getElementById('btn-next-0').onclick = function () { showStep(1); };
+      document.getElementById('btn-back-1').onclick = function () { showStep(0); };
+      document.getElementById('btn-back-2').onclick = function () { showStep(1); };
+      document.getElementById('btn-official').onclick = function () {
+        input.value = 'frogtalk.xyz';
+        showStep(2);
+        preview.textContent = 'frogtalk.xyz';
+      };
+      document.getElementById('btn-connect').onclick = function () {
+        var base = norm(input.value);
+        if (!base) { err.classList.add('show'); return; }
+        err.classList.remove('show');
+        preview.textContent = base.replace(/^https?:\/\//, '');
+        showStep(2);
+      };
+      document.getElementById('btn-finish').onclick = function () { connect(input.value); };
+      document.querySelectorAll('.chip').forEach(function (chip) {
+        chip.onclick = function () {
+          var v = chip.getAttribute('data-url');
+          if (v === '') { input.value = ''; input.focus(); return; }
+          input.value = v;
+          err.classList.remove('show');
+        };
+      });
+      input.addEventListener('input', function () { err.classList.remove('show'); });
+    })();
+  </script>
+</body>
+</html>

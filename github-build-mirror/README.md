@@ -1,37 +1,35 @@
 # FrogTalk Build Mirror
 
-Mirrored release artifacts for FrogTalk **v1.6.27** (Android `versionCode` **232**).
+Mirrored release artifacts for FrogTalk **v1.6.28** (Android `versionCode` **233**).
 
 ## Download Artifacts
 
-### Android (v1.6.27 / 232)
+### Android (v1.6.28 / 233)
 
 | Artifact | File | Use |
 |----------|------|-----|
-| **APK (sideload)** | [frogtalk-v232.apk](./frogtalk-v232.apk) | Direct install, `/download/android` on nodes |
-| **AAB (Play Store)** | [frogtalk-v232.aab](./frogtalk-v232.aab) | Google Play Console upload |
+| **APK (sideload)** | [frogtalk-v233.apk](./frogtalk-v233.apk) | Direct install, `/download/android` on nodes |
+| **AAB (Play Store)** | [frogtalk-v233.aab](./frogtalk-v233.aab) | Google Play Console upload |
 
-**Call/FCM fixes in this build:** warm notification tap recovers Accept/Decline UI without WebView reload; FCM uses configured server URL; background ring dedupe. See [docs/ANDROID_CALLS_SECURITY.md](../docs/ANDROID_CALLS_SECURITY.md).
+**This build:** polished in-app node setup wizard (replaces old AlertDialog), incoming-call recovery when the app is foregrounded, WebView cache bust for latest call UI JS.
 
 ### Verify integrity
 
 ```bash
-sha256sum -c SHA256SUMS-v232.txt
+sha256sum -c SHA256SUMS-v233.txt
 ```
 
-Checksums: [SHA256SUMS-v232.txt](./SHA256SUMS-v232.txt)
+Checksums: [SHA256SUMS-v233.txt](./SHA256SUMS-v233.txt)
 
 ### GitHub Releases
 
-**Release:** [v1.6.27 on GitHub](https://github.com/deadinternetfox/frogtalk/releases/tag/v1.6.27) (APK + AAB attached).
+**Release:** [v1.6.28 on GitHub](https://github.com/deadinternetfox/frogtalk/releases/tag/v1.6.28) (APK + AAB attached).
 
 ## Website download endpoints
 
-Each node serves the newest `node/static/frogtalk-v*.apk` automatically:
+Each node serves the newest `node/static/frogtalk-v*.apk` (or falls back to `static/github-build-mirror/` then GitHub releases):
 
 - https://frogtalk.xyz/download/android
 - Your self-hosted node: `https://<your-host>/download/android`
 
-## Older desktop builds
-
-See git history for v1.4.1 desktop mirror entries (AppImage, deb, Windows portable).
+Desktop builds (AppImage, .deb, Windows) are listed in the download picker with GitHub mirror fallback when not hosted on a given node.

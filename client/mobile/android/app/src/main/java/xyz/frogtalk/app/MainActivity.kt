@@ -19,7 +19,6 @@ import android.view.ViewGroup
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.*
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.content.BroadcastReceiver
@@ -28,7 +27,6 @@ import android.content.IntentFilter
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -39,9 +37,10 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "FrogTalk"
         private const val APP_URL = "https://frogtalk.xyz/app"
-        /** Pre-filled in the first-run dialog; user can edit or clear before connecting. */
+        private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
+        /** Pre-filled in the first-run setup wizard. */
         private const val OFFICIAL_SERVER_INPUT = "frogtalk.xyz"
-        private const val WEB_CACHE_REV = "20260424-music-background-v1"
+        private const val WEB_CACHE_REV = "20260521-calls-setup-v1"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_BATTERY_PROMPTED = "battery_prompted"
@@ -67,11 +66,30 @@ class MainActivity : AppCompatActivity() {
         @Volatile
         @JvmStatic
         var isAppVisible: Boolean = false
+
+        @Volatile
+        private var activeInstance: MainActivity? = null
+
+        /** FCM call push while the WebView is foreground — recover offer in-page (no tray dup). */
+        @JvmStatic
+        fun deliverIncomingCallWhileForeground(peerNick: String, callId: String) {
+            val act = activeInstance ?: return
+            act.runOnUiThread {
+                try {
+                    act.scheduleIncomingCallRecovery(callId, peerNick)
+                } catch (e: Throwable) {
+                    Log.w(TAG, "deliverIncomingCallWhileForeground failed", e)
+                }
+            }
+        }
     }
 
     private fun buildAppUrl(baseUrl: String? = null, intentOverride: Intent? = null): String {
         val rawUrl = baseUrl ?: APP_URL
         val parsed = Uri.parse(rawUrl)
+        if ((parsed.scheme ?: "").equals("file", ignoreCase = true)) {
+            return rawUrl
+        }
         val sourceIntent = intentOverride ?: intent
         val builder = parsed.buildUpon()
             .appendQueryParameter("mobile", "android")
@@ -168,49 +186,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun ensureServerConfigured(onReady: () -> Unit) {
-        if (normalizeServerBaseUrl(getServerBaseUrl()) != null) {
-            onReady()
-            return
-        }
-        showServerSetupDialog(onReady)
-    }
-
-    private fun persistServerFromInput(input: EditText, onReady: () -> Unit): Boolean {
-        val normalized = normalizeServerBaseUrl(input.text?.toString())
-        if (normalized == null) {
-            showErrorScreen("Invalid server URL.\nTap Retry to enter a valid address.")
-            return false
-        }
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
         onReady()
-        return true
     }
 
-    private fun showServerSetupDialog(onReady: () -> Unit) {
-        val input = EditText(this).apply {
-            setText(OFFICIAL_SERVER_INPUT)
-            setSelection(text?.length ?: 0)
-            setSingleLine(true)
-            setPadding(48, 32, 48, 32)
-            hint = OFFICIAL_SERVER_INPUT
+    private fun initialWebEntryUrl(): String {
+        return if (normalizeServerBaseUrl(getServerBaseUrl()) != null) {
+            getConfiguredAppEntryUrl()
+        } else {
+            SETUP_ASSET_URL
         }
-        AlertDialog.Builder(this)
-            .setTitle("Connect to your FrogTalk node")
-            .setMessage(
-                "Most people use the official FrogTalk node at frogtalk.xyz — it is pre-filled below. " +
-                    "Edit or replace it to use your own self-hosted server or any trusted community node."
-            )
-            .setView(input)
-            .setCancelable(false)
-            .setNegativeButton("Use official") { _, _ ->
-                input.setText(OFFICIAL_SERVER_INPUT)
-                persistServerFromInput(input, onReady)
-            }
-            .setPositiveButton("Connect") { _, _ ->
-                persistServerFromInput(input, onReady)
-            }
-            .show()
+    }
+
+    private fun reloadAppAfterServerConfigured() {
+        try {
+            val entry = getConfiguredAppEntryUrl()
+            webView?.loadUrl(buildAppUrl(entry))
+        } catch (e: Throwable) {
+            Log.e(TAG, "reloadAppAfterServerConfigured failed", e)
+            showErrorScreen("Server saved but could not load the app.\nTap Retry.")
+        }
     }
 
     fun setServerBaseUrlFromJs(url: String) {
@@ -519,7 +513,10 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 view?.let { injectStoryShareTapFix(it) }
-                // Hide loading screen once page loads
+                val finished = url.orEmpty()
+                if (finished.contains("/app") || finished.contains("incoming_call=1")) {
+                    flushPendingIncomingCallRecovery(delayMs = 400)
+                }
                 hideLoadingScreen()
             }
 
@@ -663,8 +660,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Load URL with a lightweight cache-revision query for predictable refresh.
-        val rawUrl = savedInstanceState?.getString("url") ?: getConfiguredAppEntryUrl()
+        val rawUrl = savedInstanceState?.getString("url") ?: initialWebEntryUrl()
         val withRev = buildAppUrl(rawUrl)
         wv.loadUrl(withRev)
 
@@ -916,6 +912,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        activeInstance = this
         isAppVisible = true
         try { webView?.onResume() } catch (_: Throwable) {}
         if (pendingIncomingCallId != null || pendingIncomingCallPeer != null) {
@@ -944,6 +941,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        if (activeInstance === this) activeInstance = null
         isAppVisible = false
         if (!musicPlaybackActive) {
             try { webView?.onPause() } catch (_: Throwable) {}
@@ -974,6 +972,24 @@ class MainActivity : AppCompatActivity() {
     // ── JS Bridge for call notifications ─────────────────────────────
 
     class CallBridge(private val activity: MainActivity) {
+        @android.webkit.JavascriptInterface
+        fun connectToServer(url: String) {
+            try {
+                val normalized = activity.normalizeServerBaseUrl(url)
+                if (normalized == null) {
+                    activity.runOnUiThread {
+                        activity.showErrorScreen("Invalid server URL.\nGo back and enter a valid address.")
+                    }
+                    return
+                }
+                activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
+                activity.runOnUiThread { activity.reloadAppAfterServerConfigured() }
+            } catch (e: Throwable) {
+                Log.e(TAG, "connectToServer failed", e)
+            }
+        }
+
         @android.webkit.JavascriptInterface
         fun startCallNotification(peerNick: String) {
             try {

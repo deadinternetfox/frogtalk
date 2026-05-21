@@ -50,7 +50,8 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             // creates a second "Answer" button whose auto-accept races
             // with the in-app accept and wedges the call. Skip it.
             if (MainActivity.isAppVisible) {
-                Log.i(TAG, "FCM call push: app visible, suppressing duplicate notification")
+                Log.i(TAG, "FCM call push: app visible — in-app offer recovery")
+                MainActivity.deliverIncomingCallWhileForeground(peer, callId)
                 return
             }
             // Single source of truth for the incoming-call UI: the CallStyle

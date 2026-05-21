@@ -559,28 +559,8 @@ async function handleCallOffer (data) {
   _callGlobalId = data.global_call_id || _callGlobalId;
   if (data.federated) toast('Incoming call from another node', 'info');
   _pendingOffer = { sdp: data.sdp, call_id: data.call_id || null, from_id: data.from_id, fp_sig: data.fp_sig };
-  // Track E: verify caller's signed DTLS fingerprint envelope. The caller
-  // signs at offer time before the server has assigned a call_id, so we
-  // skip the call_id binding for the initial offer. acceptCall's outbound
-  // call_answer carries the real call_id and is verified strictly by the
-  // peer on their handleCallAnswer path.
-  try {
-    _callUnverified = false;
-    const v = await _verifyCallFp(data.fp_sig, data.call_id, data.from_id, data.sdp, { bindCallId: false });
-    if (v.ok === false && _isVerifyFatal(v.reason)) {
-      toast('Signalling tampering detected (' + v.reason + ') — call refused', 'error');
-      console.error('[calls][track-E] inbound offer rejected:', v.reason);
-      _sendCallSignal({ type: 'call_reject', to_nickname: data.from_nickname, call_id: data.call_id || undefined, reason: 'tampering' });
-      _pendingOffer = null;
-      _callState = 'idle'; _callPeerNick = null; _callPeerUID = null; _callId = null;
-      return;
-    }
-    if (v.ok !== true) {
-      _callUnverified = true;
-      console.warn('[calls][track-E] inbound offer UNVERIFIED:', v.reason);
-    }
-  } catch (e) { console.warn('[calls][track-E] verify offer threw', e); _callUnverified = true; }
-  _maybeWarnIdentityRotation(_callPeerUID);
+  // Ring + popup immediately so Frog Social / FrogChannel / any view still
+  // gets Accept/Decline even while Signal verification runs in the background.
   _persistIncomingCall(data);
   showIncomingCall(data.from_nickname, data.call_type, data.from_avatar || null);
   try { Notifications.startRinging(data.from_nickname); } catch {}
@@ -601,6 +581,33 @@ async function handleCallOffer (data) {
       window.Android.ringForCall(String(data.from_nickname || ''), String(data.call_id || ''));
     }
   } catch {}
+  // Track E: verify caller's signed DTLS fingerprint envelope (async after UI).
+  let verifyFatal = false;
+  try {
+    _callUnverified = false;
+    const v = await _verifyCallFp(data.fp_sig, data.call_id, data.from_id, data.sdp, { bindCallId: false });
+    if (v.ok === false && _isVerifyFatal(v.reason)) {
+      verifyFatal = true;
+      toast('Signalling tampering detected (' + v.reason + ') — call refused', 'error');
+      console.error('[calls][track-E] inbound offer rejected:', v.reason);
+      _sendCallSignal({ type: 'call_reject', to_nickname: data.from_nickname, call_id: data.call_id || undefined, reason: 'tampering' });
+    } else if (v.ok !== true) {
+      _callUnverified = true;
+      console.warn('[calls][track-E] inbound offer UNVERIFIED:', v.reason);
+    }
+  } catch (e) {
+    console.warn('[calls][track-E] verify offer threw', e);
+    _callUnverified = true;
+  }
+  if (verifyFatal) {
+    try { hideIncomingCall(); } catch {}
+    try { Notifications.stopRinging(); } catch {}
+    _pendingOffer = null;
+    _callState = 'idle'; _callPeerNick = null; _callPeerUID = null; _callId = null;
+    _clearPersistedIncomingCall();
+    return;
+  }
+  _maybeWarnIdentityRotation(_callPeerUID);
   // Auto-accept if the user already tapped the notification's Accept button
   // before this WS offer arrived. Skip the incoming-call UI entirely.
   if (_autoAcceptPending) {
@@ -1418,10 +1425,14 @@ function closeCallOverlay () {
 function showIncomingCall (nick, type, avatar) {
   const safeNick = String(nick || '').trim() || 'Unknown';
   try { document.body.classList.remove('in-welcome'); } catch {}
+  try { document.body.classList.add('ft-incoming-call-active'); } catch {}
   try {
     if (typeof selectServer === 'function') selectServer('dms');
   } catch {}
   const card = document.getElementById('incoming-call');
+  if (card && card.parentElement !== document.body) {
+    try { document.body.appendChild(card); } catch {}
+  }
   const nameEl = document.getElementById('icall-name');
   const typeEl = document.getElementById('icall-type');
   const avatarEl = document.getElementById('icall-avatar');
@@ -1484,7 +1495,8 @@ function isIncomingCallActive () {
 try { window.isIncomingCallActive = isIncomingCallActive; } catch {}
 
 function hideIncomingCall () {
-  document.getElementById('incoming-call').classList.add('hidden');
+  document.getElementById('incoming-call')?.classList.add('hidden');
+  try { document.body.classList.remove('ft-incoming-call-active'); } catch {}
   try { Notifications.stopRinging(); } catch {}
   try { window._ringtoneCtx?.stop?.(); } catch {}
   window._ringtoneCtx = null;
@@ -2207,3 +2219,27 @@ async function applyCallSettings() {
   closeModal('modal-call-settings');
   toast('Audio settings applied', 'success');
 }
+
+try {
+  window.handleCallOffer = handleCallOffer;
+  window.acceptCall = acceptCall;
+  window.rejectCall = rejectCall;
+  window.showIncomingCall = showIncomingCall;
+  window.hideIncomingCall = hideIncomingCall;
+} catch {}
+
+function _maybeRecoverPendingIncomingCall () {
+  try {
+    if (typeof isIncomingCallActive === 'function' && isIncomingCallActive()) return;
+    if (typeof _callState !== 'undefined' && _callState !== 'idle') return;
+    if (!window.App?.recoverLatestIncomingCall) return;
+    void window.App.recoverLatestIncomingCall({ silent: true });
+  } catch {}
+}
+
+try {
+  window.addEventListener('ws:open', _maybeRecoverPendingIncomingCall);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') _maybeRecoverPendingIncomingCall();
+  });
+} catch {}

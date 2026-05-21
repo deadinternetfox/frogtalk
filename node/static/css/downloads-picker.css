@@ -197,6 +197,28 @@
   color: #7d8590;
 }
 
+.ft-dl-chip.mirror {
+  border-color: rgba(88, 166, 255, 0.35);
+  color: #9ec5ff;
+}
+
+.ft-dl-chip.github {
+  border-color: rgba(201, 168, 255, 0.35);
+  color: #d4b8ff;
+}
+
+.ft-dl-mirror-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted, #7d8590);
+  line-height: 1.45;
+  flex: 1 1 100%;
+}
+
+.ft-dl-gh-link {
+  opacity: 0.9;
+}
+
 .ft-dl-loading {
   text-align: center;
   color: var(--text-muted, #7d8590);

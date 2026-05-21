@@ -603,7 +603,17 @@ const WS = (() => {
       }
       // ── WebRTC call signaling ─────────────────────
       case 'call_offer': {
-        if (typeof handleCallOffer === 'function') handleCallOffer(data);
+        void (async () => {
+          try {
+            const fn = window.handleCallOffer
+              || (typeof handleCallOffer === 'function' ? handleCallOffer : null);
+            if (fn) await fn(data);
+            else console.warn('[WS] handleCallOffer unavailable');
+          } catch (err) {
+            console.error('[WS] handleCallOffer failed', err);
+            try { window.App?.recoverLatestIncomingCall?.({ silent: true }); } catch {}
+          }
+        })();
         break;
       }
       case 'call_created': {
