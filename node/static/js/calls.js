@@ -545,6 +545,7 @@ async function handleCallOffer (data) {
     // client — without this, the second arrival triggers call_reject(busy)
     // and the caller hangs up while we're still ringing/active.
     if (data.call_id && _callId && String(data.call_id) === String(_callId)) {
+      if (_callState === 'ringing') ensureIncomingCallSurfaceVisible();
       return;
     }
     _sendCallSignal({ type: 'call_reject', to_nickname: data.from_nickname, reason: 'busy' });
@@ -847,11 +848,18 @@ function _armConnectingHardCap () {
   }, 30_000);
 }
 
+function _callSignalMatchesSession(data) {
+  if (!data?.call_id || !_callId) return true;
+  return String(data.call_id) === String(_callId);
+}
+
 /* ── Remote rejected ───────────────────────────────────────────────────────── */
 function handleCallReject (data) {
+  if (!_callSignalMatchesSession(data)) return;
   _clearPersistedIncomingCall();
   _callId = data?.call_id || _callId;
-  toast(_callPeerNick + ' declined the call');
+  const who = data?.from_nickname || _callPeerNick || 'User';
+  toast(who + ' declined the call');
   endCall(false);
 }
 
@@ -909,9 +917,11 @@ try { window.handleCallHandled = handleCallHandled; } catch {}
 
 /* ── Remote ended ──────────────────────────────────────────────────────────── */
 function handleCallEnd (data) {
+  if (!_callSignalMatchesSession(data)) return;
   _clearPersistedIncomingCall();
   _callId = data?.call_id || _callId;
   const wasRinging = _callState === 'ringing';
+  const wasCalling = _callState === 'calling';
   const who = _callPeerNick || data?.from_nickname || 'Someone';
   if (wasRinging) {
     toast(`📵 Missed call from ${who}`, 'info');
@@ -927,6 +937,8 @@ function handleCallEnd (data) {
         window.desktopApp.showNotification('📵 Missed call', `Missed ${label} call from ${who}`);
       }
     } catch {}
+  } else if (wasCalling) {
+    toast(who + ' did not answer', 'info');
   } else {
     toast('Call ended');
   }
@@ -1486,13 +1498,45 @@ function isIncomingCallActive () {
   try {
     const card = document.getElementById('incoming-call');
     const visible = !!(card && !card.classList.contains('hidden'));
-    return _callState === 'ringing' || visible || !!_pendingOffer;
+    return _callState === 'ringing' || visible || !!_pendingOffer?.sdp;
   } catch {
     return false;
   }
 }
 
+/** Re-show Accept/Decline when we already hold the offer but the overlay was hidden. */
+function ensureIncomingCallSurfaceVisible() {
+  try {
+    if (!_pendingOffer?.sdp) return false;
+    const card = document.getElementById('incoming-call');
+    const visible = !!(card && !card.classList.contains('hidden'));
+    if (_callState !== 'ringing' && _callState !== 'idle') return false;
+    if (_callState === 'idle') _callState = 'ringing';
+    const nick = _callPeerNick || 'Unknown';
+    if (!visible) {
+      showIncomingCall(nick, _callType, _callPeerAvatar);
+      try { Notifications.startRinging(nick); } catch {}
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearStaleIncomingCallUi(reason) {
+  try { hideIncomingCall(); } catch {}
+  try { Notifications.stopRinging(); } catch {}
+  try { window.Android?.dismissRing?.(); } catch {}
+  if (_callState === 'ringing') {
+    resetCall();
+    if (reason === 'gone') toast('This call is no longer available', 'info');
+    else if (reason === 'ended') toast('Call ended', 'info');
+  }
+}
+
 try { window.isIncomingCallActive = isIncomingCallActive; } catch {}
+try { window.ensureIncomingCallSurfaceVisible = ensureIncomingCallSurfaceVisible; } catch {}
+try { window.clearStaleIncomingCallUi = clearStaleIncomingCallUi; } catch {}
 
 function hideIncomingCall () {
   document.getElementById('incoming-call')?.classList.add('hidden');
@@ -1638,6 +1682,23 @@ function getVoiceParticipantNicks() {
 }
 let _voiceMuted = false;
 
+/** Sync Android tray notification while connected to a room voice channel. */
+function _syncVoiceTrayNotification(statusText) {
+  try {
+    const android = window.Android;
+    if (!android?.updateVoiceChannel) return;
+    if (!_voiceRoom) {
+      android.stopVoiceChannel?.();
+      return;
+    }
+    const count = _voicePeers.size + 1;
+    const status = statusText
+      || document.getElementById('voice-bar-status')?.textContent
+      || 'Connected';
+    android.updateVoiceChannel(_voiceRoom, count, !!_voiceMuted, true, status);
+  } catch {}
+}
+
 /**
  * Join the voice channel for the current room (public rooms only).
  */
@@ -1685,6 +1746,7 @@ async function joinVoiceChannel() {
 
   // Tell server we're joining
   _sendVoiceSignal({ type: 'voice_join' });
+  _syncVoiceTrayNotification('Connecting…');
   // Refresh member list to show voice badge
   if (typeof Users !== 'undefined' && State.onlineUsers) Users.updateList(State.onlineUsers);
 }
@@ -1726,6 +1788,7 @@ function leaveVoiceChannel() {
   if (typeof Users !== 'undefined' && State.onlineUsers) Users.updateList(State.onlineUsers);
   // Refresh the Discord-style presence bar (removes self immediately)
   if (_presenceRoom && State.user?.id) _presenceRemove(_presenceRoom, State.user.id);
+  _syncVoiceTrayNotification();
 }
 
 /**
@@ -1754,6 +1817,7 @@ function toggleVoiceMute() {
   try { wsSend({ type: 'voice_mute', muted: _voiceMuted }); } catch {}
   // Repaint user list so our own icon updates too.
   try { if (typeof renderUsers === 'function') renderUsers(); } catch {}
+  _syncVoiceTrayNotification();
 }
 
 /**
@@ -1862,6 +1926,7 @@ function _updateVoiceBarParticipants() {
 
   // Start VAD loop for group voice
   _startVADLoop();
+  _syncVoiceTrayNotification();
 }
 
 /* ── Voice channel WebSocket message handlers ──────────────────────────────── */
@@ -1872,6 +1937,7 @@ function _updateVoiceBarParticipants() {
  */
 async function handleVoiceJoined(data) {
   document.getElementById('voice-bar-status').textContent = 'Connected';
+  _syncVoiceTrayNotification('Connected');
 
   // Seed the presence roster for our current room with the existing peers.
   if (_voiceRoom) {
@@ -2230,8 +2296,9 @@ try {
 
 function _maybeRecoverPendingIncomingCall () {
   try {
+    if (typeof ensureIncomingCallSurfaceVisible === 'function' && ensureIncomingCallSurfaceVisible()) return;
+    if (typeof _callState !== 'undefined' && (_callState === 'calling' || _callState === 'active')) return;
     if (typeof isIncomingCallActive === 'function' && isIncomingCallActive()) return;
-    if (typeof _callState !== 'undefined' && _callState !== 'idle') return;
     if (!window.App?.recoverLatestIncomingCall) return;
     void window.App.recoverLatestIncomingCall({ silent: true });
   } catch {}

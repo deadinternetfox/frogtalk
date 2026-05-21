@@ -40,7 +40,7 @@ class MainActivity : AppCompatActivity() {
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
         /** Pre-filled in the first-run setup wizard. */
         private const val OFFICIAL_SERVER_INPUT = "frogtalk.xyz"
-        private const val WEB_CACHE_REV = "20260521-calls-v234"
+        private const val WEB_CACHE_REV = "20260521-calls-v235"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_BATTERY_PROMPTED = "battery_prompted"
@@ -126,6 +126,7 @@ class MainActivity : AppCompatActivity() {
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermissionRequest: PermissionRequest? = null
     private var musicPlaybackActive: Boolean = false
+    private var voiceChannelActive: Boolean = false
     private var pendingBatteryPromptAfterNotifications: Boolean = false
     /** Warm-tap on incoming-call notification before WebView JS is ready. */
     private var pendingIncomingCallId: String? = null
@@ -405,7 +406,7 @@ class MainActivity : AppCompatActivity() {
             override fun handleOnBackPressed() {
                 if (webView?.canGoBack() == true) {
                     webView?.goBack()
-                } else if (musicPlaybackActive) {
+                } else if (musicPlaybackActive || voiceChannelActive) {
                     moveTaskToBack(true)
                 } else {
                     isEnabled = false
@@ -760,6 +761,23 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Throwable) {
             Log.w(TAG, "onNewIntent open_music failed", e)
         }
+        try {
+            if (intent.getBooleanExtra("open_voice", false) == true) {
+                val room = intent.getStringExtra("voice_room").orEmpty()
+                val roomJs = room.replace("\\", "\\\\").replace("'", "\\'")
+                webView?.postDelayed({
+                    val js = if (roomJs.isNotBlank()) {
+                        "try{if(typeof switchToRoom==='function')switchToRoom('$roomJs');" +
+                            "else if(window.Rooms&&window.Rooms.switchToRoom)window.Rooms.switchToRoom('$roomJs');}catch(e){}"
+                    } else {
+                        "try{document.getElementById('voice-channel-bar')?.scrollIntoView({block:'nearest'});}catch(e){}"
+                    }
+                    webView?.evaluateJavascript(js, null)
+                }, 250)
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "onNewIntent open_voice failed", e)
+        }
     }
 
         private fun injectStoryShareTapFix(view: WebView) {
@@ -911,8 +929,12 @@ class MainActivity : AppCompatActivity() {
             (function(){
               try{
                 if(window.App&&typeof App.recoverIncomingCallFromNative==='function'){
-                  App.recoverIncomingCallFromNative({callId:'$cidJs',peerNick:'$nickJs'});
-                  return 'ok';
+                  return App.recoverIncomingCallFromNative({callId:'$cidJs',peerNick:'$nickJs'})
+                    .then(function(ok){ return ok ? 'ok' : 'retry'; })
+                    .catch(function(e){
+                      console.warn('[ft] incoming-call recovery failed',e);
+                      return 'retry';
+                    });
                 }
               }catch(e){console.warn('[ft] incoming-call recovery failed',e);}
               return 'retry';
@@ -932,7 +954,7 @@ class MainActivity : AppCompatActivity() {
                         return@evaluateJavascript
                     }
                     incomingCallRecoveryRetries += 1
-                    if (incomingCallRecoveryRetries <= 8) {
+                    if (incomingCallRecoveryRetries <= 12) {
                         val retryDelay = (150L * incomingCallRecoveryRetries).coerceAtMost(1200L)
                         flushPendingIncomingCallRecovery(delayMs = retryDelay)
                     } else {
@@ -942,7 +964,7 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Throwable) {
                 Log.w(TAG, "incoming-call JS recovery failed", e)
                 incomingCallRecoveryRetries += 1
-                if (incomingCallRecoveryRetries <= 8) {
+                if (incomingCallRecoveryRetries <= 12) {
                     val retryDelay = (200L * incomingCallRecoveryRetries).coerceAtMost(1200L)
                     flushPendingIncomingCallRecovery(delayMs = retryDelay)
                 }
@@ -983,9 +1005,9 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         if (activeInstance === this) activeInstance = null
         isAppVisible = false
-        if (!musicPlaybackActive) {
+        if (!musicPlaybackActive && !voiceChannelActive) {
             try { webView?.onPause() } catch (_: Throwable) {}
-        } else {
+        } else if (musicPlaybackActive) {
             // WebView keeps running so audio survives, but the JS layer
             // still needs to know we went bg, otherwise the side
             // play/pause button stays stuck on Pause forever
@@ -1189,6 +1211,30 @@ class MainActivity : AppCompatActivity() {
                 activity.updateMusicPlayback(null, null, null, null, false, false, false)
             } catch (e: Throwable) {
                 Log.e(TAG, "stopMusicPlayback failed", e)
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun updateVoiceChannel(
+            room: String?,
+            participants: Int,
+            muted: Boolean,
+            active: Boolean,
+            status: String?,
+        ) {
+            try {
+                activity.updateVoiceChannel(room, participants, muted, active, status)
+            } catch (e: Throwable) {
+                Log.e(TAG, "updateVoiceChannel failed", e)
+            }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun stopVoiceChannel() {
+            try {
+                activity.updateVoiceChannel(null, 0, false, false, null)
+            } catch (e: Throwable) {
+                Log.e(TAG, "stopVoiceChannel failed", e)
             }
         }
 
@@ -1420,6 +1466,33 @@ class MainActivity : AppCompatActivity() {
         nm.notify(STORY_UPLOAD_NOTIFICATION_ID, notification)
     }
 
+    private fun updateVoiceChannel(
+        room: String?,
+        participants: Int,
+        muted: Boolean,
+        active: Boolean,
+        status: String?,
+    ) {
+        voiceChannelActive = active
+        try {
+            val intent = Intent(this, VoiceService::class.java).apply {
+                action = if (active) VoiceService.ACTION_UPDATE else VoiceService.ACTION_STOP
+                putExtra(VoiceService.EXTRA_ACTIVE, active)
+                putExtra(VoiceService.EXTRA_ROOM, room ?: "")
+                putExtra(VoiceService.EXTRA_PARTICIPANTS, participants.coerceIn(0, 999))
+                putExtra(VoiceService.EXTRA_MUTED, muted)
+                putExtra(VoiceService.EXTRA_STATUS, status ?: "")
+            }
+            if (active && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "updateVoiceChannel dispatch failed", e)
+        }
+    }
+
     private fun updateMusicPlayback(
         title: String?,
         subtitle: String?,
@@ -1532,6 +1605,23 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
+                VoiceService.ACTION_BROADCAST -> when (command) {
+                    "toggle_mute" -> webView?.post {
+                        webView?.evaluateJavascript(
+                            "try{if(typeof toggleVoiceMute==='function')toggleVoiceMute();}catch(e){}",
+                            null
+                        )
+                    }
+                    "leave" -> {
+                        voiceChannelActive = false
+                        webView?.post {
+                            webView?.evaluateJavascript(
+                                "try{if(typeof leaveVoiceChannel==='function')leaveVoiceChannel();}catch(e){}",
+                                null
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -1541,6 +1631,7 @@ class MainActivity : AppCompatActivity() {
         try {
             val filter = IntentFilter("xyz.frogtalk.app.CALL_ACTION").apply {
                 addAction(MusicService.ACTION_BROADCAST)
+                addAction(VoiceService.ACTION_BROADCAST)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(callActionReceiver, filter, RECEIVER_NOT_EXPORTED)

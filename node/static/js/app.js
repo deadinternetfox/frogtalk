@@ -728,16 +728,12 @@ const App = {
       this.setPendingIncomingCall({ callId, peerNick, action: '' });
       return false;
     }
-    if (this._nativeCallRecoverId === callId) return true;
-    this._nativeCallRecoverId = callId;
     try {
       try { document.body.classList.remove('in-welcome'); } catch {}
-      if (typeof isIncomingCallActive === 'function' && isIncomingCallActive()) {
+      if (typeof ensureIncomingCallSurfaceVisible === 'function' && ensureIncomingCallSurfaceVisible()) {
         if (peerNick && typeof openDMWithNick === 'function') {
           try { await openDMWithNick(peerNick); } catch {}
         }
-        const card = document.getElementById('incoming-call');
-        if (card) card.classList.remove('hidden');
         return true;
       }
       if (peerNick && typeof openDMWithNick === 'function') {
@@ -745,14 +741,18 @@ const App = {
       }
       const payload = { callId, peerNick, action: '' };
       this.setPendingIncomingCall(payload);
-      return await this.recoverIncomingCall(payload);
+      let ok = false;
+      if (callId) ok = await this.recoverIncomingCall(payload);
+      if (!ok && typeof this.recoverLatestIncomingCall === 'function') {
+        ok = await this.recoverLatestIncomingCall({ silent: true, peerNick });
+      }
+      if (!ok && typeof ensureIncomingCallSurfaceVisible === 'function') {
+        ok = ensureIncomingCallSurfaceVisible();
+      }
+      return ok;
     } catch (e) {
       console.warn('[App] recoverIncomingCallFromNative failed', e);
       return false;
-    } finally {
-      setTimeout(() => {
-        if (this._nativeCallRecoverId === callId) this._nativeCallRecoverId = null;
-      }, 2500);
     }
   },
 
@@ -770,6 +770,9 @@ const App = {
       if (!res.ok) {
         if (res.status === 404 || res.status === 409) {
           this.clearPendingIncomingCall();
+          if (typeof clearStaleIncomingCallUi === 'function') {
+            clearStaleIncomingCallUi(res.status === 404 ? 'gone' : 'ended');
+          }
         }
         return false;
       }
@@ -791,8 +794,11 @@ const App = {
   async recoverLatestIncomingCall(opts) {
     if (!State.token) return false;
     try {
+      if (typeof ensureIncomingCallSurfaceVisible === 'function' && ensureIncomingCallSurfaceVisible()) {
+        return true;
+      }
+      if (typeof _callState !== 'undefined' && (_callState === 'calling' || _callState === 'active')) return false;
       if (typeof isIncomingCallActive === 'function' && isIncomingCallActive()) return false;
-      if (typeof _callState !== 'undefined' && _callState !== 'idle') return false;
       const res = await fetch('/api/calls/pending-latest', {
         headers: { 'X-Session-Token': State.token }
       });
