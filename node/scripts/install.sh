@@ -56,16 +56,13 @@ parse_global_args() {
       --public-url) PUBLIC_URL_ARG="${2:-}"; shift 2 ;;
       --onion-url) ONION_URL_ARG="${2:-}"; shift 2 ;;
       setup|federation|update|update-apply|systemd|status|help|menu)
-        CMD="$1"; shift; break ;;
+        [[ -n "$CMD" ]] && ft_die "Multiple commands: $CMD and $1"
+        CMD="$1"; shift ;;
       *)
-        if [[ -z "$CMD" ]]; then
-          ft_die "Unknown argument: $1 (try: bash node/scripts/install.sh help)"
-        fi
-        break
+        ft_die "Unknown argument: $1 (try: bash node/scripts/install.sh help)"
         ;;
     esac
   done
-  return 0
 }
 
 resolve_install() {
@@ -95,13 +92,13 @@ run_federation() {
   [[ "$ASSUME_YES" -eq 1 ]] && args+=(-y)
   [[ -n "$PUBLIC_URL_ARG" ]] && args+=(--public-url "$PUBLIC_URL_ARG")
   [[ -n "$ONION_URL_ARG" ]] && args+=(--onion-url "$ONION_URL_ARG")
-  exec bash "$SCRIPT_DIR/node_federation_join.sh" "${args[@]}" "$@"
+  exec bash "$SCRIPT_DIR/node_federation_join.sh" "${args[@]}"
 }
 
 run_update() {
   local args=(--install-dir "$INSTALL_DIR")
   [[ "$ASSUME_YES" -eq 1 ]] && args+=(-y)
-  exec bash "$SCRIPT_DIR/node_update_check.sh" "${args[@]}" "$@"
+  exec bash "$SCRIPT_DIR/node_update_check.sh" "${args[@]}"
 }
 
 run_systemd() {
