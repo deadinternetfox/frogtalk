@@ -14,8 +14,22 @@
       --text: #e8f5ea;
       --muted: #8aa894;
       --danger: #f85149;
+      --link: #7ecb8e;
+      --link-hover: #cfeedb;
     }
     * { box-sizing: border-box; }
+    /* WebView defaults links to system blue — override everywhere in this shell. */
+    a, a:link, a:visited {
+      color: var(--link);
+      text-decoration: underline;
+      text-decoration-color: rgba(126, 203, 142, .45);
+      text-underline-offset: 3px;
+      font-weight: 600;
+    }
+    a:active, a:focus-visible {
+      color: var(--link-hover);
+      text-decoration-color: rgba(207, 238, 219, .7);
+    }
     html, body {
       margin: 0; min-height: 100%;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
@@ -85,6 +99,10 @@
       font-size: .8rem; line-height: 1.45; color: #9bd6ab;
     }
     .note strong { color: #cfeedb; }
+    .note a, .hint a {
+      color: var(--link);
+      text-decoration-color: rgba(126, 203, 142, .5);
+    }
     .err {
       display: none; margin-top: 10px; font-size: .82rem; color: var(--danger);
     }
@@ -109,7 +127,12 @@
     .foot {
       margin-top: 22px; text-align: center; font-size: .75rem; color: #5a7262;
     }
-    .foot a { color: var(--green); text-decoration: none; }
+    .foot a {
+      color: #6fa87a;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .foot a:active { color: var(--link); }
     .busy {
       position: fixed; inset: 0; z-index: 999;
       background: rgba(4,8,6,.84);
@@ -179,7 +202,7 @@
         </div>
         <p class="err" id="url-err">Enter a valid hostname (e.g. frogtalk.xyz or your.node.com).</p>
         <div class="note">
-          <strong>Self-hosting?</strong> Run the node setup wizard on your server — see <a href="https://frogtalk.xyz/docs/node" target="_blank" rel="noopener">docs/node</a> on desktop, or your operator’s invite link.
+          <strong>Self-hosting?</strong> Run the node setup wizard on your server — see <a class="note-link" href="https://frogtalk.xyz/docs/node" target="_blank" rel="noopener noreferrer">node docs</a> on desktop, or your operator’s invite link.
         </div>
         <div class="actions">
           <button type="button" class="btn-ghost" id="btn-back-1">Back</button>
