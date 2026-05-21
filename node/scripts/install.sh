@@ -33,6 +33,7 @@ ${C_BOLD}Commands:${C_RESET}
   setup          First-time install (venv, .env, symlinks)
   federation     Join official mesh (chat + board nav)
   board-nginx    nginx + PHP for /board/ (also in setup wizard)
+  ssl            HTTPS: self-signed (IP) or certbot (domain)
   update         Check for git updates
   update-apply   Pull latest + deps + restart
   systemd        Install/enable frogtalk.service
@@ -56,7 +57,7 @@ parse_global_args() {
       --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
       --public-url) PUBLIC_URL_ARG="${2:-}"; shift 2 ;;
       --onion-url) ONION_URL_ARG="${2:-}"; shift 2 ;;
-      setup|federation|board-nginx|update|update-apply|systemd|status|help|menu)
+      setup|federation|board-nginx|ssl|update|update-apply|systemd|status|help|menu)
         [[ -n "$CMD" ]] && ft_die "Multiple commands: $CMD and $1"
         CMD="$1"; shift ;;
       *)
@@ -102,6 +103,16 @@ run_board_nginx() {
     ft_die "board-nginx requires root (sudo bash node/scripts/install.sh board-nginx)"
   fi
   exec bash "$SCRIPT_DIR/install_board_nginx.sh" --install-dir "$INSTALL_DIR"
+}
+
+run_ssl() {
+  resolve_install
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    ft_die "ssl requires root (sudo bash node/scripts/install.sh ssl)"
+  fi
+  local args=(--install-dir "$INSTALL_DIR")
+  [[ "$ASSUME_YES" -eq 1 ]] && args+=(-y)
+  exec bash "$SCRIPT_DIR/install_node_ssl.sh" "${args[@]}"
 }
 
 run_update() {
@@ -216,6 +227,9 @@ main() {
       ;;
     board-nginx)
       run_board_nginx
+      ;;
+    ssl)
+      run_ssl
       ;;
     update|update-apply)
       resolve_install

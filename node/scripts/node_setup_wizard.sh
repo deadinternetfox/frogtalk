@@ -215,6 +215,15 @@ main() {
 
   ft_ensure_deploy_ownership "$install_dir"
 
+  if [[ "$board_nginx_ok" -eq 1 ]] && [[ "$(id -u)" -eq 0 ]] && [[ "$public_url" == http://* ]]; then
+    if [[ "$ASSUME_YES" -eq 1 ]] || ft_ask_yes_no "Enable HTTPS (self-signed for IP; Let's Encrypt if you use a domain)?" "y"; then
+      bash "$install_dir/node/scripts/install_node_ssl.sh" --install-dir "$install_dir" -y \
+        && public_url="$(grep -E '^PUBLIC_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")" \
+        && ft_ok "HTTPS configured → ${public_url}" \
+        || ft_warn "SSL step failed — retry: sudo bash node/scripts/install.sh ssl -y"
+    fi
+  fi
+
   if [[ -f "$install_dir/node/board/board_data/settings.json" ]]; then
     FT_INSTALL_DIR="$install_dir" bash "$install_dir/node/scripts/configure_board_identity.sh" --install-dir "$install_dir" \
       && ft_ok "Board title synced from node name" \

@@ -32,7 +32,7 @@
         <a href="#wizard">Setup wizard</a>
         <a href="#federation">Federation</a>
         <a href="#board">Frog Channel</a>
-        <a href="#https">nginx / HTTPS</a>
+        <a href="#https">HTTPS / TLS</a>
         <a href="#verify">Verify</a>
         <a href="#trouble">Troubleshooting</a>
         <a href="#tor">Tor / onion</a>
@@ -158,8 +158,11 @@ FROGTALK_AUTO_UPDATE_ENABLED=0</code></pre>
     </section>
 
     <section class="step" id="https">
-      <h2>4) nginx + HTTPS</h2>
-      <p class="hint">Terminate TLS at nginx; proxy to <code>127.0.0.1:8080</code>.</p>
+      <h2>4) HTTPS (stop “Not secure” on HTTP)</h2>
+      <p class="hint"><code>http://&lt;IP&gt;</code> is always labeled not secure. After setup, run:</p>
+      <pre><code>sudo bash node/scripts/install.sh ssl -y --install-dir /opt/frogtalk</code></pre>
+      <p class="hint">IP-only nodes get a <strong>self-signed</strong> cert and HTTP→HTTPS redirect. Use <code>https://&lt;YOUR_VPS_IP&gt;/</code> (accept the browser trust prompt once). For a padlock with no warning, point a domain at the VPS and use <code>https://chat.&lt;YOUR_DOMAIN&gt;</code> — certbot runs automatically in the wizard.</p>
+      <p class="hint">nginx terminates TLS and proxies to <code>127.0.0.1:8080</code>.</p>
       <pre><code>server {
     listen 80;
     server_name chat.&lt;YOUR_DOMAIN&gt;;

@@ -78,7 +78,12 @@ sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
 # Verify Frog Channel:
 curl -sS http://127.0.0.1/board/api/info | python3 -m json.tool
 
-# 6) Firewall
+# 6) HTTPS (IP nodes: self-signed; domain: Let's Encrypt)
+sudo bash node/scripts/install.sh ssl -y --install-dir /opt/frogtalk
+# Opens https://YOUR_IP/ (browser asks once to trust self-signed cert)
+# For a green padlock without warnings, use a DNS name + certbot (wizard does this automatically)
+
+# 7) Firewall
 sudo ufw allow OpenSSH
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp

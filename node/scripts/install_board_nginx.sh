@@ -56,6 +56,8 @@ esac
 if [[ "${FROGTALK_SERVER_WEBUI_COOKIE_SECURE:-0}" != "1" && "$_https_pub" -eq 0 ]]; then
   sed -i 's/fastcgi_param HTTPS on;/fastcgi_param HTTPS off;/g' "$TMP" || true
   sed -i 's/fastcgi_param HTTP_X_FORWARDED_PROTO https;/fastcgi_param HTTP_X_FORWARDED_PROTO $scheme;/g' "$TMP" || true
+  # HSTS on plain HTTP confuses browsers (forces https without a cert).
+  sed -i '/Strict-Transport-Security/d' "$TMP" || true
 fi
 
 DEST="/etc/nginx/sites-available/frogtalk"
