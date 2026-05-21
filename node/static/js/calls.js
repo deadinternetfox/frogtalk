@@ -216,38 +216,90 @@ function _waitForWsOpen(timeoutMs) {
   });
 }
 
+function _joinedRoomsList() {
+  try {
+    return Array.isArray(State?.rooms)
+      ? State.rooms.filter(r => r && r.joined && r.type !== 'dm')
+      : [];
+  } catch { return []; }
+}
+
 function _pickCallBootstrapRoom() {
   try {
-    if (State?.currentRoom && State.currentRoomType !== 'dm') return String(State.currentRoom);
+    if (State?.currentRoom && State.currentRoomType !== 'dm') {
+      const cur = _joinedRoomsList().find(r => r.name === State.currentRoom);
+      if (cur?.name) return String(cur.name);
+    }
   } catch {}
   try {
     const lastRaw = localStorage.getItem('fc_last_room');
     if (lastRaw) {
       const last = JSON.parse(lastRaw);
       const lastName = String(last?.name || '').trim();
-      if (lastName) return lastName;
+      if (lastName) {
+        const match = _joinedRoomsList().find(r => r.name === lastName);
+        if (match?.name) return lastName;
+      }
     }
   } catch {}
+  const joined = _joinedRoomsList();
+  if (joined[0]?.name) return String(joined[0].name);
+  // DM-only users: bootstrap WS on the peer DM pseudo-room (same path as switchToRoom).
   try {
-    const joined = Array.isArray(State?.rooms)
-      ? State.rooms.find(r => r && r.joined && r.type !== 'dm')
-      : null;
-    if (joined?.name) return String(joined.name);
+    const nick = State?.user?.nickname;
+    const peer = _callPeerNick;
+    if (nick && peer) {
+      const sorted = [String(nick), String(peer)].sort();
+      return `dm:${sorted.join(':')}`;
+    }
   } catch {}
-  return 'general';
+  // Never fall back to "general" — unjoined rooms get WS 4003 and _room is
+  // cleared with no auto-reconnect, leaving call_answer/ICE permanently stuck.
+  return '';
+}
+
+async function _ensureRoomsLoadedForCalls() {
+  if (_joinedRoomsList().length) return true;
+  try {
+    if (typeof Rooms !== 'undefined' && typeof Rooms.loadRooms === 'function') {
+      await Rooms.loadRooms();
+    }
+  } catch (e) {
+    console.warn('[calls] loadRooms before signaling failed', e);
+  }
+  return _joinedRoomsList().length > 0;
 }
 
 async function ensureCallSignalingReady(opts) {
   const timeoutMs = Math.max(1000, Number(opts?.timeoutMs || 15000) || 15000);
   if (_wsLooksOpen()) return true;
+  await _ensureRoomsLoadedForCalls();
+  // Native recovery can beat Rooms.loadRooms() on cold boot — wait briefly
+  // so bootstrap picks a joined channel, not a stale fc_last_room that
+  // closes with 4003 and never auto-reconnects.
+  if (!_joinedRoomsList().length) {
+    const roomsDeadline = Date.now() + Math.min(8000, timeoutMs);
+    while (!_joinedRoomsList().length && Date.now() < roomsDeadline) {
+      await new Promise(r => setTimeout(r, 100));
+      if (!_joinedRoomsList().length) await _ensureRoomsLoadedForCalls();
+    }
+  }
   try {
     const room = String(opts?.room || _pickCallBootstrapRoom()).trim();
-    if (room && typeof WS !== 'undefined' && typeof WS.connect === 'function') {
+    if (!room) return false;
+    if (typeof WS !== 'undefined' && typeof WS.connect === 'function') {
       WS.connect(room);
     }
   } catch {}
   try { await _waitForWsOpen(timeoutMs); } catch {}
   return _wsLooksOpen();
+}
+
+function isCallSessionBusy() {
+  try {
+    return _callState === 'ringing' || _callState === 'calling' || _callState === 'active'
+      || !!_acceptInFlight || !!_pendingAnswerSend;
+  } catch { return false; }
 }
 try {
   window.addEventListener('ws:open', () => {
@@ -691,15 +743,7 @@ async function acceptCall () {
   // Snapshot so a concurrent reset/finally can't null it out from under
   // the awaits below.
   const offer = _pendingOffer;
-  // If user answered from outside the DM view (Android tray / Electron),
-  // bring the DM thread into view in the background.
-  try {
-    if (_callPeerNick && typeof openDMWithNick === 'function') {
-      if (!_activeDM || _activeDM.nickname !== _callPeerNick) {
-        await openDMWithNick(_callPeerNick);
-      }
-    }
-  } catch {}
+  await _ensureRoomsLoadedForCalls();
   const wsReady = await ensureCallSignalingReady({ timeoutMs: 15000 });
   if (!wsReady) {
     toast('Could not connect to signaling — please try again', 'error');
@@ -736,17 +780,29 @@ async function acceptCall () {
 
     await _bestEffortRefreshSignalBundle();
     const answerCallId = offer.call_id || _callId || 0;
-    const fp_sig = await _signCallFp(answerCallId, _callPeerUID || (_pendingOffer && _pendingOffer.from_id) || 0, answer.sdp);
+    const peerUid = _callPeerUID || offer.from_id || 0;
+    const fp_sig = await _signCallFp(answerCallId, peerUid, answer.sdp);
 
     _sendCallAnswerReliable({
       type        : 'call_answer',
       to_nickname : _callPeerNick,
+      to_id       : peerUid || undefined,
       call_id     : offer.call_id || _callId || undefined,
       sdp         : answer.sdp,
       fp_sig      : fp_sig || undefined,
     });
     _callState = 'active';
     _armConnectingHardCap();
+
+    // Open the DM thread after answer is queued — don't block signaling on
+    // /api/dms/open while launch() may still be switching channels/WS.
+    try {
+      if (_callPeerNick && typeof openDMWithNick === 'function') {
+        if (!_activeDM || _activeDM.nickname !== _callPeerNick) {
+          void openDMWithNick(_callPeerNick).catch(() => {});
+        }
+      }
+    } catch {}
 
     if (_callType === 'video') {
       const lv = document.getElementById('local-video');
@@ -1013,6 +1069,7 @@ function endCall (notifyPeer = true, opts) {
       _sendCallSignal({
         type: 'call_end',
         to_nickname: _callPeerNick,
+        to_id: _callPeerUID || undefined,
         call_id: _callId || undefined,
         was_connected: wasConnected,
         duration_seconds: durationSecs,
@@ -1111,6 +1168,13 @@ function resetCall () {
     if (bMute) { bMute.textContent = '🎤'; bMute.classList.remove('muted'); }
     try { window.Android?.dismissRing?.(); } catch {}
     try { window.Android?.endCallNotification?.(); } catch {}
+    // If launch() skipped WS.connect while a call was active, resync now.
+    try {
+      const room = State?.currentRoom;
+      if (room && State?.currentRoomType !== 'dm' && typeof WS !== 'undefined' && WS.connect) {
+        WS.connect(room);
+      }
+    } catch {}
   } catch (e) {
     console.warn('resetCall error (non-fatal)', e);
   }
@@ -2374,6 +2438,7 @@ try {
   window.hideIncomingCall = hideIncomingCall;
   window.ensureCallSignalingReady = ensureCallSignalingReady;
   window.isCallSignalingReady = () => _wsLooksOpen();
+  window.isCallSessionBusy = isCallSessionBusy;
 } catch {}
 
 function _maybeRecoverPendingIncomingCall () {

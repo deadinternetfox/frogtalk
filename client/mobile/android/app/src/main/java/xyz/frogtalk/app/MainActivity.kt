@@ -32,6 +32,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -41,7 +42,7 @@ class MainActivity : AppCompatActivity() {
         private const val SETUP_ASSET_URL = "file:///android_asset/mobile_node_setup.html"
         /** Pre-filled in the first-run setup wizard. */
         private const val OFFICIAL_SERVER_INPUT = "frogtalk.xyz"
-        private const val WEB_CACHE_REV = "20260521-calls-v236"
+        private const val WEB_CACHE_REV = "20260521-wizard-v237"
         private const val PREFS = "frogtalk_prefs"
         private const val PREF_SERVER_BASE_URL = "server_base_url"
         private const val PREF_PERMISSIONS_WIZARD_DONE = "permissions_wizard_done"
@@ -129,7 +130,8 @@ class MainActivity : AppCompatActivity() {
     private var pendingPermissionRequest: PermissionRequest? = null
     private var musicPlaybackActive: Boolean = false
     private var voiceChannelActive: Boolean = false
-    private var permissionWizardInProgress: Boolean = false
+    /** When set, the next permission/battery result notifies the in-app HTML wizard. */
+    private var pendingWizardNativeStep: String? = null
     /** Warm-tap on incoming-call notification before WebView JS is ready. */
     private var pendingIncomingCallId: String? = null
     private var pendingIncomingCallPeer: String? = null
@@ -330,14 +332,12 @@ class MainActivity : AppCompatActivity() {
 
     private val notificationPermissionLauncher: ActivityResultLauncher<String> =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-            if (permissionWizardInProgress) {
-                continuePermissionWizardFromNotifications()
-            }
+            finishPendingWizardNativeStep("notifications")
         }
 
-    private val permissionWizardMediaLauncher: ActivityResultLauncher<Array<String>> =
+    private val wizardMediaPermissionLauncher: ActivityResultLauncher<Array<String>> =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-            continuePermissionWizardFromMedia()
+            finishPendingWizardNativeStep("media")
         }
 
     private val batteryOptimizationLauncher: ActivityResultLauncher<Intent> =
@@ -351,6 +351,7 @@ class MainActivity : AppCompatActivity() {
                     .putLong(PREF_BATTERY_PROMPTED_AT, System.currentTimeMillis())
                     .apply()
             } catch (_: Throwable) {}
+            finishPendingWizardNativeStep("battery")
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -421,161 +422,149 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        startFirstRunPromptFlow()
     }
 
-    private fun startFirstRunPromptFlow() {
-        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(PREF_PERMISSIONS_WIZARD_DONE, false)) return
-        runPermissionWizardIntro()
-    }
-
-    private fun markPermissionWizardDone() {
+    fun markPermissionWizardDone() {
         try {
             getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_PERMISSIONS_WIZARD_DONE, true)
                 .apply()
         } catch (_: Throwable) {}
-        permissionWizardInProgress = false
+        pendingWizardNativeStep = null
     }
 
-    private fun runPermissionWizardIntro() {
-        if (isFinishing || isDestroyed) return
-        permissionWizardInProgress = true
-        try {
-            AlertDialog.Builder(this)
-                .setTitle("Set up call reliability")
-                .setMessage(
-                    "FrogTalk can walk you through notifications, microphone/camera access, " +
-                        "and battery settings so incoming calls work reliably."
-                )
-                .setCancelable(false)
-                .setPositiveButton("Continue") { _, _ ->
-                    runPermissionWizardNotificationStep()
-                }
-                .setNegativeButton("Not now") { _, _ ->
-                    markPermissionWizardDone()
-                }
-                .show()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Permission wizard intro failed", e)
-            permissionWizardInProgress = false
-        }
-    }
-
-    private fun runPermissionWizardNotificationStep() {
-        if (!permissionWizardInProgress) return
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                AlertDialog.Builder(this)
-                    .setTitle("Notifications")
-                    .setMessage("Enable notifications so incoming call alerts can wake the app.")
-                    .setCancelable(false)
-                    .setPositiveButton("Allow") { _, _ ->
-                        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                    .setNegativeButton("Skip") { _, _ ->
-                        continuePermissionWizardFromNotifications()
-                    }
-                    .show()
-                return
-            }
-        } catch (e: Throwable) {
-            Log.w(TAG, "Permission wizard notification step failed", e)
-        }
-        continuePermissionWizardFromNotifications()
-    }
-
-    private fun continuePermissionWizardFromNotifications() {
-        if (!permissionWizardInProgress) return
-        runPermissionWizardMediaStep()
-    }
-
-    private fun runPermissionWizardMediaStep() {
-        if (!permissionWizardInProgress) return
-        val permsNeeded = mutableListOf<String>()
-        try {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permsNeeded.add(Manifest.permission.RECORD_AUDIO)
-            }
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permsNeeded.add(Manifest.permission.CAMERA)
-            }
-        } catch (_: Throwable) {}
-        if (permsNeeded.isEmpty()) {
-            continuePermissionWizardFromMedia()
-            return
-        }
-        try {
-            AlertDialog.Builder(this)
-                .setTitle("Microphone and camera")
-                .setMessage(
-                    "Grant microphone (and camera for video calls) now so answering an " +
-                        "incoming call does not interrupt you with surprise prompts."
-                )
-                .setCancelable(false)
-                .setPositiveButton("Allow") { _, _ ->
-                    permissionWizardMediaLauncher.launch(permsNeeded.toTypedArray())
-                }
-                .setNegativeButton("Skip") { _, _ ->
-                    continuePermissionWizardFromMedia()
-                }
-                .show()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Permission wizard media step failed", e)
-            continuePermissionWizardFromMedia()
-        }
-    }
-
-    private fun continuePermissionWizardFromMedia() {
-        if (!permissionWizardInProgress) return
-        runPermissionWizardBatteryStep()
-    }
-
-    private fun runPermissionWizardBatteryStep() {
-        if (!permissionWizardInProgress) return
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-            markPermissionWizardDone()
-            return
-        }
-        val shouldPrompt = try {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            val ignored = pm.isIgnoringBatteryOptimizations(packageName)
-            ignored == false
+    fun isPermissionWizardDone(): Boolean {
+        return try {
+            getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(PREF_PERMISSIONS_WIZARD_DONE, false)
         } catch (_: Throwable) {
             false
         }
-        if (!shouldPrompt) {
-            markPermissionWizardDone()
-            return
+    }
+
+    fun getPermissionsWizardStatusJson(): String {
+        val notifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        } else {
+            true
         }
-        try {
-            AlertDialog.Builder(this)
-                .setTitle("Battery optimization")
-                .setMessage(
-                    "Allow FrogTalk to ignore battery optimizations for more reliable incoming calls " +
-                        "on devices with aggressive background limits."
+        val microphone = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        val camera = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        val battery = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                pm.isIgnoringBatteryOptimizations(packageName)
+            } catch (_: Throwable) {
+                false
+            }
+        } else {
+            true
+        }
+        return JSONObject()
+            .put("notifications", notifications)
+            .put("microphone", microphone)
+            .put("camera", camera)
+            .put("battery", battery)
+            .toString()
+    }
+
+    private fun finishPendingWizardNativeStep(fallbackStep: String) {
+        val step = pendingWizardNativeStep ?: fallbackStep
+        pendingWizardNativeStep = null
+        emitWizardNativeStep(step)
+    }
+
+    private fun emitWizardNativeStep(step: String) {
+        val wv = webView ?: return
+        val safe = step.replace("\\", "\\\\").replace("'", "\\'")
+        wv.post {
+            try {
+                wv.evaluateJavascript(
+                    "try{if(window.MobileWizard&&typeof MobileWizard._onNativeStepDone==='function')" +
+                        "MobileWizard._onNativeStepDone('$safe');}catch(e){}",
+                    null
                 )
-                .setCancelable(false)
-                .setPositiveButton("Open settings") { _, _ ->
-                    maybePromptDisableBatteryOptimizations()
-                    markPermissionWizardDone()
+            } catch (e: Throwable) {
+                Log.w(TAG, "emitWizardNativeStep failed", e)
+            }
+        }
+    }
+
+    fun requestWizardNotifications() {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    pendingWizardNativeStep = "notifications"
+                    notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    return@runOnUiThread
                 }
-                .setNegativeButton("Skip") { _, _ ->
-                    markPermissionWizardDone()
+            } catch (e: Throwable) {
+                Log.w(TAG, "requestWizardNotifications failed", e)
+            }
+            emitWizardNativeStep("notifications")
+        }
+    }
+
+    fun requestWizardMedia() {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            val permsNeeded = mutableListOf<String>()
+            try {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    permsNeeded.add(Manifest.permission.RECORD_AUDIO)
                 }
-                .show()
-        } catch (e: Throwable) {
-            Log.w(TAG, "Permission wizard battery step failed", e)
-            markPermissionWizardDone()
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                    != PackageManager.PERMISSION_GRANTED
+                ) {
+                    permsNeeded.add(Manifest.permission.CAMERA)
+                }
+            } catch (_: Throwable) {}
+            if (permsNeeded.isEmpty()) {
+                emitWizardNativeStep("media")
+                return@runOnUiThread
+            }
+            try {
+                pendingWizardNativeStep = "media"
+                wizardMediaPermissionLauncher.launch(permsNeeded.toTypedArray())
+            } catch (e: Throwable) {
+                Log.w(TAG, "requestWizardMedia failed", e)
+                emitWizardNativeStep("media")
+            }
+        }
+    }
+
+    fun requestWizardBattery() {
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                emitWizardNativeStep("battery")
+                return@runOnUiThread
+            }
+            try {
+                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                if (pm.isIgnoringBatteryOptimizations(packageName)) {
+                    emitWizardNativeStep("battery")
+                    return@runOnUiThread
+                }
+                pendingWizardNativeStep = "battery"
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                batteryOptimizationLauncher.launch(intent)
+            } catch (e: Throwable) {
+                Log.w(TAG, "requestWizardBattery failed", e)
+                emitWizardNativeStep("battery")
+            }
         }
     }
 
@@ -1390,6 +1379,33 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Throwable) {
                 Log.e(TAG, "registerFcmToken failed", e)
             }
+        }
+
+        /** In-app HTML startup wizard — permission status and native prompts. */
+        @android.webkit.JavascriptInterface
+        fun isPermissionsWizardDone(): Boolean = activity.isPermissionWizardDone()
+
+        @android.webkit.JavascriptInterface
+        fun markPermissionsWizardDone() {
+            activity.markPermissionWizardDone()
+        }
+
+        @android.webkit.JavascriptInterface
+        fun getPermissionsWizardStatus(): String = activity.getPermissionsWizardStatusJson()
+
+        @android.webkit.JavascriptInterface
+        fun requestWizardNotifications() {
+            activity.requestWizardNotifications()
+        }
+
+        @android.webkit.JavascriptInterface
+        fun requestWizardMedia() {
+            activity.requestWizardMedia()
+        }
+
+        @android.webkit.JavascriptInterface
+        fun requestWizardBattery() {
+            activity.requestWizardBattery()
         }
 
         @android.webkit.JavascriptInterface

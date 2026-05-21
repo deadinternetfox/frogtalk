@@ -455,8 +455,24 @@ const App = {
     // or replaced by showEmptyOnboarding() if the user truly has no rooms.
     App.showChannelLoading();
 
-    // Browser notification prompt is useful on web/desktop; Android app uses
-    // the native permission wizard to avoid stacked startup popups.
+    // Rooms must load before call recovery or signaling bootstrap (joined-room WS).
+    await Rooms.loadRooms();
+
+    // Cold-boot from FCM: recover the offer before the permissions wizard can block Accept.
+    if (this.pendingIncomingCall) {
+      const restored = await this.ensureIncomingCallPipeline(this.pendingIncomingCall);
+      if (restored) this.pendingIncomingCall = null;
+    } else {
+      await this.recoverLatestIncomingCall();
+    }
+
+    const incomingActive = (typeof isIncomingCallActive === 'function' && isIncomingCallActive())
+      || (typeof isCallSessionBusy === 'function' && isCallSessionBusy());
+    if (!incomingActive && typeof MobileWizard !== 'undefined' && MobileWizard.shouldShow()) {
+      await MobileWizard.run();
+    }
+
+    // Browser notification prompt is useful on web/desktop only.
     if (!window.Android) Notifications.requestPermission();
 
     // Android native push: register/sync FCM token against this account.
@@ -465,23 +481,6 @@ const App = {
         window.Android.registerFcmToken(State.token);
       }
     } catch {}
-
-    // Recover pending incoming call as early as possible, but only after the
-    // signaling socket is ready so Accept won't race a disconnected WS.
-    if (this.pendingIncomingCall) {
-      const restored = await this.ensureIncomingCallPipeline(this.pendingIncomingCall);
-      if (restored) this.pendingIncomingCall = null;
-    } else {
-      await this.recoverLatestIncomingCall();
-    }
-
-    // Load rooms then join first available room (or show onboarding)
-    await Rooms.loadRooms();
-
-    if (this.pendingIncomingCall) {
-      const restored = await this.ensureIncomingCallPipeline(this.pendingIncomingCall);
-      if (restored) this.pendingIncomingCall = null;
-    }
 
     // Process pending invite / share link
     if (this.pendingInvite) {
@@ -503,7 +502,7 @@ const App = {
             chType = meta.room?.channel_type || 'text';
           } else if (metaRes.status === 404) {
             UI.showToast(`#${roomName} was not found`, 'error');
-            App.openFirstAvailableRoom();
+            await App.openFirstAvailableRoomWhenIdle();
             return;
           }
         } catch {}
@@ -513,7 +512,7 @@ const App = {
         Rooms.switchToRoom(roomName, roomType, null, chType);
       } else if (roomType === 'private') {
         UI.showToast(`#${roomName} is private — ask the owner for an invite link (/i/…)`, 'warning');
-        App.openFirstAvailableRoom();
+        await App.openFirstAvailableRoomWhenIdle();
       } else {
         try {
           const jr = await apiFetch(`/api/rooms/${encodeURIComponent(roomName)}/join`, 'POST');
@@ -524,10 +523,10 @@ const App = {
           } else {
             const err = await jr.json().catch(() => ({}));
             UI.showToast(err.error || `Couldn't join #${roomName}`, 'error');
-            App.openFirstAvailableRoom();
+            await App.openFirstAvailableRoomWhenIdle();
           }
         } catch {
-          App.openFirstAvailableRoom();
+          await App.openFirstAvailableRoomWhenIdle();
         }
       }
     } else if (this.pendingDM && String(this.pendingDM).trim()) {
@@ -535,12 +534,12 @@ const App = {
       if (typeof openDMWithNick === 'function') {
         try { openDMWithNick(this.pendingDM); } catch {}
       } else {
-        App.openFirstAvailableRoom();
+        await App.openFirstAvailableRoomWhenIdle();
       }
       this.pendingDM = null;
     } else if (this.pendingReel) {
       // Share link: /r/{id} or /?reel={id} — open FrogSocial reels and focus target reel.
-      App.openFirstAvailableRoom();
+      await App.openFirstAvailableRoomWhenIdle();
       const reelId = Number(this.pendingReel);
       this.pendingReel = null;
       const tryOpenReel = (attempts) => {
@@ -560,7 +559,7 @@ const App = {
       tryOpenReel(60);
     } else if (this.pendingPost) {
       // Share link: /p/{id} or /?post={id} — open FrogSocial post detail.
-      App.openFirstAvailableRoom();
+      await App.openFirstAvailableRoomWhenIdle();
       const postId = Number(this.pendingPost);
       this.pendingPost = null;
       const tryOpenPost = (attempts) => {
@@ -581,7 +580,7 @@ const App = {
     } else if (this.pendingProfile) {
       // Share link: /?profile={nick} — open the polished FrogSocial profile
       // view. Falls back to the legacy user-info modal if Social isn't loaded.
-      App.openFirstAvailableRoom();
+      await App.openFirstAvailableRoomWhenIdle();
       const nick = this.pendingProfile;
       this.pendingProfile = null;
       // Retry briefly — on slow boots Social may not be attached to window
@@ -604,7 +603,7 @@ const App = {
       };
       tryOpen(16);
     } else {
-      App.openFirstAvailableRoom();
+      await App.openFirstAvailableRoomWhenIdle();
     }
 
     // Load DM channels sidebar
@@ -755,7 +754,7 @@ const App = {
           return false;
         }
         if (peerNick && typeof openDMWithNick === 'function') {
-          try { await openDMWithNick(peerNick); } catch {}
+          void openDMWithNick(peerNick).catch(() => {});
         }
         return true;
       }
@@ -783,7 +782,7 @@ const App = {
       }
       const peerNick = String(pending?.peerNick || '').trim();
       if (peerNick && typeof openDMWithNick === 'function') {
-        try { await openDMWithNick(peerNick); } catch {}
+        void openDMWithNick(peerNick).catch(() => {});
       }
       const res = await fetch(`/api/calls/${encodeURIComponent(callId)}/pending`, {
         headers: { 'X-Session-Token': State.token }
@@ -837,7 +836,7 @@ const App = {
         });
       }
       if (peerNick && typeof openDMWithNick === 'function') {
-        try { await openDMWithNick(peerNick); } catch {}
+        void openDMWithNick(peerNick).catch(() => {});
       }
       if (typeof handleCallOffer === 'function') {
         await handleCallOffer(offer);
@@ -863,7 +862,7 @@ const App = {
         if (roomType === 'private') {
           const ok = await Rooms.ensurePrivateRoomSecret(data.room);
           if (!ok) {
-            App.openFirstAvailableRoom();
+            await App.openFirstAvailableRoomWhenIdle();
             return;
           }
         }
@@ -878,11 +877,11 @@ const App = {
         } else {
           UI.showToast(err.error || 'Failed to join', 'error');
         }
-        App.openFirstAvailableRoom();
+        await App.openFirstAvailableRoomWhenIdle();
       }
     } catch (e) {
       UI.showToast('Failed to process invite', 'error');
-      App.openFirstAvailableRoom();
+          await App.openFirstAvailableRoomWhenIdle();
     }
   },
 
@@ -891,6 +890,21 @@ const App = {
    * (fresh signup with no invite), show the onboarding/empty state instead of
    * falling back to a non-existent "general" channel.
    */
+  async openFirstAvailableRoomWhenIdle(maxWaitMs = 90000) {
+    const busy = () => {
+      try {
+        if (typeof window.isCallSessionBusy === 'function') return window.isCallSessionBusy();
+      } catch {}
+      return false;
+    };
+    let waited = 0;
+    while (busy() && waited < maxWaitMs) {
+      await new Promise(r => setTimeout(r, 250));
+      waited += 250;
+    }
+    this.openFirstAvailableRoom();
+  },
+
   openFirstAvailableRoom() {
     try {
       const rooms = (typeof State !== 'undefined' && Array.isArray(State.rooms)) ? State.rooms : [];
