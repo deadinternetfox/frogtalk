@@ -12,9 +12,11 @@
 
 # 🐸 FrogTalk
 
-**A censorship-free, federated, end-to-end encrypted chat platform.**
-Self-host your own node and join the swamp — or run it completely standalone.
+<p>
+A censorship-free, federated, end-to-end encrypted chat platform.<br>
+Self-host your own node and join the swamp — or run it completely standalone.<br>
 No company in the middle. Messages stay private. Built in the open.
+</p>
 
 [![Release](https://img.shields.io/github/v/release/deadinternetfox/frogtalk?display_name=release&sort=semver&color=4caf50)](https://github.com/deadinternetfox/frogtalk/releases)
 [![License](https://img.shields.io/github/license/deadinternetfox/frogtalk?color=4caf50)](LICENSE)

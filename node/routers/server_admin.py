@@ -293,6 +293,19 @@ def _local_server_id() -> str:
     return str(local.get("server_id") or "").strip()
 
 
+_SERVER_ID_RE = re.compile(r"^srv_[a-f0-9]{8,40}$", re.IGNORECASE)
+
+
+def _normalize_federation_server_id(server_id: str) -> tuple[str | None, JSONResponse | None]:
+    """Validate federation server_id before admin mutations (block/unblock/delete/probe)."""
+    sid = (server_id or "").strip()
+    if not sid or len(sid) > 64:
+        return None, JSONResponse(status_code=400, content={"error": "Invalid server_id"})
+    if not _SERVER_ID_RE.fullmatch(sid):
+        return None, JSONResponse(status_code=400, content={"error": "Invalid server_id format"})
+    return sid, None
+
+
 def _cleanup_sessions() -> None:
     now = time.time()
     dead = [token for token, entry in _SESSIONS.items() if entry[0] <= now]
@@ -1164,9 +1177,9 @@ async def server_admin_probe_node(server_id: str, request: Request):
     if auth:
         return auth
 
-    sid = (server_id or "").strip()
-    if not sid:
-        return JSONResponse(status_code=400, content={"error": "server_id required"})
+    sid, sid_err = _normalize_federation_server_id(server_id)
+    if sid_err:
+        return sid_err
 
     node = next((n for n in db.list_federation_servers_admin(include_disabled=True) if (n.get("server_id") or "") == sid), None)
     if not node:
@@ -1213,10 +1226,14 @@ async def server_admin_block_node(server_id: str, request: Request):
     if auth:
         return auth
 
-    ok = db.set_federation_server_enabled(server_id, False)
+    sid, sid_err = _normalize_federation_server_id(server_id)
+    if sid_err:
+        return sid_err
+
+    ok = db.set_federation_server_enabled(sid, False)
     if not ok:
         return JSONResponse(status_code=404, content={"error": "Node not found"})
-    return {"ok": True, "server_id": server_id, "blocked": True}
+    return {"ok": True, "server_id": sid, "blocked": True}
 
 
 @router.post("/api/server-admin/nodes/{server_id}/unblock")
@@ -1229,10 +1246,39 @@ async def server_admin_unblock_node(server_id: str, request: Request):
     if auth:
         return auth
 
-    ok = db.set_federation_server_enabled(server_id, True)
+    sid, sid_err = _normalize_federation_server_id(server_id)
+    if sid_err:
+        return sid_err
+
+    ok = db.set_federation_server_enabled(sid, True)
     if not ok:
         return JSONResponse(status_code=404, content={"error": "Node not found"})
-    return {"ok": True, "server_id": server_id, "blocked": False}
+    return {"ok": True, "server_id": sid, "blocked": False}
+
+
+@router.delete("/api/server-admin/nodes/{server_id}")
+@limiter.limit("20/minute")
+async def server_admin_delete_node(request: Request, server_id: str):
+    disabled = _require_enabled()
+    if disabled:
+        return disabled
+
+    _user, auth = await _require_frogtalk_admin(request)
+    if auth:
+        return auth
+
+    sid, sid_err = _normalize_federation_server_id(server_id)
+    if sid_err:
+        return sid_err
+
+    local_sid = _local_server_id()
+    if local_sid and sid == local_sid:
+        return JSONResponse(status_code=400, content={"error": "Cannot delete local node"})
+
+    ok = db.delete_federation_server(sid)
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "Node not found"})
+    return {"ok": True, "server_id": sid, "deleted": True}
 
 
 # ---------------------------------------------------------------------------

@@ -70,7 +70,7 @@ export FROGTALK_FEDERATION_TOKEN="<same-as-main-on-frogtalk.xyz>"
 # export FROGTALK_BOARD_SUBTITLE="G'day — Australian FrogTalk node"
 
 sudo apt install -y git python3 python3-venv python3-pip curl nginx php-fpm php-curl ufw sqlite3
-# setup -y (root): venv, .env, board nginx, auto HTTPS for http:// IPs, optional federation
+# setup -y (root): venv, .env, board nginx, HTTPS (recommended free cert on domain / self-signed on IP), optional federation
 sudo bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
 
@@ -229,6 +229,7 @@ sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk
 - Sets `PUBLIC_URL`, `ADMIN_PASSWORD`, `HOST=127.0.0.1`, `PORT=8080`, federation defaults
 - Symlinks `node/data` → `../data`, `node/.env` → `../.env`, `node/secrets` → `../secrets`
 - When run with `sudo`, installs nginx + php-fpm for `/board/` and applies board identity from `FROGTALK_SERVER_NAME`
+- Offers HTTPS options in the wizard: **recommended** free trusted cert (Let's Encrypt/certbot, domain) or self-signed fallback
 - Prompts for `FROGTALK_FEDERATION_TOKEN` (must match FrogTalk Main at `frogtalk.xyz`)
 - Optionally runs `node_federation_join.sh` (passes your `--public-url`)
 

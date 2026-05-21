@@ -2917,10 +2917,24 @@ function _renderNetworkServersList() {
     const torPreferred = _isTorPreferred();
     const isOnion = _isOnionNetworkUrl(publicAddr) || !!s.onion_url;
     const healthy = !!s.healthy;
+    const probeError = String(s.probe_error || '');
+    const probeErrorLower = probeError.toLowerCase();
+    const advertisedBase = String(s.base_url || '').trim().toLowerCase();
+    const isHttpOnly = advertisedBase.startsWith('http://');
     const latency = s.latency_ms == null ? 'n/a' : `${s.latency_ms} ms`;
     const region = _networkRegionLabel(s, s.base_url || publicAddr);
-    const statusColor = healthy ? '#4caf50' : '#f44336';
-    const statusDot = healthy ? '#3ecf65' : '#f44336';
+    let statusColor = healthy ? '#4caf50' : '#f44336';
+    let statusDot = healthy ? '#3ecf65' : '#f44336';
+    let statusText = healthy ? 'healthy' : 'down';
+    if (!healthy && probeErrorLower.includes('301')) {
+      statusText = 'redirect';
+      statusColor = '#f0c040';
+      statusDot = '#f0c040';
+    } else if (!healthy && isOnion && (probeErrorLower.includes('9050') || probeErrorLower.includes('socks') || probeErrorLower.includes('proxy'))) {
+      statusText = 'tor req';
+      statusColor = '#d7c477';
+      statusDot = '#d7c477';
+    }
     const selected = _networkSelectedServer && _networkSelectedServer.server_id === s.server_id;
     const isConnected = connectedBase && publicAddr === connectedBase;
     const trust = _networkBuildTrustByBase[publicAddr] || null;
@@ -2956,6 +2970,7 @@ function _renderNetworkServersList() {
     if (isConnected) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(62,207,101,.15);border:1px solid rgba(62,207,101,.3);color:#88e7a4;font-size:10px;font-weight:700;letter-spacing:.03em">CONNECTED</span>');
     if ((s.official || 0) || s.trust_tier === 'official') chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(52,130,255,.12);border:1px solid rgba(52,130,255,.25);color:#8fc7ff;font-size:10px;font-weight:700;letter-spacing:.03em">OFFICIAL DIR</span>');
     if (s.onion_url) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(62,170,101,.13);border:1px solid rgba(133,215,160,.28);color:#85d7a0;font-size:10px;font-weight:700;letter-spacing:.03em">TOR</span>');
+    if (isHttpOnly) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(140,48,48,.18);border:1px solid rgba(255,120,120,.35);color:#ffadad;font-size:10px;font-weight:700;letter-spacing:.03em">HTTP ONLY</span>');
     if (torPreferred && s.onion_url) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(120,180,40,.13);border:1px solid rgba(180,230,80,.22);color:#d7f08a;font-size:10px;font-weight:700;letter-spacing:.03em">TOR MODE</span>');
     if (trustChecked && isSameHash) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(30,58,36,.8);border:1px solid rgba(80,220,120,.22);color:#8fffaa;font-size:10px;font-weight:700;letter-spacing:.03em">✓ SAME HASH</span>');
     if (trustChecked && isOfficialCopy) chips.push('<span style="padding:2px 8px;border-radius:999px;background:rgba(47,42,22,.8);border:1px solid rgba(255,200,60,.2);color:#ffd66d;font-size:10px;font-weight:700;letter-spacing:.03em">LEGIT COPY</span>');
@@ -3005,7 +3020,7 @@ function _renderNetworkServersList() {
         <div style="flex-shrink:0;text-align:right;min-width:80px">
           <div style="display:flex;align-items:center;justify-content:flex-end;gap:5px;margin-bottom:3px">
             <span style="width:7px;height:7px;border-radius:50%;background:${statusDot};display:inline-block;box-shadow:0 0 6px ${statusDot}55"></span>
-            <span style="font-size:11px;color:${statusColor};font-weight:600">${healthy ? 'healthy' : 'down'}</span>
+            <span style="font-size:11px;color:${statusColor};font-weight:600">${statusText}</span>
           </div>
           <div style="font-size:11px;color:${latencyColor};font-weight:500">${latency === 'n/a' ? '— ms' : latency}</div>
         </div>

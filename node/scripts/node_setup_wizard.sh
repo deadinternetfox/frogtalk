@@ -215,19 +215,68 @@ main() {
 
   ft_ensure_deploy_ownership "$install_dir"
 
-  if [[ "$board_nginx_ok" -eq 1 ]] && [[ "$(id -u)" -eq 0 ]] && [[ "$public_url" == http://* ]]; then
-    local _do_ssl=0
-    if [[ "$ASSUME_YES" -eq 1 ]]; then
-      _do_ssl=1
-    elif ft_ask_yes_no "Enable HTTPS (self-signed for IP; Let's Encrypt if you use a domain)?" "y"; then
-      _do_ssl=1
+  if [[ "$board_nginx_ok" -eq 1 ]] && [[ "$(id -u)" -eq 0 ]]; then
+    ft_step "HTTPS (recommended)"
+    local _ssl_choice="" _ssl_mode="" _ssl_default="1" _ssl_url="$public_url"
+    if [[ "$public_url" == https://* ]]; then
+      ft_info "PUBLIC_URL already uses https:// — wizard can install a trusted cert now."
+    else
+      ft_info "Enable HTTPS now to avoid browser/app trust warnings and federation friction."
     fi
-    if [[ "$_do_ssl" -eq 1 ]]; then
-      bash "$install_dir/node/scripts/install_node_ssl.sh" --install-dir "$install_dir" -y \
-        && public_url="$(grep -E '^PUBLIC_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")" \
-        && ft_set_env_value "$ENV_FILE" "FROGTALK_BASE_URL" "$public_url" \
-        && ft_ok "HTTPS configured → ${public_url}" \
-        || ft_warn "SSL step failed — retry: sudo bash node/scripts/install.sh ssl -y"
+    ft_detail "1) Recommended: free trusted cert (Let's Encrypt via certbot, DNS name required)"
+    ft_detail "2) Self-signed cert (IP/domain, works but shows trust warning)"
+    ft_detail "3) Skip for now"
+
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+      if [[ "$public_url" == https://* ]]; then
+        _ssl_choice="1"
+      elif [[ "$public_url" == http://* ]]; then
+        _ssl_choice="2"
+      else
+        _ssl_choice="3"
+      fi
+    else
+      _ssl_choice="$(ft_ask "HTTPS option [1/2/3]" "$_ssl_default")"
+    fi
+
+    case "$_ssl_choice" in
+      1)
+        _ssl_mode="certbot"
+        if [[ "$public_url" != https://* ]]; then
+          local _https_host
+          _https_host="$(ft_ask "Domain for free cert (example: chat.example.com; blank keeps current URL)" "")"
+          _https_host="${_https_host#http://}"
+          _https_host="${_https_host#https://}"
+          _https_host="${_https_host%%/*}"
+          if [[ -n "$_https_host" ]]; then
+            _ssl_url="https://${_https_host}"
+            ft_set_env_value "$ENV_FILE" "PUBLIC_URL" "$_ssl_url"
+            ft_set_env_value "$ENV_FILE" "ALLOWED_ORIGINS" "$_ssl_url"
+            ft_set_env_value "$ENV_FILE" "FROGTALK_BASE_URL" "$_ssl_url"
+          fi
+        fi
+        ;;
+      2)
+        _ssl_mode="self-signed"
+        ;;
+      *)
+        _ssl_mode="skip"
+        ;;
+    esac
+
+    if [[ "$_ssl_mode" != "skip" ]]; then
+      if bash "$install_dir/node/scripts/install_node_ssl.sh" --install-dir "$install_dir" "--${_ssl_mode}"; then
+        public_url="$(grep -E '^PUBLIC_URL=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+        ft_set_env_value "$ENV_FILE" "FROGTALK_BASE_URL" "$public_url"
+        ft_ok "HTTPS configured → ${public_url}"
+        if [[ "$_ssl_mode" == "self-signed" ]]; then
+          ft_warn "Self-signed is okay for testing, but the recommended production path is option 1 (free trusted cert)."
+        fi
+      else
+        ft_warn "SSL step failed — retry: sudo bash node/scripts/install.sh ssl"
+      fi
+    else
+      ft_warn "HTTPS skipped — you can enable later: sudo bash node/scripts/install.sh ssl"
     fi
   fi
 

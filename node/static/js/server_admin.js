@@ -1317,9 +1317,9 @@
       return '';
     }
     if (blocked) {
-      return `<button class="btn" data-node-unblock="${sid}">Unblock</button>`;
+      return `<button class="btn" data-node-unblock="${sid}">Unblock</button><button class="btn danger" data-node-delete="${sid}" title="Delete stale listing">Delete</button>`;
     }
-    return `<button class="btn danger" data-node-block="${sid}">Block</button>`;
+    return `<button class="btn danger" data-node-block="${sid}">Block</button><button class="btn danger" data-node-delete="${sid}" title="Delete stale listing">Delete</button>`;
   }
 
   async function copyNodeId(serverId) {
@@ -1395,6 +1395,9 @@
     nodesBody.querySelectorAll('[data-node-unblock]').forEach((btn) => {
       btn.addEventListener('click', () => runNodeAction(btn.getAttribute('data-node-unblock'), 'unblock'));
     });
+    nodesBody.querySelectorAll('[data-node-delete]').forEach((btn) => {
+      btn.addEventListener('click', () => runNodeAction(btn.getAttribute('data-node-delete'), 'delete'));
+    });
     nodesBody.querySelectorAll('[data-node-probe]').forEach((btn) => {
       btn.addEventListener('click', () => runNodeProbe(btn.getAttribute('data-node-probe')));
     });
@@ -1413,9 +1416,17 @@
 
   async function runNodeAction(serverId, action) {
     if (!serverId || !action) return;
+    if (action === 'delete') {
+      const ok = window.confirm(`Delete node listing ${serverId}?\n\nThis removes it from this node's local directory cache. If it still exists in upstream directory sync, it may reappear later.`);
+      if (!ok) return;
+    }
     setNodeMessage(`Running ${action} for ${serverId}...`);
     try {
-      await api(`/api/server-admin/nodes/${encodeURIComponent(serverId)}/${action}`, { method: 'POST' });
+      const method = action === 'delete' ? 'DELETE' : 'POST';
+      const endpoint = action === 'delete'
+        ? `/api/server-admin/nodes/${encodeURIComponent(serverId)}`
+        : `/api/server-admin/nodes/${encodeURIComponent(serverId)}/${action}`;
+      await api(endpoint, { method });
       setNodeMessage(`${action} completed for ${serverId}.`);
       await refreshNodes();
     } catch (e) {

@@ -163,7 +163,7 @@ FROGTALK_AUTO_UPDATE_ENABLED=0</code></pre>
       <h2>4) HTTPS (stop “Not secure” on HTTP)</h2>
       <p class="hint"><code>http://&lt;IP&gt;</code> is always labeled not secure. After setup, run:</p>
       <pre><code>sudo bash node/scripts/install.sh ssl -y --install-dir /opt/frogtalk</code></pre>
-      <p class="hint">IP-only nodes get a <strong>self-signed</strong> cert and HTTP→HTTPS redirect. Use <code>https://&lt;YOUR_VPS_IP&gt;/</code> (accept the browser trust prompt once). For a padlock with no warning, point a domain at the VPS and use <code>https://chat.&lt;YOUR_DOMAIN&gt;</code> — certbot runs automatically in the wizard. If certbot fails, the SSL helper prints free CLI alternatives (ZeroSSL/Buypass via <code>acme.sh</code>).</p>
+      <p class="hint">The setup wizard now offers a recommended HTTPS option: <strong>free trusted cert</strong> (Let's Encrypt via certbot, for domains), plus self-signed fallback. IP-only nodes still use self-signed with HTTP→HTTPS redirect. Use <code>https://&lt;YOUR_VPS_IP&gt;/</code> (accept trust prompt once), or map a domain to get a clean padlock. If certbot fails, the SSL helper prints free CLI alternatives (ZeroSSL/Buypass via <code>acme.sh</code>).</p>
       <p class="hint">nginx terminates TLS and proxies to <code>127.0.0.1:8080</code>.</p>
       <pre><code>server {
     listen 80;

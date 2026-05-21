@@ -33,7 +33,7 @@ ${C_BOLD}Commands:${C_RESET}
   setup          First-time install (venv, .env, symlinks)
   federation     Join official mesh (chat + board nav)
   board-nginx    nginx + PHP for /board/ (also in setup wizard)
-  ssl            HTTPS: self-signed (IP) or certbot (domain)
+  ssl            HTTPS: recommended free cert (domain) or self-signed (IP)
   update         Check for git updates
   update-apply   Pull latest + deps + restart
   systemd        Install/enable frogtalk.service
