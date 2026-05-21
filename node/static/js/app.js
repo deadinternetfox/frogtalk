@@ -63,9 +63,20 @@
   } catch {}
 })();
 
-/** Shared federation sync UI — progress label + inline banner used across app. */
+/** Shared federation sync UI — progress label, inline banner, and full overlay. */
 const FtSync = {
   PENDING_CALL_MAX_AGE_MS: 180000,
+  PHASE_ICON: {
+    fetch: '📡',
+    channels: '#',
+    directory: '🗂️',
+    dms: '💬',
+    social_graph: '👥',
+    profile: '⚙️',
+    social_posts: '🤳🏼',
+    push: '🔔',
+    done: '✅',
+  },
 
   state() {
     return (window.__ftFederationSync && typeof window.__ftFederationSync === 'object')
@@ -80,10 +91,38 @@ const FtSync = {
 
   label(st, fallback = 'Syncing from your home node…') {
     const s = st || this.state();
-    if (!s?.in_progress) return '';
+    if (!s?.in_progress && !s?.done) return '';
     const hint = String(s.hint || fallback).trim();
     const p = this.pct(s);
     return (p != null) ? `${hint} — ${p}%` : hint;
+  },
+
+  _esc(text) {
+    if (typeof UI !== 'undefined' && UI.escHtml) return UI.escHtml(text);
+    return String(text || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  },
+
+  _phaseRowsHtml(phases) {
+    if (!Array.isArray(phases) || !phases.length) return '';
+    return phases.map((ph) => {
+      const icon = this.PHASE_ICON[ph.key] || '•';
+      const status = ph.status || 'pending';
+      const color = status === 'done' ? '#7fd6a2' : (status === 'active' ? '#f6d27a' : '#566');
+      const mark = status === 'done' ? '✓' : (status === 'active' ? '…' : '○');
+      const countText = (ph.total > 0)
+        ? `${Math.min(ph.done || 0, ph.total)}/${ph.total}`
+        : (ph.done > 0 ? String(ph.done) : '');
+      return `
+        <div style="display:flex;align-items:center;gap:8px;padding:4px 0;color:${color};font-size:12px;${status === 'pending' ? 'opacity:.55' : ''}">
+          <span style="width:14px;text-align:center">${this._esc(icon)}</span>
+          <span style="flex:1">${this._esc(ph.label || ph.key)}</span>
+          <span style="font-variant-numeric:tabular-nums;color:#8da59b">${this._esc(countText)}</span>
+          <span style="width:14px;text-align:center;font-weight:700">${this._esc(mark)}</span>
+        </div>`;
+    }).join('');
   },
 
   renderInline(st, opts = {}) {
@@ -97,8 +136,34 @@ const FtSync = {
         <div style="height:100%;width:${p}%;background:linear-gradient(90deg,#4caf86,#7fd6a2);transition:width .35s ease"></div>
       </div>`;
     return `<div class="ft-sync-inline" style="color:#8da59b;font-size:${compact ? '11px' : '12px'};line-height:1.35">
-      <div>⏳ ${typeof UI !== 'undefined' && UI.escHtml ? UI.escHtml(label) : label}</div>${bar}
+      <div>⏳ ${this._esc(label)}</div>${bar}
     </div>`;
+  },
+
+  renderOverlayHtml(st) {
+    const s = st || this.state();
+    const p = this.pct(s) ?? 0;
+    const hint = String(s.hint || 'Syncing…').trim();
+    const source = String(s.source_base || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const phases = Array.isArray(s.phases) ? s.phases : [];
+    return `
+      <div style="width:min(440px,92vw);background:linear-gradient(180deg,#0f1714,#101312);border:1px solid rgba(95,181,121,.25);border-radius:18px;box-shadow:0 28px 80px rgba(0,0,0,.58);padding:18px 20px;color:#dfead4">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+          <div style="width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#173626,#0d1812);display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid rgba(95,181,121,.28)">🐸</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:15px;font-weight:700;letter-spacing:.01em">Syncing your account</div>
+            <div style="font-size:11px;color:#8da59b;margin-top:2px">${source ? 'from ' + this._esc(source) : 'from your home node'}</div>
+          </div>
+          <div style="font-size:22px;font-weight:800;color:#a8e6c1;font-variant-numeric:tabular-nums">${p}%</div>
+        </div>
+        <div style="height:8px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;margin-bottom:14px">
+          <div style="height:100%;width:${p}%;background:linear-gradient(90deg,#4caf86,#7fd6a2);transition:width .35s ease;box-shadow:0 0 18px rgba(127,214,162,.35)"></div>
+        </div>
+        <div style="font-size:12px;color:#b7d9c3;margin-bottom:8px;min-height:16px">${this._esc(hint)}</div>
+        <div style="border-top:1px solid rgba(255,255,255,.06);padding-top:8px;max-height:240px;overflow:auto">
+          ${this._phaseRowsHtml(phases)}
+        </div>
+      </div>`;
   },
 };
 try { window.FtSync = FtSync; } catch {}
@@ -106,7 +171,7 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v3',
+  ASSET_RESET_VERSION: 'federation-sync-v4',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -1164,20 +1229,73 @@ const App = {
       if (chip) chip.remove();
       return;
     }
-    const label = window.FtSync ? FtSync.label(state) : String(state.hint || this.federationSyncHint || 'Syncing node data…').trim();
-    const pct = window.FtSync ? FtSync.pct(state) : null;
     if (!chip) {
       chip = document.createElement('div');
       chip.id = 'ft-sync-chip';
-      chip.style.cssText = 'position:fixed;right:14px;top:14px;z-index:12050;background:rgba(11,18,14,.92);border:1px solid rgba(126,207,163,.32);color:#b7d9c3;padding:8px 12px;border-radius:14px;font-size:12px;min-width:180px;backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(0,0,0,.35);pointer-events:none';
+      chip.style.cssText = 'position:fixed;right:14px;top:14px;z-index:12050;background:rgba(11,18,14,.94);border:1px solid rgba(126,207,163,.32);color:#b7d9c3;padding:10px 14px;border-radius:14px;font-size:12px;min-width:240px;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(0,0,0,.45);cursor:pointer;transition:transform .15s ease;user-select:none';
+      chip.title = 'Click for sync details';
+      chip.addEventListener('mouseenter', () => { chip.style.transform = 'scale(1.02)'; });
+      chip.addEventListener('mouseleave', () => { chip.style.transform = ''; });
+      chip.addEventListener('click', () => { App.openSyncOverlay(); });
       document.body.appendChild(chip);
     }
+    const label = window.FtSync ? FtSync.label(state) : String(state.hint || this.federationSyncHint || 'Syncing…').trim();
+    const pct = window.FtSync ? FtSync.pct(state) : null;
     const barPct = (pct != null) ? pct : 0;
     chip.innerHTML = `
-      <div style="font-weight:600;margin-bottom:6px">⏳ ${typeof UI !== 'undefined' && UI.escHtml ? UI.escHtml(label) : label}</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="font-size:14px">🐸</span>
+        <div style="flex:1;font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${typeof UI !== 'undefined' && UI.escHtml ? UI.escHtml(label) : label}</div>
+        <span style="font-variant-numeric:tabular-nums;color:#a8e6c1;font-weight:700">${pct ?? 0}%</span>
+      </div>
       <div style="height:4px;border-radius:999px;background:rgba(255,255,255,.1);overflow:hidden">
         <div style="height:100%;width:${barPct}%;background:linear-gradient(90deg,#4caf86,#7fd6a2);transition:width .35s ease"></div>
-      </div>`;
+      </div>
+      <div style="font-size:10px;color:#7ba88f;margin-top:6px;text-align:center;letter-spacing:.04em">CLICK FOR DETAILS</div>`;
+  },
+
+  openSyncOverlay() {
+    let overlay = document.getElementById('ft-sync-overlay');
+    if (overlay) {
+      overlay.classList.add('ft-sync-overlay-open');
+      this._refreshSyncOverlay();
+      return;
+    }
+    overlay = document.createElement('div');
+    overlay.id = 'ft-sync-overlay';
+    overlay.className = 'ft-sync-overlay-open';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:12080;background:rgba(3,8,6,.72);backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;padding:24px';
+    overlay.innerHTML = `<div id="ft-sync-overlay-card"></div>
+      <button id="ft-sync-overlay-close" aria-label="Dismiss" style="position:absolute;top:16px;right:16px;background:rgba(11,18,14,.85);border:1px solid rgba(255,255,255,.1);color:#dfead4;border-radius:999px;width:36px;height:36px;font-size:18px;cursor:pointer">✕</button>`;
+    overlay.addEventListener('click', (ev) => {
+      if (ev.target === overlay) App.closeSyncOverlay();
+    });
+    overlay.querySelector('#ft-sync-overlay-close').addEventListener('click', () => App.closeSyncOverlay());
+    document.body.appendChild(overlay);
+    this._refreshSyncOverlay();
+  },
+
+  closeSyncOverlay() {
+    const overlay = document.getElementById('ft-sync-overlay');
+    if (overlay) overlay.remove();
+  },
+
+  _refreshSyncOverlay() {
+    const overlay = document.getElementById('ft-sync-overlay');
+    if (!overlay) return;
+    const card = overlay.querySelector('#ft-sync-overlay-card');
+    if (!card || !window.FtSync) return;
+    card.innerHTML = FtSync.renderOverlayHtml(this.federationSyncState || window.__ftFederationSync || {});
+  },
+
+  _maybeAutoOpenSyncOverlay(state) {
+    if (!state?.in_progress) return;
+    try {
+      const key = 'ft_sync_overlay_seen';
+      if (sessionStorage.getItem(key) === '1') return;
+      sessionStorage.setItem(key, '1');
+      this.openSyncOverlay();
+    } catch {}
   },
 
   _onFederationSyncComplete(payload) {
@@ -1221,9 +1339,14 @@ const App = {
     if (payload.hint) this.federationSyncHint = String(payload.hint || '');
     this._setLoadingSyncHint(payload.in_progress ? (payload.hint || this.federationSyncHint) : '');
     this._renderGlobalSyncChip(payload);
+    this._refreshSyncOverlay();
+    this._maybeAutoOpenSyncOverlay(payload);
     this._emitFederationSyncEvent(payload);
     if (wasInProgress && !payload.in_progress && payload.done) {
       this._onFederationSyncComplete(payload);
+      setTimeout(() => {
+        if (!this.federationSyncState?.in_progress) this.closeSyncOverlay();
+      }, 2200);
     }
   },
 
@@ -1245,9 +1368,9 @@ const App = {
         if (data && data.done && !data.in_progress) return;
       } catch {}
       if ((Date.now() - started) >= maxWatchMs) return;
-      this._syncWatcherTimer = setTimeout(tick, 2200);
+      this._syncWatcherTimer = setTimeout(tick, 900);
     };
-    this._syncWatcherTimer = setTimeout(tick, 300);
+    this._syncWatcherTimer = setTimeout(tick, 150);
   },
 
   async waitForFederationSyncIfNeeded(maxWaitMs = 22000) {
@@ -1269,7 +1392,7 @@ const App = {
         if (inProgress) {
           sawInProgress = true;
           this._setLoadingSyncHint(hint || 'Syncing channels and DMs from your home node…');
-          await new Promise((r) => setTimeout(r, 900));
+          await new Promise((r) => setTimeout(r, 600));
           continue;
         }
         this._setLoadingSyncHint('');

@@ -442,30 +442,82 @@ def _sync_state_set(user_id: int, patch: dict) -> None:
         _federation_sync_state[uid] = cur
 
 
+_SYNC_PHASES = (
+    ("fetch", "Fetching from home node"),
+    ("channels", "Channels"),
+    ("directory", "Channel directory"),
+    ("dms", "Direct messages"),
+    ("social_graph", "Friends & follows"),
+    ("profile", "Profile & settings"),
+    ("social_posts", "FrogSocial posts"),
+    ("push", "Notifications"),
+    ("done", "Done"),
+)
+
+
 def _sync_state_get(user_id: int) -> dict:
     uid = int(user_id or 0)
     if uid <= 0:
-        return {"in_progress": False, "done": False, "progress_pct": 0}
+        return {"in_progress": False, "done": False, "progress_pct": 0, "phases": []}
     with _sync_state_lock:
         cur = dict(_federation_sync_state.get(uid) or {})
     if not cur:
-        return {"in_progress": False, "done": False, "progress_pct": 0}
+        return {"in_progress": False, "done": False, "progress_pct": 0, "phases": []}
     if "progress_pct" not in cur:
         cur["progress_pct"] = 100 if cur.get("done") else (50 if cur.get("in_progress") else 0)
+    counters = dict(cur.get("counters") or {})
+    totals = dict(cur.get("totals") or {})
+    current_phase = str(cur.get("phase") or "")
+    phases_out = []
+    seen_current = False
+    for key, label in _SYNC_PHASES:
+        if key == current_phase:
+            status = "active"
+            seen_current = True
+        elif cur.get("done"):
+            status = "done"
+        elif seen_current:
+            status = "pending"
+        else:
+            status = "done"
+        done_n = int(counters.get(key) or 0)
+        total_n = int(totals.get(key) or 0)
+        phases_out.append({
+            "key": key,
+            "label": label,
+            "status": status,
+            "done": done_n,
+            "total": total_n,
+        })
+    cur["phases"] = phases_out
     return cur
 
 
-def _sync_progress(user_id: int, pct: int, hint: str, phase: str = "") -> None:
+def _sync_progress(user_id: int, pct: int, hint: str, phase: str = "",
+                   counters: dict | None = None, totals: dict | None = None) -> None:
     uid = int(user_id or 0)
     if uid <= 0:
         return
-    _sync_state_set(uid, {
+    patch = {
         "in_progress": True,
         "done": False,
         "progress_pct": max(0, min(100, int(pct))),
         "phase": str(phase or "")[:64],
         "hint": str(hint or "")[:220],
-    })
+    }
+    if counters:
+        with _sync_state_lock:
+            cur = dict(_federation_sync_state.get(uid) or {})
+            merged = dict(cur.get("counters") or {})
+            merged.update({k: int(v or 0) for k, v in (counters or {}).items()})
+            patch["counters"] = merged
+    if totals:
+        with _sync_state_lock:
+            cur = dict(_federation_sync_state.get(uid) or {})
+            merged = dict(cur.get("totals") or {})
+            merged.update({k: int(v or 0) for k, v in (totals or {}).items()})
+            patch["totals"] = merged
+    _sync_state_set(uid, patch)
 
 
 def _build_sync_export_for_user(user_id: int) -> dict:
@@ -712,25 +764,35 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     me = db.get_user_by_id(uid) or {}
     my_gid = str(me.get("global_user_id") or "").strip()
 
+    n_rooms = len(rooms[:_SYNC_EXPORT_ROOM_LIMIT])
+    n_public = len(public_rooms[:_SYNC_EXPORT_PUBLIC_ROOM_LIMIT])
+    n_dms = len(dm_peers[:_SYNC_EXPORT_DM_LIMIT])
+    n_follow = len(following[:_SYNC_EXPORT_DM_LIMIT])
+    n_friends = len(friends[:_SYNC_EXPORT_DM_LIMIT])
+    n_blocked = len(blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT])
+    n_social = len(social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT])
+    n_push = len(push_tokens[:24])
     work_units = (
-        len(rooms[:_SYNC_EXPORT_ROOM_LIMIT])
-        + len(public_rooms[:_SYNC_EXPORT_PUBLIC_ROOM_LIMIT])
-        + len(dm_peers[:_SYNC_EXPORT_DM_LIMIT])
-        + len(following[:_SYNC_EXPORT_DM_LIMIT])
-        + len(friends[:_SYNC_EXPORT_DM_LIMIT])
-        + len(blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT])
-        + len(social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT])
-        + 2  # profile + push tokens
+        n_rooms + n_public + n_dms + n_follow + n_friends + n_blocked + n_social + n_push + 1
     )
     done_units = 0
 
-    def _sync_step(phase: str, hint: str) -> None:
+    _sync_progress(uid, 12, "Importing your channels…", "channels", totals={
+        "channels": n_rooms,
+        "directory": n_public,
+        "dms": n_dms,
+        "social_graph": n_follow + n_friends + n_blocked,
+        "profile": 1,
+        "social_posts": n_social,
+        "push": n_push,
+    })
+
+    def _sync_step(phase: str, hint: str, counter_key: str | None = None, counter_value: int | None = None) -> None:
         nonlocal done_units
         done_units += 1
         pct = 12 + int(83 * done_units / max(work_units, 1))
-        _sync_progress(uid, pct, hint, phase)
-
-    _sync_progress(uid, 12, "Importing your channels…", "channels")
+        counters = {counter_key: counter_value} if counter_key else None
+        _sync_progress(uid, pct, hint, phase, counters=counters)
 
     for raw in rooms[:_SYNC_EXPORT_ROOM_LIMIT]:
         if isinstance(raw, dict):
@@ -767,7 +829,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             rooms_joined += 1
         except Exception:
             continue
-        _sync_step("channels", f"Syncing channels… ({rooms_joined} joined)")
+        _sync_step("channels", f"Syncing channels… ({rooms_joined}/{n_rooms})", "channels", rooms_joined)
 
     _sync_progress(uid, max(28, 12 + int(83 * done_units / max(work_units, 1))),
                    "Syncing channel directory…", "directory")
@@ -801,7 +863,11 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             db.join_room(uid, int(existing["id"]))
         except Exception:
             continue
-        _sync_step("directory", "Syncing public channel directory…")
+        with _sync_state_lock:
+            cur = dict(_federation_sync_state.get(uid) or {})
+            ctr = dict(cur.get("counters") or {})
+            ctr["directory"] = int(ctr.get("directory") or 0) + 1
+        _sync_step("directory", f"Syncing channel directory… ({ctr['directory']}/{n_public})", "directory", ctr["directory"])
 
     _sync_progress(uid, max(42, 12 + int(83 * done_units / max(work_units, 1))),
                    "Syncing direct messages…", "dms")
@@ -829,7 +895,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             dm_linked += 1
         except Exception:
             continue
-        _sync_step("dms", f"Syncing DMs… ({dm_linked} linked)")
+        _sync_step("dms", f"Syncing DMs… ({dm_linked}/{n_dms})", "dms", dm_linked)
 
     _sync_progress(uid, max(55, 12 + int(83 * done_units / max(work_units, 1))),
                    "Syncing follows and friends…", "social_graph")
@@ -857,7 +923,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 following_linked += 1
         except Exception:
             continue
-        _sync_step("social_graph", "Syncing follows…")
+        _sync_step("social_graph", f"Syncing follows… ({following_linked}/{n_follow})", "social_graph", following_linked + friends_linked + blocked_linked)
 
     for item in friends[:_SYNC_EXPORT_DM_LIMIT]:
         if not isinstance(item, dict):
@@ -885,7 +951,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             db.get_or_create_dm(uid, peer_id)
         except Exception:
             continue
-        _sync_step("social_graph", f"Syncing friends… ({friends_linked} linked)")
+        _sync_step("social_graph", f"Syncing friends… ({friends_linked}/{n_friends})", "social_graph", following_linked + friends_linked + blocked_linked)
 
     for item in blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT]:
         if not isinstance(item, dict):
@@ -910,7 +976,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 blocked_linked += 1
         except Exception:
             continue
-        _sync_step("social_graph", "Syncing block list…")
+        _sync_step("social_graph", "Syncing block list…", "social_graph", following_linked + friends_linked + blocked_linked)
 
     if isinstance(self_profile, dict):
         try:
@@ -1023,7 +1089,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 con.commit()
         except Exception:
             pass
-    _sync_step("profile", "Syncing profile settings…")
+    _sync_step("profile", "Syncing profile & settings…", "profile", 1)
 
     _sync_progress(uid, max(78, 12 + int(83 * done_units / max(work_units, 1))),
                    "Syncing FrogSocial posts…", "social_posts")
@@ -1042,7 +1108,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             push_tokens_linked += 1
         except Exception:
             continue
-    _sync_step("push", "Syncing push tokens…")
+    _sync_step("push", f"Syncing notifications… ({push_tokens_linked}/{n_push})", "push", push_tokens_linked)
 
     for row in social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT]:
         if not isinstance(row, dict):
@@ -1076,10 +1142,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 social_posts_imported += 1
         except Exception:
             continue
-        if social_posts_imported and (social_posts_imported % 5 == 0):
-            _sync_step("social_posts", f"Syncing FrogSocial… ({social_posts_imported} posts)")
+        if social_posts_imported and (social_posts_imported % 3 == 0):
+            _sync_step("social_posts", f"Syncing FrogSocial… ({social_posts_imported}/{n_social})", "social_posts", social_posts_imported)
 
-    _sync_progress(uid, 100, "Sync complete", "done")
+    _sync_progress(uid, 100, "Sync complete", "done", counters={"social_posts": social_posts_imported})
 
     return {
         "rooms_joined": rooms_joined,
