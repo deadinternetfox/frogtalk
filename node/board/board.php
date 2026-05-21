@@ -2317,6 +2317,7 @@ if ($singleThread) {
         
         .chat-body { display: none; background: rgba(5,10,5,0.97); border: 1px solid rgba(0,255,65,0.2); border-top: none; max-height: 0; overflow: hidden; transition: max-height 0.3s ease; }
         .chat-body.open { display: block; max-height: 400px; }
+        #chatBody.open { max-height: 520px; }
         
         .chat-messages { height: 280px; overflow-y: auto; padding: 10px; scroll-behavior: smooth; }
         .chat-messages::-webkit-scrollbar { width: 4px; }
@@ -6199,8 +6200,14 @@ if ($singleThread) {
         frogMiniOpen = !frogMiniOpen;
         const body = document.getElementById('chatBody');
         const toggle = document.getElementById('chatToggleBtn');
-        if (body) body.style.display = frogMiniOpen ? 'block' : 'none';
-        if (toggle) toggle.textContent = frogMiniOpen ? '▼' : '▲';
+        if (body) {
+            body.style.display = '';
+            body.classList.toggle('open', frogMiniOpen);
+        }
+        if (toggle) {
+            toggle.textContent = frogMiniOpen ? '▼' : '▲';
+            toggle.classList.toggle('open', frogMiniOpen);
+        }
         if (frogMiniOpen) {
             _frogMiniApplyState();
             if (!frogMiniSyncTimer) {
@@ -6248,7 +6255,10 @@ if ($singleThread) {
     (function initFrogMini() {
         const body = document.getElementById('chatBody');
         const frogOpen = document.querySelector('.frog-mini-headline .frog-mini-emoji');
-        if (body) body.style.display = 'none';
+        if (body) {
+            body.style.display = '';
+            body.classList.remove('open');
+        }
         if (frogOpen && frogMiniIsNativeClient()) {
             frogOpen.classList.add('disabled');
             frogOpen.setAttribute('aria-disabled', 'true');
