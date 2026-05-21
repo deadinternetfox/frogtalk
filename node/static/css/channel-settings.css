@@ -1,0 +1,471 @@
+/* Channel settings modal — invites, vanity, and related panels */
+
+#modal-channel-settings .modal--channel-settings {
+  max-width: 480px;
+}
+
+#modal-channel-settings .ch-settings-panel {
+  display: none;
+}
+
+#modal-channel-settings .ch-settings-panel.is-active {
+  display: block;
+}
+
+.ch-is-hidden {
+  display: none !important;
+}
+
+.ch-tab-intro {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 16px;
+}
+
+.ch-field-hint {
+  font-size: 11px;
+  color: #666;
+  margin-top: 4px;
+}
+
+.ch-field-hint--spaced {
+  margin-top: 16px;
+}
+
+.ch-field-label--sm {
+  font-size: 11px;
+  color: #666;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.ch-label-spaced {
+  margin-top: 16px;
+}
+
+.ch-select--compact {
+  color: #e0e0e0;
+  background: #0d0d0d;
+  margin: 0;
+}
+
+.ch-check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.ch-check-input {
+  width: 18px;
+  height: 18px;
+  accent-color: #4caf50;
+  cursor: pointer;
+}
+
+.ch-check-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.ch-check-desc {
+  font-size: 12px;
+  color: #888;
+}
+
+/* Private / policy notices */
+.ch-notice--private {
+  display: none;
+  margin-bottom: 16px;
+  background: rgba(76, 175, 80, 0.06);
+  border-color: rgba(76, 175, 80, 0.25);
+}
+
+.ch-notice--private.is-visible {
+  display: block;
+}
+
+.ch-notice__body {
+  font-size: 12px;
+  color: #9bd0ad;
+  line-height: 1.5;
+}
+
+.ch-notice__body--relaxed {
+  line-height: 1.55;
+}
+
+.ch-policy-note {
+  display: none;
+  font-size: 12px;
+  color: #ffb36b;
+  background: #2a1e12;
+  border: 1px solid #5b3f20;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 12px;
+}
+
+.ch-policy-note.is-visible {
+  display: block;
+}
+
+.ch-modal-card--spaced {
+  margin-bottom: 16px;
+}
+
+.ch-modal-card--private-intro {
+  margin-bottom: 14px;
+  background: rgba(76, 175, 80, 0.06);
+  border-color: rgba(76, 175, 80, 0.25);
+}
+
+/* Invites tab */
+.ch-invite-no-permission {
+  display: none;
+  font-size: 13px;
+  color: #9bd0ad;
+  background: rgba(76, 175, 80, 0.06);
+  border: 1px solid rgba(76, 175, 80, 0.25);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.ch-invite-no-permission.is-visible {
+  display: block;
+}
+
+.ch-invite-intro {
+  font-size: 13px;
+  color: #888;
+  margin-bottom: 12px;
+}
+
+.ch-invite-private-block {
+  display: none;
+}
+
+.ch-invite-private-block.is-visible {
+  display: block;
+}
+
+.ch-invites-section-label {
+  display: none;
+  font-size: 11px;
+  color: #7a9c8d;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
+}
+
+.ch-invites-section-label.is-visible {
+  display: block;
+}
+
+.ch-invite-create-row {
+  display: flex;
+  gap: 8px;
+  align-items: end;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.ch-invite-create-row.ch-is-hidden {
+  display: none !important;
+}
+
+.ch-invite-field {
+  flex: 1;
+  min-width: 120px;
+}
+
+.ch-invite-create-btn {
+  margin: 0;
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
+.ch-invites-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.ch-no-invites {
+  color: #666;
+  text-align: center;
+  padding: 20px;
+  line-height: 1.45;
+}
+
+.ch-no-invites.ch-is-hidden {
+  display: none !important;
+}
+
+.ch-invite-forbidden-msg {
+  color: #9bd0ad;
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
+  line-height: 1.5;
+}
+
+.ch-inline-code {
+  background: #0a1410;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #9bd0ad;
+  font-size: 11.5px;
+}
+
+/* Vanity URL card (public channels, owner only) */
+.ch-vanity-card {
+  display: none;
+  background: linear-gradient(180deg, #13211a 0%, #101a14 100%);
+  border: 1px solid #2e4a3a;
+  border-radius: 12px;
+  padding: 14px 14px 12px;
+  margin-bottom: 16px;
+}
+
+.ch-vanity-card.is-visible {
+  display: block;
+}
+
+.ch-vanity-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #bff0d0;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.ch-vanity-card__badge {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: #7fa897;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ch-vanity-card__desc {
+  font-size: 12.5px;
+  color: #9bd0ad;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.ch-vanity-card__code {
+  background: #0a1410;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #bff0d0;
+  font-size: 11.5px;
+}
+
+.ch-vanity-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ch-vanity-input-wrap {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  background: #0a1410;
+  border: 1px solid #2e4a3a;
+  border-radius: 10px;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.ch-vanity-input-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  color: #7fa897;
+  font-size: 12.5px;
+  background: rgba(127, 210, 167, 0.04);
+  border-right: 1px solid #2e4a3a;
+  white-space: nowrap;
+}
+
+.ch-vanity-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: #dff5e8;
+  padding: 9px 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.ch-vanity-save-btn {
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid #6cd870;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #5cc163 0%, #4caf50 55%, #3e8c43 100%);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  white-space: nowrap;
+}
+
+.ch-vanity-save-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ch-vanity-clear-btn {
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid #3a3a3a;
+  color: #bcd6c8;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  background: #1a1a1a;
+}
+
+.ch-vanity-status {
+  font-size: 12px;
+  margin-top: 8px;
+  min-height: 16px;
+  color: #7fa897;
+  line-height: 1.4;
+}
+
+.ch-vanity-status--available {
+  color: #7fd2a7;
+  font-weight: 600;
+}
+
+.ch-vanity-status--invalid,
+.ch-vanity-status--taken,
+.ch-vanity-status--error {
+  color: #f85149;
+}
+
+.ch-vanity-status--warn {
+  color: #f8a058;
+}
+
+.ch-vanity-current {
+  display: none;
+  font-size: 12px;
+  margin-top: 6px;
+  color: #9bd0ad;
+}
+
+.ch-vanity-current.is-visible {
+  display: block;
+}
+
+.ch-vanity-current-link {
+  color: #bff0d0;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.ch-vanity-copy-btn {
+  background: transparent;
+  border: 0;
+  color: #7fd2a7;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* Dynamic invite list rows (built in rooms.js) */
+.ch-invite-item {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.ch-invite-item__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ch-invite-item__meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.ch-invite-item__url {
+  font-size: 13px;
+  font-weight: 700;
+  color: #7fd2a7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ch-invite-item__sub {
+  font-size: 11px;
+  color: #7a9c8d;
+  margin-top: 2px;
+}
+
+.ch-invite-item__copy {
+  font-size: 16px;
+}
+
+.ch-invite-item__revoke {
+  font-size: 16px;
+  color: #f85149;
+}
+
+.ch-invite-redemp-toggle {
+  margin-top: 8px;
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 10px;
+  background: #1a2a22;
+  color: #9bd0ad;
+  border: 1px solid #2e4a3a;
+}
+
+.ch-invite-redemp-panel {
+  display: none;
+  margin-top: 8px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.ch-invite-redemp-panel.is-expanded {
+  display: block;
+}
+
+.ch-invite-redemp-line {
+  font-size: 11px;
+  color: #9bd0ad;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(127, 210, 167, 0.12);
+}
+
+.ch-invite-redemp-empty {
+  font-size: 11px;
+  color: #7a9c8d;
+  padding: 4px 0;
+}
+
+/* Mods tab intro (same modal) */
+.ch-mods-intro {
+  font-size: 13px;
+  color: #9bd0ad;
+  margin-bottom: 12px;
+  line-height: 1.45;
+}

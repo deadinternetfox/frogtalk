@@ -67,6 +67,7 @@
 <link rel="icon" href="/static/icons/icon-512.png" type="image/png" sizes="512x512">
 <link rel="apple-touch-icon" sizes="192x192" href="/static/icons/icon-192.png">
 <link rel="manifest" href="/manifest.json">
+<link rel="stylesheet" href="/static/css/channel-settings.css">
 <style>
 /* ─── Reset & Base ──────────────────────────────────────────── */
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -8945,7 +8946,7 @@ window.ConnErr = (function(){
 
 <!-- Channel settings modal -->
 <div class="modal-overlay hidden" id="modal-channel-settings">
-  <div class="modal" style="max-width:480px">
+  <div class="modal modal--channel-settings">
     <div class="modal-title">
       <span id="ch-settings-title-icon">💬</span>
       Channel Settings
@@ -8965,7 +8966,7 @@ window.ConnErr = (function(){
     </div>
     
     <!-- General tab -->
-    <div id="ch-panel-general">
+    <div id="ch-panel-general" class="ch-settings-panel is-active">
       <!-- Encryption status badge (filled in by openChannelSettings) -->
       <div id="ch-enc-badge" style="display:none;margin-bottom:14px;padding:10px 12px;border-radius:8px;font-size:13px;line-height:1.4"></div>
       <!-- Manual key rotation (private rooms only) -->
@@ -9030,15 +9031,13 @@ window.ConnErr = (function(){
     </div>
     
     <!-- Permissions tab -->
-    <div id="ch-panel-perms" style="display:none">
-      <div style="font-size:13px;color:#888;margin-bottom:16px">
-        Control who can access and manage this channel.
-      </div>
+    <div id="ch-panel-perms" class="ch-settings-panel">
+      <p class="ch-tab-intro">Control who can access and manage this channel.</p>
       
-      <div id="ch-invite-only-private-note" class="modal-card" style="display:none;margin-bottom:16px;background:rgba(76,175,80,.06);border-color:rgba(76,175,80,.25)">
-        <div style="font-size:12px;color:#9bd0ad;line-height:1.5">
+      <div id="ch-invite-only-private-note" class="modal-card ch-notice--private">
+        <p class="ch-notice__body">
           🔒 Private channels are <strong>invite-only</strong> — new members need a direct invite link from the owner or moderators (per policy below). The shared encryption secret is for <strong>decrypting messages after</strong> they have joined, not for gaining access.
-        </div>
+        </p>
       </div>
       
       <label class="modal-label">Who Can Create Invites</label>
@@ -9047,40 +9046,36 @@ window.ConnErr = (function(){
         <option value="mods">Moderators & Owner</option>
         <option value="owner">Owner Only</option>
       </select>
-      <div id="ch-who-can-invite-hint" style="font-size:11px;color:#666;margin-top:4px">Controls who can generate invite links for this channel</div>
+      <p id="ch-who-can-invite-hint" class="ch-field-hint">Controls who can generate invite links for this channel</p>
 
-      <label class="modal-label" style="margin-top:16px">Message Forwarding</label>
+      <label class="modal-label ch-label-spaced">Message Forwarding</label>
       <div class="modal-card">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-          <input type="checkbox" id="ch-forwarding-disabled" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer">
+        <label class="ch-check-row">
+          <input type="checkbox" id="ch-forwarding-disabled" class="ch-check-input">
           <div>
-            <div style="font-weight:600;font-size:14px">Disable Forwarding</div>
-            <div style="font-size:12px;color:#888">When enabled, members cannot forward messages from this channel to other rooms or DMs</div>
+            <div class="ch-check-title">Disable Forwarding</div>
+            <p class="ch-check-desc">When enabled, members cannot forward messages from this channel to other rooms or DMs</p>
           </div>
         </label>
       </div>
     </div>
     
     <!-- Directory tab -->
-    <div id="ch-panel-directory" style="display:none">
-      <div style="font-size:13px;color:#888;margin-bottom:16px">
-        List your channel in the public directory so others can discover and join it.
-      </div>
-      <div id="ch-dir-policy-note" style="display:none;font-size:12px;color:#ffb36b;background:#2a1e12;border:1px solid #5b3f20;border-radius:8px;padding:8px 10px;margin-bottom:12px">
-        Private channels cannot be listed in directory. Change the channel type to public first.
-      </div>
-      <div class="modal-card" style="margin-bottom:16px">
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
-          <input type="checkbox" id="ch-dir-listed" style="width:18px;height:18px;accent-color:#4caf50;cursor:pointer">
+    <div id="ch-panel-directory" class="ch-settings-panel">
+      <p class="ch-tab-intro">List your channel in the public directory so others can discover and join it.</p>
+      <p id="ch-dir-policy-note" class="ch-policy-note">Private channels cannot be listed in directory. Change the channel type to public first.</p>
+      <div class="modal-card ch-modal-card--spaced">
+        <label class="ch-check-row">
+          <input type="checkbox" id="ch-dir-listed" class="ch-check-input">
           <div>
-            <div style="font-weight:600;font-size:14px">📢 List in Directory</div>
-            <div style="font-size:12px;color:#888">When enabled, your channel appears in the public channel directory</div>
+            <div class="ch-check-title">📢 List in Directory</div>
+            <p class="ch-check-desc">When enabled, your channel appears in the public channel directory</p>
           </div>
         </label>
       </div>
       
       <label class="modal-label">Category</label>
-      <select class="modal-input" id="ch-dir-category" style="color:#e0e0e0;background:#0d0d0d">
+      <select class="modal-input ch-select--compact" id="ch-dir-category">
         <option value="">None</option>
         <option value="gaming">🎮 Gaming</option>
         <option value="music">🎵 Music</option>
@@ -9104,69 +9099,56 @@ window.ConnErr = (function(){
     </div>
 
     <!-- Invites tab -->
-    <div id="ch-panel-invites" style="display:none">
-      <div id="ch-invite-no-permission" style="display:none;font-size:13px;color:#9bd0ad;background:rgba(76,175,80,.06);border:1px solid rgba(76,175,80,.25);border-radius:10px;padding:14px 16px;margin-bottom:12px;line-height:1.5">
-        Only the channel owner, moderators, or admins can create invite links for this channel. Ask them for a direct invite link to join.
-      </div>
+    <div id="ch-panel-invites" class="ch-settings-panel">
+      <p id="ch-invite-no-permission" class="ch-invite-no-permission">Only the channel owner, moderators, or admins can create invite links for this channel. Ask them for a direct invite link to join.</p>
 
       <div id="ch-invite-public-block">
-      <!-- Owner-only: Vanity URL. rooms.js toggles display based on
-           whether the current user owns this channel (public channels only). -->
-      <div id="ch-vanity-card" style="display:none;background:linear-gradient(180deg,#13211a 0%,#101a14 100%);border:1px solid #2e4a3a;border-radius:12px;padding:14px 14px 12px;margin-bottom:16px">
-        <div style="display:flex;align-items:center;gap:8px;font-weight:700;color:#bff0d0;font-size:13px;margin-bottom:4px">
+      <div id="ch-vanity-card" class="ch-vanity-card">
+        <div class="ch-vanity-card__head">
           <span aria-hidden="true">🔗</span>
           <span>Custom URL</span>
-          <span style="margin-left:auto;font-size:10.5px;color:#7fa897;font-weight:600;letter-spacing:.04em;text-transform:uppercase">Owner</span>
+          <span class="ch-vanity-card__badge">Owner</span>
         </div>
-        <div style="font-size:12.5px;color:#9bd0ad;line-height:1.5;margin-bottom:10px">
+        <p class="ch-vanity-card__desc">
           Claim a memorable short link for your channel. Anyone visiting
-          <code style="background:#0a1410;padding:1px 6px;border-radius:4px;color:#bff0d0;font-size:11.5px">frogtalk.xyz/i/&lt;name&gt;</code>
+          <code class="ch-vanity-card__code">frogtalk.xyz/i/&lt;name&gt;</code>
           will land on a join page.
-        </div>
-        <div id="ch-vanity-row" style="display:flex;gap:8px;align-items:stretch">
-          <div style="flex:1;display:flex;align-items:stretch;background:#0a1410;border:1px solid #2e4a3a;border-radius:10px;overflow:hidden;min-width:0">
-            <span style="display:flex;align-items:center;padding:0 10px;color:#7fa897;font-size:12.5px;background:rgba(127,210,167,.04);border-right:1px solid #2e4a3a;white-space:nowrap">frogtalk.xyz/i/</span>
-            <input id="ch-vanity-input" type="text" maxlength="32" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-                   placeholder="frogs"
-                   style="flex:1;min-width:0;background:transparent;border:0;outline:0;color:#dff5e8;padding:9px 10px;font-size:14px;font-family:inherit">
+        </p>
+        <div id="ch-vanity-row" class="ch-vanity-row">
+          <div class="ch-vanity-input-wrap">
+            <span class="ch-vanity-input-prefix">frogtalk.xyz/i/</span>
+            <input id="ch-vanity-input" class="ch-vanity-input" type="text" maxlength="32" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="frogs">
           </div>
-          <button id="ch-vanity-save-btn" type="button" onclick="Rooms.saveVanity()"
-                  style="padding:0 16px;border-radius:10px;border:1px solid #6cd870;color:#fff;font-weight:700;font-size:13px;cursor:pointer;background:linear-gradient(180deg,#5cc163 0%,#4caf50 55%,#3e8c43 100%);box-shadow:0 4px 12px rgba(76,175,80,.28),inset 0 1px 0 rgba(255,255,255,.18);white-space:nowrap"
-                  disabled>Save</button>
-          <button id="ch-vanity-clear-btn" type="button" onclick="Rooms.clearVanity()" title="Remove vanity URL"
-                  style="padding:0 12px;border-radius:10px;border:1px solid #3a3a3a;color:#bcd6c8;font-weight:600;font-size:13px;cursor:pointer;background:#1a1a1a;display:none">Clear</button>
+          <button id="ch-vanity-save-btn" type="button" class="ch-vanity-save-btn" onclick="Rooms.saveVanity()" disabled>Save</button>
+          <button id="ch-vanity-clear-btn" type="button" class="ch-vanity-clear-btn ch-is-hidden" onclick="Rooms.clearVanity()" title="Remove vanity URL">Clear</button>
         </div>
-        <div id="ch-vanity-status" style="font-size:12px;margin-top:8px;min-height:16px;color:#7fa897;line-height:1.4">
-          Letters, digits, hyphen and underscore. 2–32 characters.
-        </div>
-        <div id="ch-vanity-current" style="display:none;font-size:12px;margin-top:6px;color:#9bd0ad">
-          Currently live at <a id="ch-vanity-current-link" href="#" target="_blank" rel="noopener noreferrer" style="color:#bff0d0;font-weight:700;text-decoration:none">—</a>
-          · <button type="button" onclick="Rooms.copyVanityLink()" style="background:transparent;border:0;color:#7fd2a7;cursor:pointer;font-size:12px;padding:0;text-decoration:underline">Copy</button>
+        <div id="ch-vanity-status" class="ch-vanity-status">Letters, digits, hyphen and underscore. 2–32 characters.</div>
+        <div id="ch-vanity-current" class="ch-vanity-current">
+          Currently live at <a id="ch-vanity-current-link" class="ch-vanity-current-link" href="#" target="_blank" rel="noopener noreferrer">—</a>
+          · <button type="button" class="ch-vanity-copy-btn" onclick="Rooms.copyVanityLink()">Copy</button>
         </div>
       </div>
 
-      <div id="ch-invite-public-intro" style="font-size:13px;color:#888;margin-bottom:12px">
-        Create invite links to share this channel. Links can have usage limits and expiration.
-      </div>
+      <p id="ch-invite-public-intro" class="ch-invite-intro">Create invite links to share this channel. Links can have usage limits and expiration.</p>
       </div><!-- /ch-invite-public-block -->
 
-      <div id="ch-invite-private-block" style="display:none">
-        <div class="modal-card" style="margin-bottom:14px;background:rgba(76,175,80,.06);border-color:rgba(76,175,80,.25)">
-          <div style="font-size:12px;color:#9bd0ad;line-height:1.55">
+      <div id="ch-invite-private-block" class="ch-invite-private-block">
+        <div class="modal-card ch-modal-card--private-intro">
+          <p class="ch-notice__body ch-notice__body--relaxed">
             <strong>Private channel invites</strong> — no custom vanity URLs. Share a direct invite link only with people you trust. After they join, send them the room encryption secret separately so they can read messages.
-          </div>
+          </p>
         </div>
-        <div id="ch-invite-private-intro" style="font-size:13px;color:#888;margin-bottom:12px">
-          Create bounded invite links (use limits required). Share only <code style="background:#0a1410;padding:1px 5px;border-radius:4px;color:#9bd0ad;font-size:11.5px">frogtalk.xyz/i/&lt;code&gt;</code> URLs — not <code style="background:#0a1410;padding:1px 5px;border-radius:4px;color:#9bd0ad;font-size:11.5px">/c/channel</code> links.
-        </div>
+        <p id="ch-invite-private-intro" class="ch-invite-intro">
+          Create bounded invite links (use limits required). Share only <code class="ch-inline-code">frogtalk.xyz/i/&lt;code&gt;</code> URLs — not <code class="ch-inline-code">/c/channel</code> links.
+        </p>
       </div>
 
-      <div id="ch-invites-section-label" style="display:none;font-size:11px;color:#7a9c8d;font-weight:600;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Active invite links</div>
+      <p id="ch-invites-section-label" class="ch-invites-section-label">Active invite links</p>
 
-      <div id="ch-invite-create-row" style="display:flex;gap:8px;align-items:end;margin-bottom:16px;flex-wrap:wrap">
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:11px;color:#666;display:block;margin-bottom:4px">Max Uses</label>
-          <select class="modal-input" id="ch-invite-max-uses" style="color:#e0e0e0;background:#0d0d0d;margin:0">
+      <div id="ch-invite-create-row" class="ch-invite-create-row">
+        <div class="ch-invite-field">
+          <label class="ch-field-label--sm" for="ch-invite-max-uses">Max Uses</label>
+          <select class="modal-input ch-select--compact" id="ch-invite-max-uses">
             <option value="0" id="ch-invite-opt-unlimited">Unlimited</option>
             <option value="1">1 use</option>
             <option value="5">5 uses</option>
@@ -9176,9 +9158,9 @@ window.ConnErr = (function(){
             <option value="100">100 uses</option>
           </select>
         </div>
-        <div style="flex:1;min-width:120px">
-          <label style="font-size:11px;color:#666;display:block;margin-bottom:4px">Expires After</label>
-          <select class="modal-input" id="ch-invite-expires" style="color:#e0e0e0;background:#0d0d0d;margin:0">
+        <div class="ch-invite-field">
+          <label class="ch-field-label--sm" for="ch-invite-expires">Expires After</label>
+          <select class="modal-input ch-select--compact" id="ch-invite-expires">
             <option value="">Never</option>
             <option value="1">1 hour</option>
             <option value="6">6 hours</option>
@@ -9187,17 +9169,15 @@ window.ConnErr = (function(){
             <option value="720">30 days</option>
           </select>
         </div>
-        <button class="modal-btn primary" onclick="Rooms.createInvite()" style="margin:0;padding:8px 16px;white-space:nowrap">Create Link</button>
+        <button type="button" class="modal-btn primary ch-invite-create-btn" onclick="Rooms.createInvite()">Create Link</button>
       </div>
-      <div id="ch-invites-list" style="max-height:320px;overflow-y:auto"></div>
-      <div id="ch-no-invites" style="color:#666;text-align:center;padding:20px;line-height:1.45">No invite links yet. Create one above to share this channel.</div>
+      <div id="ch-invites-list" class="ch-invites-list"></div>
+      <p id="ch-no-invites" class="ch-no-invites">No invite links yet. Create one above to share this channel.</p>
     </div>
     
     <!-- Moderators tab -->
-    <div id="ch-panel-mods" style="display:none">
-      <div style="font-size:13px;color:#9bd0ad;margin-bottom:12px;line-height:1.45">
-        Moderators can delete messages and ban users from this channel.
-      </div>
+    <div id="ch-panel-mods" class="ch-settings-panel">
+      <p class="ch-mods-intro">Moderators can delete messages and ban users from this channel.</p>
       <div class="mod-add-row">
         <input class="modal-input" id="ch-add-mod-input" placeholder="Enter username" autocomplete="off"
                onkeydown="if(event.key==='Enter'){event.preventDefault();addModerator();}">
@@ -9228,7 +9208,7 @@ window.ConnErr = (function(){
     </div>
     
     <!-- Bans tab -->
-    <div id="ch-panel-bans" style="display:none">
+    <div id="ch-panel-bans" class="ch-settings-panel">
       <div style="font-size:13px;color:#888;margin-bottom:12px">
         Banned users cannot view or send messages in this channel.
       </div>
@@ -9237,7 +9217,7 @@ window.ConnErr = (function(){
     </div>
     
     <!-- Theme tab -->
-    <div id="ch-panel-theme" style="display:none">
+    <div id="ch-panel-theme" class="ch-settings-panel">
       <div style="font-size:13px;color:#888;margin-bottom:12px">
         Set a custom theme for this channel. Users will see this theme when viewing this channel.
       </div>
@@ -9321,7 +9301,7 @@ window.ConnErr = (function(){
     </div>
 
     <!-- Bots tab -->
-    <div id="ch-panel-bots" style="display:none">
+    <div id="ch-panel-bots" class="ch-settings-panel">
       <div style="font-size:13px;color:#888;margin-bottom:12px">
         Add bots to this channel. Bots can post messages, mirror content, or automate tasks.
       </div>
@@ -9334,7 +9314,7 @@ window.ConnErr = (function(){
     </div>
 
     <!-- Bridges tab -->
-    <div id="ch-panel-bridges" style="display:none">
+    <div id="ch-panel-bridges" class="ch-settings-panel">
       <!-- Private rooms cannot have bridges; explain why and hide the create UI. -->
       <div id="ch-bridges-private-warning" style="display:none;background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.3);border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;line-height:1.5;color:#ffd54f">
         🔒 <strong>Bridges aren't available for private (E2EE) rooms.</strong><br>

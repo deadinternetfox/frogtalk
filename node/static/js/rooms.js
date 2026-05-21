@@ -1702,7 +1702,7 @@ const Rooms = (() => {
     }
 
     const note = document.getElementById('ch-dir-policy-note');
-    if (note) note.style.display = isPrivate ? '' : 'none';
+    if (note) note.classList.toggle('is-visible', isPrivate);
 
     const dirListedEl = document.getElementById('ch-dir-listed');
     const dirCatEl = document.getElementById('ch-dir-category');
@@ -1716,7 +1716,7 @@ const Rooms = (() => {
     if (dirDescEl) dirDescEl.disabled = isPrivate;
 
     const inviteNote = document.getElementById('ch-invite-only-private-note');
-    if (inviteNote) inviteNote.style.display = isPrivate ? '' : 'none';
+    if (inviteNote) inviteNote.classList.toggle('is-visible', isPrivate);
 
     _applyPrivateInvitePolicies(isPrivate);
   }
@@ -1742,8 +1742,8 @@ const Rooms = (() => {
   function _applyPrivateInvitePolicies(isPrivate) {
     const publicBlock = document.getElementById('ch-invite-public-block');
     const privateBlock = document.getElementById('ch-invite-private-block');
-    if (publicBlock) publicBlock.style.display = isPrivate ? 'none' : '';
-    if (privateBlock) privateBlock.style.display = isPrivate ? '' : 'none';
+    if (publicBlock) publicBlock.classList.toggle('ch-is-hidden', isPrivate);
+    if (privateBlock) privateBlock.classList.toggle('is-visible', isPrivate);
 
     const unlimitedOpt = document.getElementById('ch-invite-opt-unlimited');
     const maxUsesEl = document.getElementById('ch-invite-max-uses');
@@ -1778,9 +1778,9 @@ const Rooms = (() => {
     const noPerm = document.getElementById('ch-invite-no-permission');
     const createRow = document.getElementById('ch-invite-create-row');
     const sectionLabel = document.getElementById('ch-invites-section-label');
-    if (noPerm) noPerm.style.display = canCreate ? 'none' : '';
-    if (createRow) createRow.style.display = canCreate ? 'flex' : 'none';
-    if (sectionLabel) sectionLabel.style.display = canCreate ? '' : 'none';
+    if (noPerm) noPerm.classList.toggle('is-visible', !canCreate);
+    if (createRow) createRow.classList.toggle('ch-is-hidden', !canCreate);
+    if (sectionLabel) sectionLabel.classList.toggle('is-visible', canCreate);
   }
 
   const _INVITE_CODE_RE = /^[a-z0-9]{2,32}$/;
@@ -1813,7 +1813,7 @@ const Rooms = (() => {
       const toggleBtn = e.target.closest('[data-invite-toggle-redemp]');
       if (toggleBtn) {
         const panel = toggleBtn.parentElement?.querySelector('[data-invite-redemp-panel]');
-        if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        if (panel) panel.classList.toggle('is-expanded');
       }
     });
   }
@@ -1823,22 +1823,21 @@ const Rooms = (() => {
     if (!code) return null;
 
     const card = document.createElement('div');
-    card.className = 'modal-card';
-    card.style.cssText = 'padding:10px 12px;margin-bottom:8px';
+    card.className = 'modal-card ch-invite-item';
 
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:10px';
+    row.className = 'ch-invite-item__row';
 
     const meta = document.createElement('div');
-    meta.style.cssText = 'flex:1;min-width:0';
+    meta.className = 'ch-invite-item__meta';
 
     const url = `https://frogtalk.xyz/i/${code}`;
     const urlEl = document.createElement('div');
-    urlEl.style.cssText = 'font-size:13px;font-weight:700;color:#7fd2a7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    urlEl.className = 'ch-invite-item__url';
     urlEl.textContent = url;
 
     const sub = document.createElement('div');
-    sub.style.cssText = 'font-size:11px;color:#7a9c8d;margin-top:2px';
+    sub.className = 'ch-invite-item__sub';
     const maxUses = parseInt(inv.max_uses, 10) || 0;
     const useCount = parseInt(inv.use_count, 10) || 0;
     const uses = maxUses > 0 ? `${useCount}/${maxUses} uses` : `${useCount} uses`;
@@ -1853,20 +1852,18 @@ const Rooms = (() => {
 
     const copyBtn = document.createElement('button');
     copyBtn.type = 'button';
-    copyBtn.className = 'icon-btn';
+    copyBtn.className = 'icon-btn ch-invite-item__copy';
     copyBtn.title = 'Copy link';
     copyBtn.setAttribute('data-invite-copy', '1');
     copyBtn.setAttribute('data-invite-url', url);
-    copyBtn.style.fontSize = '16px';
     copyBtn.textContent = '📋';
 
     const revokeBtn = document.createElement('button');
     revokeBtn.type = 'button';
-    revokeBtn.className = 'icon-btn';
+    revokeBtn.className = 'icon-btn ch-invite-item__revoke';
     revokeBtn.title = 'Revoke link';
     revokeBtn.setAttribute('data-invite-revoke', '1');
     revokeBtn.setAttribute('data-invite-code', code);
-    revokeBtn.style.cssText = 'font-size:16px;color:#f85149';
     revokeBtn.textContent = '🗑';
 
     row.appendChild(meta);
@@ -1877,19 +1874,18 @@ const Rooms = (() => {
     const redemptions = Array.isArray(inv.redemptions) ? inv.redemptions : [];
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
-    toggleBtn.className = 'modal-btn';
+    toggleBtn.className = 'modal-btn ch-invite-redemp-toggle';
     toggleBtn.setAttribute('data-invite-toggle-redemp', '1');
-    toggleBtn.style.cssText = 'margin-top:8px;width:100%;font-size:12px;padding:6px 10px;background:#1a2a22;color:#9bd0ad;border:1px solid #2e4a3a';
     toggleBtn.textContent = `Joined via this link (${redemptions.length})`;
 
     const panel = document.createElement('div');
+    panel.className = 'ch-invite-redemp-panel';
     panel.setAttribute('data-invite-redemp-panel', '1');
-    panel.style.cssText = 'display:none;margin-top:8px;max-height:120px;overflow-y:auto';
 
     if (redemptions.length) {
       redemptions.forEach((r) => {
         const line = document.createElement('div');
-        line.style.cssText = 'font-size:11px;color:#9bd0ad;padding:4px 0;border-bottom:1px solid rgba(127,210,167,.12)';
+        line.className = 'ch-invite-redemp-line';
         const nick = String(r.nickname || '?').replace(/^@+/, '');
         const when = r.redeemed_at ? new Date(r.redeemed_at).toLocaleString() : '';
         line.textContent = `@${nick} · ${when}`;
@@ -1897,7 +1893,7 @@ const Rooms = (() => {
       });
     } else {
       const empty = document.createElement('div');
-      empty.style.cssText = 'font-size:11px;color:#7a9c8d;padding:4px 0';
+      empty.className = 'ch-invite-redemp-empty';
       empty.textContent = 'No joins recorded yet';
       panel.appendChild(empty);
     }
@@ -2123,12 +2119,8 @@ const Rooms = (() => {
       const panelEl = document.getElementById(`ch-panel-${t}`);
       if (tabEl) tabEl.classList.toggle('active', t === tab);
       if (panelEl) {
-        panelEl.style.display = t === tab ? 'block' : 'none';
-        if (t === tab) {
-          panelEl.classList.add('modal-tab-pane');
-        } else {
-          panelEl.classList.remove('modal-tab-pane');
-        }
+        panelEl.classList.toggle('is-active', t === tab);
+        panelEl.classList.toggle('modal-tab-pane', t === tab);
       }
     });
     if (tab === 'invites') fetchInvites(_currentSettingsRoom);
@@ -2592,12 +2584,13 @@ const Rooms = (() => {
     if (!res.ok) {
       container.replaceChildren();
       if (res.status === 403) {
-        const msg = document.createElement('div');
-        msg.style.cssText = 'color:#9bd0ad;font-size:13px;padding:16px;text-align:center;line-height:1.5';
+        const msg = document.createElement('p');
+        msg.className = 'ch-invite-forbidden-msg';
         msg.textContent = 'Only the channel owner, moderators, or admins can view invite links for this channel.';
         container.appendChild(msg);
       }
-      noInvites.style.display = res.status === 403 ? 'none' : 'block';
+      noInvites.classList.toggle('ch-is-hidden', res.status === 403);
+      if (res.status !== 403) noInvites.classList.remove('ch-is-hidden');
       _renderVanityCard(false, null);
       _applyInviteTabPermissions({ can_create_invite: false });
       return;
@@ -2614,11 +2607,11 @@ const Rooms = (() => {
 
     if (!invites.length) {
       container.replaceChildren();
-      noInvites.style.display = 'block';
+      noInvites.classList.remove('ch-is-hidden');
       return;
     }
 
-    noInvites.style.display = 'none';
+    noInvites.classList.add('ch-is-hidden');
     const frag = document.createDocumentFragment();
     invites.forEach((inv) => {
       const el = _renderInviteListEntry(inv);
@@ -2643,15 +2636,11 @@ const Rooms = (() => {
   function _renderVanityCard(isOwner, currentVanity) {
     const card = document.getElementById('ch-vanity-card');
     if (!card) return;
-    if (_currentRoomData?.room?.type === 'private') {
-      card.style.display = 'none';
+    if (_currentRoomData?.room?.type === 'private' || !isOwner) {
+      card.classList.remove('is-visible');
       return;
     }
-    if (!isOwner) {
-      card.style.display = 'none';
-      return;
-    }
-    card.style.display = '';
+    card.classList.add('is-visible');
     _vanityCurrent = currentVanity || null;
 
     const input = document.getElementById('ch-vanity-input');
@@ -2663,15 +2652,15 @@ const Rooms = (() => {
       input.value = _vanityCurrent || '';
       input.disabled = false;
     }
-    if (clearBtn) clearBtn.style.display = _vanityCurrent ? '' : 'none';
+    if (clearBtn) clearBtn.classList.toggle('ch-is-hidden', !_vanityCurrent);
     if (currentRow && currentLink) {
       if (_vanityCurrent) {
         const url = `https://frogtalk.xyz/i/${_vanityCurrent}`;
-        currentRow.style.display = '';
+        currentRow.classList.add('is-visible');
         currentLink.textContent = `frogtalk.xyz/i/${_vanityCurrent}`;
         currentLink.href = url;
       } else {
-        currentRow.style.display = 'none';
+        currentRow.classList.remove('is-visible');
       }
     }
     _setVanityStatus('idle');
@@ -2694,29 +2683,20 @@ const Rooms = (() => {
     const saveBtn = document.getElementById('ch-vanity-save-btn');
     if (saveBtn) saveBtn.disabled = (state !== 'available');
     if (!statusEl) return;
-    let html = '';
-    let color = '#7fa897';
-    if (state === 'idle') {
-      html = 'Letters, digits, hyphen and underscore. 2–32 characters.';
-    } else if (state === 'checking') {
-      html = '<span style="opacity:.85">Checking availability…</span>';
-    } else if (state === 'available') {
-      html = `<span style="color:#7fd2a7;font-weight:600">✓ Available</span>`;
-      color = '#7fd2a7';
-    } else if (state === 'unchanged') {
-      html = '<span style="color:#7fa897">This is already your vanity</span>';
-    } else if (state === 'invalid') {
-      html = `<span style="color:#f8a058">${UI.escHtml(text || 'Invalid')}</span>`;
-      color = '#f8a058';
-    } else if (state === 'taken') {
-      html = `<span style="color:#f85149">${UI.escHtml(text || 'Already taken')}</span>`;
-      color = '#f85149';
-    } else if (state === 'error') {
-      html = `<span style="color:#f85149">${UI.escHtml(text || 'Could not check')}</span>`;
-      color = '#f85149';
-    }
-    statusEl.style.color = color;
-    statusEl.innerHTML = html;
+    statusEl.className = 'ch-vanity-status';
+    const messages = {
+      idle: 'Letters, digits, hyphen and underscore. 2–32 characters.',
+      checking: 'Checking availability…',
+      available: '✓ Available',
+      unchanged: 'This is already your vanity',
+      invalid: text || 'Invalid',
+      taken: text || 'Already taken',
+      error: text || 'Could not check',
+    };
+    if (state === 'available') statusEl.classList.add('ch-vanity-status--available');
+    else if (state === 'invalid') statusEl.classList.add('ch-vanity-status--warn');
+    else if (state === 'taken' || state === 'error') statusEl.classList.add('ch-vanity-status--taken');
+    statusEl.textContent = messages[state] || messages.idle;
   }
 
   function _onVanityInput() {
