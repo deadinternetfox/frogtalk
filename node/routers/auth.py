@@ -189,6 +189,22 @@ def _sanitize_room_order_json(raw: str) -> str:
     return json.dumps(cleaned, separators=(",", ":"))
 
 
+def _sanitize_sync_media(media_data, media_type) -> tuple[str | None, str]:
+    mt = str(media_type or "").strip().lower()[:64]
+    if mt and not re.match(r"^(image|video|audio|music)/[a-z0-9.+-]{1,48}$", mt):
+        mt = ""
+    if media_data is None:
+        return None, mt
+    md = str(media_data)
+    if len(md) > _SYNC_EXPORT_SOCIAL_MEDIA_MAX:
+        return None, mt
+    if md.startswith("data:"):
+        # Accept only common media data URLs, never text/html/svg/script.
+        if not re.match(r"^data:(image|video|audio)/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\n\r]+$", md, re.IGNORECASE):
+            return None, mt
+    return md, mt
+
+
 def _norm_base(url: str) -> str:
     raw = (url or "").strip()
     if not raw:
@@ -531,12 +547,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         privacy = str(post.get("privacy") or "public").strip().lower()
         if privacy not in ("public", "followers", "friends"):
             privacy = "public"
-        media_data = post.get("media_data")
-        media_type = str(post.get("media_type") or "").strip().lower()
-        if media_data is not None:
-            media_data = str(media_data)
-            if len(media_data) > _SYNC_EXPORT_SOCIAL_MEDIA_MAX:
-                media_data = None
+        media_data, media_type = _sanitize_sync_media(post.get("media_data"), post.get("media_type"))
         social_posts.append({
             "global_post_id": post_gid,
             "origin_server_id": str(post_origin or source_server_id or "").strip(),
@@ -544,7 +555,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             "nickname": author_nick,
             "content": str(post.get("content") or "")[:4000],
             "media_data": media_data,
-            "media_type": media_type[:64],
+            "media_type": media_type,
             "privacy": privacy,
             "share_enabled": 1 if bool(post.get("share_enabled", True)) else 0,
             "allow_comments": 1 if bool(post.get("allow_comments", True)) else 0,
@@ -644,7 +655,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         name = str(raw.get("name") or "").strip().lower()
         room_type = str(raw.get("type") or "public").strip().lower()
         channel_type = str(raw.get("channel_type") or "text").strip().lower()
-        desc = str(raw.get("description") or "")[:200]
+        desc = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("description") or ""))[:200]
         if room_type != "public":
             continue
         if not _ROOM_NAME_RE.match(name):
@@ -876,8 +887,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             "author_global_user_id": str(row.get("author_global_user_id") or "").strip(),
             "nickname": str(row.get("nickname") or "").strip(),
             "content": str(row.get("content") or "")[:4000],
-            "media_data": (str(row.get("media_data")) if row.get("media_data") is not None else None),
-            "media_type": str(row.get("media_type") or "")[:64],
+            "media_data": row.get("media_data"),
+            "media_type": row.get("media_type"),
             "privacy": str(row.get("privacy") or "public").strip().lower(),
             "share_enabled": 1 if bool(row.get("share_enabled", True)) else 0,
             "allow_comments": 1 if bool(row.get("allow_comments", True)) else 0,
@@ -885,6 +896,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             "track_room": str(row.get("track_room") or "")[:64],
             "track_mood": str(row.get("track_mood") or "")[:32],
         }
+        payload_post["media_data"], payload_post["media_type"] = _sanitize_sync_media(
+            payload_post.get("media_data"),
+            payload_post.get("media_type"),
+        )
         post_origin = str(row.get("origin_server_id") or source_server_id or "").strip()
         if not post_origin:
             continue

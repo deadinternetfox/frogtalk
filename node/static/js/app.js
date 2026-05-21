@@ -71,6 +71,7 @@ const App = {
   easterTapCount: 0,
   easterTapTimer: null,
   federationSyncHint: '',
+  federationSyncState: null,
 
   async ensureFreshAssets() {
     try {
@@ -652,6 +653,9 @@ const App = {
 
     // Load DM channels sidebar
     if (typeof loadDMChannels === 'function') loadDMChannels();
+    if (justSwitchedNode || (this.federationSyncState && this.federationSyncState.in_progress)) {
+      this.startFederationSyncWatcher();
+    }
 
     // Load friends (for badge count)
     if (typeof loadFriends === 'function') loadFriends();
@@ -962,6 +966,63 @@ const App = {
     el.style.display = '';
   },
 
+  _emitFederationSyncEvent(state) {
+    try {
+      const payload = state && typeof state === 'object' ? state : {};
+      window.__ftFederationSync = payload;
+      window.dispatchEvent(new CustomEvent('ft:federation-sync', { detail: payload }));
+    } catch {}
+  },
+
+  _renderGlobalSyncChip(state) {
+    const inProgress = !!(state && state.in_progress);
+    let chip = document.getElementById('ft-sync-chip');
+    if (!inProgress) {
+      if (chip) chip.remove();
+      return;
+    }
+    const hint = String(state.hint || this.federationSyncHint || 'Syncing node data…').trim();
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.id = 'ft-sync-chip';
+      chip.style.cssText = 'position:fixed;right:14px;top:14px;z-index:12050;background:rgba(11,18,14,.86);border:1px solid rgba(126,207,163,.32);color:#b7d9c3;padding:6px 10px;border-radius:999px;font-size:12px;backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(0,0,0,.35);pointer-events:none;';
+      document.body.appendChild(chip);
+    }
+    chip.textContent = hint;
+  },
+
+  _applyFederationSyncUiState(state) {
+    const payload = (state && typeof state === 'object') ? state : {};
+    this.federationSyncState = payload;
+    if (payload.hint) this.federationSyncHint = String(payload.hint || '');
+    this._setLoadingSyncHint(payload.in_progress ? (payload.hint || this.federationSyncHint) : '');
+    this._renderGlobalSyncChip(payload);
+    this._emitFederationSyncEvent(payload);
+  },
+
+  startFederationSyncWatcher(maxWatchMs = 180000) {
+    if (!State.token) return;
+    const started = Date.now();
+    if (this._syncWatcherTimer) {
+      try { clearTimeout(this._syncWatcherTimer); } catch {}
+      this._syncWatcherTimer = null;
+    }
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/auth/federation-sync-status', {
+          headers: { 'X-Session-Token': State.token },
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        this._applyFederationSyncUiState(data || {});
+        if (data && data.done && !data.in_progress) return;
+      } catch {}
+      if ((Date.now() - started) >= maxWatchMs) return;
+      this._syncWatcherTimer = setTimeout(tick, 2200);
+    };
+    this._syncWatcherTimer = setTimeout(tick, 300);
+  },
+
   async waitForFederationSyncIfNeeded(maxWaitMs = 22000) {
     if (!State.token) return false;
     const started = Date.now();
@@ -977,6 +1038,7 @@ const App = {
         const inProgress = !!data.in_progress;
         const done = !!data.done;
         const hint = String(data.hint || this.federationSyncHint || '').trim();
+        this._applyFederationSyncUiState(data || {});
         if (inProgress) {
           sawInProgress = true;
           this._setLoadingSyncHint(hint || 'Syncing channels and DMs from your home node…');
@@ -1001,6 +1063,7 @@ const App = {
       }
     }
     this._setLoadingSyncHint('');
+    if (!applied) this.startFederationSyncWatcher();
     return applied;
   },
 
@@ -1053,6 +1116,9 @@ const App = {
     }
     // Ensure the welcome-only CSS flag is not set during the load.
     document.body.classList.remove('in-welcome');
+    if (this.federationSyncHint) {
+      this._setLoadingSyncHint(this.federationSyncHint);
+    }
   },
 
   /** Welcome / empty state for users with no channels yet. */

@@ -904,6 +904,14 @@ const Rooms = (() => {
     // Show skeleton placeholders while loading (first load only)
     const container = document.getElementById('public-channels');
     if (container && !container.children.length) {
+      let syncHint = '';
+      try {
+        const st = window.__ftFederationSync || {};
+        if (st && st.in_progress) {
+          const hint = String(st.hint || 'Syncing channel directory…').trim();
+          syncHint = `<div style="padding:4px 10px;color:#8da59b;font-size:12px">${UI.escHtml(hint)}</div>`;
+        }
+      } catch {}
       container.innerHTML = Array(5).fill(0).map(() => `
         <div class="channel-item skel-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px">
           <div class="skel-circle" style="width:32px;height:32px;flex-shrink:0"></div>
@@ -911,7 +919,7 @@ const Rooms = (() => {
             <div class="skel-line" style="height:11px;width:70%"></div>
             <div class="skel-line" style="height:9px;width:40%"></div>
           </div>
-        </div>`).join('');
+        </div>`).join('') + syncHint;
     }
     try {
       const res = await fetch('/api/rooms', { headers: { 'X-Session-Token': State.token } });

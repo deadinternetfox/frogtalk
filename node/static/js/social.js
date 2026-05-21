@@ -1072,7 +1072,15 @@ const Social = (() => {
     if (tone === 'reels') cls.push('social-loading-fun', 'is-reels');
     if (tone === 'fun') cls.push('social-loading-fun');
     if (variant === 'compact') cls.push('social-loading-compact');
-    return `<div class="${cls.join(' ')}">${esc(label)}</div>`;
+    let syncHint = '';
+    try {
+      const st = window.__ftFederationSync || {};
+      if (st && st.in_progress) {
+        const hint = String(st.hint || 'Syncing data from your home node…').trim();
+        syncHint = `<div style="font-size:12px;color:#8da59b;margin-top:6px">${esc(hint)}</div>`;
+      }
+    } catch {}
+    return `<div class="${cls.join(' ')}">${esc(label)}${syncHint}</div>`;
   }
 
   function _commentsSkeletonHtml(count = 3, includeInput = true) {
