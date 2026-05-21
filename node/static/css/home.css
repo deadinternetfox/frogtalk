@@ -602,6 +602,69 @@
     box-shadow: 0 2px 12px rgba(22,163,74,.35);
   }
 
+  .demo-wrap { width: 100%; max-width: 960px; margin-top: 4rem; }
+  .dmob-icon-frog { font-size: 18px; }
+  .dmob-icon-menu { color: #888; font-size: 18px; }
+  .dmob-icon-dots { font-size: 14px; letter-spacing: 2px; }
+  .dmob-day-sep {
+    text-align: center; font-size: 11px; color: #555;
+    padding: 6px 0 4px; flex-shrink: 0;
+  }
+  .dmob-av--tide { background: #1a2e3a; font-size: 16px; }
+  .dmob-av--vault { background: #2a1a2e; font-size: 12px; font-weight: 700; color: #c084fc; }
+  .dmob-av--tg { background: #1a253a; font-size: 12px; font-weight: 700; color: #4fc3e8; }
+  .dmob-av--reed { background: #1e1a2e; font-size: 12px; font-weight: 700; color: #a78bfa; }
+  .dmob-av--mossy { background: #1a2e1a; }
+  .dmob-nick--tide { color: #38bdf8; }
+  .dmob-nick--vault { color: #c084fc; }
+  .dmob-nick--reed { color: #a78bfa; }
+  .dmob-quote-ref { color: #4fc3e8; }
+  .dmob-bridge-pill svg { flex-shrink: 0; }
+  .demo-ch-badge {
+    margin-left: auto; background: #4ade80; color: #000;
+    font-size: 0.6rem; padding: 1px 5px; border-radius: 8px;
+  }
+  .sec-label--voice {
+    margin-top: auto; border-top: 1px solid var(--border); padding-top: 0.5rem;
+  }
+  .demo-main-col {
+    flex: 1; display: flex; flex-direction: column; min-width: 0;
+  }
+  .demo-role-hint { color: #888; font-weight: 400; font-size: 0.65rem; }
+  .demo-highlight { color: #4ade80; }
+  .demo-muted { color: #888; }
+  .demo-now-playing { font-weight: 600; color: #4ade80; }
+  .demo-av--dc {
+    background: rgba(88, 101, 242, 0.2);
+    border-color: rgba(88, 101, 242, 0.5);
+    color: #a5b4fc; font-size: 0.85rem;
+  }
+  .demo-av--tg {
+    background: rgba(38, 166, 239, 0.2);
+    border-color: rgba(38, 166, 239, 0.5);
+    color: #7dd3fc; font-size: 0.85rem;
+  }
+  .demo-bridge-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.4px;
+    text-transform: uppercase; padding: 1px 6px 1px 4px;
+    border-radius: 999px; vertical-align: 1px;
+  }
+  .demo-bridge-badge.dc {
+    color: #8aa5f5;
+    background: rgba(138, 165, 245, 0.12);
+    border: 1px solid rgba(138, 165, 245, 0.38);
+  }
+  .demo-bridge-badge.tg {
+    color: #4fc3e8;
+    background: rgba(79, 195, 232, 0.12);
+    border: 1px solid rgba(79, 195, 232, 0.38);
+  }
+  .demo-toolbar-icon { color: var(--text-muted); font-size: 1rem; }
+  .section-sub--tight { margin-bottom: 2rem; }
+  .text-accent-green { color: var(--green); }
+  .cta-frog { font-size: 3rem; margin-bottom: 1rem; }
+
   @media (max-width: 900px) {
     .demo-preview {
       border-radius: 18px;
@@ -615,7 +678,7 @@
       display: block;
     }
     .demo-sidebar, .demo-strip { display: none; }
-    .demo-body > div:last-child { display: none !important; }
+    .demo-main-col { display: none !important; }
     .demo-mobile { display: flex; }
   }
 

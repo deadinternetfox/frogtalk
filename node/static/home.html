@@ -107,13 +107,7 @@
 <body>
 
 <!-- VIBE-CODE TRANSPARENCY BANNER -->
-<!--
-  Dismissible top banner. Honest disclosure that the app is still being
-  "deslopped" (AI-drafted code reviewed and tightened by humans). We keep
-  it lightweight: a single inline style block + ~30 lines of vanilla JS,
-  localStorage remembers the dismissal so we don't nag returning users.
-  Banner pushes the fixed <nav> down on mount and snaps it back on close.
--->
+<!-- Dismissible vibe banner: styles in home.css, logic in home-vibe-banner.js -->
 
 <div id="vibe-banner" role="status" aria-live="polite" hidden>
   <div class="vb-inner">
@@ -157,7 +151,7 @@
     <a href="#downloads" class="btn btn-ghost btn-lg">Download app ↓</a>
   </div>
   <!-- DEMO PREVIEW -->
-  <div style="width:100%;max-width:960px;margin-top:4rem;">
+  <div class="demo-wrap">
     <div class="demo-preview">
       <div class="demo-topbar">
         <div class="demo-dot r"></div>
@@ -170,8 +164,8 @@
           <!-- header: frog logo · hamburger · channel avatar + name · icons -->
           <div class="dmob-header">
             <div class="dmob-header-left">
-              <span style="font-size:18px">🐸</span>
-              <span style="color:#888;font-size:18px">☰</span>
+              <span class="dmob-icon-frog">🐸</span>
+              <span class="dmob-icon-menu">☰</span>
               <div class="dmob-ch-av">🌿</div>
               <div>
                 <div class="dmob-ch-name">#the-swamp</div>
@@ -181,18 +175,18 @@
             <div class="dmob-header-icons">
               <span>🔔</span>
               <span>👥</span>
-              <span style="font-size:14px;letter-spacing:2px">···</span>
+              <span class="dmob-icon-dots">···</span>
             </div>
           </div>
           <!-- messages -->
           <div class="dmob-msgs">
             <!-- yesterday separator -->
-            <div style="text-align:center;font-size:11px;color:#555;padding:6px 0 4px;flex-shrink:0">Yesterday</div>
+            <div class="dmob-day-sep">Yesterday</div>
             <div class="dmob-msg">
-              <div class="dmob-av" style="background:#1a2e3a;font-size:16px">🌊</div>
+              <div class="dmob-av dmob-av--tide">🌊</div>
               <div class="dmob-msg-body">
                 <div class="dmob-msg-meta">
-                  <span class="dmob-nick" style="color:#38bdf8">TideFrog</span>
+                  <span class="dmob-nick dmob-nick--tide">TideFrog</span>
                   <span class="dmob-time">21:14</span>
                 </div>
                 <div class="dmob-msg-text">this app is actually good ngl</div>
@@ -210,13 +204,13 @@
               </div>
             </div>
             <!-- today separator -->
-            <div style="text-align:center;font-size:11px;color:#555;padding:6px 0 4px;flex-shrink:0">Today</div>
+            <div class="dmob-day-sep">Today</div>
             <!-- normal message -->
             <div class="dmob-msg">
-              <div class="dmob-av" style="background:#2a1a2e;font-size:12px;font-weight:700;color:#c084fc">V</div>
+              <div class="dmob-av dmob-av--vault">V</div>
               <div class="dmob-msg-body">
                 <div class="dmob-msg-meta">
-                  <span class="dmob-nick" style="color:#c084fc">VaultFrog</span>
+                  <span class="dmob-nick dmob-nick--vault">VaultFrog</span>
                   <span class="dmob-time">03:10</span>
                 </div>
                 <div class="dmob-msg-text">anyone tried the discord bridge yet?</div>
@@ -235,11 +229,11 @@
             </div>
             <!-- Telegram bridged message with real badge -->
             <div class="dmob-msg">
-              <div class="dmob-av" style="background:#1a253a;font-size:12px;font-weight:700;color:#4fc3e8">TG</div>
+              <div class="dmob-av dmob-av--tg">TG</div>
               <div class="dmob-msg-body">
                 <div class="dmob-msg-meta">
                   <span class="dmob-nick">CrispyPond</span>
-                  <span class="dmob-bridge-pill tg"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9" style="flex-shrink:0"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg> Telegram</span>
+                  <span class="dmob-bridge-pill tg"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg> Telegram</span>
                   <span class="dmob-time">03:33</span>
                 </div>
                 <div class="dmob-msg-text">just joined from telegram 👋</div>
@@ -248,19 +242,19 @@
             </div>
             <!-- reply-quote message -->
             <div class="dmob-msg">
-              <div class="dmob-av" style="background:#1e1a2e;font-size:12px;font-weight:700;color:#a78bfa">N</div>
+              <div class="dmob-av dmob-av--reed">N</div>
               <div class="dmob-msg-body">
                 <div class="dmob-msg-meta">
-                  <span class="dmob-nick" style="color:#a78bfa">ReedWhistle</span>
+                  <span class="dmob-nick dmob-nick--reed">ReedWhistle</span>
                   <span class="dmob-time">03:50</span>
                 </div>
-                <div class="dmob-reply-quote"><span style="color:#4fc3e8">CrispyPond</span> · bridges work super smooth</div>
+                <div class="dmob-reply-quote"><span class="dmob-quote-ref">CrispyPond</span> · bridges work super smooth</div>
                 <div class="dmob-msg-text">yes amazing! 🙏</div>
               </div>
             </div>
             <!-- message with reactions -->
             <div class="dmob-msg">
-              <div class="dmob-av" style="background:#1a2e1a">🌿</div>
+              <div class="dmob-av dmob-av--mossy">🌿</div>
               <div class="dmob-msg-body">
                 <div class="dmob-msg-meta">
                   <span class="dmob-nick">MossyLog</span>
@@ -301,22 +295,22 @@
         <div class="demo-sidebar">
           <div class="sec-label">Channels</div>
           <div class="demo-ch active"># general</div>
-          <div class="demo-ch"># random <span style="margin-left:auto;background:#4ade80;color:#000;font-size:.6rem;padding:1px 5px;border-radius:8px">3</span></div>
+          <div class="demo-ch"># random <span class="demo-ch-badge">3</span></div>
           <div class="demo-ch">🔊 voice-lounge</div>
           <div class="demo-ch">🎬 watch-together</div>
           <div class="demo-ch">📣 announcements</div>
           <div class="sec-label">Direct Messages</div>
           <div class="demo-ch">🔒 ZippyFrog</div>
           <div class="demo-ch">🔒 MossyLog</div>
-          <div class="sec-label" style="margin-top:auto;border-top:1px solid var(--border);padding-top:.5rem">🟢 voice-lounge · 4 talking</div>
+          <div class="sec-label sec-label--voice">🟢 voice-lounge · 4 talking</div>
         </div>
-        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <div class="demo-main-col">
           <div class="demo-messages">
             <div class="demo-msg">
               <div class="demo-av">🐸</div>
               <div class="demo-msg-body">
-                <div class="demo-msg-name">ZippyFrog <span style="color:#888;font-weight:400;font-size:.65rem">· 👑 owner</span></div>
-                <div class="demo-msg-text">Check out <b style="color:#4ade80">Frog Social</b> — post updates, watch Reels, share stories, and see what friends are up to 🌐</div>
+                <div class="demo-msg-name">ZippyFrog <span class="demo-role-hint">· 👑 owner</span></div>
+                <div class="demo-msg-text">Check out <b class="demo-highlight">Frog Social</b> — post updates, watch Reels, share stories, and see what friends are up to 🌐</div>
                 <div class="demo-reactions">
                   <span class="demo-reaction mine">🐸 4</span>
                   <span class="demo-reaction">🔥 2</span>
@@ -328,20 +322,20 @@
               <div class="demo-av">🌿</div>
               <div class="demo-msg-body">
                 <div class="demo-msg-name">MossyLog</div>
-                <div class="demo-music-pill">🎬 <span style="font-weight:600;color:#4ade80">Now playing</span> · Tame Impala — <i>Let It Happen</i> <span style="color:#888">(synced)</span></div>
+                <div class="demo-music-pill">🎬 <span class="demo-now-playing">Now playing</span> · Tame Impala — <i>Let It Happen</i> <span class="demo-muted">(synced)</span></div>
               </div>
             </div>
             <div class="demo-msg">
-              <div class="demo-av" style="background:rgba(88,101,242,.2);border-color:rgba(88,101,242,.5);color:#a5b4fc;font-size:.85rem">DC</div>
+              <div class="demo-av demo-av--dc">DC</div>
               <div class="demo-msg-body">
-                <div class="demo-msg-name">blaze <span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px 1px 4px;border-radius:999px;color:#8aa5f5;background:rgba(138,165,245,.12);border:1px solid rgba(138,165,245,.38);vertical-align:1px"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z"/></svg> Discord</span></div>
+                <div class="demo-msg-name">blaze <span class="demo-bridge-badge dc"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M20.3 4.5a18.3 18.3 0 0 0-4.6-1.4l-.2.4c-1.7-.3-3.4-.3-5 0l-.2-.4a18 18 0 0 0-4.6 1.4C2.3 9.9 1.5 15.2 1.9 20.4a18.5 18.5 0 0 0 5.6 2.8l.4-.6c-.9-.3-1.8-.8-2.6-1.3l.2-.2c5 2.3 10.5 2.3 15.4 0l.2.2c-.8.5-1.7.9-2.6 1.3l.4.6a18.3 18.3 0 0 0 5.6-2.8c.5-6-.9-11.2-4.2-15.9zM8.5 17.2c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3zm7 0c-1.1 0-2-1-2-2.3 0-1.2.9-2.3 2-2.3s2 1 2 2.3c0 1.2-.9 2.3-2 2.3z"/></svg> Discord</span></div>
                 <div class="demo-msg-text">reactions &amp; media sync both ways 🔁</div>
               </div>
             </div>
             <div class="demo-msg">
-              <div class="demo-av" style="background:rgba(38,166,239,.2);border-color:rgba(38,166,239,.5);color:#7dd3fc;font-size:.85rem">TG</div>
+              <div class="demo-av demo-av--tg">TG</div>
               <div class="demo-msg-body">
-                <div class="demo-msg-name">mira <span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;padding:1px 6px 1px 4px;border-radius:999px;color:#4fc3e8;background:rgba(79,195,232,.12);border:1px solid rgba(79,195,232,.38);vertical-align:1px"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg> Telegram</span></div>
+                <div class="demo-msg-name">mira <span class="demo-bridge-badge tg"><svg viewBox="0 0 24 24" fill="currentColor" width="9" height="9"><path d="M21.5 4.1 2.7 11.5c-.9.4-.9 1 .1 1.3l4.8 1.5 1.9 5.9c.2.7.6.9 1.1.4l2.7-2.5 4.8 3.6c.9.5 1.5.2 1.7-.8l3-14.1c.3-1.3-.5-1.9-1.3-1.7zM9.7 14.3l8.8-5.5c.4-.2.8.1.5.5l-7.2 6.5-.3 3.1-1.8-4.6z"/></svg> Telegram</span></div>
                 <div class="demo-msg-text">voice notes and stickers too 🎙️</div>
               </div>
             </div>
@@ -354,12 +348,12 @@
             </div>
           </div>
           <div class="demo-input-row">
-            <div style="color:var(--text-muted);font-size:1rem">📷</div>
-            <div style="color:var(--text-muted);font-size:1rem">📎</div>
-            <div style="color:var(--text-muted);font-size:1rem">🎙️</div>
+            <div class="demo-toolbar-icon">📷</div>
+            <div class="demo-toolbar-icon">📎</div>
+            <div class="demo-toolbar-icon">🎙️</div>
             <input class="demo-input" placeholder="Message #general…" readonly>
-            <div style="color:var(--text-muted);font-size:1rem">😀</div>
-            <div style="color:var(--text-muted);font-size:1rem">GIF</div>
+            <div class="demo-toolbar-icon">😀</div>
+            <div class="demo-toolbar-icon">GIF</div>
             <div class="demo-send-btn">↑</div>
           </div>
         </div>
@@ -382,7 +376,7 @@
 <!-- DOWNLOADS -->
 <section class="section ft-downloads-section" id="downloads" aria-labelledby="downloads-heading">
   <div class="section-title" id="downloads-heading">Download FrogTalk</div>
-  <div class="section-sub" style="margin-bottom:2rem">Native Android, desktop builds, or open in the browser — pick what fits your device.</div>
+  <div class="section-sub section-sub--tight">Native Android, desktop builds, or open in the browser — pick what fits your device.</div>
   <div data-ft-downloads-root></div>
 </section>
 <link rel="stylesheet" href="/static/css/downloads-picker.css?v=2">
@@ -620,7 +614,7 @@
       <div class="step-num">2</div>
       <div class="step-content">
         <h3>Add Friends, Join Channels, Explore Social</h3>
-        <p>Find friends by username, jump into public channels, or open <b style="color:var(--green)">Frog Social</b> to post updates, watch Reels, share stories, and see what's trending.</p>
+        <p>Find friends by username, jump into public channels, or open <b class="text-accent-green">Frog Social</b> to post updates, watch Reels, share stories, and see what's trending.</p>
       </div>
     </div>
     <div class="step">
@@ -635,7 +629,7 @@
 
 <!-- CTA -->
 <section class="cta-banner">
-  <div style="font-size:3rem;margin-bottom:1rem;">🐸</div>
+  <div class="cta-frog">🐸</div>
   <h2>Ready to Hop In?</h2>
   <p>Join FrogTalk today. Free forever, private always.</p>
   <a href="/app" class="btn btn-primary btn-lg">Create Your Account →</a>
