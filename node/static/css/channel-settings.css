@@ -182,104 +182,118 @@
   display: block;
 }
 
-.ch-invite-create-row {
+/* Invite create: row 1 = labels, row 2 = controls (same 40px track for selects + button) */
+#modal-channel-settings .ch-invite-create-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  grid-template-rows: auto 40px;
+  column-gap: 10px;
+  row-gap: 4px;
   margin-bottom: 16px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  align-items: end;
+  align-items: stretch;
 }
 
 .ch-invite-create-row.ch-is-hidden {
   display: none !important;
 }
 
-.ch-invite-field {
-  min-width: 0;
+#modal-channel-settings .ch-invite-create__label-uses {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+#modal-channel-settings .ch-invite-create__label-expires {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+#modal-channel-settings .ch-invite-create__select-uses {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+#modal-channel-settings .ch-invite-create__select-expires {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+#modal-channel-settings .ch-invite-create-row select.ch-select--compact {
   width: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.ch-invite-field .ch-select--compact,
-.ch-invite-field .modal-input {
-  width: 100%;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-/* Match select control height (modal-input padding + line-height) */
-#modal-channel-settings .ch-invite-field select.ch-select--compact {
-  min-height: 40px;
-  height: 40px;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.ch-invite-create-btn-label {
-  visibility: hidden;
-  user-select: none;
-  pointer-events: none;
-}
-
-.ch-invite-create-btn-wrap {
   min-width: 0;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  margin: 0 !important;
+  padding: 0 32px 0 10px !important;
+  box-sizing: border-box !important;
+  line-height: 40px !important;
 }
 
 #modal-channel-settings .ch-invite-create-btn.modal-btn.primary {
-  margin: 0;
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  height: 40px;
-  min-height: 40px;
-  padding: 0 14px !important;
-  box-sizing: border-box;
+  flex: none !important;
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  max-height: 40px !important;
+  padding: 0 16px !important;
+  box-sizing: border-box !important;
   white-space: nowrap;
-  display: inline-flex !important;
+  display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  flex: 0 0 auto;
+  transform: none !important;
+  line-height: 1 !important;
 }
 
-/* Desktop: three columns, button column lines up with labelled selects */
+/* Desktop: labels row + controls row; button in column 3 same row as selects */
 @media (min-width: 480px) {
   #modal-channel-settings .ch-invite-create-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(7.5rem, auto);
-    align-items: end;
-  }
-
-  #modal-channel-settings .ch-invite-create-btn-wrap {
-    min-width: 7.5rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(8.5rem, auto);
+    grid-template-rows: auto 40px;
   }
 
   #modal-channel-settings .ch-invite-create-btn.modal-btn.primary {
-    width: 100%;
+    grid-column: 3;
+    grid-row: 2;
+    width: 100% !important;
+    min-width: 8.5rem;
   }
 }
 
-/* Mobile: full-width button on its own row */
 @media (max-width: 479px) {
   #modal-channel-settings .ch-invite-create-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto 40px auto;
   }
 
-  #modal-channel-settings .ch-invite-create-btn-wrap {
+  #modal-channel-settings .ch-invite-create-btn.modal-btn.primary {
     grid-column: 1 / -1;
-  }
-
-  #modal-channel-settings .ch-invite-create-btn-label {
-    display: none;
+    grid-row: 3;
+    min-width: 0 !important;
   }
 }
 
 @media (max-width: 380px) {
   #modal-channel-settings .ch-invite-create-row {
     grid-template-columns: 1fr;
+    grid-template-rows: auto 40px auto 40px auto;
   }
+
+  #modal-channel-settings .ch-invite-create__label-uses { grid-column: 1; grid-row: 1; }
+  #modal-channel-settings .ch-invite-create__label-expires { grid-column: 1; grid-row: 3; }
+  #modal-channel-settings .ch-invite-create__select-uses { grid-column: 1; grid-row: 2; }
+  #modal-channel-settings .ch-invite-create__select-expires { grid-column: 1; grid-row: 4; }
+  #modal-channel-settings .ch-invite-create-btn.modal-btn.primary { grid-column: 1; grid-row: 5; }
+}
+
+.ch-invite-field {
+  min-width: 0;
+  width: 100%;
 }
 
 .ch-invites-list {
