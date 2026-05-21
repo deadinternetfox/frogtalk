@@ -910,10 +910,10 @@ def _probe_url(base_url: str, timeout_s: float = 1.2) -> dict:
         payload = json.loads(text)
         sid = str(((payload or {}).get("server") or {}).get("server_id") or "").strip()
         if not sid:
-            return {"ok": False, "latency_ms": None, "error": "invalid status payload"}
+            return {"ok": False, "latency_ms": None, "error": "invalid status payload", "server_id": ""}
         ok = True
         latency_ms = int((time.perf_counter() - start) * 1000)
-        return {"ok": ok, "latency_ms": latency_ms, "error": None if ok else "status_not_ok"}
+        return {"ok": ok, "latency_ms": latency_ms, "error": None if ok else "status_not_ok", "server_id": sid}
     except urllib.error.URLError as e:
         return {"ok": False, "latency_ms": None, "error": str(e.reason)}
     except Exception as e:
@@ -1772,6 +1772,39 @@ async def list_network_servers(request: Request, official_only: int = 0):
     if local_target and not any((s.get("server_id") == local["server_id"] or _public_server_target(s) == local_target) for s in rows):
         rows.insert(0, local_public)
     return {"servers": _dedupe_public_servers(rows)}
+
+
+@router.get("/network/verify")
+async def verify_network_target(
+    request: Request,
+    target: str = "",
+    timeout_ms: int = 2500,
+):
+    """Server-side reachability check for node switching.
+
+    Browsers cannot cross-fetch arbitrary FrogTalk nodes (CSP connect-src),
+    so the SPA calls this on the *current* node and we probe the target
+    server-side — same path as /network/probe.
+    """
+    base = _normalize_base_url(str(target or "").strip())
+    if not base:
+        return JSONResponse(status_code=400, content={"ok": False, "error": "missing target"})
+    here = _normalize_base_url(str(request.base_url))
+    if here and base == here:
+        local = db.get_or_create_local_server_identity()
+        sid = str((local or {}).get("server_id") or "current").strip()
+        return {"ok": True, "same_node": True, "server_id": sid}
+    timeout_s = max(0.5, min(int(timeout_ms or 2500), 8000) / 1000.0)
+    result = await asyncio.to_thread(_probe_url, base, timeout_s)
+    if result.get("ok"):
+        return {
+            "ok": True,
+            "same_node": False,
+            "server_id": str(result.get("server_id") or "").strip(),
+            "latency_ms": result.get("latency_ms"),
+        }
+    err = str(result.get("error") or "unreachable").strip()
+    return {"ok": False, "error": err[:200]}
 
 
 @router.get("/network/probe")

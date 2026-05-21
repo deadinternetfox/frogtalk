@@ -906,10 +906,8 @@ const Rooms = (() => {
     if (container && !container.children.length) {
       let syncHint = '';
       try {
-        const st = window.__ftFederationSync || {};
-        if (st && st.in_progress) {
-          const hint = String(st.hint || 'Syncing channel directory…').trim();
-          syncHint = `<div style="padding:4px 10px;color:#8da59b;font-size:12px">${UI.escHtml(hint)}</div>`;
+        if (window.FtSync && FtSync.state().in_progress) {
+          syncHint = FtSync.renderInline(FtSync.state(), { compact: true, fallback: 'Syncing channel directory…' });
         }
       } catch {}
       container.innerHTML = Array(5).fill(0).map(() => `

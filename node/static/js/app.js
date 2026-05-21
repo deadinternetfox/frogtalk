@@ -63,6 +63,46 @@
   } catch {}
 })();
 
+/** Shared federation sync UI — progress label + inline banner used across app. */
+const FtSync = {
+  PENDING_CALL_MAX_AGE_MS: 180000,
+
+  state() {
+    return (window.__ftFederationSync && typeof window.__ftFederationSync === 'object')
+      ? window.__ftFederationSync
+      : ((window.App && App.federationSyncState) || {});
+  },
+
+  pct(st) {
+    const n = Number((st || this.state())?.progress_pct);
+    return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : null;
+  },
+
+  label(st, fallback = 'Syncing from your home node…') {
+    const s = st || this.state();
+    if (!s?.in_progress) return '';
+    const hint = String(s.hint || fallback).trim();
+    const p = this.pct(s);
+    return (p != null) ? `${hint} — ${p}%` : hint;
+  },
+
+  renderInline(st, opts = {}) {
+    const s = st || this.state();
+    if (!s?.in_progress) return '';
+    const compact = !!opts.compact;
+    const label = this.label(s, opts.fallback || 'Syncing…');
+    const p = this.pct(s) ?? 0;
+    const bar = `
+      <div style="margin-top:${compact ? '4px' : '8px'};height:4px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden">
+        <div style="height:100%;width:${p}%;background:linear-gradient(90deg,#4caf86,#7fd6a2);transition:width .35s ease"></div>
+      </div>`;
+    return `<div class="ft-sync-inline" style="color:#8da59b;font-size:${compact ? '11px' : '12px'};line-height:1.35">
+      <div>⏳ ${typeof UI !== 'undefined' && UI.escHtml ? UI.escHtml(label) : label}</div>${bar}
+    </div>`;
+  },
+};
+try { window.FtSync = FtSync; } catch {}
+
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
@@ -118,10 +158,16 @@ const App = {
       const p = JSON.parse(raw);
       const callId = String(p?.callId || '').trim();
       if (!callId) return null;
+      const ts = Number(p?.ts || 0);
+      if (ts && (Date.now() - ts) > FtSync.PENDING_CALL_MAX_AGE_MS) {
+        this.clearPendingIncomingCall();
+        return null;
+      }
       return {
         callId,
         peerNick: String(p?.peerNick || '').trim(),
         action: String(p?.action || '').trim().toLowerCase(),
+        ts,
       };
     } catch {
       return null;
@@ -873,6 +919,11 @@ const App = {
   async recoverLatestIncomingCall(opts) {
     if (!State.token) return false;
     try {
+      const stalePending = this.getPendingIncomingCall();
+      if (!stalePending && localStorage.getItem(this.PENDING_CALL_KEY)) {
+        this.clearPendingIncomingCall();
+        return false;
+      }
       if (opts?.requireSignalReady && typeof ensureCallSignalingReady === 'function') {
         const wsReady = await ensureCallSignalingReady({ timeoutMs: 15000 });
         if (!wsReady) return false;
@@ -885,7 +936,10 @@ const App = {
       const res = await fetch('/api/calls/pending-latest', {
         headers: { 'X-Session-Token': State.token }
       });
-      if (!res.ok) return false;
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 409) this.clearPendingIncomingCall();
+        return false;
+      }
       const offer = await res.json();
       const peerNick = String(offer?.from_nickname || opts?.peerNick || '').trim();
       if (offer?.call_id) {
@@ -967,10 +1021,17 @@ const App = {
   _setLoadingSyncHint(text) {
     const el = document.getElementById('ch-loading-sync-hint');
     if (!el) return;
+    const st = window.__ftFederationSync || this.federationSyncState || {};
+    if (st.in_progress && window.FtSync) {
+      el.innerHTML = FtSync.renderInline(st, { compact: true });
+      el.style.display = '';
+      return;
+    }
     const msg = String(text || '').trim();
     if (!msg) {
       el.textContent = '';
       el.style.display = 'none';
+      el.innerHTML = '';
       return;
     }
     el.textContent = msg;
@@ -992,23 +1053,67 @@ const App = {
       if (chip) chip.remove();
       return;
     }
-    const hint = String(state.hint || this.federationSyncHint || 'Syncing node data…').trim();
+    const label = window.FtSync ? FtSync.label(state) : String(state.hint || this.federationSyncHint || 'Syncing node data…').trim();
+    const pct = window.FtSync ? FtSync.pct(state) : null;
     if (!chip) {
       chip = document.createElement('div');
       chip.id = 'ft-sync-chip';
-      chip.style.cssText = 'position:fixed;right:14px;top:14px;z-index:12050;background:rgba(11,18,14,.86);border:1px solid rgba(126,207,163,.32);color:#b7d9c3;padding:6px 10px;border-radius:999px;font-size:12px;backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(0,0,0,.35);pointer-events:none;';
+      chip.style.cssText = 'position:fixed;right:14px;top:14px;z-index:12050;background:rgba(11,18,14,.92);border:1px solid rgba(126,207,163,.32);color:#b7d9c3;padding:8px 12px;border-radius:14px;font-size:12px;min-width:180px;backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(0,0,0,.35);pointer-events:none';
       document.body.appendChild(chip);
     }
-    chip.textContent = hint;
+    const barPct = (pct != null) ? pct : 0;
+    chip.innerHTML = `
+      <div style="font-weight:600;margin-bottom:6px">⏳ ${typeof UI !== 'undefined' && UI.escHtml ? UI.escHtml(label) : label}</div>
+      <div style="height:4px;border-radius:999px;background:rgba(255,255,255,.1);overflow:hidden">
+        <div style="height:100%;width:${barPct}%;background:linear-gradient(90deg,#4caf86,#7fd6a2);transition:width .35s ease"></div>
+      </div>`;
+  },
+
+  _onFederationSyncComplete(payload) {
+    try {
+      if (typeof Rooms !== 'undefined' && Rooms.loadRooms) void Rooms.loadRooms();
+    } catch {}
+    try {
+      if (typeof loadDMChannels === 'function') void loadDMChannels();
+    } catch {}
+    try {
+      if (typeof loadFriends === 'function') void loadFriends();
+    } catch {}
+    try {
+      if (window.Social) {
+        if (Social.loadFeed && Social._currentTab === 'feed') void Social.loadFeed();
+        if (Social.loadReelsTab && Social._currentTab === 'reels') void Social.loadReelsTab();
+        if (Social.refreshActivityBadge) void Social.refreshActivityBadge();
+      }
+    } catch {}
+    const joined = Number(payload?.rooms_joined || 0);
+    const dms = Number(payload?.dm_linked || 0);
+    const posts = Number(payload?.social_posts_imported || 0);
+    const parts = [];
+    if (joined > 0) parts.push(`${joined} channels`);
+    if (dms > 0) parts.push(`${dms} DMs`);
+    if (posts > 0) parts.push(`${posts} posts`);
+    if (parts.length && typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast(`Federation sync complete — ${parts.join(', ')}`, 'success', 4500);
+    } else if (!payload?.error && typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Federation sync complete', 'success', 3500);
+    }
+    if (payload?.error && typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast(`Sync issue: ${String(payload.error).slice(0, 120)}`, 'error', 6000);
+    }
   },
 
   _applyFederationSyncUiState(state) {
     const payload = (state && typeof state === 'object') ? state : {};
+    const wasInProgress = !!(this.federationSyncState && this.federationSyncState.in_progress);
     this.federationSyncState = payload;
     if (payload.hint) this.federationSyncHint = String(payload.hint || '');
     this._setLoadingSyncHint(payload.in_progress ? (payload.hint || this.federationSyncHint) : '');
     this._renderGlobalSyncChip(payload);
     this._emitFederationSyncEvent(payload);
+    if (wasInProgress && !payload.in_progress && payload.done) {
+      this._onFederationSyncComplete(payload);
+    }
   },
 
   startFederationSyncWatcher(maxWatchMs = 180000) {
@@ -1060,13 +1165,8 @@ const App = {
         if (done) {
           const joined = Number(data.rooms_joined || 0);
           const dms = Number(data.dm_linked || 0);
-          applied = joined > 0 || dms > 0;
-          if (sawInProgress && applied && typeof UI !== 'undefined' && UI.showToast) {
-            const parts = [];
-            if (joined > 0) parts.push(`${joined} channels`);
-            if (dms > 0) parts.push(`${dms} DMs`);
-            UI.showToast(`Synced ${parts.join(' and ')} from federation`, 'info', 3600);
-          }
+          const posts = Number(data.social_posts_imported || 0);
+          applied = joined > 0 || dms > 0 || posts > 0;
         }
         break;
       } catch {

@@ -5125,6 +5125,8 @@ def save_pending_call_offer(call_id: int, caller_id: int, callee_id: int,
 
 
 def get_pending_call_offer(call_id: int, callee_id: int) -> Optional[Dict]:
+    expire_stale_ringing_calls()
+    max_age = PENDING_CALL_MAX_AGE_SEC
     with _conn() as con:
         try:
             row = con.execute(
@@ -5132,8 +5134,9 @@ def get_pending_call_offer(call_id: int, callee_id: int) -> Optional[Dict]:
                           p.call_type, p.sdp, COALESCE(p.fp_sig, '') AS fp_sig, c.status
                    FROM pending_call_offers p
                    JOIN calls c ON c.id = p.call_id
-                   WHERE p.call_id=? AND p.callee_id=?""",
-                (call_id, callee_id),
+                   WHERE p.call_id=? AND p.callee_id=? AND c.status='ringing'
+                     AND datetime(c.created_at) > datetime('now', ?)""",
+                (call_id, callee_id, f"-{max_age} seconds"),
             ).fetchone()
         except sqlite3.OperationalError:
             row = con.execute(
@@ -5141,13 +5144,45 @@ def get_pending_call_offer(call_id: int, callee_id: int) -> Optional[Dict]:
                           p.call_type, p.sdp, '' AS fp_sig, c.status
                    FROM pending_call_offers p
                    JOIN calls c ON c.id = p.call_id
-                   WHERE p.call_id=? AND p.callee_id=?""",
-                (call_id, callee_id),
+                   WHERE p.call_id=? AND p.callee_id=? AND c.status='ringing'
+                     AND datetime(c.created_at) > datetime('now', ?)""",
+                (call_id, callee_id, f"-{max_age} seconds"),
             ).fetchone()
     return dict(row) if row else None
 
 
+PENDING_CALL_MAX_AGE_SEC = 180
+
+
+def expire_stale_ringing_calls(max_age_sec: int = PENDING_CALL_MAX_AGE_SEC) -> int:
+    """End ringing calls older than max_age_sec and drop their pending offers."""
+    age = max(30, int(max_age_sec or PENDING_CALL_MAX_AGE_SEC))
+    with _conn() as con:
+        stale = con.execute(
+            """
+            SELECT id FROM calls
+            WHERE status='ringing'
+              AND datetime(created_at) <= datetime('now', ?)
+            """,
+            (f"-{age} seconds",),
+        ).fetchall()
+        ids = [int(r["id"]) for r in stale if r and r["id"]]
+        if not ids:
+            return 0
+        ended = datetime.utcnow().isoformat()
+        for cid in ids:
+            con.execute(
+                "UPDATE calls SET status='missed', ended_at=? WHERE id=? AND status='ringing'",
+                (ended, cid),
+            )
+            con.execute("DELETE FROM pending_call_offers WHERE call_id=?", (cid,))
+        con.commit()
+        return len(ids)
+
+
 def get_latest_pending_call_offer(callee_id: int) -> Optional[Dict]:
+    expire_stale_ringing_calls()
+    max_age = PENDING_CALL_MAX_AGE_SEC
     with _conn() as con:
         try:
             row = con.execute(
@@ -5156,9 +5191,10 @@ def get_latest_pending_call_offer(callee_id: int) -> Optional[Dict]:
                    FROM pending_call_offers p
                    JOIN calls c ON c.id = p.call_id
                    WHERE p.callee_id=? AND c.status='ringing'
+                     AND datetime(c.created_at) > datetime('now', ?)
                    ORDER BY p.call_id DESC
                    LIMIT 1""",
-                (callee_id,),
+                (callee_id, f"-{max_age} seconds"),
             ).fetchone()
         except sqlite3.OperationalError:
             row = con.execute(
@@ -5167,9 +5203,10 @@ def get_latest_pending_call_offer(callee_id: int) -> Optional[Dict]:
                    FROM pending_call_offers p
                    JOIN calls c ON c.id = p.call_id
                    WHERE p.callee_id=? AND c.status='ringing'
+                     AND datetime(c.created_at) > datetime('now', ?)
                    ORDER BY p.call_id DESC
                    LIMIT 1""",
-                (callee_id,),
+                (callee_id, f"-{max_age} seconds"),
             ).fetchone()
     return dict(row) if row else None
 

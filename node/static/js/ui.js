@@ -2922,6 +2922,12 @@ function _renderNetworkSyncState(state) {
   if (!inProgress) {
     el.textContent = '';
     el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  if (window.FtSync && typeof FtSync.renderInline === 'function') {
+    el.innerHTML = FtSync.renderInline(st, { compact: true });
+    el.style.display = '';
     return;
   }
   const hint = String(st?.hint || (window.App && App.federationSyncHint) || 'Syncing node data…').trim();
@@ -3140,26 +3146,15 @@ async function _verifyNodeForSwitch(target) {
   const here = _normalizeNetworkUrl(window.location.origin || '');
   if (here && base === here) return { ok: true, sameNode: true, serverId: 'current' };
   try {
-    const statusUrl = new URL('/api/network/status', base);
-    statusUrl.searchParams.set('t', String(Date.now()));
-    const res = await fetch(statusUrl.toString(), { cache: 'no-store' });
-    if (!res.ok) {
-      return { ok: false, error: `HTTP ${res.status}` };
+    const q = new URLSearchParams({ target: base, timeout_ms: '3000', t: String(Date.now()) });
+    const res = await apiFetch(`/api/network/verify?${q.toString()}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok) {
+      return { ok: false, error: _networkNodeCheckError(data?.error || `HTTP ${res.status}`) };
     }
-    const body = await res.text();
-    const lower = body.toLowerCase();
-    if (body.startsWith('<!doctype') || body.startsWith('<html') || lower.includes('cloudflare') || lower.includes('cf-ray')) {
-      return { ok: false, error: 'edge/html challenge' };
-    }
-    let data = null;
-    try {
-      data = JSON.parse(body);
-    } catch {
-      return { ok: false, error: 'invalid status response' };
-    }
-    const sid = String(data?.server?.server_id || '').trim();
+    const sid = String(data?.server_id || '').trim();
     if (!sid) return { ok: false, error: 'invalid node status payload' };
-    return { ok: true, serverId: sid, sameNode: false };
+    return { ok: true, serverId: sid, sameNode: !!data.same_node, latencyMs: data.latency_ms };
   } catch (e) {
     return { ok: false, error: _networkNodeCheckError(e?.message || e) };
   }

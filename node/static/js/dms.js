@@ -729,10 +729,8 @@ async function loadDMChannels () {
   if (sidebarEl && !_dmChannels.length) {
     let syncHint = '';
     try {
-      const st = window.__ftFederationSync || {};
-      if (st && st.in_progress) {
-        const hint = String(st.hint || 'Syncing DMs…').trim();
-        syncHint = `<div style="padding:4px 8px;color:#8da59b;font-size:12px">${UI.escHtml(hint)}</div>`;
+      if (window.FtSync && FtSync.state().in_progress) {
+        syncHint = FtSync.renderInline(FtSync.state(), { compact: true, fallback: 'Syncing DMs…' });
       }
     } catch {}
     sidebarEl.innerHTML = `<div style="padding:6px 8px"><span class="skel-line" style="width:70%;height:10px;display:block;margin-bottom:6px"></span><span class="skel-line" style="width:50%;height:10px;display:block"></span></div>${syncHint}`;

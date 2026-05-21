@@ -122,6 +122,7 @@ DEFAULT_FILES=(
   "node/main.py:node/main.py"
   "node/geoip.py:node/geoip.py"
   "node/database.py:node/database.py"
+  "node/routers/auth.py:node/routers/auth.py"
   "node/routers/federation.py:node/routers/federation.py"
   "node/routers/server_admin.py:node/routers/server_admin.py"
   "node/static/js/server_admin.js:node/static/js/server_admin.js"

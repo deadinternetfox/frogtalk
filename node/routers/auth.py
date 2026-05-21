@@ -445,12 +445,27 @@ def _sync_state_set(user_id: int, patch: dict) -> None:
 def _sync_state_get(user_id: int) -> dict:
     uid = int(user_id or 0)
     if uid <= 0:
-        return {"in_progress": False, "done": False}
+        return {"in_progress": False, "done": False, "progress_pct": 0}
     with _sync_state_lock:
         cur = dict(_federation_sync_state.get(uid) or {})
     if not cur:
-        return {"in_progress": False, "done": False}
+        return {"in_progress": False, "done": False, "progress_pct": 0}
+    if "progress_pct" not in cur:
+        cur["progress_pct"] = 100 if cur.get("done") else (50 if cur.get("in_progress") else 0)
     return cur
+
+
+def _sync_progress(user_id: int, pct: int, hint: str, phase: str = "") -> None:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    _sync_state_set(uid, {
+        "in_progress": True,
+        "done": False,
+        "progress_pct": max(0, min(100, int(pct))),
+        "phase": str(phase or "")[:64],
+        "hint": str(hint or "")[:220],
+    })
 
 
 def _build_sync_export_for_user(user_id: int) -> dict:
@@ -697,6 +712,26 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     me = db.get_user_by_id(uid) or {}
     my_gid = str(me.get("global_user_id") or "").strip()
 
+    work_units = (
+        len(rooms[:_SYNC_EXPORT_ROOM_LIMIT])
+        + len(public_rooms[:_SYNC_EXPORT_PUBLIC_ROOM_LIMIT])
+        + len(dm_peers[:_SYNC_EXPORT_DM_LIMIT])
+        + len(following[:_SYNC_EXPORT_DM_LIMIT])
+        + len(friends[:_SYNC_EXPORT_DM_LIMIT])
+        + len(blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT])
+        + len(social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT])
+        + 2  # profile + push tokens
+    )
+    done_units = 0
+
+    def _sync_step(phase: str, hint: str) -> None:
+        nonlocal done_units
+        done_units += 1
+        pct = 12 + int(83 * done_units / max(work_units, 1))
+        _sync_progress(uid, pct, hint, phase)
+
+    _sync_progress(uid, 12, "Importing your channels…", "channels")
+
     for raw in rooms[:_SYNC_EXPORT_ROOM_LIMIT]:
         if isinstance(raw, dict):
             name = str(raw.get("name") or "").strip().lower()
@@ -732,6 +767,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             rooms_joined += 1
         except Exception:
             continue
+        _sync_step("channels", f"Syncing channels… ({rooms_joined} joined)")
+
+    _sync_progress(uid, max(28, 12 + int(83 * done_units / max(work_units, 1))),
+                   "Syncing channel directory…", "directory")
 
     # Mirror public room directory so the destination node can render channels
     # immediately even before regular federation replication catches up.
@@ -762,6 +801,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             db.join_room(uid, int(existing["id"]))
         except Exception:
             continue
+        _sync_step("directory", "Syncing public channel directory…")
+
+    _sync_progress(uid, max(42, 12 + int(83 * done_units / max(work_units, 1))),
+                   "Syncing direct messages…", "dms")
 
     for item in dm_peers[:_SYNC_EXPORT_DM_LIMIT]:
         if not isinstance(item, dict):
@@ -786,6 +829,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             dm_linked += 1
         except Exception:
             continue
+        _sync_step("dms", f"Syncing DMs… ({dm_linked} linked)")
+
+    _sync_progress(uid, max(55, 12 + int(83 * done_units / max(work_units, 1))),
+                   "Syncing follows and friends…", "social_graph")
 
     for item in following[:_SYNC_EXPORT_DM_LIMIT]:
         if not isinstance(item, dict):
@@ -810,6 +857,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 following_linked += 1
         except Exception:
             continue
+        _sync_step("social_graph", "Syncing follows…")
 
     for item in friends[:_SYNC_EXPORT_DM_LIMIT]:
         if not isinstance(item, dict):
@@ -837,6 +885,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             db.get_or_create_dm(uid, peer_id)
         except Exception:
             continue
+        _sync_step("social_graph", f"Syncing friends… ({friends_linked} linked)")
 
     for item in blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT]:
         if not isinstance(item, dict):
@@ -861,6 +910,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 blocked_linked += 1
         except Exception:
             continue
+        _sync_step("social_graph", "Syncing block list…")
 
     if isinstance(self_profile, dict):
         try:
@@ -973,6 +1023,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 con.commit()
         except Exception:
             pass
+    _sync_step("profile", "Syncing profile settings…")
+
+    _sync_progress(uid, max(78, 12 + int(83 * done_units / max(work_units, 1))),
+                   "Syncing FrogSocial posts…", "social_posts")
 
     for row in push_tokens[:24]:
         if not isinstance(row, dict):
@@ -988,6 +1042,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             push_tokens_linked += 1
         except Exception:
             continue
+    _sync_step("push", "Syncing push tokens…")
 
     for row in social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT]:
         if not isinstance(row, dict):
@@ -1021,6 +1076,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 social_posts_imported += 1
         except Exception:
             continue
+        if social_posts_imported and (social_posts_imported % 5 == 0):
+            _sync_step("social_posts", f"Syncing FrogSocial… ({social_posts_imported} posts)")
+
+    _sync_progress(uid, 100, "Sync complete", "done")
 
     return {
         "rooms_joined": rooms_joined,
@@ -1296,17 +1355,23 @@ async def _sync_user_from_peer_session(user_id: int, source_base: str, remote_to
         "in_progress": True,
         "done": False,
         "error": "",
-        "hint": "Syncing channels and DMs from your home node…",
+        "progress_pct": 3,
+        "phase": "fetch",
+        "hint": "Fetching account data from your home node…",
     })
     try:
         export = await asyncio.to_thread(_fetch_sync_export_via_session, source, tok)
         if not isinstance(export, dict):
             raise ValueError("export_unavailable")
+        _sync_progress(uid, 8, "Applying synced data…", "apply")
         applied = await asyncio.to_thread(_apply_sync_export_to_user, uid, export)
         _sync_state_set(uid, {
             "in_progress": False,
             "done": True,
             "error": "",
+            "progress_pct": 100,
+            "phase": "done",
+            "hint": "Sync complete",
             "finished_at": int(time.time()),
             **(applied or {}),
         })
@@ -1333,17 +1398,23 @@ async def _sync_user_from_peer_ticket(user_id: int, source_base: str, ticket: st
         "in_progress": True,
         "done": False,
         "error": "",
-        "hint": "Syncing channels and DMs from your home node…",
+        "progress_pct": 3,
+        "phase": "fetch",
+        "hint": "Fetching account data from your home node…",
     })
     try:
         export = await asyncio.to_thread(_fetch_sync_export_via_ticket, source, raw_ticket)
         if not isinstance(export, dict):
             raise ValueError("export_unavailable")
+        _sync_progress(uid, 8, "Applying synced data…", "apply")
         applied = await asyncio.to_thread(_apply_sync_export_to_user, uid, export)
         _sync_state_set(uid, {
             "in_progress": False,
             "done": True,
             "error": "",
+            "progress_pct": 100,
+            "phase": "done",
+            "hint": "Sync complete",
             "finished_at": int(time.time()),
             **(applied or {}),
         })
@@ -2005,6 +2076,8 @@ async def login_with_federation_ticket(
             "in_progress": True,
             "done": False,
             "error": "",
+            "progress_pct": 2,
+            "phase": "fetch",
             "hint": "Syncing channels and DMs from your home node…",
         })
         try:

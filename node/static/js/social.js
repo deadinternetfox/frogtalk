@@ -1074,10 +1074,8 @@ const Social = (() => {
     if (variant === 'compact') cls.push('social-loading-compact');
     let syncHint = '';
     try {
-      const st = window.__ftFederationSync || {};
-      if (st && st.in_progress) {
-        const hint = String(st.hint || 'Syncing data from your home node…').trim();
-        syncHint = `<div style="font-size:12px;color:#8da59b;margin-top:6px">${esc(hint)}</div>`;
+      if (window.FtSync && FtSync.state().in_progress) {
+        syncHint = FtSync.renderInline(FtSync.state(), { compact: false, fallback: 'Syncing data from your home node…' });
       }
     } catch {}
     return `<div class="${cls.join(' ')}">${esc(label)}${syncHint}</div>`;
