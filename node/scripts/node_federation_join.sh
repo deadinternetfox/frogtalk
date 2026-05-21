@@ -457,7 +457,12 @@ sync_board_peers() {
     return 0
   fi
 
-  require_cmd php
+  if ! command -v php >/dev/null 2>&1; then
+    skip "php not installed — skipping board peer pills (optional: sudo apt install php-cli php-curl)"
+    BOARD_ADDED=0
+    BOARD_FAILED=0
+    return 0
+  fi
   spinner_msg "Linking federated boards (fetching /board/api/info)…"
 
   local php_result
@@ -607,6 +612,8 @@ print_summary() {
 
 main() {
   parse_args "$@"
+  [[ "$ASSUME_YES" -eq 1 ]] && export FT_ASSUME_YES=1
+  ft_guard_noninteractive_stdin
   require_cmd python3
   require_cmd curl
 

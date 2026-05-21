@@ -149,12 +149,13 @@ git clone https://github.com/deadinternetfox/frogtalk.git
 cd frogtalk
 
 # CLI install wizard (venv, .env, symlinks) — not a browser UI
-bash node/scripts/install.sh setup -y
-bash node/scripts/install.sh federation -y
-bash node/scripts/install.sh systemd -y
+export PUBLIC_URL="https://chat.yourdomain.com"
+bash node/scripts/install.sh setup -y --public-url "$PUBLIC_URL"
+bash node/scripts/install.sh federation -y --public-url "$PUBLIC_URL"
+sudo bash node/scripts/install.sh systemd -y
 ```
 
-Or use the **interactive menu:** `bash node/scripts/install.sh` → setup · federation · systemd · status.
+Or use the **interactive menu:** `bash node/scripts/install.sh` → setup · federation · systemd · status. See [docs/NODE_INSTALL.md](docs/NODE_INSTALL.md) for a full copy-paste VPS guide.
 
 Put **nginx + certbot** in front (ports 80/443), keep uvicorn on `127.0.0.1:8080`, set
 `PUBLIC_URL=https://chat.yourdomain.com` and matching `ALLOWED_ORIGINS`. See the VPS guide for UFW,

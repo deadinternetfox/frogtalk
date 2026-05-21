@@ -19,6 +19,8 @@ INSTALL_DIR_DEFAULT="/opt/frogtalk"
 INSTALL_DIR=""
 ASSUME_YES=0
 CMD=""
+PUBLIC_URL_ARG=""
+ONION_URL_ARG=""
 
 usage() {
   ft_banner "FrogTalk Node Installer" "Self-host setup · federation · updates"
@@ -38,6 +40,8 @@ ${C_BOLD}Commands:${C_RESET}
 
 ${C_BOLD}Options:${C_RESET}
   --install-dir PATH   Install root (default: ${INSTALL_DIR_DEFAULT})
+  --public-url URL     Clearnet URL (federation / setup; or PUBLIC_URL env)
+  --onion-url URL      Onion URL (federation join)
   -y, --yes            Non-interactive defaults
   -h, --help
 EOF
@@ -49,6 +53,8 @@ parse_global_args() {
       -h|--help) usage; exit 0 ;;
       -y|--yes) ASSUME_YES=1; export FT_ASSUME_YES=1; shift ;;
       --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
+      --public-url) PUBLIC_URL_ARG="${2:-}"; shift 2 ;;
+      --onion-url) ONION_URL_ARG="${2:-}"; shift 2 ;;
       setup|federation|update|update-apply|systemd|status|help|menu)
         CMD="$1"; shift; return 0 ;;
       *)
@@ -80,12 +86,15 @@ run_setup() {
   local args=()
   [[ -n "$INSTALL_DIR" ]] && args+=(--install-dir "$INSTALL_DIR")
   [[ "$ASSUME_YES" -eq 1 ]] && args+=(-y)
+  [[ -n "$PUBLIC_URL_ARG" ]] && args+=(--public-url "$PUBLIC_URL_ARG")
   exec bash "$SCRIPT_DIR/node_setup_wizard.sh" "${args[@]}"
 }
 
 run_federation() {
   local args=(--install-dir "$INSTALL_DIR")
   [[ "$ASSUME_YES" -eq 1 ]] && args+=(-y)
+  [[ -n "$PUBLIC_URL_ARG" ]] && args+=(--public-url "$PUBLIC_URL_ARG")
+  [[ -n "$ONION_URL_ARG" ]] && args+=(--onion-url "$ONION_URL_ARG")
   exec bash "$SCRIPT_DIR/node_federation_join.sh" "${args[@]}" "$@"
 }
 
@@ -100,16 +109,22 @@ run_systemd() {
   local unit_src="$INSTALL_DIR/node/deploy/frogtalk.service"
   [[ -f "$unit_src" ]] || ft_die "Missing $unit_src — run setup first."
   ft_require_cmd systemctl
+  local cp_cmd=(cp) systemctl_cmd=(systemctl)
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+    ft_require_cmd sudo
+    cp_cmd=(sudo cp)
+    systemctl_cmd=(sudo systemctl)
+  fi
   if [[ "$ASSUME_YES" -eq 0 ]] && ! ft_ask_yes_no "Install unit to /etc/systemd/system/frogtalk.service?" "y"; then
     exit 0
   fi
-  cp "$unit_src" /etc/systemd/system/frogtalk.service
-  systemctl daemon-reload
-  systemctl enable frogtalk
+  "${cp_cmd[@]}" "$unit_src" /etc/systemd/system/frogtalk.service
+  "${systemctl_cmd[@]}" daemon-reload
+  "${systemctl_cmd[@]}" enable frogtalk
   if ft_ask_yes_no "Start frogtalk now?" "y"; then
-    systemctl restart frogtalk
+    "${systemctl_cmd[@]}" restart frogtalk
     sleep 2
-    systemctl is-active frogtalk >/dev/null && ft_ok "frogtalk.service active" \
+    "${systemctl_cmd[@]}" is-active frogtalk >/dev/null && ft_ok "frogtalk.service active" \
       || ft_warn "Not active — journalctl -u frogtalk -n 40"
   else
     ft_ok "Unit enabled (not started)"
@@ -180,6 +195,7 @@ show_menu() {
 
 main() {
   parse_global_args "$@"
+  [[ "$ASSUME_YES" -eq 1 ]] && ft_guard_noninteractive_stdin
   case "${CMD:-}" in
     ""|menu) show_menu ;;
     help) usage ;;

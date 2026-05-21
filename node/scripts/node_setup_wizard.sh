@@ -18,6 +18,7 @@ ENV_TEMPLATE="node/deploy/env.example"
 ENV_FILE=".env"
 ASSUME_YES=0
 INSTALL_DIR_ARG=""
+PUBLIC_URL_ARG=""
 
 usage() {
   ft_banner "Setup wizard" "venv · .env · federation-ready defaults"
@@ -25,6 +26,7 @@ usage() {
 ${C_BOLD}Usage:${C_RESET} bash node/scripts/node_setup_wizard.sh [options]
 
   --install-dir PATH   Target install root (default: ${INSTALL_DIR_DEFAULT})
+  --public-url URL     Clearnet URL (or set PUBLIC_URL env before -y)
   -y, --yes             Accept defaults (including federation join)
   -h, --help            This help
 
@@ -38,6 +40,7 @@ parse_args() {
       -h|--help) usage; exit 0 ;;
       -y|--yes) ASSUME_YES=1; export FT_ASSUME_YES=1; shift ;;
       --install-dir) INSTALL_DIR_ARG="${2:-}"; shift 2 ;;
+      --public-url) PUBLIC_URL_ARG="${2:-}"; shift 2 ;;
       *) ft_die "Unknown option: $1" ;;
     esac
   done
@@ -64,6 +67,7 @@ PY
 
 main() {
   parse_args "$@"
+  ft_guard_noninteractive_stdin
   clear 2>/dev/null || true
   ft_banner "Node Setup Wizard" "First-time self-host install"
 
@@ -87,9 +91,10 @@ main() {
 
   if [[ -d "$install_dir/.git" ]]; then
     ft_info "Existing repo at $install_dir"
-    if ft_ask_yes_no "Check for git updates and pull (fast-forward)?" "y"; then
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+      ft_skip "Git update skipped in -y mode (run: bash node/scripts/install.sh update-apply -y)"
+    elif ft_ask_yes_no "Check for git updates and pull (fast-forward)?" "y"; then
       local upd_args=(--install-dir "$install_dir" --apply --skip-federation-hint)
-      [[ "$ASSUME_YES" -eq 1 ]] && upd_args+=(-y --skip-restart)
       if bash "$SCRIPT_DIR/node_update_check.sh" "${upd_args[@]}"; then
         ft_ok "Repository up to date or updated"
       else
@@ -139,14 +144,28 @@ main() {
     fi
   fi
 
-  public_url="$(ft_ask "Public URL (https://… or http://localhost:8080)" "http://localhost:8080")"
+  local default_pub="${PUBLIC_URL_ARG:-${PUBLIC_URL:-http://localhost:8080}}"
+  public_url="$(ft_ask "Public URL (https://… or http://YOUR_IP)" "$default_pub")"
   public_url="${public_url%/}"
   admin_password="$(ft_ask "Admin password (blank = auto-generate)" "")"
   [[ -n "$admin_password" ]] || admin_password="$(gen_password)" && ft_info "Generated admin password (saved in .env)."
 
+  local server_name="${FROGTALK_SERVER_NAME:-}"
+  if [[ -z "$server_name" ]]; then
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+      server_name="FrogTalk Node"
+    else
+      server_name="$(ft_ask "Node display name (federation directory)" "FrogTalk Node")"
+    fi
+  fi
+
   ft_set_env_value "$ENV_FILE" "ADMIN_PASSWORD" "$admin_password"
   ft_set_env_value "$ENV_FILE" "PUBLIC_URL" "$public_url"
   ft_set_env_value "$ENV_FILE" "FROGTALK_BASE_URL" "$public_url"
+  ft_set_env_value "$ENV_FILE" "FROGTALK_SERVER_NAME" "$server_name"
+  ft_set_env_value "$ENV_FILE" "HOST" "127.0.0.1"
+  ft_set_env_value "$ENV_FILE" "PORT" "8080"
+  ft_set_env_value "$ENV_FILE" "ALLOWED_ORIGINS" "${public_url},http://localhost:8080"
   ft_set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_ENABLED" "1"
   ft_set_env_value "$ENV_FILE" "FROGTALK_FEDERATION_REQUIRE_SIGS" "1"
   ft_set_env_value "$ENV_FILE" "FROGTALK_OFFICIAL_DIRECTORY_URL" "https://frogtalk.xyz/api/network/servers"
@@ -168,7 +187,8 @@ main() {
 
   if ft_ask_yes_no "Join FrogTalk federation mesh now? (recommended)" "y"; then
     ft_info "Running federation join…"
-    if bash "$install_dir/node/scripts/node_federation_join.sh" --install-dir "$install_dir" -y --skip-restart; then
+    local fed_args=(--install-dir "$install_dir" -y --skip-restart --public-url "$public_url")
+    if bash "$install_dir/node/scripts/node_federation_join.sh" "${fed_args[@]}"; then
       ft_ok "Federation mesh linked"
     else
       ft_warn "Federation join had issues — retry: bash node/scripts/install.sh federation"

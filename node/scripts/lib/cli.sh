@@ -66,16 +66,24 @@ ft_require_cmd() {
 
 ft_ask() {
   local prompt="$1" default="${2:-}" answer=""
-  if [[ "${FT_ASSUME_YES:-0}" -eq 1 && -n "$default" ]]; then
+  # Non-interactive: never read stdin (avoids heredoc/SSH scripts feeding garbage).
+  if [[ "${FT_ASSUME_YES:-0}" -eq 1 ]]; then
     printf "%s" "$default"
     return 0
   fi
   if [[ -n "$default" ]]; then
-    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt} [${C_DIM}${default}${C_RESET}]: " answer
+    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt} [${C_DIM}${default}${C_RESET}]: " answer </dev/tty
     printf "%s" "${answer:-$default}"
   else
-    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt}: " answer
+    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt}: " answer </dev/tty
     printf "%s" "$answer"
+  fi
+}
+
+# Call at the start of operator scripts when -y is set and stdin is not a TTY.
+ft_guard_noninteractive_stdin() {
+  if [[ "${FT_ASSUME_YES:-0}" -eq 1 ]] && [[ ! -t 0 ]]; then
+    exec </dev/null
   fi
 }
 

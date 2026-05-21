@@ -7,18 +7,27 @@ starts here.
 ## Quick start (Linux)
 
 ```bash
-git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
+sudo apt install -y git python3 python3-venv python3-pip curl nginx
+sudo adduser --disabled-password --gecos "" deploy
+sudo mkdir -p /opt/frogtalk && sudo chown deploy:deploy /opt/frogtalk
+
+sudo -u deploy git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
+
+export PUBLIC_URL="http://YOUR_VPS_IP_OR_DOMAIN"
+export FROGTALK_SERVER_NAME="My FrogTalk Node"
 
 # Interactive installer (setup · federation · updates · systemd · status)
 bash node/scripts/install.sh
 
-# Or run steps directly:
-bash node/scripts/install.sh setup -y
-bash node/scripts/install.sh federation -y
-bash node/scripts/install.sh systemd -y
+# Or non-interactive (recommended on VPS):
+bash node/scripts/install.sh setup -y --public-url "$PUBLIC_URL"
+bash node/scripts/install.sh federation -y --public-url "$PUBLIC_URL"
+sudo bash node/scripts/install.sh systemd -y
 journalctl -u frogtalk -f
 ```
+
+Full VPS walkthrough: [docs/NODE_INSTALL.md](../docs/NODE_INSTALL.md).
 
 **Tor-only:** set `FROGTALK_TOR_ENABLED=1` and `FROGTALK_ONION_URL=http://….onion` in `.env` (or use the wizard), then run federation-join again.
 
