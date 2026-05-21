@@ -71,11 +71,15 @@ ft_ask() {
     printf "%s" "$default"
     return 0
   fi
+  if [[ ! -t 0 ]]; then
+    printf "%s" "$default"
+    return 0
+  fi
   if [[ -n "$default" ]]; then
-    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt} [${C_DIM}${default}${C_RESET}]: " answer </dev/tty
+    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt} [${C_DIM}${default}${C_RESET}]: " answer
     printf "%s" "${answer:-$default}"
   else
-    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt}: " answer </dev/tty
+    read -r -p "    ${C_CYAN}?${C_RESET} ${prompt}: " answer
     printf "%s" "$answer"
   fi
 }

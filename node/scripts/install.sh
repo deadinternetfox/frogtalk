@@ -56,7 +56,7 @@ parse_global_args() {
       --public-url) PUBLIC_URL_ARG="${2:-}"; shift 2 ;;
       --onion-url) ONION_URL_ARG="${2:-}"; shift 2 ;;
       setup|federation|update|update-apply|systemd|status|help|menu)
-        CMD="$1"; shift; return 0 ;;
+        CMD="$1"; shift; break ;;
       *)
         if [[ -z "$CMD" ]]; then
           ft_die "Unknown argument: $1 (try: bash node/scripts/install.sh help)"
