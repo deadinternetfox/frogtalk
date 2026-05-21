@@ -2309,7 +2309,7 @@ if ($singleThread) {
         .chat-header h4 { color: #00ff41; font-size: 12px; margin: 0; display: flex; align-items: center; gap: 6px; }
         .chat-header .chat-online { color: #4a8f4a; font-size: 11px; }
         .chat-header .chat-toggle { color: #00ff41; font-size: 16px; background: none; border: none; cursor: pointer; font-family: 'Courier New', monospace; transition: transform 0.3s; }
-        .chat-body.open ~ .chat-header .chat-toggle, .chat-header .chat-toggle.open { transform: rotate(180deg); }
+        .chat-widget .chat-header.open .chat-toggle { transform: rotate(180deg); }
         .chat-unread { display: none; background: #ff4444; color: #fff; font-size: 9px; font-weight: bold; min-width: 16px; height: 16px; border-radius: 8px; text-align: center; line-height: 16px; padding: 0 4px; animation: unreadPop 0.3s ease; }
         .chat-unread.visible { display: inline-block; }
         .chat-unread.mention { background: #f6851b; }
@@ -4051,7 +4051,7 @@ if ($singleThread) {
         <div class="chat-header" onclick="toggleFrogMini()">
             <h4 class="frog-mini-headline"><span class="frog-mini-emoji" role="button" tabindex="0" title="Open full FrogTalk" aria-label="Open full FrogTalk in new tab" onclick="event.stopPropagation();frogMiniOpenFullApp()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();frogMiniOpenFullApp();}">🐸</span><span class="frog-mini-label">FrogTalk</span></h4>
             <span class="frog-mini-note" id="frogMiniState">Checking login…</span>
-            <button class="chat-toggle" id="chatToggleBtn">▲</button>
+            <button type="button" class="chat-toggle" id="chatToggleBtn" aria-expanded="false" aria-label="Expand FrogTalk panel" onclick="event.stopPropagation();toggleFrogMini()">▲</button>
         </div>
         <div class="chat-body" id="chatBody">
             <div id="frogMiniGuest" class="frog-mini-guest">
@@ -6196,18 +6196,24 @@ if ($singleThread) {
         }
     }
 
+    function _frogMiniSyncToggleUi() {
+        const header = document.querySelector('#chatWidget .chat-header');
+        const toggle = document.getElementById('chatToggleBtn');
+        if (header) header.classList.toggle('open', frogMiniOpen);
+        if (toggle) {
+            toggle.setAttribute('aria-expanded', frogMiniOpen ? 'true' : 'false');
+            toggle.setAttribute('aria-label', frogMiniOpen ? 'Collapse FrogTalk panel' : 'Expand FrogTalk panel');
+        }
+    }
+
     function toggleFrogMini() {
         frogMiniOpen = !frogMiniOpen;
         const body = document.getElementById('chatBody');
-        const toggle = document.getElementById('chatToggleBtn');
         if (body) {
             body.style.display = '';
             body.classList.toggle('open', frogMiniOpen);
         }
-        if (toggle) {
-            toggle.textContent = frogMiniOpen ? '▼' : '▲';
-            toggle.classList.toggle('open', frogMiniOpen);
-        }
+        _frogMiniSyncToggleUi();
         if (frogMiniOpen) {
             _frogMiniApplyState();
             if (!frogMiniSyncTimer) {
@@ -6259,6 +6265,7 @@ if ($singleThread) {
             body.style.display = '';
             body.classList.remove('open');
         }
+        _frogMiniSyncToggleUi();
         if (frogOpen && frogMiniIsNativeClient()) {
             frogOpen.classList.add('disabled');
             frogOpen.setAttribute('aria-disabled', 'true');
