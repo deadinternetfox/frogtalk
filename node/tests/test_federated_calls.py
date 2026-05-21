@@ -75,6 +75,7 @@ class FederatedCallsTests(unittest.TestCase):
         self.assertEqual(fc._safe_avatar("javascript:alert(1)"), "")
         self.assertEqual(fc._safe_avatar("vbscript:msgbox 1"), "")
         self.assertEqual(fc._safe_avatar("data:text/html,<script>"), "")
+        self.assertEqual(fc._safe_avatar("data:image/svg+xml,<svg onload=alert(1)>"), "")
         self.assertEqual(fc._safe_avatar("file:///etc/passwd"), "")
         self.assertEqual(fc._safe_avatar(""), "")
         self.assertTrue(fc._safe_avatar("https://example.com/a.png").startswith("https://"))
@@ -83,6 +84,12 @@ class FederatedCallsTests(unittest.TestCase):
     def test_clip_sdp_caps(self):
         big = "v=0\r\n" + ("a" * (fc._FED_CALL_SDP_MAX * 2))
         self.assertLessEqual(len(fc._clip_sdp(big)), fc._FED_CALL_SDP_MAX)
+        self.assertNotIn("\x00", fc._clip_sdp("v=0\r\nabc\x00def"))
+
+    def test_clip_ice_strips_controls(self):
+        out = fc._clip_ice("candidate:1 1 udp 2122252543 1.2.3.4 5555 typ host\x00")
+        self.assertNotIn("\x00", out)
+        self.assertTrue(out.startswith("candidate:1"))
 
     def test_offer_flood_per_origin_callee(self):
         # Clear shared bucket to make the test deterministic.

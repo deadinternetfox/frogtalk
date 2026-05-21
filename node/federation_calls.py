@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from collections import defaultdict, deque
@@ -49,6 +50,7 @@ _FED_CALL_TYPES = ("voice", "video")
 # when origin-wide budget is healthy.
 _OFFER_FLOOD_WINDOW_S = 60
 _OFFER_FLOOD_MAX = 4
+_OFFER_FLOOD_KEYS_MAX = 4096
 _offer_flood: dict[tuple[str, str], Deque[float]] = defaultdict(deque)
 
 
@@ -57,8 +59,16 @@ def new_global_call_id() -> str:
 
 
 def _clip_sdp(sdp: str) -> str:
-    s = str(sdp or "")
+    # Keep SDP printable + CR/LF/TAB only; strip other control bytes.
+    s = re.sub(r"[^\x09\x0a\x0d\x20-\x7e]", "", str(sdp or ""))
     return s[:_FED_CALL_SDP_MAX]
+
+
+def _clip_ice(candidate: str) -> str:
+    # ICE lines should be plain text; drop non-printable controls so peers
+    # cannot smuggle terminal/log control chars through signaling.
+    c = re.sub(r"[^\x09\x0a\x0d\x20-\x7e]", "", str(candidate or ""))
+    return c[:_FED_CALL_ICE_MAX]
 
 
 def _safe_call_type(value: Any) -> str:
@@ -78,7 +88,10 @@ def _safe_avatar(value: Any) -> str:
         return ""
     low = raw.lower()
     if low.startswith("data:image/"):
-        pass
+        # Require base64 data URLs and deny SVG to reduce scriptable payload
+        # surface in downstream renderers.
+        if not re.match(r"^data:image/(?!svg\+xml)[a-z0-9.+-]+;base64,[a-z0-9+/=\n\r]+$", low, re.IGNORECASE):
+            return ""
     elif low.startswith("http://") or low.startswith("https://"):
         pass
     else:
@@ -94,6 +107,20 @@ def _offer_throttled(origin: str, callee_gid: str) -> bool:
     if not key[0] or not key[1]:
         return False
     now = time.monotonic()
+    if len(_offer_flood) > _OFFER_FLOOD_KEYS_MAX:
+        # Opportunistic compact: drop stale/empty buckets first, then trim
+        # oldest survivors to keep memory bounded under hostile cardinality.
+        stale: list[tuple[str, str]] = []
+        for k, b in _offer_flood.items():
+            while b and (now - b[0]) > _OFFER_FLOOD_WINDOW_S:
+                b.popleft()
+            if not b:
+                stale.append(k)
+        for k in stale:
+            _offer_flood.pop(k, None)
+        if len(_offer_flood) > _OFFER_FLOOD_KEYS_MAX:
+            for k in list(_offer_flood.keys())[: len(_offer_flood) - _OFFER_FLOOD_KEYS_MAX]:
+                _offer_flood.pop(k, None)
     bucket = _offer_flood[key]
     while bucket and (now - bucket[0]) > _OFFER_FLOOD_WINDOW_S:
         bucket.popleft()
@@ -203,15 +230,20 @@ def enqueue_call_offer(
     ident = db.get_or_create_local_server_identity() or {}
     origin = str(ident.get("server_id") or "").strip()
     db.map_federation_call(global_call_id, origin, local_call_id, "caller")
+    caller_gid = str(caller.get("global_user_id") or "").strip()
+    callee_gid = str(callee.get("global_user_id") or "").strip()
+    sdp_clip = _clip_sdp(sdp)
+    if not caller_gid or not callee_gid or not sdp_clip:
+        return {"ok": False, "error": "invalid_offer_payload"}
     payload = {
         "global_call_id": global_call_id,
         "local_call_id_origin": int(local_call_id),
-        "caller_global_user_id": str(caller.get("global_user_id") or "").strip(),
-        "callee_global_user_id": str(callee.get("global_user_id") or "").strip(),
+        "caller_global_user_id": caller_gid,
+        "callee_global_user_id": callee_gid,
         "caller_nickname": str(caller.get("nickname") or "").strip(),
         "caller_avatar": _safe_avatar(caller.get("avatar")),
         "call_type": _safe_call_type(call_type),
-        "sdp": _clip_sdp(sdp),
+        "sdp": sdp_clip,
         "fp_sig": str(fp_sig or "")[:_FED_CALL_FP_SIG_MAX],
     }
     return _enqueue("call.offer", payload, [home])
@@ -229,11 +261,16 @@ def enqueue_call_answer(
     home = db.resolve_global_user_home_server_id(caller_gid)
     if not home:
         return {"ok": False, "error": "no_caller_home"}
+    callee_gid = str(callee.get("global_user_id") or "").strip()
+    caller_gid_clean = str(caller_gid or "").strip()
+    sdp_clip = _clip_sdp(sdp)
+    if not callee_gid or not caller_gid_clean or not sdp_clip:
+        return {"ok": False, "error": "invalid_answer_payload"}
     payload = {
         "global_call_id": global_call_id,
-        "callee_global_user_id": str(callee.get("global_user_id") or "").strip(),
-        "caller_global_user_id": str(caller_gid or "").strip(),
-        "sdp": _clip_sdp(sdp),
+        "callee_global_user_id": callee_gid,
+        "caller_global_user_id": caller_gid_clean,
+        "sdp": sdp_clip,
         "fp_sig": str(fp_sig or "")[:_FED_CALL_FP_SIG_MAX],
         "renegotiate": bool(renegotiate),
     }
@@ -250,11 +287,16 @@ def enqueue_call_ice(
     home = db.resolve_global_user_home_server_id(to_gid)
     if not home:
         return {"ok": False, "error": "no_peer_home"}
+    from_gid = str(from_user.get("global_user_id") or "").strip()
+    to_gid_clean = str(to_gid or "").strip()
+    cand = _clip_ice(candidate)
+    if not from_gid or not to_gid_clean or not cand:
+        return {"ok": False, "error": "invalid_ice_payload"}
     payload = {
         "global_call_id": global_call_id,
-        "from_global_user_id": str(from_user.get("global_user_id") or "").strip(),
-        "to_global_user_id": str(to_gid or "").strip(),
-        "candidate": str(candidate or "")[:_FED_CALL_ICE_MAX],
+        "from_global_user_id": from_gid,
+        "to_global_user_id": to_gid_clean,
+        "candidate": cand,
     }
     return _enqueue("call.ice", payload, [home])
 
@@ -536,7 +578,9 @@ async def _apply_call_ice(payload, origin, gid_call, _fed_global_id):
     cand_raw = payload.get("candidate")
     if cand_raw is None:
         return
-    cand = str(cand_raw)[:_FED_CALL_ICE_MAX]
+    cand = _clip_ice(cand_raw)
+    if not cand:
+        return
     ice_payload = {
         "type": "ice_candidate",
         "from_id": int(from_user["id"]),
