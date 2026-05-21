@@ -2251,6 +2251,7 @@ async def federation_sync_resume(
 @router.post("/federation-sync-export-gid")
 @limiter.limit("120/hour")
 async def federation_sync_export_gid(
+    request: Request,
     body: FederationSyncExportGidRequest,
     x_federation_token: str | None = Header(default=None),
 ):
