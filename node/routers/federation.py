@@ -762,6 +762,62 @@ def _public_server_target(server: dict) -> str:
     return base_url or onion_url
 
 
+_GENERIC_DIRECTORY_NAMES = frozenset({"frogtalk node"})
+
+
+def _directory_row_rank(row: dict) -> tuple:
+    """Higher is better when picking one row per public target."""
+    name = (row.get("display_name") or "").strip().lower()
+    generic = 0 if name in _GENERIC_DIRECTORY_NAMES or not name else 1
+    region = 1 if (row.get("region") or "").strip() else 0
+    official = 1 if row.get("official") else 0
+    pubkey = 1 if (row.get("server_pubkey") or "").strip() else 0
+    return (generic, region, official, pubkey, len(name))
+
+
+def _dedupe_public_servers(rows: list[dict]) -> list[dict]:
+    """One listing per clearnet/onion target; drop generic duplicate names."""
+    by_key: dict[str, dict] = {}
+    order: list[str] = []
+    for s in rows:
+        key = (_public_server_target(s) or s.get("server_id") or "").strip().rstrip("/").lower()
+        if not key:
+            continue
+        if key not in by_key:
+            by_key[key] = s
+            order.append(key)
+            continue
+        if _directory_row_rank(s) > _directory_row_rank(by_key[key]):
+            by_key[key] = s
+    return [by_key[k] for k in order]
+
+
+def prune_duplicate_federation_servers() -> int:
+    """Delete extra DB rows that share the same public URL (keeps best display name)."""
+    rows = db.list_federation_servers_admin(include_disabled=True)
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        view = _public_server_view(row)
+        key = (_public_server_target(view) or row.get("server_id") or "").strip().rstrip("/").lower()
+        if not key:
+            continue
+        groups.setdefault(key, []).append(row)
+    removed = 0
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        group.sort(key=_directory_row_rank, reverse=True)
+        for dup in group[1:]:
+            if db.delete_federation_server(dup.get("server_id") or ""):
+                removed += 1
+                _log.info(
+                    "federation: removed duplicate directory row %s (%s)",
+                    dup.get("server_id"),
+                    dup.get("display_name"),
+                )
+    return removed
+
+
 def _resolved_server_region(server: dict) -> str:
     """Stored region, else GeoIP from clearnet base URL, else Tor label."""
     region = str(server.get("region") or "").strip()
@@ -1549,6 +1605,7 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
     except Exception:
         _log.exception("federation: ensure_peer_pubkeys_pinned after directory sync")
     db.set_config("federation.official_directory_last_sync", str(int(time.time())))
+    pruned = prune_duplicate_federation_servers()
     return {
         "ok": True,
         "directory_url": url,
@@ -1556,6 +1613,7 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
         "skipped": skipped,
         "total": len(entries),
         "tor_peers_disabled": tor_disabled,
+        "duplicates_pruned": pruned,
     }
 
 
@@ -1662,7 +1720,7 @@ async def list_network_servers(request: Request, official_only: int = 0):
     local_target = _public_server_target(local_public)
     if local_target and not any((s.get("server_id") == local["server_id"] or _public_server_target(s) == local_target) for s in rows):
         rows.insert(0, local_public)
-    return {"servers": rows}
+    return {"servers": _dedupe_public_servers(rows)}
 
 
 @router.get("/network/probe")
@@ -1958,6 +2016,7 @@ async def register_network_server(
         capabilities=body.capabilities,
         turn_urls_json=turn_json,
     )
+    prune_duplicate_federation_servers()
     return {"ok": True}
 
 

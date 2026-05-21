@@ -9750,6 +9750,17 @@ def set_federation_server_enabled(server_id: str, enabled: bool) -> bool:
     return cur.rowcount > 0
 
 
+def delete_federation_server(server_id: str) -> bool:
+    """Remove a federation directory row (duplicate/stale peer)."""
+    sid = (server_id or "").strip()
+    if not sid:
+        return False
+    with _conn() as con:
+        cur = con.execute("DELETE FROM federation_servers WHERE server_id=?", (sid,))
+        con.commit()
+    return cur.rowcount > 0
+
+
 def upsert_federation_server(
     server_id: str,
     display_name: str,
