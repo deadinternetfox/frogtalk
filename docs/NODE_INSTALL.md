@@ -426,7 +426,9 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d chat.yourdomain.com
 ```
 
-Align ports: default app `PORT=8080` in `.env` must match `proxy_pass`. The template in `node/deploy/nginx.conf` may reference port **8000** — change upstream or `.env` so they match.
+Align ports: default app `PORT=8080` in `.env` must match nginx upstream `127.0.0.1:8080`. The wizard’s `install_board_nginx.sh` **does not** bind nginx on port 8080 unless `FROGTALK_NGINX_TUNNEL_LISTEN=1` (Cloudflare tunnel on Main). If both nginx and uvicorn fight for 8080 you get **502 Bad Gateway** on `/app` while `/board/` still works.
+
+Reference: [`node/deploy/nginx.conf`](../node/deploy/nginx.conf) (upstream default **8000** in the file — the install script rewrites it to your `PORT`).
 
 Reference: [`node/deploy/nginx.conf`](../node/deploy/nginx.conf), [`node/deploy/README.md`](../node/deploy/README.md).
 

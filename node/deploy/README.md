@@ -116,7 +116,7 @@ The image `WORKDIR` is `/app` with `node/` contents copied in; `CMD` is `python 
 
 ## Cloudflare Tunnel
 
-Production clearnet nodes often terminate TLS at Cloudflare and run `cloudflared` locally. Point the tunnel origin at **nginx on port 8080**, not uvicorn directly.
+Production clearnet nodes often terminate TLS at Cloudflare and run `cloudflared` locally. Point the tunnel origin at **nginx on port 8080**, not uvicorn directly. When installing nginx on that host, set `FROGTALK_NGINX_TUNNEL_LISTEN=1` so `install_board_nginx.sh` keeps `listen 8080` in the site config. **Community VPS nodes** (app on `127.0.0.1:8080`) must **not** use that flag — otherwise nginx steals port 8080 and `/app` returns 502 while PHP `/board/` still works.
 
 1. Install [cloudflared](https://github.com/cloudflare/cloudflared/releases) (`.deb` on Debian/Ubuntu).
 2. In **Cloudflare Zero Trust → Networks → Tunnels**, set the public hostname origin to `http://localhost:8080`.

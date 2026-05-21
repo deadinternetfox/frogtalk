@@ -208,6 +208,7 @@ journalctl -u frogtalk -n 40 --no-pager</code></pre>
         <tr><td>Peers listed, no sync</td><td>Re-run <code>federation -y</code> after service is running</td></tr>
         <tr><td>Not on frogtalk.xyz directory</td><td>Match <code>FROGTALK_FEDERATION_TOKEN</code> on Main + node; re-run <code>federation -y</code></td></tr>
         <tr><td>CORS errors</td><td>Add your URL to <code>ALLOWED_ORIGINS</code></td></tr>
+        <tr><td><code>/board/</code> OK but <code>/app</code> 502</td><td>nginx must not <code>listen 8080</code> when app uses <code>PORT=8080</code> — re-run <code>board-nginx</code> (wizard strips tunnel port by default)</td></tr>
         <tr><td><code>/board/</code> 404</td><td>Re-run <code>sudo bash node/scripts/install.sh board-nginx</code>; check php-fpm + nginx test</td></tr>
         <tr><td>Board pills / <code>curl_init</code></td><td><code>sudo apt install php-cli php-curl</code>; re-run federation</td></tr>
         <tr><td><code>systemd</code> permission denied</td><td><code>sudo chown -R deploy:deploy /opt/frogtalk</code>; <code>sudo bash node/scripts/install.sh systemd -y</code></td></tr>

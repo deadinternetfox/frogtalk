@@ -39,6 +39,16 @@ TEMPLATE="$INSTALL_DIR/node/deploy/nginx.conf"
 TMP="$(mktemp)"
 sed "s/127.0.0.1:8000/127.0.0.1:${APP_PORT}/g" "$TEMPLATE" >"$TMP"
 
+# Clearnet VPS installs: app binds PORT (default 8080). nginx must not also listen
+# on that port (template includes 8080 for Cloudflare tunnel origins on Main only).
+_tunnel_nginx=0
+case "${FROGTALK_NGINX_TUNNEL_LISTEN:-}" in
+  1|true|yes|on) _tunnel_nginx=1 ;;
+esac
+if [[ "$_tunnel_nginx" -eq 0 ]]; then
+  sed -i '/listen 8080;/d; /listen \[::\]:8080;/d' "$TMP"
+fi
+
 _https_pub=0
 case "${PUBLIC_URL:-}" in
   https://*) _https_pub=1 ;;

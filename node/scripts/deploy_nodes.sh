@@ -37,10 +37,10 @@ for spec in "${FLEET_HOSTS[@]:-}"; do
   [[ "$host" != "$port" ]] || port=22
   HOSTS+=("$host")
   HOST_PORT["$host"]="$port"
-  if [[ -n "${FLEET_SSH_PASS[$host]:-}" ]]; then
-    HOST_SSH_PASS["$host"]="${FLEET_SSH_PASS[$host]}"
+  if [[ -n "${FLEET_SSH_PASS["$host"]:-}" ]]; then
+    HOST_SSH_PASS["$host"]="${FLEET_SSH_PASS["$host"]}"
   fi
-  HOST_LABEL["$host"]="${FLEET_HOST_LABEL[$host]:-$host}"
+  HOST_LABEL["$host"]="${FLEET_HOST_LABEL["$host"]:-$host}"
 done
 [[ ${#HOSTS[@]} -gt 0 ]] || { echo "FLEET_HOSTS is empty in deploy_fleet.local.sh" >&2; exit 1; }
 
@@ -112,6 +112,9 @@ DEFAULT_FILES=(
   "node/static/frogtalk-v237.apk:node/static/frogtalk-v237.apk"
   "node/static/github-build-mirror/frogtalk-v237.apk:node/static/github-build-mirror/frogtalk-v237.apk"
   "node/main.py:node/main.py"
+  "node/geoip.py:node/geoip.py"
+  "node/database.py:node/database.py"
+  "node/routers/federation.py:node/routers/federation.py"
   "node/static/partials/site-nav.html:node/static/partials/site-nav.html"
   "node/static/home.html:node/static/home.html"
   "node/static/css/home.css:node/static/css/home.css"
