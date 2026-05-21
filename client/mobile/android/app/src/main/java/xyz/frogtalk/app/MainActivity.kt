@@ -107,6 +107,10 @@ class MainActivity : AppCompatActivity() {
     private var pendingPermissionRequest: PermissionRequest? = null
     private var musicPlaybackActive: Boolean = false
     private var pendingBatteryPromptAfterNotifications: Boolean = false
+    /** Warm-tap on incoming-call notification before WebView JS is ready. */
+    private var pendingIncomingCallId: String? = null
+    private var pendingIncomingCallPeer: String? = null
+    private var incomingCallRecoveryToken: Long = 0L
 
     private fun normalizeServerBaseUrl(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
@@ -703,7 +707,11 @@ class MainActivity : AppCompatActivity() {
                 // leave both ends stuck on "Calling…/Connecting…". The
                 // system has already brought us to the foreground; that's
                 // all that's needed.
-                Log.i(TAG, "incoming-call body tap: bring-to-front only, no reload")
+                Log.i(TAG, "incoming-call body tap: bring-to-front + JS recovery")
+                val callId = intent.getStringExtra(CallService.EXTRA_CALL_ID).orEmpty()
+                val peerNick = intent.getStringExtra(CallService.EXTRA_PEER_NICK)
+                    ?: intent.getStringExtra("dm_nick").orEmpty()
+                scheduleIncomingCallRecovery(callId, peerNick)
                 // Clear the system tray ringing notification — redundant
                 // once the in-app overlay takes over and just noisy.
                 try {
@@ -870,10 +878,44 @@ class MainActivity : AppCompatActivity() {
         try { webView?.restoreState(savedInstanceState) } catch (_: Throwable) {}
     }
 
+    private fun scheduleIncomingCallRecovery(callId: String, peerNick: String) {
+        pendingIncomingCallId = callId.trim().takeIf { it.isNotEmpty() }
+        pendingIncomingCallPeer = peerNick.trim().takeIf { it.isNotEmpty() }
+        flushPendingIncomingCallRecovery(delayMs = 350)
+    }
+
+    private fun flushPendingIncomingCallRecovery(delayMs: Long = 0) {
+        val callId = pendingIncomingCallId.orEmpty()
+        val peerNick = pendingIncomingCallPeer.orEmpty()
+        if (callId.isBlank() && peerNick.isBlank()) return
+        val wv = webView ?: return
+        val cidJs = callId.replace("\\", "\\\\").replace("'", "\\'")
+        val nickJs = peerNick.replace("\\", "\\\\").replace("'", "\\'")
+        val js = """
+            try{
+              if(window.App&&typeof App.recoverIncomingCallFromNative==='function'){
+                App.recoverIncomingCallFromNative({callId:'$cidJs',peerNick:'$nickJs'});
+              }
+            }catch(e){console.warn('[ft] incoming-call recovery failed',e);}
+        """.trimIndent()
+        val token = ++incomingCallRecoveryToken
+        wv.postDelayed({
+            if (token != incomingCallRecoveryToken) return@postDelayed
+            try { wv.evaluateJavascript(js, null) } catch (e: Throwable) {
+                Log.w(TAG, "incoming-call JS recovery failed", e)
+            }
+            pendingIncomingCallId = null
+            pendingIncomingCallPeer = null
+        }, delayMs)
+    }
+
     override fun onResume() {
         super.onResume()
         isAppVisible = true
         try { webView?.onResume() } catch (_: Throwable) {}
+        if (pendingIncomingCallId != null || pendingIncomingCallPeer != null) {
+            flushPendingIncomingCallRecovery(delayMs = 200)
+        }
         // Refresh the FCM token if it's been more than 6h since the last
         // server-side sync. Catches silent token rotations (Play Services
         // updates, GCM rotations, app data restored to a new device) that

@@ -223,16 +223,6 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Distinct intent for the "Answer" action: same as openIntent but with
-        // auto_accept=true so MainActivity tells the WebView to skip the
-        // ringing UI and accept immediately. Safe now that onNewIntent's
-        // body-tap branch no longer reloads the WebView (which was tearing
-        // down the live RTCPeerConnection mid-handshake).
-        // (Removed: see CallStyle/regular-notification block below — we no
-        //  longer expose an Answer button; the in-app #incoming-call popup
-        //  is the single Accept/Decline surface and tapping the
-        //  notification merely opens the app.)
-
         val declineIntent = Intent(this, CallDeclineReceiver::class.java).apply {
             putExtra(CallService.EXTRA_CALL_ID, callId)
             putExtra(CallService.EXTRA_PEER_NICK, peerNick)

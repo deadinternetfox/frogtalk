@@ -66,7 +66,7 @@
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'room-secret-wrap-probe-v1',
+  ASSET_RESET_VERSION: 'android-call-notif-v1',
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -716,10 +716,54 @@ const App = {
     overlay.querySelector('#ft-node-easter-close')?.addEventListener('click', () => this.closeNodeEasterEgg());
   },
 
+  /**
+   * Android warm-tap on incoming-call notification (activity already running).
+   * Fetches pending offer via REST, opens the DM thread, shows #incoming-call.
+   */
+  async recoverIncomingCallFromNative(pending) {
+    const callId = String(pending?.callId || '').trim();
+    const peerNick = String(pending?.peerNick || '').trim();
+    if (!callId && !peerNick) return false;
+    if (!State.token) {
+      this.setPendingIncomingCall({ callId, peerNick, action: '' });
+      return false;
+    }
+    if (this._nativeCallRecoverId === callId) return true;
+    this._nativeCallRecoverId = callId;
+    try {
+      try { document.body.classList.remove('in-welcome'); } catch {}
+      if (typeof isIncomingCallActive === 'function' && isIncomingCallActive()) {
+        if (peerNick && typeof openDMWithNick === 'function') {
+          try { await openDMWithNick(peerNick); } catch {}
+        }
+        const card = document.getElementById('incoming-call');
+        if (card) card.classList.remove('hidden');
+        return true;
+      }
+      if (peerNick && typeof openDMWithNick === 'function') {
+        try { await openDMWithNick(peerNick); } catch {}
+      }
+      const payload = { callId, peerNick, action: '' };
+      this.setPendingIncomingCall(payload);
+      return await this.recoverIncomingCall(payload);
+    } catch (e) {
+      console.warn('[App] recoverIncomingCallFromNative failed', e);
+      return false;
+    } finally {
+      setTimeout(() => {
+        if (this._nativeCallRecoverId === callId) this._nativeCallRecoverId = null;
+      }, 2500);
+    }
+  },
+
   async recoverIncomingCall(pending) {
     const callId = String(pending?.callId || '').trim();
     if (!callId || !State.token) return false;
     try {
+      const peerNick = String(pending?.peerNick || '').trim();
+      if (peerNick && typeof openDMWithNick === 'function') {
+        try { await openDMWithNick(peerNick); } catch {}
+      }
       const res = await fetch(`/api/calls/${encodeURIComponent(callId)}/pending`, {
         headers: { 'X-Session-Token': State.token }
       });
@@ -730,14 +774,11 @@ const App = {
         return false;
       }
       const offer = await res.json();
-      if (!offer?.from_nickname && pending?.peerNick) {
-        offer.from_nickname = pending.peerNick;
+      if (!offer?.from_nickname && peerNick) {
+        offer.from_nickname = peerNick;
       }
       if (typeof handleCallOffer === 'function') {
         await handleCallOffer(offer);
-        if (String(pending?.action || '').toLowerCase() === 'answer' && typeof acceptCall === 'function') {
-          try { await acceptCall(); } catch {}
-        }
         return true;
       }
       return false;
@@ -755,11 +796,15 @@ const App = {
       });
       if (!res.ok) return false;
       const offer = await res.json();
+      const peerNick = String(offer?.from_nickname || opts?.peerNick || '').trim();
       if (offer?.call_id) {
         this.setPendingIncomingCall({
           callId: String(offer.call_id),
-          peerNick: String(offer.from_nickname || ''),
+          peerNick,
         });
+      }
+      if (peerNick && typeof openDMWithNick === 'function') {
+        try { await openDMWithNick(peerNick); } catch {}
       }
       if (typeof handleCallOffer === 'function') {
         await handleCallOffer(offer);

@@ -11,8 +11,21 @@ object FcmBridge {
     private const val TAG = "FrogTalkFCM"
     private const val PREFS = "frogtalk_prefs"
     private const val PREF_SESSION_TOKEN = "session_token"
+    private const val PREF_SERVER_BASE_URL = "server_base_url"
     private const val PREF_LAST_TOKEN_SYNC = "last_fcm_token_sync_at"
-    private const val BASE_API = "https://frogtalk.xyz"
+    private const val DEFAULT_API = "https://frogtalk.xyz"
+
+    private fun apiBase(context: Context): String {
+        val custom = try {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(PREF_SERVER_BASE_URL, "")
+                .orEmpty()
+                .trim()
+        } catch (_: Throwable) {
+            ""
+        }
+        return (custom.ifBlank { DEFAULT_API }).trimEnd('/')
+    }
 
     fun rememberSessionToken(context: Context, sessionToken: String?) {
         val token = (sessionToken ?: "").trim()
@@ -97,7 +110,7 @@ object FcmBridge {
 
         Thread {
             try {
-                val conn = (URL("$BASE_API/api/push/fcm-subscribe").openConnection() as HttpURLConnection).apply {
+                val conn = (URL("${apiBase(context)}/api/push/fcm-subscribe").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 12000
                     readTimeout = 12000
@@ -138,7 +151,7 @@ object FcmBridge {
 
         Thread {
             try {
-                val conn = (URL("$BASE_API/api/calls/decline").openConnection() as HttpURLConnection).apply {
+                val conn = (URL("${apiBase(context)}/api/calls/decline").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     connectTimeout = 12000
                     readTimeout = 12000

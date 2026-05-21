@@ -1803,7 +1803,7 @@ function openModal(id) {
    being listed in _noBackdropDismiss below (e.g. active calls). */
 const _noBackdropDismiss = new Set([
   'modal-call',            // don't accidentally end a live call
-  'modal-incoming-call',   // answer/decline only
+  'incoming-call',   // answer/decline only (full-screen overlay, not a modal)
   'modal-confirm',         // explicit Yes/No required
 ]);
 

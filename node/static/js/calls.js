@@ -590,10 +590,14 @@ async function handleCallOffer (data) {
       window.desktopApp.showNotification('📞 Incoming call', `${data.from_nickname || 'Someone'} is calling (${label})`);
     }
   } catch {}
-  // Best-effort: fire native ring on Android so the user can hear/see the call
-  // even when the browser tab isn't focused. Full force-closed wake requires FCM.
+  // Native tray ring only while the WebView is visible. When backgrounded,
+  // FCM posts the incoming-call notification — ringForCall here duplicates it.
   try {
-    if (window.Android && typeof window.Android.ringForCall === 'function') {
+    if (
+      document.visibilityState === 'visible' &&
+      window.Android &&
+      typeof window.Android.ringForCall === 'function'
+    ) {
       window.Android.ringForCall(String(data.from_nickname || ''), String(data.call_id || ''));
     }
   } catch {}
@@ -1413,6 +1417,10 @@ function closeCallOverlay () {
 
 function showIncomingCall (nick, type, avatar) {
   const safeNick = String(nick || '').trim() || 'Unknown';
+  try { document.body.classList.remove('in-welcome'); } catch {}
+  try {
+    if (typeof selectServer === 'function') selectServer('dms');
+  } catch {}
   const card = document.getElementById('incoming-call');
   const nameEl = document.getElementById('icall-name');
   const typeEl = document.getElementById('icall-type');
