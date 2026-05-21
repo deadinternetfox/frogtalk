@@ -135,9 +135,84 @@
       .replaceAll("'", '&#39;');
   }
 
+  /** While > 0, suppress red error flashes during PIN sync / session catch-up. */
+  let _authSettling = 0;
+
   function setLoginMessage(msg, isError = false) {
+    if (!loginMsg) return;
+    if (_authSettling > 0 && isError) {
+      return;
+    }
     loginMsg.textContent = msg || '';
     loginMsg.style.color = isError ? '#ff9f9f' : '#93ab9a';
+  }
+
+  function _sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function _syncAdminGateQuiet() {
+    try {
+      await api('/api/auth/pin/sync-admin-gate', { method: 'POST' });
+      return true;
+    } catch (e) {
+      return e.status !== 423;
+    }
+  }
+
+  async function _waitForAdminGateOpen(maxTries = 8) {
+    let last = {};
+    for (let i = 0; i < maxTries; i++) {
+      await _syncAdminGateQuiet();
+      last = await api('/api/server-admin/session');
+      if (last.ok && last.authenticated && last.is_admin && !last.pin_required) {
+        return last;
+      }
+      if (last.ok && last.authenticated && last.is_admin) {
+        return last;
+      }
+      await _sleep(50 + i * 45);
+    }
+    return last;
+  }
+
+  async function _confirmAdminMe(maxTries = 6) {
+    let lastErr = null;
+    for (let i = 0; i < maxTries; i++) {
+      try {
+        await api('/api/server-admin/me');
+        return true;
+      } catch (e) {
+        lastErr = e;
+        if (e.status === 423 && i < maxTries - 1) {
+          await _syncAdminGateQuiet();
+          await _sleep(50 + i * 50);
+          continue;
+        }
+        throw e;
+      }
+    }
+    if (lastErr) throw lastErr;
+    return false;
+  }
+
+  async function _openAdminDashboard() {
+    _authSettling += 1;
+    setLoginMessage('Opening server panel…', false);
+    try {
+      const gate = await _waitForAdminGateOpen();
+      if (!gate.ok) {
+        throw new Error('PIN accepted but session is not cleared for admin access. Hard-refresh and try again.');
+      }
+      await _confirmAdminMe();
+      setLoginMessage('');
+      loginScreen.classList.add('hidden');
+      app.classList.remove('hidden');
+      await refreshDashboard();
+      return true;
+    } finally {
+      _authSettling = Math.max(0, _authSettling - 1);
+    }
   }
 
   function setActionMessage(msg, isError = false) {
@@ -1378,20 +1453,14 @@
       setLoginMessage('PIN required to open the server panel.', true);
       return false;
     }
-    try {
-      await api('/api/auth/pin/sync-admin-gate', { method: 'POST' });
-    } catch (e) {
-      if (e.status === 423) {
-        setLoginMessage('Enter your privacy PIN to unlock the server panel.', true);
-        return false;
-      }
-    }
+    await _syncAdminGateQuiet();
     return true;
   }
 
   async function ensureAuth() {
     loginScreen.classList.remove('hidden');
     app.classList.add('hidden');
+    setLoginMessage('');
     let gate = {};
     try {
       gate = await api('/api/server-admin/session');
@@ -1404,7 +1473,6 @@
       return false;
     }
     const legacyBox = document.getElementById('gate-legacy');
-    const frogtalkBox = document.getElementById('gate-frogtalk');
     if (legacyBox) legacyBox.classList.toggle('hidden', !gate.legacy_webui_login);
     if (!gate.authenticated) {
       setLoginMessage('Sign in with a FrogTalk account that has node admin rights.');
@@ -1415,37 +1483,12 @@
       return false;
     }
     if (gate.pin_required) {
-      setLoginMessage('Enter your privacy PIN to unlock the server panel.');
+      setLoginMessage('');
       const pinOk = await _runAdminPinGate();
       if (!pinOk) return false;
-      try {
-        gate = await api('/api/server-admin/session');
-      } catch (e) {
-        setLoginMessage(e.message || 'Session check failed after PIN.', true);
-        return false;
-      }
-      if (!gate.ok) {
-        try {
-          await api('/api/auth/pin/sync-admin-gate', { method: 'POST' });
-          gate = await api('/api/server-admin/session');
-        } catch (e) {
-          if (e.status === 423) {
-            setLoginMessage('Enter your privacy PIN to unlock the server panel.', true);
-            return false;
-          }
-        }
-        if (!gate.ok) {
-          setLoginMessage('PIN accepted but session is not cleared for admin access. Hard-refresh and try again.', true);
-          return false;
-        }
-      }
     }
     try {
-      await api('/api/server-admin/me');
-      loginScreen.classList.add('hidden');
-      app.classList.remove('hidden');
-      await refreshDashboard();
-      return true;
+      return await _openAdminDashboard();
     } catch (e) {
       setLoginMessage(e.message || 'Could not load server panel.', true);
       return false;
@@ -1468,13 +1511,13 @@
       say('Enter username and password.', true);
       return;
     }
-    say('Signing in...');
+    say('Signing in…', false);
     try {
       await api('/api/server-admin/login', {
         method: 'POST',
         body: JSON.stringify({ username, password })
       });
-      say('Authenticated.');
+      setLoginMessage('');
       await ensureAuth();
     } catch (e) {
       say(e.message, true);
