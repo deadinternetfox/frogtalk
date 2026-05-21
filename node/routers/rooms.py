@@ -599,12 +599,13 @@ async def create_room(request: Request, body: CreateRoomRequest,
         return JSONResponse(status_code=400, content={"error": str(e)})
 
     clean_desc = _sanitize_room_text(body.description, max_len=256)
+    clean_hint = _sanitize_room_text(body.room_key_hint, max_len=512, multiline=True) or None
     room_id = db.create_room(
         name=body.name,
         description=clean_desc,
         room_type=body.type,
         owner_id=current_user["id"],
-        room_key_hint=body.room_key_hint,
+        room_key_hint=clean_hint,
         icon=icon,
         channel_type=body.channel_type
     )

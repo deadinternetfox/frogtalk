@@ -86,40 +86,132 @@ const Rooms = (() => {
    *     slot to v1 on first access so existing users keep working without
    *     a re-key prompt.
    */
-  function _getStoredRoomSecret(name, version) {
+  async function _unwrapStoredSecret(raw) {
+    if (!raw) return '';
+    if (typeof Crypto !== 'undefined' && Crypto.unwrapLocalSecret) {
+      return Crypto.unwrapLocalSecret(raw);
+    }
+    return raw;
+  }
+
+  async function _wrapSecretForStorage(secret) {
+    if (!secret) return '';
+    if (typeof Crypto !== 'undefined' && Crypto.wrapLocalSecret) {
+      return Crypto.wrapLocalSecret(secret);
+    }
+    return secret;
+  }
+
+  async function _getStoredRoomSecret(name, version) {
     try {
+      const readKey = (k) => localStorage.getItem(k) || '';
       if (version && version > 0) {
-        const v = localStorage.getItem(_roomSecretStorageKey(name, version));
-        if (v) return v;
-        // Migration: if we have a legacy secret and the caller asked for v1,
-        // promote the legacy slot in-place so subsequent fetches hit fast.
+        const storageKey = _roomSecretStorageKey(name, version);
+        const raw = readKey(storageKey);
+        if (raw) {
+          const plain = await _unwrapStoredSecret(raw);
+          if (plain && !raw.startsWith('ftls1:')) {
+            void _storeRoomSecret(name, plain, version);
+          }
+          return plain;
+        }
         if (version === 1) {
-          const legacy = localStorage.getItem(_roomSecretStorageKey(name));
-          if (legacy) {
-            try { localStorage.setItem(_roomSecretStorageKey(name, 1), legacy); } catch {}
-            return legacy;
+          const legacyKey = _roomSecretStorageKey(name);
+          const legacyRaw = readKey(legacyKey);
+          if (legacyRaw) {
+            const plain = await _unwrapStoredSecret(legacyRaw);
+            if (plain) {
+              try { await _storeRoomSecret(name, plain, 1); } catch {}
+            }
+            return plain;
           }
         }
         return '';
       }
-      return localStorage.getItem(_roomSecretStorageKey(name)) || '';
+      const raw = readKey(_roomSecretStorageKey(name));
+      const plain = await _unwrapStoredSecret(raw);
+      if (plain && raw && !raw.startsWith('ftls1:')) {
+        void _storeRoomSecret(name, plain);
+      }
+      return plain;
     } catch {
       return '';
     }
   }
 
-  function _storeRoomSecret(name, secret, version) {
+  async function _storeRoomSecret(name, secret, version) {
     try {
       if (secret) {
-        localStorage.setItem(_roomSecretStorageKey(name), secret);
+        const wrapped = await _wrapSecretForStorage(secret);
+        localStorage.setItem(_roomSecretStorageKey(name), wrapped);
         if (version && version > 0) {
-          localStorage.setItem(_roomSecretStorageKey(name, version), secret);
+          localStorage.setItem(_roomSecretStorageKey(name, version), wrapped);
           _setStoredKeyVersion(name, version);
         }
       } else {
-        localStorage.removeItem(_roomSecretStorageKey(name));
+        _clearRoomSecrets(name);
       }
     } catch {}
+  }
+
+  function _clearRoomSecrets(name) {
+    const base = String(name || '').toLowerCase();
+    try {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith(`${ROOM_SECRET_PREFIX}${base}`)) keys.push(k);
+      }
+      keys.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+      localStorage.removeItem(_roomKeyVersionStorageKey(name));
+    } catch {}
+    try {
+      if (State.roomKeys) delete State.roomKeys[name];
+    } catch {}
+  }
+
+  function _looksLikeRoomCiphertext(content) {
+    if (!content || typeof content !== 'string') return false;
+    if (content.startsWith('ftenc:')) return true;
+    if (content.length < 28) return false;
+    if (/^[\x20-\x7E]+$/.test(content) && !/^[A-Za-z0-9+/=]+$/.test(content)) return false;
+    return /^[A-Za-z0-9+/=]+$/.test(content);
+  }
+
+  /**
+   * After join: sample recent ciphertext and verify the shared secret decrypts.
+   * Empty channels pass; wrong secret rolls back membership.
+   */
+  async function probePrivateRoomDecrypt(roomName, key) {
+    const room = (State.rooms || []).find(r => r.name === roomName) || null;
+    if (!room || (room.type || 'public') !== 'private' || !key) return true;
+    try {
+      const res = await fetch(
+        `/api/messages/${encodeURIComponent(roomName)}?limit=40`,
+        { headers: { 'X-Session-Token': State.token } },
+      );
+      if (!res.ok) return true;
+      const data = await res.json();
+      const msgs = (data.messages || []).filter(
+        m => !m.system_kind && m.content && _looksLikeRoomCiphertext(m.content),
+      );
+      if (!msgs.length) return true;
+      for (const m of msgs) {
+        const ver = parseInt(m.key_version, 10) || 0;
+        let useKey = key;
+        let aad = null;
+        if (ver > 0 && room.id) {
+          try { useKey = (await _getRoomKeyForVersion(roomName, ver)) || key; } catch {}
+          try { aad = _aadForRoom(room.id, ver); } catch {}
+        }
+        const plain = await Crypto.decrypt(m.content, useKey, aad || undefined);
+        if (plain !== null) return true;
+      }
+      return false;
+    } catch {
+      return true;
+    }
   }
 
   function toggleSecretVisibility(inputId, buttonId) {
@@ -217,8 +309,8 @@ const Rooms = (() => {
     const room = (State.rooms || []).find(r => r.name === name) || null;
     const srvVer = Math.max(1, parseInt(room?.room_key_version, 10) || 1);
     // Try the per-version slot first; fall back to legacy unsuffixed.
-    let secret = _getStoredRoomSecret(name, srvVer);
-    if (!secret) secret = _getStoredRoomSecret(name);
+    let secret = await _getStoredRoomSecret(name, srvVer);
+    if (!secret) secret = await _getStoredRoomSecret(name);
     if (!secret) {
       const entered = await _promptPrivateRoomSecret(name, room?.room_key_hint || '');
       if (!entered) return undefined;
@@ -227,25 +319,20 @@ const Rooms = (() => {
         UI.showToast('Private rooms require a shared secret', 'error');
         return undefined;
       }
-      if (entered.remember) _storeRoomSecret(name, secret, srvVer);
+      if (entered.remember) await _storeRoomSecret(name, secret, srvVer);
     } else {
-      // Promote into the versioned slot if we only had a legacy copy, so
-      // future loads skip the fallback path and per-version decryption
-      // (for messages encrypted under srvVer) just works.
       try {
-        if (!localStorage.getItem(_roomSecretStorageKey(name, srvVer))) {
-          localStorage.setItem(_roomSecretStorageKey(name, srvVer), secret);
-          _setStoredKeyVersion(name, srvVer);
+        const verKey = _roomSecretStorageKey(name, srvVer);
+        if (!(localStorage.getItem(verKey) || '').trim()) {
+          await _storeRoomSecret(name, secret, srvVer);
         }
       } catch {}
     }
     return Crypto.getRoomKey(name, secret);
   }
 
-  /** After API join: private rooms still need the shared secret or membership is rolled back. */
-  async function ensurePrivateRoomSecret(roomName) {
-    const key = await _resolvePrivateRoomKey(roomName);
-    if (key !== undefined) return true;
+  async function _leaveRoomAfterSecretFailure(roomName, toastMsg) {
+    _clearRoomSecrets(roomName);
     try {
       await fetch(`/api/rooms/${encodeURIComponent(roomName)}/leave`, {
         method: 'POST',
@@ -253,11 +340,29 @@ const Rooms = (() => {
       });
       await loadRooms();
     } catch {}
-    UI.showToast(
-      'Private channels need the shared secret to join — ask the owner for the invite link and secret',
-      'warning',
-    );
-    return false;
+    if (toastMsg) UI.showToast(toastMsg, 'warning');
+  }
+
+  /** After API join: private rooms still need the shared secret or membership is rolled back. */
+  async function ensurePrivateRoomSecret(roomName) {
+    const key = await _resolvePrivateRoomKey(roomName);
+    if (key === undefined) {
+      await _leaveRoomAfterSecretFailure(
+        roomName,
+        'Private channels need the shared secret to join — ask the owner for the invite link and secret',
+      );
+      return false;
+    }
+    const decryptOk = await probePrivateRoomDecrypt(roomName, key);
+    if (!decryptOk) {
+      await _leaveRoomAfterSecretFailure(
+        roomName,
+        'That shared secret does not match this channel — check the secret with the owner and try again',
+      );
+      return false;
+    }
+    try { State.roomKeys[roomName] = key; } catch {}
+    return true;
   }
 
   // ─── Key rotation (Phase 2 #3, #4) ───────────────────────────────────
@@ -278,8 +383,8 @@ const Rooms = (() => {
     if (!name) return null;
     const v = parseInt(version, 10) || 0;
     let secret = '';
-    if (v > 0) secret = _getStoredRoomSecret(name, v);
-    if (!secret) secret = _getStoredRoomSecret(name);
+    if (v > 0) secret = await _getStoredRoomSecret(name, v);
+    if (!secret) secret = await _getStoredRoomSecret(name);
     if (!secret) return null;
     try { return await Crypto.getRoomKey(name, secret); } catch { return null; }
   }
@@ -306,7 +411,7 @@ const Rooms = (() => {
     if (v <= 0) return false;
     // Don't downgrade.
     const cur = _getStoredKeyVersion(room);
-    if (cur && cur >= v && _getStoredRoomSecret(room, v)) return true;
+    if (cur && cur >= v && (await _getStoredRoomSecret(room, v))) return true;
     if (!window.Signal || typeof Signal.decryptDM !== 'function') {
       console.warn('[rooms] installRotatedKey: Signal not ready');
       return false;
@@ -334,9 +439,7 @@ const Rooms = (() => {
     const secret = String(payload.secret || '');
     if (!secret) return false;
     try {
-      localStorage.setItem(_roomSecretStorageKey(room, v), secret);
-      localStorage.setItem(_roomSecretStorageKey(room), secret); // current pointer
-      _setStoredKeyVersion(room, v);
+      await _storeRoomSecret(room, secret, v);
     } catch {}
     // Bump the cached room metadata so encrypts immediately use the new
     // version without waiting for a /api/rooms refresh.
@@ -467,9 +570,7 @@ const Rooms = (() => {
     }
     // Persist locally under the new version.
     try {
-      localStorage.setItem(_roomSecretStorageKey(roomName, newVer), secretB64);
-      localStorage.setItem(_roomSecretStorageKey(roomName), secretB64);
-      _setStoredKeyVersion(roomName, newVer);
+      await _storeRoomSecret(roomName, secretB64, newVer);
       room.room_key_version = newVer;
       // Drop any cached derived key so the next encrypt picks up the new
       // secret. messages.js re-derives via Rooms helpers below.
@@ -1468,8 +1569,14 @@ const Rooms = (() => {
         document.getElementById('new-room-secret')?.focus();
         return;
       }
-      _storeRoomSecret(name, trimmedSecret);
-      roomKeyHint = (document.getElementById('new-room-secret-hint')?.value || '').trim() || null;
+      await _storeRoomSecret(name, trimmedSecret);
+      const hintRaw = (document.getElementById('new-room-secret-hint')?.value || '').trim();
+      if (hintRaw && hintRaw === trimmedSecret) {
+        UI.showToast('Hint must not be the full secret — use a short reminder only', 'warning');
+        roomKeyHint = null;
+      } else {
+        roomKeyHint = hintRaw || null;
+      }
     }
 
     const res = await fetch('/api/rooms', {
@@ -1479,7 +1586,7 @@ const Rooms = (() => {
     });
     const data = await res.json();
     if (!res.ok) {
-      if (_selectedRoomType === 'private') _storeRoomSecret(name, '');
+      if (_selectedRoomType === 'private') await _storeRoomSecret(name, '');
       UI.showToast(data.error || 'Failed to create room', 'error');
       return;
     }

@@ -75,6 +75,23 @@ Channels use a simpler model than DMs because trust is membership-based, not 1:1
 - **Public channel:** No shared key; messages stored and broadcast in plaintext.
 - **Wire format:** `{"iv":"…","ct":"…"}` JSON stored verbatim.
 
+### Private channel access (invite + secret)
+
+- **Server gate:** Membership requires a valid invite link (`POST /api/invites/{code}/join`).
+  The shared secret is **never** sent to the server on join or create.
+- **Client gate:** After join, the client prompts for the shared secret. If the user
+  cancels, the client calls `POST /api/rooms/{name}/leave` and membership is rolled back.
+- **Wrong secret:** The server cannot verify passphrase correctness without storing a
+  verifier (which would break E2EE). A member with a wrong secret remains in
+  `room_members` but cannot decrypt history; only the correct secret derives the AES key.
+- **`room_key_hint`:** Optional human-readable reminder stored on the server (max 512
+  chars, sanitized). It must **not** contain the full secret.
+- **Local storage:** Remembered room secrets are wrapped with a per-device AES-GCM key
+  in IndexedDB (`ftls1:` prefix in localStorage). XSS with full script access can still
+  unwrap them; this is defense-in-depth vs extension/localStorage scrapers only.
+- **Join probe:** After join, the client samples recent ciphertext; if none decrypt,
+  membership is rolled back (wrong secret). Empty channels skip the probe.
+
 ### Why not libsignal Sender Keys for channels
 
 Track C (Sender Keys) shipped in early 2026 and was **reverted 2026-05-20**

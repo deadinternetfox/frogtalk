@@ -14,6 +14,10 @@ const Crypto = (() => {
   // and never end up with two different keypairs racing into localStorage.
   const _ecdhPairPending = new Map();
   const _payloadPrefix = 'ftenc:';
+  // Device-bound wrap for room shared secrets in localStorage (ftls1:…).
+  const _LOCAL_WRAP_PREFIX = 'ftls1:';
+  const _roomWrapKeyCache = new Map();
+  const _roomWrapKeyPending = new Map();
 
   function _bytesToBase64(bytes) {
     const chunkSize = 0x8000;
@@ -495,6 +499,73 @@ const Crypto = (() => {
   // Short fingerprint of THIS device's ECDH public key. Useful for showing
   // "this device" identity in the encryption-info modal so users can tell
   // multi-device situations apart.
+  function _roomWrapIdbKey(scope = _getIdentityScope()) {
+    return `${scope}::room-wrap-v1`;
+  }
+
+  /**
+   * Per-device AES-GCM key in IndexedDB (non-extractable). Used only to wrap
+   * room shared secrets before localStorage — the server never sees either key.
+   */
+  async function _loadOrCreateRoomWrapKey() {
+    const scope = _getIdentityScope();
+    if (_roomWrapKeyCache.has(scope)) return _roomWrapKeyCache.get(scope);
+    if (_roomWrapKeyPending.has(scope)) return _roomWrapKeyPending.get(scope);
+    const p = (async () => {
+      const idbKey = _roomWrapIdbKey(scope);
+      try {
+        const stored = await _idbGet(idbKey);
+        if (stored && stored.wrapKey) {
+          _roomWrapKeyCache.set(scope, stored.wrapKey);
+          return stored.wrapKey;
+        }
+      } catch (e) {
+        console.warn('[Crypto] room-wrap IDB read failed', e);
+      }
+      const wrapKey = await crypto.subtle.generateKey(
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt'],
+      );
+      try {
+        await _idbPut(idbKey, { wrapKey });
+      } catch (e) {
+        console.warn('[Crypto] room-wrap IDB write failed; room secrets stay plaintext', e);
+      }
+      _roomWrapKeyCache.set(scope, wrapKey);
+      return wrapKey;
+    })();
+    _roomWrapKeyPending.set(scope, p);
+    try { return await p; }
+    finally { _roomWrapKeyPending.delete(scope); }
+  }
+
+  /** Encrypt a room shared secret for localStorage (device-bound). */
+  async function wrapLocalSecret(plaintext) {
+    if (!plaintext) return '';
+    try {
+      const key = await _loadOrCreateRoomWrapKey();
+      return _LOCAL_WRAP_PREFIX + await encrypt(plaintext, key);
+    } catch (e) {
+      console.warn('[Crypto] wrapLocalSecret failed', e);
+      return plaintext;
+    }
+  }
+
+  /** Decrypt ftls1:… blobs; legacy plaintext passes through unchanged. */
+  async function unwrapLocalSecret(stored) {
+    if (!stored) return '';
+    if (!stored.startsWith(_LOCAL_WRAP_PREFIX)) return stored;
+    try {
+      const key = await _loadOrCreateRoomWrapKey();
+      const plain = await decrypt(stored.slice(_LOCAL_WRAP_PREFIX.length), key);
+      return plain !== null ? plain : '';
+    } catch (e) {
+      console.warn('[Crypto] unwrapLocalSecret failed', e);
+      return '';
+    }
+  }
+
   async function publicKeyFingerprint() {
     try {
       const pair = await _loadOrCreateECDHPair();
@@ -507,5 +578,9 @@ const Crypto = (() => {
     } catch { return ''; }
   }
 
-  return { encrypt, decrypt, encryptPayload, decryptPayload, getRoomKey, getDMKey, fingerprint, getPublicKey, deriveShared, resetIdentityKey, publicKeyFingerprint };
+  return {
+    encrypt, decrypt, encryptPayload, decryptPayload, getRoomKey, getDMKey,
+    fingerprint, getPublicKey, deriveShared, resetIdentityKey, publicKeyFingerprint,
+    wrapLocalSecret, unwrapLocalSecret,
+  };
 })();
