@@ -39,6 +39,7 @@ from deps import (
     _pin_session_is_locked,
 )
 from routers._media_safety import safe_reencode as _media_reencode
+from routers._css_inline import sanitize_inline_style as _sanitize_inline_style
 from ws_manager import manager
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -121,11 +122,68 @@ MAX_AVATAR_BYTES = 2 * 1024 * 1024  # 2 MB in base64
 FED_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 FrogTalkFederation/1.0"
 _ROOM_NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 _GID_RE = re.compile(r"^[A-Za-z0-9._:\-]{6,128}$")
+_FCM_TOKEN_RE = re.compile(r"^[A-Za-z0-9:_\-.]{16,512}$")
 _SYNC_EXPORT_ROOM_LIMIT = 400
 _SYNC_EXPORT_DM_LIMIT = 400
 
 _sync_state_lock = _threading.Lock()
 _federation_sync_state: dict[int, dict] = {}
+
+
+def _load_user_sync_row(user_id: int) -> dict:
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return {}
+    try:
+        with db._conn() as con:
+            row = con.execute(
+                """
+                SELECT display_name, avatar, bio, status_msg, presence,
+                       wall_enabled, wall_comments_enabled,
+                       profile_public, allow_friend_requests,
+                       theme, notify_sounds, notify_desktop,
+                       notify_dms, notify_mentions,
+                       allow_dms_from, show_last_seen,
+                       show_read_receipts, hide_active_channels,
+                       mood, custom_style, room_order,
+                       location_sharing_enabled,
+                       pin_hash, pin_require_on_unlock, pin_require_for_admin,
+                       pin_require_after_autologin, pin_idle_timeout_sec,
+                       pin_keypad_privacy
+                FROM users WHERE id=?
+                """,
+                (uid,),
+            ).fetchone()
+        return dict(row) if row else {}
+    except Exception:
+        return {}
+
+
+def _sanitize_room_order_json(raw: str) -> str:
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    try:
+        arr = json.loads(text)
+    except Exception:
+        return ""
+    if not isinstance(arr, list):
+        return ""
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in arr:
+        name = str(item or "").strip().lower()
+        if not _ROOM_NAME_RE.match(name):
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        cleaned.append(name)
+        if len(cleaned) >= 500:
+            break
+    if not cleaned:
+        return ""
+    return json.dumps(cleaned, separators=(",", ":"))
 
 
 def _norm_base(url: str) -> str:
@@ -381,7 +439,10 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         if len(friends) >= _SYNC_EXPORT_DM_LIMIT:
             break
 
-    me = db.get_user_by_id(uid) or {}
+    me = _load_user_sync_row(uid)
+    pin_hash = str(me.get("pin_hash") or "").strip()
+    if pin_hash and (not pin_hash.startswith("$2") or len(pin_hash) > 200):
+        pin_hash = ""
     self_profile = {
         "display_name": str(me.get("display_name") or "")[:64],
         "avatar": me.get("avatar") or "",
@@ -392,7 +453,38 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         "wall_comments_enabled": 1 if int(me.get("wall_comments_enabled") or 0) else 0,
         "profile_public": 1 if int(me.get("profile_public") or 0) else 0,
         "allow_friend_requests": 1 if int(me.get("allow_friend_requests") or 0) else 0,
+        "theme": str(me.get("theme") or "frog")[:64],
+        "notify_sounds": 1 if int(me.get("notify_sounds") or 0) else 0,
+        "notify_desktop": 1 if int(me.get("notify_desktop") or 0) else 0,
+        "notify_dms": 1 if int(me.get("notify_dms") or 0) else 0,
+        "notify_mentions": 1 if int(me.get("notify_mentions") or 0) else 0,
+        "allow_dms_from": str(me.get("allow_dms_from") or "everyone")[:32],
+        "show_last_seen": str(me.get("show_last_seen") or "everyone")[:32],
+        "show_read_receipts": 1 if int(me.get("show_read_receipts") or 0) else 0,
+        "hide_active_channels": 1 if int(me.get("hide_active_channels") or 0) else 0,
+        "mood": str(me.get("mood") or "")[:200],
+        "custom_style": _sanitize_inline_style(str(me.get("custom_style") or "")[:12000]),
+        "room_order": _sanitize_room_order_json(str(me.get("room_order") or "")[:12000]),
+        "location_sharing_enabled": 1 if int(me.get("location_sharing_enabled") or 0) else 0,
+        "pin_hash": pin_hash,
+        "pin_require_on_unlock": 1 if int(me.get("pin_require_on_unlock") or 0) else 0,
+        "pin_require_for_admin": 1 if int(me.get("pin_require_for_admin") or 0) else 0,
+        "pin_require_after_autologin": 1 if int(me.get("pin_require_after_autologin") or 0) else 0,
+        "pin_idle_timeout_sec": max(0, min(86400, int(me.get("pin_idle_timeout_sec") or 300))),
+        "pin_keypad_privacy": 1 if int(me.get("pin_keypad_privacy") or 0) else 0,
     }
+
+    push_tokens: list[dict] = []
+    for row in db.get_fcm_tokens(uid):
+        token = str((row or {}).get("token") or "").strip()
+        platform = str((row or {}).get("platform") or "android").strip().lower()
+        if platform not in ("android", "ios", "web"):
+            platform = "android"
+        if not _FCM_TOKEN_RE.match(token):
+            continue
+        push_tokens.append({"token": token, "platform": platform})
+        if len(push_tokens) >= 24:
+            break
 
     return {
         "rooms": rooms,
@@ -400,6 +492,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         "following": following,
         "friends": friends,
         "self_profile": self_profile,
+        "push_tokens": push_tokens,
         "source_server_id": source_server_id,
         "exported_at": int(time.time()),
     }
@@ -417,16 +510,19 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     following_in = payload.get("following")
     friends_in = payload.get("friends")
     self_profile = payload.get("self_profile")
+    push_tokens_in = payload.get("push_tokens")
     rooms = rooms_in if isinstance(rooms_in, list) else []
     dm_peers = dm_in if isinstance(dm_in, list) else []
     following = following_in if isinstance(following_in, list) else []
     friends = friends_in if isinstance(friends_in, list) else []
+    push_tokens = push_tokens_in if isinstance(push_tokens_in, list) else []
 
     rooms_joined = 0
     rooms_missing = 0
     dm_linked = 0
     following_linked = 0
     friends_linked = 0
+    push_tokens_linked = 0
     me = db.get_user_by_id(uid) or {}
     my_gid = str(me.get("global_user_id") or "").strip()
 
@@ -532,6 +628,33 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             wall_comments_enabled = 1 if int(self_profile.get("wall_comments_enabled") or 0) else 0
             profile_public = 1 if int(self_profile.get("profile_public") or 0) else 0
             allow_friend_requests = 1 if int(self_profile.get("allow_friend_requests") or 0) else 0
+            theme = str(self_profile.get("theme") or "frog").strip().lower()
+            if theme not in ("frog", "light", "midnight", "forest", "cyberpunk", "ocean", "sunset", "rose", "solarized", "mono", "custom"):
+                theme = "frog"
+            notify_sounds = 1 if int(self_profile.get("notify_sounds") or 0) else 0
+            notify_desktop = 1 if int(self_profile.get("notify_desktop") or 0) else 0
+            notify_dms = 1 if int(self_profile.get("notify_dms") or 0) else 0
+            notify_mentions = 1 if int(self_profile.get("notify_mentions") or 0) else 0
+            allow_dms_from = str(self_profile.get("allow_dms_from") or "everyone").strip().lower()
+            if allow_dms_from not in ("everyone", "friends", "nobody"):
+                allow_dms_from = "everyone"
+            show_last_seen = str(self_profile.get("show_last_seen") or "everyone").strip().lower()
+            if show_last_seen not in ("everyone", "friends", "nobody"):
+                show_last_seen = "everyone"
+            show_read_receipts = 1 if int(self_profile.get("show_read_receipts") or 0) else 0
+            hide_active_channels = 1 if int(self_profile.get("hide_active_channels") or 0) else 0
+            mood = str(self_profile.get("mood") or "")[:200]
+            custom_style = _sanitize_inline_style(str(self_profile.get("custom_style") or "")[:12000])
+            room_order = _sanitize_room_order_json(str(self_profile.get("room_order") or "")[:12000])
+            location_sharing_enabled = 1 if int(self_profile.get("location_sharing_enabled") or 0) else 0
+            pin_hash = str(self_profile.get("pin_hash") or "").strip()
+            if pin_hash and (not pin_hash.startswith("$2") or len(pin_hash) > 200):
+                pin_hash = ""
+            pin_require_on_unlock = 1 if int(self_profile.get("pin_require_on_unlock") or 0) else 0
+            pin_require_for_admin = 1 if int(self_profile.get("pin_require_for_admin") or 0) else 0
+            pin_require_after_autologin = 1 if int(self_profile.get("pin_require_after_autologin") or 0) else 0
+            pin_idle_timeout_sec = max(0, min(86400, int(self_profile.get("pin_idle_timeout_sec") or 300)))
+            pin_keypad_privacy = 1 if int(self_profile.get("pin_keypad_privacy") or 0) else 0
             with db._conn() as con:
                 con.execute(
                     """
@@ -544,7 +667,28 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                         wall_enabled=?,
                         wall_comments_enabled=?,
                         profile_public=?,
-                        allow_friend_requests=?
+                        allow_friend_requests=?,
+                        theme=?,
+                        notify_sounds=?,
+                        notify_desktop=?,
+                        notify_dms=?,
+                        notify_mentions=?,
+                        allow_dms_from=?,
+                        show_last_seen=?,
+                        show_read_receipts=?,
+                        hide_active_channels=?,
+                        mood=?,
+                        custom_style=?,
+                        room_order=?,
+                        location_sharing_enabled=?,
+                        pin_hash=?,
+                        pin_require_on_unlock=?,
+                        pin_require_for_admin=?,
+                        pin_require_after_autologin=?,
+                        pin_idle_timeout_sec=?,
+                        pin_keypad_privacy=?,
+                        pin_failed_attempts=0,
+                        pin_locked_until=NULL
                     WHERE id=?
                     """,
                     (
@@ -557,6 +701,25 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                         wall_comments_enabled,
                         profile_public,
                         allow_friend_requests,
+                        theme,
+                        notify_sounds,
+                        notify_desktop,
+                        notify_dms,
+                        notify_mentions,
+                        allow_dms_from,
+                        show_last_seen,
+                        show_read_receipts,
+                        hide_active_channels,
+                        mood,
+                        custom_style,
+                        room_order,
+                        location_sharing_enabled,
+                        (pin_hash or None),
+                        pin_require_on_unlock,
+                        pin_require_for_admin,
+                        pin_require_after_autologin,
+                        pin_idle_timeout_sec,
+                        pin_keypad_privacy,
                         uid,
                     ),
                 )
@@ -564,12 +727,28 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         except Exception:
             pass
 
+    for row in push_tokens[:24]:
+        if not isinstance(row, dict):
+            continue
+        token = str(row.get("token") or "").strip()
+        platform = str(row.get("platform") or "android").strip().lower()
+        if platform not in ("android", "ios", "web"):
+            platform = "android"
+        if not _FCM_TOKEN_RE.match(token):
+            continue
+        try:
+            db.save_fcm_token(uid, token, platform)
+            push_tokens_linked += 1
+        except Exception:
+            continue
+
     return {
         "rooms_joined": rooms_joined,
         "rooms_missing": rooms_missing,
         "dm_linked": dm_linked,
         "following_linked": following_linked,
         "friends_linked": friends_linked,
+        "push_tokens_linked": push_tokens_linked,
     }
 
 
