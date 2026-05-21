@@ -125,6 +125,9 @@ _GID_RE = re.compile(r"^[A-Za-z0-9._:\-]{6,128}$")
 _FCM_TOKEN_RE = re.compile(r"^[A-Za-z0-9:_\-.]{16,512}$")
 _SYNC_EXPORT_ROOM_LIMIT = 400
 _SYNC_EXPORT_DM_LIMIT = 400
+_SYNC_EXPORT_PUBLIC_ROOM_LIMIT = 800
+_SYNC_EXPORT_SOCIAL_POST_LIMIT = 160
+_SYNC_EXPORT_SOCIAL_MEDIA_MAX = 1_500_000
 
 _sync_state_lock = _threading.Lock()
 _federation_sync_state: dict[int, dict] = {}
@@ -375,9 +378,8 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         return {"rooms": [], "dm_peers": [], "source_server_id": ""}
     joined_ids = db.get_user_joined_room_ids(uid)
     rooms: list[dict] = []
+    public_rooms: list[dict] = []
     for room in db.list_rooms():
-        if room.get("id") not in joined_ids:
-            continue
         name = str(room.get("name") or "").strip().lower()
         if not _ROOM_NAME_RE.match(name):
             continue
@@ -387,13 +389,19 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         ctype = str(room.get("channel_type") or "text").strip().lower()
         if ctype not in ("text", "music", "voice"):
             ctype = "text"
-        rooms.append({
+        room_payload = {
             "name": name,
             "type": rtype,
             "channel_type": ctype,
-        })
-        if len(rooms) >= _SYNC_EXPORT_ROOM_LIMIT:
-            break
+            "description": str(room.get("description") or "")[:200],
+        }
+        if rtype == "public" and len(public_rooms) < _SYNC_EXPORT_PUBLIC_ROOM_LIMIT:
+            public_rooms.append(room_payload)
+        if room.get("id") in joined_ids:
+            rooms.append(room_payload)
+            if len(rooms) >= _SYNC_EXPORT_ROOM_LIMIT:
+                # Keep collecting public room directory even if joined-room cap reached.
+                continue
 
     dm_peers: list[dict] = []
     for ch in db.get_dm_channels(uid):
@@ -496,11 +504,62 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         if len(push_tokens) >= 24:
             break
 
+    social_posts: list[dict] = []
+    try:
+        feed_rows = db.get_feed_posts(uid, limit=_SYNC_EXPORT_SOCIAL_POST_LIMIT, offset=0, mood="", lite=False)
+    except Exception:
+        feed_rows = []
+    for post in feed_rows[:_SYNC_EXPORT_SOCIAL_POST_LIMIT]:
+        try:
+            post_id = int(post.get("id") or 0)
+        except Exception:
+            post_id = 0
+        if post_id <= 0:
+            continue
+        author_id = int(post.get("user_id") or 0)
+        if author_id <= 0:
+            continue
+        author = db.get_user_by_id(author_id) or {}
+        author_gid = str(author.get("global_user_id") or "").strip()
+        author_nick = str(author.get("nickname") or post.get("nickname") or "").strip()
+        if not author_nick or not _GID_RE.match(author_gid):
+            continue
+        post_gid, post_origin = db.register_local_wall_post_global_id(post_id)
+        post_gid = str(post_gid or "").strip()
+        if not post_gid:
+            continue
+        privacy = str(post.get("privacy") or "public").strip().lower()
+        if privacy not in ("public", "followers", "friends"):
+            privacy = "public"
+        media_data = post.get("media_data")
+        media_type = str(post.get("media_type") or "").strip().lower()
+        if media_data is not None:
+            media_data = str(media_data)
+            if len(media_data) > _SYNC_EXPORT_SOCIAL_MEDIA_MAX:
+                media_data = None
+        social_posts.append({
+            "global_post_id": post_gid,
+            "origin_server_id": str(post_origin or source_server_id or "").strip(),
+            "author_global_user_id": author_gid,
+            "nickname": author_nick,
+            "content": str(post.get("content") or "")[:4000],
+            "media_data": media_data,
+            "media_type": media_type[:64],
+            "privacy": privacy,
+            "share_enabled": 1 if bool(post.get("share_enabled", True)) else 0,
+            "allow_comments": 1 if bool(post.get("allow_comments", True)) else 0,
+            "track_title": str(post.get("track_title") or "")[:160],
+            "track_room": str(post.get("track_room") or "")[:64],
+            "track_mood": str(post.get("track_mood") or "")[:32],
+        })
+
     return {
         "rooms": rooms,
+        "public_rooms": public_rooms,
         "dm_peers": dm_peers,
         "following": following,
         "friends": friends,
+        "social_posts": social_posts,
         "self_profile": self_profile,
         "push_tokens": push_tokens,
         "source_server_id": source_server_id,
@@ -516,15 +575,19 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     payload = export if isinstance(export, dict) else {}
     source_server_id = str(payload.get("source_server_id") or "").strip()
     rooms_in = payload.get("rooms")
+    public_rooms_in = payload.get("public_rooms")
     dm_in = payload.get("dm_peers")
     following_in = payload.get("following")
     friends_in = payload.get("friends")
+    social_posts_in = payload.get("social_posts")
     self_profile = payload.get("self_profile")
     push_tokens_in = payload.get("push_tokens")
     rooms = rooms_in if isinstance(rooms_in, list) else []
+    public_rooms = public_rooms_in if isinstance(public_rooms_in, list) else []
     dm_peers = dm_in if isinstance(dm_in, list) else []
     following = following_in if isinstance(following_in, list) else []
     friends = friends_in if isinstance(friends_in, list) else []
+    social_posts = social_posts_in if isinstance(social_posts_in, list) else []
     push_tokens = push_tokens_in if isinstance(push_tokens_in, list) else []
 
     rooms_joined = 0
@@ -533,6 +596,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     following_linked = 0
     friends_linked = 0
     push_tokens_linked = 0
+    social_posts_imported = 0
     me = db.get_user_by_id(uid) or {}
     my_gid = str(me.get("global_user_id") or "").strip()
 
@@ -569,6 +633,36 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         try:
             db.join_room(uid, int(room["id"]))
             rooms_joined += 1
+        except Exception:
+            continue
+
+    # Mirror public room directory so the destination node can render channels
+    # immediately even before regular federation replication catches up.
+    for raw in public_rooms[:_SYNC_EXPORT_PUBLIC_ROOM_LIMIT]:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name") or "").strip().lower()
+        room_type = str(raw.get("type") or "public").strip().lower()
+        channel_type = str(raw.get("channel_type") or "text").strip().lower()
+        desc = str(raw.get("description") or "")[:200]
+        if room_type != "public":
+            continue
+        if not _ROOM_NAME_RE.match(name):
+            continue
+        if channel_type not in ("text", "music", "voice"):
+            channel_type = "text"
+        existing = db.get_room_by_name(name)
+        if not existing:
+            try:
+                owner = db.get_or_create_federation_system_user()
+                db.create_room(name, desc, "public", owner, None, channel_type=channel_type)
+                existing = db.get_room_by_name(name)
+            except Exception:
+                existing = None
+        if not existing:
+            continue
+        try:
+            db.join_room(uid, int(existing["id"]))
         except Exception:
             continue
 
@@ -774,6 +868,35 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         except Exception:
             continue
 
+    for row in social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT]:
+        if not isinstance(row, dict):
+            continue
+        payload_post = {
+            "global_post_id": str(row.get("global_post_id") or "").strip(),
+            "author_global_user_id": str(row.get("author_global_user_id") or "").strip(),
+            "nickname": str(row.get("nickname") or "").strip(),
+            "content": str(row.get("content") or "")[:4000],
+            "media_data": (str(row.get("media_data")) if row.get("media_data") is not None else None),
+            "media_type": str(row.get("media_type") or "")[:64],
+            "privacy": str(row.get("privacy") or "public").strip().lower(),
+            "share_enabled": 1 if bool(row.get("share_enabled", True)) else 0,
+            "allow_comments": 1 if bool(row.get("allow_comments", True)) else 0,
+            "track_title": str(row.get("track_title") or "")[:160],
+            "track_room": str(row.get("track_room") or "")[:64],
+            "track_mood": str(row.get("track_mood") or "")[:32],
+        }
+        post_origin = str(row.get("origin_server_id") or source_server_id or "").strip()
+        if not post_origin:
+            continue
+        if not payload_post["global_post_id"] or not payload_post["author_global_user_id"] or not payload_post["nickname"]:
+            continue
+        try:
+            created = db.apply_federated_wall_post_created(payload_post, post_origin)
+            if created:
+                social_posts_imported += 1
+        except Exception:
+            continue
+
     return {
         "rooms_joined": rooms_joined,
         "rooms_missing": rooms_missing,
@@ -781,6 +904,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         "following_linked": following_linked,
         "friends_linked": friends_linked,
         "push_tokens_linked": push_tokens_linked,
+        "social_posts_imported": social_posts_imported,
     }
 
 
