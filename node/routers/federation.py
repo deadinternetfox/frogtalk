@@ -26,6 +26,7 @@ from deps import get_current_user
 from pydantic import BaseModel
 
 import database as db
+import geoip
 # Track B \u2014 inline-style sanitiser, applied to every federated
 # profile update before it reaches the local DB. Replaces the previous
 # selector-aware <style> sanitiser; the local renderer no longer emits
@@ -761,6 +762,24 @@ def _public_server_target(server: dict) -> str:
     return base_url or onion_url
 
 
+def _resolved_server_region(server: dict) -> str:
+    """Stored region, else GeoIP from clearnet base URL, else Tor label."""
+    region = str(server.get("region") or "").strip()
+    if region:
+        return region[:120]
+    if _server_advertises_onion_only(server) and str(server.get("onion_url") or "").strip():
+        return "Tor Hidden Service"
+    base = _normalize_base_url(str(server.get("base_url") or ""))
+    if not base or ".onion" in base:
+        return ""
+    try:
+        label = geoip.format_region_label(geoip.lookup_base_url(base))
+    except Exception:
+        _log.debug("geo region resolve failed for %s", base, exc_info=True)
+        return ""
+    return label[:120]
+
+
 def _public_server_view(server: dict, *, onion_only: bool | None = None) -> dict:
     public = dict(server)
     onion_url = _normalize_base_url(str(public.get("onion_url") or ""))
@@ -769,6 +788,9 @@ def _public_server_view(server: dict, *, onion_only: bool | None = None) -> dict
         onion_only = _server_advertises_onion_only(public)
     public["onion_url"] = onion_url
     public["base_url"] = "" if (onion_only and onion_url) else base_url
+    region = _resolved_server_region(public)
+    if region:
+        public["region"] = region
     return public
 
 
@@ -1357,6 +1379,11 @@ def _local_register_payload() -> dict | None:
         or (db.get_config("federation.signing.pubkey_pem") or "").strip()
     )
     region = (os.getenv("FROGTALK_SERVER_REGION") or "").strip()
+    if not region and base_url:
+        try:
+            region = geoip.format_region_label(geoip.lookup_base_url(base_url))
+        except Exception:
+            region = ""
     return {
         "server_id": server_id,
         "display_name": display_name[:120] or server_id,
@@ -1500,12 +1527,13 @@ async def sync_official_directory_once(directory_url: str | None = None) -> dict
         if not row:
             skipped += 1
             continue
+        region = row["region"] or _resolved_server_region(row)
         db.upsert_federation_server(
             server_id=row["server_id"],
             display_name=row["display_name"],
             base_url=row["base_url"],
             onion_url=row["onion_url"],
-            region=row["region"],
+            region=region,
             official=True,
             trust_tier="official",
             server_pubkey=row["server_pubkey"],
@@ -1624,7 +1652,7 @@ async def list_network_servers(request: Request, official_only: int = 0):
         "display_name": local["display_name"],
         "base_url": local_base,
         "onion_url": local.get("onion_url") or "",
-        "region": "",
+        "region": (os.getenv("FROGTALK_SERVER_REGION") or local.get("region") or "").strip(),
         "official": 1,
         "trust_tier": "official",
         "capabilities": ["federation-v1"],
@@ -1912,12 +1940,18 @@ async def register_network_server(
         "turn_username": body.turn_username or "",
         "turn_credential": body.turn_credential or "",
     })
+    reg_row = {
+        "base_url": body.base_url,
+        "onion_url": body.onion_url,
+        "region": body.region,
+    }
+    region = (body.region or "").strip() or _resolved_server_region(reg_row)
     db.upsert_federation_server(
         server_id=body.server_id,
         display_name=body.display_name,
         base_url=body.base_url,
         onion_url=body.onion_url,
-        region=body.region,
+        region=region,
         official=official,
         trust_tier=trust_tier,
         server_pubkey=body.server_pubkey,

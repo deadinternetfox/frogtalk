@@ -231,7 +231,7 @@ def _admin_node_view(node: dict) -> dict:
     return {
         "server_id": raw.get("server_id"),
         "display_name": raw.get("display_name"),
-        "region": raw.get("region") or "",
+        "region": federation_router._resolved_server_region(raw) or raw.get("region") or "",
         "official": bool(raw.get("official")),
         "trust_tier": raw.get("trust_tier") or "community",
         "enabled": bool(raw.get("enabled", True)),
