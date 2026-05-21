@@ -4,27 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Run Your FrogTalk Node</title>
-<meta name="description" content="Production guide to run your own FrogTalk federation node with Tor/onion deployment, update channel, and trust verification.">
+<meta name="description" content="Install a FrogTalk federation node on a Linux VPS: setup wizard, HTTPS, systemd, and mesh sync with frogtalk.xyz.">
 <link rel="canonical" href="https://frogtalk.xyz/docs/node">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://frogtalk.xyz/docs/node">
 <meta property="og:title" content="Run Your FrogTalk Node">
-<meta property="og:description" content="Self-hosting guide for a FrogTalk federation node with Tor/onion reverse-proxy setup, update feed, legitimacy checks, and federation-safe routing.">
+<meta property="og:description" content="VPS install guide for a self-hosted FrogTalk node with federation, nginx, and the CLI setup wizard.">
 <meta property="og:image" content="https://frogtalk.xyz/static/icons/og-image.png">
-<meta property="og:image:secure_url" content="https://frogtalk.xyz/static/icons/og-image.png">
-<meta property="og:image:type" content="image/png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="FrogTalk node setup guide preview">
 <meta property="og:site_name" content="FrogTalk">
-<meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:site" content="@frogtalk">
 <meta name="twitter:title" content="Run Your FrogTalk Node">
-<meta name="twitter:description" content="Deploy and operate your own FrogTalk node with federation and update-channel best practices.">
+<meta name="twitter:description" content="Deploy and federate your own FrogTalk node on a fresh Linux VPS.">
 <meta name="twitter:image" content="https://frogtalk.xyz/static/icons/og-image.png">
-<meta name="twitter:image:alt" content="FrogTalk node setup guide preview">
 <style>
   :root {
     --bg: #0d1117;
@@ -45,39 +37,10 @@
     background:
       radial-gradient(900px 560px at 50% -10%, rgba(74,222,128,.10), transparent 70%),
       radial-gradient(560px 420px at 14% 75%, rgba(88,166,255,.07), transparent 65%),
-      radial-gradient(520px 360px at 86% 18%, rgba(74,222,128,.06), transparent 65%),
       var(--bg);
     line-height: 1.55;
   }
   body.ft-has-site-nav .wrap { padding-top: 5.2rem; }
-  .top {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    backdrop-filter: blur(10px);
-    background: rgba(13,17,23,.9);
-    border-bottom: 1px solid var(--line);
-  }
-  .top-inner {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: .82rem 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: .8rem;
-  }
-  .brand { color: var(--green); text-decoration: none; font-weight: 800; }
-  .links { display: flex; gap: .6rem; flex-wrap: wrap; }
-  .links a {
-    text-decoration: none;
-    color: var(--muted);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: .32rem .7rem;
-    font-size: .78rem;
-  }
-  .links a:hover { color: var(--text); border-color: #3f566f; }
   .wrap { max-width: 1000px; margin: 0 auto; padding: 1.2rem 1rem 3rem; }
   .hero {
     border: 1px solid var(--line);
@@ -89,6 +52,21 @@
   }
   h1 { margin: 0 0 .35rem; font-size: clamp(1.4rem, 3.5vw, 2rem); }
   .sub { margin: 0; color: var(--muted); }
+  .toc {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+    margin-top: .8rem;
+  }
+  .toc a {
+    color: var(--muted);
+    text-decoration: none;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: .28rem .62rem;
+    font-size: .76rem;
+  }
+  .toc a:hover { color: var(--text); border-color: #3f566f; }
   .step {
     border: 1px solid var(--line);
     border-radius: 14px;
@@ -109,234 +87,226 @@
     line-height: 1.44;
   }
   code { font-family: "Consolas", "SFMono-Regular", monospace; }
-  .hint { color: var(--muted); }
-  .ok { color: #86efac; }
-  .warn { color: #fde68a; }
+  .hint { color: var(--muted); font-size: .92rem; }
   .callout {
     border: 1px solid #2d5a3a;
     border-radius: 12px;
     background: rgba(74,222,128,.08);
     padding: .72rem;
     color: #d9f99d;
+    margin-top: .6rem;
   }
+  .warn-box {
+    border: 1px solid #5a4a2d;
+    border-radius: 12px;
+    background: rgba(251,191,36,.08);
+    padding: .72rem;
+    color: #fde68a;
+    margin-top: .6rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .88rem;
+    margin-top: .5rem;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: .45rem .55rem;
+    text-align: left;
+  }
+  th { color: var(--green); background: rgba(74,222,128,.06); }
+  ul { margin: .4rem 0 0; padding-left: 1.2rem; }
+  a { color: var(--blue); }
 </style>
 </head>
 <body>
-  <!-- NAV (shared: static/partials/site-nav.html) -->
   <div id="ft-site-nav-mount"></div>
   <script src="/static/js/site-nav.js?v=2" defer></script>
 
   <main class="wrap">
     <section class="hero">
-      <h1>Self-Host A Federation Node</h1>
-      <p class="sub">Production setup with update feed, legitimacy checks, onion-first routing, and federation-safe update flow.</p>
+      <h1>Run a FrogTalk Node</h1>
+      <p class="sub">Self-host a federated chat node on a fresh Linux VPS — CLI setup wizard, HTTPS, systemd, and sync with the public mesh anchored at <a href="https://frogtalk.xyz">frogtalk.xyz</a>.</p>
+      <nav class="toc" aria-label="On this page">
+        <a href="#prereq">Prerequisites</a>
+        <a href="#vps">VPS bootstrap</a>
+        <a href="#wizard">Setup wizard</a>
+        <a href="#federation">Federation</a>
+        <a href="#https">HTTPS</a>
+        <a href="#verify">Verify</a>
+        <a href="#trouble">Troubleshooting</a>
+        <a href="#tor">Tor / onion</a>
+        <a href="#updates">Updates</a>
+      </nav>
+      <p class="hint" style="margin-top:.75rem">Full guide (GitHub): <a href="https://github.com/deadinternetfox/frogtalk/blob/master/docs/NODE_INSTALL.md" rel="noopener noreferrer">docs/NODE_INSTALL.md</a> · Typical path: <code>/opt/frogtalk</code></p>
     </section>
 
-    <section class="step">
-      <h2>0) Fast setup wizard (recommended)</h2>
-      <p class="hint">Use the built-in CLI helpers for first-time setup and safe updates on self-hosted nodes.</p>
-      <pre><code>git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
-cd /opt/frogtalk
+    <section class="warn-box">
+      <strong>Secrets:</strong> Never commit <code>.env</code>, SSH passwords, or federation tokens. Use SSH keys for VPS login. Placeholders below: <code>&lt;SSH_USER&gt;</code>, <code>&lt;YOUR_VPS_IP&gt;</code>, <code>&lt;YOUR_DOMAIN&gt;</code>.
+    </section>
 
-# Interactive installer (setup · federation · updates · systemd)
+    <section class="step" id="prereq">
+      <h2>Prerequisites</h2>
+      <table>
+        <tr><th>Item</th><th>Recommendation</th></tr>
+        <tr><td>VPS</td><td>1–2 vCPU, 2–4 GB RAM, 20+ GB disk (scale up for busy boards)</td></tr>
+        <tr><td>OS</td><td>Debian 12 / Ubuntu 22.04+ with systemd</td></tr>
+        <tr><td>Python</td><td>3.10+ (3.11+ recommended)</td></tr>
+        <tr><td>DNS</td><td>A/AAAA for <code>chat.&lt;YOUR_DOMAIN&gt;</code> → VPS IP</td></tr>
+        <tr><td>Ports</td><td>22 (SSH), 80/443 (nginx) — keep app port 8080 on localhost only</td></tr>
+      </table>
+      <p class="hint">Install wizard = <strong>bash CLI</strong> (<code>node/scripts/install.sh</code>), not a browser page. Users sign up at <code>/app</code> after the node is live.</p>
+    </section>
+
+    <section class="step" id="vps">
+      <h2>1) Bootstrap the VPS</h2>
+      <pre><code># SSH (prefer keys — do not store passwords in git)
+ssh-copy-id -i ~/.ssh/id_ed25519.pub &lt;SSH_USER&gt;@&lt;YOUR_VPS_IP&gt;
+ssh &lt;SSH_USER&gt;@&lt;YOUR_VPS_IP&gt;
+
+# Packages
+sudo apt update
+sudo apt install -y git python3 python3-venv python3-pip curl nginx \
+  certbot python3-certbot-nginx ufw
+
+# Optional dedicated user (matches frogtalk.service default)
+sudo adduser --disabled-password --gecos "" deploy
+sudo mkdir -p /opt/frogtalk && sudo chown deploy:deploy /opt/frogtalk
+
+# Firewall
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable</code></pre>
+    </section>
+
+    <section class="step" id="wizard">
+      <h2>2) Clone repo + run setup wizard</h2>
+      <pre><code>cd /opt
+git clone https://github.com/deadinternetfox/frogtalk.git
+cd frogtalk
+
+# Interactive menu: setup · federation · systemd · updates
 bash node/scripts/install.sh
 
-# Or direct commands:
-bash node/scripts/install.sh setup -y
-bash node/scripts/install.sh federation -y
-bash node/scripts/install.sh update-apply</code></pre>
-      <p class="hint">The wizard configures <code>.env</code>, installs dependencies, wires the runtime symlinks (<code>node/data</code>, <code>node/.env</code>, <code>node/secrets</code>), and can <strong>pull the latest git release</strong> on an existing checkout. Defaults the install path to your current clone (not only <code>/opt/frogtalk</code>).</p>
+# Non-interactive (fresh VPS)
+bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk
+bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk
+bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk</code></pre>
+      <p class="hint">The wizard creates <code>venv/</code>, writes <code>.env</code>, and symlinks <code>node/data</code>, <code>node/.env</code>, <code>node/secrets</code> to the install root. A real <code>node/data</code> folder (not a symlink) causes an empty database — the wizard and federation script repair this.</p>
+      <p class="hint"><strong>Admin:</strong> user <code>admin</code> is created on first boot. If <code>ADMIN_PASSWORD</code> is empty, a one-time password is logged to <code>journalctl -u frogtalk</code> — log in and rotate immediately.</p>
+      <pre><code># Dev run without systemd
+cd /opt/frogtalk && source venv/bin/activate && cd node && python main.py
+# → http://127.0.0.1:8080</code></pre>
     </section>
 
-    <section class="step">
-      <h2>0.5) Apply git updates (operators)</h2>
-      <p class="hint">After setup, use the same installer menu for safe fast-forward updates — previews commits, refreshes <code>venv</code> deps, restarts <code>frogtalk.service</code>, and verifies <code>/api/ping</code>.</p>
-      <pre><code>bash node/scripts/install.sh update
-bash node/scripts/install.sh update-apply -y
+    <section class="step" id="federation">
+      <h2>3) Federation — join the mesh</h2>
+      <pre><code>bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
+  --public-url https://chat.&lt;YOUR_DOMAIN&gt;
 
-# From a dev checkout (use your repo root, not /opt/frogtalk):
-bash node/scripts/install.sh --install-dir "$(pwd)" update-apply
-
-# Status shows how many commits you are behind upstream
-bash node/scripts/install.sh status</code></pre>
-      <p class="hint">Re-run <code>install.sh federation -y</code> after major releases if peer pills or mesh nav look stale. Hot SCP deploy (<code>deploy_nodes.sh</code>) does not run DB migrations — prefer <code>update-apply</code> when <code>database.py</code> changes.</p>
-    </section>
-
-    <section class="step">
-      <h2>1) Deploy FrogTalk Service</h2>
-      <p class="hint">Clone the official repo, create a virtualenv, install requirements, and copy the env template.</p>
-      <pre><code>git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
-cd /opt/frogtalk
-python3 -m venv venv
-source venv/bin/activate
-pip install -r node/requirements.txt
-cp node/deploy/env.example .env
-$EDITOR .env   # set ADMIN_PASSWORD, PORT, ALLOWED_ORIGINS, PUBLIC_URL</code></pre>
-    </section>
-
-    <section class="step">
-      <h2>2) Configure Federation + Update Channel</h2>
-      <pre><code># /opt/frogtalk/.env
-FROGTALK_FEDERATION_ENABLED=1
-FROGTALK_FEDERATION_TOKEN=CHANGE_THIS_SHARED_SECRET
-FROGTALK_OFFICIAL_DIRECTORY_URL=https://frogtalk.xyz/api/network/servers
-
-# Signed inbox (default ON since 2026-05 hardening).
-# Reject events from origins with no pinned server_pubkey.
+# Re-sync after changing URL or major upgrades
+bash node/scripts/install.sh federation -y</code></pre>
+      <p class="hint">Pulls the <a href="https://frogtalk.xyz/api/network/servers">official directory</a>, imports peers into SQLite, and pins Ed25519 keys from each peer’s <code>/api/network/status</code> (the directory JSON does not ship pubkeys).</p>
+      <p class="hint"><strong>Official production anchors</strong> (also used as CLI fallback if directory HTTP fails):</p>
+      <table>
+        <tr><th>Name</th><th>Role</th></tr>
+        <tr><td>FrogTalk Main</td><td><code>https://frogtalk.xyz</code></td></tr>
+        <tr><td>FrogTalk Tor Mirror</td><td>Onion mirror — see network list in the app</td></tr>
+      </table>
+      <p class="hint">Essential <code>.env</code> keys (wizard sets most of these):</p>
+      <pre><code>FROGTALK_FEDERATION_ENABLED=1
 FROGTALK_FEDERATION_REQUIRE_SIGS=1
-# Pin peer keys from GET /api/network/status (directory has no pubkeys).
-# Optional: federated voice/video + channel voice mesh
-# FROGTALK_FEDERATION_CALLS_ENABLED=1
-# FROGTALK_TURN_URLS=stun:stun.l.google.com:19302,turn:turn.example:3478
-# FROGTALK_TURN_USERNAME=…
-# FROGTALK_TURN_CREDENTIAL=…
-# Inbox/outbox poll (seconds) — defaults 8 idle, 2 busy
-# FROGTALK_FEDERATION_INBOX_IDLE_SEC=8
-# FROGTALK_FEDERATION_OUTBOX_IDLE_SEC=8
-
-# Centralized release feed from main site
-FROGTALK_UPDATE_FEED_URL=https://frogtalk.xyz/api/network/updates/latest
-FROGTALK_UPDATE_CHECK_INTERVAL_SEC=300
-
-# Auto-apply is OFF by default (CRIT-3). Opt in explicitly.
-FROGTALK_AUTO_UPDATE_ENABLED=0
-
-# Ed25519 release signer pubkeys (hex), semicolon separated. Update
-# apply refuses to run if the manifest signature isn't from one of these.
-FROGTALK_RELEASE_SIGNERS=
-
-# Public URL clients and federation peers should use (clearnet nodes)
-PUBLIC_URL=https://your-node.example
-# Optional alias — same role as PUBLIC_URL when set
-# FROGTALK_BASE_URL=https://your-node.example</code></pre>
-      <p class="hint">Use the same federation token only for trusted nodes under your control. Generate a strong value via
-      <code>python -c "import secrets; print(secrets.token_urlsafe(32))"</code>.</p>
+FROGTALK_OFFICIAL_DIRECTORY_URL=https://frogtalk.xyz/api/network/servers
+PUBLIC_URL=https://chat.&lt;YOUR_DOMAIN&gt;
+ALLOWED_ORIGINS=https://chat.&lt;YOUR_DOMAIN&gt;
+FROGTALK_AUTO_UPDATE_ENABLED=0</code></pre>
     </section>
 
-    <section class="step">
-      <h2>2.5) Run Behind Tor / Onion</h2>
-      <p class="hint">If you want the node to be reachable over Tor, point clients and federation peers at the onion app URL, not the marketing home page.</p>
-      <pre><code># /opt/frogtalk/.env
-FROGTALK_TOR_ENABLED=1
-FROGTALK_ONION_URL=http://yourhiddenserviceaddress.onion
-# Optional: keep empty for onion-only nodes so the public IP never appears in directory output
-FROGTALK_BASE_URL=
+    <section class="step" id="https">
+      <h2>4) nginx + HTTPS</h2>
+      <p class="hint">Terminate TLS at nginx; proxy to uvicorn on <code>127.0.0.1:8080</code> (default <code>PORT=8080</code> in <code>.env</code>).</p>
+      <pre><code># /etc/nginx/sites-available/frogtalk
+server {
+    listen 80;
+    server_name chat.&lt;YOUR_DOMAIN&gt;;
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
 
-# Tor Browser and other clients should open:
-# http://yourhiddenserviceaddress.onion/app
+sudo ln -sf /etc/nginx/sites-available/frogtalk /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d chat.&lt;YOUR_DOMAIN&gt;</code></pre>
+      <p class="hint">Template reference: <code>node/deploy/nginx.conf</code>. If upstream uses port 8000, either set <code>PORT=8000</code> or change <code>proxy_pass</code> — board internal API defaults assume the same port.</p>
+    </section>
 
-# Clearnet hub pushing to onion peers needs local Tor SOCKS:
+    <section class="step" id="verify">
+      <h2>5) Verify</h2>
+      <pre><code>bash node/scripts/install.sh status
+curl -sS https://chat.&lt;YOUR_DOMAIN&gt;/api/ping
+curl -sS https://chat.&lt;YOUR_DOMAIN&gt;/api/network/status | python3 -m json.tool
+journalctl -u frogtalk -n 40 --no-pager</code></pre>
+      <p class="hint">Open <code>https://chat.&lt;YOUR_DOMAIN&gt;/app</code>, create a test account, join a room. In <strong>Settings → Network</strong>, probe peers and compare build hash with frogtalk.xyz before trusting federation.</p>
+      <div class="callout">Backup: stop the service, archive <code>.env</code>, <code>data/frogtalk.db</code>, <code>data/uploads</code>, and <code>secrets/</code>.</div>
+    </section>
+
+    <section class="step" id="trouble">
+      <h2>Troubleshooting</h2>
+      <table>
+        <tr><th>Symptom</th><th>Fix</th></tr>
+        <tr><td><code>no such table</code> / empty app</td><td>Fix <code>node/data</code> symlink → <code>/opt/frogtalk/data</code></td></tr>
+        <tr><td>Works on :8080, not on domain</td><td>Align <code>PORT</code> and nginx <code>proxy_pass</code></td></tr>
+        <tr><td>Peers listed, no sync</td><td>Re-run <code>federation -y</code>; check pubkey length in DB</td></tr>
+        <tr><td>CORS errors</td><td>Add origin to <code>ALLOWED_ORIGINS</code></td></tr>
+        <tr><td>Board nav pills missing</td><td><code>chown www-data</code> on <code>node/board/board_data</code></td></tr>
+      </table>
+      <p class="hint">Security reports: <a href="/security">frogtalk.xyz/security</a></p>
+    </section>
+
+    <section class="step" id="tor">
+      <h2>Tor / onion (optional)</h2>
+      <pre><code>FROGTALK_TOR_ENABLED=1
+FROGTALK_ONION_URL=http://yourhiddenservice.onion
+# Clearnet hub fetching .onion boards:
 FROGTALK_TOR_SOCKS_PROXY=socks5://127.0.0.1:9050</code></pre>
-      <div class="callout">Use <code>/app</code> for client handoff links and network-tab switches. The Node Control and network UI now prefer onion app links so users land inside the chat client, not the marketing site.</div>
-      <p class="hint"><strong>Calls in Tor Browser:</strong> voice/video need WebRTC. Tor Browser, private tabs, and some privacy extensions block it — use a normal window or the FrogTalk mobile app.</p>
+      <p class="hint">Clients should open <code>http://….onion/app</code>. Clearnet hubs need Tor SOCKS to reach onion peers. Voice/video in Tor Browser is limited — use the mobile app or a normal browser window.</p>
+      <pre><code>bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
+  --onion-url http://yourhiddenservice.onion --public-url ""</code></pre>
+    </section>
+
+    <section class="step" id="updates">
+      <h2>Updates &amp; signed releases</h2>
+      <pre><code>bash node/scripts/install.sh update
+bash node/scripts/install.sh update-apply -y</code></pre>
+      <p class="hint"><code>FROGTALK_UPDATE_FEED_URL</code> defaults to frogtalk.xyz. Set <code>FROGTALK_RELEASE_SIGNERS</code> (Ed25519 hex) before enabling <code>FROGTALK_AUTO_UPDATE_ENABLED=1</code>.</p>
+      <p class="hint">Cross-node calls: <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code> + coturn — see <code>docs/FEDERATED_CALLS.md</code> in the repo.</p>
     </section>
 
     <section class="step">
-      <h2>2.6) Join the mesh + federated calls</h2>
-      <pre><code>bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
-# Clearnet hub:
-#   --public-url https://your-node.example
-# Tor mirror:
-#   --onion-url http://….onion --public-url ""
-# Re-sync after deploys (safe to re-run):
-bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y</code></pre>
-      <p class="hint">Syncs <a href="https://frogtalk.xyz/api/network/servers">frogtalk.xyz/api/network/servers</a> (retries; falls back to the official Main + Tor mirror pair if unreachable), pins peer keys from <code>/api/network/status</code>, fixes <code>node/data</code> symlinks, and links board nav pills. Clearnet hubs need <code>FROGTALK_TOR_SOCKS_PROXY</code> to fetch <code>.onion</code> boards.</p>
-      <p class="hint">Cross-node calls: set <code>FROGTALK_FEDERATION_CALLS_ENABLED=1</code>, install <a href="https://github.com/coturn/coturn" target="_blank" rel="noopener noreferrer">coturn</a>, and expose TURN in <code>.env</code>. Clients use <code>GET /api/network/ice-config</code> (authenticated). Spec: <code>docs/FEDERATED_CALLS.md</code> in the repo.</p>
-    </section>
-
-    <section class="step">
-      <h2>3) Start Service</h2>
-      <pre><code>sudo cp node/deploy/frogtalk.service /etc/systemd/system/frogtalk.service
-# Defaults: WorkingDirectory=/opt/frogtalk/node, EnvironmentFile=/opt/frogtalk/.env
-# Edit only the User if you're not running as `deploy`.
-sudo systemctl daemon-reload
-sudo systemctl enable frogtalk
-sudo systemctl restart frogtalk
-sudo systemctl status frogtalk --no-pager</code></pre>
-    </section>
-
-    <section class="step">
-      <h2>4) Verify Node Health + Hash</h2>
-      <pre><code>curl -s https://your-node.example/api/network/status
-curl -s https://your-node.example/api/network/build/local
-curl -s https://your-node.example/api/network/update/status</code></pre>
-      <p class="hint">`build_hash` should match the approved release from main-site feed for federation stability.</p>
-      <p class="hint">For onion-only nodes, verify the same endpoints through your Tor endpoint and test the user-facing app at <code>http://yourhiddenserviceaddress.onion/app</code>.</p>
-    </section>
-
-    <section class="step">
-      <h2>5) Publish Releases From Main Site (signed)</h2>
-      <p class="hint">On frogtalk.xyz, publish a <strong>signed</strong> manifest once per release so nodes can verify and pull updates safely.</p>
-      <pre><code>curl -X POST https://frogtalk.xyz/api/network/updates/publish \
-  -H "X-Session-Token: ADMIN_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "version": "1.5.4",
-    "package_url": "https://frogtalk.xyz/releases/frogtalk-1.5.4.tar.gz",
-    "package_sha256": "PUT_REAL_SHA256",
-    "build_hash": "PUT_REAL_WEB_BUILD_HASH",
-    "signature": "ED25519_SIGNATURE_OVER_CANONICAL_MANIFEST",
-    "signer": "ED25519_PUBKEY_HEX",
-    "notes": "Federation-safe rollout"
-  }'</code></pre>
-      <p class="hint">Operators set <code>FROGTALK_RELEASE_SIGNERS</code> in <code>.env</code> to the Ed25519 pubkey hex (semicolon-separated for multiple). Update apply refuses to run if the signature isn't from one of these signers — even if auto-apply is enabled.</p>
-    </section>
-
-    <section class="step">
-      <h2>6) Use Network Settings In App</h2>
-      <p class="hint">Open app Settings -> Network to:</p>
-      <ul>
-        <li>Probe nodes and view latency</li>
-        <li>Verify legitimacy badges (`SAME HASH`, `LEGIT COPY`, mismatch alerts)</li>
-        <li>Switch to Tor-enabled nodes using onion <code>/app</code> links with automatic handoff when possible</li>
-        <li>Check/apply updates from the official feed</li>
-      </ul>
-    </section>
-
-    <section class="step">
-      <h2>7) Maintainer deploy scripts</h2>
-      <p class="hint">From a dev checkout at repo root (see <code>node/deploy/README.md</code>):</p>
-      <pre><code># Production fleet — SCP files + restart frogtalk on both nodes
-node/scripts/deploy_nodes.sh node/static/js/calls.js
-
-# Single server — full rsync of node/ (configure node/scripts/.env)
-node/scripts/deploy.sh
-
-# Imageboard PHP only
-node/scripts/deploy_board.sh
-
-# Publish docs pages after editing docs-node.html / docs-api.html
-node/scripts/deploy_nodes.sh node/static/docs-node.html node/static/docs-api.html</code></pre>
-      <p class="hint">Hot deploy does not run DB migrations — use <code>node_update_check.sh --apply</code> when <code>database.py</code> changes.</p>
-    </section>
-
-    <section class="step">
-      <h2>8) Project structure (post 2026-05 restructure)</h2>
-      <p class="hint">The repo now splits cleanly into <code>client/</code> (what end-users install) and <code>node/</code> (the federated server you run):</p>
-      <pre><code>frogtalk/
-├── client/                       # everything end-users install
-│   ├── desktop/                  # Electron source + builds
-│   └── mobile/{android,ios}
-└── node/                         # the federated server
-    ├── main.py                   # FastAPI entrypoint
-    ├── routers/                  # FastAPI route modules
-    ├── static/                   # web client + marketing pages
-    ├── board/                    # Frog Channel PHP imageboard (public /board/)
-    ├── deploy/                   # systemd / nginx / env.example
-    ├── scripts/                  # setup, update, deploy, build helpers
-    ├── tests/                    # pytest suite
-    ├── requirements.txt
-    └── Dockerfile</code></pre>
-      <p class="hint">On a running node, operator state (<code>.env</code>, <code>data/</code>, <code>secrets/</code>, <code>venv/</code>) stays at <code>/opt/frogtalk/</code> and the runtime source at <code>/opt/frogtalk/node/</code>. The setup wizard wires symlinks so the service can run with <code>WorkingDirectory=/opt/frogtalk/node</code> without copying secrets into the source tree.</p>
-      <p class="hint">Build entrypoints: <code>client/desktop/app/package.json</code> (Electron), <code>client/mobile/android/build.gradle.kts</code>, <code>client/mobile/ios/FrogTalk.xcodeproj</code>, and <code>node/Dockerfile</code> for containerized deploys.</p>
-      <p class="hint">The nginx file in git (<code>node/deploy/nginx.conf</code>) is a reusable <em>template</em>. Set your own <code>server_name</code>, cert paths, and upstream port to match your service override.</p>
+      <h2>Project layout</h2>
+      <pre><code>/opt/frogtalk/
+├── .env              # secrets (never commit)
+├── data/             # SQLite + uploads
+├── secrets/          # federation keys, push creds
+├── venv/
+└── node/             # FastAPI app (WorkingDirectory for systemd)
+    ├── main.py
+    ├── static/       # /app and this page (/docs/node)
+    ├── board/        # optional /board/
+    └── scripts/      # install.sh, federation join, updates</code></pre>
     </section>
 
   </main>
 
-<!-- FOOTER (shared: static/partials/site-footer.html) -->
-<div id="ft-site-footer-mount"></div>
-<script src="/static/js/site-footer.js?v=6" defer></script>
-
+  <div id="ft-site-footer-mount"></div>
+  <script src="/static/js/site-footer.js?v=6" defer></script>
 </body>
 </html>

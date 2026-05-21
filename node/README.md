@@ -35,7 +35,7 @@ Shows incoming commits, warns on dirty trees, re-checks runtime symlinks, and pi
 
 The wizard creates `venv/`, writes `.env`, and symlinks `data/`, `secrets/`, and `.env` into the tree so the unit (`WorkingDirectory=/opt/frogtalk/node`) finds runtime state.
 
-**Docs:** [Node guide](static/docs-node.html) (`/docs/node` on a live server) · [Deploy](deploy/README.md) · [API reference](static/docs-api.html) (`/docs/api`)
+**Docs:** [VPS install guide](../docs/NODE_INSTALL.md) · [Node guide](static/docs-node.html) (`/docs/node`) · [Deploy](deploy/README.md) · [API](static/docs-api.html) (`/docs/api`)
 
 ## Layout
 

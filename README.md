@@ -30,9 +30,26 @@ No company in the middle. Messages stay private. Built in the open.
 
 ---
 
-## ✨ Why FrogTalk?
+## What is FrogTalk?
+
+FrogTalk is a **self-hostable, federated chat and social node**: FastAPI + SQLite on the server,
+vanilla JS in the browser, optional Frog Channel imageboard, Discord/Telegram bridges, WebRTC calls,
+and **Ed25519-signed federation** between independent operators. Clients encrypt DMs (Signal Protocol)
+and private channels (AES-GCM) before data reaches your disk.
+
+- **Use someone else's node:** [frogtalk.xyz/app](https://frogtalk.xyz/app)
+- **Run your own:** install under `/opt/frogtalk`, complete the **CLI setup wizard**, join the mesh — **[full VPS guide](docs/NODE_INSTALL.md)** · **[web guide](https://frogtalk.xyz/docs/node)**
+
+---
+
+## ✨ Why run your own node?
 
 > **Your chat, your server, your keys.** No company in the middle, no plaintext on disk, no telemetry tax.
+
+- **Censorship resistance** — more independent nodes means no single kill switch
+- **Policy control** — moderation, federation peers, and bridges on your terms
+- **Privacy** — you operate the infrastructure users connect to (still E2E for DMs/private rooms)
+- **Federation** — your users can talk to people on other nodes in the same mesh
 
 - 🔐 **Real E2E** — Signal Protocol (X3DH + Double Ratchet) for DMs, per-room AES-256-GCM (AAD-bound, with key rotation on ban/kick) for private channels. The server stores ciphertext and nothing else.
 - 🌐 **Federated** — your node talks to other nodes; users, profiles, posts, rooms and DMs replicate across the swamp.
@@ -121,52 +138,103 @@ Open **[frogtalk.xyz/app](https://frogtalk.xyz/app)** — no install; works on L
 
 ## Self-Host (run your own node)
 
-### Quick start (Linux server)
+**Docs:** [docs/NODE_INSTALL.md](docs/NODE_INSTALL.md) (VPS, DNS, firewall, nginx, HTTPS, backups) ·
+[https://frogtalk.xyz/docs/node](https://frogtalk.xyz/docs/node) (same flow on the live site)
+
+### Quick start (fresh Linux VPS)
 
 ```bash
-git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
-cd /opt/frogtalk
+cd /opt
+git clone https://github.com/deadinternetfox/frogtalk.git
+cd frogtalk
 
-# Interactive wizard: venv, .env, data/ symlinks, optional Tor
-bash node/scripts/install.sh
-
-# Join the public mesh (official directory + board nav pills)
-bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
-
-# Production service (optional)
-sudo cp node/deploy/frogtalk.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now frogtalk
+# CLI install wizard (venv, .env, symlinks) — not a browser UI
+bash node/scripts/install.sh setup -y
+bash node/scripts/install.sh federation -y
+bash node/scripts/install.sh systemd -y
 ```
 
-Manual path without the wizard:
+Or use the **interactive menu:** `bash node/scripts/install.sh` → setup · federation · systemd · status.
+
+Put **nginx + certbot** in front (ports 80/443), keep uvicorn on `127.0.0.1:8080`, set
+`PUBLIC_URL=https://chat.yourdomain.com` and matching `ALLOWED_ORIGINS`. See the VPS guide for UFW,
+SSH keys, and troubleshooting.
+
+**Admin account:** user `admin` on first boot — password from `ADMIN_PASSWORD` in `.env`, or a
+one-time generated value in `journalctl` if left empty (rotate after login).
+
+> Runtime state lives at `/opt/frogtalk/` (`.env`, `data/`, `secrets/`, `venv/`). Code is
+> `/opt/frogtalk/node/`. `node/data` and `node/.env` must be **symlinks**, not real folders.
+
+### Install wizard (CLI)
+
+| Entry | What it does |
+|-------|----------------|
+| `bash node/scripts/install.sh` | Interactive menu |
+| `bash node/scripts/install.sh setup` | `node_setup_wizard.sh` — venv, `.env`, symlinks |
+| `bash node/scripts/install.sh federation` | Directory sync, pubkey pin, board peer pills |
+| `bash node/scripts/install.sh systemd` | Install `frogtalk.service` |
+| `bash node/scripts/install.sh status` | `/api/ping` + federation peer list |
+
+Wizard source: `node/scripts/node_setup_wizard.sh`. Users register at **`/app`** after the node is up.
+
+### Federation setup
+
+```bash
+bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y \
+  --public-url https://chat.yourdomain.com
+```
+
+- Directory feed (default): `https://frogtalk.xyz/api/network/servers`
+- Peer **Ed25519 keys** are pinned from each peer’s `/api/network/status`
+- Re-run after changing `PUBLIC_URL`, onion URL, or major upgrades
+
+**Official production nodes** (directory + CLI fallback when HTTP is down):
+
+| Node | Clearnet |
+|------|----------|
+| FrogTalk Main | `https://frogtalk.xyz` |
+| FrogTalk Tor Mirror | Onion address in app **Settings → Network** |
+
+### Manual install (no wizard)
 
 ```bash
 git clone https://github.com/deadinternetfox/frogtalk.git /opt/frogtalk
 cd /opt/frogtalk
 python3 -m venv venv && source venv/bin/activate
 pip install -r node/requirements.txt
-cp node/deploy/env.example .env    # set ADMIN_PASSWORD, PUBLIC_URL, ALLOWED_ORIGINS
-mkdir -p data && ln -sfn /opt/frogtalk/data node/data && ln -sfn /opt/frogtalk/.env node/.env
-cd node && python main.py          # → http://localhost:8080
+cp node/deploy/env.example .env
+mkdir -p data secrets
+ln -sfn /opt/frogtalk/data node/data && ln -sfn /opt/frogtalk/.env node/.env
+cd node && python main.py
 ```
 
-Default admin login: `admin` / the value of `ADMIN_PASSWORD` in your `.env`.
-
-> All node code lives under `node/`. Runtime state (`data/`, `secrets/`, `.env`) stays at
-> the install root; `node/data` and `node/.env` must be **symlinks**, not real folders
-> (otherwise you get an empty DB and broken sessions). The wizard and
-> `node_federation_join.sh` fix this automatically.
-
-### Guided setup + updates
+### Updates
 
 ```bash
-# Federation mesh (re-run after changing PUBLIC_URL or onion address)
-bash node/scripts/node_federation_join.sh --install-dir /opt/frogtalk -y
-
-# Check / apply signed upstream updates
-bash node/scripts/node_update_check.sh
-bash node/scripts/node_update_check.sh --apply
+bash node/scripts/install.sh update
+bash node/scripts/install.sh update-apply -y
+bash node/scripts/install.sh federation -y   # refresh peers after releases
 ```
+
+### Security notes (operators)
+
+- Use **SSH keys**; do not commit `.env`, tokens, or passwords to git
+- `FROGTALK_FEDERATION_REQUIRE_SIGS=1` (default in wizard) — reject unsigned federation events
+- `FROGTALK_AUTO_UPDATE_ENABLED=0` until `FROGTALK_RELEASE_SIGNERS` is set
+- Expose **nginx** on 443, not raw uvicorn on the public internet
+- Report issues: [frogtalk.xyz/security](https://frogtalk.xyz/security)
+
+### Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| Empty DB / missing tables | `node/data` must symlink to `/opt/frogtalk/data` — run setup or federation join |
+| Domain 502, local `:8080` OK | Match `PORT` in `.env` with nginx `proxy_pass` |
+| Federation peers, no delivery | Re-run `federation -y`; check pinned pubkey in DB (`install.sh status`) |
+| CORS in browser | Add your HTTPS origin to `ALLOWED_ORIGINS` |
+
+More: [docs/NODE_INSTALL.md](docs/NODE_INSTALL.md#troubleshooting)
 
 ### Server Web Admin (node management)
 
@@ -249,7 +317,7 @@ server {
 }
 ```
 
-Full node setup guide: **[frogtalk.xyz/docs/node](https://frogtalk.xyz/docs/node)**
+Full node setup: **[docs/NODE_INSTALL.md](docs/NODE_INSTALL.md)** · **[frogtalk.xyz/docs/node](https://frogtalk.xyz/docs/node)**
 
 ---
 
@@ -344,7 +412,9 @@ frogtalk/
 ├── bot-examples/                 # standalone reference bots
 ├── github-build-mirror/          # release binaries published to GitHub
 ├── docs/
-│   └── SECURITY_MODEL.md         # encryption + threat model
+│   ├── NODE_INSTALL.md           # VPS install + federation (start here for ops)
+│   ├── SECURITY_MODEL.md         # encryption + threat model
+│   └── FEDERATED_CALLS.md        # cross-node WebRTC / TURN
 ├── README.md / SECURITY.md / CONTRIBUTING.md / CONTRIBUTORS.md / LICENSE
 └── .gitignore / .dockerignore / .fallowrc.json
 ```
