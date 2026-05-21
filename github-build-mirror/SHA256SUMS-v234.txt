@@ -1,0 +1,3 @@
+c7131a120d781ee2c9426a4b896e502fffd2121d28bb5ba4940edf60ff907ad7  node/static/frogtalk-v234.apk
+c7131a120d781ee2c9426a4b896e502fffd2121d28bb5ba4940edf60ff907ad7  github-build-mirror/frogtalk-v234.apk
+a53b5017ae1303c2cb610be0bf8187cf00d432f330260c1d9832920b0897b9bb  github-build-mirror/frogtalk-v234.aab

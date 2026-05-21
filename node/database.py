@@ -10028,9 +10028,11 @@ def resolve_global_user_home_server_id(global_user_id: str) -> str:
         return ""
     ident = get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
-    origin = get_federation_profile_origin(gid)
-    if origin:
-        return origin
+    # Registered local account always homes on this node. Checking
+    # federation_user_profiles first misclassified same-node friends as
+    # remote (stale origin rows), which routed call_offer through
+    # federation instead of the live WS path — callees on Android/desktop
+    # never saw a direct incoming-call popup.
     try:
         with _conn() as con:
             row = con.execute(
@@ -10041,6 +10043,9 @@ def resolve_global_user_home_server_id(global_user_id: str) -> str:
             return local_sid
     except Exception:
         pass
+    origin = get_federation_profile_origin(gid)
+    if origin:
+        return origin
     return ""
 
 
