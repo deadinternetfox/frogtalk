@@ -54,6 +54,7 @@ class MainActivity : AppCompatActivity() {
         private const val BATTERY_REPROMPT_INTERVAL_MS = 7L * 24 * 60 * 60 * 1000
         private const val STORY_UPLOAD_NOTIFICATION_ID = 42002
         private const val STORY_UPLOAD_CHANNEL_ID = "frogtalk_upload"
+        private const val DEFAULT_LOADING_MESSAGE = "Connecting to the pond…"
 
         /**
          * Tracks whether the activity is currently visible (between onResume
@@ -72,8 +73,8 @@ class MainActivity : AppCompatActivity() {
 
         /** FCM call push while the WebView is foreground — recover offer in-page (no tray dup). */
         @JvmStatic
-        fun deliverIncomingCallWhileForeground(peerNick: String, callId: String) {
-            val act = activeInstance ?: return
+        fun deliverIncomingCallWhileForeground(peerNick: String, callId: String): Boolean {
+            val act = activeInstance ?: return false
             act.runOnUiThread {
                 try {
                     act.scheduleIncomingCallRecovery(callId, peerNick)
@@ -81,6 +82,7 @@ class MainActivity : AppCompatActivity() {
                     Log.w(TAG, "deliverIncomingCallWhileForeground failed", e)
                 }
             }
+            return true
         }
     }
 
@@ -129,6 +131,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingIncomingCallId: String? = null
     private var pendingIncomingCallPeer: String? = null
     private var incomingCallRecoveryToken: Long = 0L
+    private var incomingCallRecoveryRetries: Int = 0
 
     private fun normalizeServerBaseUrl(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
@@ -199,6 +202,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun reloadAppAfterServerConfigured() {
         try {
+            showLoadingScreen("Opening FrogTalk…")
             val entry = getConfiguredAppEntryUrl()
             webView?.loadUrl(buildAppUrl(entry))
         } catch (e: Throwable) {
@@ -213,6 +217,7 @@ class MainActivity : AppCompatActivity() {
             .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
         runOnUiThread {
             try {
+                showLoadingScreen("Opening FrogTalk…")
                 webView?.loadUrl(buildAppUrl(getConfiguredAppEntryUrl()))
             } catch (e: Throwable) {
                 Log.e(TAG, "setServerBaseUrlFromJs reload failed", e)
@@ -801,6 +806,15 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.loading_screen)?.visibility = View.GONE
     }
 
+    private fun showLoadingScreen(message: String? = null) {
+        runOnUiThread {
+            findViewById<View>(R.id.error_screen)?.visibility = View.GONE
+            findViewById<TextView>(R.id.loading_message)?.text =
+                message?.takeIf { it.isNotBlank() } ?: DEFAULT_LOADING_MESSAGE
+            findViewById<View>(R.id.loading_screen)?.visibility = View.VISIBLE
+        }
+    }
+
     private fun showErrorScreen(message: String) {
         runOnUiThread {
             findViewById<View>(R.id.loading_screen)?.visibility = View.GONE
@@ -877,6 +891,7 @@ class MainActivity : AppCompatActivity() {
     private fun scheduleIncomingCallRecovery(callId: String, peerNick: String) {
         pendingIncomingCallId = callId.trim().takeIf { it.isNotEmpty() }
         pendingIncomingCallPeer = peerNick.trim().takeIf { it.isNotEmpty() }
+        incomingCallRecoveryRetries = 0
         flushPendingIncomingCallRecovery(delayMs = 350)
     }
 
@@ -893,20 +908,45 @@ class MainActivity : AppCompatActivity() {
             .replace("\\", "\\\\")
             .replace("'", "\\'")
         val js = """
-            try{
-              if(window.App&&typeof App.recoverIncomingCallFromNative==='function'){
-                App.recoverIncomingCallFromNative({callId:'$cidJs',peerNick:'$nickJs'});
-              }
-            }catch(e){console.warn('[ft] incoming-call recovery failed',e);}
+            (function(){
+              try{
+                if(window.App&&typeof App.recoverIncomingCallFromNative==='function'){
+                  App.recoverIncomingCallFromNative({callId:'$cidJs',peerNick:'$nickJs'});
+                  return 'ok';
+                }
+              }catch(e){console.warn('[ft] incoming-call recovery failed',e);}
+              return 'retry';
+            })();
         """.trimIndent()
         val token = ++incomingCallRecoveryToken
         wv.postDelayed({
             if (token != incomingCallRecoveryToken) return@postDelayed
-            try { wv.evaluateJavascript(js, null) } catch (e: Throwable) {
+            try {
+                wv.evaluateJavascript(js) { raw ->
+                    if (token != incomingCallRecoveryToken) return@evaluateJavascript
+                    val status = raw?.trim()?.removePrefix("\"")?.removeSuffix("\"")
+                    if (status == "ok") {
+                        incomingCallRecoveryRetries = 0
+                        pendingIncomingCallId = null
+                        pendingIncomingCallPeer = null
+                        return@evaluateJavascript
+                    }
+                    incomingCallRecoveryRetries += 1
+                    if (incomingCallRecoveryRetries <= 8) {
+                        val retryDelay = (150L * incomingCallRecoveryRetries).coerceAtMost(1200L)
+                        flushPendingIncomingCallRecovery(delayMs = retryDelay)
+                    } else {
+                        Log.w(TAG, "incoming-call recovery deferred; JS bridge still unavailable")
+                    }
+                }
+            } catch (e: Throwable) {
                 Log.w(TAG, "incoming-call JS recovery failed", e)
+                incomingCallRecoveryRetries += 1
+                if (incomingCallRecoveryRetries <= 8) {
+                    val retryDelay = (200L * incomingCallRecoveryRetries).coerceAtMost(1200L)
+                    flushPendingIncomingCallRecovery(delayMs = retryDelay)
+                }
             }
-            pendingIncomingCallId = null
-            pendingIncomingCallPeer = null
         }, delayMs)
     }
 
@@ -984,7 +1024,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .edit().putString(PREF_SERVER_BASE_URL, normalized).apply()
-                activity.runOnUiThread { activity.reloadAppAfterServerConfigured() }
+                activity.runOnUiThread {
+                    activity.showLoadingScreen("Opening FrogTalk…")
+                    activity.reloadAppAfterServerConfigured()
+                }
             } catch (e: Throwable) {
                 Log.e(TAG, "connectToServer failed", e)
             }

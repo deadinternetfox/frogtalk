@@ -110,6 +110,32 @@
       margin-top: 22px; text-align: center; font-size: .75rem; color: #5a7262;
     }
     .foot a { color: var(--green); text-decoration: none; }
+    .busy {
+      position: fixed; inset: 0; z-index: 999;
+      background: rgba(4,8,6,.84);
+      display: none; align-items: center; justify-content: center;
+      padding: 22px;
+    }
+    .busy.show { display: flex; }
+    .busy-card {
+      width: min(360px, 92vw);
+      border-radius: 18px;
+      border: 1px solid #2a4a34;
+      background: linear-gradient(165deg, rgba(16,25,21,.98), rgba(10,14,12,.98));
+      text-align: center;
+      padding: 22px 18px;
+      box-shadow: 0 18px 48px rgba(0,0,0,.45);
+    }
+    .busy-spinner {
+      width: 34px; height: 34px; margin: 2px auto 14px;
+      border-radius: 50%;
+      border: 3px solid rgba(76,175,80,.25);
+      border-top-color: var(--green);
+      animation: spin .9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .busy-title { margin: 0; font-size: 1rem; font-weight: 700; color: #d8f0de; }
+    .busy-text { margin: 8px 0 0; font-size: .84rem; color: #8fb49a; }
   </style>
 </head>
 <body>
@@ -175,12 +201,24 @@
     <p class="foot">Open source · <a href="https://github.com/deadinternetfox/frogtalk" target="_blank" rel="noopener">GitHub</a></p>
   </div>
 
+  <div class="busy" id="busy">
+    <div class="busy-card">
+      <div class="busy-spinner" aria-hidden="true"></div>
+      <p class="busy-title">Opening FrogTalk…</p>
+      <p class="busy-text" id="busy-text">Preparing your node connection.</p>
+    </div>
+  </div>
+
   <script>
     (function () {
       var step = 0;
       var input = document.getElementById('server-url');
       var err = document.getElementById('url-err');
       var preview = document.getElementById('preview-host');
+      var busy = document.getElementById('busy');
+      var busyText = document.getElementById('busy-text');
+      var finishBtn = document.getElementById('btn-finish');
+      var isSubmitting = false;
 
       function norm(raw) {
         var u = String(raw || '').trim();
@@ -209,6 +247,7 @@
       }
 
       function connect(url) {
+        if (isSubmitting) return;
         var base = norm(url);
         if (!base) {
           err.classList.add('show');
@@ -216,10 +255,25 @@
         }
         err.classList.remove('show');
         preview.textContent = base.replace(/^https?:\/\//, '');
+        isSubmitting = true;
+        if (finishBtn) {
+          finishBtn.disabled = true;
+          finishBtn.textContent = 'Opening…';
+          finishBtn.style.opacity = '0.7';
+        }
+        if (busy) busy.classList.add('show');
+        if (busyText) busyText.textContent = 'Connecting to ' + preview.textContent + ' and loading sign in…';
         if (window.Android && typeof Android.connectToServer === 'function') {
           Android.connectToServer(base);
           return;
         }
+        isSubmitting = false;
+        if (finishBtn) {
+          finishBtn.disabled = false;
+          finishBtn.textContent = 'Open FrogTalk';
+          finishBtn.style.opacity = '1';
+        }
+        if (busy) busy.classList.remove('show');
         alert('Could not reach the app shell. Restart FrogTalk and try again.');
       }
 

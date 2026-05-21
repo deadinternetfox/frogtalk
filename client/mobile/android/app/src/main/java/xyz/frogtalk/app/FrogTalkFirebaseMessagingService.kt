@@ -44,15 +44,18 @@ class FrogTalkFirebaseMessagingService : FirebaseMessagingService() {
         if (kind == "call") {
             val peer = data["from_nickname"].orEmpty()
             val callId = data["call_id"].orEmpty()
-            // When the app is already visible, the in-app ringing overlay
-            // (driven by the WS call_offer path) is the single source of
-            // truth. Posting the FCM CallStyle heads-up on top of it just
-            // creates a second "Answer" button whose auto-accept races
-            // with the in-app accept and wedges the call. Skip it.
+            // When the app is visible we prefer in-app offer recovery
+            // (WS + /api/calls/{id}/pending). If recovery cannot be started,
+            // fall back to the native heads-up so users still have a reliable
+            // tap path into the incoming-call UI.
             if (MainActivity.isAppVisible) {
                 Log.i(TAG, "FCM call push: app visible — in-app offer recovery")
-                MainActivity.deliverIncomingCallWhileForeground(peer, callId)
-                return
+                val delivered = MainActivity.deliverIncomingCallWhileForeground(peer, callId)
+                if (delivered && callId.isNotBlank()) return
+                // Guardrail: if the activity instance is not attached yet (or call_id
+                // is unexpectedly missing), fall back to the heads-up so the user still
+                // gets a tappable incoming-call surface instead of a silent miss.
+                Log.w(TAG, "Foreground recovery unavailable; falling back to call notification")
             }
             // Single source of truth for the incoming-call UI: the CallStyle
             // heads-up below. We deliberately do NOT also fire CallService's
