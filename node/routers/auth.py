@@ -36,6 +36,7 @@ from deps import (
     admin_pin_clear_for_token,
     admin_area_access_status,
     session_token_from_request,
+    _pin_session_is_locked,
 )
 from routers._media_safety import safe_reencode as _media_reencode
 from ws_manager import manager
@@ -1362,6 +1363,39 @@ async def pin_verify(request: Request, body: PinVerifyRequest,
     except Exception:
         pass
     return res
+
+
+@router.post("/pin/sync-admin-gate")
+@limiter.limit("60/minute")
+async def pin_sync_admin_gate(
+    request: Request,
+    x_session_token: str = Header(None, alias="X-Session-Token"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Stamp server-side admin PIN grace without re-entering the PIN.
+
+    Used when the browser already passed ``gateAdmin()`` (sessionStorage
+    grace or a parent-frame unlock) but ``/api/server-admin/session`` still
+    reports ``pin_required`` because the unlock was keyed on a different
+    transport (header vs cookie).
+    """
+    if not int(current_user.get("pin_require_for_admin") or 0):
+        return {"ok": True, "synced": False}
+    token = session_token_from_request(request) or (x_session_token or "").strip()
+    if _pin_session_is_locked(current_user, token):
+        return JSONResponse(
+            status_code=423,
+            content={
+                "pin_required": True,
+                "admin": True,
+                "error": "PIN required for admin actions",
+            },
+        )
+    try:
+        admin_pin_mark_unlocked(token)
+    except Exception:
+        pass
+    return {"ok": True, "synced": True}
 
 
 @router.delete("/pin")

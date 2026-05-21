@@ -181,6 +181,15 @@
     }
   }
 
+  function _sessionToken() {
+    try {
+      if (window.State && State.token) return String(State.token);
+      return localStorage.getItem('fc_token') || '';
+    } catch {
+      return '';
+    }
+  }
+
   function _readCsrfCookie() {
     // FrogTalk session CSRF (``ft_csrf``) — bound to HttpOnly ``ft_session``.
     const m = (document.cookie || '').match(/(?:^|;\s*)ft_csrf=([^;]+)/);
@@ -193,6 +202,8 @@
   async function api(path, opts = {}) {
     const method = String(opts.method || 'GET').toUpperCase();
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    const tok = _sessionToken();
+    if (tok) headers['X-Session-Token'] = tok;
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       const csrf = _readCsrfCookie();
       if (csrf) headers['X-CSRF-Token'] = csrf;
@@ -1367,6 +1378,14 @@
       setLoginMessage('PIN required to open the server panel.', true);
       return false;
     }
+    try {
+      await api('/api/auth/pin/sync-admin-gate', { method: 'POST' });
+    } catch (e) {
+      if (e.status === 423) {
+        setLoginMessage('Enter your privacy PIN to unlock the server panel.', true);
+        return false;
+      }
+    }
     return true;
   }
 
@@ -1406,8 +1425,19 @@
         return false;
       }
       if (!gate.ok) {
-        setLoginMessage('PIN accepted but session is not cleared for admin access.', true);
-        return false;
+        try {
+          await api('/api/auth/pin/sync-admin-gate', { method: 'POST' });
+          gate = await api('/api/server-admin/session');
+        } catch (e) {
+          if (e.status === 423) {
+            setLoginMessage('Enter your privacy PIN to unlock the server panel.', true);
+            return false;
+          }
+        }
+        if (!gate.ok) {
+          setLoginMessage('PIN accepted but session is not cleared for admin access. Hard-refresh and try again.', true);
+          return false;
+        }
       }
     }
     try {

@@ -93,6 +93,25 @@
     return null;
   }
 
+  function _sessionToken () {
+    try {
+      if (window.State && State.token) return String(State.token);
+      return localStorage.getItem('fc_token') || '';
+    } catch {
+      return '';
+    }
+  }
+
+  async function _syncAdminGateToServer () {
+    try {
+      const res = await _api('/api/auth/pin/sync-admin-gate', 'POST', {});
+      if (res.ok) return true;
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 423 && j.pin_required) return false;
+    } catch {}
+    return false;
+  }
+
   function _readCsrfCookie () {
     try {
       const v = ('; ' + (document.cookie || '')).split('; ft_csrf=');
@@ -110,7 +129,7 @@
     }
     const verb = String(method || 'GET').toUpperCase();
     const headers = {
-      'X-Session-Token': (window.State && State.token) || '',
+      'X-Session-Token': _sessionToken(),
       'Content-Type': 'application/json',
     };
     if (verb !== 'GET' && verb !== 'HEAD' && verb !== 'OPTIONS') {
@@ -697,7 +716,10 @@
       // Admin grace uses its OWN tracker. The boot-time unlock
       // intentionally does not count — that's the whole point of the
       // "Require PIN for admin areas" toggle.
-      if (_wasAdminUnlockedRecently(_ADMIN_GRACE_MS)) { resolve(true); return; }
+      if (_wasAdminUnlockedRecently(_ADMIN_GRACE_MS)) {
+        _syncAdminGateToServer().then((ok) => resolve(!!ok));
+        return;
+      }
       _adminGatePending = true;
       _unlockResolvers.push(resolve);
       lockNow();
