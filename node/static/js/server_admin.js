@@ -36,8 +36,6 @@
   const channelRetentionLastSaved = document.getElementById('channel-retention-last-saved');
   const blockTorPeers = document.getElementById('block-tor-peers');
   const blockHttpOnlyPeers = document.getElementById('block-http-only-peers');
-  const redactClearnetIps = document.getElementById('redact-clearnet-ips');
-  const redactClearnetHint = document.getElementById('redact-clearnet-hint');
   const saveFederationPolicyBtn = document.getElementById('save-federation-policy-btn');
   const federationPolicyStatus = document.getElementById('federation-policy-status');
   const onboardingAlerts = document.getElementById('node-onboarding-alerts');
@@ -62,7 +60,6 @@
   const operatorUrlBannerSteps = document.getElementById('operator-url-banner-steps');
   const operatorUrlBannerActions = document.getElementById('operator-url-banner-actions');
   const operatorUrlBannerDismiss = document.getElementById('operator-url-banner-dismiss');
-  const REDACT_HINT_DEFAULT = 'Display-only masking for operator UI clarity. It does not hide your real IP from visitors, browsers, federation peers, or /board/. Use a real domain + trusted HTTPS to hide VPS IP exposure. Default: off.';
 
   function retentionSig() {
     const d = Math.max(1, Number(channelActiveDays?.value || 30) || 30);
@@ -86,8 +83,7 @@
   function federationPolicySig() {
     const tor = blockTorPeers?.checked ? '1' : '0';
     const http = blockHttpOnlyPeers?.checked ? '1' : '0';
-    const redact = redactClearnetIps?.checked ? '1' : '0';
-    return `${tor}|${http}|${redact}`;
+    return `${tor}|${http}`;
   }
 
   function setFederationPolicyStatus(state, text) {
@@ -108,14 +104,11 @@
   function syncFederationPolicy(policy) {
     const block = !!(policy && policy.block_tor_peers);
     const blockHttp = !!(policy && policy.block_http_only_peers);
-    const redact = !!(policy && policy.redact_clearnet_ips);
     if (blockTorPeers) blockTorPeers.checked = block;
     if (blockHttpOnlyPeers) blockHttpOnlyPeers.checked = blockHttp;
-    if (redactClearnetIps) redactClearnetIps.checked = redact;
     lastFederationPolicy = {
       block_tor_peers: block,
       block_http_only_peers: blockHttp,
-      redact_clearnet_ips: redact,
     };
     federationPolicyBaseline = federationPolicySig();
     setFederationPolicyStatus('saved', 'Loaded from this node');
@@ -134,7 +127,6 @@
         body: JSON.stringify({
           block_tor_peers: !!blockTorPeers?.checked,
           block_http_only_peers: !!blockHttpOnlyPeers?.checked,
-          redact_clearnet_ips: !!redactClearnetIps?.checked,
         }),
       });
       syncFederationPolicy(payload.federation_policy || {});
@@ -806,7 +798,7 @@
     } else if (issues.includes('ip')) {
       severity = 'warn';
       title = 'Public URL is a bare IP';
-      body = `The browser address bar uses <code>${host}</code>. “Mask peer IPs in this panel” only changes this admin UI — it does not change what users or federation peers see.`;
+      body = `The browser address bar uses <code>${host}</code>. Raw-IP PUBLIC_URL still exposes this address to users and federation peers until you switch to a domain + HTTPS.`;
       steps.push('Add a DNS name, set <code>PUBLIC_URL=https://your.domain</code>, and run the SSL installer.');
       steps.push('Re-announce to the hub after <code>PUBLIC_URL</code> changes.');
     }
@@ -924,20 +916,6 @@
     lastPublicUrlMeta = meta;
     renderOperatorUrlBanner(meta);
     renderOperatorDomainBanner(meta);
-    const ipPublicUrl = !!meta.is_ip_host && !meta.is_onion;
-    if (redactClearnetIps) {
-      redactClearnetIps.disabled = ipPublicUrl;
-      if (ipPublicUrl) redactClearnetIps.checked = false;
-    }
-    if (redactClearnetHint) {
-      if (ipPublicUrl) {
-        redactClearnetHint.textContent = 'Unavailable while PUBLIC_URL is a raw IP. Visitors and federation peers still see this address. Use a domain + trusted HTTPS.';
-      } else if (meta.recommend_redact_clearnet_ips && !redactClearnetIps?.checked) {
-        redactClearnetHint.textContent = 'Optional: mask VPS IPs in this panel only. Does not change the address bar or /board/ while PUBLIC_URL is an IP.';
-      } else {
-        redactClearnetHint.textContent = REDACT_HINT_DEFAULT;
-      }
-    }
     const warnEl = document.getElementById('imageboard-url-warnings');
     if (warnEl) {
       const bits = [];
@@ -1966,7 +1944,6 @@
   operatorDomainBannerDismiss?.addEventListener('click', dismissOperatorDomainBanner);
   blockTorPeers?.addEventListener('change', refreshFederationPolicyDirtyUi);
   blockHttpOnlyPeers?.addEventListener('change', refreshFederationPolicyDirtyUi);
-  redactClearnetIps?.addEventListener('change', refreshFederationPolicyDirtyUi);
   channelActiveDays?.addEventListener('input', refreshRetentionDirtyUi);
   channelAutoDeleteDays?.addEventListener('input', refreshRetentionDirtyUi);
   frogTrigger?.addEventListener('click', handleFrogTap);

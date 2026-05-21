@@ -486,18 +486,17 @@ The same nodes show warnings on **`/board/`** for visitors (IP in the address ba
 | `HTTP only` badge | Peer or this node’s clearnet `base_url` is `http://` |
 | `HTTPS` badge | Clearnet `base_url` uses `https://` |
 | `Direct clearnet route` | Federation uses `base_url`, not Tor |
-| `Clearnet address redacted` | Optional mask `46.250.*.*` in this panel only |
 | `IP hidden (Tor)` | Traffic uses `.onion` |
 
 **Federation Directory** policies (defaults **off**):
 
 - **Block Tor federation peers** — disables `.onion` routes when enabled.
 - **Auto-block non-SSL federation peers (HTTP)** — disables peers whose clearnet URL is `http://` (no TLS).
-- **Mask peer IPs in this panel only** (default **off**) — admin UI redaction only. If this node uses a raw-IP `PUBLIC_URL`, the toggle is unavailable because browsers/federation still expose that IP until a real domain + HTTPS is configured.
 
 Federation probes and **Settings → Network** always use the real stored `base_url`.
 
 **Trusted TLS:** use a DNS name + Let’s Encrypt (`install.sh ssl`) or Cloudflare in front of origin. Self-signed HTTPS on an IP removes browser warnings only after users accept an untrusted cert — production federation should use a domain.
+`install_node_ssl.sh` now also prints free CLI CA alternatives (ZeroSSL/Buypass via `acme.sh`) when certbot is unavailable or fails.
 
 ---
 

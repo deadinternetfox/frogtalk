@@ -163,7 +163,7 @@ FROGTALK_AUTO_UPDATE_ENABLED=0</code></pre>
       <h2>4) HTTPS (stop “Not secure” on HTTP)</h2>
       <p class="hint"><code>http://&lt;IP&gt;</code> is always labeled not secure. After setup, run:</p>
       <pre><code>sudo bash node/scripts/install.sh ssl -y --install-dir /opt/frogtalk</code></pre>
-      <p class="hint">IP-only nodes get a <strong>self-signed</strong> cert and HTTP→HTTPS redirect. Use <code>https://&lt;YOUR_VPS_IP&gt;/</code> (accept the browser trust prompt once). For a padlock with no warning, point a domain at the VPS and use <code>https://chat.&lt;YOUR_DOMAIN&gt;</code> — certbot runs automatically in the wizard.</p>
+      <p class="hint">IP-only nodes get a <strong>self-signed</strong> cert and HTTP→HTTPS redirect. Use <code>https://&lt;YOUR_VPS_IP&gt;/</code> (accept the browser trust prompt once). For a padlock with no warning, point a domain at the VPS and use <code>https://chat.&lt;YOUR_DOMAIN&gt;</code> — certbot runs automatically in the wizard. If certbot fails, the SSL helper prints free CLI alternatives (ZeroSSL/Buypass via <code>acme.sh</code>).</p>
       <p class="hint">nginx terminates TLS and proxies to <code>127.0.0.1:8080</code>.</p>
       <pre><code>server {
     listen 80;
@@ -201,7 +201,7 @@ curl -sS "$PUBLIC_URL/api/ping"
 curl -sS "$PUBLIC_URL/api/network/status" | python3 -m json.tool
 journalctl -u frogtalk -n 40 --no-pager</code></pre>
       <p class="hint">Open <code>$PUBLIC_URL/app</code>, register a test user. In <strong>Settings → Network</strong>, probe peers.</p>
-      <p class="hint"><strong>Server Admin</strong> shows a warning banner when <code>PUBLIC_URL</code> has no domain or no HTTPS, with fix steps. Use “Hide until fixed” to dismiss for the current page session; it returns on next load until corrected. “Mask peer IPs in this panel only” is UI redaction and is unavailable when <code>PUBLIC_URL</code> is still a raw IP, because visitors and federation still see that IP until a domain + HTTPS is configured.</p>
+      <p class="hint"><strong>Server Admin</strong> shows a warning banner when <code>PUBLIC_URL</code> has no domain or no HTTPS, with fix steps. Use “Hide until fixed” to dismiss for the current page session; it returns on next load until corrected. Raw-IP <code>PUBLIC_URL</code> still exposes the node IP to users and federation peers until a domain + HTTPS is configured.</p>
     </section>
 
     <section class="step" id="trouble">

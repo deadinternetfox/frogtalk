@@ -1301,13 +1301,6 @@ input, select {
                   <span class="field-hint">When enabled, clearnet peers using <code>http://</code> (no TLS/SSL) are automatically disabled for sync, inbox, and push. Same behavior pattern as Tor auto-block. Turning this off does not auto-unblock previously blocked peers. Default: off.</span>
                 </span>
               </label>
-              <label class="policy-toggle" for="redact-clearnet-ips" style="margin-top:10px;">
-                <input type="checkbox" id="redact-clearnet-ips" autocomplete="off">
-                <span class="policy-toggle-copy">
-                  <strong>Mask peer IPs in this panel only (UI redaction)</strong>
-                  <span class="field-hint" id="redact-clearnet-hint">Display-only masking for operator UI clarity. It does <b>not</b> hide your real IP from visitors, browsers, federation peers, or <code>/board/</code>. Use a real domain + trusted HTTPS to hide VPS IP exposure. Default: off.</span>
-                </span>
-              </label>
               <div class="retention-actions" style="margin-top:10px;">
                 <button class="btn" id="save-federation-policy-btn" type="button">Save Federation Policy</button>
                 <span id="federation-policy-status" class="status-pill state-saved">No local changes</span>

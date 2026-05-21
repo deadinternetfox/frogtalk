@@ -21,6 +21,9 @@ Usage: sudo bash node/scripts/install_node_ssl.sh [--install-dir PATH] [-y]
   --skip         No-op
 
 Run after install_board_nginx.sh. Updates PUBLIC_URL to https:// when TLS is enabled.
+For DNS names, this script prefers Let's Encrypt via certbot.
+If certbot is unavailable/fails, it prints free CLI CA alternatives
+(ZeroSSL/Buypass via acme.sh) before falling back to self-signed.
 EOF
 }
 
@@ -153,6 +156,17 @@ _apply_https_env() {
   ft_ok "Updated PUBLIC_URL → ${new_url}"
 }
 
+_print_free_ca_alternatives() {
+  ft_step "Free certificate providers (CLI-friendly)"
+  ft_detail "1) Let's Encrypt (certbot) — default path in this script."
+  ft_detail "2) ZeroSSL (via acme.sh): curl https://get.acme.sh | sh"
+  ft_detail "3) Buypass Go SSL (via acme.sh): acme.sh --set-default-ca --server buypass"
+  ft_detail "Example (acme.sh webroot with nginx):"
+  ft_detail "  ~/.acme.sh/acme.sh --issue -d ${_host} --webroot /var/www/html"
+  ft_detail "  ~/.acme.sh/acme.sh --install-cert -d ${_host} \\"
+  ft_detail "    --key-file ${SSL_KEY} --fullchain-file ${SSL_CERT} --reloadcmd 'systemctl reload nginx'"
+}
+
 case "$MODE" in
   self-signed)
     if [[ "$_is_ip" -eq 1 ]]; then
@@ -178,6 +192,7 @@ case "$MODE" in
     if [[ "$_is_ip" -eq 1 ]]; then
       ft_die "Let's Encrypt needs a DNS name — use --self-signed for bare IPs."
     fi
+    _print_free_ca_alternatives
     if ! command -v certbot >/dev/null 2>&1; then
       ft_info "Installing certbot…"
       apt-get update -qq
@@ -191,6 +206,7 @@ case "$MODE" in
       ft_ok "Let's Encrypt certificate installed for ${_host}"
     else
       ft_warn "certbot failed — falling back to self-signed"
+      _print_free_ca_alternatives
       bash "$SCRIPT_DIR/install_node_ssl.sh" --install-dir "$INSTALL_DIR" --self-signed
       exit $?
     fi

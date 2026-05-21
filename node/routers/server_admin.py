@@ -230,19 +230,11 @@ def _admin_node_view(node: dict) -> dict:
     onion_url = str(raw.get("onion_url") or "").strip()
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
     _policy = db.get_federation_policy_settings()
-    _redact_ips = bool(_policy.get("redact_clearnet_ips", False))
+    _redact_ips = False
     display_endpoint = _safe_host_label(
         onion_url if route_mode == "tor" and onion_url else target,
         redact_clearnet_ips=_redact_ips,
     )
-    _clearnet_ip_redacted = False
-    if route_mode == "clearnet" and _redact_ips:
-        try:
-            _h = (urllib.parse.urlparse(target).hostname or "").strip()
-            ipaddress.ip_address(_h)
-            _clearnet_ip_redacted = True
-        except Exception:
-            _clearnet_ip_redacted = False
     transport_preference = str(raw.get("transport_preference") or "auto").strip().lower() or "auto"
     base_url = str(raw.get("base_url") or "").strip()
     tls_insecure = bool(base_url) and url_is_http_only_clearnet(base_url)
@@ -269,7 +261,7 @@ def _admin_node_view(node: dict) -> dict:
         "privacy_label": (
             "IP hidden (Tor)"
             if route_mode == "tor"
-            else ("Clearnet address redacted" if _clearnet_ip_redacted else "Public host")
+            else "Public host"
         ),
         "policy_tor_blocked": policy_tor_blocked,
         "policy_http_blocked": policy_http_blocked,
@@ -284,7 +276,7 @@ def _local_admin_server_view() -> dict:
     endpoint = federation_router._public_server_target(public)
     tor_enabled = bool(federation_router._tor_mode_enabled())
     url_meta = analyze_public_url()
-    _redact = bool(db.get_federation_policy_settings().get("redact_clearnet_ips", False))
+    _redact = False
     return {
         "server_id": public.get("server_id") or "",
         "display_name": public.get("display_name") or "FrogTalk Node",
@@ -1197,7 +1189,7 @@ async def server_admin_probe_node(server_id: str, request: Request):
     target = federation_router._select_peer_target(node)
     result = federation_router._probe_url(target, timeout_s=1.6)
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
-    _redact_ips = bool(db.get_federation_policy_settings().get("redact_clearnet_ips", False))
+    _redact_ips = False
     return {
         "ok": True,
         "server_id": sid,
