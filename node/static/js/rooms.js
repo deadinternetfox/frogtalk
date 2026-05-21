@@ -1765,7 +1765,7 @@ const Rooms = (() => {
     const noInv = document.getElementById('ch-no-invites');
     if (noInv) {
       noInv.textContent = isPrivate
-        ? 'No invite links yet. Create a bounded link above — only /i/… URLs work for private channels.'
+        ? 'No invite links yet. Create one above.'
         : 'No invite links yet. Create one above to share this channel.';
     }
 
