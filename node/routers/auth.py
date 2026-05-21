@@ -374,14 +374,24 @@ def _build_sync_export_for_user(user_id: int) -> dict:
     if uid <= 0:
         return {"rooms": [], "dm_peers": [], "source_server_id": ""}
     joined_ids = db.get_user_joined_room_ids(uid)
-    rooms: list[str] = []
+    rooms: list[dict] = []
     for room in db.list_rooms():
         if room.get("id") not in joined_ids:
             continue
         name = str(room.get("name") or "").strip().lower()
         if not _ROOM_NAME_RE.match(name):
             continue
-        rooms.append(name)
+        rtype = str(room.get("type") or "public").strip().lower()
+        if rtype not in ("public", "private"):
+            rtype = "public"
+        ctype = str(room.get("channel_type") or "text").strip().lower()
+        if ctype not in ("text", "music", "voice"):
+            ctype = "text"
+        rooms.append({
+            "name": name,
+            "type": rtype,
+            "channel_type": ctype,
+        })
         if len(rooms) >= _SYNC_EXPORT_ROOM_LIMIT:
             break
 
@@ -527,13 +537,35 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     my_gid = str(me.get("global_user_id") or "").strip()
 
     for raw in rooms[:_SYNC_EXPORT_ROOM_LIMIT]:
-        name = str(raw or "").strip().lower()
+        if isinstance(raw, dict):
+            name = str(raw.get("name") or "").strip().lower()
+            room_type = str(raw.get("type") or "public").strip().lower()
+            channel_type = str(raw.get("channel_type") or "text").strip().lower()
+        else:
+            name = str(raw or "").strip().lower()
+            room_type = "public"
+            channel_type = "text"
         if not _ROOM_NAME_RE.match(name):
             continue
+        if room_type not in ("public", "private"):
+            room_type = "public"
+        if channel_type not in ("text", "music", "voice"):
+            channel_type = "text"
         room = db.get_room_by_name(name)
         if not room:
-            rooms_missing += 1
-            continue
+            # Auto-materialize missing public rooms so account channel state
+            # survives first login on a fresh node. Private rooms still require
+            # invite/secret flow and are not auto-created here.
+            if room_type == "public":
+                try:
+                    owner = db.get_or_create_federation_system_user()
+                    db.create_room(name, "", "public", owner, None, channel_type=channel_type)
+                    room = db.get_room_by_name(name)
+                except Exception:
+                    room = None
+            if not room:
+                rooms_missing += 1
+                continue
         try:
             db.join_room(uid, int(room["id"]))
             rooms_joined += 1
