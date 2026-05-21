@@ -233,7 +233,7 @@ Paths under `node/` map to `/opt/frogtalk/node/` on the server. Bare `static/…
 | Label | Host | SSH port |
 |-------|------|----------|
 | FrogTalk Main | `31.220.92.120` | `22` |
-| FrogTalk Clearnet | `161.97.182.73` | `2222` |
+| FrogTalk Tor Mirror | `161.97.182.73` | `2222` |
 | FrogTalk AUS | `46.250.244.184` | `22` |
 
 Edit `HOSTS`, `HOST_PORT`, and `HOST_LABEL` in `node/scripts/deploy_nodes.sh` (and `deploy_board.sh`) when the fleet changes.
