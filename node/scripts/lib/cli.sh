@@ -183,6 +183,29 @@ ft_ensure_runtime_symlinks() {
   return 0
 }
 
+# frogtalk.service runs as User=deploy; root-run wizards must hand off ownership.
+ft_ensure_deploy_ownership() {
+  local install_dir="${1:-}"
+  [[ -n "$install_dir" ]] || return 0
+  [[ "$(id -u)" -eq 0 ]] || return 0
+  if ! getent passwd deploy >/dev/null 2>&1; then
+    ft_warn "User deploy missing — adduser deploy (see docs/NODE_INSTALL.md) or edit frogtalk.service User="
+    return 0
+  fi
+  chown -R deploy:deploy "$install_dir"
+  if [[ -f "$install_dir/.env" ]]; then
+    chmod 600 "$install_dir/.env"
+    chown deploy:deploy "$install_dir/.env"
+  fi
+  if [[ -d "$install_dir/node/board/board_data" ]] && id www-data >/dev/null 2>&1; then
+    chown -R www-data:www-data \
+      "$install_dir/node/board/board_data" \
+      "$install_dir/node/board/board_uploads" \
+      "$install_dir/node/board/board_previews" 2>/dev/null || true
+  fi
+  ft_ok "Ownership → deploy:deploy (board_data → www-data)"
+}
+
 # Print how many commits local HEAD is behind upstream (0 if up to date / unknown).
 ft_git_behind_upstream() {
   local install_dir="$1"

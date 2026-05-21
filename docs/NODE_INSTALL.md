@@ -64,6 +64,8 @@ export PUBLIC_URL="http://<YOUR_VPS_IP>"
 export FROGTALK_SERVER_NAME="My FrogTalk Node"
 
 # 5) Install wizard + mesh + systemd (non-interactive -y)
+#    Export FROGTALK_FEDERATION_TOKEN (same as Main) before setup for hub auto-listing.
+export FROGTALK_FEDERATION_TOKEN="<same-as-main>"
 bash node/scripts/install.sh setup -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 bash node/scripts/install.sh federation -y --install-dir /opt/frogtalk --public-url "$PUBLIC_URL"
 sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk

@@ -116,6 +116,7 @@ run_systemd() {
     exit 0
   fi
   "${cp_cmd[@]}" "$unit_src" /etc/systemd/system/frogtalk.service
+  ft_ensure_deploy_ownership "$INSTALL_DIR"
   "${systemctl_cmd[@]}" daemon-reload
   "${systemctl_cmd[@]}" enable frogtalk
   if ft_ask_yes_no "Start frogtalk now?" "y"; then

@@ -195,6 +195,8 @@ main() {
     fi
   fi
 
+  ft_ensure_deploy_ownership "$install_dir"
+
   if ft_ask_yes_no "Join FrogTalk federation mesh now? (recommended)" "y"; then
     ft_info "Running federation join…"
     local fed_args=(--install-dir "$install_dir" -y --skip-restart --public-url "$public_url")

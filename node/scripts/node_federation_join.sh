@@ -640,6 +640,9 @@ verify_and_restart() {
   fi
 
   if [[ "$SKIP_RESTART" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
+    if [[ "$(id -u)" -eq 0 ]] && getent passwd deploy >/dev/null 2>&1; then
+      ft_ensure_deploy_ownership "$INSTALL_DIR"
+    fi
     if systemctl is-enabled frogtalk >/dev/null 2>&1 || systemctl is-active frogtalk >/dev/null 2>&1; then
       spinner_msg "Restarting frogtalk.service…"
       if systemctl restart frogtalk 2>/dev/null; then
