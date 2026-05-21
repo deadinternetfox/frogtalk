@@ -913,9 +913,19 @@ const Rooms = (() => {
           </div>
         </div>`).join('');
     }
-    const res = await fetch('/api/rooms', { headers: { 'X-Session-Token': State.token } });
-    const data = await res.json();
-    State.rooms = data.rooms || [];
+    try {
+      const res = await fetch('/api/rooms', { headers: { 'X-Session-Token': State.token } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        console.warn('[rooms] loadRooms failed', res.status, data?.error || data);
+        State.rooms = [];
+      } else {
+        State.rooms = data.rooms || [];
+      }
+    } catch (e) {
+      console.warn('[rooms] loadRooms error', e);
+      State.rooms = [];
+    }
     renderRooms();
   }
 

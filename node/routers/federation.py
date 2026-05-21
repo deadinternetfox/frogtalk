@@ -877,6 +877,18 @@ def _public_server_view(server: dict, *, onion_only: bool | None = None) -> dict
     return public
 
 
+def _network_probe_status(target: str, result: dict) -> str:
+    """Map probe result to UI-friendly status (not always hard down)."""
+    if bool(result.get("ok")):
+        return "healthy"
+    err = str(result.get("error") or "").lower()
+    if _url_uses_tor(target):
+        return "tor_required"
+    if "redirects not allowed" in err or "301" in err:
+        return "redirect"
+    return "down"
+
+
 def _probe_url(base_url: str, timeout_s: float = 1.2) -> dict:
     start = time.perf_counter()
     target = _normalize_base_url(base_url)
@@ -1765,10 +1777,12 @@ async def probe_network_servers(
     async def probe_one(server: dict):
         target = server.get("onion_url") if (include_onion and server.get("onion_url")) else _public_server_target(server)
         result = await asyncio.to_thread(_probe_url, target, timeout_ms / 1000.0)
+        probe_status = _network_probe_status(target, result)
         return {
             **server,
             "probe_target": target,
             "healthy": bool(result.get("ok")),
+            "probe_status": probe_status,
             "latency_ms": result.get("latency_ms"),
             "probe_error": result.get("error"),
         }
