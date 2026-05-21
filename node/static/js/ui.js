@@ -2926,14 +2926,16 @@ function _renderNetworkServersList() {
     let statusColor = healthy ? '#4caf50' : '#f44336';
     let statusDot = healthy ? '#3ecf65' : '#f44336';
     let statusText = healthy ? 'healthy' : 'down';
-    if (!healthy && probeErrorLower.includes('301')) {
-      statusText = 'redirect';
-      statusColor = '#f0c040';
-      statusDot = '#f0c040';
-    } else if (!healthy && isOnion && (probeErrorLower.includes('9050') || probeErrorLower.includes('socks') || probeErrorLower.includes('proxy'))) {
+    if (!healthy && isOnion) {
+      // Onion probes from non-Tor environments are expected to fail.
+      // Show an actionable state instead of a misleading hard "down".
       statusText = 'tor req';
       statusColor = '#d7c477';
       statusDot = '#d7c477';
+    } else if (!healthy && probeErrorLower.includes('301')) {
+      statusText = 'redirect';
+      statusColor = '#f0c040';
+      statusDot = '#f0c040';
     }
     const selected = _networkSelectedServer && _networkSelectedServer.server_id === s.server_id;
     const isConnected = connectedBase && publicAddr === connectedBase;
