@@ -203,8 +203,14 @@ def _safe_host_label(url: str) -> str:
             return host
         return f"{host[:14]}...{host[-10:]}"
     try:
-        ipaddress.ip_address(host)
-        return "hidden clearnet ip"
+        ip = ipaddress.ip_address(host)
+        if isinstance(ip, ipaddress.IPv4Address):
+            octets = str(ip).split(".")
+            return f"{octets[0]}.{octets[1]}.*.*"
+        compact = str(ip)
+        if len(compact) > 20:
+            return f"{compact[:8]}…{compact[-6:]}"
+        return compact
     except Exception:
         pass
     if len(host) <= 36:
@@ -221,6 +227,14 @@ def _admin_node_view(node: dict) -> dict:
     onion_url = str(raw.get("onion_url") or "").strip()
     route_mode = "tor" if federation_router._url_uses_tor(target) else "clearnet"
     display_endpoint = _safe_host_label(onion_url if route_mode == "tor" and onion_url else target)
+    _clearnet_ip_redacted = False
+    if route_mode == "clearnet":
+        try:
+            _h = (urllib.parse.urlparse(target).hostname or "").strip()
+            ipaddress.ip_address(_h)
+            _clearnet_ip_redacted = True
+        except Exception:
+            _clearnet_ip_redacted = False
     transport_preference = str(raw.get("transport_preference") or "auto").strip().lower() or "auto"
     tor_policy = bool(db.get_federation_policy_settings().get("block_tor_peers"))
     policy_tor_blocked = (
@@ -242,7 +256,11 @@ def _admin_node_view(node: dict) -> dict:
         "transport_preference": transport_preference,
         "display_endpoint": display_endpoint,
         "transport_label": "Tor onion route" if route_mode == "tor" else "Direct clearnet route",
-        "privacy_label": "IP hidden" if route_mode == "tor" or display_endpoint == "hidden clearnet ip" else "Public host",
+        "privacy_label": (
+            "IP hidden (Tor)"
+            if route_mode == "tor"
+            else ("Clearnet address redacted" if _clearnet_ip_redacted else "Public host")
+        ),
         "policy_tor_blocked": policy_tor_blocked,
     }
 

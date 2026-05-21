@@ -199,6 +199,7 @@ curl -sS "$PUBLIC_URL/api/ping"
 curl -sS "$PUBLIC_URL/api/network/status" | python3 -m json.tool
 journalctl -u frogtalk -n 40 --no-pager</code></pre>
       <p class="hint">Open <code>$PUBLIC_URL/app</code>, register a test user. In <strong>Settings → Network</strong>, probe peers.</p>
+      <p class="hint"><strong>Server Admin</strong> may show <code>46.250.*.*</code> and “Clearnet address redacted” for IP-based nodes — that hides the full VPS IP in the operator UI only; federation still uses your real <code>PUBLIC_URL</code>.</p>
     </section>
 
     <section class="step" id="trouble">

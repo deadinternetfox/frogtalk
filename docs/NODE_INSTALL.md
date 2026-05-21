@@ -477,6 +477,19 @@ Open `$PUBLIC_URL/app` — register a test user, join a room, confirm WebSocket 
 
 In the app: **Settings → Network** — probe peers, compare build hash with [frogtalk.xyz](https://frogtalk.xyz) when federating.
 
+### “Clearnet address redacted” in Server Admin
+
+**Server Admin → Federation nodes** masks clearnet **IP addresses** in the UI (e.g. `46.250.*.*`) so operator screenshots do not leak peer VPS IPs. This is **display-only**:
+
+| UI | What it means |
+|----|----------------|
+| `Direct clearnet route` | Federation uses the normal `base_url` (HTTP/HTTPS), not Tor |
+| `Clearnet address redacted` | The host is an IP; the admin panel hides the last octets |
+| `IP hidden (Tor)` | Traffic is aimed at an `.onion` hidden service |
+| `Public host` | A DNS name is shown (e.g. `frogtalk.xyz`) |
+
+Federation, probes, and **Settings → Network** still use the real `base_url` stored in the database. Only the Server Admin card redacts bare IPs. Nodes with a **domain** in `PUBLIC_URL` show the hostname instead of a masked IP.
+
 ---
 
 ## 10) Backup and upgrades

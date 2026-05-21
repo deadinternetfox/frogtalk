@@ -70,7 +70,8 @@ class TorModeTests(unittest.TestCase):
             "capabilities": [],
         })
         self.assertEqual(view["route_mode"], "clearnet")
-        self.assertEqual(view["display_endpoint"], "hidden clearnet ip")
+        self.assertEqual(view["display_endpoint"], "31.220.*.*")
+        self.assertEqual(view["privacy_label"], "Clearnet address redacted")
 
     def test_easter_egg_sanitizer_removes_script_and_handlers(self):
         raw = '<div onclick="alert(1)">ok</div><script>alert(2)</script><a href="javascript:alert(3)">x</a>'
