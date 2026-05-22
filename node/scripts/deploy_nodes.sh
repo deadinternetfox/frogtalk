@@ -3,7 +3,8 @@
 # Normal installs use install.sh setup + federation — not this script.
 #
 #   cp node/scripts/deploy_fleet.local.example.sh node/scripts/deploy_fleet.local.sh
-#   node/scripts/deploy_nodes.sh                    # default file bundle
+#   node/scripts/deploy_nodes.sh sync               # federation-sync hotfix only (fast)
+#   node/scripts/deploy_nodes.sh                    # full default bundle (large APKs, etc.)
 #   node/scripts/deploy_nodes.sh node/routers/federation.py
 #
 # Local paths live under node/; remote tree is /opt/frogtalk/node/.
@@ -95,6 +96,27 @@ remote_scp() {
     scp -q -P "$port" "${SSH_OPTS[@]}" "$src" "${SSH_USER}@${host}:${dest}"
   fi
 }
+
+# Lean hotfix: federation account-sync polish + related UI/calls (no APKs/binaries).
+SYNC_UPDATE_FILES=(
+  "node/database.py:node/database.py"
+  "node/crypto_fed.py:node/crypto_fed.py"
+  "node/federation_calls.py:node/federation_calls.py"
+  "node/federation_voice.py:node/federation_voice.py"
+  "node/fed_turn.py:node/fed_turn.py"
+  "node/routers/auth.py:node/routers/auth.py"
+  "node/routers/federation.py:node/routers/federation.py"
+  "node/routers/rooms.py:node/routers/rooms.py"
+  "node/routers/ws.py:node/routers/ws.py"
+  "node/static/js/app.js:node/static/js/app.js"
+  "node/static/js/ui.js:node/static/js/ui.js"
+  "node/static/js/social.js:node/static/js/social.js"
+  "node/static/js/calls.js:node/static/js/calls.js"
+  "node/static/js/rooms.js:node/static/js/rooms.js"
+  "node/static/js/users.js:node/static/js/users.js"
+  "node/static/sw.js:node/static/sw.js"
+  "node/static/docs-node.html:node/static/docs-node.html"
+)
 
 # Default file set if caller passed nothing. Each entry is
 #   "<local_path>:<remote_path>"
@@ -194,9 +216,25 @@ rewrite_path() {
   esac
 }
 
-if [[ $# -gt 0 ]]; then
+USE_SYNC_BUNDLE=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    sync|--sync|federation-sync)
+      USE_SYNC_BUNDLE=1
+      ;;
+    *)
+      ARGS+=("$arg")
+      ;;
+  esac
+done
+
+if (( USE_SYNC_BUNDLE )); then
+  FILES=("${SYNC_UPDATE_FILES[@]}")
+  echo "Deploy bundle: federation-sync update (${#FILES[@]} files, no APKs/binaries)"
+elif (( ${#ARGS[@]} > 0 )); then
   FILES=()
-  for f in "$@"; do
+  for f in "${ARGS[@]}"; do
     if [[ "$f" == *:* ]]; then
       local_part="${f%%:*}"
       remote_part="${f##*:}"
@@ -208,6 +246,7 @@ if [[ $# -gt 0 ]]; then
   done
 else
   FILES=("${DEFAULT_FILES[@]}")
+  echo "Deploy bundle: default (${#FILES[@]} files). For sync-only: deploy_nodes.sh sync"
 fi
 
 probe_port() {
