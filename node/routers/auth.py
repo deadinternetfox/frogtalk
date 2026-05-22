@@ -533,6 +533,97 @@ def _sync_item_peer_origin(item: dict, source_server_id: str) -> str:
     return str(item.get("home_server_id") or source_server_id or "").strip()
 
 
+def _pin_local_account_home(user_id: int) -> None:
+    """Mark this node as the account's federation home (native registration)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    ident = db.get_or_create_local_server_identity() or {}
+    sid = str(ident.get("server_id") or "").strip()
+    if sid:
+        db.set_user_account_home_server_id(uid, sid, force=True)
+
+
+def _upsert_sync_peer_profile_cache(item: dict, source_server_id: str) -> bool:
+    """Cache avatar/display for a federated contact from account-sync export."""
+    if not isinstance(item, dict):
+        return False
+    gid = str(item.get("global_user_id") or "").strip()
+    nick = str(item.get("nickname") or "").strip()
+    if not _GID_RE.match(gid) or not nick:
+        return False
+    display_name = str(item.get("display_name") or "")[:64]
+    avatar = item.get("avatar") or ""
+    bio = str(item.get("bio") or "")[:4000]
+    status_msg = str(item.get("status_msg") or "")[:200]
+    mood = str(item.get("mood") or "")[:200]
+    presence = str(item.get("presence") or "offline")[:32]
+    custom_style = _sanitize_inline_style(str(item.get("custom_style") or "")[:12000])
+    if not (display_name or avatar or bio or status_msg or custom_style):
+        return False
+    origin = _sync_item_peer_origin(item, source_server_id)
+    try:
+        return bool(
+            db.upsert_federation_user_profile(
+                gid,
+                nick,
+                display_name=display_name,
+                avatar=avatar or "",
+                bio=bio,
+                origin_server_id=origin,
+                status_msg=status_msg,
+                mood=mood,
+                presence=presence,
+                custom_style=custom_style,
+                banner=str(item.get("banner") or "")[:500_000],
+            )
+        )
+    except Exception:
+        return False
+
+
+def _apply_sync_peer_profile_cache_from_export(payload: dict, source_server_id: str) -> int:
+    """Upsert federation_user_profiles for all graph/roster peers in an export."""
+    if not isinstance(payload, dict):
+        return 0
+    src = str(source_server_id or "").strip()
+    seen: set[str] = set()
+    applied = 0
+
+    def _ingest(item: dict) -> None:
+        nonlocal applied
+        if not isinstance(item, dict):
+            return
+        gid = str(item.get("global_user_id") or "").strip()
+        if not _GID_RE.match(gid) or gid in seen:
+            return
+        seen.add(gid)
+        if _upsert_sync_peer_profile_cache(item, src):
+            applied += 1
+        try:
+            row = db.find_user_by_global_id(gid) or {}
+            uid = int(row.get("id") or 0)
+            av = item.get("avatar")
+            if uid > 0 and av:
+                db.patch_sync_user_profile(
+                    uid,
+                    display_name=str(item.get("display_name") or ""),
+                    avatar=av,
+                )
+        except Exception:
+            pass
+
+    for key in ("dm_peers", "following", "friends", "blocked_users"):
+        for item in payload.get(key) or []:
+            _ingest(item)
+    for entry in payload.get("member_snapshots") or []:
+        if not isinstance(entry, dict):
+            continue
+        for item in entry.get("members") or []:
+            _ingest(item)
+    return applied
+
+
 def _sync_state_set(user_id: int, patch: dict) -> None:
     uid = int(user_id or 0)
     if uid <= 0:
@@ -678,6 +769,238 @@ def resolve_account_home_base_url(user_id: int) -> tuple[str, str]:
 
 _profile_fetch_last: dict[str, float] = {}
 _PROFILE_FETCH_MIN_INTERVAL = 300.0
+_profile_card_fetch_last: dict[str, float] = {}
+_PROFILE_CARD_MIN_INTERVAL = 45.0
+
+
+def _federation_profile_payload_from_user_row(row, gid: str, origin_server_id: str) -> dict:
+    """Public profile fields safe to mirror on peer nodes."""
+    presence = str(row["presence"] or "offline").strip().lower()
+    if presence not in ("online", "away", "dnd", "invisible", "offline"):
+        presence = "offline"
+    return {
+        "global_user_id": gid,
+        "nickname": str(row["nickname"] or "")[:64],
+        "display_name": str(row["display_name"] or "")[:64],
+        "avatar": str(row["avatar"] or "")[:256 * 1024],
+        "bio": str(row["bio"] or "")[:500],
+        "status_msg": str(row["status_msg"] or "")[:200],
+        "mood": str(row["mood"] or "")[:200],
+        "presence": presence,
+        "custom_style": _sanitize_inline_style(str(row["custom_style"] or "")[:12000]),
+        "banner": str(row["banner"] or "")[:500_000],
+        "origin_server_id": origin_server_id,
+    }
+
+
+def _lookup_federation_profile_gid_payload(gid: str) -> dict | None:
+    """Build federation-sync-profile-gid payload for a user on this node."""
+    with db._conn() as con:
+        row = con.execute(
+            """
+            SELECT id, nickname, display_name, avatar, bio, status_msg, mood, presence,
+                   custom_style, banner
+            FROM users WHERE global_user_id=? LIMIT 1
+            """,
+            (gid,),
+        ).fetchone()
+    if row:
+        ident = db.get_or_create_local_server_identity() or {}
+        origin = str(ident.get("server_id") or "").strip()
+        return _federation_profile_payload_from_user_row(row, gid, origin)
+    prof = db.get_federation_user_profile_row(gid) or {}
+    if not prof:
+        return None
+    return {
+        "global_user_id": gid,
+        "nickname": str(prof.get("nickname") or "")[:64],
+        "display_name": str(prof.get("display_name") or "")[:64],
+        "avatar": str(prof.get("avatar") or "")[:256 * 1024],
+        "bio": str(prof.get("bio") or "")[:500],
+        "status_msg": str(prof.get("status_msg") or "")[:200],
+        "mood": str(prof.get("mood") or "")[:200],
+        "presence": str(prof.get("presence") or "offline")[:32],
+        "custom_style": str(prof.get("custom_style") or "")[:12000],
+        "banner": str(prof.get("banner") or "")[:500_000],
+        "origin_server_id": str(prof.get("origin_server_id") or "").strip(),
+    }
+
+
+def _upsert_profile_cache_from_payload(payload: dict) -> None:
+    if not isinstance(payload, dict):
+        return
+    gid = str(payload.get("global_user_id") or "").strip()
+    nick = str(payload.get("nickname") or "").strip()
+    if not gid or not nick:
+        return
+    try:
+        db.upsert_federation_user_profile(
+            gid,
+            nick,
+            display_name=str(payload.get("display_name") or "")[:64],
+            avatar=payload.get("avatar") or "",
+            bio=str(payload.get("bio") or "")[:500],
+            origin_server_id=str(payload.get("origin_server_id") or "")[:128],
+            status_msg=str(payload.get("status_msg") or "")[:200],
+            mood=str(payload.get("mood") or "")[:200],
+            presence=str(payload.get("presence") or "offline")[:32],
+            custom_style=str(payload.get("custom_style") or "")[:12000],
+            banner=str(payload.get("banner") or "")[:500_000],
+        )
+    except Exception:
+        pass
+
+
+def _fetch_home_profile_payload(gid: str, home_server_id: str) -> dict | None:
+    home_sid = str(home_server_id or "").strip()
+    if not home_sid:
+        home_sid = str(db.get_federation_profile_origin(gid) or "").strip()
+    if not home_sid:
+        home_sid = str(db.resolve_global_user_home_server_id(gid) or "").strip()
+    base = resolve_server_base_url(home_sid)
+    if not base:
+        return None
+    fed = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
+    if not fed:
+        return None
+    try:
+        data = _post_json(
+            f"{base}/api/auth/federation-sync-profile-gid",
+            {"global_user_id": gid},
+            headers={"X-Federation-Token": fed},
+            timeout=5.0,
+        )
+    except Exception:
+        return None
+    return data if isinstance(data, dict) and data.get("nickname") else None
+
+
+def _profile_cache_is_thin(prof: dict) -> bool:
+    if not str(prof.get("nickname") or "").strip():
+        return True
+    if str(prof.get("avatar") or "").strip():
+        return False
+    if str(prof.get("status_msg") or "").strip() or str(prof.get("custom_style") or "").strip():
+        return False
+    return True
+
+
+def _resolve_federated_subject_home(home_server_id: str, global_user_id: str) -> tuple[str, str]:
+    """True home (server_id, base_url) for a federated profile subject.
+
+    Avoids labelling a travel-node mirror as its own home when the local
+    ``users`` row exists only for routing/DMs.
+    """
+    gid = str(global_user_id or "").strip()
+    sid = str(home_server_id or "").strip()
+    prof = db.get_federation_user_profile_row(gid) if gid else {}
+    prof_origin = str((prof or {}).get("origin_server_id") or "").strip()
+    if not sid:
+        sid = prof_origin
+    if not sid and gid:
+        sid = str(db.resolve_global_user_home_server_id(gid) or "").strip()
+    try:
+        ident = db.get_or_create_local_server_identity() or {}
+        local_sid = str(ident.get("server_id") or "").strip()
+    except Exception:
+        local_sid = ""
+    if sid and local_sid and sid == local_sid and prof_origin and prof_origin != local_sid:
+        sid = prof_origin
+    return sid, resolve_server_base_url(sid)
+
+
+def build_federation_profile_card(
+    *,
+    global_user_id: str = "",
+    nickname: str = "",
+    home_server_id: str = "",
+    refresh: bool = False,
+) -> dict:
+    """Session-facing profile card: local user row, cache, or home fetch."""
+    gid = str(global_user_id or "").strip()
+    nick_hint = str(nickname or "").strip()
+    if not _GID_RE.match(gid) and nick_hint:
+        local = db.get_user_profile(nick_hint) or {}
+        gid = str(local.get("global_user_id") or "").strip()
+    if not _GID_RE.match(gid) and nick_hint:
+        gid = db.find_federation_profile_gid_by_nickname(nick_hint)
+    if not _GID_RE.match(gid):
+        return {"error": "Profile not found", "code": "not_found"}
+
+    home_sid = str(home_server_id or "").strip()
+    home_unreachable = False
+    source = "cache"
+
+    local_row = db.find_user_by_global_id(gid) or {}
+    local_uid = int(local_row.get("id") or 0)
+    if local_uid > 0:
+        with db._conn() as con:
+            row = con.execute(
+                """
+                SELECT id, nickname, display_name, avatar, bio, status_msg, mood, presence,
+                       custom_style, banner
+                FROM users WHERE id=? LIMIT 1
+                """,
+                (local_uid,),
+            ).fetchone()
+        if row:
+            ident = db.get_or_create_local_server_identity() or {}
+            origin = str(ident.get("server_id") or "").strip()
+            payload = _federation_profile_payload_from_user_row(row, gid, origin)
+            payload["source"] = "local"
+            payload["home_unreachable"] = False
+            payload["local_user_id"] = local_uid
+            sub_home_sid, sub_home_base = _resolve_federated_subject_home(home_sid, gid)
+            payload["home_server_id"] = sub_home_sid
+            payload["home_base_url"] = sub_home_base
+            payload["wall_available"] = bool(sub_home_sid and sub_home_sid == origin)
+            return payload
+
+    cached = db.get_federation_user_profile_row(gid) or {}
+    if not home_sid:
+        home_sid = str(cached.get("origin_server_id") or "").strip()
+    if not home_sid:
+        home_sid = str(db.resolve_global_user_home_server_id(gid) or "").strip()
+
+    now = time.time()
+    need_fetch = bool(refresh) or _profile_cache_is_thin(cached)
+    if need_fetch and (
+        refresh or (now - float(_profile_card_fetch_last.get(gid) or 0) >= _PROFILE_CARD_MIN_INTERVAL)
+    ):
+        live = _fetch_home_profile_payload(gid, home_sid)
+        _profile_card_fetch_last[gid] = now
+        if live:
+            _upsert_profile_cache_from_payload(live)
+            cached = db.get_federation_user_profile_row(gid) or cached
+            source = "live"
+        else:
+            home_unreachable = True
+            source = "partial" if cached.get("nickname") else "cache"
+
+    nick = str(cached.get("nickname") or nick_hint or "").strip()
+    if not nick:
+        return {"error": "profile_not_found", "code": "not_found", "home_unreachable": home_unreachable}
+
+    sub_home_sid, sub_home_base = _resolve_federated_subject_home(home_sid, gid)
+    return {
+        "global_user_id": gid,
+        "nickname": nick,
+        "display_name": str(cached.get("display_name") or "")[:64],
+        "avatar": str(cached.get("avatar") or "")[:256 * 1024],
+        "bio": str(cached.get("bio") or "")[:500],
+        "status_msg": str(cached.get("status_msg") or "")[:200],
+        "mood": str(cached.get("mood") or "")[:200],
+        "presence": str(cached.get("presence") or "offline")[:32],
+        "custom_style": str(cached.get("custom_style") or "")[:12000],
+        "banner": str(cached.get("banner") or "")[:500_000],
+        "origin_server_id": str(cached.get("origin_server_id") or home_sid or "")[:128],
+        "home_server_id": sub_home_sid,
+        "home_base_url": sub_home_base,
+        "source": source,
+        "home_unreachable": home_unreachable,
+        "local_user_id": None,
+        "wall_available": False,
+    }
 
 
 def hydrate_federation_profile_from_home(global_user_id: str, home_server_id: str = "") -> bool:
@@ -692,47 +1015,19 @@ def hydrate_federation_profile_from_home(global_user_id: str, home_server_id: st
         return False
     try:
         existing = db.get_federation_user_profile_row(gid) or {}
-        if str(existing.get("avatar") or "").strip():
+        if str(existing.get("avatar") or "").strip() and str(existing.get("status_msg") or "").strip():
             return False
     except Exception:
         existing = {}
     now = time.time()
     if now - float(_profile_fetch_last.get(gid) or 0) < _PROFILE_FETCH_MIN_INTERVAL:
         return False
-    base = resolve_server_base_url(home_sid)
-    if not base:
-        return False
-    fed = (os.getenv("FROGTALK_FEDERATION_TOKEN", "") or "").strip()
-    if not fed:
-        return False
-    try:
-        data = _post_json(
-            f"{base}/api/auth/federation-sync-profile-gid",
-            {"global_user_id": gid},
-            headers={"X-Federation-Token": fed},
-            timeout=4.0,
-        )
-    except Exception:
-        _profile_fetch_last[gid] = now
-        return False
+    live = _fetch_home_profile_payload(gid, home_sid)
     _profile_fetch_last[gid] = now
-    if not isinstance(data, dict):
+    if not live:
         return False
-    nick = str(data.get("nickname") or existing.get("nickname") or "").strip()
-    if not nick:
-        return False
-    try:
-        db.upsert_federation_user_profile(
-            gid,
-            nick,
-            display_name=str(data.get("display_name") or "")[:64],
-            avatar=str(data.get("avatar") or "")[:256 * 1024],
-            bio=str(data.get("bio") or "")[:500],
-            origin_server_id=str(data.get("origin_server_id") or home_sid)[:128],
-        )
-        return True
-    except Exception:
-        return False
+    _upsert_profile_cache_from_payload(live)
+    return True
 
 
 def _resolve_sync_source_base(
@@ -895,7 +1190,10 @@ def _user_at_account_home(user_id: int) -> bool:
     local_sid = str(ident.get("server_id") or "").strip()
     if not local_sid:
         return True
-    return _account_home_server_id(user_id) == local_sid
+    pinned = db.get_user_account_home_server_id(int(user_id or 0))
+    if not pinned:
+        return False
+    return pinned == local_sid
 
 
 def _sync_state_for_user(user_id: int) -> dict:
@@ -1275,6 +1573,10 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
             "home_server_id": _peer_home_server_id_for_sync(gid, source_server_id),
             "avatar": peer.get("avatar") or "",
             "display_name": str(peer.get("display_name") or "")[:64],
+            "status_msg": str(peer.get("status_msg") or "")[:200],
+            "mood": str(peer.get("mood") or "")[:200],
+            "presence": str(peer.get("presence") or "offline")[:32],
+            "custom_style": _sanitize_inline_style(str(peer.get("custom_style") or "")[:12000]),
         })
         if len(dm_peers) >= _SYNC_EXPORT_DM_LIMIT:
             break
@@ -1311,6 +1613,9 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
             "avatar": (profile or {}).get("avatar") or (row or {}).get("avatar") or "",
             "display_name": str((profile or {}).get("display_name") or "")[:64],
             "status_msg": str((profile or {}).get("status_msg") or "")[:200],
+            "mood": str((profile or {}).get("mood") or "")[:200],
+            "presence": str((profile or {}).get("presence") or "offline")[:32],
+            "custom_style": _sanitize_inline_style(str((profile or {}).get("custom_style") or "")[:12000]),
         })
         if len(friends) >= _SYNC_EXPORT_DM_LIMIT:
             break
@@ -1538,6 +1843,9 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
                 "avatar": str(m.get("avatar") or "")[:200_000],
                 "role": role,
                 "home_server_id": _peer_home_server_id_for_sync(gid, source_server_id),
+                "status_msg": str(m.get("status_msg") or "")[:200],
+                "mood": str(m.get("mood") or "")[:200],
+                "presence": str(m.get("presence") or "offline")[:32],
             })
         if snap:
             room_member_snapshots.append({"room_name": name, "members": snap})
@@ -2069,7 +2377,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                 gid,
                 nick,
                 origin_server_id=peer_origin,
-                avatar="",
+                display_name=str(item.get("display_name") or "")[:64],
+                avatar=(item.get("avatar") or ""),
             )
             if not peer:
                 users_nick_collisions += 1
@@ -2500,6 +2809,14 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     except Exception:
         pass
 
+    peer_profiles_cached = 0
+    try:
+        peer_profiles_cached = int(
+            _apply_sync_peer_profile_cache_from_export(payload, source_server_id) or 0
+        )
+    except Exception:
+        peer_profiles_cached = 0
+
     return {
         "rooms_joined": rooms_joined,
         "rooms_pruned": rooms_pruned,
@@ -2519,6 +2836,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         "history_messages_applied": history_messages_applied,
         "dm_history_messages_applied": dm_history_messages_applied,
         "members_snapshots_applied": members_snapshots_applied,
+        "peer_profiles_cached": peer_profiles_cached,
     }
 
 
@@ -3013,6 +3331,58 @@ def _materialize_federated_channel(raw) -> dict | None:
     return room
 
 
+def materialize_directory_federated_channel(room_name: str) -> tuple[dict | None, str | None]:
+    """Create or refresh a local public shell for a federated directory listing.
+
+    Only uses metadata from ``federation_channel_index`` (never client input).
+    Returns ``(room, error_code)``. ``error_code`` is one of:
+    ``invalid_name``, ``not_in_directory``, ``name_collision``.
+    """
+    name = str(room_name or "").strip().lower()
+    if not _ROOM_NAME_RE.match(name):
+        return None, "invalid_name"
+    existing = db.get_room_by_name(name)
+    if db.room_blocks_home_sync_mirror(existing):
+        return None, "name_collision"
+    if existing:
+        return existing, None
+    fed = db.get_federation_channel_index_entry(name)
+    if not fed:
+        return None, "not_in_directory"
+    home_sid = str(fed.get("home_server_id") or "").strip()
+    if not home_sid:
+        return None, "not_in_directory"
+    tags_raw = fed.get("tags_json") or "[]"
+    raw = {
+        "name": name,
+        "type": "public",
+        "channel_type": str(fed.get("channel_type") or "text"),
+        "description": str(fed.get("description") or "")[:200],
+        "icon": fed.get("icon"),
+    }
+    room = _materialize_federated_channel(raw)
+    if not room:
+        existing = db.get_room_by_name(name)
+        if db.room_blocks_home_sync_mirror(existing):
+            return None, "name_collision"
+        return None, "not_in_directory"
+    try:
+        db.set_room_home_server_id_if_empty(name, home_sid)
+    except Exception:
+        pass
+    try:
+        db.set_room_public(
+            name,
+            1,
+            category=str(fed.get("category") or "").strip().lower(),
+            directory_description=str(fed.get("directory_description") or "")[:1200],
+            tags=tags_raw if isinstance(tags_raw, str) else "[]",
+        )
+    except Exception:
+        pass
+    return db.get_room_by_name(name) or room, None
+
+
 def _apply_home_channel_memberships(user_id: int, payload: dict) -> int:
     """Mirror home joined channels locally, then prune anything not on home."""
     uid = int(user_id or 0)
@@ -3413,6 +3783,15 @@ class FederationSyncResumeRequest(BaseModel):
     force: bool = False
 
 
+class FederationSyncResetRequest(BaseModel):
+    clear_home_pin: bool = False
+
+
+class RepinAccountHomeRequest(BaseModel):
+    source_base: str = Field(min_length=4, max_length=512)
+    start_sync: bool = True
+
+
 class ProfileUpdateRequest(BaseModel):
     # Avatar/banner are accepted as data URLs or http(s) URLs. Cap at a
     # generous ceiling so the request body itself can't be used as a
@@ -3620,6 +3999,7 @@ async def register(
             "suggestions": suggestions,
         })
     db.auto_join_defaults(user_id)
+    _pin_local_account_home(user_id)
     try:
         ident = db.get_user_by_id(user_id) or {}
         db.insert_federation_outbox_event({
@@ -4163,14 +4543,90 @@ async def federation_sync_resume(
     return state
 
 
+@router.post("/clear-account-home-pin")
+@limiter.limit("12/hour")
+async def clear_account_home_pin(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear a mistaken home pin (e.g. registered on a travel node by accident)."""
+    uid = int(current_user["id"])
+    db.clear_user_account_home_server_id(uid)
+    _clear_federation_sync_state(uid)
+    home_sid, home_base = resolve_account_home_base_url(uid)
+    return {
+        "ok": True,
+        "at_home_node": _user_at_account_home(uid),
+        "account_home_server_id": home_sid,
+        "account_home_base_url": home_base,
+    }
+
+
+@router.post("/repin-account-home")
+@limiter.limit("12/hour")
+async def repin_account_home(
+    request: Request,
+    body: RepinAccountHomeRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Pin account home to a federation directory server and optionally start sync."""
+    uid = int(current_user["id"])
+    source = _norm_base(str(body.source_base or ""))
+    if not source:
+        return JSONResponse(status_code=400, content={"error": "source_base required"})
+    remote_sid = _resolve_server_id_for_base(source)
+    if not remote_sid:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "home not in directory", "source_base": source},
+        )
+    ident = db.get_or_create_local_server_identity() or {}
+    local_sid = str(ident.get("server_id") or "").strip()
+    db.set_user_account_home_server_id(uid, remote_sid, force=True)
+    _clear_federation_sync_state(uid)
+    at_home = bool(local_sid and remote_sid == local_sid)
+    sync_meta = None
+    if body.start_sync and not at_home:
+        me = db.get_user_by_id(uid) or current_user
+        state = await _start_federation_sync_for_user(
+            uid,
+            source_base=source,
+            global_user_id=str(me.get("global_user_id") or ""),
+            here_base=str(request.base_url),
+            force=True,
+        )
+        sync_meta = state
+    home_sid, home_base = resolve_account_home_base_url(uid)
+    out = {
+        "ok": True,
+        "at_home_node": at_home,
+        "account_home_server_id": home_sid,
+        "account_home_base_url": home_base,
+        "source_base": source,
+    }
+    if sync_meta:
+        out["federation_sync"] = sync_meta
+    return out
+
+
 @router.post("/federation-sync-reset")
 @limiter.limit("12/hour")
 async def federation_sync_reset(
     request: Request,
+    body: FederationSyncResetRequest | None = None,
     current_user: dict = Depends(get_current_user),
 ):
     """Clear stale sync state and directory shells so a forced re-sync can run."""
     uid = int(current_user["id"])
+    clear_pin = bool(body and body.clear_home_pin)
+    if clear_pin:
+        db.clear_user_account_home_server_id(uid)
+        _clear_federation_sync_state(uid)
+        return {
+            "ok": True,
+            "at_home_node": _user_at_account_home(uid),
+            "home_pin_cleared": True,
+        }
     if _user_at_account_home(uid):
         _clear_federation_sync_state(uid)
         return {"ok": True, "at_home_node": True, "skipped": True}
@@ -4202,43 +4658,40 @@ async def federation_sync_profile_gid(
     body: FederationSyncExportGidRequest,
     x_federation_token: str | None = Header(default=None),
 ):
-    """Federation peers: minimal profile for roster avatar hydration."""
+    """Federation peers: public profile mirror for visiting nodes."""
     if not _fed_token_ok(x_federation_token):
         return JSONResponse(status_code=401, content={"error": "Invalid federation token"})
     gid = str(body.global_user_id or "").strip()
     if not _GID_RE.match(gid):
         return JSONResponse(status_code=400, content={"error": "Invalid global_user_id"})
-    with db._conn() as con:
-        row = con.execute(
-            "SELECT id, nickname, display_name, avatar, bio FROM users WHERE global_user_id=? LIMIT 1",
-            (gid,),
-        ).fetchone()
-    if not row:
-        prof = db.get_federation_user_profile_row(gid) or {}
-        if not prof:
-            return JSONResponse(status_code=404, content={"error": "Profile not found"})
-        origin = str(prof.get("origin_server_id") or "").strip()
-        return {
-            "global_user_id": gid,
-            "nickname": str(prof.get("nickname") or "")[:64],
-            "display_name": str(prof.get("display_name") or "")[:64],
-            "avatar": str(prof.get("avatar") or "")[:256 * 1024],
-            "bio": str(prof.get("bio") or "")[:500],
-            "origin_server_id": origin,
-        }
-    try:
-        ident = db.get_or_create_local_server_identity() or {}
-        origin = str(ident.get("server_id") or "").strip()
-    except Exception:
-        origin = ""
-    return {
-        "global_user_id": gid,
-        "nickname": str(row["nickname"] or "")[:64],
-        "display_name": str(row["display_name"] or "")[:64],
-        "avatar": str(row["avatar"] or "")[:256 * 1024],
-        "bio": str(row["bio"] or "")[:500],
-        "origin_server_id": origin,
-    }
+    payload = _lookup_federation_profile_gid_payload(gid)
+    if not payload:
+        return JSONResponse(status_code=404, content={"error": "Profile not found"})
+    return payload
+
+
+@router.get("/federation/profile-card")
+@limiter.limit("120/minute")
+async def federation_profile_card(
+    request: Request,
+    global_user_id: str = "",
+    nickname: str = "",
+    home_server_id: str = "",
+    refresh: int = 0,
+    current_user: dict = Depends(get_current_user),
+):
+    """Profile card for federated users (cache + optional home refresh)."""
+    del current_user  # gate only — card is public fields
+    out = build_federation_profile_card(
+        global_user_id=global_user_id,
+        nickname=nickname,
+        home_server_id=home_server_id,
+        refresh=bool(int(refresh or 0)),
+    )
+    if out.get("error"):
+        code = 400 if out.get("code") == "invalid_gid" else 404
+        return JSONResponse(status_code=code, content=out)
+    return out
 
 
 @router.post("/federation-sync-export-gid")
@@ -5221,6 +5674,7 @@ async def register_with_captcha(
             "suggestions": suggestions,
         })
     db.auto_join_defaults(user_id)
+    _pin_local_account_home(user_id)
     try:
         ident = db.get_user_by_id(user_id) or {}
         db.insert_federation_outbox_event({

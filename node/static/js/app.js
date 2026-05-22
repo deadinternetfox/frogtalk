@@ -426,6 +426,101 @@ const App = {
     } catch {}
   },
 
+  async clearAccountHomePin() {
+    if (!State.token) return false;
+    const ok = window.confirm(
+      'Clear your pinned home node? Use this if this server is not your real home. You can re-pin from the Network panel afterward.'
+    );
+    if (!ok) return false;
+    try {
+      const res = await fetch('/api/auth/clear-account-home-pin', {
+        method: 'POST',
+        headers: { 'X-Session-Token': State.token },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast(data?.error || 'Could not clear home pin', 'error', 6000);
+        }
+        return false;
+      }
+      await this.refreshIdentityFromMe();
+      if (typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast('Home pin cleared — re-pin your real home node, then re-sync.', 'info', 8000);
+      }
+      return true;
+    } catch (e) {
+      console.warn('[App] clearAccountHomePin failed', e);
+      return false;
+    }
+  },
+
+  async openFederatedProfileCard(opts = {}) {
+    if (!State.token) return null;
+    if (typeof showFederatedProfileCard === 'function') {
+      return showFederatedProfileCard(opts);
+    }
+    return null;
+  },
+
+  openFederatedUserOnHomeNode(opts = {}) {
+    if (typeof openFederatedUserOnHomeNode === 'function') {
+      return openFederatedUserOnHomeNode(opts);
+    }
+    return null;
+  },
+
+  async repinAccountHomeFromPrompt() {
+    if (!State.token) return false;
+    const def = (State.user && State.user.account_home_base_url)
+      || this.getSyncSourceBase()
+      || localStorage.getItem('ft_sync_source_base')
+      || localStorage.getItem('ft_network_selected')
+      || '';
+    const raw = window.prompt(
+      'Enter your real home node URL (must be in the federation directory):',
+      String(def || '').replace(/\/$/, '')
+    );
+    if (!raw) return false;
+    const source = this._normalizeOrigin(raw);
+    if (!source) return false;
+    try {
+      const res = await fetch('/api/auth/repin-account-home', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': State.token,
+        },
+        body: JSON.stringify({ source_base: source, start_sync: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast(data?.error || 'Could not re-pin home', 'error', 8000);
+        }
+        return false;
+      }
+      if (data.account_home_base_url) {
+        this.rememberSyncSourceBase(data.account_home_base_url);
+      }
+      await this.refreshIdentityFromMe();
+      if (data.federation_sync) {
+        this.applyFederationSyncMeta(data.federation_sync);
+        this.openSyncOverlay();
+        if (typeof this.startFederationSyncWatcher === 'function') {
+          this.startFederationSyncWatcher();
+        }
+      }
+      if (typeof UI !== 'undefined' && UI.showToast) {
+        UI.showToast('Home node updated', 'success', 5000);
+      }
+      return true;
+    } catch (e) {
+      console.warn('[App] repinAccountHomeFromPrompt failed', e);
+      return false;
+    }
+  },
+
   async forceFederationResync() {
     if (!State.token || this.isAtHomeNode()) return false;
     const source = this._normalizeOrigin(this.getSyncSourceBase());
@@ -434,7 +529,11 @@ const App = {
     try {
       await fetch('/api/auth/federation-sync-reset', {
         method: 'POST',
-        headers: { 'X-Session-Token': State.token },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Session-Token': State.token,
+        },
+        body: JSON.stringify({ clear_home_pin: false }),
       });
     } catch {}
     try {
@@ -686,8 +785,10 @@ const App = {
       window.history.replaceState({}, '', window.location.pathname);
     }
     const pendingProfile = params.get('profile');
-    if (pendingProfile) {
-      this.pendingProfile = pendingProfile;
+    const pendingFedGid = (params.get('ft_gid') || '').trim();
+    if (pendingProfile || pendingFedGid) {
+      this.pendingProfile = pendingProfile || '';
+      this.pendingFedProfileGid = pendingFedGid;
       window.history.replaceState({}, '', window.location.pathname);
     }
     const pendingDM = (params.get('dm') || '').trim();
@@ -1092,18 +1193,23 @@ const App = {
         if (attempts > 0) setTimeout(() => tryOpenPost(attempts - 1), 120);
       };
       tryOpenPost(16);
-    } else if (this.pendingProfile) {
-      // Share link: /?profile={nick} — open the polished FrogSocial profile
-      // view. Falls back to the legacy user-info modal if Social isn't loaded.
+    } else if (this.pendingProfile || this.pendingFedProfileGid) {
+      // Deep link from another node: ?profile=nick&ft_gid=… after ticket login
       await App.openFirstAvailableRoomWhenIdle();
-      const nick = this.pendingProfile;
+      const nick = String(this.pendingProfile || '').trim();
+      const gid = String(this.pendingFedProfileGid || '').trim();
       this.pendingProfile = null;
-      // Retry briefly — on slow boots Social may not be attached to window
-      // by the time launch() runs (script ordering vs. deferred parsing
-      // in some packaged builds). Poll for up to ~2s before giving up.
+      this.pendingFedProfileGid = null;
       const tryOpen = (attempts) => {
         try {
-          if (typeof Social !== 'undefined' && Social.openProfile) {
+          if (gid && typeof showFederatedProfileCard === 'function') {
+            void showFederatedProfileCard({
+              global_user_id: gid,
+              nickname: nick,
+            });
+            return;
+          }
+          if (nick && typeof Social !== 'undefined' && Social.openProfile) {
             Social.openProfile(nick);
             return;
           }
@@ -1112,7 +1218,7 @@ const App = {
         }
         if (attempts > 0) {
           setTimeout(() => tryOpen(attempts - 1), 120);
-        } else if (typeof showUserInfo === 'function') {
+        } else if (nick && typeof showUserInfo === 'function') {
           try { showUserInfo(nick); } catch {}
         }
       };

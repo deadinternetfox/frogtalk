@@ -1791,7 +1791,7 @@ function inlineSpinner(label) {
 
 function closeModal(id) {
   document.getElementById(id)?.classList.add('hidden');
-  if (id === 'modal-user-info') clearProfileCustomCss();
+  if (id === 'modal-user-info' || id === 'modal-federated-profile') clearProfileCustomCss();
 }
 
 function openModal(id) {
@@ -3015,7 +3015,12 @@ async function refreshNetworkAccountSyncPanel() {
   if (atHome) {
     panel.innerHTML = `
       <div style="font-size:12px;color:#9bd6ab;font-weight:700;margin-bottom:4px">Account sync</div>
-      <div style="font-size:11px;color:#78a187;line-height:1.45">You're on your home node (<span style="color:#b7d9c3">${esc(here.replace(/^https?:\/\//, ''))}</span>). Channels, DMs, and FrogSocial data are authoritative here — no import needed.</div>`;
+      <div style="font-size:11px;color:#78a187;line-height:1.45">You're on your home node (<span style="color:#b7d9c3">${esc(here.replace(/^https?:\/\//, ''))}</span>). Channels, DMs, and FrogSocial data are authoritative here — no import needed.</div>
+      <div style="font-size:11px;color:#6f8e77;margin-top:8px;line-height:1.45">Wrong node? If you registered on a travel node by mistake, re-pin your real home below — then re-sync from Settings → Network.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+        <button class="modal-btn secondary" type="button" onclick="networkRepinAccountHome()" style="padding:6px 10px;font-size:11px">Re-pin home node…</button>
+        <button class="modal-btn secondary" type="button" onclick="networkClearHomePin()" style="padding:6px 10px;font-size:11px">Clear home pin</button>
+      </div>`;
     _renderNetworkSyncState(st);
     return;
   }
@@ -3050,23 +3055,87 @@ async function refreshNetworkAccountSyncPanel() {
         ${statusHtml}
         ${homeLine}
       </div>
-      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+      <div style="display:flex;flex-direction:column;gap:11px;flex-shrink:0;margin-top:2px">
         <button class="modal-btn primary" type="button" onclick="networkResyncFromHome()" style="padding:8px 12px;min-width:148px" ${inProgress ? 'disabled' : ''}>↻ Re-sync from home</button>
-        <button class="modal-btn secondary" type="button" onclick="networkOpenSyncDetails()" style="padding:8px 10px;min-width:148px">Details</button>
+        <button class="modal-btn secondary" type="button" onclick="networkOpenSyncDetails()" style="padding:8px 10px;min-width:148px;margin-top:2px">More info</button>
       </div>
     </div>`;
   _renderNetworkSyncState(st);
 }
 
+function _networkSyncFullyComplete(st) {
+  if (!st || st.in_progress) return false;
+  if (String(st.error || '').trim()) return false;
+  if (!st.done) return false;
+  const socialPending = Number(st.social_posts_total || 0) > Number(st.social_posts_imported || 0);
+  return !socialPending;
+}
+
 async function networkResyncFromHome() {
   if (typeof App === 'undefined' || !App.forceFederationResync) return;
+  if (App.isAtHomeNode && App.isAtHomeNode()) {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('You are on your home node — no import needed.', 'info', 5000);
+    }
+    return;
+  }
+  const wasComplete = _networkSyncFullyComplete(
+    (App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {})
+  );
   const ok = await App.forceFederationResync();
-  if (ok && typeof App.startFederationSyncWatcher === 'function') App.startFederationSyncWatcher();
+  if (ok) {
+    if (typeof App.startFederationSyncWatcher === 'function') App.startFederationSyncWatcher();
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast(wasComplete ? 'Re-sync started from your home node…' : 'Sync started…', 'success', 5000);
+    }
+  } else {
+    let msg = 'Could not start re-sync.';
+    const hereHost = String(window.location.origin || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+    const home = _networkSyncSourceLabel();
+    if (!home) msg = 'Home node URL unknown — re-pin your home in this panel first.';
+    else if (home && hereHost === home) msg = 'Home URL matches this node — re-pin your real home node.';
+    if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, 'error', 7000);
+  }
   await refreshNetworkAccountSyncPanel();
 }
 
-function networkOpenSyncDetails() {
-  if (typeof App !== 'undefined' && App.openSyncOverlay) App.openSyncOverlay();
+async function networkRepinAccountHome() {
+  if (typeof App === 'undefined' || !App.repinAccountHomeFromPrompt) return;
+  await App.repinAccountHomeFromPrompt();
+  await refreshNetworkAccountSyncPanel();
+}
+
+async function networkClearHomePin() {
+  if (typeof App === 'undefined' || !App.clearAccountHomePin) return;
+  const ok = await App.clearAccountHomePin();
+  if (ok) await refreshNetworkAccountSyncPanel();
+}
+
+async function networkOpenSyncDetails() {
+  let st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
+  if (!App.isAtHomeNode || !App.isAtHomeNode()) {
+    await refreshNetworkAccountSyncPanel();
+    st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
+  }
+  try { closeModal('modal-settings'); } catch {}
+  if (typeof App !== 'undefined' && App.applyFederationSyncMeta) App.applyFederationSyncMeta(st);
+  if (typeof App !== 'undefined' && App.openSyncOverlay) {
+    App.openSyncOverlay();
+    if (typeof App._refreshSyncOverlay === 'function') App._refreshSyncOverlay();
+  }
+  if (_networkSyncFullyComplete(st) && typeof UI !== 'undefined' && UI.showToast) {
+    const summary = _networkSyncSummaryLine(st);
+    const when = _networkSyncRelativeTime(st.finished_at);
+    UI.showToast(
+      summary
+        ? `Fully synced${when ? ' ' + when : ''}: ${summary}`
+        : 'Fully synced with your home node.',
+      'success',
+      8000
+    );
+  } else if (st.in_progress && typeof UI !== 'undefined' && UI.showToast) {
+    UI.showToast(String(st.hint || 'Sync in progress…'), 'info', 5000);
+  }
 }
 
 function _renderNetworkSyncState(state) {
@@ -3493,6 +3562,87 @@ async function saveNetworkSettingsAndMaybeSwitch(silent = false) {
   return true;
 }
 
+async function _fetchFederationSwitchTicket(targetBase) {
+  const target = _normalizeNetworkUrl(targetBase || '');
+  const hereBase = _normalizeNetworkUrl(window.location.origin || '');
+  if (!target || !hereBase || target === hereBase || !State.token) return '';
+  try {
+    const r = await fetch('/api/auth/federation-ticket', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-Token': State.token || '',
+      },
+      body: JSON.stringify({ target_base_url: target, target_url: target }),
+    });
+    if (r.ok) {
+      const d = await r.json().catch(() => ({}));
+      return String(d.ticket || '');
+    }
+  } catch {}
+  return '';
+}
+
+/** Open a federated user's profile on their home node (ticket + profile deep link). */
+async function openFederatedUserOnHomeNode(opts = {}) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const gid = String(o.global_user_id || '').trim();
+  const nick = String(o.nickname || '').trim();
+  let homeUrl = _normalizeNetworkUrl(String(o.home_base_url || ''));
+  const here = _normalizeNetworkUrl(window.location.origin || '');
+  if (!homeUrl || (here && homeUrl === here)) {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast(
+        'Home node URL is missing or matches this server. Re-pin your home under Settings → Network.',
+        'error',
+        7500
+      );
+    }
+    return;
+  }
+  try { closeModal('modal-federated-profile'); } catch {}
+  if (_isOnionNetworkUrl(homeUrl)) {
+    const confirmed = await _showTorModeDialog({
+      title: 'Open profile on onion node',
+      body: 'This profile lives on a Tor hidden service. Your browser must reach Tor for the link to work.',
+      address: homeUrl,
+      confirmLabel: 'Continue',
+      showCancel: true,
+    });
+    if (!confirmed) return;
+  }
+  const switchTicket = await _fetchFederationSwitchTicket(homeUrl);
+  if (switchTicket) {
+    try {
+      window.name = JSON.stringify({ ft_switch_ticket: switchTicket, ts: Date.now() });
+    } catch {}
+  }
+  try {
+    State.clear();
+  } catch {}
+  try {
+    localStorage.setItem('ft_just_switched_node', '1');
+    sessionStorage.setItem('ft_just_switched', '1');
+    if (window.location?.origin) {
+      sessionStorage.setItem('ft_switch_from', window.location.origin);
+    }
+    localStorage.removeItem('fc_last_room');
+  } catch {}
+  try {
+    const next = new URL('/app', homeUrl);
+    next.searchParams.set('switched', '1');
+    if (_isOnionNetworkUrl(homeUrl)) next.searchParams.set('tor', '1');
+    if (window.location?.origin) next.searchParams.set('from', window.location.origin);
+    if (nick) next.searchParams.set('profile', nick);
+    if (gid) next.searchParams.set('ft_gid', gid);
+    window.location.href = next.toString();
+  } catch {
+    window.location.href = homeUrl;
+  }
+}
+
+window.openFederatedUserOnHomeNode = openFederatedUserOnHomeNode;
+
 async function connectToSelectedServer() {
   const mode = document.getElementById('network-mode')?.value || 'auto';
   let target = _normalizeNetworkUrl(_resolveSelectedNetworkTarget() || '');
@@ -3538,25 +3688,7 @@ async function connectToSelectedServer() {
     if (!confirmed) return;
   }
 
-  let switchTicket = '';
-  try {
-    const targetBase = _normalizeNetworkUrl(target || '');
-    const hereBase = _normalizeNetworkUrl(window.location.origin || '');
-    if (targetBase && hereBase && targetBase !== hereBase && State.token) {
-      const r = await fetch('/api/auth/federation-ticket', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Session-Token': State.token || '',
-        },
-        body: JSON.stringify({ target_base_url: targetBase, target_url: targetBase }),
-      });
-      if (r.ok) {
-        const d = await r.json().catch(() => ({}));
-        switchTicket = String(d.ticket || '');
-      }
-    }
-  } catch {}
+  const switchTicket = await _fetchFederationSwitchTicket(target);
 
   if (switchTicket) {
     try {
@@ -6239,6 +6371,137 @@ async function _resolveBridgeSourceFromConfig(platform) {
   }
 }
 
+function _federatedProfileHost() {
+  let host = document.getElementById('modal-federated-profile');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'modal-federated-profile';
+    host.className = 'modal-overlay hidden';
+    document.body.appendChild(host);
+  }
+  return host;
+}
+
+function _renderFederatedProfileStatusHtml(u, esc) {
+  const status = String(u.status_msg || '').trim();
+  const mood = String(u.mood || '').trim();
+  if (!status && !mood) return '';
+  if (status.indexOf('🎵') === 0) {
+    const track = status.replace(/^🎵\s*/, '').trim() || 'a track';
+    const safeNick = esc(u.nickname || '').replace(/'/g, "\\'");
+    const moodSuffix = mood ? ` <span class="sml-mood">· ${esc(mood)}</span>` : '';
+    return `<div id="fedprof-status" style="margin-top:8px;font-size:13px">
+      <a href="javascript:void(0)" class="status-music-link" onclick="event.stopPropagation();window.Social&&Social.openProfileMusic&&Social.openProfileMusic('${safeNick}')" title="Open music">🎵 <span class="sml-label">Now playing:</span> <span class="sml-track">${esc(track)}</span>${moodSuffix}</a>
+    </div>`;
+  }
+  return `<div id="fedprof-status" style="margin-top:8px;font-size:13px;color:#b8d4c0">${esc([status, mood].filter(Boolean).join(' · '))}</div>`;
+}
+
+async function showFederatedProfileCard(opts) {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  const gid = String(o.global_user_id || '').trim();
+  const nick = String(o.nickname || '').trim();
+  const homeSid = String(o.home_server_id || '').trim();
+  const refresh = !!o.refresh;
+  const esc = (t) => (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(t) : String(t || '');
+  const host = _federatedProfileHost();
+  clearProfileCustomCss();
+
+  host.innerHTML = `
+    <div class="modal user-profile-modal" id="fedprof-card" style="max-width:440px;padding:0;overflow:hidden;border:1px solid #2a5a3a">
+      <div class="profile-header" id="fedprof-header" style="position:relative;background:linear-gradient(135deg,#1a3a2a 0%,#0d1f0d 100%);padding:20px;min-height:120px">
+        <button type="button" class="profile-close-btn" onclick="closeModal('modal-federated-profile')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5">✕</button>
+        <div style="padding-top:28px;text-align:center;color:#8ab89a;font-size:13px">Loading profile from federation…</div>
+      </div>
+      <div class="profile-body" style="padding:16px;background:#111" id="fedprof-body"></div>
+    </div>`;
+  openModal('modal-federated-profile');
+
+  const params = new URLSearchParams();
+  if (gid) params.set('global_user_id', gid);
+  if (nick) params.set('nickname', nick);
+  if (homeSid) params.set('home_server_id', homeSid);
+  if (refresh) params.set('refresh', '1');
+  let u = null;
+  try {
+    const res = await apiFetch('/api/federation/profile-card?' + params.toString());
+    u = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(u.error || 'Profile unavailable');
+  } catch (e) {
+    host.querySelector('#fedprof-body').innerHTML = `
+      <div style="text-align:center;padding:16px 8px;color:#e8a0a0;font-size:13px;line-height:1.45">
+        ${esc(String(e.message || e))}
+        <div style="margin-top:12px"><button type="button" class="modal-btn secondary" id="fedprof-retry-btn">↻ Retry</button></div>
+      </div>`;
+    return null;
+  }
+
+  const displayLabel = u.display_name || u.nickname || nick;
+  const handle = u.nickname || nick;
+  const homeHost = String(u.home_base_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const bannerStyle = u.banner
+    ? `background-image:url(${esc(u.banner)});background-size:cover;background-position:center;`
+    : '';
+  const css = String(u.custom_style || '');
+  if (css && typeof applyProfileCustomCss === 'function') applyProfileCustomCss(css);
+
+  const headerEl = host.querySelector('#fedprof-header');
+  if (headerEl) {
+    headerEl.style.cssText = `position:relative;padding:20px;min-height:130px;border-bottom:1px solid #2a4a36;${bannerStyle}background-color:#0d1f0d`;
+    headerEl.innerHTML = `
+      <button type="button" class="profile-close-btn" onclick="closeModal('modal-federated-profile')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5">✕</button>
+      <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:14px;padding-top:32px">
+        <div style="flex-shrink:0">${UI.avatarEl(u.avatar, handle, 88)}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:20px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(displayLabel)}</div>
+          <div style="font-size:13px;color:#8ab89a;margin-top:2px">@${esc(handle)}</div>
+          <span style="display:inline-flex;align-items:center;gap:4px;margin-top:6px;font-size:10px;color:#7fd6a2;background:rgba(127,214,162,.1);border:1px solid rgba(127,214,162,.3);padding:2px 8px;border-radius:8px">🌐 Federated${homeHost ? ' · ' + esc(homeHost) : ''}</span>
+        </div>
+      </div>`;
+  }
+
+  const warn = u.home_unreachable
+    ? `<div style="background:#2a1a12;border:1px solid #6a4030;border-radius:8px;padding:10px;margin-bottom:12px;font-size:12px;color:#f6d27a;line-height:1.4">Home node unreachable — showing ${esc(u.source || 'cached')} profile. <button type="button" class="modal-btn secondary" id="fedprof-refresh-btn" style="margin-top:8px;padding:6px 10px;font-size:11px">↻ Refresh from home</button></div>`
+    : '';
+
+  const actions = u.local_user_id
+    ? `<button type="button" class="modal-btn primary" style="flex:1;min-width:120px" onclick="closeModal('modal-federated-profile');showUserInfo('${esc(handle).replace(/'/g, "\\'")}',${u.local_user_id})">Full profile</button>`
+    : `<div style="font-size:12px;color:#7a9a82;line-height:1.45">DM, call, and friend actions need a local account on this node. Re-sync from your home node to mirror contacts.</div>`;
+
+  const hereNorm = _normalizeNetworkUrl(window.location.origin || '');
+  const homeNorm = _normalizeNetworkUrl(String(u.home_base_url || ''));
+  const homeLink = (homeNorm && hereNorm && homeNorm !== hereNorm)
+    ? `<button type="button" class="modal-btn secondary" id="fedprof-home-btn" style="width:100%;margin-top:10px;padding:8px 12px;font-size:12px">Visit on home node ↗</button>`
+    : '';
+
+  host.querySelector('#fedprof-body').innerHTML = `
+    ${warn}
+    <div style="font-size:14px;color:#ccc;line-height:1.5;margin-bottom:12px">${esc(u.bio || 'No bio set.')}</div>
+    ${_renderFederatedProfileStatusHtml(u, esc)}
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid #2a2a2a;display:flex;flex-direction:column;gap:8px">${actions}</div>
+    ${homeLink}
+  `;
+  const retryBtn = host.querySelector('#fedprof-retry-btn');
+  const refreshBtn = host.querySelector('#fedprof-refresh-btn');
+  const homeBtn = host.querySelector('#fedprof-home-btn');
+  const retryOpts = { ...o, refresh: true };
+  if (retryBtn) retryBtn.onclick = () => { void showFederatedProfileCard(retryOpts); };
+  if (refreshBtn) refreshBtn.onclick = () => { void showFederatedProfileCard(retryOpts); };
+  if (homeBtn) {
+    homeBtn.onclick = () => {
+      void openFederatedUserOnHomeNode({
+        global_user_id: u.global_user_id || gid,
+        nickname: u.nickname || nick,
+        home_base_url: u.home_base_url,
+        home_server_id: u.home_server_id || homeSid,
+      });
+    };
+  }
+  return u;
+}
+
+window.showFederatedProfileCard = showFederatedProfileCard;
+
 function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourceParent, bridgeAvatar, senderUsername) {
   const plat = String(platform || '').toLowerCase();
   const meta = ({
@@ -6367,6 +6630,11 @@ function showBridgedUserInfo(nickname, platform, sourceName, sourceId, sourcePar
 }
 
 function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridgeSourceId, bridgeSourceParent, bridgeAvatar, bridgeSenderUsername) {
+  const uid = userId && String(userId) !== 'null' ? parseInt(userId, 10) : 0;
+  if (!uid && !bridgePlatform && typeof showFederatedProfileCard === 'function') {
+    void showFederatedProfileCard({ nickname: String(nickname || '').trim() });
+    return;
+  }
   const plat = String(bridgePlatform || '').toLowerCase();
   // Federated room messages may still carry bridge_platform=federation even when
   // the sender has a real account on this node (legacy rows or remote-only users).

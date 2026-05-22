@@ -578,20 +578,7 @@ def create_user(nickname: str, password: str, registration_ip: Optional[str] = N
                     )
                 )
             con.commit()
-            uid = int(cur.lastrowid or 0)
-            if uid > 0:
-                try:
-                    ident = get_or_create_local_server_identity() or {}
-                    home_sid = str(ident.get("server_id") or "").strip()
-                    if home_sid:
-                        con.execute(
-                            "UPDATE users SET account_home_server_id=? WHERE id=?",
-                            (home_sid, uid),
-                        )
-                        con.commit()
-                except Exception:
-                    pass
-            return uid
+            return int(cur.lastrowid or 0) or None
     except sqlite3.IntegrityError:
         return None
 
@@ -2892,6 +2879,18 @@ def _migrate():
         fed_profile_cols = {r["name"] for r in con.execute("PRAGMA table_info(federation_user_profiles)").fetchall()}
         if fed_profile_cols and "display_name" not in fed_profile_cols:
             con.execute("ALTER TABLE federation_user_profiles ADD COLUMN display_name TEXT DEFAULT ''")
+        for _col, _ddl in (
+            ("status_msg", "ALTER TABLE federation_user_profiles ADD COLUMN status_msg TEXT DEFAULT ''"),
+            ("mood", "ALTER TABLE federation_user_profiles ADD COLUMN mood TEXT DEFAULT ''"),
+            ("presence", "ALTER TABLE federation_user_profiles ADD COLUMN presence TEXT DEFAULT 'offline'"),
+            ("custom_style", "ALTER TABLE federation_user_profiles ADD COLUMN custom_style TEXT DEFAULT ''"),
+            ("banner", "ALTER TABLE federation_user_profiles ADD COLUMN banner TEXT DEFAULT ''"),
+        ):
+            if fed_profile_cols and _col not in fed_profile_cols:
+                try:
+                    con.execute(_ddl)
+                except Exception:
+                    pass
 
         # ── Denormalized engagement counters on wall_posts ──
         # The /feed, /explore and /reels endpoints used to evaluate three
@@ -4744,6 +4743,23 @@ def apply_sync_room_allowlist(user_id: int, keep_names: set) -> int:
     return pruned
 
 
+def clear_user_account_home_server_id(user_id: int) -> bool:
+    """Clear pinned federation home so the account can re-bind after travel/bootstrap."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return False
+    try:
+        with _conn() as con:
+            con.execute(
+                "UPDATE users SET account_home_server_id='' WHERE id=?",
+                (uid,),
+            )
+            con.commit()
+        return True
+    except Exception:
+        return False
+
+
 def set_user_account_home_server_id(user_id: int, server_id: str, *, force: bool = False) -> bool:
     """Pin which federation server owns this account for sync gating."""
     uid = int(user_id or 0)
@@ -6443,6 +6459,7 @@ def get_room_by_name(room_name: str) -> Optional[Dict]:
                    r.owner_id, r.room_key_hint, r.channel_type, r.channel_theme, r.created_at,
                    r.invite_only, r.who_can_invite,
                    r.is_public, r.category, r.tags, r.directory_description,
+                   COALESCE(r.home_server_id, '') AS home_server_id,
                    COALESCE(r.room_key_version, 1) AS room_key_version,
                    (SELECT COUNT(*) FROM room_members WHERE room_id=r.id) AS member_count,
                    r.banner, r.about, r.dj_only_queue, r.forwarding_disabled,
@@ -12117,6 +12134,25 @@ def disambiguate_federated_nickname(
     return fallback if is_username_available(fallback) else ""
 
 
+def set_room_home_server_id_if_empty(room_name: str, home_server_id: str) -> bool:
+    """Set ``rooms.home_server_id`` only when unset (first-write wins)."""
+    name = (room_name or "").strip().lower()
+    sid = (home_server_id or "").strip()
+    if not name or not sid:
+        return False
+    try:
+        with _conn() as con:
+            cur = con.execute(
+                "UPDATE rooms SET home_server_id=? "
+                "WHERE name=? AND (home_server_id IS NULL OR home_server_id='')",
+                (sid, name),
+            )
+            con.commit()
+            return cur.rowcount > 0
+    except Exception:
+        return False
+
+
 def room_blocks_home_sync_mirror(room: Optional[Dict]) -> bool:
     """True when a local channel name is owned by someone other than the sync shell.
 
@@ -12267,6 +12303,26 @@ def get_or_create_federation_system_user() -> int:
     return int(row["id"]) if row else 1
 
 
+def find_federation_profile_gid_by_nickname(nickname: str) -> str:
+    """Resolve ``global_user_id`` from a federated profile cache nickname."""
+    nick = (nickname or "").strip()
+    if not nick:
+        return ""
+    try:
+        with _conn() as con:
+            row = con.execute(
+                """
+                SELECT global_user_id FROM federation_user_profiles
+                 WHERE nickname=? COLLATE NOCASE
+                 ORDER BY updated_at DESC LIMIT 1
+                """,
+                (nick,),
+            ).fetchone()
+        return str(row["global_user_id"] or "").strip() if row else ""
+    except Exception:
+        return ""
+
+
 def get_federation_user_profile_row(global_user_id: str) -> dict:
     """Return federation_user_profiles row for UI enrichment (avatar, display_name)."""
     gid = (global_user_id or "").strip()
@@ -12276,7 +12332,8 @@ def get_federation_user_profile_row(global_user_id: str) -> dict:
         with _conn() as con:
             row = con.execute(
                 """
-                SELECT global_user_id, nickname, display_name, avatar, bio, origin_server_id
+                SELECT global_user_id, nickname, display_name, avatar, bio, origin_server_id,
+                       status_msg, mood, presence, custom_style, banner, updated_at
                 FROM federation_user_profiles WHERE global_user_id=? LIMIT 1
                 """,
                 (gid,),
@@ -12348,6 +12405,11 @@ def upsert_federation_user_profile(
     bio: str = "",
     identity_pubkey: str = "",
     origin_server_id: str = "",
+    status_msg: str = "",
+    mood: str = "",
+    presence: str = "",
+    custom_style: str = "",
+    banner: str = "",
 ) -> bool:
     gid = (global_user_id or "").strip()
     nick = (nickname or "").strip()
@@ -12371,11 +12433,15 @@ def upsert_federation_user_profile(
                         return False
             except Exception:
                 pass
+        pres = (presence or "offline").strip().lower()
+        if pres not in ("online", "away", "dnd", "invisible", "offline"):
+            pres = "offline"
         con.execute(
             """
             INSERT INTO federation_user_profiles
-            (global_user_id, nickname, display_name, avatar, bio, identity_pubkey, origin_server_id, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            (global_user_id, nickname, display_name, avatar, bio, identity_pubkey, origin_server_id,
+             status_msg, mood, presence, custom_style, banner, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(global_user_id) DO UPDATE SET
                 nickname=excluded.nickname,
                 display_name=excluded.display_name,
@@ -12383,9 +12449,18 @@ def upsert_federation_user_profile(
                 bio=excluded.bio,
                 identity_pubkey=excluded.identity_pubkey,
                 origin_server_id=excluded.origin_server_id,
+                status_msg=excluded.status_msg,
+                mood=excluded.mood,
+                presence=excluded.presence,
+                custom_style=excluded.custom_style,
+                banner=excluded.banner,
                 updated_at=datetime('now')
             """,
-            (gid, nick, display_name or "", avatar or "", bio or "", identity_pubkey or "", origin_server_id or ""),
+            (
+                gid, nick, display_name or "", avatar or "", bio or "", identity_pubkey or "",
+                origin_server_id or "", (status_msg or "")[:200], (mood or "")[:200], pres,
+                (custom_style or "")[:12000], (banner or "")[:500_000],
+            ),
         )
         con.commit()
     return True
@@ -12758,6 +12833,17 @@ def upsert_federation_room_member(
                 ),
             )
             con.commit()
+        if avatar or display_name:
+            try:
+                upsert_federation_user_profile(
+                    gid,
+                    nick,
+                    display_name=display_name or "",
+                    avatar=avatar or "",
+                    origin_server_id=home_server_id or "",
+                )
+            except Exception:
+                pass
         return True
     except Exception:
         return False

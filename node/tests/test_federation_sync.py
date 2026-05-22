@@ -800,6 +800,289 @@ class FederationSyncLoginApiTests(unittest.TestCase):
         })
         self.assertIsNone(room)
 
+    def test_user_at_home_requires_explicit_pin(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("unpinned_home", "secret12"))
+        self.assertFalse(auth_mod._user_at_account_home(uid))
+        local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
+        db.set_user_account_home_server_id(uid, local_sid, force=True)
+        self.assertTrue(auth_mod._user_at_account_home(uid))
+
+    def test_repin_account_home_api(self):
+        db = self.db
+        ident = db.get_or_create_local_server_identity() or {}
+        local_sid = str(ident.get("server_id") or "").strip()
+        home_sid = "srv_repin_real_home"
+        if local_sid == home_sid:
+            home_sid = "srv_repin_real_home_b"
+        db.upsert_federation_server(
+            home_sid,
+            "Real Home",
+            "https://real-home.test",
+            official=True,
+        )
+        uid = int(db.create_user("repin_user", "secret12"))
+        db.set_user_account_home_server_id(uid, local_sid, force=True)
+        token = self.client.post(
+            "/api/auth/login",
+            json={"nickname": "repin_user", "password": "secret12"},
+        ).json().get("token")
+        self.assertTrue(token)
+        r = self.client.post(
+            "/api/auth/repin-account-home",
+            json={"source_base": "https://real-home.test", "start_sync": False},
+            headers={"X-Session-Token": token},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertFalse(body.get("at_home_node"))
+        self.assertEqual(db.get_user_account_home_server_id(uid), home_sid)
+
+    def test_federation_profile_card_http_route(self):
+        db = self.db
+        gid = "00000000-0000-4000-8000-000000000044"
+        db.upsert_federation_user_profile(
+            gid,
+            "http_route_peer",
+            display_name="HTTP Peer",
+            bio="from cache",
+            origin_server_id="srv_http_home",
+        )
+        token = self.client.post(
+            "/api/auth/login",
+            json={"nickname": "http_route_peer", "password": "secret12"},
+        )
+        if token.status_code != 200:
+            db.create_user("http_viewer", "secret12")
+            token = self.client.post(
+                "/api/auth/login",
+                json={"nickname": "http_viewer", "password": "secret12"},
+            )
+        self.assertEqual(token.status_code, 200, token.text)
+        sess = token.json().get("token")
+        r = self.client.get(
+            f"/api/federation/profile-card?global_user_id={gid}",
+            headers={"X-Session-Token": sess},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body.get("nickname"), "http_route_peer")
+        self.assertEqual(body.get("global_user_id"), gid)
+
+    def test_resolve_federated_subject_home_not_local_mirror(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        ident = db.get_or_create_local_server_identity() or {}
+        local_sid = str(ident.get("server_id") or "").strip()
+        home_sid = "srv_subject_real_home"
+        if local_sid == home_sid:
+            home_sid = "srv_subject_real_home_b"
+        db.upsert_federation_server(
+            home_sid,
+            "Subject Home",
+            "https://subject-home.test",
+            official=True,
+        )
+        gid = "00000000-0000-4000-8000-000000000033"
+        db.upsert_federation_user_profile(
+            gid,
+            "fed_subject",
+            origin_server_id=home_sid,
+        )
+        sid, base = auth_mod._resolve_federated_subject_home(local_sid, gid)
+        self.assertEqual(sid, home_sid)
+        self.assertEqual(base, "https://subject-home.test")
+
+    def test_profile_card_remote_mirror_home_base_not_local(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        ident = db.get_or_create_local_server_identity() or {}
+        local_sid = str(ident.get("server_id") or "").strip()
+        home_sid = "srv_card_subject_home"
+        if local_sid == home_sid:
+            home_sid = "srv_card_subject_home_x"
+        db.upsert_federation_server(
+            home_sid,
+            "Card Subject Home",
+            "https://card-subject-home.test",
+            official=True,
+        )
+        gid = "00000000-0000-4000-8000-000000000022"
+        db.upsert_federation_user_profile(
+            gid,
+            "mirror_peer",
+            origin_server_id=home_sid,
+        )
+        db.create_user("mirror_peer", "secret12")
+        with db._conn() as con:
+            con.execute(
+                "UPDATE users SET global_user_id=? WHERE nickname=? COLLATE NOCASE",
+                (gid, "mirror_peer"),
+            )
+            con.commit()
+        out = auth_mod.build_federation_profile_card(global_user_id=gid)
+        self.assertEqual(out.get("home_server_id"), home_sid)
+        self.assertEqual(out.get("home_base_url"), "https://card-subject-home.test")
+
+    def test_build_federation_profile_card_local_user(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("fedprof_local", "secret12"))
+        self.assertTrue(uid)
+        row = db.get_user_by_id(uid) or {}
+        gid = str(row.get("global_user_id") or "")
+        out = auth_mod.build_federation_profile_card(global_user_id=gid)
+        self.assertEqual(out.get("source"), "local")
+        self.assertEqual(int(out.get("local_user_id") or 0), uid)
+        self.assertEqual(out.get("nickname"), "fedprof_local")
+
+    def test_apply_sync_peer_profile_cache(self):
+        import routers.auth as auth_mod
+
+        gid = "00000000-0000-4000-8000-000000000055"
+        export = {
+            "dm_peers": [{
+                "global_user_id": gid,
+                "nickname": "avatar_peer",
+                "display_name": "Avatar Peer",
+                "avatar": "data:image/png;base64,iVBORw0KGgo=",
+                "home_server_id": "srv_avatar_home",
+            }],
+            "member_snapshots": [],
+        }
+        n = auth_mod._apply_sync_peer_profile_cache_from_export(export, "srv_avatar_home")
+        self.assertEqual(n, 1)
+        prof = self.db.get_federation_user_profile_row(gid) or {}
+        self.assertIn("data:image", str(prof.get("avatar") or ""))
+
+
+class FederationDirectoryJoinApiTests(unittest.TestCase):
+    """Directory browse + join for federation_channel_index (remote_only) rows."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        os.environ["DB_PATH"] = os.path.join(cls._tmpdir.name, "fed_dir_join.db")
+        os.environ["FROGTALK_CSRF_SECRET"] = "test-csrf-fed-dir-join"
+        os.environ["ADMIN_PASSWORD"] = "test-admin-pass"
+        from fastapi.testclient import TestClient
+        import importlib
+        import database as db_mod
+        import main
+
+        importlib.reload(db_mod)
+        db_mod.init_db()
+        importlib.reload(main)
+        cls.db = db_mod
+        cls.client = TestClient(main.app)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmpdir.cleanup()
+
+    def _login(self, nick: str = "dir_joiner") -> str:
+        db = self.db
+        if not db.get_user_id_by_nickname(nick):
+            db.create_user(nick, "secret12")
+        r = self.client.post(
+            "/api/auth/login",
+            json={"nickname": nick, "password": "secret12"},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        token = r.json().get("token")
+        self.assertTrue(token)
+        return token
+
+    def _seed_index(self, room_name: str, home_sid: str = "srv_dir_home") -> None:
+        db = self.db
+        db.upsert_federation_server(
+            home_sid,
+            "Dir Home",
+            "https://dir-home.test",
+            official=True,
+        )
+        ok = db.upsert_federation_channel_index(
+            room_name=room_name,
+            home_server_id=home_sid,
+            description="Federated public channel",
+            directory_description="Listed on home node",
+            category="gaming",
+            visibility="public",
+            member_count=12,
+            home_base_url="https://dir-home.test",
+        )
+        self.assertTrue(ok)
+
+    def test_browse_includes_remote_only_channel(self):
+        self._seed_index("remote-join-room")
+        token = self._login()
+        r = self.client.get(
+            "/api/directory/channels",
+            headers={"X-Session-Token": token},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        names = {c["name"] for c in (r.json().get("channels") or [])}
+        self.assertIn("remote-join-room", names)
+        row = next(c for c in r.json()["channels"] if c["name"] == "remote-join-room")
+        self.assertTrue(row.get("remote_only"))
+        self.assertTrue(row.get("is_federated"))
+
+    def test_join_materializes_shell_from_index(self):
+        self._seed_index("lazy-shell-room")
+        token = self._login("lazy_joiner")
+        self.assertIsNone(self.db.get_room_by_name("lazy-shell-room"))
+        r = self.client.post(
+            "/api/rooms/lazy-shell-room/join",
+            headers={"X-Session-Token": token},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        room = self.db.get_room_by_name("lazy-shell-room")
+        self.assertIsNotNone(room)
+        self.assertEqual(str(room.get("home_server_id") or ""), "srv_dir_home")
+        uid = int(self.db.get_user_id_by_nickname("lazy_joiner") or 0)
+        self.assertTrue(self.db.is_room_member(uid, int(room["id"])))
+
+    def test_profile_for_index_only_channel(self):
+        self._seed_index("profile-fed-room")
+        token = self._login("profile_viewer")
+        r = self.client.get(
+            "/api/directory/channels/profile-fed-room/profile",
+            headers={"X-Session-Token": token},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body.get("name"), "profile-fed-room")
+        self.assertTrue(body.get("is_federated"))
+        self.assertTrue(body.get("remote_only"))
+
+    def test_join_name_collision_returns_409(self):
+        db = self.db
+        owner = int(db.create_user("local_chan_owner", "secret12"))
+        db.create_room("collision-join", "local channel", "public", owner, None)
+        self._seed_index("collision-join", home_sid="srv_other_home")
+        token = self._login("collision_joiner")
+        r = self.client.post(
+            "/api/rooms/collision-join/join",
+            headers={"X-Session-Token": token},
+        )
+        self.assertEqual(r.status_code, 409, r.text)
+        self.assertEqual(r.json().get("code"), "name_collision")
+
+    def test_materialize_directory_helper(self):
+        import routers.auth as auth_mod
+
+        self._seed_index("helper-mat-room")
+        room, err = auth_mod.materialize_directory_federated_channel("helper-mat-room")
+        self.assertIsNone(err)
+        self.assertIsNotNone(room)
+        self.assertEqual(room.get("name"), "helper-mat-room")
+        self.assertEqual(str(room.get("home_server_id") or ""), "srv_dir_home")
+
 
 if __name__ == "__main__":
     unittest.main()

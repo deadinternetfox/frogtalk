@@ -4097,6 +4097,20 @@ async function searchDirectory() {
   }
 }
 
+function _directoryJoinErrorMessage(d, name) {
+  const code = String(d?.code || '').trim();
+  if (code === 'name_collision') {
+    return d.error || `#${name} already exists on this node under a different owner.`;
+  }
+  if (code === 'room_not_found') {
+    return d.error || `Channel not found. Re-sync from your home node, then try again.`;
+  }
+  if (code === 'room_banned') {
+    return d.error || `You are banned from #${name}.`;
+  }
+  return d?.error || 'Failed to join';
+}
+
 async function joinDirectoryChannel(name) {
   try {
     const r = await fetch(`/api/rooms/${encodeURIComponent(name)}/join`, {
@@ -4110,7 +4124,7 @@ async function joinDirectoryChannel(name) {
       UI.showToast(`Joined #${name}!`);
     } else {
       const d = await r.json().catch(() => ({}));
-      UI.showToast(d.error || 'Failed to join', 'error');
+      UI.showToast(_directoryJoinErrorMessage(d, name), 'error');
     }
   } catch {
     UI.showToast('Failed to join channel', 'error');
@@ -4142,7 +4156,7 @@ async function openChannelFromDiscovery(name, btnEl) {
       });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        UI.showToast(d.error || `Couldn't join #${name}`, 'error');
+        UI.showToast(_directoryJoinErrorMessage(d, name), 'error');
         restore();
         return;
       }

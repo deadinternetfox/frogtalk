@@ -1587,11 +1587,64 @@ async def unpin_message(room_name: str, msg_id: int,
 
 
 @router.post("/{room_name}/join")
-async def join_room(room_name: str, current_user: dict = Depends(get_current_user)):
-    """Join a channel."""
-    room = db.get_room_by_name(room_name)
+@limiter.limit("60/minute")
+async def join_room(
+    request: Request,
+    room_name: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Join a channel.
+
+    When the room does not exist locally but appears in the federated
+    directory index (``remote_only`` listings), materialize a public mirror
+    shell from the index row, then join — without requiring a full account
+    sync of every home public channel.
+    """
+    name = str(room_name or "").strip().lower()
+    room = db.get_room_by_name(name)
+    fed_index = db.get_federation_channel_index_entry(name)
+    if room and fed_index and db.room_blocks_home_sync_mirror(room):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": (
+                    f"#{name} already exists on this node as a local channel. "
+                    "You cannot join the federated channel with the same name."
+                ),
+                "code": "name_collision",
+                "room": name,
+            },
+        )
     if not room:
-        return JSONResponse(status_code=404, content={"error": "Room not found"})
+        from routers import auth as auth_mod
+
+        room, err = auth_mod.materialize_directory_federated_channel(name)
+        if err == "name_collision":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": (
+                        f"#{name} already exists on this node as a local channel. "
+                        "You cannot join the federated channel with the same name."
+                    ),
+                    "code": "name_collision",
+                    "room": name,
+                },
+            )
+        if err == "invalid_name":
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Invalid channel name", "code": "invalid_name"},
+            )
+        if not room:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": "Room not found. Re-sync from your home node or refresh the directory.",
+                    "code": "room_not_found",
+                    "room": name,
+                },
+            )
     # Surface room bans with a specific code so the client can render
     # the "you are banned" UX instead of a generic permission error.
     is_admin = bool(current_user.get("is_admin"))
@@ -1600,15 +1653,15 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
         if ban:
             banner = db.get_user_by_id(ban.get("banned_by")) if ban.get("banned_by") else None
             return JSONResponse(status_code=403, content={
-                "error": f"You are banned from #{room_name} and cannot join.",
+                "error": f"You are banned from #{name} and cannot join.",
                 "code": "room_banned",
-                "room": room_name,
+                "room": name,
                 "reason": (ban.get("reason") or "")[:500],
                 "expires_at": ban.get("expires_at"),
                 "banned_by": (banner or {}).get("nickname"),
             })
     if not db.user_can_access_room(
-        current_user["id"], room_name, is_admin=is_admin
+        current_user["id"], name, is_admin=is_admin
     ):
         return JSONResponse(
             status_code=403,
@@ -1622,9 +1675,9 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
     # without entering the room, existing members never saw them.
     try:
         from ws_manager import manager
-        await manager.broadcast_room(room_name, {
+        await manager.broadcast_room(name, {
             "type": "member_joined",
-            "room": room_name,
+            "room": name,
             "user_id": current_user["id"],
             "nickname": current_user["nickname"],
             "avatar": current_user.get("avatar"),
@@ -1636,7 +1689,7 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
             "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
             "event_type": "room.member.joined",
             "payload": {
-                "room_name": room_name,
+                "room_name": name,
                 "nickname": current_user["nickname"],
             },
         })
@@ -1649,7 +1702,7 @@ async def join_room(room_name: str, current_user: dict = Depends(get_current_use
     try:
         if str(room.get("type") or "public").lower() == "public":
             from routers import federation as federation_mod
-            federation_mod.maybe_emit_room_members_snapshot(room_name)
+            federation_mod.maybe_emit_room_members_snapshot(name)
     except Exception:
         pass
     # Private-room key handoff. The freshly-joined user has no current
@@ -1739,6 +1792,8 @@ async def get_channel_members(room_name: str,
                 continue
             avatar = str(row.get("avatar") or "").strip()
             display_name = str(row.get("display_name") or "").strip()
+            status_msg = ""
+            mood = ""
             if gid and (not avatar or not display_name):
                 try:
                     prof = db.get_federation_user_profile_row(gid) or {}
@@ -1746,6 +1801,8 @@ async def get_channel_members(room_name: str,
                         avatar = str(prof.get("avatar") or "").strip()
                     if not display_name:
                         display_name = str(prof.get("display_name") or "").strip()
+                    status_msg = str(prof.get("status_msg") or "").strip()
+                    mood = str(prof.get("mood") or "").strip()
                 except Exception:
                     pass
             if gid and not avatar:
@@ -1757,6 +1814,17 @@ async def get_channel_members(room_name: str,
                         avatar = str(prof.get("avatar") or "").strip()
                         if not display_name:
                             display_name = str(prof.get("display_name") or "").strip()
+                        if not status_msg:
+                            status_msg = str(prof.get("status_msg") or "").strip()
+                        if not mood:
+                            mood = str(prof.get("mood") or "").strip()
+                except Exception:
+                    pass
+            if gid and not status_msg:
+                try:
+                    prof = db.get_federation_user_profile_row(gid) or {}
+                    status_msg = str(prof.get("status_msg") or "").strip()
+                    mood = str(prof.get("mood") or "").strip()
                 except Exception:
                     pass
             federated.append({
@@ -1764,6 +1832,8 @@ async def get_channel_members(room_name: str,
                 "nickname": row.get("nickname") or "",
                 "display_name": display_name,
                 "avatar": avatar,
+                "status_msg": status_msg,
+                "mood": mood,
                 "global_user_id": gid,
                 "home_server_id": row.get("home_server_id") or "",
                 "role": row.get("role") or "member",

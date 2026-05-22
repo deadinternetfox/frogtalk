@@ -2294,6 +2294,30 @@ async def set_identity_pubkey(
     return {"ok": True}
 
 
+@router.get("/federation/profile-card")
+async def federation_profile_card_public(
+    global_user_id: str = "",
+    nickname: str = "",
+    home_server_id: str = "",
+    refresh: int = 0,
+    current_user: dict = Depends(get_current_user),
+):
+    """Session profile card (alias for ``/api/auth/federation/profile-card``)."""
+    from routers.auth import build_federation_profile_card
+
+    del current_user
+    out = build_federation_profile_card(
+        global_user_id=global_user_id,
+        nickname=nickname,
+        home_server_id=home_server_id,
+        refresh=bool(int(refresh or 0)),
+    )
+    if out.get("error"):
+        code = 400 if out.get("code") == "invalid_gid" else 404
+        return JSONResponse(status_code=code, content=out)
+    return out
+
+
 @router.get("/identity/me/claim")
 async def get_my_identity_claim(
     ttl_seconds: int = 3600,

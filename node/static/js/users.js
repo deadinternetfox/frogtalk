@@ -284,7 +284,17 @@ const Users = (() => {
   function _renderUserRow(u, isOnline) {
     const el = document.createElement('div');
     el.className = 'user-item' + (isOnline ? '' : ' offline') + (u.remote ? ' remote' : '');
-    el.onclick = () => showUserInfo(u.nickname, u.user_id);
+    el.onclick = () => {
+      if ((u.remote || !u.user_id) && typeof App !== 'undefined' && App.openFederatedProfileCard) {
+        void App.openFederatedProfileCard({
+          global_user_id: u.global_user_id || '',
+          nickname: u.nickname,
+          home_server_id: u.home_server_id || '',
+        });
+        return;
+      }
+      showUserInfo(u.nickname, u.user_id);
+    };
     const isAdmin = u.nickname === 'admin' || u.is_admin;
     const inCall = isOnline && typeof getVoiceParticipantNicks === 'function' && getVoiceParticipantNicks().has(u.nickname);
     const isMuted = inCall && typeof getVoiceMutedNicks === 'function' && getVoiceMutedNicks().has(u.nickname);
@@ -320,6 +330,9 @@ const Users = (() => {
       ? (State.user.display_name || State.user.nickname || u.nickname)
       : (u.display_name || u.nickname);
     const hasHandle = !!(displayLabel && displayLabel !== handleNick);
+    const statusSub = (u.remote && String(u.status_msg || '').trim())
+      ? `<span class="user-status-sub" style="display:block;font-size:11px;color:#6f9a7d;margin-top:2px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${UI.escHtml(u.status_msg)}">${UI.escHtml(u.status_msg)}</span>`
+      : '';
     el.innerHTML = `
       <div class="user-avatar">
         ${UI.avatarEl(avatarSrc, handleNick, 32)}
@@ -328,6 +341,7 @@ const Users = (() => {
       <div class="user-name-wrap">
         <span class="user-name${isAdmin ? ' admin' : ''}">${isAdmin ? '👑 ' : ''}${UI.escHtml(displayLabel)}${voiceIcon ? ' ' + voiceIcon : ''}${remoteBadge}</span>
         ${hasHandle ? `<span class="user-handle">@${UI.escHtml(handleNick)}</span>` : ''}
+        ${statusSub}
       </div>
     `;
     return el;
