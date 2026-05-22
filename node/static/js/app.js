@@ -204,7 +204,9 @@ try { window.FtSync = FtSync; } catch {}
 const App = {
   pendingInvite: null,  // Store invite code to process after login
   PENDING_CALL_KEY: 'ft_pending_incoming_call',
-  ASSET_RESET_VERSION: 'federation-sync-v21',
+  ASSET_RESET_VERSION: 'federation-sync-v22',
+  _syncOverlayDismissed: false,
+  _syncResumeStarting: false,
   easterEgg: null,
   easterTapCount: 0,
   easterTapTimer: null,
@@ -401,6 +403,41 @@ const App = {
     return this.probeAccountSyncIfSparse({ force: false });
   },
 
+  async _fetchFederationSyncStatus() {
+    if (!State.token) return null;
+    try {
+      const res = await fetch('/api/auth/federation-sync-status', {
+        headers: { 'X-Session-Token': State.token },
+      });
+      if (!res.ok) return null;
+      return await res.json().catch(() => null);
+    } catch {
+      return null;
+    }
+  },
+
+  async _reconcileFederationSyncAfterDismiss() {
+    const data = await this._fetchFederationSyncStatus();
+    if (data) {
+      this._applyFederationSyncUiState(data);
+      if (data.in_progress && typeof this.startFederationSyncWatcher === 'function') {
+        this.startFederationSyncWatcher();
+      }
+      return;
+    }
+    const st = this.federationSyncState || {};
+    if (st.in_progress) {
+      this._applyFederationSyncUiState({
+        ...st,
+        in_progress: false,
+        progress_pct: st.done ? 100 : 0,
+        hint: st.done ? 'Sync complete' : '',
+      });
+    } else {
+      this._setLoadingSyncHint('');
+    }
+  },
+
   async _resumeFederationSyncFromHome(opts = {}) {
     const force = !!(opts && opts.force);
     if (!State.token || this.isAtHomeNode()) return false;
@@ -409,15 +446,11 @@ const App = {
       (State.user && State.user.account_home_base_url) || this.getSyncSourceBase()
     );
     if (!source || source === here) return false;
-    this.applyFederationSyncMeta({
-      in_progress: true,
-      progress_pct: 1,
-      hint: force ? 'Re-syncing your account from your home node…' : 'Resuming account sync from your home node…',
-      phase: 'fetch',
-      source_base: source,
-    });
+    this._syncOverlayDismissed = false;
+    this._syncResumeStarting = true;
     try { sessionStorage.removeItem('ft_sync_overlay_seen'); } catch {}
-    this.openSyncOverlay();
+    this.openSyncOverlay({ userInitiated: true });
+    let ok = false;
     try {
       const res = await fetch('/api/auth/federation-sync-resume', {
         method: 'POST',
@@ -429,11 +462,13 @@ const App = {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        this.applyFederationSyncMeta(data);
-        return true;
-      }
-      if (data?.error) {
-        this.applyFederationSyncMeta({
+        this._applyFederationSyncUiState(data);
+        if (data.in_progress && typeof this.startFederationSyncWatcher === 'function') {
+          this.startFederationSyncWatcher();
+        }
+        ok = true;
+      } else if (data?.error) {
+        this._applyFederationSyncUiState({
           in_progress: false,
           done: true,
           error: data.error,
@@ -442,11 +477,17 @@ const App = {
         if (typeof UI !== 'undefined' && UI.showToast) {
           UI.showToast(`Account sync failed: ${String(data.error).slice(0, 100)}`, 'error', 8000);
         }
+      } else {
+        await this._reconcileFederationSyncAfterDismiss();
       }
     } catch (e) {
       console.warn('[App] _resumeFederationSyncFromHome failed', e);
+      await this._reconcileFederationSyncAfterDismiss();
+    } finally {
+      this._syncResumeStarting = false;
+      this._refreshSyncOverlay();
     }
-    return false;
+    return ok;
   },
 
   clearFederationSyncClientState() {
@@ -502,20 +543,11 @@ const App = {
     return null;
   },
 
-  async repinAccountHomeFromPrompt() {
+  async repinAccountHome(sourceBase, opts = {}) {
     if (!State.token) return false;
-    const def = (State.user && State.user.account_home_base_url)
-      || this.getSyncSourceBase()
-      || localStorage.getItem('ft_sync_source_base')
-      || localStorage.getItem('ft_network_selected')
-      || '';
-    const raw = window.prompt(
-      'Enter your real home node URL (must be in the federation directory):',
-      String(def || '').replace(/\/$/, '')
-    );
-    if (!raw) return false;
-    const source = this._normalizeOrigin(raw);
+    const source = this._normalizeOrigin(sourceBase);
     if (!source) return false;
+    const startSync = opts.startSync !== false;
     try {
       const res = await fetch('/api/auth/repin-account-home', {
         method: 'POST',
@@ -523,34 +555,43 @@ const App = {
           'Content-Type': 'application/json',
           'X-Session-Token': State.token,
         },
-        body: JSON.stringify({ source_base: source, start_sync: true }),
+        body: JSON.stringify({ source_base: source, start_sync: startSync }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (typeof UI !== 'undefined' && UI.showToast) {
-          UI.showToast(data?.error || 'Could not re-pin home', 'error', 8000);
+          UI.showToast(data?.error || 'Could not set account home', 'error', 8000);
         }
-        return false;
+        return { ok: false, error: data?.error || 'Could not set account home' };
       }
       if (data.account_home_base_url) {
         this.rememberSyncSourceBase(data.account_home_base_url);
       }
       await this.refreshIdentityFromMe();
       if (data.federation_sync) {
-        this.applyFederationSyncMeta(data.federation_sync);
-        this.openSyncOverlay();
+        this._syncOverlayDismissed = false;
+        this._applyFederationSyncUiState(data.federation_sync);
+        this.openSyncOverlay({ userInitiated: true });
         if (typeof this.startFederationSyncWatcher === 'function') {
           this.startFederationSyncWatcher();
         }
       }
       if (typeof UI !== 'undefined' && UI.showToast) {
-        UI.showToast('Home node updated', 'success', 5000);
+        UI.showToast('Account home node updated', 'success', 5000);
       }
-      return true;
+      return { ok: true, data };
     } catch (e) {
-      console.warn('[App] repinAccountHomeFromPrompt failed', e);
+      console.warn('[App] repinAccountHome failed', e);
+      return { ok: false, error: 'Network error' };
+    }
+  },
+
+  async repinAccountHomeFromPrompt() {
+    if (typeof openAccountHomeRepinModal === 'function') {
+      openAccountHomeRepinModal();
       return false;
     }
+    return false;
   },
 
   async forceFederationResync() {
@@ -1657,7 +1698,8 @@ const App = {
       <div style="font-size:10px;color:#7ba88f;margin-top:6px;text-align:center;letter-spacing:.04em">CLICK FOR DETAILS</div>`;
   },
 
-  openSyncOverlay() {
+  openSyncOverlay(opts = {}) {
+    if (opts && opts.userInitiated) this._syncOverlayDismissed = false;
     let overlay = document.getElementById('ft-sync-overlay');
     if (overlay) {
       overlay.classList.add('ft-sync-overlay-open');
@@ -1681,6 +1723,8 @@ const App = {
   closeSyncOverlay() {
     const overlay = document.getElementById('ft-sync-overlay');
     if (overlay) overlay.remove();
+    this._syncOverlayDismissed = true;
+    void this._reconcileFederationSyncAfterDismiss();
   },
 
   _refreshSyncOverlay() {
@@ -1689,7 +1733,16 @@ const App = {
     const card = overlay.querySelector('#ft-sync-overlay-card');
     if (!card || !window.FtSync) return;
     const st = this.federationSyncState || window.__ftFederationSync || {};
-    let html = FtSync.renderOverlayHtml(st);
+    const starting = !!this._syncResumeStarting;
+    let html = starting
+      ? FtSync.renderOverlayHtml({
+        in_progress: true,
+        progress_pct: 0,
+        hint: 'Connecting to your home node…',
+        source_base: st.source_base || this.getSyncSourceBase(),
+        phase: 'fetch',
+      })
+      : FtSync.renderOverlayHtml(st);
     const err = String(st.error || '').trim();
     if (!st.in_progress && st.done) {
       const summaryParts = [];
@@ -1727,6 +1780,7 @@ const App = {
   },
 
   _maybeAutoOpenSyncOverlay(state) {
+    if (this._syncOverlayDismissed) return;
     if (this.isAtHomeNode()) return;
     if (!state?.in_progress) return;
     this.openSyncOverlay();
@@ -1857,6 +1911,11 @@ const App = {
     this._renderGlobalSyncChip(payload);
     this._refreshSyncOverlay();
     this._maybeAutoOpenSyncOverlay(payload);
+    try {
+      if (typeof refreshNetworkAccountSyncPanel === 'function' && document.getElementById('network-account-sync-panel')) {
+        refreshNetworkAccountSyncPanel({ allowFetch: false });
+      }
+    } catch {}
     this._emitFederationSyncEvent(payload);
     if (wasInProgress && !payload.in_progress && payload.done) {
       void this._onFederationSyncComplete(payload);

@@ -10551,6 +10551,57 @@ window.ConnErr = (function(){
   </div>
 </div>
 
+<!-- Account home node (federation sync source) — not the same as preferred routing URL -->
+<div class="modal-overlay hidden" id="modal-account-home-repin">
+  <div class="modal" style="max-width:520px;width:min(520px,94vw)">
+    <div style="text-align:center;margin-bottom:14px">
+      <div style="font-size:40px;line-height:1;margin-bottom:6px">🏠</div>
+      <div style="font-size:17px;font-weight:700;color:#4caf50">Set account home node</div>
+      <div style="font-size:12px;color:#7a8a82;margin-top:6px;line-height:1.55;max-width:420px;margin-left:auto;margin-right:auto">
+        Your <strong style="color:#9ec59e">home node</strong> is where your account lives and where channels, DMs, and FrogSocial data are imported from when you visit other servers.
+        This is <em>not</em> the same as your preferred routing server below.
+      </div>
+    </div>
+
+    <div style="display:grid;gap:8px;margin-bottom:14px;font-size:11px;color:#8da59b;line-height:1.45">
+      <div style="padding:10px 12px;background:#141a16;border:1px solid #2a3a32;border-radius:8px">
+        <div style="color:#6f8e77;margin-bottom:4px">Connected now</div>
+        <div id="account-home-repin-now" style="color:#b7d9c3;word-break:break-all">—</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="padding:10px 12px;background:#141a16;border:1px solid #2a3a32;border-radius:8px;min-width:0">
+          <div style="color:#6f8e77;margin-bottom:4px">Account home (sync source)</div>
+          <div id="account-home-repin-current" style="color:#9ec59e;word-break:break-all">Not set</div>
+        </div>
+        <div style="padding:10px 12px;background:#141a16;border:1px solid #2a3a32;border-radius:8px;min-width:0">
+          <div style="color:#6f8e77;margin-bottom:4px">Preferred routing (optional)</div>
+          <div id="account-home-repin-preferred" style="color:#9ec59e;word-break:break-all">—</div>
+        </div>
+      </div>
+    </div>
+
+    <label style="display:block;font-size:12px;color:#9dc4b2;margin-bottom:6px">Home node URL</label>
+    <input type="url" id="account-home-repin-input" class="modal-input" inputmode="url" autocomplete="off"
+           placeholder="https://frogtalk.xyz" maxlength="512"
+           onkeydown="if(event.key==='Enter')submitAccountHomeRepin();else if(event.key==='Escape')closeAccountHomeRepinModal()">
+    <div style="font-size:11px;color:#6f8e77;margin-top:6px;line-height:1.45">
+      Must be a public FrogTalk node listed in the federation directory. Use <code style="color:#9ec59e">https://</code> or hostname only — we normalize and validate before saving.
+    </div>
+
+    <label style="display:flex;align-items:flex-start;gap:10px;margin-top:12px;cursor:pointer">
+      <input type="checkbox" id="account-home-repin-start-sync" checked style="width:18px;height:18px;margin-top:2px;accent-color:#4caf50;flex-shrink:0">
+      <span style="font-size:12px;color:#b7d9c3;line-height:1.45">Start importing from this home after saving (recommended when visiting another node)</span>
+    </label>
+
+    <div id="account-home-repin-error" class="auth-error" style="display:none;margin-top:10px"></div>
+
+    <div class="modal-actions" style="margin-top:14px;flex-wrap:wrap">
+      <button class="modal-btn secondary" type="button" onclick="closeAccountHomeRepinModal()">Cancel</button>
+      <button class="modal-btn primary" type="button" id="account-home-repin-submit" onclick="submitAccountHomeRepin()">Save home node</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════════════════ RECOVERY KEY MODALS ═══════════════════════ -->
 
 <!-- Password confirmation modal for generating a new recovery key from

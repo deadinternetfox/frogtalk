@@ -2573,6 +2573,12 @@ function ensureNetworkPaneContent() {
 
     <div id="network-account-sync-panel" style="background:linear-gradient(135deg,#121a16,#0f1411);border:1px solid #2a4a36;border-radius:10px;padding:12px;margin-bottom:12px"></div>
 
+    <div style="background:#121816;border:1px solid #2a3a32;border-radius:8px;padding:10px;margin-bottom:12px;font-size:11px;color:#8da59b;line-height:1.5">
+      <strong style="color:#9ec59e">Routing vs account home</strong><br>
+      <span style="color:#7a8a82">Preferred routing</span> (mode + server list below) chooses which node you open by default — travel convenience only.<br>
+      <span style="color:#7a8a82">Account home</span> (sync panel above) is your federation identity and the server that exports channels, DMs, and FrogSocial when you visit peers. Changing routing does <em>not</em> change home; use <strong>Set home node…</strong> in the sync panel when needed.
+    </div>
+
     <label class="modal-label" style="margin-top:0">Connection Mode</label>
     <select id="network-mode" class="modal-input" style="color:#e0e0e0;background:#0d0d0d">
       <option value="auto">Auto (recommended)</option>
@@ -3164,9 +3170,9 @@ function _renderNetworkAccountSyncPanel(st, opts) {
     panel.innerHTML = `
       <div style="font-size:12px;color:#9bd6ab;font-weight:700;margin-bottom:4px">Account sync</div>
       <div style="font-size:11px;color:#78a187;line-height:1.45">You're on your home node (<span style="color:#b7d9c3">${esc(here.replace(/^https?:\/\//, ''))}</span>). Channels, DMs, and FrogSocial data are authoritative here — no import needed.</div>
-      <div style="font-size:11px;color:#6f8e77;margin-top:8px;line-height:1.45">Wrong node? If you registered on a travel node by mistake, re-pin your real home below — then re-sync from Settings → Network.</div>
+      <div style="font-size:11px;color:#6f8e77;margin-top:8px;line-height:1.45">Registered on the wrong node by mistake? Set your real account home below (not the preferred routing server).</div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
-        <button class="modal-btn secondary" type="button" onclick="networkRepinAccountHome()" style="padding:6px 10px;font-size:11px">Re-pin home node…</button>
+        <button class="modal-btn secondary" type="button" onclick="networkRepinAccountHome()" style="padding:6px 10px;font-size:11px">Set home node…</button>
         <button class="modal-btn secondary" type="button" onclick="networkClearHomePin()" style="padding:6px 10px;font-size:11px">Clear home pin</button>
       </div>`;
     _renderNetworkSyncState(st);
@@ -3206,7 +3212,7 @@ function _renderNetworkAccountSyncPanel(st, opts) {
   const resyncDisabled = inProgress && st.in_progress;
   const resyncLabel = (st.in_progress || (loading && !fullyComplete))
     ? 'Syncing…'
-    : (fullyComplete && !socialPending ? '✓ Up to date' : '↻ Re-sync from home');
+    : (fullyComplete && !socialPending ? '↻ Re-sync anyway' : '↻ Re-sync from home');
   const resyncStyle = (fullyComplete && !socialPending && !st.in_progress)
     ? 'padding:8px 12px;min-width:148px;opacity:0.92'
     : 'padding:8px 12px;min-width:148px';
@@ -3298,16 +3304,13 @@ async function networkResyncFromHome() {
   }
   const stNow = (App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
   if (_networkSyncFullyComplete(stNow)) {
-    const btn = document.getElementById('network-resync-btn');
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = '✓ Up to date';
+    const ok = window.confirm(
+      'Fully synced with your home node. Re-import channels, DMs, friends, and FrogSocial again? This may take a minute.'
+    );
+    if (!ok) {
+      void refreshNetworkAccountSyncPanel({ forceFetch: true });
+      return;
     }
-    if (typeof UI !== 'undefined' && UI.showToast) {
-      UI.showToast('Already fully synced with your home node.', 'info', 4500);
-    }
-    void refreshNetworkAccountSyncPanel({ forceFetch: true });
-    return;
   }
   const btn = document.getElementById('network-resync-btn');
   if (btn) {
@@ -3344,10 +3347,128 @@ async function networkResyncFromHome() {
   await refreshNetworkAccountSyncPanel({ forceFetch: true });
 }
 
+function _hostLabelFromUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return '—';
+  try {
+    return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).host;
+  } catch {
+    return raw.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+  }
+}
+
+function _sanitizeAccountHomeRepinUrl(raw) {
+  const trimmed = String(raw || '').trim().slice(0, 512);
+  if (!trimmed || /\s/.test(trimmed)) {
+    return { ok: false, error: 'Enter a valid server URL (hostname or https://…).' };
+  }
+  const normalized = _normalizeNetworkUrl(trimmed);
+  if (!normalized) return { ok: false, error: 'URL cannot be empty.' };
+  try {
+    const u = new URL(normalized);
+    if (!['http:', 'https:'].includes(u.protocol)) {
+      return { ok: false, error: 'Only http:// or https:// URLs are allowed.' };
+    }
+    if (!u.hostname || u.username || u.password) {
+      return { ok: false, error: 'Invalid hostname.' };
+    }
+    if (/[<>"']/.test(trimmed)) {
+      return { ok: false, error: 'URL contains invalid characters.' };
+    }
+  } catch {
+    return { ok: false, error: 'Could not parse URL — check spelling.' };
+  }
+  const source = (typeof App !== 'undefined' && App._normalizeOrigin)
+    ? App._normalizeOrigin(normalized)
+    : normalized.toLowerCase().replace(/\/$/, '');
+  if (!source) return { ok: false, error: 'Invalid URL.' };
+  return { ok: true, source, display: normalized };
+}
+
+function openAccountHomeRepinModal() {
+  const input = document.getElementById('account-home-repin-input');
+  const errEl = document.getElementById('account-home-repin-error');
+  const submitBtn = document.getElementById('account-home-repin-submit');
+  const startSyncEl = document.getElementById('account-home-repin-start-sync');
+  const nowEl = document.getElementById('account-home-repin-now');
+  const curEl = document.getElementById('account-home-repin-current');
+  const prefEl = document.getElementById('account-home-repin-preferred');
+  if (!input) return;
+
+  const home = (State.user && State.user.account_home_base_url)
+    || (typeof App !== 'undefined' && App.getSyncSourceBase ? App.getSyncSourceBase() : '')
+    || localStorage.getItem('ft_sync_source_base')
+    || '';
+  const preferred = localStorage.getItem('ft_network_selected') || '';
+  const def = home || preferred || 'frogtalk.xyz';
+
+  if (nowEl) nowEl.textContent = _hostLabelFromUrl(window.location.origin);
+  if (curEl) {
+    curEl.textContent = home ? _hostLabelFromUrl(home) : 'Not set';
+    curEl.style.color = home ? '#9ec59e' : '#f6d27a';
+  }
+  if (prefEl) prefEl.textContent = preferred ? _hostLabelFromUrl(preferred) : 'Not set (auto routing)';
+  input.value = _hostLabelFromUrl(def);
+  if (startSyncEl) {
+    const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
+    startSyncEl.checked = !atHome;
+    startSyncEl.disabled = !!atHome;
+  }
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.textContent = '';
+  }
+  if (submitBtn) submitBtn.disabled = false;
+  openModal('modal-account-home-repin');
+  setTimeout(() => { try { input.focus(); input.select(); } catch {} }, 50);
+}
+
+function closeAccountHomeRepinModal() {
+  closeModal('modal-account-home-repin');
+}
+
+async function submitAccountHomeRepin() {
+  const input = document.getElementById('account-home-repin-input');
+  const errEl = document.getElementById('account-home-repin-error');
+  const submitBtn = document.getElementById('account-home-repin-submit');
+  const startSyncEl = document.getElementById('account-home-repin-start-sync');
+  if (!input || typeof App === 'undefined' || !App.repinAccountHome) return;
+
+  const parsed = _sanitizeAccountHomeRepinUrl(input.value);
+  if (!parsed.ok) {
+    if (errEl) {
+      errEl.textContent = parsed.error;
+      errEl.style.display = '';
+    }
+    return;
+  }
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.textContent = '';
+  }
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving…';
+  }
+  const startSync = !!(startSyncEl && startSyncEl.checked);
+  const result = await App.repinAccountHome(parsed.source, { startSync });
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Save home node';
+  }
+  if (!result || !result.ok) {
+    if (errEl) {
+      errEl.textContent = String((result && result.error) || 'Could not save home node');
+      errEl.style.display = '';
+    }
+    return;
+  }
+  closeAccountHomeRepinModal();
+  await refreshNetworkAccountSyncPanel({ forceFetch: true });
+}
+
 async function networkRepinAccountHome() {
-  if (typeof App === 'undefined' || !App.repinAccountHomeFromPrompt) return;
-  await App.repinAccountHomeFromPrompt();
-  await refreshNetworkAccountSyncPanel();
+  openAccountHomeRepinModal();
 }
 
 async function networkClearHomePin() {
@@ -3380,7 +3501,8 @@ async function networkOpenSyncDetails() {
   try { closeModal('modal-settings'); } catch {}
   if (typeof App !== 'undefined' && App.applyFederationSyncMeta) App.applyFederationSyncMeta(st);
   if (typeof App !== 'undefined' && App.openSyncOverlay) {
-    App.openSyncOverlay();
+    App._syncOverlayDismissed = false;
+    App.openSyncOverlay({ userInitiated: true });
     if (typeof App._refreshSyncOverlay === 'function') App._refreshSyncOverlay();
   }
 
