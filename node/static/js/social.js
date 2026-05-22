@@ -1984,8 +1984,9 @@ const Social = (() => {
   }
 
   function renderStoriesBar() {
-    if (_storyData.length === 0 && !State.user) return '';
-    const myStory = _storyData.find(u => u.user_id === State.user?.id);
+    const stories = Array.isArray(_storyData) ? _storyData : [];
+    if (stories.length === 0 && !State.user) return '';
+    const myStory = stories.find(u => u && u.user_id === State.user?.id);
     let html = '<div class="stories-bar"><div class="stories-scroll">';
     // "Add story" circle
     html += `<div class="story-circle add-story" onclick="Social.openAddStory()">
@@ -1995,8 +1996,9 @@ const Social = (() => {
       </div>
       <span class="story-nick">Your story</span>
     </div>`;
-    for (let i = 0; i < _storyData.length; i++) {
-      const u = _storyData[i];
+    for (let i = 0; i < stories.length; i++) {
+      const u = stories[i];
+      if (!u || !Array.isArray(u.stories)) continue;
       if (u.user_id === State.user?.id && u.stories.length > 0) {
         // show own story ring (viewed style)
         continue; // already shown as "Your story"
@@ -7994,7 +7996,7 @@ const Social = (() => {
     try { _suggestedCache = null; } catch {}
     try { _profilePostsCache.clear(); } catch {}
     try { _profileRepostsCache.clear(); } catch {}
-    try { _storyData = null; } catch {}
+    try { _storyData = []; } catch {}
   }
 
   async function toggleFollow(nickname, btn) {

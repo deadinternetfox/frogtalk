@@ -686,9 +686,17 @@ function _resolveOwnDMPlaintext(cipher, msgId, channelId) {
 }
 
 const _dmDecryptWarned = new Set();
+const _dmDecryptPermafail = new Set();
+const _DM_DECRYPT_LOCKED = '\u{1F512} Encrypted (keys not available on this node)';
 
 function _resetDmDecryptWarnings() {
   _dmDecryptWarned.clear();
+  _dmDecryptPermafail.clear();
+}
+
+function _dmMarkDecryptPermafail(cipher) {
+  const k = _dmPtCacheKey(String(cipher || ''));
+  if (k) _dmDecryptPermafail.add(k);
 }
 
 try {
@@ -734,6 +742,10 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
   // any second call would fail with "Bad MAC".
   const _cached = _dmPtCacheGet(raw);
   if (_cached !== undefined) return _cached;
+  if (_dmDecryptPermafail.has(_cacheKey)) {
+    if (opts.sidebar) return _dmEncryptedPreviewLabel();
+    return _DM_DECRYPT_LOCKED;
+  }
 
   const inflight = _dmDecryptInflight.get(_cacheKey);
   if (inflight) {
@@ -796,7 +808,16 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
           errMsg.slice(0, 120),
         );
       }
-      if (allowSessionReset && (errMsg.includes('Bad MAC') || errMsg.includes('Message key not found'))) {
+      const noDevice = errMsg.includes('No record for device');
+      const isPre = env.t === 'pre';
+      // Never reset sessions for historical pre-key envelopes or unmapped
+      // peer device ids — that spams Bad MAC and can break live sessions.
+      if (
+        allowSessionReset
+        && !isPre
+        && !noDevice
+        && (errMsg.includes('Bad MAC') || errMsg.includes('Message key not found'))
+      ) {
         try {
           if (typeof window.Signal.resetSessionWith === 'function') {
             await window.Signal.resetSessionWith(peerNum);
@@ -812,6 +833,9 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
           }
         }
       }
+      if (noDevice || isPre || errMsg.includes('Bad MAC')) {
+        _dmMarkDecryptPermafail(raw);
+      }
     }
     return null;
   };
@@ -819,16 +843,30 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
   const work = (async () => {
     const plain = await _tryDecrypt(!!opts.retry);
     if (plain !== null) return plain;
+    if (_dmDecryptPermafail.has(_cacheKey)) {
+      if (opts.sidebar) return _dmEncryptedPreviewLabel();
+      return _DM_DECRYPT_LOCKED;
+    }
     if (opts.sidebar && _looksEncryptedBlob(raw)) {
       return _dmEncryptedPreviewLabel();
     }
     if (_looksEncryptedBlob(raw) && !opts.silent) {
-      try {
-        const msg = opts.federated
-          ? 'Encrypted message from another node — open the app on your home server or run account sync.'
-          : 'Could not decrypt — ask your contact to send a new message, or refresh after both sides reload the app.';
-        window.UI?.showToast?.(msg, 'warning', 6000);
-      } catch {}
+      const warnKey = `toast:${peerNum}`;
+      if (!_dmDecryptWarned.has(warnKey)) {
+        _dmDecryptWarned.add(warnKey);
+        try {
+          const switched = !!window.__ftDctImported || sessionStorage.getItem('ft_just_switched') === '1';
+          let msg = opts.federated
+            ? 'Encrypted message from another node — open your home node or re-sync in this browser.'
+            : 'Could not decrypt — ask your contact to send a new message.';
+          if (switched && !window.__ftDctImported) {
+            msg = 'DM history could not be unlocked — switch nodes in the same browser so encryption keys can transfer, or ask for a new message.';
+          } else if (window.__ftDctImported) {
+            msg = 'Some older messages use keys from before this node switch and stay locked.';
+          }
+          window.UI?.showToast?.(msg, 'warning', 7000);
+        } catch {}
+      }
     }
     return raw;
   })();

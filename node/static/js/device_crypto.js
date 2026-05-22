@@ -249,7 +249,13 @@
         blob_b64: sealed,
       });
       if (!res.ok) {
-        console.warn('[DCT] upload failed', res.status);
+        const detail = await res.json().catch(() => ({}));
+        console.warn('[DCT] upload failed', res.status, detail.error || '');
+        try {
+          if (typeof UI !== 'undefined' && UI.showToast) {
+            UI.showToast('Could not save encryption keys for switch — DMs may need a new message after landing.', 'warning', 6000);
+          }
+        } catch {}
         return false;
       }
       return true;
@@ -281,20 +287,47 @@
       if (!plain || plain.dct_version !== DCT_VERSION) return false;
 
       const idMap = new Map();
-      const book = plain.address_book;
+      const book = plain.address_book || {};
+      const meId = Number((window.State && State.user && State.user.id) || 0);
+      const srcMe = Number(book.source_user_id || 0);
+      if (srcMe > 0 && meId > 0) idMap.set(srcMe, meId);
+
+      // Map exported source user ids → destination local ids via global_user_id.
+      for (const p of (book.peers || [])) {
+        const src = Number(p.source_local_id) || 0;
+        const gid = String(p.gid || '').trim();
+        if (!gid || src <= 0 || idMap.has(src)) continue;
+        const dest = await _resolveGidToLocalId(gid);
+        idMap.set(src, dest);
+      }
 
       if (!window.SignalStore) return false;
       const store = new window.SignalStore();
       const signal = plain.signal;
+      const _remapRowKey = async (key) => {
+        const mapped = await _remapAddressKey(String(key || ''), book, idMap);
+        const uid = Number(String(mapped || '').split('.')[0]) || 0;
+        return uid > 0 ? mapped : '';
+      };
       if (signal && signal.sessions) {
+        const kept = [];
         for (const row of signal.sessions) {
-          row.key = await _remapAddressKey(String(row.key), book, idMap);
+          const nk = await _remapRowKey(row.key);
+          if (!nk) continue;
+          row.key = nk;
+          kept.push(row);
         }
+        signal.sessions = kept;
       }
       if (signal && signal.identities) {
+        const keptId = [];
         for (const row of signal.identities) {
-          row.key = await _remapAddressKey(String(row.key), book, idMap);
+          const nk = await _remapRowKey(row.key);
+          if (!nk) continue;
+          row.key = nk;
+          keptId.push(row);
         }
+        signal.identities = keptId;
       }
       await store.importSnapshot(signal, (k) => k);
 
