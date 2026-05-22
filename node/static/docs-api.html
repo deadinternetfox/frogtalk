@@ -83,7 +83,22 @@ POST   /api/auth/recovery-key
 POST   /api/auth/recover
 POST   /api/auth/verify-recovery-key
 POST   /api/auth/federation-ticket
-POST   /api/auth/federation-ticket-login</code></pre>
+POST   /api/auth/federation-ticket-login
+GET    /api/auth/federation-sync-status
+POST   /api/auth/federation-sync-resume
+POST   /api/auth/federation-sync-reset
+POST   /api/auth/repin-account-home
+POST   /api/auth/federation-sync-profile-gid
+GET    /api/auth/federation-sync-export
+POST   /api/auth/federation-sync-export-ticket
+POST   /api/auth/federation-sync-export-gid
+POST   /api/auth/federation-sync-memberships-gid
+GET    /api/federation/profile-card</code></pre>
+          <p class="muted"><strong>Account sync</strong> (foreign node): home-signed export chunks
+          import joined rooms (with <code>channel_theme</code>), DM peers, friends/following styling,
+          self profile (<code>theme</code>, <code>custom_style</code>), and FrogSocial posts.
+          <code>GET /api/federation/profile-card?nickname=&amp;ft_gid=</code> returns a federated user
+          card (sanitized <code>custom_style</code>, optional wall when subject is at home).</p>
         </article>
 
         <article class="panel" id="users">
@@ -639,7 +654,15 @@ social.story.created / social.story.deleted</code></pre>
           gid is homed on a different server than <code>origin_server_id</code> are rejected (prevents
           cross-peer impersonation). Post update/delete require author ownership on the mapped local row.</p>
           <p class="muted">Also signed under sensitive prefixes: <code>user.*</code>, <code>dm.*</code>,
-          <code>friend.*</code> (e.g. <code>friend.requested</code>, <code>friend.accepted</code>).</p>
+          <code>friend.*</code> (e.g. <code>friend.requested</code>, <code>friend.accepted</code>).
+          <code>user.profile.updated</code> mirrors avatar, status, mood, and sanitized
+          <code>custom_style</code> to peers that host a local row for the gid.</p>
+
+          <h3 class="h-mt-14">Directory join (foreign node)</h3>
+          <p class="muted"><code>POST /api/rooms/{room_name}/join</code> materializes a public channel
+          shell from <code>federation_channel_index</code> only (no client-supplied metadata).
+          Returns <code>409</code> with <code>code: name_collision</code> when a local community channel
+          blocks mirroring the same name.</p>
 
           <h3 class="h-mt-14">Inbox envelope (peer → peer)</h3>
 <pre><code>POST /api/federation/events/inbox

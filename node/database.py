@@ -4292,13 +4292,35 @@ def search_users(query: str, limit: int = 20, requester_id: int = 0) -> List[Dic
     return [dict(r) for r in rows]
 
 
+def enrich_user_profile_from_federation(profile: Optional[Dict]) -> Optional[Dict]:
+    """Overlay federation_user_profiles when the local users row is sparse."""
+    if not profile:
+        return profile
+    gid = str(profile.get("global_user_id") or "").strip()
+    if not gid:
+        return profile
+    fed = get_federation_user_profile_row(gid)
+    if not fed:
+        return profile
+    for key in ("display_name", "avatar", "bio", "status_msg", "mood", "banner", "custom_style"):
+        if not str(profile.get(key) or "").strip():
+            val = str(fed.get(key) or "").strip()
+            if val:
+                profile[key] = val
+    if not str(profile.get("presence") or "").strip() or str(profile.get("presence")).strip().lower() == "offline":
+        fp = str(fed.get("presence") or "").strip().lower()
+        if fp and fp != "offline":
+            profile["presence"] = fp
+    return profile
+
+
 def get_user_profile(nickname: str) -> Optional[Dict]:
     with _conn() as con:
         row = con.execute(
             """SELECT id, nickname, display_name, username_changed_at,
                       avatar, banner, bio, status_msg,
                       presence, last_seen, is_admin,
-                      mood, custom_css, custom_style,
+                      mood, custom_css, custom_style, global_user_id,
                       wall_enabled, wall_comments_enabled,
                       show_last_seen, show_read_receipts, profile_public,
                       created_at
@@ -4311,7 +4333,7 @@ def get_user_profile(nickname: str) -> Optional[Dict]:
         d["tags"] = [r["tag"] for r in con.execute(
             "SELECT tag FROM user_tags WHERE user_id=? ORDER BY tag", (d["id"],)
         ).fetchall()]
-    return d
+    return enrich_user_profile_from_federation(d)
 
 # Alias used by social.py
 get_user_by_nick = get_user_profile

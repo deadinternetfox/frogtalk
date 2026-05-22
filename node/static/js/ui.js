@@ -232,6 +232,17 @@ const UI = (() => {
         if (data.display_name !== undefined) State.user.display_name = data.display_name || null;
         if (data.avatar !== undefined) State.user.avatar = data.avatar;
         if (typeof data.at_home_node === 'boolean') State.user.at_home_node = data.at_home_node;
+        if (typeof data.theme === 'string' && data.theme) {
+          State.user.theme = data.theme;
+          try { localStorage.setItem('frogtalk-theme', data.theme); } catch {}
+          if (typeof applyTheme === 'function') {
+            const t = (String(data.theme).toLowerCase() === 'dark') ? 'frog' : data.theme;
+            applyTheme(t);
+          }
+        }
+        if (typeof data.custom_style === 'string' && typeof applyProfileCustomCss === 'function') {
+          applyProfileCustomCss(data.custom_style);
+        }
         if (typeof State.save === 'function') State.save();
         _profileRefreshLastAt = Date.now();
         renderSelfStatus();

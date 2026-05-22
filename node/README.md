@@ -103,7 +103,7 @@ node/
 
 **FrogSocial across nodes:** only plaintext posts with `privacy` `public` or `followers` replicate to peers. Friends-only or private audiences use encrypted wall posts (`POST /api/wall/posts/encrypted`); peers receive targeted `social.post.created.encrypted` and `social.post.keys.extended` events. Details: `/docs/api` (Federation section).
 
-**Account sync on foreign nodes:** when users visit another node, **Settings → Network → Re-sync from home** pulls channels, DMs, graph, and FrogSocial posts from their home server (paginated, 300 per page). Auto-resume on login, export verification/signing, and name-collision handling (nick / channel / vanity) are documented in [FEDERATION_SYNC_FULL_POLISH_PLAN.md](../docs/FEDERATION_SYNC_FULL_POLISH_PLAN.md) and [FEDERATION_SYNC_AUDIT_REPORT.md](../docs/FEDERATION_SYNC_AUDIT_REPORT.md).
+**Account sync on foreign nodes:** when users visit another node, **Settings → Network → Re-sync from home** pulls channels (incl. room themes), DMs, graph, profile theme/CSS, and FrogSocial posts from their home server (paginated, 300 per page). Details: [SECURITY_MODEL.md](../docs/SECURITY_MODEL.md) (Account sync) and [docs/api](static/docs-api.html).
 
 | `FROGTALK_SYNC_*` flag | Default | Purpose |
 |----------------------|---------|---------|

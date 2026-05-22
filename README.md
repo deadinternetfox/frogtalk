@@ -68,7 +68,7 @@ and private channels (AES-GCM) before data reaches your disk.
 |---|---|
 | 🔐 **E2E Encryption** | Signal Protocol for DMs (X3DH + Double Ratchet) and per-room AES-256-GCM (AAD-bound v2 wire format, automatic key rotation on ban/kick) for private channels, client-side only — the server never sees plaintext |
 | 🌐 **Federated** | Your node joins the global FrogTalk directory and talks to other nodes |
-| 🔁 **Cross-node Sync** | Replicates users/profile status, social follows/posts/stories, rooms, and DMs across nodes |
+| 🔁 **Cross-node Sync** | Replicates profile, themes, contacts, joined channels (incl. room themes), social graph/posts, and DM history when visiting another node |
 | ⚡ **Real-time** | WebSocket messaging with auto-reconnect, typing indicators, reactions |
 | 🔒 **Private Rooms** | Passphrase-protected rooms — only members with the passphrase can decrypt |
 | 💬 **Direct Messages** | Fully encrypted DMs between any two users |
@@ -418,9 +418,11 @@ frogtalk/
 ├── bot-examples/                 # standalone reference bots
 ├── github-build-mirror/          # release binaries published to GitHub
 ├── docs/
+│   ├── README.md                 # index of public operator docs
 │   ├── NODE_INSTALL.md           # VPS install + federation (start here for ops)
 │   ├── SECURITY_MODEL.md         # encryption + threat model
 │   └── FEDERATED_CALLS.md        # cross-node WebRTC / TURN
+│   └── internal/                 # gitignored planning notes (not published)
 ├── README.md / SECURITY.md / CONTRIBUTING.md / CONTRIBUTORS.md / LICENSE
 └── .gitignore / .dockerignore / .fallowrc.json
 ```

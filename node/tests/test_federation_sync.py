@@ -1084,5 +1084,71 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
         self.assertEqual(str(room.get("home_server_id") or ""), "srv_dir_home")
 
 
+    def test_enrich_user_profile_merges_federation_custom_style(self):
+        db = self.db
+        gid = "00000000-0000-4000-8000-000000000088"
+        shadow = db.ensure_federated_dm_local_user(
+            gid,
+            "fed_style_peer",
+            origin_server_id="srv_style_home",
+        )
+        self.assertIsNotNone(shadow)
+        db.upsert_federation_user_profile(
+            gid,
+            "fed_style_peer",
+            custom_style="color:#aabbcc;background:#112233",
+            origin_server_id="srv_style_home",
+        )
+        prof = db.get_user_profile("fed_style_peer")
+        self.assertIsNotNone(prof)
+        self.assertIn("#aabbcc", str(prof.get("custom_style") or ""))
+
+    def test_following_export_includes_custom_style(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        exporter = db.create_user("style_exporter", "secret12")
+        self.assertIsNotNone(exporter)
+        remote_gid = "00000000-0000-4000-8000-000000000087"
+        db.ensure_federated_dm_local_user(
+            remote_gid,
+            "style_follow",
+            origin_server_id="srv_style_export",
+        )
+        db.upsert_federation_user_profile(
+            remote_gid,
+            "style_follow",
+            custom_style="color:#ff00aa",
+            mood="vibing",
+            origin_server_id="srv_style_export",
+        )
+        peer_id = int((db.get_user_profile("style_follow") or {}).get("id") or 0)
+        db.follow_user(int(exporter), peer_id)
+        export = auth_mod._build_sync_export_for_user(int(exporter))
+        row = next(
+            (f for f in (export.get("following") or []) if f.get("global_user_id") == remote_gid),
+            None,
+        )
+        self.assertIsNotNone(row, export.get("following"))
+        self.assertIn("#ff00aa", str(row.get("custom_style") or ""))
+        self.assertEqual(str(row.get("mood") or ""), "vibing")
+
+    def test_materialize_applies_channel_theme(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        theme = '{"accent":"#336699","bg":"#101010"}'
+        room = auth_mod._materialize_federated_channel({
+            "name": "themed-fed-room",
+            "type": "public",
+            "channel_type": "text",
+            "channel_theme": theme,
+        })
+        self.assertIsNotNone(room)
+        loaded = db.get_room_by_name("themed-fed-room") or {}
+        stored = str(loaded.get("channel_theme") or "")
+        self.assertIn("#336699", stored)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -289,7 +289,7 @@ nano /opt/frogtalk/.env
 | `FROGTALK_SYNC_PAGINATION` | `1` | Chunk social posts beyond 300 per export page |
 | `FROGTALK_SYNC_STALE_HOURS` | `0` | Re-sync after N hours when prior import completed (`24` recommended on busy foreign nodes) |
 
-See [FEDERATION_SYNC_FULL_POLISH_PLAN.md](FEDERATION_SYNC_FULL_POLISH_PLAN.md) and [SECURITY_MODEL.md](SECURITY_MODEL.md) (Account sync section).
+Imports include joined channel shells (with sanitized `channel_theme`), contact profile styling, your app theme preset, and profile inline CSS. See [SECURITY_MODEL.md](SECURITY_MODEL.md) (Account sync section) and the live [API reference](https://frogtalk.xyz/docs/api) (Auth + Federation).
 
 Generate a federation shared secret once on FrogTalk Main, then distribute to operators (never commit):
 

@@ -69,7 +69,7 @@
 <section class="privacy-hero">
   <h1>Privacy Policy</h1>
   <p>FrogTalk is built privacy-first. Your messages are encrypted before they leave your device, we run no analytics, and we sell nothing to anyone. This page explains exactly what that means in plain English.</p>
-  <div class="updated">Last updated: 20 May 2026</div>
+  <div class="updated">Last updated: 22 May 2026</div>
 </section>
 
 <!-- BODY -->
@@ -122,7 +122,7 @@
       <li><strong>Password hash</strong> — stored salted and hashed with bcrypt; we never see your plaintext password. Failed-login attempts are counted server-side and trigger a temporary per-account lockout to slow brute force.</li>
       <li><strong>Recovery key</strong> (optional) — if you generate one, the value is bcrypt-hashed at rest. Older accounts created before May 2026 may still have a SHA-256 row that gets migrated on next successful use.</li>
       <li><strong>Public encryption keys</strong> — your Signal identity key plus a signed prekey and a pool of one-time prekeys, so other users can start an encrypted DM with you even while you're offline. Your private keys never leave your device.</li>
-      <li><strong>Optional profile data</strong> — avatar, status, bio, pronouns. Whatever you fill in is shown to other users; what you leave blank is never collected.</li>
+      <li><strong>Optional profile data</strong> — avatar, status, bio, pronouns, and optional profile styling (preset theme and sanitized inline CSS). Whatever you fill in is shown to other users; what you leave blank is never collected. Styling is not end-to-end encrypted — it is replicated across federation like avatars.</li>
     </ul>
 
     <h3>Message metadata (server-visible)</h3>

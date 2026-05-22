@@ -559,7 +559,8 @@ def _upsert_sync_peer_profile_cache(item: dict, source_server_id: str) -> bool:
     mood = str(item.get("mood") or "")[:200]
     presence = str(item.get("presence") or "offline")[:32]
     custom_style = _sanitize_inline_style(str(item.get("custom_style") or "")[:12000])
-    if not (display_name or avatar or bio or status_msg or custom_style):
+    banner = str(item.get("banner") or "")[:500_000]
+    if not (display_name or avatar or bio or status_msg or custom_style or mood or presence or banner):
         return False
     origin = _sync_item_peer_origin(item, source_server_id)
     try:
@@ -575,11 +576,40 @@ def _upsert_sync_peer_profile_cache(item: dict, source_server_id: str) -> bool:
                 mood=mood,
                 presence=presence,
                 custom_style=custom_style,
-                banner=str(item.get("banner") or "")[:500_000],
+                banner=banner,
             )
         )
     except Exception:
         return False
+
+
+def _sync_peer_profile_row(user_id: int, nick_hint: str = "") -> dict:
+    """Full profile row for sync export (users + federation_user_profiles)."""
+    nick = str(nick_hint or "").strip()
+    if not nick and int(user_id or 0) > 0:
+        brief = db.get_user_by_id(int(user_id)) or {}
+        nick = str(brief.get("nickname") or "").strip()
+    if nick:
+        return db.get_user_profile(nick) or {}
+    if int(user_id or 0) > 0:
+        return db.get_user_by_id(int(user_id)) or {}
+    return {}
+
+
+def _sanitize_sync_channel_theme(raw, room_type: str = "public") -> str | None:
+    """Sanitize channel_theme JSON for federation account-sync export/apply."""
+    raw_s = str(raw or "").strip()
+    if not raw_s:
+        return None
+    rtype = str(room_type or "public").strip().lower()
+    if rtype not in ("public", "private"):
+        rtype = "public"
+    try:
+        from routers.rooms import _sanitize_channel_theme
+
+        return _sanitize_channel_theme(raw_s, room_type=rtype)
+    except Exception:
+        return None
 
 
 def _apply_sync_peer_profile_cache_from_export(payload: dict, source_server_id: str) -> int:
@@ -1549,6 +1579,9 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
             "owner_global_user_id": owner_gid,
             "vanity": vanity,
         }
+        sync_theme = _sanitize_sync_channel_theme(room.get("channel_theme"), rtype)
+        if sync_theme:
+            room_payload["channel_theme"] = sync_theme
         if rtype == "public" and len(public_rooms) < _SYNC_EXPORT_PUBLIC_ROOM_LIMIT:
             public_rooms.append(room_payload)
         if room.get("id") in joined_ids:
@@ -1562,7 +1595,7 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         other_id = int(ch.get("other_id") or 0)
         if other_id <= 0:
             continue
-        peer = db.get_user_by_id(other_id) or {}
+        peer = _sync_peer_profile_row(other_id)
         nick = str(peer.get("nickname") or "").strip()
         gid = str(peer.get("global_user_id") or "").strip()
         if not nick or not _GID_RE.match(gid):
@@ -1584,9 +1617,10 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
     following: list[dict] = []
     for row in db.get_following_list(uid, limit=_SYNC_EXPORT_DM_LIMIT):
         raw_id = int((row or {}).get("id") or 0)
-        profile = db.get_user_by_id(raw_id) if raw_id > 0 else {}
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
         gid = str((profile or {}).get("global_user_id") or "").strip()
-        nick = str((profile or {}).get("nickname") or (row or {}).get("nickname") or "").strip()
+        nick = str((profile or {}).get("nickname") or nick_hint or "").strip()
         if not nick or not _GID_RE.match(gid):
             continue
         following.append({
@@ -1596,14 +1630,19 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
             "avatar": (profile or {}).get("avatar") or (row or {}).get("avatar") or "",
             "display_name": str((profile or {}).get("display_name") or "")[:64],
             "status_msg": str((profile or {}).get("status_msg") or "")[:200],
+            "mood": str((profile or {}).get("mood") or "")[:200],
+            "presence": str((profile or {}).get("presence") or "offline")[:32],
+            "custom_style": _sanitize_inline_style(str((profile or {}).get("custom_style") or "")[:12000]),
+            "banner": str((profile or {}).get("banner") or "")[:500_000],
         })
 
     friends: list[dict] = []
     for row in db.get_friends(uid):
         raw_id = int((row or {}).get("id") or 0)
-        profile = db.get_user_by_id(raw_id) if raw_id > 0 else {}
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
         gid = str((profile or {}).get("global_user_id") or "").strip()
-        nick = str((profile or {}).get("nickname") or (row or {}).get("nickname") or "").strip()
+        nick = str((profile or {}).get("nickname") or nick_hint or "").strip()
         if not nick or not _GID_RE.match(gid):
             continue
         friends.append({
@@ -3253,6 +3292,7 @@ def _parse_sync_channel_raw(raw) -> dict | None:
         icon = _sanitize_sync_room_icon(raw.get("icon"))
         desc = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("description") or ""))[:200]
         vanity = str(raw.get("vanity") or "").strip().lower()[:32]
+        channel_theme = _sanitize_sync_channel_theme(raw.get("channel_theme"), room_type)
     else:
         name = str(raw or "").strip().lower()
         room_type = "public"
@@ -3260,13 +3300,14 @@ def _parse_sync_channel_raw(raw) -> dict | None:
         icon = None
         desc = ""
         vanity = ""
+        channel_theme = None
     if not _ROOM_NAME_RE.match(name):
         return None
     if room_type not in ("public", "private"):
         room_type = "public"
     if channel_type not in ("text", "music", "voice"):
         channel_type = "text"
-    return {
+    out = {
         "name": name,
         "type": room_type,
         "channel_type": channel_type,
@@ -3274,6 +3315,9 @@ def _parse_sync_channel_raw(raw) -> dict | None:
         "description": desc,
         "vanity": vanity,
     }
+    if channel_theme:
+        out["channel_theme"] = channel_theme
+    return out
 
 
 def _try_apply_sync_room_vanity(room: dict | None, vanity: str) -> bool:
@@ -3324,6 +3368,11 @@ def _materialize_federated_channel(raw) -> dict | None:
     elif room and parsed.get("icon"):
         try:
             db.update_room_settings(name, icon=parsed["icon"])
+        except Exception:
+            pass
+    if room and parsed.get("channel_theme"):
+        try:
+            db.update_room_settings(name, channel_theme=parsed["channel_theme"])
         except Exception:
             pass
     if room and parsed.get("vanity"):

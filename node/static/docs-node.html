@@ -132,7 +132,7 @@ sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk</code><
 
     <section class="step" id="account-sync">
       <h2>Account sync (visiting another node)</h2>
-      <p class="hint">Users who log in on a <strong>community node</strong> (not their home) can import channels, DMs, friends, and FrogSocial posts from their home server under <strong>Settings → Network → Re-sync from home</strong>. Sync is automatic on login when incomplete.</p>
+      <p class="hint">Users who log in on a <strong>community node</strong> (not their home) can import channels (including room themes), DMs, friends, profile theme/CSS, and FrogSocial posts from their home server under <strong>Settings → Network → Re-sync from home</strong>. Sync is automatic on login when incomplete. Federated directory channels can be joined with <strong>Join</strong> without a prior sync row (metadata from the index only).</p>
       <pre><code># Optional tuning in /opt/frogtalk/.env (defaults keep features on)
 FROGTALK_SYNC_PERSIST=1
 FROGTALK_SYNC_BIND_HOME=1
@@ -229,7 +229,8 @@ journalctl -u frogtalk -n 40 --no-pager</code></pre>
         <tr><td>Peers listed, no sync</td><td>Re-run <code>federation -y</code> after service is running</td></tr>
         <tr><td>Traveler empty feed on foreign node</td><td>Settings → Network → Re-sync; check sync status for errors or partial import</td></tr>
         <tr><td>Call does not ring on foreign node</td><td>Callee may be homed elsewhere — they must be online here or at home; friends-only gate default</td></tr>
-        <tr><td>Channel name clash after sync</td><td>Local channel kept; home channel listed in federated directory only</td></tr>
+        <tr><td>Channel name clash after sync</td><td>Local channel kept; home channel listed in federated directory only — join via directory may return <code>name_collision</code></td></tr>
+        <tr><td>Friend theme missing on travel node</td><td>Re-sync from home; profiles merge <code>federation_user_profiles</code> cache</td></tr>
         <tr><td>Not on frogtalk.xyz directory</td><td>Match <code>FROGTALK_FEDERATION_TOKEN</code> on Main + node; re-run <code>federation -y</code></td></tr>
         <tr><td>CORS errors</td><td>Add your URL to <code>ALLOWED_ORIGINS</code></td></tr>
         <tr><td><code>/board/</code> OK but <code>/app</code> 502</td><td>nginx must not <code>listen 8080</code> when app uses <code>PORT=8080</code> — re-run <code>board-nginx</code> (wizard strips tunnel port by default)</td></tr>

@@ -1,6 +1,6 @@
 # FrogTalk Security & Encryption Model
 
-_Last updated: 2026-05-21_
+_Last updated: 2026-05-22_
 
 This document describes FrogTalk's security and encryption architecture as it
 ships in production. If something here disagrees with the code, the code wins —
@@ -22,6 +22,7 @@ please open a PR.
 | Wall — friends / private | Per-post AES-256-GCM + Signal-wrapped keys | No | **Encrypted path only** — never plaintext private |
 | Bridged channels | Plaintext on FrogTalk side | Yes | N/A (bridge-local) |
 | Linked devices | Per-device Signal sub-identities (Phase 1) | No | Device records via signed `user.*` |
+| Profile / room themes | Sanitized CSS + JSON theme blobs | Yes (styling only) | Account sync + `user.profile.updated` |
 
 The server stores ciphertext for every "No" row. There is no master key, no key
 escrow, and no recovery key for DM or wall ciphertext — losing all devices loses
@@ -168,7 +169,9 @@ wraps, and often a re-wrap after the relationship exists on both sides. Details:
 
 When you use the same account on a **foreign** node, the app can pull a bounded
 snapshot from your **home** node (`GET/POST /api/auth/federation-sync-*`): joined
-channels, DM peers, follow graph, and FrogSocial posts already visible on home
+channels (including sanitized `channel_theme` JSON), DM peers, follow graph, your
+app theme preset and profile inline CSS (`custom_style`), contact profile styling
+in `federation_user_profiles`, and FrogSocial posts already visible on home
 (**300 per export page**; paginated resume when `FROGTALK_SYNC_PAGINATION=1`).
 This is separate from live federation inbox traffic; it is a deliberate import for
 UX on node switch.
@@ -198,6 +201,13 @@ user is created under a disambiguated local name (same `global_user_id`). If a
 home channel name is already owned by a local community channel, sync leaves that
 membership alone and lists the home channel via the federation directory only;
 vanity invite slugs are applied only when free on this node.
+
+**Themes are not E2EE:** preset themes, profile `custom_style`, and room
+`channel_theme` are server-side presentation metadata. They are sanitized on
+write (`_sanitize_inline_style`, `_sanitize_channel_theme`) and replicated for
+UX. FrogSocial profiles merge `federation_user_profiles` when the local
+`users` row is sparse so travelers see friends' styling. Directory-only channels
+can be joined via `POST /api/rooms/{name}/join` (index metadata only).
 
 ### Federated voice and video calls
 
