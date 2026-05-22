@@ -672,6 +672,18 @@ try {
   }
 } catch {}
 
+function _resolveOwnDMPlaintext(cipher, msgId, channelId) {
+  const raw = String(cipher || '');
+  if (!raw) return '';
+  const cached = _dmPtCacheGet(raw);
+  if (typeof cached === 'string' && cached.length) return cached;
+  const byMsg = _recallDMPlaintext(channelId, msgId);
+  if (byMsg) return byMsg;
+  const pend = _dmMessages.find(x => x._pending && x.content && !_looksEncryptedBlob(x.content));
+  if (pend?.content) return pend.content;
+  return '';
+}
+
 async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
   const raw = String(cipher || '');
   if (!raw) return '';
@@ -683,6 +695,11 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
   // any second call would fail with "Bad MAC".
   const _cached = _dmPtCacheGet(raw);
   if (_cached !== undefined) return _cached;
+
+  const myId = STATE?.user?.id;
+  if (myId && peerId && (+peerId === +myId) && _looksEncryptedBlob(raw)) {
+    return raw;
+  }
 
   // Track A v2 Signal envelope is the ONLY supported DM crypto path
   // after Track H cleanup. Wire format: `{v:2,t:'pre'|'msg',b:'<b64>'}`.
@@ -1044,6 +1061,8 @@ async function openDMChannel (id, nickname, avatar) {
           const pu = await prof.json();
           const sid = String(pu.peer_home_server_id || '').trim();
           if (sid) _activeDM.peer_home_server_id = sid;
+          const gid = String(pu.global_user_id || '').trim();
+          if (gid) _activeDM.global_user_id = gid;
         }
       } catch {}
       // Track H cleanup: legacy ECDH pubkey publish/fetch (used to seed
@@ -1675,6 +1694,10 @@ function renderDMMessage (m) {
       if (typeof _cachedPt === 'string' && _cachedPt.length) _rawContent = _cachedPt;
     } catch {}
   }
+  if (mine && _looksEncryptedBlob(_rawContent)) {
+    const ownPlain = _resolveOwnDMPlaintext(_rawContentOrig, m.id, m.channel_id || _activeDM?.id);
+    if (ownPlain) _rawContent = ownPlain;
+  }
   const _isCipherBlob = _looksEncryptedBlob(_rawContent);
   const safeContent = (m.view_once || isViewOnceConsumed)
     ? ''
@@ -1729,11 +1752,9 @@ function renderDMMessage (m) {
   }
   if (!contentHtml && !mediaHtml) {
     if (_isCipherBlob || m._decryptPending) {
-      // Decryption hasn't succeeded yet — show a lock placeholder instead
-      // of the misleading "Media" string. A re-decrypt happens on the next
-      // render pass once the ECDH key derives (loadDMMessages / openDM
-      // attach the peer pubkey → _dmSharedKeyCache populates).
-      contentHtml = '<em style="color:#888">\uD83D\uDD12 Older message — encrypted on a previous device</em>';
+      contentHtml = mine
+        ? '<em style="color:#888">\uD83D\uDD12 Couldn\u2019t show your sent message on this device</em>'
+        : '<em style="color:#888">\uD83D\uDD12 Older message — encrypted on a previous device</em>';
     } else if (m.has_media) {
       contentHtml = '<em style="color:#444">Media</em>';
     }
@@ -2494,6 +2515,9 @@ async function sendDMMessage () {
       _pending   : true,
     };
     _dmMessages.push(_tempMsg);
+    if (encryptedContent !== content) {
+      try { _rememberDMPlaintext(_activeDM.id, _tempId, content); } catch {}
+    }
     const area = document.getElementById('messages-area');
     if (area) {
       const tmp = document.createElement('div');
@@ -2660,7 +2684,12 @@ function handleWSDMMessage (data) {
       // Replace any cached pending entry
       const pi = _dmMessages.findIndex(x => x._nonce === data.client_nonce);
       if (pi >= 0) {
-        _dmMessages[pi] = _normalizeDMMessage({ ...data, content: _dmMessages[pi].content });
+        const plain = _dmMessages[pi].content || '';
+        _dmMessages[pi] = _normalizeDMMessage({ ...data, content: plain });
+        if (plain && data.content) {
+          try { _dmPtCachePut(data.content, plain); } catch {}
+          try { _rememberDMPlaintext(data.channel_id, data.id, plain); } catch {}
+        }
         const previewUrl = _extractDMPreviewUrl(String(_dmMessages[pi].content || ''));
         if (previewUrl && !_dmMessages[pi].preview_suppressed) {
           setTimeout(() => _loadDMPreview(data.id, previewUrl), 80);
@@ -2710,7 +2739,12 @@ function handleWSDMMessage (data) {
           if (x && x._pending && ((x.sender_id|0) === (_selfId|0))) { pi = i; break; }
         }
         if (pi >= 0) {
-          _dmMessages[pi] = _normalizeDMMessage({ ...data, content: _dmMessages[pi].content });
+          const plain = _dmMessages[pi].content || '';
+          _dmMessages[pi] = _normalizeDMMessage({ ...data, content: plain });
+          if (plain && data.content) {
+            try { _dmPtCachePut(data.content, plain); } catch {}
+            try { _rememberDMPlaintext(data.channel_id, data.id, plain); } catch {}
+          }
           const previewUrl = _extractDMPreviewUrl(String(_dmMessages[pi].content || ''));
           if (previewUrl && !_dmMessages[pi].preview_suppressed) {
             setTimeout(() => _loadDMPreview(data.id, previewUrl), 80);
@@ -2719,6 +2753,7 @@ function handleWSDMMessage (data) {
         return;
       }
     }
+    if (data.id && _dmMessages.some(x => Number(x.id) === Number(data.id))) return;
   }
 
   // Try to decrypt
@@ -2728,6 +2763,14 @@ function handleWSDMMessage (data) {
       // Reuse the single decrypt result (see comment at top of handler)
       // so we don't double-consume the Track A envelope.
       try { content = await _plainPromise; } catch {}
+    }
+    if (_isMine && _looksEncryptedBlob(content)) {
+      const plain = _resolveOwnDMPlaintext(content, data.id, data.channel_id);
+      if (plain) {
+        content = plain;
+        try { _dmPtCachePut(data.content || '', plain); } catch {}
+        try { _rememberDMPlaintext(data.channel_id, data.id, plain); } catch {}
+      }
     }
     appendDMMessage({ ...data, content });
     // Active chat — immediately mark as read

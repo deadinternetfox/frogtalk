@@ -488,6 +488,57 @@ def _client_prefs_from_local_storage_map(prefs: dict) -> str:
     return _sanitize_client_prefs_json(payload)
 
 
+def _sanitize_sync_pin_hash(raw) -> str:
+    """Accept only bcrypt PIN hashes for federation account sync."""
+    h = str(raw or "").strip()
+    if not h:
+        return ""
+    if not h.startswith("$2") or len(h) > 200:
+        return ""
+    return h
+
+
+def _apply_sync_pin_from_self_profile(uid: int, self_profile: dict) -> None:
+    """Mirror home-node PIN settings onto a travel node after verified export.
+
+    Called only from the signed sync-import path. Never stores plaintext PINs —
+    only the bcrypt hash and behaviour flags from ``self_profile``.
+    """
+    if not isinstance(self_profile, dict):
+        return
+    pin_hash = _sanitize_sync_pin_hash(self_profile.get("pin_hash"))
+    pin_require_on_unlock = 1 if int(self_profile.get("pin_require_on_unlock") or 0) else 0
+    pin_require_for_admin = 1 if int(self_profile.get("pin_require_for_admin") or 0) else 0
+    pin_require_after_autologin = 1 if int(self_profile.get("pin_require_after_autologin") or 0) else 0
+    pin_idle_timeout_sec = max(0, min(86400, int(self_profile.get("pin_idle_timeout_sec") or 300)))
+    pin_keypad_privacy = 1 if int(self_profile.get("pin_keypad_privacy") or 0) else 0
+    with db._conn() as con:
+        con.execute(
+            """
+            UPDATE users
+            SET pin_hash=?,
+                pin_require_on_unlock=?,
+                pin_require_for_admin=?,
+                pin_require_after_autologin=?,
+                pin_idle_timeout_sec=?,
+                pin_keypad_privacy=?,
+                pin_failed_attempts=0,
+                pin_locked_until=NULL
+            WHERE id=?
+            """,
+            (
+                (pin_hash or None),
+                pin_require_on_unlock,
+                pin_require_for_admin,
+                pin_require_after_autologin,
+                pin_idle_timeout_sec,
+                pin_keypad_privacy,
+                uid,
+            ),
+        )
+        con.commit()
+
+
 def _normalize_sync_theme(raw: str) -> str:
     theme = str(raw or "frog").strip().lower()
     if theme == "dark":
@@ -1265,7 +1316,11 @@ def build_federation_profile_card(
         if row:
             ident = db.get_or_create_local_server_identity() or {}
             origin = str(ident.get("server_id") or "").strip()
-            payload = _federation_profile_payload_from_user_row(row, gid, origin)
+            nick = str(row["nickname"] or "").strip()
+            prof = db.get_user_profile(nick) if nick else dict(row)
+            if not prof:
+                prof = dict(row)
+            payload = _federation_profile_payload_from_user_row(prof, gid, origin)
             payload["source"] = "local"
             payload["home_unreachable"] = False
             payload["local_user_id"] = local_uid
@@ -1517,14 +1572,29 @@ def _account_home_server_id(user_id: int) -> str:
 
 def _user_at_account_home(user_id: int) -> bool:
     """True when the signed-in user is on the node that owns their account."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return False
     ident = db.get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
     if not local_sid:
         return True
-    pinned = db.get_user_account_home_server_id(int(user_id or 0))
-    if not pinned:
-        return False
-    return pinned == local_sid
+    pinned = db.get_user_account_home_server_id(uid)
+    if pinned:
+        return pinned == local_sid
+    # Legacy accounts registered here before home-pin existed: no explicit
+    # pin but also no travel sync from another node → treat as home and
+    # self-heal the pin so Network → Re-sync does not ask to "re-pin" the
+    # URL they are already on.
+    try:
+        st = db.get_user_federation_sync_state(uid) or {}
+        src_sid = str(st.get("source_server_id") or "").strip()
+        if src_sid and src_sid != local_sid:
+            return False
+    except Exception:
+        pass
+    db.set_user_account_home_server_id(uid, local_sid, force=False)
+    return True
 
 
 def _sync_state_for_user(user_id: int) -> dict:
@@ -2056,10 +2126,46 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         if len(friends) >= _SYNC_EXPORT_DM_LIMIT:
             break
 
+    friend_pending_out: list[dict] = []
+    for row in db.get_friend_requests_out(uid):
+        raw_id = int((row or {}).get("id") or 0)
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
+        gid = str((profile or {}).get("global_user_id") or "").strip()
+        nick = str((profile or {}).get("nickname") or nick_hint or "").strip()
+        if not nick or not _GID_RE.match(gid):
+            continue
+        friend_pending_out.append({
+            "nickname": nick,
+            "global_user_id": gid,
+            "home_server_id": _peer_home_server_id_for_sync(gid, source_server_id),
+            "avatar": (profile or {}).get("avatar") or (row or {}).get("avatar") or "",
+            "display_name": str((profile or {}).get("display_name") or "")[:64],
+        })
+        if len(friend_pending_out) >= _SYNC_EXPORT_DM_LIMIT:
+            break
+
+    friend_pending_in: list[dict] = []
+    for row in db.get_friend_requests_in(uid):
+        raw_id = int((row or {}).get("id") or 0)
+        nick_hint = str((row or {}).get("nickname") or "").strip()
+        profile = _sync_peer_profile_row(raw_id, nick_hint)
+        gid = str((profile or {}).get("global_user_id") or "").strip()
+        nick = str((profile or {}).get("nickname") or nick_hint or "").strip()
+        if not nick or not _GID_RE.match(gid):
+            continue
+        friend_pending_in.append({
+            "nickname": nick,
+            "global_user_id": gid,
+            "home_server_id": _peer_home_server_id_for_sync(gid, source_server_id),
+            "avatar": (profile or {}).get("avatar") or (row or {}).get("avatar") or "",
+            "display_name": str((profile or {}).get("display_name") or "")[:64],
+        })
+        if len(friend_pending_in) >= _SYNC_EXPORT_DM_LIMIT:
+            break
+
     me = _load_user_sync_row(uid)
-    pin_hash = str(me.get("pin_hash") or "").strip()
-    if pin_hash and (not pin_hash.startswith("$2") or len(pin_hash) > 200):
-        pin_hash = ""
+    pin_hash = _sanitize_sync_pin_hash(me.get("pin_hash"))
     self_profile = {
         "display_name": str(me.get("display_name") or "")[:64],
         "avatar": me.get("avatar") or "",
@@ -2304,6 +2410,8 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         "room_member_snapshots": room_member_snapshots,
         "following": following,
         "friends": friends,
+        "friend_pending_out": friend_pending_out,
+        "friend_pending_in": friend_pending_in,
         "blocked_users": blocked_users,
         "social_posts": social_posts,
         "social_posts_omitted_at_export": social_posts_omitted_at_export,
@@ -2428,6 +2536,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     dm_in = payload.get("dm_peers")
     following_in = payload.get("following")
     friends_in = payload.get("friends")
+    friend_pending_out_in = payload.get("friend_pending_out")
+    friend_pending_in_in = payload.get("friend_pending_in")
     blocked_in = payload.get("blocked_users")
     social_posts_in = payload.get("social_posts")
     self_profile = payload.get("self_profile")
@@ -2441,6 +2551,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     dm_peers = dm_in if isinstance(dm_in, list) else []
     following = following_in if isinstance(following_in, list) else []
     friends = friends_in if isinstance(friends_in, list) else []
+    friend_pending_out = friend_pending_out_in if isinstance(friend_pending_out_in, list) else []
+    friend_pending_in = friend_pending_in_in if isinstance(friend_pending_in_in, list) else []
     blocked_users = blocked_in if isinstance(blocked_in, list) else []
     social_posts = social_posts_in if isinstance(social_posts_in, list) else []
     push_tokens = push_tokens_in if isinstance(push_tokens_in, list) else []
@@ -2471,6 +2583,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     dm_linked = 0
     following_linked = 0
     friends_linked = 0
+    friend_pending_linked = 0
     blocked_linked = 0
     push_tokens_linked = 0
     social_posts_imported = 0
@@ -2507,6 +2620,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     n_dms = len(dm_peers[:_SYNC_EXPORT_DM_LIMIT])
     n_follow = len(following[:_SYNC_EXPORT_DM_LIMIT])
     n_friends = len(friends[:_SYNC_EXPORT_DM_LIMIT])
+    n_friend_pending = (
+        len(friend_pending_out[:_SYNC_EXPORT_DM_LIMIT])
+        + len(friend_pending_in[:_SYNC_EXPORT_DM_LIMIT])
+    )
     n_blocked = len(blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT])
     n_social = len(social_posts[:_SYNC_EXPORT_SOCIAL_POST_LIMIT])
     n_push = len(push_tokens[:24])
@@ -2514,7 +2631,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     n_dm_history_cap = len(dm_histories[:_SYNC_EXPORT_DM_HISTORY_TOTAL_CHANNELS])
     n_member_snaps = len(member_snaps[:_SYNC_EXPORT_MEMBER_ROOM_LIMIT])
     work_units = (
-        n_rooms + n_public + n_dms + n_follow + n_friends + n_blocked + n_social + n_push
+        n_rooms + n_public + n_dms + n_follow + n_friends + n_friend_pending + n_blocked + n_social + n_push
         + n_history_rooms_cap + n_dm_history_cap + n_member_snaps + 1
     )
     done_units = 0
@@ -2523,7 +2640,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         "channels": n_rooms,
         "directory": n_public,
         "dms": n_dms,
-        "social_graph": n_follow + n_friends + n_blocked,
+        "social_graph": n_follow + n_friends + n_friend_pending + n_blocked,
         "profile": 1,
         "social_posts": n_social,
         "push": n_push,
@@ -2784,7 +2901,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                 following_linked += 1
         except Exception:
             continue
-        _sync_step("social_graph", f"Syncing follows… ({following_linked}/{n_follow})", "social_graph", following_linked + friends_linked + blocked_linked)
+        _sync_step("social_graph", f"Syncing follows… ({following_linked}/{n_follow})", "social_graph", following_linked + friends_linked + friend_pending_linked + blocked_linked)
 
     for item in friends[:_SYNC_EXPORT_DM_LIMIT]:
         if not isinstance(item, dict):
@@ -2825,7 +2942,61 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
             db.get_or_create_dm(uid, peer_id)
         except Exception:
             continue
-        _sync_step("social_graph", f"Syncing friends… ({friends_linked}/{n_friends})", "social_graph", following_linked + friends_linked + blocked_linked)
+        _sync_step("social_graph", f"Syncing friends… ({friends_linked}/{n_friends})", "social_graph", following_linked + friends_linked + friend_pending_linked + blocked_linked)
+
+    for item in friend_pending_in[:_SYNC_EXPORT_DM_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("global_user_id") or "").strip()
+        nick = str(item.get("nickname") or "").strip()
+        if not nick or not _GID_RE.match(gid) or (my_gid and gid == my_gid):
+            continue
+        try:
+            peer_origin = _sync_item_peer_origin(item, source_server_id)
+            peer = db.ensure_federated_dm_local_user(
+                gid,
+                nick,
+                origin_server_id=peer_origin,
+                display_name=str(item.get("display_name") or "")[:64],
+                avatar=(item.get("avatar") or ""),
+            )
+            if not peer:
+                users_nick_collisions += 1
+                continue
+            peer_id = int(peer.get("id") or 0)
+            if peer_id <= 0 or peer_id == uid:
+                continue
+            if db.send_friend_request(peer_id, uid) == "ok":
+                friend_pending_linked += 1
+        except Exception:
+            continue
+
+    for item in friend_pending_out[:_SYNC_EXPORT_DM_LIMIT]:
+        if not isinstance(item, dict):
+            continue
+        gid = str(item.get("global_user_id") or "").strip()
+        nick = str(item.get("nickname") or "").strip()
+        if not nick or not _GID_RE.match(gid) or (my_gid and gid == my_gid):
+            continue
+        try:
+            peer_origin = _sync_item_peer_origin(item, source_server_id)
+            peer = db.ensure_federated_dm_local_user(
+                gid,
+                nick,
+                origin_server_id=peer_origin,
+                display_name=str(item.get("display_name") or "")[:64],
+                avatar=(item.get("avatar") or ""),
+            )
+            if not peer:
+                users_nick_collisions += 1
+                continue
+            peer_id = int(peer.get("id") or 0)
+            if peer_id <= 0 or peer_id == uid:
+                continue
+            if db.send_friend_request(uid, peer_id) == "ok":
+                friend_pending_linked += 1
+        except Exception:
+            continue
 
     for item in blocked_users[:_SYNC_EXPORT_BLOCKED_LIMIT]:
         if not isinstance(item, dict):
@@ -2896,14 +3067,6 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
             profile_banner = _sanitize_sync_profile_banner(self_profile.get("banner"))
             room_order = _sanitize_room_order_json(str(self_profile.get("room_order") or "")[:12000])
             location_sharing_enabled = 1 if int(self_profile.get("location_sharing_enabled") or 0) else 0
-            pin_hash = str(self_profile.get("pin_hash") or "").strip()
-            if pin_hash and (not pin_hash.startswith("$2") or len(pin_hash) > 200):
-                pin_hash = ""
-            pin_require_on_unlock = 1 if int(self_profile.get("pin_require_on_unlock") or 0) else 0
-            pin_require_for_admin = 1 if int(self_profile.get("pin_require_for_admin") or 0) else 0
-            pin_require_after_autologin = 1 if int(self_profile.get("pin_require_after_autologin") or 0) else 0
-            pin_idle_timeout_sec = max(0, min(86400, int(self_profile.get("pin_idle_timeout_sec") or 300)))
-            pin_keypad_privacy = 1 if int(self_profile.get("pin_keypad_privacy") or 0) else 0
             with db._conn() as con:
                 con.execute(
                     """
@@ -2933,15 +3096,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                         custom_css=?,
                         client_prefs_json=?,
                         room_order=?,
-                        location_sharing_enabled=?,
-                        pin_hash=?,
-                        pin_require_on_unlock=?,
-                        pin_require_for_admin=?,
-                        pin_require_after_autologin=?,
-                        pin_idle_timeout_sec=?,
-                        pin_keypad_privacy=?,
-                        pin_failed_attempts=0,
-                        pin_locked_until=NULL
+                        location_sharing_enabled=?
                     WHERE id=?
                     """,
                     (
@@ -2971,16 +3126,11 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
                         client_prefs_json,
                         room_order,
                         location_sharing_enabled,
-                        (pin_hash or None),
-                        pin_require_on_unlock,
-                        pin_require_for_admin,
-                        pin_require_after_autologin,
-                        pin_idle_timeout_sec,
-                        pin_keypad_privacy,
                         uid,
                     ),
                 )
                 con.commit()
+            _apply_sync_pin_from_self_profile(uid, self_profile)
         except Exception:
             pass
     _sync_step("profile", "Syncing profile & settings…", "profile", 1)
@@ -5305,6 +5455,8 @@ async def federation_sync_export_gid(
         ).fetchone()
     if not row:
         return JSONResponse(status_code=404, content={"error": "Account not found on this node"})
+    # Intentionally no node-ban gate: peers may still pull export for data portability
+    # even when the user cannot sign in or interact on this node locally.
     cursor = str(parsed.get("social_posts_cursor") or "").strip()
     return _build_sync_export_for_user(int(row["id"]), social_posts_cursor=cursor)
 
@@ -5659,6 +5811,7 @@ async def me(current_user: dict = Depends(get_current_user)):
         out["pin_require_for_admin"] = int(pin_status.get("pin_require_for_admin") or 0)
         out["pin_require_after_autologin"] = int(pin_status.get("pin_require_after_autologin") or 0)
         out["pin_idle_timeout_sec"] = int(pin_status.get("pin_idle_timeout_sec") or 300)
+        out["pin_keypad_privacy"] = int(pin_status.get("pin_keypad_privacy") or 0)
         out["pin_lock_remaining_sec"] = int(pin_status.get("pin_lock_remaining_sec") or 0)
     except Exception:
         # Never let a PIN-status failure break /me — the user can still
@@ -5666,12 +5819,12 @@ async def me(current_user: dict = Depends(get_current_user)):
         out.setdefault("has_pin", 0)
     uid = int(current_user["id"])
     out["at_home_node"] = _user_at_account_home(uid)
+    home_sid, home_base = resolve_account_home_base_url(uid)
+    if home_sid:
+        out["account_home_server_id"] = home_sid
+    if home_base:
+        out["account_home_base_url"] = home_base
     if not out["at_home_node"]:
-        home_sid, home_base = resolve_account_home_base_url(uid)
-        if home_sid:
-            out["account_home_server_id"] = home_sid
-        if home_base:
-            out["account_home_base_url"] = home_base
         try:
             st = _sync_state_for_user(uid)
             if st and not st.get("skipped"):
@@ -6382,8 +6535,52 @@ async def register_with_captcha(
 # Recovery Key System - Account recovery without email
 # ===========================================================================
 
+def _recovery_key_node_context(request: Request, user_id: int | None = None) -> dict:
+    """Metadata stamped into recovery files — keys are per-node, not federated."""
+    from urllib.parse import urlparse
+
+    ident = db.get_or_create_local_server_identity() or {}
+    sid = str(ident.get("server_id") or "").strip()
+    base = _norm_base(str(request.base_url))
+    gid = ""
+    if user_id:
+        try:
+            uid = int(user_id)
+        except Exception:
+            uid = 0
+        if uid > 0:
+            with db._conn() as con:
+                r = con.execute(
+                    "SELECT global_user_id FROM users WHERE id=? LIMIT 1",
+                    (uid,),
+                ).fetchone()
+            if r:
+                gid = str(r["global_user_id"] or "").strip()
+    try:
+        host = urlparse(base or "").hostname or ""
+    except Exception:
+        host = ""
+    return {
+        "node_server_id": sid,
+        "node_base_url": base,
+        "node_label": host or sid or "this node",
+        "global_user_id": gid,
+    }
+
+
 class GenerateRecoveryKeyRequest(BaseModel):
     password: str  # Verify identity
+
+
+@router.get("/recovery-key/info")
+async def recovery_key_info(request: Request, current_user: dict = Depends(get_current_user)):
+    """Whether this node has an active recovery key for the signed-in account."""
+    ctx = _recovery_key_node_context(request, current_user["id"])
+    return {
+        "has_key": db.has_active_recovery_key(current_user["id"]),
+        "username": current_user["nickname"],
+        **ctx,
+    }
 
 
 @router.post("/recovery-key")
@@ -6399,26 +6596,30 @@ async def generate_recovery_key(request: Request, body: GenerateRecoveryKeyReque
     # legacy hex-digest format too, so older callers keep working.
     raw_key = secrets.token_urlsafe(32)
     db.create_recovery_key(current_user["id"], raw_key)
-    
-    # Create recovery file content
+    ctx = _recovery_key_node_context(request, current_user["id"])
+
+    # Create recovery file content (version 2 includes node URL — keys are per-node)
     recovery_data = {
         "app": "FrogTalk",
-        "version": 1,
+        "version": 2,
         "username": current_user["nickname"],
         "user_id": current_user["id"],
         "recovery_key": raw_key,
-        "warning": "KEEP THIS FILE SAFE! Anyone with this key can access your account."
+        "warning": "KEEP THIS FILE SAFE! Anyone with this key can access your account on THIS node only.",
+        "node_scope": "per_node",
+        **ctx,
     }
-    
+
     import json
     recovery_json = json.dumps(recovery_data, indent=2)
     recovery_b64 = base64.b64encode(recovery_json.encode()).decode()
-    
+
     return {
         "recovery_key": raw_key,
         "file_content": f"data:application/json;base64,{recovery_b64}",
         "filename": f"frogtalk-recovery-{current_user['nickname']}.json",
-        "message": "Save this file securely! It's the ONLY way to recover your account."
+        "message": "Save this file securely! It only resets your password on this FrogTalk node.",
+        **ctx,
     }
 
 
@@ -6439,7 +6640,15 @@ async def recover_account(request: Request, body: RecoverAccountRequest):
     user_id = db.use_recovery_key(body.recovery_key)
     
     if not user_id:
-        return JSONResponse(status_code=401, content={"error": "Invalid or already used recovery key"})
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": "Invalid or already used recovery key",
+                "code": "invalid_or_used",
+                "hint": "Recovery keys only work on the FrogTalk node where they were created. Use the server URL in your recovery file.",
+                **_recovery_key_node_context(request),
+            },
+        )
     
     # Reset password
     with db._conn() as con:
@@ -6478,9 +6687,16 @@ class VerifyRecoveryKeyRequest(BaseModel):
 @limiter.limit("20/hour")
 async def verify_recovery_key(request: Request, body: VerifyRecoveryKeyRequest):
     """Check if a recovery key is valid (without using it)."""
+    ctx = _recovery_key_node_context(request)
+    invalid = {
+        "valid": False,
+        "code": "invalid_or_used",
+        "hint": "Recovery keys only work on the FrogTalk node where they were created. Open the server URL saved in your recovery file.",
+        **ctx,
+    }
     raw = (body.recovery_key or "").strip()
     if not raw:
-        return {"valid": False}
+        return invalid
     # Legacy SHA-256-at-rest rows: O(1) lookup by hash.
     key_hash = hashlib.sha256(raw.encode()).hexdigest()
     with db._conn() as con:
@@ -6490,13 +6706,13 @@ async def verify_recovery_key(request: Request, body: VerifyRecoveryKeyRequest):
             WHERE rk.key_hash=? AND rk.used_at IS NULL
         """, (key_hash,)).fetchone()
     if row:
-        return {"valid": True, "username": row["nickname"]}
+        return {"valid": True, "username": row["nickname"], **ctx}
     # HIGH-5: bcrypt-at-rest rows — scan only unused bcrypt rows. Small
     # working set because there's at most one active key per user.
     try:
         import bcrypt as _bcrypt_local
     except Exception:
-        return {"valid": False}
+        return invalid
     with db._conn() as con:
         cands = con.execute("""
             SELECT rk.id, u.nickname, rk.key_hash FROM recovery_keys rk
@@ -6507,7 +6723,7 @@ async def verify_recovery_key(request: Request, body: VerifyRecoveryKeyRequest):
         try:
             hashed = cand["key_hash"][len("bcrypt$"):]
             if _bcrypt_local.checkpw(raw.encode("utf-8"), hashed.encode("utf-8")):
-                return {"valid": True, "username": cand["nickname"]}
+                return {"valid": True, "username": cand["nickname"], **ctx}
         except Exception:
             continue
-    return {"valid": False}
+    return invalid

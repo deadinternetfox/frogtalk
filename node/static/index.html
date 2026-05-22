@@ -2656,7 +2656,11 @@ body[data-music="1"] #messages-area{flex:1;min-height:160px}
 }
 .msg-act-btn:hover{background:#2a2a2a;color:#e0e0e0}
 .msg-act-btn.danger:hover{background:rgba(255,85,85,.15);color:#ff5555}
-.msg-spoiler-btn,.spoiler-rehide,.spoiler-overlay-ic,.att-preview-chip{
+.msg-spoiler-btn,.spoiler-rehide,.spoiler-overlay-ic,.att-preview-chip,
+.ft-emoji-select,.ft-emoji-select option,
+#self-status,.sqm-status-btn,.self-status-display,
+.css-preset-btn,.css-preset-btn div:first-child,
+.status-picker-popover [data-presence]{
   font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif
 }
 .msg-spoiler-btn[data-blur="1"]{background:rgba(76,175,80,.22);color:#a5d6a7}
@@ -6368,6 +6372,52 @@ body.in-welcome #ch-title .room-title-icon{display:none !important}
 @keyframes pulse-text{0%,100%{opacity:.7}50%{opacity:1}}
 @media (max-width:480px){.story-upload-bar-inner{padding:10px 12px}.story-upload-bar-text{gap:1px}.story-upload-bar-title{font-size:12px}.story-upload-bar-sub{font-size:10px}}
 
+/* Federation sync banner — first block under FrogSocial header */
+.social-feed-sync-banner{
+  position:sticky;top:0;z-index:24;
+  padding:10px 14px 0;
+  background:linear-gradient(180deg,#0d0d0d 72%,rgba(13,13,13,0));
+  border-bottom:1px solid transparent;
+}
+.social-sync-card{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  padding:12px 14px;margin:0 0 10px;
+  border-radius:12px;font-size:12px;line-height:1.45;
+}
+.social-sync-card--warn{
+  background:rgba(246,210,122,.09);
+  border:1px solid rgba(246,210,122,.28);
+  color:#f6d27a;
+}
+.social-sync-card--info{
+  background:rgba(127,214,162,.08);
+  border:1px solid rgba(127,214,162,.24);
+  color:#9ec59e;
+}
+.social-sync-card--progress{
+  background:rgba(76,175,80,.08);
+  border:1px solid rgba(76,175,80,.22);
+  color:#b7d9c3;
+}
+.social-sync-card-body{display:flex;align-items:flex-start;gap:10px;flex:1;min-width:0}
+.social-sync-card-icon{font-size:18px;line-height:1;flex-shrink:0;margin-top:1px}
+.social-sync-card-text{flex:1;min-width:0}
+.social-sync-card-title{font-size:13px;font-weight:700;margin-bottom:4px;color:inherit}
+.social-sync-card-sub{font-size:12px;color:#9ec59e;line-height:1.45}
+.social-sync-card-sub strong{color:#c8e6c9;font-weight:600}
+.social-sync-card--warn .social-sync-card-sub{color:#d4c48a}
+.social-sync-card-btn{
+  flex-shrink:0;align-self:center;
+  background:#4caf50;color:#0a0a0a;border:none;
+  padding:8px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;
+  white-space:nowrap;
+}
+.social-sync-card-btn:hover{background:#5bc661}
+@media (max-width:560px){
+  .social-sync-card{flex-direction:column;align-items:stretch}
+  .social-sync-card-btn{width:100%;text-align:center}
+}
+
 /* Suggested bar */
 .social-suggest-bar{padding:16px;border-bottom:1px solid #1a1a1a}
 .social-suggest-title{font-size:13px;font-weight:600;color:#888;margin-bottom:12px}
@@ -9968,11 +10018,11 @@ window.ConnErr = (function(){
       <label class="modal-label">Status Message</label>
       <input class="modal-input" id="profile-status-msg" placeholder="What's on your mind?" maxlength="128">
       <label class="modal-label">Presence</label>
-      <select class="modal-input" id="profile-presence" style="color:#e0e0e0;background:#0d0d0d">
+      <select class="modal-input ft-emoji-select" id="profile-presence" style="color:#e0e0e0;background:#0d0d0d">
         <option value="online">🟢 Online</option>
         <option value="away">🟡 Away</option>
         <option value="dnd">🔴 Do Not Disturb</option>
-        <option value="invisible">⚪ Invisible</option>
+        <option value="invisible">⚫ Invisible</option>
       </select>
     </div>
     <!-- Social Tab -->
@@ -10431,13 +10481,16 @@ window.ConnErr = (function(){
       <div style="margin:24px 0 8px;padding-top:16px;border-top:1px solid #2a2a2a">
         <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">🔑 Account Recovery Key</div>
         <div style="font-size:12px;color:#888;line-height:1.55;margin-bottom:10px">
-          Generate a one-time <b>recovery file</b> you can use to reset your password if you ever lose access.
-          We don't store your email, so this file is the <b>only</b> way back in.
+          Generate a one-time <b>recovery file</b> to reset your password on <b>this FrogTalk node only</b>.
+          Keys are <b>not</b> shared across the federation — if you use multiple nodes, save a separate file on each one.
+          We don't store your email, so this file is the only way back in here.
         </div>
+        <div id="recovery-key-node-hint" style="font-size:11px;color:#9dc4b2;line-height:1.5;margin-bottom:10px;padding:10px 12px;background:#141a16;border:1px solid #2a3a32;border-radius:8px;display:none"></div>
         <div style="font-size:11px;color:#7a8a82;line-height:1.55;margin-bottom:12px">
+          • The downloaded file includes this server's URL — use that same site when recovering.<br>
           • Store it offline — USB stick, password manager, or printed copy.<br>
-          • Anyone who has this file can take over your account — keep it secret.<br>
-          • Generating a new key invalidates the previous one.
+          • Anyone who has this file can reset your password <em>on this node</em> — keep it secret.<br>
+          • Generating a new key invalidates the previous one on this node.
         </div>
         <button class="modal-btn primary" id="generate-recovery-key-btn"
                 onclick="generateRecoveryKey()" style="width:100%">
@@ -10540,16 +10593,21 @@ window.ConnErr = (function(){
       <div style="font-size:48px;line-height:1;margin-bottom:6px">🔑</div>
       <div style="font-size:18px;font-weight:700;color:#4caf50">Save your Recovery Key</div>
       <div style="font-size:12px;color:#7a8a82;margin-top:4px" id="recovery-key-subtitle">
-        This file is the <b>only</b> way to recover your account if you lose your password.
+        Save this file to reset your password on <b>this node only</b>.
       </div>
     </div>
 
     <div style="background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:12px;font-size:12px;color:#d0d0d0;line-height:1.6;margin-bottom:14px">
-      <div style="color:#ffb74d;font-weight:600;margin-bottom:6px">⚠️ Important</div>
+      <div style="color:#ffb74d;font-weight:600;margin-bottom:6px">⚠️ Important — per node</div>
+      • Recovery keys are stored on <b>this server only</b>; they won't work on another FrogTalk URL.<br>
       • We don't store your email, so we <b>cannot</b> reset your password for you.<br>
-      • Anyone who has this file can take over your account — keep it secret.<br>
+      • Anyone who has this file can reset your password here — keep it secret.<br>
       • Store it offline: USB stick, password manager, or printed copy.<br>
-      • You can generate a new key anytime in Settings → Account (this invalidates the old one).
+      • You can generate a new key anytime in Settings → Security (invalidates the old one here).
+    </div>
+
+    <div id="recovery-key-node-row" style="display:none;font-size:12px;color:#9dc4b2;margin-bottom:10px;text-align:center;line-height:1.5;padding:8px 10px;background:#141a16;border:1px solid #2a3a32;border-radius:8px">
+      For node: <span id="recovery-key-node-label" style="color:#4caf50;font-weight:600"></span>
     </div>
 
     <div id="recovery-key-username-row" style="display:none;font-size:12px;color:#7a8a82;margin-bottom:10px;text-align:center">
@@ -10588,8 +10646,9 @@ window.ConnErr = (function(){
       <div style="font-size:40px;line-height:1;margin-bottom:6px">🔓</div>
       <div style="font-size:18px;font-weight:700;color:#4caf50">Recover your account</div>
       <div style="font-size:12px;color:#7a8a82;margin-top:4px">
-        Paste your recovery key or upload the recovery file you downloaded.
+        Paste your recovery key or upload the recovery file — it only works on the node where you created it.
       </div>
+      <div id="recover-node-hint" style="font-size:11px;color:#9dc4b2;margin-top:8px;line-height:1.45"></div>
     </div>
 
     <!-- Step 1: provide the key -->

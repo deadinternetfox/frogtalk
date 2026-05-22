@@ -589,15 +589,42 @@ def enqueue_social_follow_changed(
     *,
     action: str,
 ) -> dict:
+    follower_gid = str(follower.get("global_user_id") or "").strip()
+    following_gid = str(following.get("global_user_id") or "").strip()
+    targets = db.resolve_federation_push_targets_for_recipient_gids(
+        [follower_gid, following_gid],
+    )
     return enqueue_server_event(
         "social.follow.changed",
         {
             "action": action,
             "follower_nickname": str(follower.get("nickname") or "").strip(),
-            "follower_global_user_id": str(follower.get("global_user_id") or "").strip(),
+            "follower_global_user_id": follower_gid,
             "following_nickname": str(following.get("nickname") or "").strip(),
-            "following_global_user_id": str(following.get("global_user_id") or "").strip(),
+            "following_global_user_id": following_gid,
         },
+        target_server_ids=targets if targets else None,
+    )
+
+
+def enqueue_friend_graph_event(
+    event_type: str,
+    from_user: dict,
+    to_user: dict,
+) -> dict:
+    """Replicate friend.requested / friend.accepted to each party's home node."""
+    from_gid = str(from_user.get("global_user_id") or "").strip()
+    to_gid = str(to_user.get("global_user_id") or "").strip()
+    targets = db.resolve_federation_push_targets_for_recipient_gids([from_gid, to_gid])
+    return enqueue_server_event(
+        event_type,
+        {
+            "from_nickname": str(from_user.get("nickname") or "").strip(),
+            "from_global_user_id": from_gid,
+            "to_nickname": str(to_user.get("nickname") or "").strip(),
+            "to_global_user_id": to_gid,
+        },
+        target_server_ids=targets if targets else None,
     )
 
 
@@ -638,6 +665,7 @@ def _fed_resolve_social_user(
     origin_server_id: str = "",
     *,
     strict_origin: bool = True,
+    use_account_home: bool = False,
 ) -> dict | None:
     """Map a federated social actor to a local users row.
 
@@ -646,6 +674,9 @@ def _fed_resolve_social_user(
     homed elsewhere. Pass ``False`` only for counterparty lookups (e.g. the
     "following" side of a follow event, where their home is by definition
     different from the follower's home).
+
+    ``use_account_home=True`` pins shadow users to their federation home
+    server (for social-graph events signed on travel nodes).
     """
     nick = _fed_nickname(
         payload.get("nickname")
@@ -653,6 +684,8 @@ def _fed_resolve_social_user(
         or payload.get("author_nickname")
         or payload.get("follower_nickname")
         or payload.get("following_nickname")
+        or payload.get("from_nickname")
+        or payload.get("to_nickname")
     )
     gid = _fed_global_id(
         payload.get("global_user_id")
@@ -660,18 +693,42 @@ def _fed_resolve_social_user(
         or payload.get("actor_global_user_id")
         or payload.get("follower_global_user_id")
         or payload.get("following_global_user_id")
+        or payload.get("from_global_user_id")
+        or payload.get("to_global_user_id")
     )
     origin = (origin_server_id or "").strip()
     if gid:
-        if strict_origin:
-            home = db.resolve_global_user_home_server_id(gid)
+        home = db.resolve_global_user_home_server_id(gid)
+        shadow_origin = (home or origin) if use_account_home else origin
+        if not use_account_home and strict_origin:
             if home and origin and home != origin:
                 return None
         return db.ensure_federated_dm_local_user(
-            gid, nick or "", origin_server_id=origin,
+            gid, nick or "", origin_server_id=shadow_origin or origin,
         )
     if nick:
         return _ensure_local_user_by_nickname(nick)
+    return None
+
+
+def _fed_resolve_friend_party(
+    payload: dict,
+    role: str,
+    origin_server_id: str = "",
+) -> dict | None:
+    """Resolve ``from`` / ``to`` on friend.* events by global_user_id first."""
+    prefix = "from" if role == "from" else "to"
+    nick = _fed_nickname(payload.get(f"{prefix}_nickname"))
+    gid = _fed_global_id(payload.get(f"{prefix}_global_user_id"))
+    if gid:
+        home = db.resolve_global_user_home_server_id(gid)
+        return db.ensure_federated_dm_local_user(
+            gid,
+            nick or "",
+            origin_server_id=home or origin_server_id,
+        )
+    if nick:
+        return db.get_user_by_nick(nick)
     return None
 
 
@@ -4654,15 +4711,13 @@ async def _handle_friend_event(event: dict) -> None:
         from_nick = None  # handled inside the blocks below
         to_nick = None
     else:
-        from_nick = str(payload.get("from_nickname") or "").strip()
-        to_nick = str(payload.get("to_nickname") or "").strip()
-        if not from_nick or not to_nick:
-            return
-
-        from_user = _ensure_local_user_by_nickname(from_nick)
-        to_user = _ensure_local_user_by_nickname(to_nick)
+        origin = str(event.get("origin_server_id") or "").strip()
+        from_user = _fed_resolve_friend_party(payload, "from", origin)
+        to_user = _fed_resolve_friend_party(payload, "to", origin)
         if not from_user or not to_user:
             return
+        from_nick = str(from_user.get("nickname") or payload.get("from_nickname") or "").strip()
+        to_nick = str(to_user.get("nickname") or payload.get("to_nickname") or "").strip()
 
     if event_type == "friend.requested":
         db.send_friend_request(from_user["id"], to_user["id"])
@@ -5008,6 +5063,7 @@ async def _handle_social_event(event: dict) -> None:
                 "follower_global_user_id": payload.get("follower_global_user_id"),
             },
             origin,
+            use_account_home=True,
         )
         following = _fed_resolve_social_user(
             {
@@ -5015,7 +5071,7 @@ async def _handle_social_event(event: dict) -> None:
                 "following_global_user_id": payload.get("following_global_user_id"),
             },
             origin,
-            strict_origin=False,
+            use_account_home=True,
         )
         if not follower or not following:
             return

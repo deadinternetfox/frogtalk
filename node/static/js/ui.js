@@ -49,6 +49,36 @@ const UI = (() => {
       .replace(/'/g, '&#39;');
   }
 
+  /** CSS-safe banner URL (do not use escHtml — it breaks data: URLs in url()). */
+  function profileBannerCssUrl(banner) {
+    const b = String(banner || '').trim();
+    if (!b) return '';
+    if (!/^(data:|https?:\/\/)/i.test(b)) return '';
+    return b.replace(/\\/g, '\\\\').replace(/'/g, '%27').replace(/\)/g, '%29');
+  }
+
+  function profileBannerBackground(banner, fallbackGradient) {
+    const url = profileBannerCssUrl(banner);
+    const grad = fallbackGradient || 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)';
+    return url ? `url('${url}') center/cover` : grad;
+  }
+
+  function applyProfileBannerToElement(el, banner) {
+    if (!el) return;
+    const url = profileBannerCssUrl(banner);
+    if (url) {
+      el.style.setProperty('background-image', `url('${url}')`, 'important');
+      el.style.setProperty('background-size', 'cover', 'important');
+      el.style.setProperty('background-position', 'center', 'important');
+      el.style.setProperty('background-color', 'transparent', 'important');
+    } else {
+      el.style.removeProperty('background-image');
+      el.style.removeProperty('background-size');
+      el.style.removeProperty('background-position');
+      el.style.removeProperty('background-color');
+    }
+  }
+
   // Server stores UTC but historically some payloads emit `2026-05-05T03:28:00`
   // without a trailing `Z`. Per ECMA-262 such bare datetime strings are parsed
   // as LOCAL time, while the same value appended with `Z` (or `+00:00` in the
@@ -223,6 +253,7 @@ const UI = (() => {
         const data = await res.json();
         if (!data || !State.user) return;
         _mergeUserSettingsFromMe(data);
+        try { if (window.Pin && typeof Pin.adoptFromMe === 'function') Pin.adoptFromMe(data); } catch {}
         if (typeof State.save === 'function') State.save();
         _profileRefreshLastAt = Date.now();
         renderSelfStatus();
@@ -1246,7 +1277,7 @@ const UI = (() => {
     });
   }
 
-  return { escHtml, formatTime, formatDate, avatarEl, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, refreshSelfProfileFromServer, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, updateTypingBar, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled, setSelfNameAndHandle };
+  return { escHtml, formatTime, formatDate, avatarEl, profileBannerCssUrl, profileBannerBackground, applyProfileBannerToElement, setConnectionStatus, renderSelfStatus, renderSelfQuickStatus, refreshSelfProfileFromServer, openStatusPicker, toggleSelfStatusComposer, submitSelfQuickStatus, cancelSelfQuickStatus, showTyping, updateTypingBar, showPresence, showToast, showProgressToast, copy, blobToDataURL, uploadJSONWithProgress, confirm, notice, handleSelfStatusClick, setNowPlayingEnabled, setSelfNameAndHandle };
 })();
 
 // ─── ChatVideo: themed inline video player for chat ──────────────────────────
@@ -2176,8 +2207,11 @@ function _showNodeBannedScreen(data) {
       </p>
       ${reason ? `<div style="background:#3a1010;border:1px solid #6b1f1f;border-radius:8px;padding:10px 12px;margin-bottom:12px;"><div style="font-size:11px;text-transform:uppercase;letter-spacing:0.06em;color:#fca5a5;margin-bottom:4px;">Reason</div><div style="color:#fee2e2;white-space:pre-wrap;">${esc(reason)}</div></div>` : ''}
       <div style="font-size:13px;color:#fda4af;margin-bottom:20px;">Duration: <strong>${esc(exp)}</strong></div>
+      <p style="margin:0 0 12px;color:#fecaca;font-size:13px;line-height:1.5;">
+        This ban applies <strong>only on this node</strong>. You cannot sign in, chat, or call here.
+      </p>
       <p style="margin:0 0 18px;color:#fecaca;font-size:13px;line-height:1.5;">
-        You can still use other federated FrogTalk nodes — your account works across the network. Contact this node's admin if you believe this is a mistake.
+        Your federated identity and data can still move to another FrogTalk node — open your home server (or any node you trust), sign in with a travel ticket, and re-sync. You keep your profile and history; you just cannot interact on <em>this</em> server until the ban is lifted.
       </p>
       <button id="node-banned-dismiss" style="width:100%;background:#7f1d1d;color:#fee2e2;border:none;border-radius:8px;padding:10px 14px;font-weight:600;cursor:pointer;">Back to login</button>
     </div>`;
@@ -2701,7 +2735,10 @@ function switchSettingsTab(tab) {
   if (tab === 'privacy') loadBlockedUsers();
   // Security tab owns the App-PIN section — refresh server-side
   // status so toggles reflect what the server actually has.
-  if (tab === 'security') { try { window.Pin && Pin.refreshFromServer(); } catch {} }
+  if (tab === 'security') {
+    try { window.Pin && Pin.refreshFromServer(); } catch {}
+    try { refreshRecoveryKeyStatus(); } catch {}
+  }
   // Load API keys / bots when dev tab opened
   if (tab === 'dev') { loadApiKeys(); loadBots(); }
   // Load social stats
@@ -3041,6 +3078,22 @@ function _networkSyncSourceLabel() {
   }
 }
 
+function _networkSyncSourceMatchesHere() {
+  try {
+    const here = String(window.location.origin || '').replace(/\/$/, '').toLowerCase();
+    const home = String(_networkSyncSourceLabel() || '').toLowerCase();
+    if (!here || !home) return false;
+    const norm = (u) => {
+      let s = String(u || '').trim().toLowerCase().replace(/\/$/, '');
+      if (s && !/^https?:\/\//.test(s)) s = 'https://' + s;
+      return s;
+    };
+    return norm(here) === norm(home);
+  } catch {
+    return false;
+  }
+}
+
 function _networkSyncRelativeTime(ts) {
   const t = Number(ts || 0);
   if (!t) return '';
@@ -3102,7 +3155,8 @@ function _renderNetworkAccountSyncPanel(st, opts) {
   if (!panel) return;
   const options = opts || {};
   const loading = !!options.loading;
-  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
+  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode())
+    || _networkSyncSourceMatchesHere();
   const here = String(window.location.origin || '').replace(/\/$/, '');
   const home = _networkSyncSourceLabel();
   const esc = (t) => (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(t) : String(t || '');
@@ -3177,7 +3231,8 @@ async function refreshNetworkAccountSyncPanel(opts) {
   const seq = options.seq;
   const panel = document.getElementById('network-account-sync-panel');
   if (!panel) return;
-  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
+  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode())
+    || _networkSyncSourceMatchesHere();
   let st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
   _renderNetworkAccountSyncPanel(st, { loading: false });
 
@@ -3234,10 +3289,11 @@ async function networkResyncFromHome() {
     }
     return;
   }
-  if (App.isAtHomeNode && App.isAtHomeNode()) {
+  if ((App.isAtHomeNode && App.isAtHomeNode()) || _networkSyncSourceMatchesHere()) {
     if (typeof UI !== 'undefined' && UI.showToast) {
       UI.showToast('You are on your home node — no import needed.', 'info', 5000);
     }
+    void refreshNetworkAccountSyncPanel({ forceFetch: true });
     return;
   }
   const stNow = (App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
@@ -3270,10 +3326,16 @@ async function networkResyncFromHome() {
       }
     } else {
       let msg = 'Could not start re-sync.';
-      const hereHost = String(window.location.origin || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
       const home = _networkSyncSourceLabel();
       if (!home) msg = 'Home node URL unknown — re-pin your home in this panel first.';
-      else if (home && hereHost === home) msg = 'Home URL matches this node — re-pin your real home node.';
+      else if (_networkSyncSourceMatchesHere()) {
+        msg = 'You are on your home node — no import needed.';
+        if (typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast(msg, 'info', 5000);
+        }
+        void refreshNetworkAccountSyncPanel({ forceFetch: true });
+        return;
+      }
       if (typeof UI !== 'undefined' && UI.showToast) UI.showToast(msg, 'error', 7000);
     }
   } finally {
@@ -4525,6 +4587,22 @@ function _mergeUserSettingsFromMe(data) {
   }
   if (data.custom_css !== undefined) State.user.custom_css = String(data.custom_css || '').slice(0, 10240);
   if (data.client_prefs) _applyClientPrefsFromSync(data.client_prefs);
+  if (data.has_pin !== undefined) State.user.has_pin = Number(data.has_pin || 0);
+  if (data.pin_require_on_unlock !== undefined) {
+    State.user.pin_require_on_unlock = Number(data.pin_require_on_unlock || 0);
+  }
+  if (data.pin_require_for_admin !== undefined) {
+    State.user.pin_require_for_admin = Number(data.pin_require_for_admin || 0);
+  }
+  if (data.pin_require_after_autologin !== undefined) {
+    State.user.pin_require_after_autologin = Number(data.pin_require_after_autologin || 0);
+  }
+  if (data.pin_idle_timeout_sec !== undefined) {
+    State.user.pin_idle_timeout_sec = Number(data.pin_idle_timeout_sec || 300);
+  }
+  if (data.pin_keypad_privacy !== undefined) {
+    State.user.pin_keypad_privacy = Number(data.pin_keypad_privacy || 0);
+  }
 }
 
 function applyStoredCustomThemeJson(raw) {
@@ -5866,7 +5944,8 @@ async function showProfile() {
   const bannerPrev = document.getElementById('profile-banner-preview');
   if (bannerPrev) {
     delete bannerPrev.dataset.newBanner;
-    bannerPrev.style.backgroundImage = u.banner ? `url(${u.banner})` : '';
+    const bannerUrl = UI.profileBannerCssUrl(u.banner);
+    bannerPrev.style.backgroundImage = bannerUrl ? `url('${bannerUrl}')` : '';
   }
   // Account tab
   document.getElementById('profile-cur-pw').value = '';
@@ -6913,15 +6992,13 @@ async function showFederatedProfileCard(opts) {
   const displayLabel = u.display_name || u.nickname || nick;
   const handle = u.nickname || nick;
   const homeHost = String(u.home_base_url || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
-  const bannerStyle = u.banner
-    ? `background-image:url(${esc(u.banner)});background-size:cover;background-position:center;`
-    : '';
   const css = String(u.custom_style || '');
   if (css && typeof applyProfileCustomCss === 'function') applyProfileCustomCss(css);
 
   const headerEl = host.querySelector('#fedprof-header');
   if (headerEl) {
-    headerEl.style.cssText = `position:relative;padding:20px;min-height:130px;border-bottom:1px solid #2a4a36;${bannerStyle}background-color:#0d1f0d`;
+    headerEl.style.cssText = 'position:relative;padding:20px;min-height:130px;border-bottom:1px solid #2a4a36;background-color:#0d1f0d';
+    if (u.banner) UI.applyProfileBannerToElement(headerEl, u.banner);
     headerEl.innerHTML = `
       <button type="button" class="profile-close-btn" onclick="closeModal('modal-federated-profile')" style="position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);border:none;width:32px;height:32px;border-radius:50%;color:#fff;font-size:18px;cursor:pointer;z-index:5">✕</button>
       <div class="profile-header-content" style="display:flex;align-items:flex-end;gap:14px;padding-top:32px">
@@ -7296,14 +7373,10 @@ function showUserInfo(nickname, userId, bridgePlatform, bridgeSourceName, bridge
           ).join('');
           if (tagsSection) tagsSection.style.display = 'block';
         }
-        // Update banner (use setProperty with 'important' so it wins over custom CSS themes)
         const header = document.getElementById('userinfo-header');
         if (header) {
           if (u.banner) {
-            header.style.setProperty('background-image', `url(${u.banner})`, 'important');
-            header.style.setProperty('background-size', 'cover', 'important');
-            header.style.setProperty('background-position', 'center', 'important');
-            header.style.setProperty('background-color', 'transparent', 'important');
+            UI.applyProfileBannerToElement(header, u.banner);
           } else {
             header.style.removeProperty('background-image');
             header.style.removeProperty('background-size');
@@ -8921,6 +8994,68 @@ function doShareToChat() {
 // button only enables after the download click.
 
 window._pendingRecoveryKey = null; // { file_content, filename, recovery_key }
+window._recoveryKeyNodeInfo = null;
+window._recoveryFileNodeBase = '';
+
+function _normNodeBaseUrl(url) {
+  try {
+    const u = new URL(String(url || '').trim());
+    return `${u.protocol}//${u.host}`.replace(/\/$/, '');
+  } catch {
+    return String(url || '').trim().replace(/\/$/, '');
+  }
+}
+
+async function refreshRecoveryKeyStatus() {
+  const hint = document.getElementById('recovery-key-node-hint');
+  const status = document.getElementById('recovery-key-status');
+  if (!State.token) {
+    if (hint) { hint.style.display = 'none'; hint.textContent = ''; }
+    return;
+  }
+  try {
+    const res = await apiFetch('/api/auth/recovery-key/info');
+    const info = await res.json().catch(() => ({}));
+    if (!res.ok) return;
+    window._recoveryKeyNodeInfo = info;
+    const label = info.node_label || info.node_base_url || window.location.host || 'this node';
+    if (hint) {
+      hint.style.display = 'block';
+      if (info.has_key) {
+        hint.innerHTML = `✓ Active recovery key for <b>${UI.escHtml(label)}</b>. Visiting another node? Generate a separate key there (Settings → Security).`;
+        hint.style.color = '#9dc4b2';
+      } else {
+        hint.innerHTML = `No recovery key saved for <b>${UI.escHtml(label)}</b> yet — recommended if you sign in here.`;
+        hint.style.color = '#c08040';
+      }
+    }
+    if (status && (!status.textContent || /^(Recovery key active|No recovery key)/.test(status.textContent))) {
+      status.textContent = info.has_key
+        ? 'Recovery key active for this node.'
+        : 'No recovery key on this node.';
+    }
+  } catch {}
+}
+window.refreshRecoveryKeyStatus = refreshRecoveryKeyStatus;
+
+function _updateRecoverNodeHint(fileNodeBase, fileNodeLabel) {
+  const el = document.getElementById('recover-node-hint');
+  if (!el) return;
+  const esc = UI.escHtml;
+  const here = _normNodeBaseUrl(window.location.origin);
+  const fileBase = _normNodeBaseUrl(fileNodeBase);
+  const label = fileNodeLabel || fileBase || here;
+  if (fileBase && fileBase !== here) {
+    el.innerHTML = `You are on <b>${esc(here)}</b>. This file is for <b>${esc(label)}</b> — the key will not work here.`;
+    el.style.color = '#ffb74d';
+  } else if (fileBase) {
+    el.innerHTML = `File matches this node (<b>${esc(label)}</b>).`;
+    el.style.color = '#9dc4b2';
+  } else {
+    el.innerHTML = `Recovery only works on the node where the key was created (now: <b>${esc(here)}</b>).`;
+    el.style.color = '#9dc4b2';
+  }
+}
 
 function _setRecoveryKeyError(msg) {
   const el = document.getElementById('recovery-key-error');
@@ -8943,6 +9078,15 @@ function _populateRecoveryKeyModal(payload, opts = {}) {
   if (userRow && userText && nick) {
     userText.textContent = '@' + nick;
     userRow.style.display = '';
+  }
+  const nodeRow = document.getElementById('recovery-key-node-row');
+  const nodeLabel = document.getElementById('recovery-key-node-label');
+  const pl = payload || {};
+  if (nodeRow && nodeLabel && (pl.node_base_url || pl.node_label)) {
+    nodeLabel.textContent = pl.node_label || pl.node_base_url || window.location.host;
+    nodeRow.style.display = '';
+  } else if (nodeRow) {
+    nodeRow.style.display = 'none';
   }
   if (savedHint) savedHint.style.display = 'none';
   if (dlBtn) { dlBtn.disabled = false; dlBtn.style.opacity = '1'; dlBtn.style.cursor = 'pointer'; }
@@ -9036,9 +9180,10 @@ async function generateRecoveryKey() {
       if (status) status.textContent = data.error || 'Failed to generate key.';
       return;
     }
-    if (status) status.textContent = 'Recovery key generated. Save the file in the next dialog.';
+    if (status) status.textContent = 'Recovery key generated for this node. Save the file in the next dialog.';
     await _showRecoveryKeyModalAwait(data, { forceSave: false });
-    if (status) status.textContent = 'Recovery key ready. Old keys are now invalid.';
+    if (status) status.textContent = 'Recovery key ready on this node. Old keys here are invalid.';
+    try { await refreshRecoveryKeyStatus(); } catch {}
   } catch {
     if (status) status.textContent = 'Network error. Try again.';
   } finally {
@@ -9093,8 +9238,8 @@ window.submitRecoveryKeyPassword = submitRecoveryKeyPassword;
 let _recoverVerifiedKey = null;
 
 function showRecoverAccount() {
-  // Reset modal to step 1
   _recoverVerifiedKey = null;
+  window._recoveryFileNodeBase = '';
   const s1 = document.getElementById('recover-step-1');
   const s2 = document.getElementById('recover-step-2');
   const e1 = document.getElementById('recover-step1-error');
@@ -9111,6 +9256,7 @@ function showRecoverAccount() {
   if (file)  file.value  = '';
   if (pw1) pw1.value = '';
   if (pw2) pw2.value = '';
+  _updateRecoverNodeHint('', '');
   openModal('modal-recover-account');
 }
 window.showRecoverAccount = showRecoverAccount;
@@ -9155,6 +9301,8 @@ function onRecoveryFileChosen(ev) {
       const clean = rk.trim();
       if (!/^[\x21-\x7e]+$/.test(clean)) throw new Error('bad-chars');
       keyIn.value = clean;
+      window._recoveryFileNodeBase = _normNodeBaseUrl(data.node_base_url || '');
+      _updateRecoverNodeHint(data.node_base_url, data.node_label);
       if (nameEl) nameEl.textContent = f.name || '';
       if (err) { err.style.display = 'none'; err.textContent = ''; }
     } catch {
@@ -9188,7 +9336,13 @@ async function verifyRecoveryKey() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.valid) {
-      if (err) { err.textContent = (data && data.error) || 'Invalid or already-used recovery key.'; err.style.display = 'block'; }
+      const here = _normNodeBaseUrl(window.location.origin);
+      const fileBase = window._recoveryFileNodeBase || '';
+      let msg = (data && data.hint) || (data && data.error) || 'Invalid or already-used recovery key.';
+      if (fileBase && fileBase !== here) {
+        msg = 'This recovery file belongs to another FrogTalk node. Open the server URL saved in the file.';
+      }
+      if (err) { err.textContent = msg; err.style.display = 'block'; }
       return;
     }
     _recoverVerifiedKey = key;
@@ -9243,7 +9397,7 @@ async function doRecover() {
     State.user  = { id: 0, nickname: data.nickname };
     State.save();
     closeModal('modal-recover-account');
-    if (typeof showToast === 'function') showToast('Welcome back! Don\u2019t forget to generate a new recovery key in Settings.', 'success', 6000);
+    if (typeof showToast === 'function') showToast('Welcome back! Generate a new recovery key for this node in Settings \u2192 Security.', 'success', 6000);
     _recoverVerifiedKey = null;
     try { App.launch(); } catch {}
   } catch {

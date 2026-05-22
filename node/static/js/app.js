@@ -341,6 +341,11 @@ const App = {
 
   isAtHomeNode() {
     if (State.user && State.user.at_home_node === true) return true;
+    const here = this._normalizeOrigin(window.location.origin);
+    const home = this._normalizeOrigin(
+      (State.user && State.user.account_home_base_url) || this.getSyncSourceBase()
+    );
+    if (home && here && home === here) return true;
     if (State.user && State.user.at_home_node === false) return false;
     return false;
   },
@@ -1819,6 +1824,15 @@ const App = {
     if (postsOmitted > 0) parts.push(`${postsOmitted} locked on home`);
     if (msgs > 0) parts.push(`${msgs} messages`);
     if (dmMsgs > 0) parts.push(`${dmMsgs} DM messages`);
+    try {
+      if (!this.isAtHomeNode() && typeof refreshRecoveryKeyStatus === 'function') {
+        await refreshRecoveryKeyStatus();
+        const info = window._recoveryKeyNodeInfo;
+        if (info && !info.has_key && typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast('Tip: save a recovery key for this node in Settings → Security.', 'info', 7000);
+        }
+      }
+    } catch {}
     if (parts.length && typeof UI !== 'undefined' && UI.showToast) {
       UI.showToast(`Federation sync complete — ${parts.join(', ')}`, 'success', 4500);
     } else if (!payload?.error && typeof UI !== 'undefined' && UI.showToast) {

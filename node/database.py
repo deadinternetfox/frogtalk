@@ -4299,6 +4299,20 @@ def search_users(query: str, limit: int = 20, requester_id: int = 0) -> List[Dic
     return [dict(r) for r in rows]
 
 
+def _pick_profile_banner(local_val: str, fed_val: str) -> str:
+    """Prefer a usable banner: synced data URLs beat empty local rows."""
+    local_v = str(local_val or "").strip()
+    fed_v = str(fed_val or "").strip()
+    if fed_v.startswith("data:") and len(fed_v) > 80:
+        if not local_v.startswith("data:") or len(local_v) < 80:
+            return fed_v
+    if local_v.startswith("data:") and len(local_v) > 80:
+        return local_v
+    if fed_v and not local_v:
+        return fed_v
+    return local_v or fed_v
+
+
 def enrich_user_profile_from_federation(profile: Optional[Dict]) -> Optional[Dict]:
     """Overlay federation_user_profiles when the local users row is sparse."""
     if not profile:
@@ -4309,7 +4323,10 @@ def enrich_user_profile_from_federation(profile: Optional[Dict]) -> Optional[Dic
     fed = get_federation_user_profile_row(gid)
     if not fed:
         return profile
-    for key in ("display_name", "avatar", "bio", "status_msg", "mood", "banner", "custom_style"):
+    banner = _pick_profile_banner(profile.get("banner"), fed.get("banner"))
+    if banner:
+        profile["banner"] = banner
+    for key in ("display_name", "avatar", "bio", "status_msg", "mood", "custom_style"):
         if not str(profile.get(key) or "").strip():
             val = str(fed.get(key) or "").strip()
             if val:
@@ -9723,6 +9740,25 @@ def cleanup_expired_captchas():
         con.execute(
             "DELETE FROM captcha_challenges WHERE datetime('now') > expires_at"
         )
+
+
+def has_active_recovery_key(user_id: int) -> bool:
+    """True when this node has an unused recovery key for the local user row."""
+    try:
+        uid = int(user_id or 0)
+    except Exception:
+        return False
+    if uid <= 0:
+        return False
+    try:
+        with _conn() as con:
+            row = con.execute(
+                "SELECT 1 FROM recovery_keys WHERE user_id=? AND used_at IS NULL LIMIT 1",
+                (uid,),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
 
 
 def create_recovery_key(user_id: int, key_or_hash: str) -> int:

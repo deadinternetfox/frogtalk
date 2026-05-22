@@ -519,6 +519,14 @@ async function startCall (type, nick, uid) {
   _callPeerUID  = uid   || _activeDM?.user_id;
   _callPeerAvatar = _activeDM?.avatar || null;
   _callId       = null;
+  if (!_callPeerUID && _callPeerNick) {
+    try {
+      const ch = (typeof _dmChannels !== 'undefined' && Array.isArray(_dmChannels))
+        ? _dmChannels.find(c => String(c.nickname || '').toLowerCase() === String(_callPeerNick).toLowerCase())
+        : null;
+      if (ch?.with_user_id) _callPeerUID = ch.with_user_id;
+    } catch {}
+  }
   // _activeDM carries the federated peer's home server when the DM is
   // cross-node — feed it into the ICE config so RTC negotiates with the
   // peer's TURN as well as ours. Cleared on every fresh startCall so we
@@ -851,7 +859,7 @@ function rejectCall () {
 }
 
 /* ── Call created confirmation (server sends call_id back to caller) ────────── */
-function handleCallCreated (data) {
+async function handleCallCreated (data) {
   if (!data) return;
   if (data.call_id && (_callState === 'calling' || !_callId)) {
     _callId = data.call_id;

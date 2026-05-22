@@ -71,7 +71,15 @@ def _friend_push(user_id: int, title: str, body: str,
         pass
 
 
-def _emit_friend_event(event_type: str, payload: dict) -> None:
+def _emit_friend_graph_event(event_type: str, from_user: dict, to_user: dict) -> None:
+    try:
+        from routers import federation as federation_mod
+        federation_mod.enqueue_friend_graph_event(event_type, from_user, to_user)
+    except Exception:
+        pass
+
+
+def _emit_friend_sound_event(event_type: str, payload: dict) -> None:
     try:
         db.insert_federation_outbox_event({
             "event_id": f"evt_{int(time.time() * 1000):016x}_{uuid.uuid4().hex[:8]}",
@@ -210,10 +218,7 @@ async def send_request(request: Request, nickname: str, current_user: dict = Dep
                  f"{current_user['nickname']} wants to be friends",
                  kind="friend_request",
                  from_nickname="")
-    _emit_friend_event("friend.requested", {
-        "from_nickname": current_user["nickname"],
-        "to_nickname": profile["nickname"],
-    })
+    _emit_friend_graph_event("friend.requested", current_user, profile)
     return {"ok": True}
 
 
@@ -232,10 +237,7 @@ async def accept_request(request: Request, nickname: str, current_user: dict = D
                  f"{current_user['nickname']} accepted your friend request",
                  kind="friend_accepted",
                  from_nickname="")
-    _emit_friend_event("friend.accepted", {
-        "from_nickname": profile["nickname"],
-        "to_nickname": current_user["nickname"],
-    })
+    _emit_friend_graph_event("friend.accepted", profile, current_user)
     try:
         from routers.federation import _notify_wall_rewrap_for_new_follower
         await _notify_wall_rewrap_for_new_follower(int(profile["id"]), int(current_user["id"]))
@@ -390,7 +392,7 @@ async def upload_friend_sound(
     )
     # Replicate to peer nodes via federation so any node can serve the file.
     try:
-        _emit_friend_event("friend.sound.created", {
+        _emit_friend_sound_event("friend.sound.created", {
             "owner_nick": current_user.get("nickname", ""),
             "friend_nick": nickname,
             "kind": safe_kind,
@@ -485,7 +487,7 @@ async def delete_friend_sound(asset_id: int, current_user: dict = Depends(get_cu
     # Replicate deletion to peer nodes.
     try:
         friend_row = db.get_user_by_id(deleted["friend_user_id"])
-        _emit_friend_event("friend.sound.deleted", {
+        _emit_friend_sound_event("friend.sound.deleted", {
             "owner_nick": current_user.get("nickname", ""),
             "friend_nick": (friend_row or {}).get("nickname", ""),
             "kind": deleted.get("kind", ""),

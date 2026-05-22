@@ -38,6 +38,7 @@ const Social = (() => {
   let _profilePrefetchRic = 0;             // idle callback handle for profile subtab warming
   let _reelsDirectLaunchId = 0;          // set by openSharedReel to suppress scope-bar flash
   let _bgPrefetchRic = 0;                // handle for pending background cache-warm callback
+  let _socialSyncListenerBound = false;
   // Bumped on every successful switchTab() so an abandoned load can
   // bail out of its retry loop. A tab swap mid-flight used to leave
   // _apiOkJson hammering up to 4 attempts (~3.5 s of network usage) at
@@ -794,6 +795,7 @@ const Social = (() => {
   function open(tab) {
     _ensureReactionButtonDelegation();
     _ensureNavHoverPrefetch();
+    _ensureSocialSyncBannerListener();
     _currentTab = tab || 'feed';
     const overlay = document.getElementById('social-overlay');
     if (!overlay) return;
@@ -3218,54 +3220,122 @@ const Social = (() => {
     }
   }
 
-  function _socialSyncResyncButtonHtml() {
-    if (!_socialAwayFromHome()) return '';
-    return `<button type="button" class="modal-btn primary" style="margin-top:14px" onclick="App.forceFederationResync()">↻ Sync from home node</button>`;
+  function _socialSyncState() {
+    return (window.FtSync && FtSync.state) ? FtSync.state() : ((window.App && App.federationSyncState) || {});
   }
 
-  function _socialNeverSyncedBannerHtml() {
+  function _socialSyncResyncButtonHtml() {
     if (!_socialAwayFromHome()) return '';
-    const st = (window.FtSync && FtSync.state) ? FtSync.state() : ((window.App && App.federationSyncState) || {});
-    if (st.in_progress || st.done) return '';
-    const err = String(st.error || '').trim();
-    if (err) return '';
-    return `<div style="margin:0 0 12px;padding:10px 12px;border-radius:10px;background:rgba(246,210,122,.08);border:1px solid rgba(246,210,122,.25);font-size:12px;color:#f6d27a;line-height:1.45">
-      <div>Your FrogSocial data has not been imported from your home node yet.</div>
-      <div style="margin-top:6px;color:#9ec59e">Open <strong>Settings → Network</strong> and tap <strong>Re-sync from home</strong>, or wait for account sync to finish after login.</div>
-      ${_socialSyncResyncButtonHtml()}
+    return `<button type="button" class="social-sync-card-btn" onclick="App.forceFederationResync()">↻ Sync from home</button>`;
+  }
+
+  function _socialSyncCardHtml(kind, title, bodyHtml, showBtn) {
+    const icon = kind === 'progress' ? '⏳' : (kind === 'info' ? 'ℹ️' : '⚠️');
+    const btn = showBtn ? _socialSyncResyncButtonHtml() : '';
+    return `<div class="social-sync-card social-sync-card--${kind}">
+      <div class="social-sync-card-body">
+        <span class="social-sync-card-icon" aria-hidden="true">${icon}</span>
+        <div class="social-sync-card-text">
+          <div class="social-sync-card-title">${esc(title)}</div>
+          <div class="social-sync-card-sub">${bodyHtml}</div>
+        </div>
+      </div>
+      ${btn}
     </div>`;
   }
 
-  function _socialPartialSyncBannerHtml() {
+  function _socialSyncBannerInnerHtml() {
     if (!_socialAwayFromHome()) return '';
-    const st = (window.FtSync && FtSync.state) ? FtSync.state() : ((window.App && App.federationSyncState) || {});
-    if (st.in_progress) return '';
+    const st = _socialSyncState();
+    if (st.in_progress) {
+      const inline = (window.FtSync && FtSync.renderInline)
+        ? FtSync.renderInline(st, { compact: true, fallback: 'Syncing FrogSocial from your home node…' })
+        : esc(String(st.hint || 'Syncing from your home node…'));
+      return _socialSyncCardHtml('progress', 'Importing from your home node', inline, false);
+    }
+    const err = String(st.error || '').trim();
+    if (err) {
+      return _socialSyncCardHtml(
+        'warn',
+        'Account sync issue',
+        esc(err.slice(0, 180)),
+        true,
+      );
+    }
+    if (!st.done) {
+      return _socialSyncCardHtml(
+        'warn',
+        'FrogSocial not imported yet',
+        'Open <strong>Settings → Network</strong> and tap <strong>Re-sync from home</strong>, or wait for account sync to finish after login.',
+        true,
+      );
+    }
     const imported = Number(st.social_posts_imported || 0);
     const total = Number(st.social_posts_total || 0);
     const omitted = Number(st.social_posts_omitted_at_export || 0);
     const skipped = Number(st.social_posts_skipped || 0);
     const lines = [];
     if (total > imported) {
-      lines.push(`FrogSocial backfill is partial (${imported}/${total} posts on this node).`);
+      lines.push(`Backfill is partial (${imported}/${total} posts on this node).`);
     }
     if (omitted > 0) {
-      lines.push(`${omitted} encrypted post${omitted === 1 ? '' : 's'} could not be exported without keys — view on your home node or re-sync after mutual follow on both nodes.`);
+      lines.push(`${omitted} encrypted post${omitted === 1 ? '' : 's'} stay on your home node until keys match on both nodes.`);
     }
     if (skipped > 0 && !lines.length) {
       lines.push(`${skipped} post${skipped === 1 ? '' : 's'} skipped during import.`);
     }
     if (!lines.length) return '';
-    return `<div style="margin:0 0 12px;padding:10px 12px;border-radius:10px;background:rgba(127,214,162,.08);border:1px solid rgba(127,214,162,.22);font-size:12px;color:#9ec59e;line-height:1.45">
-      ${lines.map((ln) => `<div style="margin-bottom:4px">${esc(ln)}</div>`).join('')}
-      ${_socialSyncResyncButtonHtml()}
-    </div>`;
+    return _socialSyncCardHtml(
+      'info',
+      'Partial FrogSocial sync',
+      lines.map((ln) => esc(ln)).join('<br>'),
+      true,
+    );
+  }
+
+  function _socialSyncBannersHtml() {
+    const inner = _socialSyncBannerInnerHtml();
+    if (!inner) return '';
+    return `<div id="social-feed-sync-banner" class="social-feed-sync-banner">${inner}</div>`;
+  }
+
+  /** Keep the federation sync banner pinned as the first block under the FrogSocial header. */
+  function _patchSocialFeedSyncBanner() {
+    if (_currentTab !== 'feed') return;
+    const content = document.getElementById('social-content');
+    if (!content) return;
+    const inner = _socialSyncBannerInnerHtml();
+    let host = document.getElementById('social-feed-sync-banner');
+    if (!inner) {
+      if (host) host.remove();
+      return;
+    }
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'social-feed-sync-banner';
+      host.className = 'social-feed-sync-banner';
+      content.insertBefore(host, content.firstChild);
+    }
+    host.innerHTML = inner;
+    const stories = document.getElementById('social-feed-stories');
+    if (host && stories && host.nextElementSibling !== stories) {
+      content.insertBefore(host, content.firstChild);
+    }
+  }
+
+  function _ensureSocialSyncBannerListener() {
+    if (_socialSyncListenerBound) return;
+    _socialSyncListenerBound = true;
+    window.addEventListener('ft:federation-sync', () => {
+      try { _patchSocialFeedSyncBanner(); } catch {}
+    });
   }
 
   // ── FEED ────────────────────────────────────────────────────────────────
   function _renderFeedContent(content, posts, extras = {}) {
-    let html = `<div id="social-feed-stories">${extras.storiesHtml || renderStoriesBar()}</div><div id="social-feed-suggest">${extras.suggestedHtml || ''}</div>`;
-    html += _socialNeverSyncedBannerHtml();
-    html += _socialPartialSyncBannerHtml();
+    let html = _socialSyncBannersHtml();
+    html += `<div id="social-feed-stories">${extras.storiesHtml || renderStoriesBar()}</div>`;
+    html += `<div id="social-feed-suggest">${extras.suggestedHtml || ''}</div>`;
 
     if (!posts.length) {
       const syncing = !!(window.FtSync && window.FtSync.state && window.FtSync.state().in_progress);
@@ -3295,6 +3365,7 @@ const Social = (() => {
 
     _disposeMediaIn(content);
     content.innerHTML = html;
+    _patchSocialFeedSyncBanner();
   }
 
   async function loadFeed(opts = {}) {
@@ -3411,6 +3482,7 @@ const Social = (() => {
         const el = document.getElementById('social-feed-suggest');
         if (!el) return;
         el.innerHTML = _renderSuggestedUsers(sugData.users || []);
+        _patchSocialFeedSyncBanner();
       }).catch(() => {}).finally(() => {
         suggestDone = true;
         refreshFeedSubresources();
@@ -3770,7 +3842,7 @@ const Social = (() => {
       content.innerHTML = `
       <div class="social-profile fade-in">
         <!-- Banner -->
-        <div class="sp-banner" style="background:${u.banner ? `url('${esc(u.banner)}') center/cover` : 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)'}">
+        <div class="sp-banner" style="background:${(typeof UI !== 'undefined' && UI.profileBannerBackground) ? UI.profileBannerBackground(u.banner) : (u.banner ? `url('${String(u.banner).replace(/\\/g, '\\\\').replace(/'/g, '%27')}') center/cover` : 'linear-gradient(135deg,#1a3a1a 0%,#0d1f0d 50%,#1a2a1a 100%)')}">
           ${isSelf ? `<button class="sp-edit-btn" onclick="showProfile()" title="Edit Profile">✏️</button>` : ''}
         </div>
 

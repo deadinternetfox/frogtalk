@@ -860,6 +860,132 @@ class FederationSyncTests(unittest.TestCase):
         self.assertEqual(int(st.get("progress_pct") or 0), 100)
         self.assertTrue(str(st.get("error") or "").strip())
 
+    def test_friend_requested_federation_event_by_global_user_id(self):
+        import asyncio
+        from routers import federation as fed_mod
+
+        db = self.db
+        alice_id = int(db.create_user("alice_fed_fr", "secret12"))
+        alice = db.get_user_by_id(alice_id) or {}
+        alice_gid = str(alice.get("global_user_id") or "").strip()
+        self.assertTrue(alice_gid)
+
+        bob_gid = "00000000-0000-4000-8000-000000000090"
+        bob = db.ensure_federated_dm_local_user(
+            bob_gid,
+            "bob_fed_fr",
+            origin_server_id="srv_bob_home",
+        )
+        bob_id = int(bob.get("id") or 0)
+        self.assertEqual(db.friend_request_status(alice_id, bob_id), "none")
+
+        asyncio.run(fed_mod._handle_friend_event({
+            "event_type": "friend.requested",
+            "origin_server_id": "srv_travel_node",
+            "payload": {
+                "from_global_user_id": alice_gid,
+                "from_nickname": "alice_fed_fr",
+                "to_global_user_id": bob_gid,
+                "to_nickname": "bob_fed_fr",
+            },
+        }))
+        self.assertEqual(db.friend_request_status(alice_id, bob_id), "sent")
+
+    def test_social_follow_changed_from_travel_node(self):
+        import asyncio
+        from routers import federation as fed_mod
+
+        db = self.db
+        follower_gid = "00000000-0000-4000-8000-000000000091"
+        follower = db.ensure_federated_dm_local_user(
+            follower_gid,
+            "travel_follower",
+            origin_server_id="srv_follower_home",
+        )
+        db.upsert_federation_user_profile(
+            follower_gid,
+            "travel_follower",
+            origin_server_id="srv_follower_home",
+        )
+        following_id = int(db.create_user("local_following", "secret12"))
+        following = db.get_user_by_id(following_id) or {}
+        following_gid = str(following.get("global_user_id") or "").strip()
+
+        asyncio.run(fed_mod._handle_social_event({
+            "event_type": "social.follow.changed",
+            "origin_server_id": "srv_travel_node",
+            "payload": {
+                "action": "follow",
+                "follower_nickname": "travel_follower",
+                "follower_global_user_id": follower_gid,
+                "following_nickname": "local_following",
+                "following_global_user_id": following_gid,
+            },
+        }))
+        self.assertTrue(db.is_following(int(follower["id"]), following_id))
+
+    def test_sync_export_includes_pin_settings_bcrypt_only(self):
+        import bcrypt
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("pin_sync_user", "secret12"))
+        pin_hash = bcrypt.hashpw(b"2468", bcrypt.gensalt()).decode()
+        with db._conn() as con:
+            con.execute(
+                """
+                UPDATE users
+                SET pin_hash=?,
+                    pin_require_on_unlock=1,
+                    pin_require_for_admin=1,
+                    pin_require_after_autologin=1,
+                    pin_idle_timeout_sec=120,
+                    pin_keypad_privacy=1
+                WHERE id=?
+                """,
+                (pin_hash, uid),
+            )
+            con.commit()
+        export = auth_mod._build_sync_export_for_user(uid)
+        prof = export.get("self_profile") or {}
+        self.assertTrue(str(prof.get("pin_hash") or "").startswith("$2"))
+        self.assertEqual(int(prof.get("pin_require_on_unlock") or 0), 1)
+        self.assertEqual(int(prof.get("pin_keypad_privacy") or 0), 1)
+        self.assertEqual(int(prof.get("pin_idle_timeout_sec") or 0), 120)
+
+        travel_uid = int(db.create_user("pin_sync_travel", "secret12"))
+        auth_mod._apply_sync_pin_from_self_profile(travel_uid, prof)
+        status = db.get_pin_status(travel_uid)
+        self.assertEqual(int(status.get("has_pin") or 0), 1)
+        self.assertEqual(int(status.get("pin_require_on_unlock") or 0), 1)
+        self.assertEqual(int(status.get("pin_idle_timeout_sec") or 0), 120)
+
+        bad = dict(prof)
+        bad["pin_hash"] = "not-a-bcrypt-hash"
+        auth_mod._apply_sync_pin_from_self_profile(travel_uid, bad)
+        status2 = db.get_pin_status(travel_uid)
+        self.assertEqual(int(status2.get("has_pin") or 0), 0)
+
+    def test_friend_pending_export_includes_outgoing_requests(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        sender_id = int(db.create_user("pending_sender", "secret12"))
+        receiver_gid = "00000000-0000-4000-8000-000000000092"
+        receiver = db.ensure_federated_dm_local_user(
+            receiver_gid,
+            "pending_receiver",
+            origin_server_id="srv_recv_home",
+        )
+        receiver_id = int(receiver.get("id") or 0)
+        db.send_friend_request(sender_id, receiver_id)
+        export = auth_mod._build_sync_export_for_user(sender_id)
+        out_rows = export.get("friend_pending_out") or []
+        self.assertTrue(
+            any(r.get("global_user_id") == receiver_gid for r in out_rows),
+            out_rows,
+        )
+
 
 class FederationSyncLoginApiTests(unittest.TestCase):
     @classmethod
@@ -1029,15 +1155,27 @@ class FederationSyncLoginApiTests(unittest.TestCase):
         })
         self.assertIsNone(room)
 
-    def test_user_at_home_requires_explicit_pin(self):
+    def test_user_at_home_auto_pins_legacy_native_account(self):
         import routers.auth as auth_mod
 
         db = self.db
         uid = int(db.create_user("unpinned_home", "secret12"))
-        self.assertFalse(auth_mod._user_at_account_home(uid))
         local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
-        db.set_user_account_home_server_id(uid, local_sid, force=True)
         self.assertTrue(auth_mod._user_at_account_home(uid))
+        self.assertEqual(db.get_user_account_home_server_id(uid), local_sid)
+
+    def test_user_at_home_false_when_sync_source_is_remote(self):
+        import routers.auth as auth_mod
+
+        db = self.db
+        uid = int(db.create_user("travel_unpinned", "secret12"))
+        local_sid = str((db.get_or_create_local_server_identity() or {}).get("server_id") or "")
+        remote_sid = "srv_travel_remote_home"
+        if remote_sid == local_sid:
+            remote_sid = "srv_travel_remote_home_b"
+        db.upsert_federation_server(remote_sid, "Remote", "https://remote-home.test", official=True)
+        auth_mod._sync_state_set(uid, {"source_server_id": remote_sid, "source_base": "https://remote-home.test"})
+        self.assertFalse(auth_mod._user_at_account_home(uid))
 
     def test_repin_account_home_api(self):
         db = self.db
@@ -1331,6 +1469,42 @@ class FederationDirectoryJoinApiTests(unittest.TestCase):
         prof = db.get_user_profile("fed_style_peer")
         self.assertIsNotNone(prof)
         self.assertIn("#aabbcc", str(prof.get("custom_style") or ""))
+
+    def test_enrich_user_profile_merges_federation_banner(self):
+        db = self.db
+        gid = "00000000-0000-4000-8000-000000000089"
+        banner = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        shadow = db.ensure_federated_dm_local_user(
+            gid,
+            "fed_banner_peer",
+            origin_server_id="srv_banner_home",
+        )
+        self.assertIsNotNone(shadow)
+        with db._conn() as con:
+            row = con.execute(
+                "SELECT id FROM users WHERE nickname=?",
+                ("fed_banner_peer",),
+            ).fetchone()
+            uid = int(row["id"]) if row else 0
+            con.execute("UPDATE users SET banner='' WHERE id=?", (uid,))
+        db.upsert_federation_user_profile(
+            gid,
+            "fed_banner_peer",
+            banner=banner,
+            origin_server_id="srv_banner_home",
+        )
+        prof = db.get_user_profile("fed_banner_peer")
+        self.assertIsNotNone(prof)
+        self.assertTrue(str(prof.get("banner") or "").startswith("data:image/png"))
+
+    def test_has_active_recovery_key(self):
+        db = self.db
+        user = db.create_user("recovery_key_user", "secret12")
+        self.assertIsNotNone(user)
+        uid = int(user)
+        self.assertFalse(db.has_active_recovery_key(uid))
+        db.create_recovery_key(uid, "test-recovery-token-abc123xyz")
+        self.assertTrue(db.has_active_recovery_key(uid))
 
     def test_following_export_includes_custom_style(self):
         import routers.auth as auth_mod
