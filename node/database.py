@@ -9187,6 +9187,42 @@ def set_wall_reaction(post_id: int, user_id: int, emoji: str, active: bool) -> b
         return True
 
 
+def ensure_wall_repost(post_id: int, user_id: int, quote_text: Optional[str] = None) -> bool:
+    """Idempotently ensure a repost row exists (federation sync import)."""
+    try:
+        pid = int(post_id or 0)
+        uid = int(user_id or 0)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0 or uid <= 0:
+        return False
+    normalized_quote = (quote_text or "").strip() or None
+    with _conn() as con:
+        existing = con.execute(
+            "SELECT id FROM wall_reposts WHERE post_id=? AND user_id=?",
+            (pid, uid),
+        ).fetchone()
+        if existing:
+            if normalized_quote:
+                con.execute(
+                    """
+                    UPDATE wall_reposts
+                       SET quote_text=?, created_at=datetime('now')
+                     WHERE id=?
+                    """,
+                    (normalized_quote, existing["id"]),
+                )
+            return True
+        con.execute(
+            """
+            INSERT INTO wall_reposts (post_id, user_id, quote_text)
+            VALUES (?, ?, ?)
+            """,
+            (pid, uid, normalized_quote),
+        )
+        return True
+
+
 def toggle_wall_repost(post_id: int, user_id: int, quote_text: Optional[str] = None) -> bool:
     """Toggle/update a repost.
 

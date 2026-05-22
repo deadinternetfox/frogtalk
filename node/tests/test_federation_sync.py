@@ -766,6 +766,100 @@ class FederationSyncTests(unittest.TestCase):
             cursor = str(page.get("social_posts_next_cursor") or "").strip()
         self.assertGreaterEqual(imported, 350)
 
+    def test_wall_reposts_sync_export_apply(self):
+        import routers.auth as auth_mod
+        import crypto_fed as cf
+
+        db = self.db
+        owner = int(db.create_user("repost_owner", "secret12"))
+        traveler = int(db.create_user("repost_traveler", "secret12"))
+        self.assertTrue(owner and traveler)
+        post_id = int(db.create_wall_post(owner, "shared post", privacy="public"))
+        self.assertTrue(post_id)
+        db.toggle_wall_repost(post_id, traveler, quote_text="nice")
+
+        export = auth_mod._build_sync_export_for_user(traveler)
+        reposts = export.get("wall_reposts") or []
+        self.assertGreaterEqual(len(reposts), 1)
+        self.assertGreaterEqual(int(export.get("wall_reposts_total") or 0), 1)
+
+        ident = db.get_or_create_local_server_identity() or {}
+        home_sid = str(ident.get("server_id") or "").strip()
+        self.assertTrue(home_sid)
+        db.upsert_federation_server(
+            home_sid,
+            "Repost Home",
+            "https://repost-home.test",
+            official=True,
+            server_pubkey=cf.get_local_public_key_pem(),
+        )
+        db.set_user_account_home_server_id(traveler, home_sid, force=True)
+        gid = str((db.get_user_by_id(traveler) or {}).get("global_user_id") or "").strip()
+        post_gid, post_origin = db.ensure_federation_wall_post_global_id(post_id)
+        payload = auth_mod._attach_sync_export_signature({
+            "export_version": 2,
+            "global_user_id": gid,
+            "source_server_id": home_sid,
+            "source_public_url": "https://repost-home.test",
+            "social_posts": [{
+                "global_post_id": post_gid,
+                "origin_server_id": post_origin,
+                "author_global_user_id": str((db.get_user_by_id(owner) or {}).get("global_user_id") or ""),
+                "nickname": "repost_owner",
+                "content": "shared post",
+                "privacy": "public",
+                "enc_v": 0,
+            }],
+            "wall_reposts": reposts,
+            "rooms": [],
+            "public_rooms": [],
+            "dm_peers": [],
+            "following": [],
+            "friends": [],
+            "blocked_users": [],
+            "dm_histories": [],
+            "room_histories": [],
+            "room_member_snapshots": [],
+            "self_profile": {},
+            "push_tokens": [],
+        })
+        applied = auth_mod._apply_sync_export_to_user(
+            traveler, payload, fetch_origin="https://repost-home.test",
+        )
+        self.assertGreaterEqual(int(applied.get("reposts_linked") or 0), 1)
+        posts = db.get_user_reposts(traveler, traveler, limit=10, lite=True)
+        self.assertTrue(any(int(p.get("id") or 0) > 0 for p in posts))
+
+    def test_normalize_stuck_in_progress_sync_state(self):
+        import routers.auth as auth_mod
+        import time
+
+        db = self.db
+        uid = int(db.create_user("stuck_sync_user", "secret12"))
+        home_sid = "srv_stuck"
+        db.upsert_federation_server(
+            home_sid,
+            "Stuck Home",
+            "https://stuck-home.test",
+            official=True,
+        )
+        db.set_user_account_home_server_id(uid, home_sid, force=True)
+        old = int(time.time()) - 90000
+        auth_mod._sync_state_set(uid, {
+            "in_progress": True,
+            "done": False,
+            "progress_pct": 87,
+            "phase": "social_posts",
+            "hint": "Importing posts…",
+            "started_at": old,
+            "updated_at": old,
+        })
+        st = auth_mod._sync_state_get(uid)
+        self.assertFalse(st.get("in_progress"))
+        self.assertTrue(st.get("done"))
+        self.assertEqual(int(st.get("progress_pct") or 0), 100)
+        self.assertTrue(str(st.get("error") or "").strip())
+
 
 class FederationSyncLoginApiTests(unittest.TestCase):
     @classmethod

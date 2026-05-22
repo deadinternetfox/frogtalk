@@ -87,6 +87,25 @@ const FtSync = {
       : ((window.App && App.federationSyncState) || {});
   },
 
+  /** Align client UI with server-normalized sync flags (avoids stuck % overlay). */
+  normalizeState(st) {
+    const s = (st && typeof st === 'object') ? { ...st } : {};
+    const err = String(s.error || '').trim();
+    if (s.done && s.in_progress) {
+      s.in_progress = false;
+    }
+    if (!s.in_progress && s.done && !err) {
+      s.progress_pct = 100;
+      s.phase = String(s.phase || 'done');
+      if (!String(s.hint || '').trim()) s.hint = 'Sync complete';
+    }
+    if (!s.in_progress && err) {
+      const p = Number(s.progress_pct);
+      if (!Number.isFinite(p) || p < 100) s.progress_pct = 100;
+    }
+    return s;
+  },
+
   pct(st) {
     const n = Number((st || this.state())?.progress_pct);
     return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : null;
@@ -150,17 +169,22 @@ const FtSync = {
   },
 
   renderOverlayHtml(st) {
-    const s = st || this.state();
-    const p = this.pct(s) ?? 0;
-    const hint = String(s.hint || 'Syncing…').trim();
+    const s = this.normalizeState(st || this.state());
+    const inProgress = !!s.in_progress;
+    const done = !!s.done && !inProgress;
+    const err = String(s.error || '').trim();
+    const p = this.pct(s) ?? (done ? 100 : 0);
+    const hint = String(s.hint || (done ? (err ? 'Sync finished with issues' : 'Sync complete') : 'Syncing…')).trim();
     const source = String(s.source_base || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
     const phases = Array.isArray(s.phases) ? s.phases : [];
+    const title = done ? (err ? 'Sync finished' : 'Sync complete') : 'Syncing your account';
+    const pctColor = done ? (err ? '#f6d27a' : '#7fd6a2') : '#a8e6c1';
     return `
       <div style="width:min(440px,92vw);background:linear-gradient(180deg,#0f1714,#101312);border:1px solid rgba(95,181,121,.25);border-radius:18px;box-shadow:0 28px 80px rgba(0,0,0,.58);padding:18px 20px;color:#dfead4">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
-          <div style="width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#173626,#0d1812);display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid rgba(95,181,121,.28)">🐸</div>
+          <div style="width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,#173626,#0d1812);display:flex;align-items:center;justify-content:center;font-size:22px;border:1px solid rgba(95,181,121,.28)">${done ? (err ? '⚠️' : '✅') : '🐸'}</div>
           <div style="flex:1;min-width:0">
-            <div style="font-size:15px;font-weight:700;letter-spacing:.01em">Syncing your account</div>
+            <div style="font-size:15px;font-weight:700;letter-spacing:.01em">${this._esc(title)}</div>
             <div style="font-size:11px;color:#8da59b;margin-top:2px">${source ? 'from ' + this._esc(source) : 'from your home node'}</div>
           </div>
           <div style="font-size:22px;font-weight:800;color:#a8e6c1;font-variant-numeric:tabular-nums">${p}%</div>
@@ -606,18 +630,21 @@ const App = {
   applyFederationSyncMeta(meta) {
     if (!meta || typeof meta !== 'object') return;
     if (this.isAtHomeNode() && !meta.done) return;
-    const inProgress = !!meta.in_progress;
-    const hint = String(meta.hint || '').trim();
-    if (!inProgress && !hint && !meta.done) return;
+    const normalized = window.FtSync && FtSync.normalizeState
+      ? FtSync.normalizeState(meta)
+      : meta;
+    const inProgress = !!normalized.in_progress;
+    const hint = String(normalized.hint || '').trim();
+    if (!inProgress && !hint && !normalized.done) return;
     const payload = {
-      ...meta,
+      ...normalized,
       in_progress: inProgress,
-      done: !!meta.done,
-      progress_pct: Number.isFinite(Number(meta.progress_pct))
-        ? Math.max(0, Math.min(100, Number(meta.progress_pct)))
-        : (inProgress ? 2 : 0),
-      hint: hint || (inProgress ? 'Syncing from your home node…' : ''),
-      phase: String(meta.phase || ''),
+      done: !!normalized.done,
+      progress_pct: Number.isFinite(Number(normalized.progress_pct))
+        ? Math.max(0, Math.min(100, Number(normalized.progress_pct)))
+        : (inProgress ? 2 : (normalized.done ? 100 : 0)),
+      hint: hint || (inProgress ? 'Syncing from your home node…' : (normalized.done ? 'Sync complete' : '')),
+      phase: String(normalized.phase || ''),
     };
     this._applyFederationSyncUiState(payload);
   },
@@ -1721,6 +1748,7 @@ const App = {
         if (Social.loadExplore) await Social.loadExplore(undefined, { force: true });
         if (Social.loadReelsTab) await Social.loadReelsTab();
         if (Social.loadMusicTab) await Social.loadMusicTab();
+        if (Social.reloadOpenProfileTab) await Social.reloadOpenProfileTab();
         if (Social.refreshActivityBadge) void Social.refreshActivityBadge();
         if (Social.refreshChatStoryCache) void Social.refreshChatStoryCache(true);
       }
@@ -1802,7 +1830,10 @@ const App = {
   },
 
   _applyFederationSyncUiState(state) {
-    const payload = (state && typeof state === 'object') ? state : {};
+    let payload = (state && typeof state === 'object') ? state : {};
+    if (window.FtSync && typeof FtSync.normalizeState === 'function') {
+      payload = FtSync.normalizeState(payload);
+    }
     const wasInProgress = !!(this.federationSyncState && this.federationSyncState.in_progress);
     this.federationSyncState = payload;
     if (payload.hint) this.federationSyncHint = String(payload.hint || '');
@@ -1823,7 +1854,7 @@ const App = {
     }
   },
 
-  startFederationSyncWatcher(maxWatchMs = 180000) {
+  startFederationSyncWatcher(maxWatchMs = 600000) {
     if (!State.token) return;
     const started = Date.now();
     if (this._syncWatcherTimer) {
@@ -1840,8 +1871,16 @@ const App = {
         this._applyFederationSyncUiState(data || {});
         if (data && data.done && !data.in_progress) return;
       } catch {}
-      if ((Date.now() - started) >= maxWatchMs) return;
-      this._syncWatcherTimer = setTimeout(tick, 900);
+      if ((Date.now() - started) >= maxWatchMs) {
+        const st = this.federationSyncState || {};
+        if (st.in_progress && typeof UI !== 'undefined' && UI.showToast) {
+          UI.showToast('Sync is taking longer than expected — check Settings → Network.', 'info', 5000);
+        }
+        return;
+      }
+      const st = this.federationSyncState || {};
+      const interval = st.in_progress ? 900 : 2400;
+      this._syncWatcherTimer = setTimeout(tick, interval);
     };
     this._syncWatcherTimer = setTimeout(tick, 150);
   },

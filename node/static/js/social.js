@@ -3983,7 +3983,18 @@ const Social = (() => {
     }
   }
 
-  function switchProfileTab(tab, btn) {
+  async function reloadOpenProfileTab() {
+    if (_currentTab !== 'profile' || !_profileUser) return;
+    const nick = String(_profileUser || '').trim();
+    if (!nick) return;
+    _invalidateProfilePostsCache(nick);
+    try { _profileRepostsCache.delete(nick.toLowerCase()); } catch {}
+    const tab = _profileActiveTab || 'wall';
+    const btn = document.querySelector(`.sp-tab[data-pt="${tab}"]`);
+    switchProfileTab(tab, btn || null);
+  }
+
+    function switchProfileTab(tab, btn) {
     document.querySelectorAll('.sp-tab').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
     const token = _beginProfileTabLoad(tab);
@@ -10006,6 +10017,7 @@ const Social = (() => {
     open, close, openProfile, openProfileMusic, switchTab, switchProfileTab,
     invalidateProfileCache: _invalidateProfileCache,
     invalidateAllSocialCaches: _invalidateAllSocialCaches,
+    reloadOpenProfileTab,
     switchProfileMediaMode, loadProfileMediaCombined,
     openSideMenu, closeSideMenu, navTo, _initUploadRecovery,
     _closeLinkEmbed,
@@ -10124,6 +10136,8 @@ try {
         if (tab === 'feed' && Social.loadFeed) void Social.loadFeed({ force: true });
         if (tab === 'explore' && Social.loadExplore) void Social.loadExplore(undefined, { force: true });
         if (tab === 'reels' && Social.loadReelsTab) void Social.loadReelsTab();
+        if (tab === 'music' && Social.loadMusicTab) void Social.loadMusicTab();
+        if (tab === 'profile' && Social.reloadOpenProfileTab) void Social.reloadOpenProfileTab();
         if (Social.refreshActivityBadge) void Social.refreshActivityBadge();
       }
     } catch {}

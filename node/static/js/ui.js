@@ -2396,9 +2396,18 @@ let _networkAutoSelectBusy = false;
 let _networkResyncBusy = false;
 let _networkResyncCooldownUntil = 0;
 let _networkSyncListenerBound = false;
+let _networkTabLoadSeq = 0;
+let _networkTabLoading = false;
+let _networkPaneBuilt = false;
+let _networkSyncStatusFetchedAt = 0;
+let _networkVerifyBuildBusy = false;
+let _networkSyncDetailsBusy = false;
+let _networkSyncDetailsCooldownUntil = 0;
+const _NETWORK_SYNC_DETAILS_COOLDOWN_MS = 2000;
 const _NETWORK_PROBE_COOLDOWN_MS = 8000;
 const _NETWORK_PROBE_CACHE_MS = 120000;
 const _NETWORK_RESYNC_COOLDOWN_MS = 15000;
+const _NETWORK_SYNC_STATUS_CACHE_MS = 12000;
 const _DESKTOP_CLOSE_TO_TRAY_LS_KEY = 'frogtalk-desktop-close-to-tray';
 
 function _isDesktopSettingsRuntime() {
@@ -2498,6 +2507,7 @@ async function _loadDesktopAppSettingsIntoProfile() {
 function ensureNetworkPaneContent() {
   const pane = document.getElementById('set-pane-network');
   if (!pane) return;
+  if (_networkPaneBuilt && document.getElementById('network-mode')) return;
 
   pane.innerHTML = `
     <div style="font-size:13px;color:#4caf50;font-weight:600;margin-bottom:8px">🌐 Network Settings</div>
@@ -2570,6 +2580,95 @@ function ensureNetworkPaneContent() {
     </div>
     <div style="margin-top:6px;font-size:11px;color:#687d74">This saves only Network tab options. The modal "Save" button still saves your account/profile settings.</div>
   `;
+  _networkPaneBuilt = true;
+}
+
+function _networkSyncPanelSkeletonHtml() {
+  return `
+    <div style="font-size:12px;color:#9bd6ab;font-weight:700;margin-bottom:6px">Account sync</div>
+    <div style="color:#8da59b;font-size:11px;line-height:1.45">Loading sync status…</div>
+    <div style="margin-top:10px;height:8px;border-radius:4px;background:rgba(255,255,255,.06);overflow:hidden">
+      <div style="height:100%;width:40%;border-radius:4px;background:linear-gradient(90deg,rgba(76,175,80,.15),rgba(76,175,80,.45),rgba(76,175,80,.15));animation:ftSkel 1.1s ease-in-out infinite"></div>
+    </div>`;
+}
+
+function _networkServersListIdleHtml(message) {
+  const msg = message || 'Loading node list…';
+  return `<div style="color:#8da59b;font-size:12px;text-align:center;padding:14px 8px">${msg}</div>`;
+}
+
+function _applyNetworkFormFromStorage() {
+  const modeEl = document.getElementById('network-mode');
+  const onionEl = document.getElementById('network-prefer-onion');
+  const customEl = document.getElementById('network-custom-url');
+  if (!modeEl || !onionEl || !customEl) return;
+  modeEl.value = localStorage.getItem('ft_network_mode') || 'auto';
+  onionEl.checked = localStorage.getItem('ft_network_prefer_onion') === '1';
+  customEl.value = localStorage.getItem('ft_network_custom_url') || OFFICIAL_NETWORK_INPUT;
+  if (!onionEl.dataset.bound) {
+    onionEl.addEventListener('change', () => {
+      saveNetworkSettings(true);
+      handleNetworkPreferOnionChange(true);
+    });
+    onionEl.dataset.bound = '1';
+  }
+}
+
+function _paintNetworkTabInstant() {
+  _applyNetworkFormFromStorage();
+  const syncPanel = document.getElementById('network-account-sync-panel');
+  if (syncPanel) {
+    const st = (window.App && App.federationSyncState) ? App.federationSyncState
+      : (window.__ftFederationSync || {});
+    if (st && (st.in_progress || st.done || st.error || st.hint)) {
+      _renderNetworkAccountSyncPanel(st, { loading: _networkTabLoading });
+    } else {
+      syncPanel.innerHTML = _networkSyncPanelSkeletonHtml();
+    }
+  }
+  const buildEl = document.getElementById('network-build-local');
+  if (buildEl && !_networkLocalBuildInfo) {
+    buildEl.textContent = 'Loading build info…';
+  }
+  const saved = localStorage.getItem('ft_network_selected') || '';
+  if (_networkHydrateProbeFromCache()) {
+    _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved)
+      || _networkProbeResults.find(s => s.healthy)
+      || _networkProbeResults[0]
+      || null;
+    _renderNetworkServersList();
+    _renderNetworkSelection();
+    _updateNetworkProbeHint();
+  } else {
+    const list = document.getElementById('network-servers-list');
+    if (list) list.innerHTML = _networkServersListIdleHtml('Loading node list…');
+  }
+  _updateNetworkActionButtons();
+}
+
+async function loadNetworkTab() {
+  const seq = ++_networkTabLoadSeq;
+  _networkTabLoading = true;
+  ensureNetworkPaneContent();
+  _paintNetworkTabInstant();
+  _updateNetworkActionButtons();
+  try {
+    await Promise.all([
+      _loadNetworkSettingsAsync(seq),
+      refreshNetworkAccountSyncPanel({ seq, allowFetch: true }),
+    ]);
+    if (seq !== _networkTabLoadSeq) return;
+    void loadLocalBuildIntegrity();
+  } finally {
+    if (seq === _networkTabLoadSeq) {
+      _networkTabLoading = false;
+      const st = (window.App && App.federationSyncState) ? App.federationSyncState
+        : (window.__ftFederationSync || {});
+      if (document.getElementById('network-account-sync-panel')) {
+        _renderNetworkAccountSyncPanel(st, { loading: false });
+      }
+    }
+  }
 }
 
 function switchSettingsTab(tab) {
@@ -2607,13 +2706,10 @@ function switchSettingsTab(tab) {
   if (tab === 'dev') { loadApiKeys(); loadBots(); }
   // Load social stats
   if (tab === 'social') loadSocialStats();
-  // Load network settings and latest health checks
+  // Network tab: one guarded loader (instant cache paint, then background fetch).
   if (tab === 'network') {
-    // Rebuild every time in case stale/corrupted DOM or conflicting CSS hid controls.
-    ensureNetworkPaneContent();
-    loadNetworkSettings();
-    loadLocalBuildIntegrity();
-    void refreshNetworkAccountSyncPanel();
+    if (_networkTabLoading) return;
+    void loadNetworkTab();
   }
   if (tab === 'application') {
     _loadDesktopAppSettingsIntoProfile();
@@ -2845,8 +2941,15 @@ async function loadLocalBuildIntegrity() {
 }
 
 async function verifyNetworkBuildIntegrity() {
+  if (_networkVerifyBuildBusy || _networkProbeLoading) {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Wait for the current network check to finish.', 'info', 3000);
+    }
+    return;
+  }
+  _networkVerifyBuildBusy = true;
   if (!_networkProbeResults.length) {
-    await refreshNetworkServers();
+    await refreshNetworkServers({ manual: true });
   }
   const summaryEl = document.getElementById('network-trust-summary');
   if (summaryEl) summaryEl.textContent = 'Verifying peer build hashes...';
@@ -2875,6 +2978,8 @@ async function verifyNetworkBuildIntegrity() {
   } catch {
     if (summaryEl) summaryEl.textContent = 'Verification failed due to network error.';
     UI.showToast('Build verification failed', 'error');
+  } finally {
+    _networkVerifyBuildBusy = false;
   }
 }
 
@@ -2992,24 +3097,14 @@ function _networkSyncSummaryLine(st) {
   return parts.join(' · ');
 }
 
-async function refreshNetworkAccountSyncPanel() {
+function _renderNetworkAccountSyncPanel(st, opts) {
   const panel = document.getElementById('network-account-sync-panel');
   if (!panel) return;
+  const options = opts || {};
+  const loading = !!options.loading;
   const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
   const here = String(window.location.origin || '').replace(/\/$/, '');
   const home = _networkSyncSourceLabel();
-  let st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
-  if (!atHome && State.token) {
-    try {
-      const res = await fetch('/api/auth/federation-sync-status', {
-        headers: { 'X-Session-Token': State.token },
-      });
-      if (res.ok) {
-        st = await res.json().catch(() => st);
-        if (typeof App !== 'undefined' && App.applyFederationSyncMeta) App.applyFederationSyncMeta(st);
-      }
-    } catch {}
-  }
   const esc = (t) => (typeof UI !== 'undefined' && UI.escHtml) ? UI.escHtml(t) : String(t || '');
   if (atHome) {
     panel.innerHTML = `
@@ -3023,18 +3118,25 @@ async function refreshNetworkAccountSyncPanel() {
     _renderNetworkSyncState(st);
     return;
   }
-  const inProgress = !!st.in_progress;
+  const inProgress = !!st.in_progress || loading;
   const err = String(st.error || '').trim();
   const summary = _networkSyncSummaryLine(st);
   const socialPending = Number(st.social_posts_total || 0) > Number(st.social_posts_imported || 0);
+  const fullyComplete = _networkSyncFullyComplete(st);
   let statusHtml = '';
-  if (inProgress) {
+  if (loading && !st.done && !st.in_progress && !err) {
+    statusHtml = `<div style="color:#8da59b;font-size:11px;line-height:1.4">Checking sync status with server…</div>`;
+  } else if (inProgress && st.in_progress) {
     statusHtml = window.FtSync && FtSync.renderInline
       ? FtSync.renderInline(st, { compact: false, fallback: 'Syncing from your home node…' })
       : `<div style="color:#8da59b;font-size:11px">⏳ ${esc(st.hint || 'Syncing…')}</div>`;
   } else if (err) {
     const hint = _networkSyncErrorHint(err);
     statusHtml = `<div style="color:#e8a0a0;font-size:11px;line-height:1.4">⚠ ${esc(hint || err.slice(0, 200))}</div>`;
+  } else if (fullyComplete && summary) {
+    const when = _networkSyncRelativeTime(st.finished_at);
+    const whenTxt = when ? ` (${when})` : '';
+    statusHtml = `<div style="color:#7fd6a2;font-size:11px;line-height:1.4">✓ Fully synced${whenTxt}: ${esc(summary)}</div>`;
   } else if (st.done && summary) {
     const when = _networkSyncRelativeTime(st.finished_at);
     const whenTxt = when ? ` (${when})` : '';
@@ -3047,6 +3149,14 @@ async function refreshNetworkAccountSyncPanel() {
   const homeLine = home
     ? `<div style="font-size:11px;color:#6f8e77;margin-top:6px">Home: <span style="color:#9ec59e">${esc(home)}</span> · Now: <span style="color:#9ec59e">${esc(here.replace(/^https?:\/\//, ''))}</span></div>`
     : `<div style="font-size:11px;color:#f6d27a;margin-top:6px">Home node URL unknown — switch nodes from login or set sync source, then re-sync.</div>`;
+  const resyncDisabled = inProgress && st.in_progress;
+  const resyncLabel = (st.in_progress || (loading && !fullyComplete))
+    ? 'Syncing…'
+    : (fullyComplete && !socialPending ? '✓ Up to date' : '↻ Re-sync from home');
+  const resyncStyle = (fullyComplete && !socialPending && !st.in_progress)
+    ? 'padding:8px 12px;min-width:148px;opacity:0.92'
+    : 'padding:8px 12px;min-width:148px';
+  const resyncClass = (fullyComplete && !socialPending && !st.in_progress) ? 'modal-btn secondary' : 'modal-btn primary';
   panel.innerHTML = `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
       <div style="flex:1;min-width:200px">
@@ -3055,10 +3165,48 @@ async function refreshNetworkAccountSyncPanel() {
         ${homeLine}
       </div>
       <div style="display:flex;flex-direction:column;gap:11px;flex-shrink:0;margin-top:2px">
-        <button class="modal-btn primary" type="button" onclick="networkResyncFromHome()" style="padding:8px 12px;min-width:148px" ${inProgress ? 'disabled' : ''}>↻ Re-sync from home</button>
+        <button id="network-resync-btn" class="${resyncClass}" type="button" onclick="networkResyncFromHome()" style="${resyncStyle}" ${resyncDisabled ? 'disabled' : ''}>${resyncLabel}</button>
         <button class="modal-btn secondary" type="button" onclick="networkOpenSyncDetails()" style="padding:8px 10px;min-width:148px;margin-top:2px">More info</button>
       </div>
     </div>`;
+  _renderNetworkSyncState(st);
+}
+
+async function refreshNetworkAccountSyncPanel(opts) {
+  const options = opts || {};
+  const seq = options.seq;
+  const panel = document.getElementById('network-account-sync-panel');
+  if (!panel) return;
+  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
+  let st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
+  _renderNetworkAccountSyncPanel(st, { loading: false });
+
+  const allowFetch = options.allowFetch !== false;
+  const forceFetch = !!options.forceFetch;
+  const cacheFresh = (Date.now() - _networkSyncStatusFetchedAt) < _NETWORK_SYNC_STATUS_CACHE_MS;
+  if (atHome || !State.token || (!allowFetch && !forceFetch)) {
+    _renderNetworkSyncState(st);
+    return;
+  }
+  if (!forceFetch && cacheFresh && (st.done || st.in_progress || st.error)) {
+    _renderNetworkSyncState(st);
+    return;
+  }
+
+  _renderNetworkAccountSyncPanel(st, { loading: true });
+  try {
+    const res = await fetch('/api/auth/federation-sync-status', {
+      headers: { 'X-Session-Token': State.token },
+    });
+    if (seq != null && seq !== _networkTabLoadSeq) return;
+    if (res.ok) {
+      st = await res.json().catch(() => st);
+      _networkSyncStatusFetchedAt = Date.now();
+      if (typeof App !== 'undefined' && App.applyFederationSyncMeta) App.applyFederationSyncMeta(st);
+    }
+  } catch {}
+  if (seq != null && seq !== _networkTabLoadSeq) return;
+  _renderNetworkAccountSyncPanel(st, { loading: false });
   _renderNetworkSyncState(st);
 }
 
@@ -3092,12 +3240,28 @@ async function networkResyncFromHome() {
     }
     return;
   }
+  const stNow = (App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
+  if (_networkSyncFullyComplete(stNow)) {
+    const btn = document.getElementById('network-resync-btn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '✓ Up to date';
+    }
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Already fully synced with your home node.', 'info', 4500);
+    }
+    void refreshNetworkAccountSyncPanel({ forceFetch: true });
+    return;
+  }
+  const btn = document.getElementById('network-resync-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Starting…';
+  }
   _networkResyncBusy = true;
   _networkResyncCooldownUntil = now + _NETWORK_RESYNC_COOLDOWN_MS;
   try {
-    const wasComplete = _networkSyncFullyComplete(
-      (App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {})
-    );
+    const wasComplete = _networkSyncFullyComplete(stNow);
     const ok = await App.forceFederationResync();
     if (ok) {
       if (typeof App.startFederationSyncWatcher === 'function') App.startFederationSyncWatcher();
@@ -3115,7 +3279,7 @@ async function networkResyncFromHome() {
   } finally {
     _networkResyncBusy = false;
   }
-  await refreshNetworkAccountSyncPanel();
+  await refreshNetworkAccountSyncPanel({ forceFetch: true });
 }
 
 async function networkRepinAccountHome() {
@@ -3131,17 +3295,33 @@ async function networkClearHomePin() {
 }
 
 async function networkOpenSyncDetails() {
-  let st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
-  if (!App.isAtHomeNode || !App.isAtHomeNode()) {
-    await refreshNetworkAccountSyncPanel();
-    st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
+  const now = Date.now();
+  if (_networkSyncDetailsBusy) {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Opening sync details…', 'info', 2200);
+    }
+    return;
   }
+  if (now < _networkSyncDetailsCooldownUntil) {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Please wait a moment before opening again.', 'info', 2200);
+    }
+    return;
+  }
+  _networkSyncDetailsBusy = true;
+  _networkSyncDetailsCooldownUntil = now + _NETWORK_SYNC_DETAILS_COOLDOWN_MS;
+
+  let st = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
+  const atHome = (typeof App !== 'undefined' && App.isAtHomeNode && App.isAtHomeNode());
+  const cacheFresh = (Date.now() - _networkSyncStatusFetchedAt) < _NETWORK_SYNC_STATUS_CACHE_MS;
+
   try { closeModal('modal-settings'); } catch {}
   if (typeof App !== 'undefined' && App.applyFederationSyncMeta) App.applyFederationSyncMeta(st);
   if (typeof App !== 'undefined' && App.openSyncOverlay) {
     App.openSyncOverlay();
     if (typeof App._refreshSyncOverlay === 'function') App._refreshSyncOverlay();
   }
+
   if (_networkSyncFullyComplete(st) && typeof UI !== 'undefined' && UI.showToast) {
     const summary = _networkSyncSummaryLine(st);
     const when = _networkSyncRelativeTime(st.finished_at);
@@ -3150,11 +3330,22 @@ async function networkOpenSyncDetails() {
         ? `Fully synced${when ? ' ' + when : ''}: ${summary}`
         : 'Fully synced with your home node.',
       'success',
-      8000
+      6000
     );
   } else if (st.in_progress && typeof UI !== 'undefined' && UI.showToast) {
-    UI.showToast(String(st.hint || 'Sync in progress…'), 'info', 5000);
+    UI.showToast(String(st.hint || 'Sync in progress…'), 'info', 4500);
+  } else if (!atHome && !cacheFresh && State.token) {
+    if (typeof UI !== 'undefined' && UI.showToast) {
+      UI.showToast('Refreshing sync status…', 'info', 2800);
+    }
+    void refreshNetworkAccountSyncPanel({ forceFetch: true }).then(() => {
+      const fresh = (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {});
+      if (typeof App !== 'undefined' && App.applyFederationSyncMeta) App.applyFederationSyncMeta(fresh);
+      if (typeof App._refreshSyncOverlay === 'function') App._refreshSyncOverlay();
+    });
   }
+
+  _networkSyncDetailsBusy = false;
 }
 
 function _renderNetworkSyncState(state) {
@@ -3871,58 +4062,56 @@ async function connectToSelectedServer() {
   }
 }
 
-async function loadNetworkSettings() {
-  const modeEl = document.getElementById('network-mode');
-  const onionEl = document.getElementById('network-prefer-onion');
-  const customEl = document.getElementById('network-custom-url');
-  if (!modeEl || !onionEl || !customEl) return;
-  modeEl.value = localStorage.getItem('ft_network_mode') || 'auto';
-  onionEl.checked = localStorage.getItem('ft_network_prefer_onion') === '1';
-  customEl.value = localStorage.getItem('ft_network_custom_url') || OFFICIAL_NETWORK_INPUT;
-  if (!onionEl.dataset.bound) {
-    onionEl.addEventListener('change', () => {
-      saveNetworkSettings(true);
-      handleNetworkPreferOnionChange(true);
-    });
-    onionEl.dataset.bound = '1';
-  }
-  _networkSelectedServer = null;
-  await _loadCurrentNetworkStatus();
-  const currentServer = _networkCurrentServerEntry();
-  _networkProbeResults = currentServer ? [currentServer] : [];
-  _networkSelectedServer = _networkProbeResults[0] || null;
-  _renderNetworkServersList();
-  _renderNetworkSelection();
-  _renderNetworkSyncState();
-  _renderNetworkBuildHeader();
+async function _loadNetworkSettingsAsync(seq) {
+  if (seq !== _networkTabLoadSeq) return;
+  _applyNetworkFormFromStorage();
   if (!_networkSyncListenerBound) {
     window.addEventListener('ft:federation-sync', (ev) => {
       const detail = (ev && ev.detail) ? ev.detail : {};
       _renderNetworkSyncState(detail);
       if (document.getElementById('network-account-sync-panel')) {
-        void refreshNetworkAccountSyncPanel();
+        _renderNetworkAccountSyncPanel(detail, { loading: false });
       }
     });
     _networkSyncListenerBound = true;
   }
-  void refreshNetworkAccountSyncPanel();
-  const saved = localStorage.getItem('ft_network_selected') || '';
-  if (_networkHydrateProbeFromCache()) {
-    _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved)
-      || _networkProbeResults.find(s => s.healthy)
-      || _networkProbeResults[0]
-      || _networkSelectedServer;
+  await _loadCurrentNetworkStatus();
+  if (seq !== _networkTabLoadSeq) return;
+  const currentServer = _networkCurrentServerEntry();
+  if (!_networkHydrateProbeFromCache()) {
+    _networkProbeResults = currentServer ? [currentServer] : [];
+    _networkSelectedServer = _networkProbeResults[0] || null;
     _renderNetworkServersList();
     _renderNetworkSelection();
-    _updateNetworkProbeHint();
-    _updateNetworkActionButtons();
-  } else {
-    await refreshNetworkServers({ quiet: true });
-    _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved)
-      || _networkSelectedServer;
-    _renderNetworkServersList();
-    _renderNetworkSelection();
+  } else if (currentServer) {
+    const connectedBase = _getConnectedServerBaseUrl();
+    if (connectedBase && !_networkProbeResults.some(s => _preferredNetworkUrl(s) === connectedBase)) {
+      _networkProbeResults.unshift(currentServer);
+    }
   }
+  _renderNetworkSelection();
+  _renderNetworkSyncState(
+    (window.App && App.federationSyncState) ? App.federationSyncState : (window.__ftFederationSync || {})
+  );
+  const saved = localStorage.getItem('ft_network_selected') || '';
+  _networkSelectedServer = _networkProbeResults.find(s => _normalizeNetworkUrl(s.onion_url || s.base_url || '') === saved)
+    || _networkProbeResults.find(s => s.healthy)
+    || _networkProbeResults[0]
+    || _networkSelectedServer;
+  _renderNetworkServersList();
+  _renderNetworkSelection();
+  _updateNetworkProbeHint();
+  _updateNetworkActionButtons();
+  if (!_networkHydrateProbeFromCache() && seq === _networkTabLoadSeq) {
+    void refreshNetworkServers({ quiet: true });
+  } else if (_networkProbeCacheAgeMs() != null && _networkProbeCacheAgeMs() > _NETWORK_PROBE_CACHE_MS && seq === _networkTabLoadSeq) {
+    void refreshNetworkServers({ quiet: true });
+  }
+}
+
+/** @deprecated Use loadNetworkTab — kept for any external callers */
+async function loadNetworkSettings() {
+  await loadNetworkTab();
 }
 
 async function loadBlockedUsers() {

@@ -207,6 +207,8 @@ _SYNC_EXPORT_HISTORY_TOTAL_ROOMS = 60
 _SYNC_EXPORT_DM_HISTORY_PER_CHANNEL = 60
 _SYNC_EXPORT_DM_HISTORY_TOTAL_CHANNELS = 40
 _SYNC_EXPORT_MEMBER_ROOM_LIMIT = 40
+_SYNC_EXPORT_REPOST_LIMIT = 500
+_SYNC_MAX_IN_PROGRESS_SEC = 7200
 _SYNC_EXPORT_MEMBERS_PER_ROOM = 120
 
 _sync_state_lock = _threading.Lock()
@@ -909,7 +911,8 @@ def _sync_state_set(user_id: int, patch: dict) -> None:
         if _sync_persist_enabled() and not cur:
             cur = dict(db.get_user_federation_sync_state(uid) or {})
         cur.update(patch or {})
-        cur["updated_at"] = now
+        if "updated_at" not in (patch or {}):
+            cur["updated_at"] = now
         if "started_at" not in cur or not int(cur.get("started_at") or 0):
             cur["started_at"] = now
         src = str(cur.get("source_base") or cur.get("source_public_url") or "").strip()
@@ -937,6 +940,46 @@ _SYNC_PHASES = (
 )
 
 
+def _sync_max_in_progress_sec() -> int:
+    try:
+        return max(300, int(os.getenv("FROGTALK_SYNC_MAX_IN_PROGRESS_SEC", str(_SYNC_MAX_IN_PROGRESS_SEC)) or _SYNC_MAX_IN_PROGRESS_SEC))
+    except Exception:
+        return _SYNC_MAX_IN_PROGRESS_SEC
+
+
+def _normalize_sync_state(uid: int, cur: dict) -> dict:
+    """Repair stuck or inconsistent federation sync state before exposing it to clients."""
+    if not cur or uid <= 0:
+        return cur or {}
+    out = dict(cur)
+    changed = False
+    if out.get("done") and out.get("in_progress"):
+        out["in_progress"] = False
+        out["progress_pct"] = 100
+        out["phase"] = str(out.get("phase") or "done")[:64]
+        changed = True
+    if out.get("in_progress"):
+        now = int(time.time())
+        ref = int(out.get("updated_at") or out.get("started_at") or 0)
+        if ref > 0 and (now - ref) > _sync_max_in_progress_sec():
+            out["in_progress"] = False
+            out["done"] = True
+            out["progress_pct"] = 100
+            out["phase"] = "done"
+            if not str(out.get("error") or "").strip():
+                out["error"] = "Sync timed out on this node — tap Re-sync to try again."
+            out["hint"] = "Sync timed out — re-sync from your home node."
+            out["finished_at"] = now
+            changed = True
+    elif out.get("done") and not str(out.get("error") or "").strip():
+        if int(out.get("progress_pct") or 0) < 100:
+            out["progress_pct"] = 100
+            changed = True
+    if changed:
+        _sync_state_set(uid, out)
+    return out
+
+
 def _sync_state_get(user_id: int) -> dict:
     uid = int(user_id or 0)
     if uid <= 0:
@@ -953,6 +996,7 @@ def _sync_state_get(user_id: int) -> dict:
             cur = {}
     if not cur:
         return {"in_progress": False, "done": False, "progress_pct": 0, "phases": []}
+    cur = _normalize_sync_state(uid, cur)
     if "progress_pct" not in cur:
         cur["progress_pct"] = 100 if cur.get("done") else (50 if cur.get("in_progress") else 0)
     counters = dict(cur.get("counters") or {})
@@ -1570,7 +1614,7 @@ def _export_social_post_rows(
         author_nick = str(author.get("nickname") or post.get("nickname") or "").strip()
         if not author_nick or not _GID_RE.match(author_gid):
             continue
-        post_gid, post_origin = db.register_local_wall_post_global_id(post_id)
+        post_gid, post_origin = db.ensure_federation_wall_post_global_id(post_id)
         post_gid = str(post_gid or "").strip()
         if not post_gid or post_gid in seen_post_gids:
             continue
@@ -1632,6 +1676,74 @@ def _export_social_post_rows(
                 continue
         social_posts.append(item)
     return social_posts, social_posts_omitted_at_export
+
+
+def _export_sync_reposts(uid: int, source_server_id: str) -> list[dict]:
+    """Export the user's repost list keyed by federated post global ids."""
+    out: list[dict] = []
+    try:
+        with db._conn() as con:
+            rows = con.execute(
+                """
+                SELECT wr.post_id, wr.quote_text, wr.created_at
+                FROM wall_reposts wr
+                WHERE wr.user_id=?
+                ORDER BY wr.created_at DESC
+                LIMIT ?
+                """,
+                (int(uid), _SYNC_EXPORT_REPOST_LIMIT),
+            ).fetchall()
+    except Exception:
+        return out
+    for row in rows or []:
+        try:
+            post_id = int(row["post_id"] or 0)
+        except Exception:
+            continue
+        if post_id <= 0:
+            continue
+        post_gid, post_origin = db.ensure_federation_wall_post_global_id(post_id)
+        post_gid = str(post_gid or "").strip()
+        if not post_gid or not _GID_RE.match(post_gid):
+            continue
+        post_origin_sid = str(post_origin or source_server_id or "").strip()
+        if not post_origin_sid:
+            continue
+        quote = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(row["quote_text"] or ""))[:500]
+        out.append({
+            "global_post_id": post_gid,
+            "origin_server_id": post_origin_sid,
+            "quote": quote,
+            "created_at": str(row["created_at"] or "")[:64],
+        })
+    return out
+
+
+def _apply_sync_reposts(
+    uid: int,
+    reposts: list,
+    *,
+    default_origin: str,
+) -> int:
+    """Import repost rows after wall posts are materialized on the travel node."""
+    linked = 0
+    for raw in reposts[:_SYNC_EXPORT_REPOST_LIMIT]:
+        if not isinstance(raw, dict):
+            continue
+        post_gid = str(raw.get("global_post_id") or "").strip()
+        origin = str(raw.get("origin_server_id") or default_origin or "").strip()
+        if not post_gid or not origin or not _GID_RE.match(post_gid):
+            continue
+        local_post = db.resolve_federation_wall_local_id(origin, "post", post_gid)
+        if not local_post:
+            continue
+        quote = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", str(raw.get("quote") or ""))[:500] or None
+        try:
+            if db.ensure_wall_repost(int(local_post), uid, quote_text=quote):
+                linked += 1
+        except Exception:
+            continue
+    return linked
 
 
 def _ordered_sync_social_post_ids(uid: int) -> list[int]:
@@ -2016,6 +2128,7 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
     social_posts, social_posts_omitted_at_export = _export_social_post_rows(
         uid, page_post_ids, source_server_id, my_gid,
     )
+    wall_reposts = _export_sync_reposts(uid, source_server_id)
 
     # Recent room history per joined room. We export plain message rows
     # without media_data — the destination node lazy-loads media on demand
@@ -2197,6 +2310,8 @@ def _build_sync_export_for_user(user_id: int, *, social_posts_cursor: str = "") 
         "social_posts_has_more": social_posts_has_more,
         "social_posts_next_cursor": social_posts_next_cursor,
         "social_posts_total": len(ordered_post_ids),
+        "wall_reposts": wall_reposts,
+        "wall_reposts_total": len(wall_reposts),
         "self_profile": self_profile,
         "push_tokens": push_tokens,
         "source_server_id": source_server_id,
@@ -2320,6 +2435,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     room_histories_in = payload.get("room_histories")
     dm_histories_in = payload.get("dm_histories")
     member_snaps_in = payload.get("room_member_snapshots")
+    reposts_in = payload.get("wall_reposts")
     rooms = rooms_in if isinstance(rooms_in, list) else []
     public_rooms = public_rooms_in if isinstance(public_rooms_in, list) else []
     dm_peers = dm_in if isinstance(dm_in, list) else []
@@ -2331,6 +2447,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     room_histories = room_histories_in if isinstance(room_histories_in, list) else []
     dm_histories = dm_histories_in if isinstance(dm_histories_in, list) else []
     member_snaps = member_snaps_in if isinstance(member_snaps_in, list) else []
+    wall_reposts = reposts_in if isinstance(reposts_in, list) else []
 
     ident = db.get_or_create_local_server_identity() or {}
     local_sid = str(ident.get("server_id") or "").strip()
@@ -2956,6 +3073,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
     except Exception:
         pass
 
+    reposts_linked = 0
+    if wall_reposts:
+        reposts_linked = _apply_sync_reposts(uid, wall_reposts, default_origin=source_server_id)
+
     # ── Recent chat history backfill ──────────────────────────────────
     # Apply room-history snapshots from the source node. We deliberately
     # do this after rooms are joined so user_can_access_room evaluates
@@ -3194,6 +3315,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict, *, fetch_origin: str 
         "social_posts_total": n_social,
         "social_posts_skipped": social_posts_skipped,
         "social_posts_omitted_at_export": social_posts_omitted_at_export,
+        "reposts_linked": reposts_linked,
         "history_messages_applied": history_messages_applied,
         "dm_history_messages_applied": dm_history_messages_applied,
         "members_snapshots_applied": members_snapshots_applied,
@@ -4011,6 +4133,9 @@ async def _sync_user_from_peer_gid(user_id: int, source_base: str, global_user_i
             "in_progress": False,
             "done": True,
             "error": str(e)[:200],
+            "progress_pct": 100,
+            "phase": "done",
+            "hint": "Sync failed",
             "finished_at": int(time.time()),
             "rooms_joined": 0,
             "rooms_missing": 0,
@@ -4055,6 +4180,9 @@ async def _sync_user_from_peer_session(user_id: int, source_base: str, remote_to
             "in_progress": False,
             "done": True,
             "error": str(e)[:200],
+            "progress_pct": 100,
+            "phase": "done",
+            "hint": "Sync failed",
             "finished_at": int(time.time()),
             "rooms_joined": 0,
             "rooms_missing": 0,
@@ -4099,6 +4227,9 @@ async def _sync_user_from_peer_ticket(user_id: int, source_base: str, ticket: st
             "in_progress": False,
             "done": True,
             "error": str(e)[:200],
+            "progress_pct": 100,
+            "phase": "done",
+            "hint": "Sync failed",
             "finished_at": int(time.time()),
             "rooms_joined": 0,
             "rooms_missing": 0,
