@@ -107,7 +107,25 @@ GET    /api/federation/profile-card</code></pre>
           capped app notification sounds (stored server-side; included in sync).
           <code>GET /api/federation/profile-card?nickname=&amp;ft_gid=</code> returns a federated user
           card (sanitized <code>custom_style</code> only; raw <code>custom_css</code> is self-only;
-          optional wall when subject is at home).</p>
+          optional wall when subject is at home). Peer export endpoints
+          (<code>federation-sync-export-gid</code>, <code>-ticket</code>, <code>-profile-gid</code>,
+          <code>-memberships-gid</code>) accept <strong>dual federation auth</strong>: legacy
+          <code>X-Federation-Token</code> and/or per-peer Ed25519 signed HTTP headers (same as
+          <code>POST /federation/events/inbox</code>). Imports verify
+          <code>export_sig_b64</code> against the pinned home <code>server_pubkey</code> when
+          <code>FROGTALK_SYNC_REQUIRE_EXPORT_SIG=1</code> (default).</p>
+<pre><code>PATCH /api/auth/client-prefs
+{
+  "prefer_onion": true,
+  "preferred_node_url": "https://frogtalk.xyz",
+  "custom_sounds": {
+    "app:msg": "data:audio/wav;base64,…",
+    "app:ring": "data:audio/wav;base64,…"
+  }
+}</code></pre>
+          <p class="muted"><code>GET /api/auth/me</code> returns <code>client_prefs</code> and
+          <code>custom_style</code> (self only: <code>custom_css</code> editor blob). Sound URLs are
+          capped server-side; included in account sync <code>self_profile.client_prefs</code>.</p>
         </article>
 
         <article class="panel" id="users">
@@ -193,7 +211,14 @@ GET    /api/dms/{channel_id}/disappear
 POST   /api/dms/{channel_id}/disappear
 POST   /api/dms/{channel_id}/hide
 POST   /api/dms/{channel_id}/unhide
+POST   /api/dms/{channel_id}/forwarding
 DELETE /api/dms/{channel_id}/messages</code></pre>
+          <p class="muted"><code>PATCH /api/rooms/{room_name}</code> accepts moderation fields including
+          <code>slowmode</code>, <code>invite_only</code>, <code>who_can_invite</code>,
+          <code>forwarding_disabled</code> (0/1), <code>channel_theme</code> (sanitized JSON), banner,
+          and about. Joined-room settings replicate on account sync. DM
+          <code>POST …/forwarding</code> body: <code>{"disabled": true}</code> — synced per peer via
+          <code>dm_peers[]</code> in export.</p>
         </article>
 
         <article class="panel" id="media">
@@ -541,7 +566,9 @@ POST   /api/external/dms/{user_id}
 POST   /api/external/webhooks</code></pre>
           <pre><code>curl -X GET https://frogtalk.xyz/api/external/me \
   -H "X-API-Key: frog_your_key_here"</code></pre>
-          <p class="muted"><strong>Bot keys only:</strong> <code>GET /api/external/me/channels</code> returns the list of channels the bot has been installed in (via Settings → Bots → Add to channel). Auto-discovery clients should poll this every ~30s instead of hardcoding a channel list.</p>
+          <p class="muted"><strong>Bot keys only:</strong> <code>GET /api/external/me/channels</code> returns the list of channels the bot has been installed in (via Settings → Bots → Add to channel). Auto-discovery clients should poll this every ~30s instead of hardcoding a channel list. Reference bots and setup guides live in the repo under
+          <a href="https://github.com/deadinternetfox/frogtalk/tree/master/bot-examples" target="_blank" rel="noopener noreferrer"><code>bot-examples/</code></a>
+          (see also <a href="#bot-examples">Examples</a> above).</p>
         </article>
 
         <article class="panel" id="bridge">

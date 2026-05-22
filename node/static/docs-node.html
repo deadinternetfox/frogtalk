@@ -132,12 +132,13 @@ sudo bash node/scripts/install.sh systemd -y --install-dir /opt/frogtalk</code><
 
     <section class="step" id="account-sync">
       <h2>Account sync (visiting another node)</h2>
-      <p class="hint">Users who log in on a <strong>community node</strong> (not their home) can import channels (including room themes), DMs, friends, profile theme/CSS, and FrogSocial posts from their home server under <strong>Settings → Network → Re-sync from home</strong>. Sync is automatic on login when incomplete. Federated directory channels can be joined with <strong>Join</strong> without a prior sync row (metadata from the index only).</p>
+      <p class="hint">Users who log in on a <strong>community node</strong> (not their home) can import joined channel settings (themes, slowmode, forwarding lock), DM thread prefs, friends/following, profile theme/CSS, client prefs (Tor, sounds), and FrogSocial posts from their home server under <strong>Settings → Network → Re-sync from home</strong>. Sync is automatic on login when incomplete. Exports are Ed25519-signed by the home node and verified on import. Federated directory channels can be joined with <strong>Join</strong> without a prior sync row (metadata from the index only).</p>
       <pre><code># Optional tuning in /opt/frogtalk/.env (defaults keep features on)
 FROGTALK_SYNC_PERSIST=1
 FROGTALK_SYNC_BIND_HOME=1
 FROGTALK_SYNC_VERIFY_EXPORT=1
 FROGTALK_SYNC_SIGN_EXPORT=1
+FROGTALK_SYNC_REQUIRE_EXPORT_SIG=1
 FROGTALK_SYNC_LOGIN_RESUME=1
 FROGTALK_SYNC_PAGINATION=1
 # FROGTALK_SYNC_STALE_HOURS=24</code></pre>
