@@ -4076,11 +4076,13 @@ async function searchDirectory() {
       el.style.opacity = '';
       const emptyHint = syncSparse
         ? 'Federation sync is still importing channels. Hold on for a moment.'
-        : 'No channels match your search. Try a different category, or check back after your home node sync completes.';
+        : 'No channels match your search. Try a different category, or re-sync from your home node.';
+      const resyncBtn = syncSparse ? '' : `<button type="button" class="modal-btn primary" style="margin-top:14px" onclick="App.forceFederationResync()">↻ Re-sync from home node</button>`;
       el.innerHTML = `${banner}<div style="text-align:center;padding:40px">
         <div style="font-size:48px;margin-bottom:12px">🔍</div>
         <div style="color:#888;font-size:15px">No channels found</div>
         <div style="color:#555;font-size:12px;margin-top:4px">${esc(emptyHint)}</div>
+        ${resyncBtn}
       </div>`;
       return;
     }

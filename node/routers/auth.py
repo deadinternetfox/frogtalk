@@ -699,6 +699,12 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         source_server_id = str(ident.get("server_id") or "").strip()
     except Exception:
         source_server_id = ""
+    source_public_url = ""
+    try:
+        import os as _os_sync
+        source_public_url = str(_os_sync.environ.get("SITE_URL") or "").strip()[:256]
+    except Exception:
+        source_public_url = ""
 
     following: list[dict] = []
     for row in db.get_following_list(uid, limit=_SYNC_EXPORT_DM_LIMIT):
@@ -1095,6 +1101,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
                 "display_name": str(m.get("display_name") or "")[:64],
                 "avatar": str(m.get("avatar") or "")[:200_000],
                 "role": role,
+                "home_server_id": source_server_id,
             })
         if snap:
             room_member_snapshots.append({"room_name": name, "members": snap})
@@ -1114,6 +1121,7 @@ def _build_sync_export_for_user(user_id: int) -> dict:
         "self_profile": self_profile,
         "push_tokens": push_tokens,
         "source_server_id": source_server_id,
+        "source_public_url": source_public_url,
         "exported_at": int(time.time()),
     }
 
@@ -1154,6 +1162,8 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
     if source_server_id and source_server_id != local_sid:
         db.set_user_account_home_server_id(uid, source_server_id, force=True)
 
+    source_public_url = str(payload.get("source_public_url") or "").strip()[:256]
+
     rooms_joined = 0
     rooms_missing = 0
     dm_linked = 0
@@ -1176,6 +1186,11 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             nm = str(raw or "").strip().lower()
         if nm and _ROOM_NAME_RE.match(nm):
             keep_room_names.add(nm)
+
+    try:
+        db.prune_federation_sync_room_shells(keep_room_names)
+    except Exception:
+        pass
 
     rooms_pruned = 0
     try:
@@ -1328,6 +1343,14 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         # room for every public channel on the home node. Empty local copies
         # hide the federated index entry and make Discover look solo/empty.
         existing = db.get_room_by_name(name) if name in keep_room_names else None
+        stale_shell = db.get_room_by_name(name)
+        if stale_shell and name not in keep_room_names:
+            try:
+                fed_uid = int(db.get_or_create_federation_system_user())
+                if int(stale_shell.get("owner_id") or 0) == fed_uid and not int(stale_shell.get("is_public") or 0):
+                    existing = None
+            except Exception:
+                pass
         if name in keep_room_names and not existing:
             try:
                 owner = db.get_or_create_federation_system_user()
@@ -1338,17 +1361,28 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 existing = db.get_room_by_name(name)
             except Exception:
                 existing = None
-        elif existing and (icon or desc):
+        if existing or stale_shell:
             try:
-                patch = {}
-                if icon:
-                    patch["icon"] = icon
-                if desc:
-                    patch["description"] = desc
-                if patch:
-                    db.update_room_settings(name, **patch)
+                db.set_room_public(
+                    name,
+                    1,
+                    category=category,
+                    directory_description=directory_description,
+                    tags=tags_json,
+                )
             except Exception:
                 pass
+            if icon or desc:
+                try:
+                    patch = {}
+                    if icon:
+                        patch["icon"] = icon
+                    if desc:
+                        patch["description"] = desc
+                    if patch:
+                        db.update_room_settings(name, **patch)
+                except Exception:
+                    pass
         # Always update the federated channel index so the directory
         # shows synced channels with their real home node. Even if the
         # local `rooms` materialisation failed, the index still surfaces
@@ -1368,17 +1402,17 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                     member_count=member_count,
                     owner_nickname=owner_nickname,
                     owner_global_user_id=owner_gid,
+                    home_base_url=source_public_url,
                 )
             except Exception:
                 _log.debug("upsert_federation_channel_index failed name=%s", name, exc_info=True)
-        if not existing:
-            continue
-        # Directory rows mirror metadata only — do NOT auto-join every public room.
         if name in keep_room_names:
-            try:
-                db.join_room(uid, int(existing["id"]))
-            except Exception:
-                pass
+            join_room = existing or stale_shell or db.get_room_by_name(name)
+            if join_room:
+                try:
+                    db.join_room(uid, int(join_room["id"]))
+                except Exception:
+                    pass
         with _sync_state_lock:
             cur = dict(_federation_sync_state.get(uid) or {})
             ctr = dict(cur.get("counters") or {})
@@ -1758,6 +1792,13 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                 continue
         history_messages_applied += applied
         history_rooms_done += 1
+        try:
+            db.backfill_federation_room_members_from_messages(
+                rn,
+                home_server_id=source_server_id,
+            )
+        except Exception:
+            pass
         if history_rooms_done % 5 == 0:
             _sync_step(
                 "messages",
@@ -1859,6 +1900,10 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
             if applied_n > 0:
                 members_snapshots_applied += 1
                 members_done += 1
+            db.backfill_federation_room_members_from_messages(
+                rn,
+                home_server_id=source_server_id,
+            )
         except Exception:
             continue
         if members_done % 3 == 0:
@@ -2382,6 +2427,7 @@ class FederationSyncExportGidRequest(BaseModel):
 class FederationSyncResumeRequest(BaseModel):
     source_base: str | None = Field(default=None, max_length=512)
     ticket: str | None = Field(default=None, max_length=8192)
+    force: bool = False
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -2782,6 +2828,7 @@ async def _start_federation_sync_for_user(
     ticket: str = "",
     global_user_id: str = "",
     here_base: str = "",
+    force: bool = False,
 ) -> dict:
     uid = int(user_id or 0)
     if uid <= 0:
@@ -2798,7 +2845,7 @@ async def _start_federation_sync_for_user(
     cur = _sync_state_get(uid)
     if cur.get("in_progress"):
         return cur
-    if cur.get("done") and not str(cur.get("error") or "").strip():
+    if not force and cur.get("done") and not str(cur.get("error") or "").strip():
         if int(cur.get("rooms_joined") or 0) > 0 or int(cur.get("social_posts_imported") or 0) > 0:
             return cur
     with _sync_state_lock:
@@ -3082,10 +3129,45 @@ async def federation_sync_resume(
         ticket=str(body.ticket or ""),
         global_user_id=str(me.get("global_user_id") or ""),
         here_base=str(request.base_url),
+        force=bool(body.force),
     )
     if state.get("error") and not state.get("in_progress"):
         return JSONResponse(status_code=400, content=state)
     return state
+
+
+@router.post("/federation-sync-reset")
+@limiter.limit("12/hour")
+async def federation_sync_reset(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear stale sync state and directory shells so a forced re-sync can run."""
+    uid = int(current_user["id"])
+    if _user_at_account_home(uid):
+        with _sync_state_lock:
+            _federation_sync_state.pop(uid, None)
+        return {"ok": True, "at_home_node": True, "skipped": True}
+    keep: set[str] = set()
+    try:
+        joined_ids = db.get_user_joined_room_ids(uid)
+        with db._conn() as con:
+            for rid in joined_ids:
+                row = con.execute("SELECT name FROM rooms WHERE id=?", (int(rid),)).fetchone()
+                if row:
+                    nm = str(row["name"] or "").strip().lower()
+                    if nm:
+                        keep.add(nm)
+    except Exception:
+        keep = set()
+    pruned = 0
+    try:
+        pruned = int(db.prune_federation_sync_room_shells(keep) or 0)
+    except Exception:
+        pruned = 0
+    with _sync_state_lock:
+        _federation_sync_state.pop(uid, None)
+    return {"ok": True, "shells_pruned": pruned, "keep_rooms": sorted(keep)}
 
 
 @router.post("/federation-sync-export-gid")

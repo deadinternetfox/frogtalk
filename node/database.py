@@ -12236,7 +12236,7 @@ def list_federation_channel_index(
                        fci.member_count, fci.owner_nickname, fci.owner_global_user_id,
                        fci.home_server_id, fci.home_base_url, fci.last_seen_at
                 FROM federation_channel_index fci
-                LEFT JOIN rooms r ON r.name = fci.room_name
+                LEFT JOIN rooms r ON r.name = fci.room_name AND COALESCE(r.is_public, 0) = 1
                 WHERE fci.tombstoned = 0
                   AND fci.visibility = 'public'
                   AND fci.last_seen_at >= datetime('now', '-' || ? || ' days')
@@ -12398,6 +12398,94 @@ def list_federation_room_members(room_name: str, limit: int = 200) -> List[Dict]
         return []
 
 
+def prune_federation_sync_room_shells(keep_names: Optional[set] = None) -> int:
+    """Delete stale directory shells from old sync (federation_sync owner, not joined).
+
+    Empty ``is_public=0`` rooms owned by the federation system user block
+    federated directory rows and make Discover look empty on remote nodes.
+    """
+    keep = {str(n or "").strip().lower() for n in (keep_names or set()) if n}
+    try:
+        fed_uid = int(get_or_create_federation_system_user())
+    except Exception:
+        return 0
+    pruned = 0
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT r.id, r.name FROM rooms r
+                WHERE r.owner_id=? AND COALESCE(r.is_public, 0)=0
+                """,
+                (fed_uid,),
+            ).fetchall()
+            for row in rows:
+                rid = int(row["id"] or 0)
+                name = str(row["name"] or "").strip().lower()
+                if rid <= 0 or not name or name in keep:
+                    continue
+                mc = con.execute(
+                    "SELECT COUNT(*) AS n FROM room_members WHERE room_id=?",
+                    (rid,),
+                ).fetchone()
+                if int((mc["n"] if mc else 0) or 0) > 0:
+                    continue
+                con.execute("DELETE FROM messages WHERE room_name=?", (name,))
+                con.execute("DELETE FROM rooms WHERE id=?", (rid,))
+                pruned += 1
+            con.commit()
+    except Exception:
+        return pruned
+    return pruned
+
+
+def backfill_federation_room_members_from_messages(
+    room_name: str,
+    *,
+    home_server_id: str = "",
+    limit: int = 120,
+) -> int:
+    """Upsert federated member rows from recent message senders in a room."""
+    name = (room_name or "").strip().lower()
+    sid = (home_server_id or "").strip()
+    if not name:
+        return 0
+    cap = max(1, min(int(limit or 120), 200))
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT m.nickname, u.global_user_id, u.display_name, u.avatar
+                  FROM messages m
+                  LEFT JOIN users u ON u.nickname = m.nickname COLLATE NOCASE
+                 WHERE m.room_name=?
+                 GROUP BY m.nickname
+                 ORDER BY MAX(m.created_at) DESC
+                 LIMIT ?
+                """,
+                (name, cap),
+            ).fetchall()
+    except Exception:
+        return 0
+    n = 0
+    for row in rows:
+        nick = str(row["nickname"] or "").strip()
+        gid = str(row["global_user_id"] or "").strip()
+        if not nick or not gid or len(gid) < 6:
+            continue
+        if upsert_federation_room_member(
+            name,
+            gid,
+            nick,
+            display_name=str(row["display_name"] or ""),
+            avatar=str(row["avatar"] or ""),
+            home_server_id=sid,
+            role="member",
+        ):
+            n += 1
+    return n
+
+
 def federation_channel_index_count(
     category: str = "",
     search: str = "",
@@ -12409,7 +12497,7 @@ def federation_channel_index_count(
         with _conn() as con:
             base = """
                 SELECT COUNT(*) AS c FROM federation_channel_index fci
-                LEFT JOIN rooms r ON r.name = fci.room_name
+                LEFT JOIN rooms r ON r.name = fci.room_name AND COALESCE(r.is_public, 0) = 1
                 WHERE fci.tombstoned = 0
                   AND fci.visibility = 'public'
                   AND fci.last_seen_at >= datetime('now', '-' || ? || ' days')
