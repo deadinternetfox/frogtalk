@@ -984,9 +984,16 @@ def _build_sync_export_for_user(user_id: int) -> dict:
             nick = str(m.get("nickname") or "").strip()
             if not nick:
                 continue
+            sender_gid = ""
+            try:
+                author = db.get_user_by_id(int(m.get("user_id") or 0)) or {}
+                sender_gid = str(author.get("global_user_id") or "").strip()
+            except Exception:
+                sender_gid = ""
             clean.append({
                 "id": mid,
                 "nickname": nick[:64],
+                "sender_global_user_id": sender_gid[:128],
                 "display_name": str(m.get("display_name") or "")[:64],
                 "content": str(m.get("content") or "")[:10_000],
                 "media_type": str(m.get("media_type") or "")[:64] or None,
@@ -1194,26 +1201,7 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
 
     rooms_pruned = 0
     try:
-        with db._conn() as con:
-            member_rows = con.execute(
-                """
-                SELECT r.id, r.name FROM rooms r
-                JOIN room_members rm ON rm.room_id = r.id
-                WHERE rm.user_id=?
-                """,
-                (uid,),
-            ).fetchall()
-        for row in member_rows:
-            rid = int(row["id"] or 0)
-            nm = str(row["name"] or "").strip().lower()
-            if rid <= 0 or not nm:
-                continue
-            if nm not in keep_room_names:
-                try:
-                    db.leave_room(uid, rid)
-                    rooms_pruned += 1
-                except Exception:
-                    continue
+        rooms_pruned = int(db.reconcile_user_room_memberships(uid, keep_room_names) or 0)
     except Exception:
         rooms_pruned = 0
 
@@ -1790,6 +1778,23 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
                     applied += 1
             except Exception:
                 continue
+            sgid = str(m.get("sender_global_user_id") or "").strip()
+            if sgid and _GID_RE.match(sgid) and nick:
+                try:
+                    db.ensure_federated_dm_local_user(
+                        sgid, nick, origin_server_id=source_server_id,
+                        display_name=str(m.get("display_name") or "")[:64],
+                        avatar=str(m.get("avatar") or "")[:200_000],
+                    )
+                    db.upsert_federation_room_member(
+                        rn, sgid, nick,
+                        display_name=str(m.get("display_name") or "")[:64],
+                        avatar=str(m.get("avatar") or "")[:200_000],
+                        home_server_id=source_server_id,
+                        role="member",
+                    )
+                except Exception:
+                    pass
         history_messages_applied += applied
         history_rooms_done += 1
         try:
@@ -1919,6 +1924,13 @@ def _apply_sync_export_to_user(user_id: int, export: dict) -> dict:
         "dm_messages": dm_history_messages_applied,
         "members": members_snapshots_applied,
     })
+
+    try:
+        pruned_final = int(db.reconcile_user_room_memberships(uid, keep_room_names) or 0)
+        rooms_pruned = max(int(rooms_pruned or 0), pruned_final)
+        db.prune_room_order_for_user(uid, keep_room_names)
+    except Exception:
+        pass
 
     return {
         "rooms_joined": rooms_joined,

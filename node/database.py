@@ -12439,6 +12439,111 @@ def prune_federation_sync_room_shells(keep_names: Optional[set] = None) -> int:
     return pruned
 
 
+def reconcile_user_room_memberships(user_id: int, keep_names: set) -> int:
+    """Leave every channel not in ``keep_names`` (authoritative home-node list)."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return 0
+    keep = {str(n or "").strip().lower() for n in (keep_names or set()) if n}
+    pruned = 0
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT r.id, r.name FROM rooms r
+                JOIN room_members rm ON rm.room_id = r.id
+                WHERE rm.user_id=?
+                """,
+                (uid,),
+            ).fetchall()
+        for row in rows:
+            rid = int(row["id"] or 0)
+            nm = str(row["name"] or "").strip().lower()
+            if rid <= 0 or not nm or nm in keep:
+                continue
+            try:
+                leave_room(uid, rid)
+                pruned += 1
+            except Exception:
+                continue
+    except Exception:
+        return pruned
+    return pruned
+
+
+def prune_room_order_for_user(user_id: int, keep_names: set) -> None:
+    """Drop stale channel names from the user's saved sidebar order."""
+    uid = int(user_id or 0)
+    if uid <= 0:
+        return
+    keep = {str(n or "").strip().lower() for n in (keep_names or set()) if n}
+    raw = get_room_order(uid)
+    if not raw:
+        return
+    try:
+        arr = json.loads(raw)
+    except Exception:
+        return
+    if not isinstance(arr, list):
+        return
+    filtered: list[str] = []
+    seen: set[str] = set()
+    for item in arr:
+        if not isinstance(item, str):
+            continue
+        name = item.strip().lower()
+        if not name or name not in keep or name in seen:
+            continue
+        seen.add(name)
+        filtered.append(name)
+    try:
+        set_room_order(uid, json.dumps(filtered))
+    except Exception:
+        pass
+
+
+def list_room_message_participants(
+    room_name: str,
+    *,
+    exclude_nicks: Optional[set] = None,
+    limit: int = 200,
+) -> List[Dict]:
+    """Distinct nicknames seen in a room's message history (for member sidebar)."""
+    name = (room_name or "").strip().lower()
+    if not name:
+        return []
+    skip = {str(n or "").strip().lower() for n in (exclude_nicks or set()) if n}
+    skip.update({"federation_sync", "remote", ""})
+    cap = max(1, min(int(limit or 200), 300))
+    try:
+        with _conn() as con:
+            rows = con.execute(
+                """
+                SELECT m.nickname,
+                       MAX(COALESCE(u.display_name, '')) AS display_name,
+                       MAX(COALESCE(u.avatar, '')) AS avatar,
+                       MAX(COALESCE(u.global_user_id, '')) AS global_user_id,
+                       MAX(m.bridge_platform) AS bridge_platform
+                  FROM messages m
+                  LEFT JOIN users u ON u.nickname = m.nickname COLLATE NOCASE
+                 WHERE m.room_name=?
+                 GROUP BY m.nickname
+                 ORDER BY MAX(m.created_at) DESC
+                 LIMIT ?
+                """,
+                (name, cap),
+            ).fetchall()
+    except Exception:
+        return []
+    out: List[Dict] = []
+    for row in rows:
+        nick = str(row["nickname"] or "").strip()
+        if not nick or nick.lower() in skip:
+            continue
+        out.append(dict(row))
+    return out
+
+
 def backfill_federation_room_members_from_messages(
     room_name: str,
     *,
@@ -12450,35 +12555,37 @@ def backfill_federation_room_members_from_messages(
     sid = (home_server_id or "").strip()
     if not name:
         return 0
-    cap = max(1, min(int(limit or 120), 200))
-    try:
-        with _conn() as con:
-            rows = con.execute(
-                """
-                SELECT m.nickname, u.global_user_id, u.display_name, u.avatar
-                  FROM messages m
-                  LEFT JOIN users u ON u.nickname = m.nickname COLLATE NOCASE
-                 WHERE m.room_name=?
-                 GROUP BY m.nickname
-                 ORDER BY MAX(m.created_at) DESC
-                 LIMIT ?
-                """,
-                (name, cap),
-            ).fetchall()
-    except Exception:
-        return 0
+    participants = list_room_message_participants(name, limit=limit)
     n = 0
-    for row in rows:
-        nick = str(row["nickname"] or "").strip()
-        gid = str(row["global_user_id"] or "").strip()
-        if not nick or not gid or len(gid) < 6:
+    for row in participants:
+        nick = str(row.get("nickname") or "").strip()
+        if not nick:
+            continue
+        gid = str(row.get("global_user_id") or "").strip()
+        if not gid or len(gid) < 6:
+            try:
+                with _conn() as con:
+                    prow = con.execute(
+                        "SELECT global_user_id FROM federation_user_profiles "
+                        "WHERE LOWER(nickname)=LOWER(?) LIMIT 1",
+                        (nick,),
+                    ).fetchone()
+                if prow:
+                    gid = str(prow["global_user_id"] or "").strip()
+            except Exception:
+                gid = ""
+        if not gid or len(gid) < 6:
+            prof = get_user_profile(nick)
+            if prof:
+                gid = str(prof.get("global_user_id") or "").strip()
+        if not gid or len(gid) < 6:
             continue
         if upsert_federation_room_member(
             name,
             gid,
             nick,
-            display_name=str(row["display_name"] or ""),
-            avatar=str(row["avatar"] or ""),
+            display_name=str(row.get("display_name") or ""),
+            avatar=str(row.get("avatar") or ""),
             home_server_id=sid,
             role="member",
         ):

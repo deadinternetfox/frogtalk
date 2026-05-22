@@ -1740,6 +1740,40 @@ async def get_channel_members(room_name: str,
     except Exception:
         federated = []
 
+    # Anyone who posted in this room (incl. federated history backfill) should
+    # appear even when snapshot sync or global_user_id lookup failed.
+    seen_nicks = {str(m.get("nickname") or "").lower() for m in members + federated if m.get("nickname")}
+    viewer_nick = str(current_user.get("nickname") or "").lower()
+    try:
+        for part in db.list_room_message_participants(
+            room["name"],
+            exclude_nicks={viewer_nick},
+            limit=200,
+        ):
+            nick = str(part.get("nickname") or "").strip()
+            if not nick:
+                continue
+            key = nick.lower()
+            if key in seen_nicks:
+                continue
+            seen_nicks.add(key)
+            is_bridge = str(part.get("bridge_platform") or "").strip().lower() == "federation"
+            federated.append({
+                "user_id": None,
+                "nickname": nick,
+                "display_name": part.get("display_name") or "",
+                "avatar": part.get("avatar") or "",
+                "global_user_id": str(part.get("global_user_id") or "").strip(),
+                "home_server_id": "",
+                "role": "member",
+                "is_admin": 0,
+                "presence": "offline",
+                "live_online": False,
+                "remote": is_bridge or True,
+            })
+    except Exception:
+        pass
+
     # Bots installed in this channel are surfaced in their own section
     # at the bottom of the right-hand sidebar so users can see who can
     # respond + how to @-mention them. We deliberately keep them out of

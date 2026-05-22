@@ -928,6 +928,7 @@ const Rooms = (() => {
       } else {
         State.rooms = data.rooms || [];
       }
+      try { State._showAllChannels = false; } catch {}
     } catch (e) {
       console.warn('[rooms] loadRooms error', e);
       State.rooms = [];
