@@ -684,7 +684,7 @@ function _resolveOwnDMPlaintext(cipher, msgId, channelId) {
   return '';
 }
 
-async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
+async function _decryptDMPreviewContent(cipher, peerId, _peerNick, opts = {}) {
   const raw = String(cipher || '');
   if (!raw) return '';
   if (_parseDMCallLog(raw)) return raw;
@@ -697,47 +697,106 @@ async function _decryptDMPreviewContent(cipher, peerId, _peerNick) {
   if (_cached !== undefined) return _cached;
 
   const myId = STATE?.user?.id;
-  if (myId && peerId && (+peerId === +myId) && _looksEncryptedBlob(raw)) {
+  const peerNum = Number(peerId) || 0;
+  // Outgoing ciphertext cannot be decrypted via a session keyed to self.
+  if (myId && peerNum && (+peerNum === +myId) && _looksEncryptedBlob(raw)) {
     return raw;
   }
 
-  // Track A v2 Signal envelope is the ONLY supported DM crypto path
-  // after Track H cleanup. Wire format: `{v:2,t:'pre'|'msg',b:'<b64>'}`.
-  if (raw.length >= 9 && raw[0] === '{') {
+  if (raw.length < 9 || raw[0] !== '{' || !window.Signal) return raw;
+
+  let env;
+  try {
+    env = JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+  if (!env || env.v !== 2 || typeof env.b !== 'string') return raw;
+
+  const _tryDecrypt = async (allowSessionReset) => {
     try {
-      const env = JSON.parse(raw);
-      if (env && env.v === 2 && typeof env.b === 'string' && window.Signal) {
-        try {
-          if (!window.Signal.isReady()) {
-            const meId = STATE?.user?.id;
-            if (meId) {
-              await window.Signal.init(meId);
-            }
-          }
-          if (window.Signal.isReady()) {
-            const out = await window.Signal.decryptDM(peerId, env);
-            try { console.log('[dms.decryptDM]', 't=', env.t, 'from', peerId, 'ok=', typeof out === 'string'); } catch {}
-            if (typeof out === 'string') {
-              // Cache plaintext so subsequent attempts on the same
-              // envelope skip the ratchet (and don't fail with Bad MAC).
-              _dmPtCachePut(raw, out);
-              return out;
-            }
-          }
-        } catch (e) {
-          try { console.warn('[dms.decryptDM] FAIL t=', env.t, 'from', peerId, e && e.message ? e.message : e); } catch {}
-          // Cold history this device's IndexedDB can't decrypt, or
-          // Signal not yet initialised. Fall through to raw.
-        }
+      if (!window.Signal.isReady()) {
+        const meId = STATE?.user?.id;
+        if (meId) await window.Signal.init(meId);
       }
-    } catch {
-      // Not a JSON envelope; fall through.
+    } catch {}
+    if (!window.Signal.isReady() || !peerNum) return null;
+    try {
+      if (typeof window.Signal.ensureSessionWith === 'function') {
+        await window.Signal.ensureSessionWith(peerNum);
+      }
+    } catch {}
+    try {
+      const out = await window.Signal.decryptDM(peerNum, env);
+      if (typeof out === 'string') {
+        _dmPtCachePut(raw, out);
+        return out;
+      }
+    } catch (e) {
+      const errMsg = String((e && e.message) || e || '');
+      if (allowSessionReset && (errMsg.includes('Bad MAC') || errMsg.includes('Message key not found'))) {
+        try {
+          if (typeof window.Signal.resetSessionWith === 'function') {
+            await window.Signal.resetSessionWith(peerNum);
+          }
+          if (typeof window.Signal.ensureSessionWith === 'function') {
+            await window.Signal.ensureSessionWith(peerNum);
+          }
+          const out2 = await window.Signal.decryptDM(peerNum, env);
+          if (typeof out2 === 'string') {
+            _dmPtCachePut(raw, out2);
+            return out2;
+          }
+        } catch {}
+      }
+    }
+    return null;
+  };
+
+  const plain = await _tryDecrypt(!!opts.retry);
+  if (plain !== null) return plain;
+  return raw;
+}
+
+async function _decryptDMSidebarPreview(content, peerId, peerNick, lastSenderId) {
+  const raw = String(content || '');
+  if (!raw) return '';
+  const myId = STATE?.user?.id;
+  if (myId && lastSenderId != null && +lastSenderId === +myId) {
+    if (!_looksEncryptedBlob(raw)) return raw;
+    const cached = _dmPtCacheGet(raw);
+    if (typeof cached === 'string' && cached.length && !_looksEncryptedBlob(cached)) return cached;
+    return raw;
+  }
+  return _decryptDMPreviewContent(raw, peerId, peerNick, { retry: true });
+}
+
+async function _redecryptStaleDMMessages() {
+  if (!_activeDM?.id || !_dmMessages.length) return;
+  const peerId = Number(_activeDM.user_id) || 0;
+  const myId = Number(STATE?.user?.id) || 0;
+  if (!peerId) return;
+  let changed = false;
+  for (const m of _dmMessages) {
+    if (!m?.content || !_looksEncryptedBlob(m.content)) continue;
+    const mine = !!(m.sender_id != null && myId && +m.sender_id === +myId);
+    let plain = '';
+    if (mine) {
+      plain = _resolveOwnDMPlaintext(m.content, m.id, m.channel_id || _activeDM.id);
+    } else {
+      plain = await _decryptDMPreviewContent(
+        m.content, peerId, _activeDM.nickname || '', { retry: true },
+      );
+    }
+    if (plain && !_looksEncryptedBlob(plain)) {
+      m.content = plain;
+      _rememberDMPlaintext(_activeDM.id, m.id, plain);
+      changed = true;
     }
   }
-
-  // If decrypt fails, keep the raw payload so message rendering can still
-  // show a lock placeholder instead of an empty bubble.
-  return raw;
+  if (!changed) return;
+  _dmHistoryCache.set(_activeDM.id, _dmMessages.map((x) => ({ ...x })));
+  if (State.currentRoomType === 'dm') renderDMChat();
 }
 
 /* ── Sidebar DM list ────────────────────────────────────────────────────────── */
@@ -759,7 +818,8 @@ async function loadDMChannels () {
     _dmChannels = await Promise.all((data.channels || data || []).map(async (ch) => {
       const peerNick = ch.other_nick || ch.nickname || '';
       const peerId = ch.other_id || ch.with_user_id || 0;
-      const previewContent = await _decryptDMPreviewContent(ch.last_msg, peerId, peerNick);
+      const lastSenderId = ch.last_sender_id != null ? +ch.last_sender_id : null;
+      const previewContent = await _decryptDMSidebarPreview(ch.last_msg, peerId, peerNick, lastSenderId);
       const _logMeta = _parseDMCallLog(previewContent);
       return {
         id: ch.id,
@@ -970,6 +1030,7 @@ async function openDMChannel (id, nickname, avatar) {
   if (_dmMessages.length) {
     renderDMChat();
     scrollChatBottom();
+    void _redecryptStaleDMMessages();
   }
 
   // Switch app to DM view
@@ -1081,10 +1142,13 @@ async function openDMChannel (id, nickname, avatar) {
       try {
         if (window.Signal && typeof window.Signal.ensureSessionWith === 'function') {
           if (typeof window.Signal.isReady === 'function' && window.Signal.isReady()) {
-            window.Signal.ensureSessionWith(peerUserId).catch(() => {});
+            window.Signal.ensureSessionWith(peerUserId)
+              .then(() => _redecryptStaleDMMessages())
+              .catch(() => {});
           } else if (typeof window.Signal.ensureReady === 'function' && State?.user?.id) {
             window.Signal.ensureReady(State.user.id, { timeoutMs: 8000 })
               .then(() => window.Signal.ensureSessionWith(peerUserId))
+              .then(() => _redecryptStaleDMMessages())
               .catch(() => {});
           }
         }
@@ -1331,7 +1395,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     if (!msg) return msg;
     const next = _normalizeDMMessage(msg);
     if (next.content) {
-      try { next.content = await _decryptDMPreviewContent(next.content, _peerUserId, _peerNick); } catch {}
+      try { next.content = await _decryptDMPreviewContent(next.content, _peerUserId, _peerNick, { retry: true }); } catch {}
       // If decrypt didn't yield plaintext, fall back to per-device cache so
       // history that was previously decrypted on this browser stays readable.
       if (_looksEncryptedBlob(next.content)) {
@@ -1375,6 +1439,7 @@ async function loadDMMessages (pageOffset = 0, options = {}) {
     if (!isDelta || msgs.length) {
       renderDMChat();
       scrollChatBottom();
+      void _redecryptStaleDMMessages();
     }
   } else {
     _dmMessages = [...msgs, ..._dmMessages];
@@ -1690,9 +1755,13 @@ function renderDMMessage (m) {
   let _rawContent = _rawContentOrig;
   if (_rawContent && _rawContent.length >= 9 && _rawContent[0] === '{' && _looksEncryptedBlob(_rawContent)) {
     try {
-      const _cachedPt = _dmPtCacheGet(_rawContent);
+      const _cachedPt = _dmPtCacheGet(_rawContentOrig);
       if (typeof _cachedPt === 'string' && _cachedPt.length) _rawContent = _cachedPt;
     } catch {}
+  }
+  if (_looksEncryptedBlob(_rawContent)) {
+    const recalled = _recallDMPlaintext(m.channel_id || _activeDM?.id, m.id);
+    if (recalled) _rawContent = recalled;
   }
   if (mine && _looksEncryptedBlob(_rawContent)) {
     const ownPlain = _resolveOwnDMPlaintext(_rawContentOrig, m.id, m.channel_id || _activeDM?.id);
@@ -2564,9 +2633,13 @@ function handleWSDMMessage (data) {
   // placeholder. Decrypt up-front and share the plaintext with every
   // downstream consumer (sidebar, toast, bubble).
   const _ch0 = _dmChannels.find(c => c.id === data.channel_id);
-  const _peerId0  = data.sender_id || _ch0?.with_user_id || 0;
   const _peerNick0 = data.sender_nick || _ch0?.nickname || '';
-  const _plainPromise = _decryptDMPreviewContent(data.content || '', _peerId0, _peerNick0);
+  const _peerForDecrypt = _isMine
+    ? 0
+    : (Number(data.sender_id) || Number(_activeDM?.user_id) || Number(_ch0?.with_user_id) || 0);
+  const _plainPromise = _isMine
+    ? Promise.resolve(String(data.content || ''))
+    : _decryptDMPreviewContent(data.content || '', _peerForDecrypt, _peerNick0, { retry: true });
 
   // Cheap in-place sidebar update (avoid round-tripping /api/dms on every message
   // which was adding 200-500 ms of perceived send lag).
@@ -2760,17 +2833,25 @@ function handleWSDMMessage (data) {
   (async () => {
     let content = data.content || '';
     if (content) {
-      // Reuse the single decrypt result (see comment at top of handler)
-      // so we don't double-consume the Track A envelope.
       try { content = await _plainPromise; } catch {}
     }
     if (_isMine && _looksEncryptedBlob(content)) {
-      const plain = _resolveOwnDMPlaintext(content, data.id, data.channel_id);
+      const plain = _resolveOwnDMPlaintext(data.content || content, data.id, data.channel_id);
       if (plain) {
         content = plain;
         try { _dmPtCachePut(data.content || '', plain); } catch {}
         try { _rememberDMPlaintext(data.channel_id, data.id, plain); } catch {}
       }
+    } else if (!_isMine && content && _looksEncryptedBlob(content) && _peerForDecrypt) {
+      try {
+        const retryPlain = await _decryptDMPreviewContent(
+          data.content || content, _peerForDecrypt, _peerNick0, { retry: true },
+        );
+        if (retryPlain && !_looksEncryptedBlob(retryPlain)) {
+          content = retryPlain;
+          _rememberDMPlaintext(data.channel_id, data.id, retryPlain);
+        }
+      } catch {}
     }
     appendDMMessage({ ...data, content });
     // Active chat — immediately mark as read
